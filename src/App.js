@@ -16,12 +16,12 @@ import {
    LocalStorage keys
    ========================= */
 const LS = {
-  tab: "ft_tab_v5",
-  paramsL: "ft_params_left_v5",
-  paramsR: "ft_params_right_v5",
-  histL: "ft_history_left_v5",
-  histR: "ft_history_right_v5",
-  ui: "ft_ui_v5",
+  tab: "ft_tab_v6",
+  paramsL: "ft_params_left_v6",
+  paramsR: "ft_params_right_v6",
+  histL: "ft_history_left_v6",
+  histR: "ft_history_right_v6",
+  ui: "ft_ui_v6",
 };
 
 /* =========================
@@ -52,6 +52,7 @@ function gripFromNotes(notes = "") {
   const i = s.indexOf(" — ");
   return (i >= 0 ? s.slice(0, i) : s).trim();
 }
+const dayKey = (iso) => new Date(iso).toISOString().slice(0, 10);
 
 /* =========================
    Defaults
@@ -86,7 +87,7 @@ const defaultUI = {
 /* =========================
    Model math
    ========================= */
-// f(t) remaining fraction
+// normalized 3-exp fatigue curve (remaining fraction)
 function fatigueAt(t, p) {
   const W = Math.max(1e-9, p.w1 + p.w2 + p.w3);
   const a = p.w1 / W,
@@ -218,11 +219,11 @@ function planLoads(baseSingleSetLoad, TUT, reps, rest, params) {
 }
 
 /* =========================
-   Combine rows (History UI)
+   Combine rows (History UI) + Daily trends
    ========================= */
 function buildCombinedRows(hL, hR) {
   // group by (date(YYYY-MM-DD) | grip) so L/R appear together
-  const keyOf = (r) => `${new Date(r.date).toISOString().slice(0, 10)}|${gripFromNotes(r.notes)}`;
+  const keyOf = (r) => `${dayKey(r.date)}|${gripFromNotes(r.notes)}`;
   const map = new Map();
 
   for (const r of hL) {
@@ -241,6 +242,28 @@ function buildCombinedRows(hL, hR) {
   }
 
   return Array.from(map.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
+function dailyTrends(hL, hR, pL, pR) {
+  const byDay = new Map(); // date -> {loads:[], durs:[]}
+  const add = (r) => {
+    const k = dayKey(r.date);
+    const v = byDay.get(k) || { loads: [], durs: [] };
+    v.loads.push(r.load);
+    v.durs.push(r.duration);
+    byDay.set(k, v);
+  };
+  hL.forEach(add);
+  hR.forEach(add);
+
+  const days = Array.from(byDay.entries()).sort((a, b) => new Date(a[0]) - new Date(b[0]));
+  return days.map(([d, v]) => {
+    const avgLoad = v.loads.reduce((a, b) => a + b, 0) / v.loads.length;
+    const avgDur = v.durs.reduce((a, b) => a + b, 0) / v.durs.length;
+    // modeled %MVC: average of both hands’ models at avgDur
+    const m = (fatigueAt(avgDur, pL) + fatigueAt(avgDur, pR)) * 50; // -> %
+    return { date: d, avgLoad: +avgLoad.toFixed(2), avgDur: +avgDur.toFixed(2), modeledPct: +m.toFixed(2) };
+  });
 }
 
 /* =========================
@@ -398,37 +421,6 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  /* ===== Inline edit state for History ===== */
-  const [rowEdits, setRowEdits] = useState({}); // {rowKey: {rest, notes, L:{load,duration}, R:{load,duration}}}
-  const setRowField = (rowKey, side /* "L"|"R"|null */, field, value) => {
-    setRowEdits((m) => {
-      const prev = m[rowKey] || {};
-      if (side) {
-        return { ...m, [rowKey]: { ...prev, [side]: { ...(prev[side] || {}), [field]: value } } };
-      }
-      return { ...m, [rowKey]: { ...prev, [field]: value } };
-    });
-  };
-  const saveEditsForSide = (side, rec, rowKey) => {
-    if (!rec) return;
-    const e = rowEdits[rowKey] || {};
-    const eSide = e[side] || {};
-    const newRec = {
-      ...rec,
-      load: eSide.load != null ? N(eSide.load, rec.load) : rec.load,
-      duration: eSide.duration != null ? N(eSide.duration, rec.duration) : rec.duration,
-      rest: e.rest != null ? N(e.rest, rec.rest) : rec.rest,
-      notes: e.notes != null ? e.notes : rec.notes,
-    };
-    if (side === "L") setHL((arr) => arr.map((r) => (r.id === rec.id ? newRec : r)));
-    else setHR((arr) => arr.map((r) => (r.id === rec.id ? newRec : r)));
-    setRowEdits((m) => {
-      const next = { ...(m[rowKey] || {}) };
-      if (next[side]) next[side] = {};
-      return { ...m, [rowKey]: next };
-    });
-  };
-
   /* =========================
      UI
      ========================= */
@@ -436,7 +428,8 @@ export default function App() {
     <div style={{ maxWidth: 1200, margin: "18px auto", padding: "0 14px" }}>
       <h1 style={{ margin: 0 }}>Finger Training Dosing — Precision Mode (Per Hand)</h1>
       <p style={{ margin: "6px 0 16px", color: "#555" }}>
-        Aim to fail within ±2–3 s. Learn per hand, ratio-control your next load, smooth anchors with EMA, and see your sets on the curve.
+        Aim to fail within ±2–3 s. Learn per hand, ratio-control your next load, smooth anchors with EMA,
+        and see your sets on the curve.
       </p>
 
       {/* Tabs */}
@@ -507,7 +500,7 @@ export default function App() {
               <input
                 type="number"
                 value={ui.tMax}
-                onChange={(e) => setUI((u) => ({ ...u, tMax: clamp(N(e.target.value, 300), 60, 600) }))}
+                onChange={(e) => setUI((u) => ({ ...u, tMax: clamp(N(e.target.value, u.tMax), 60, 600) }))}
                 style={{ width: 110, padding: 6 }}
               />
               <div style={{ color: "#666", marginTop: 4 }}>
@@ -620,11 +613,12 @@ export default function App() {
         </div>
       )}
 
-      {/* ===== SESSIONS ===== */}
+      {/* ===== SESSIONS (classic) ===== */}
       {tab === "sessions" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, gridColumn: "1 / span 2" }}>
-            <h3 style={{ marginTop: 0 }}>Log a Session (Left & Right together)</h3>
+          {/* Left: combined L/R entry */}
+          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+            <h3 style={{ marginTop: 0 }}>Log a Session</h3>
             <div
               style={{
                 display: "grid",
@@ -647,7 +641,7 @@ export default function App() {
                 <label>Grip / Exercise</label>
                 <input
                   type="text"
-                  placeholder="e.g., 20mm Half Crimp"
+                  placeholder="e.g., Rolling Thunder / 20mm Half Crimp"
                   value={form.grip}
                   onChange={(e) => setForm((f) => ({ ...f, grip: e.target.value }))}
                   style={{ width: "100%", padding: 6 }}
@@ -682,6 +676,7 @@ export default function App() {
                   style={{ width: "100%", padding: 6 }}
                 />
               </div>
+
               <div>
                 <label>Left Duration (s)</label>
                 <input
@@ -705,178 +700,238 @@ export default function App() {
                 <label>Notes</label>
                 <input
                   type="text"
+                  placeholder="optional"
                   value={form.notes}
                   onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
                   style={{ width: "100%", padding: 6 }}
-                  placeholder="optional"
                 />
               </div>
               <div>
                 <button onClick={onAdd} style={{ width: "100%", padding: 10 }}>
-                  + Add
+                  + Add Session
                 </button>
               </div>
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={learnLeft}>Learn Left</button>
-            <button onClick={learnRight}>Learn Right</button>
+          {/* Right: cards (like your screenshot) */}
+          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+            <h3 style={{ marginTop: 0 }}>Today's Modeled Values</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <MetricCard
+                label="%MVC Left @ 20s"
+                value={`${(fatigueAt(20, pL) * 100).toFixed(2)}%`}
+                help={`Suggested Left Load: ${modelLoadForT(pL, 20) ? round1(modelLoadForT(pL, 20)) + " lb" : "—"}`}
+              />
+              <MetricCard
+                label="%MVC Right @ 20s"
+                value={`${(fatigueAt(20, pR) * 100).toFixed(2)}%`}
+                help={`Suggested Right Load: ${modelLoadForT(pR, 20) ? round1(modelLoadForT(pR, 20)) + " lb" : "—"}`}
+              />
+              <MetricCard
+                label="Recovery after 180s"
+                value={`Left ${(recoveryFrac(180, pL) * 100).toFixed(2)}% · Right ${(recoveryFrac(180, pR) * 100).toFixed(2)}%`}
+                help="Rule of thumb: ≥65% to keep TUT stable across sets."
+              />
+            </div>
+
+            <div style={{ marginTop: 12, fontSize: 13, color: "#444" }}>
+              <b>Quick Tips</b>
+              <ul style={{ marginTop: 6 }}>
+                <li>Precision Mode narrows learning to your <b>exact TUT</b> (±3s).</li>
+                <li>Type observed time to get the <b>ratio-controlled</b> next load instantly.</li>
+                <li>Re-hit <b>Learn Left/Right</b> after a few converged sets to keep the curve honest.</li>
+              </ul>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ===== HISTORY (combined, inline edit) ===== */}
+      {/* ===== HISTORY (classic + Trends) ===== */}
       {tab === "history" && (() => {
         const rows = buildCombinedRows(hL, hR);
+        const trends = dailyTrends(hL, hR, pL, pR);
         const pct = (d, p) => (d ? (fatigueAt(d, p) * 100).toFixed(2) + "%" : "—");
-        const rowKeyOf = (row) => `${row.L?.id || "nilL"}|${row.R?.id || "nilR"}`;
         const recov = (r, p) => (r != null ? (recoveryFrac(r, p) * 100).toFixed(2) + "%" : "—");
 
+        const updateRec = (hand, rec, patch) => {
+          const apply = (r) => (r.id === rec.id ? { ...r, ...patch } : r);
+          if (hand === "L") setHL((arr) => arr.map(apply));
+          else setHR((arr) => arr.map(apply));
+        };
+
         return (
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-              <button onClick={exportJSON}>Export JSON</button>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span>Import JSON</span>
-                <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importJSON(e.target.files[0])} />
-              </label>
-              <button onClick={clearAll} style={{ marginLeft: "auto", color: "#b00020" }}>
-                Clear ALL history…
-              </button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+            <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <button onClick={exportJSON}>Export JSON</button>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span>Import JSON</span>
+                  <input
+                    type="file"
+                    accept="application/json"
+                    onChange={(e) => e.target.files?.[0] && importJSON(e.target.files[0])}
+                  />
+                </label>
+                <button onClick={clearAll} style={{ marginLeft: "auto", color: "#b00020" }}>
+                  Clear ALL history…
+                </button>
+              </div>
+
+              <h3 style={{ marginTop: 0 }}>Session History (most recent first)</h3>
+              {rows.length === 0 ? (
+                <div style={{ color: "#666" }}>No sessions yet.</div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#fafafa" }}>
+                        <Th>Date</Th>
+                        <Th>Grip</Th>
+                        <Th>Left Load</Th>
+                        <Th>Right Load</Th>
+                        <Th>Left Dur (s)</Th>
+                        <Th>Right Dur (s)</Th>
+                        <Th>% L</Th>
+                        <Th>% R</Th>
+                        <Th>Recov L</Th>
+                        <Th>Recov R</Th>
+                        <Th>Notes</Th>
+                        <Th>Actions</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, i) => {
+                        const L = row.L,
+                          R = row.R;
+                        return (
+                          <tr key={i}>
+                            <Td>{new Date(row.date).toLocaleDateString()}</Td>
+                            <Td>{row.grip || "—"}</Td>
+
+                            <Td>
+                              {L ? (
+                                <input
+                                  style={{ width: 70, padding: 4 }}
+                                  type="number"
+                                  value={L.load}
+                                  onChange={(e) => updateRec("L", L, { load: N(e.target.value, L.load) })}
+                                />
+                              ) : (
+                                "—"
+                              )}
+                            </Td>
+                            <Td>
+                              {R ? (
+                                <input
+                                  style={{ width: 70, padding: 4 }}
+                                  type="number"
+                                  value={R.load}
+                                  onChange={(e) => updateRec("R", R, { load: N(e.target.value, R.load) })}
+                                />
+                              ) : (
+                                "—"
+                              )}
+                            </Td>
+
+                            <Td>
+                              {L ? (
+                                <input
+                                  style={{ width: 70, padding: 4 }}
+                                  type="number"
+                                  value={L.duration}
+                                  onChange={(e) => updateRec("L", L, { duration: N(e.target.value, L.duration) })}
+                                />
+                              ) : (
+                                "—"
+                              )}
+                            </Td>
+                            <Td>
+                              {R ? (
+                                <input
+                                  style={{ width: 70, padding: 4 }}
+                                  type="number"
+                                  value={R.duration}
+                                  onChange={(e) => updateRec("R", R, { duration: N(e.target.value, R.duration) })}
+                                />
+                              ) : (
+                                "—"
+                              )}
+                            </Td>
+
+                            <Td>{L ? pct(L.duration, pL) : "—"}</Td>
+                            <Td>{R ? pct(R.duration, pR) : "—"}</Td>
+                            <Td>{L ? recov(L.rest, pL) : "—"}</Td>
+                            <Td>{R ? recov(R.rest, pR) : "—"}</Td>
+
+                            <Td>
+                              <input
+                                style={{ width: 220, padding: 4 }}
+                                type="text"
+                                value={L?.notes || R?.notes || ""}
+                                onChange={(e) => {
+                                  if (L) updateRec("L", L, { notes: e.target.value });
+                                  if (R) updateRec("R", R, { notes: e.target.value });
+                                }}
+                              />
+                            </Td>
+
+                            <Td>
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <button
+                                  disabled={!L}
+                                  onClick={() => L && onDelete("L", L.id)}
+                                  style={{ color: "#b00020", opacity: L ? 1 : 0.5 }}
+                                >
+                                  Delete L
+                                </button>
+                                <button
+                                  disabled={!R}
+                                  onClick={() => R && onDelete("R", R.id)}
+                                  style={{ color: "#b00020", opacity: R ? 1 : 0.5 }}
+                                >
+                                  Delete R
+                                </button>
+                              </div>
+                            </Td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
-            <h3 style={{ marginTop: 0 }}>Session History (most recent first)</h3>
-            {rows.length === 0 ? (
-              <div style={{ color: "#666" }}>No sessions yet.</div>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ background: "#fafafa" }}>
-                      <Th>Date</Th>
-                      <Th>Grip</Th>
-                      <Th>Left Load</Th>
-                      <Th>Right Load</Th>
-                      <Th>Left Dur (s)</Th>
-                      <Th>Right Dur (s)</Th>
-                      <Th>% L</Th>
-                      <Th>% R</Th>
-                      <Th>Recov L</Th>
-                      <Th>Recov R</Th>
-                      <Th>Rest (s)</Th>
-                      <Th>Notes</Th>
-                      <Th>Actions</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row, idx) => {
-                      const L = row.L, R = row.R;
-                      const rowKey = rowKeyOf(row);
-                      const e = rowEdits[rowKey] || {};
-                      const eL = e.L || {};
-                      const eR = e.R || {};
-                      const restDisplay = e.rest ?? (L?.rest ?? R?.rest ?? "");
-                      const notesDisplay = e.notes ?? (L?.notes || R?.notes || "");
-
-                      return (
-                        <tr key={idx}>
-                          <Td>{new Date(row.date).toLocaleString()}</Td>
-                          <Td>{row.grip || "—"}</Td>
-
-                          <Td>
-                            {L ? (
-                              <input
-                                style={{ width: 70, padding: 4 }}
-                                type="number"
-                                placeholder={String(L.load)}
-                                value={eL.load ?? ""}
-                                onChange={(ev) => setRowField(rowKey, "L", "load", ev.target.value)}
-                              />
-                            ) : "—"}
-                          </Td>
-                          <Td>
-                            {R ? (
-                              <input
-                                style={{ width: 70, padding: 4 }}
-                                type="number"
-                                placeholder={String(R.load)}
-                                value={eR.load ?? ""}
-                                onChange={(ev) => setRowField(rowKey, "R", "load", ev.target.value)}
-                              />
-                            ) : "—"}
-                          </Td>
-
-                          <Td>
-                            {L ? (
-                              <input
-                                style={{ width: 70, padding: 4 }}
-                                type="number"
-                                placeholder={String(L.duration)}
-                                value={eL.duration ?? ""}
-                                onChange={(ev) => setRowField(rowKey, "L", "duration", ev.target.value)}
-                              />
-                            ) : "—"}
-                          </Td>
-                          <Td>
-                            {R ? (
-                              <input
-                                style={{ width: 70, padding: 4 }}
-                                type="number"
-                                placeholder={String(R.duration)}
-                                value={eR.duration ?? ""}
-                                onChange={(ev) => setRowField(rowKey, "R", "duration", ev.target.value)}
-                              />
-                            ) : "—"}
-                          </Td>
-
-                          <Td>{L ? pct(L.duration, pL) : "—"}</Td>
-                          <Td>{R ? pct(R.duration, pR) : "—"}</Td>
-                          <Td>{L ? recov(L.rest, pL) : "—"}</Td>
-                          <Td>{R ? recov(R.rest, pR) : "—"}</Td>
-
-                          <Td>
-                            <input
-                              style={{ width: 80, padding: 4 }}
-                              type="number"
-                              placeholder={String(L?.rest ?? R?.rest ?? "")}
-                              value={restDisplay}
-                              onChange={(ev) => setRowField(rowKey, null, "rest", ev.target.value)}
-                            />
-                          </Td>
-                          <Td>
-                            <input
-                              style={{ width: 220, padding: 4 }}
-                              type="text"
-                              placeholder={(L?.notes || R?.notes || "")}
-                              value={notesDisplay}
-                              onChange={(ev) => setRowField(rowKey, null, "notes", ev.target.value)}
-                            />
-                          </Td>
-
-                          <Td>
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                              <button disabled={!L} onClick={() => saveEditsForSide("L", L, rowKey)} style={{ opacity: L ? 1 : 0.5 }}>
-                                Save L
-                              </button>
-                              <button disabled={!R} onClick={() => saveEditsForSide("R", R, rowKey)} style={{ opacity: R ? 1 : 0.5 }}>
-                                Save R
-                              </button>
-                              <button disabled={!L} onClick={() => L && onDelete("L", L.id)} style={{ color: "#b00020", opacity: L ? 1 : 0.5 }}>
-                                Delete L
-                              </button>
-                              <button disabled={!R} onClick={() => R && onDelete("R", R.id)} style={{ color: "#b00020", opacity: R ? 1 : 0.5 }}>
-                                Delete R
-                              </button>
-                            </div>
-                          </Td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {/* Trends (averages) */}
+            <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+              <h3 style={{ marginTop: 0 }}>Trends (averages)</h3>
+              {trends.length === 0 ? (
+                <div style={{ color: "#666" }}>No data yet.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={trends} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis yAxisId="left" domain={[0, "auto"]} />
+                    <YAxis yAxisId="right" orientation="right" domain={[0, 100]} />
+                    <Tooltip />
+                    <Legend />
+                    <Line yAxisId="left" type="monotone" dataKey="avgDur" name="Avg Duration (s)" dot={false} strokeWidth={2} />
+                    <Line yAxisId="left" type="monotone" dataKey="avgLoad" name="Avg Load (L/R)" dot={false} strokeWidth={2} />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="modeledPct"
+                      name="Modeled %MVC (avg)"
+                      dot={false}
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
           </div>
         );
       })()}
@@ -944,35 +999,3 @@ function RecPanel({
 
       <div style={{ fontWeight: 600, marginBottom: 8 }}>
         Single-Set Suggestion: {combined ? `${combined} lb @ ${nextTUT}s` : "Add history and click Learn"}
-      </div>
-
-      {planLoads && planLoads.length > 0 && (
-        <div style={{ marginTop: 6 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            Multi-Set Plan ({planReps} sets, rest {planRest}s):
-          </div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {planLoads.map((L, i) => (
-              <li key={i}>
-                Set {i + 1}: {L} lb
-              </li>
-            ))}
-          </ul>
-          <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
-            Loads taper across sets using your fatigue/recovery model to keep each set near {nextTUT}s.
-          </div>
-        </div>
-      )}
-
-      <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
-        {near ? <>Nearest set: {near.load} lb @ {near.duration}s {near.notes ? `— ${near.notes}` : ""}</> : "No nearby set yet."}
-      </div>
-    </div>
-  );
-}
-const Th = ({ children }) => (
-  <th style={{ textAlign: "left", padding: "8px 6px", borderBottom: "1px solid #eee", fontWeight: 600, fontSize: 13, color: "#333" }}>
-    {children}
-  </th>
-);
-const Td = ({ children }) => <td style={{ padding: "8px 6px", borderBottom: "1px solid #f0f0f0" }}>{children}</td>;
