@@ -11,7 +11,38 @@ import {
   Legend,
   Scatter,
 } from "recharts";
+// ---- Table cell helpers (must be at top-level, outside any component) ----
+function Th({ children }) {
+  return (
+    <th
+      style={{
+        textAlign: "left",
+        padding: "8px 6px",
+        borderBottom: "1px solid #eee",
+        fontWeight: 600,
+        fontSize: 13,
+        color: "#333",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </th>
+  );
+}
 
+function Td({ children }) {
+  return (
+    <td
+      style={{
+        padding: "8px 6px",
+        borderBottom: "1px solid #f0f0f0",
+        verticalAlign: "top",
+      }}
+    >
+      {children}
+    </td>
+  );
+}
 /* =========================
    LocalStorage keys
    ========================= */
@@ -983,19 +1014,89 @@ function RecPanel({
   planReps,
   planRest,
 }) {
+  // <<< add this variable
+  const singleSetText =
+    "Single-Set Suggestion: " +
+    (combined ? combined + " lb @ " + nextTUT + "s" : "Add history and click Learn");
+
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
       <h3 style={{ marginTop: 0 }}>{title}</h3>
+
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
         <label>Target TUT (s)</label>
-        <input type="number" value={nextTUT} onChange={(e) => onSetTUT(N(e.target.value, nextTUT))} style={{ width: 100, padding: 6 }} />
+        <input
+          type="number"
+          value={nextTUT}
+          onChange={(e) => onSetTUT(Number(e.target.value) || nextTUT)}
+          style={{ width: 100, padding: 6 }}
+        />
         <button onClick={onLearn}>Learn</button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-        <MetricCard label="Model-Based" value={modelLoad != null ? `${round1(modelLoad)} lb` : "—"} help="Interpolates learned 20/60/180 anchors." />
-        <MetricCard label="Ratio-Based" value={ratioLoad != null ? `${round1(ratioLoad)} lb` : "—"} help="Nearest set scaled by L ∝ t^{-β}." />
+        <MetricCard
+          label="Model-Based"
+          value={modelLoad != null ? `${Math.round(modelLoad * 10) / 10} lb` : "—"}
+          help="Interpolates learned 20/60/180 anchors."
+        />
+        <MetricCard
+          label="Ratio-Based"
+          value={ratioLoad != null ? `${Math.round(ratioLoad * 10) / 10} lb` : "—"}
+          help="Nearest set scaled by L ∝ t^{-β}."
+        />
       </div>
 
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>
-        Single-Set Suggestion: {combined ? `${combined} lb @ ${nextTUT}s` : "Add history and click Learn"}
+      {/* <<< replace the problematic block with this one-liner */}
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>{singleSetText}</div>
+
+      {planLoads && planLoads.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            Multi-Set Plan ({planReps} sets, rest {planRest}s):
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {planLoads.map((L, i) => (
+              <li key={i}>
+                Set {i + 1}: {L} lb
+              </li>
+            ))}
+          </ul>
+          <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
+            Loads taper across sets using your fatigue/recovery model to keep each set near {nextTUT}s.
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
+        {near ? (
+          <>Nearest set: {near.load} lb @ {near.duration}s {near.notes ? `— ${near.notes}` : ""}</>
+        ) : (
+          "No nearby set yet."
+        )}
+      </div>
+    </div>
+  );
+  // ---- Table cell helpers ----
+const Th = ({ children }) => (
+  <th
+    style={{
+      textAlign: "left",
+      padding: "8px 6px",
+      borderBottom: "1px solid #eee",
+      fontWeight: 600,
+      fontSize: 13,
+      color: "#333",
+      whiteSpace: "nowrap",
+    }}
+  >
+    {children}
+  </th>
+);
+
+const Td = ({ children }) => (
+  <td style={{ padding: "8px 6px", borderBottom: "1px solid #f0f0f0", verticalAlign: "top" }}>
+    {children}
+  </td>
+);
+}
