@@ -580,7 +580,7 @@ export default function App() {
           </div>
 
           {/* RIGHT: Quick actions / tips */}
-          <div style={{ border: "1px solid "#eee", borderRadius: 10, padding: 14 }}>
+          <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 14 }}>
             <h3 style={{ marginTop: 0 }}>Quick Actions</h3>
             <div style={{ fontSize: 13, color: "#555" }}>
               Aim to fail within ±2–3 s. If a set runs long, log the <b>actual</b> duration — the model and controller
