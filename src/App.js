@@ -646,137 +646,120 @@ export default function App() {
 
       {/* ===== SESSIONS (classic) ===== */}
       {tab === "sessions" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {/* Left: combined L/R entry */}
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Log a Session</h3>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "140px 1fr 1fr 1fr 1fr 120px",
-                gap: 8,
-                alignItems: "center",
-              }}
-            >
-              <div>
-                <label>Date</label>
-                <input
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-                  style={{ width: "100%", padding: 6 }}
-                />
-              </div>
+  <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 16 }}>
+    {/* LEFT: Vertical form container */}
+    <div style={{ border: "1px solid #ddd", borderRadius: 10, padding: 14 }}>
+      <h3 style={{ marginTop: 0 }}>Log a Session</h3>
 
-              <div style={{ gridColumn: "2 / span 3" }}>
-                <label>Grip / Exercise</label>
-                <input
-                  type="text"
-                  placeholder="e.g., Rolling Thunder / 20mm Half Crimp"
-                  value={form.grip}
-                  onChange={(e) => setForm((f) => ({ ...f, grip: e.target.value }))}
-                  style={{ width: "100%", padding: 6 }}
-                />
-              </div>
+      {/* Date */}
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Date</label>
+        <input
+          type="date"
+          value={form.date}
+          onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+          style={{ width: "100%", padding: 8 }}
+        />
+      </div>
 
-              <div>
-                <label>Rest (s)</label>
-                <input
-                  type="number"
-                  value={form.rest}
-                  onChange={(e) => setForm((f) => ({ ...f, rest: e.target.value }))}
-                  style={{ width: "100%", padding: 6 }}
-                />
-              </div>
+      {/* Grip / Exercise */}
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Grip / Exercise</label>
+        <input
+          type="text"
+          placeholder="e.g., 20mm Half Crimp"
+          value={form.grip}
+          onChange={(e) => setForm((f) => ({ ...f, grip: e.target.value }))}
+          style={{ width: "100%", padding: 8 }}
+        />
+      </div>
 
-              <div>
-                <label>Left Load (lb)</label>
-                <input
-                  type="number"
-                  value={form.leftLoad}
-                  onChange={(e) => setForm((f) => ({ ...f, leftLoad: e.target.value }))}
-                  style={{ width: "100%", padding: 6 }}
-                />
-              </div>
-              <div>
-                <label>Right Load (lb)</label>
-                <input
-                  type="number"
-                  value={form.rightLoad}
-                  onChange={(e) => setForm((f) => ({ ...f, rightLoad: e.target.value }))}
-                  style={{ width: "100%", padding: 6 }}
-                />
-              </div>
-
-              <div>
-                <label>Left Duration (s)</label>
-                <input
-                  type="number"
-                  value={form.leftDur}
-                  onChange={(e) => setForm((f) => ({ ...f, leftDur: e.target.value }))}
-                  style={{ width: "100%", padding: 6 }}
-                />
-              </div>
-              <div>
-                <label>Right Duration (s)</label>
-                <input
-                  type="number"
-                  value={form.rightDur}
-                  onChange={(e) => setForm((f) => ({ ...f, rightDur: e.target.value }))}
-                  style={{ width: "100%", padding: 6 }}
-                />
-              </div>
-
-              <div style={{ gridColumn: "1 / span 5" }}>
-                <label>Notes</label>
-                <input
-                  type="text"
-                  placeholder="optional"
-                  value={form.notes}
-                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                  style={{ width: "100%", padding: 6 }}
-                />
-              </div>
-              <div>
-                <button onClick={onAdd} style={{ width: "100%", padding: 10 }}>
-                  + Add Session
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Right: cards (like your screenshot) */}
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Today's Modeled Values</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <MetricCard
-                label="%MVC Left @ 20s"
-                value={`${(fatigueAt(20, pL) * 100).toFixed(2)}%`}
-                help={`Suggested Left Load: ${modelLoadForT(pL, 20) ? round1(modelLoadForT(pL, 20)) + " lb" : "—"}`}
-              />
-              <MetricCard
-                label="%MVC Right @ 20s"
-                value={`${(fatigueAt(20, pR) * 100).toFixed(2)}%`}
-                help={`Suggested Right Load: ${modelLoadForT(pR, 20) ? round1(modelLoadForT(pR, 20)) + " lb" : "—"}`}
-              />
-              <MetricCard
-                label="Recovery after 180s"
-                value={`Left ${(recoveryFrac(180, pL) * 100).toFixed(2)}% · Right ${(recoveryFrac(180, pR) * 100).toFixed(2)}%`}
-                help="Rule of thumb: ≥65% to keep TUT stable across sets."
-              />
-            </div>
-
-            <div style={{ marginTop: 12, fontSize: 13, color: "#444" }}>
-              <b>Quick Tips</b>
-              <ul style={{ marginTop: 6 }}>
-                <li>Precision Mode narrows learning to your <b>exact TUT</b> (±3s).</li>
-                <li>Type observed time to get the <b>ratio-controlled</b> next load instantly.</li>
-                <li>Re-hit <b>Learn Left/Right</b> after a few converged sets to keep the curve honest.</li>
-              </ul>
-            </div>
-          </div>
+      {/* Left/Right Load */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+        <div>
+          <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Left Load (lb)</label>
+          <input
+            type="number"
+            value={form.leftLoad}
+            onChange={(e) => setForm((f) => ({ ...f, leftLoad: e.target.value }))}
+            style={{ width: "100%", padding: 8 }}
+          />
         </div>
-      )}
+        <div>
+          <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Right Load (lb)</label>
+          <input
+            type="number"
+            value={form.rightLoad}
+            onChange={(e) => setForm((f) => ({ ...f, rightLoad: e.target.value }))}
+            style={{ width: "100%", padding: 8 }}
+          />
+        </div>
+      </div>
+
+      {/* Left/Right Duration */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+        <div>
+          <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Left Duration (s)</label>
+          <input
+            type="number"
+            value={form.leftDur}
+            onChange={(e) => setForm((f) => ({ ...f, leftDur: e.target.value }))}
+            style={{ width: "100%", padding: 8 }}
+          />
+        </div>
+        <div>
+          <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Right Duration (s)</label>
+          <input
+            type="number"
+            value={form.rightDur}
+            onChange={(e) => setForm((f) => ({ ...f, rightDur: e.target.value }))}
+            style={{ width: "100%", padding: 8 }}
+          />
+        </div>
+      </div>
+
+      {/* Rest */}
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Rest (s)</label>
+        <input
+          type="number"
+          value={form.rest}
+          onChange={(e) => setForm((f) => ({ ...f, rest: e.target.value }))}
+          style={{ width: "100%", padding: 8 }}
+        />
+      </div>
+
+      {/* Notes */}
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Notes</label>
+        <input
+          type="text"
+          value={form.notes}
+          onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+          style={{ width: "100%", padding: 8 }}
+          placeholder="optional"
+        />
+      </div>
+
+      <button onClick={onAdd} style={{ width: "100%", padding: 12, fontWeight: 700 }}>
+        + Add Session
+      </button>
+    </div>
+
+    {/* RIGHT: Quick actions / tips (optional; keep or remove) */}
+    <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 14 }}>
+      <h3 style={{ marginTop: 0 }}>Quick Actions</h3>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <button onClick={learnLeft}>Learn Left</button>
+        <button onClick={learnRight}>Learn Right</button>
+      </div>
+      <div style={{ fontSize: 13, color: "#555" }}>
+        Aim to fail within ±2–3 s. If a set runs long, log the **actual** duration here—the recommendations and planner
+        will adjust the next loads automatically.
+      </div>
+    </div>
+  </div>
+)}
 
       {/* ===== HISTORY (classic + Trends) ===== */}
       {tab === "history" && (() => {
