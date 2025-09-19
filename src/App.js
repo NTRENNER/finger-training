@@ -142,7 +142,66 @@ function buildFatigueCurve(anchors) {
   }
   return xs.filter((d) => d.pct != null);
 }
+/** ---- Optional 3-exponential shape (manual sliders) ----
+ * L_adj(T) = L_base(T) * [ triExp(T) / triExp(20) ]
+ * triExp(T) = w1*exp(-T/t1) + w2*exp(-T/t2) + w3*exp(-T/t3), with w1+w2+w3 normalized to 1
+ */
 
+function triExp(T, p) {
+  const wsum = Math.max(1e-9, (p.w1 || 0) + (p.w2 || 0) + (p.w3 || 0));
+  const w1 = wsum ? p.w1 / wsum : 1, w2 = wsum ? p.w2 / wsum : 0, w3 = wsum ? p.w3 / wsum : 0;
+  const e1 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t1 || 1));
+  const e2 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t2 || 1));
+  const e3 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t3 || 1));
+  return w1 * e1 + w2 * e2 + w3 * e3;
+}
+function adjustedModelLoadForT(anchors, T, p) {
+  const base = modelLoadForT(anchors, T);
+  if (base == null) return null;
+  const k = triExp(T, p);
+  const k20 = triExp(20, p);
+  return k20 > 0 ? base * (k / k20) : base;
+}
+function buildAdjustedCurve(anchors, p) {
+  const xs = [];
+  for (let t = 10; t <= 400; t += 10) {
+    const Lb = modelLoadForT(anchors, t);
+    const La = adjustedModelLoadForT(anchors, t, p);
+    const ref = anchors.a20 || Lb || La;
+    const pct = ref ? ((La || Lb) / ref) * 100 : null;
+    if (pct != null) xs.push({ t, pct: +pct.toFixed(2) });
+  }
+  return xs;
+}
+function triExp(T, p) {
+  const wsum = (p.w1 || 0) + (p.w2 || 0) + (p.w3 || 0);
+  const w1 = wsum ? p.w1 / wsum : 1, w2 = wsum ? p.w2 / wsum : 0, w3 = wsum ? p.w3 / wsum : 0;
+  const e1 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t1 || 1));
+  const e2 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t2 || 1));
+  const e3 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t3 || 1));
+  return w1 * e1 + w2 * e2 + w3 * e3;
+}
+
+function adjustedModelLoadForT(anchors, T, p) {
+  const base = modelLoadForT(anchors, T);
+  if (base == null) return null;
+  const k = triExp(T, p);
+  const k20 = triExp(20, p);
+  if (k20 <= 0) return base;
+  return base * (k / k20);
+}
+
+function buildAdjustedCurve(anchors, p) {
+  const xs = [];
+  for (let t = 10; t <= 400; t += 10) {
+    const Lb = modelLoadForT(anchors, t);
+    const La = adjustedModelLoadForT(anchors, t, p);
+    const ref = anchors.a20 || Lb || La;
+    const pct = ref ? ((La || Lb) / ref) * 100 : null;
+    if (pct != null) xs.push({ t, pct: +pct.toFixed(2) });
+  }
+  return xs;
+}
 /** =============================== History helpers =============================== */
 
 function buildCombinedRows(hL, hR) {
@@ -357,8 +416,35 @@ export default function App() {
   const [tutL, setTutL] = useState(20);
   const [tutR, setTutR] = useState(20);
 
-  const modelLoadL = useMemo(() => modelLoadForT(anchorsL, tutL), [anchorsL, tutL]);
-  const modelLoadR = useMemo(() => modelLoadForT(anchorsR, tutR), [anchorsR, tutR]);
+  // Manual model sliders (optional tri-exponential adjustment)
+const [useAdjusted, setUseAdjusted] = useState(false);
+const [params, setParams] = useState({
+  w1: 0.6, w2: 0.3, w3: 0.1,   // weights
+  t1: 8,   t2: 45,  t3: 180,   // time constants in seconds
+});
+  // Base model (no slider shaping)
+const baseModelLoadL = useMemo(() => modelLoadForT(anchorsL, tutL), [anchorsL, tutL]);
+const baseModelLoadR = useMemo(() => modelLoadForT(anchorsR, tutR), [anchorsR, tutR]);
+
+// Adjusted model (uses the tri-exponential sliders)
+const adjModelLoadL = useMemo(
+  () => adjustedModelLoadForT(anchorsL, tutL, params),
+  [anchorsL, tutL, params]
+);
+const adjModelLoadR = useMemo(
+  () => adjustedModelLoadForT(anchorsR, tutR, params),
+  [anchorsR, tutR, params]
+);
+
+// Final model loads used everywhere else (toggled by useAdjusted)
+const modelLoadL = useMemo(
+  () => (useAdjusted ? adjModelLoadL : baseModelLoadL),
+  [useAdjusted, adjModelLoadL, baseModelLoadL]
+);
+const modelLoadR = useMemo(
+  () => (useAdjusted ? adjModelLoadR : baseModelLoadR),
+  [useAdjusted, adjModelLoadR, baseModelLoadR]
+);
 
   const nearL = useMemo(() => nearestByTime(hL, tutL), [hL, tutL]);
   const nearR = useMemo(() => nearestByTime(hR, tutR), [hR, tutR]);
