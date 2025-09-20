@@ -3,153 +3,104 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  CartesianGrid,
   XAxis,
   YAxis,
-  CartesianGrid,
   Tooltip,
   Legend,
-  ScatterChart,
-  Scatter,
+  ComposedChart,
+  Bar,
 } from "recharts";
 
-/** =============================== Utilities & Storage =============================== */
-
-const N = (v, fallback = 0) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
+/* ===================== Small utilities ===================== */
+const LS_L = "finger_training_left_v2";
+const LS_R = "finger_training_right_v2";
+const todayISO = new Date().toISOString().slice(0, 10);
+const N = (v, d = 0) => {
+  const x = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(x) ? x : d;
 };
-const round1 = (x) => Math.round(x * 10) / 10;
-const uid = () => Math.round(Date.now() + Math.random() * 1e6);
-const dayKey = (iso) => new Date(iso).toISOString().slice(0, 10);
-const within = (x, target, tol) => Math.abs(x - target) <= tol;
+const uid = () => Math.random().toString(36).slice(2, 10);
+const dayKey = (iso) => (iso || todayISO);
 
-const LS = {
-  get(name, def) {
-    try {
-      const s = localStorage.getItem(name);
-      return s ? JSON.parse(s) : def;
-    } catch {
-      return def;
-    }
-  },
-  set(name, v) {
-    localStorage.setItem(name, JSON.stringify(v));
-  },
-};
+/* ===================== Simple UI atoms ===================== */
+function Card({ title, children, style }) {
+  return (
+    <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 14, ...style }}>
+      {title && <div style={{ fontWeight: 700, marginBottom: 8 }}>{title}</div>}
+      {children}
+    </div>
+  );
+}
+const Label = ({ children, width = 140 }) => (
+  <div style={{ width, fontSize: 12, color: "#444" }}>{children}</div>
+);
 
-/** =============================== Modeling helpers =============================== */
-/**
- * Two estimators per hand:
- * 1) Model-Based: learn representative anchor loads near 20/60/180s and interpolate in log-log.
- * 2) Ratio-Based: fit L ∝ t^{-β} from history and scale the nearest set.
+/* ===================== Data model ===================== */
+/** Record:
+ * { id, hand: "L"|"R", date: "YYYY-MM-DD", grip, load, duration, rest, notes }
  */
 
-function pickAnchorLoad(history, T, window = 4) {
-  const near = history
-    .filter((r) => within(r.duration, T, window))
-    .map((r) => r.load)
-    .sort((a, b) => a - b);
-  if (!near.length) return null;
-  const mid = Math.floor(near.length / 2);
-  return near.length % 2 === 1 ? near[mid] : (near[mid - 1] + near[mid]) / 2;
-}
+/* ---------- Core helpers ---------- */
 
-function fitAnchors(history) {
-  return {
-    a20: pickAnchorLoad(history, 20, 4),
-    a60: pickAnchorLoad(history, 60, 6),
-    a180: pickAnchorLoad(history, 180, 10),
-  };
-}
-
-function interpLogLog(x1, y1, x2, y2, x) {
-  const lx1 = Math.log(x1),
-    ly1 = Math.log(y1),
-    lx2 = Math.log(x2),
-    ly2 = Math.log(y2);
-  const m = (ly2 - ly1) / (lx2 - lx1);
-  const b = ly1 - m * lx1;
-  return Math.exp(m * Math.log(x) + b);
-}
-
-function modelLoadForT(anchors, T) {
-  const { a20, a60, a180 } = anchors;
-  if (a20 && a60 && T >= 20 && T <= 60) return interpLogLog(20, a20, 60, a60, T);
-  if (a60 && a180 && T >= 60 && T <= 180) return interpLogLog(60, a60, 180, a180, T);
-  if (a20 && a60 && T < 20) return interpLogLog(20, a20, 60, a60, Math.max(5, T));
-  if (a60 && a180 && T > 180) return interpLogLog(60, a60, 180, a180, Math.min(400, T));
-  // Single-anchor fallback (reasonable default β=0.3)
-  const beta = 0.3;
-  if (a20) return a20 * Math.pow(T / 20, -beta);
-  if (a60) return a60 * Math.pow(T / 60, -beta);
-  if (a180) return a180 * Math.pow(T / 180, -beta);
-  return null;
-}
-
-function fitBeta(history) {
-  const pts = history
-    .filter((r) => r.load > 0 && r.duration > 0)
-    .map((r) => ({ x: Math.log(r.duration), y: Math.log(r.load) }));
-  if (pts.length < 2) return 0.3;
-  const n = pts.length;
-  const sx = pts.reduce((a, p) => a + p.x, 0);
-  const sy = pts.reduce((a, p) => a + p.y, 0);
-  const sxx = pts.reduce((a, p) => a + p.x * p.x, 0);
-  const sxy = pts.reduce((a, p) => a + p.x * p.y, 0);
-  const denom = n * sxx - sx * sx;
-  if (denom === 0) return 0.3;
-  const slope = (n * sxy - sx * sy) / denom;
-  const beta = -slope;
-  return Math.max(0.05, Math.min(1.0, beta));
-}
-
+/** nearestByTime: pick record whose duration is closest to target T */
 function nearestByTime(history, targetT) {
-  if (!history.length) return null;
-  let best = null,
-    bestD = Infinity;
+  if (!history || history.length === 0) return null;
+  let best = null;
+  let bestD = Infinity;
   for (const r of history) {
-    const d = Math.abs(r.duration - targetT);
+    const d = Math.abs(N(r.duration, 0) - targetT);
     if (d < bestD) {
-      bestD = d;
       best = r;
+      bestD = d;
     }
   }
   return best;
 }
 
-function ratioSuggestLoad(nearest, beta, targetT) {
-  if (!nearest) return null;
-  const tObs = Math.max(1, nearest.duration);
-  return nearest.load * Math.pow(targetT / tObs, -beta);
+/** fitBeta: estimate exponent for L ~ (Tref/T)^beta across history (least squares) */
+function fitBeta(history) {
+  const Tref = 20;
+  const pairs = [];
+  for (const r of history) {
+    const L = N(r.load, 0);
+    const T = N(r.duration, 0);
+    if (L > 0 && T > 0 && T !== Tref) {
+      pairs.push({ L, T });
+    }
+  }
+  if (pairs.length < 2) return 0.7; // fallback
+  // regress y=ln L on x=ln(Tref/T)
+  let sx = 0, sy = 0, sxx = 0, sxy = 0, n = 0;
+  for (const p of pairs) {
+    const x = Math.log(Tref / p.T);
+    const y = Math.log(p.L);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      n++; sx += x; sy += y; sxx += x * x; sxy += x * y;
+    }
+  }
+  if (n < 2) return 0.7;
+  const beta = (n * sxy - sx * sy) / Math.max(1e-9, (n * sxx - sx * sx));
+  return Math.min(2.5, Math.max(0.2, beta));
 }
 
-function multiSetPlan({ targetT, base, beta, reps = 5, rest = 120 }) {
-  // Light taper to keep TUT stable. k depends weakly on targetT vs rest.
-  const k = Math.min(0.08, Math.max(0.015, (targetT / (rest + targetT)) * 0.12)); // 1.5–8%
-  const plan = [];
-  for (let i = 0; i < reps; i++) {
-    const li = base * Math.pow(1 - k, i);
-    plan.push(Math.max(0, round1(li)));
-  }
-  return plan;
-}
-
-function buildFatigueCurve(anchors) {
-  const xs = [];
-  for (let t = 10; t <= 400; t += 10) {
-    const L = modelLoadForT(anchors, t);
-    xs.push({ t, pct: L ? (L / (anchors.a20 || L)) * 100 : null });
-  }
-  return xs.filter((d) => d.pct != null);
-}
-/** ---- Optional 3-exponential shape (manual sliders) ----
- * L_adj(T) = L_base(T) * [ triExp(T) / triExp(20) ]
- * triExp(T) = w1*exp(-T/t1) + w2*exp(-T/t2) + w3*exp(-T/t3), with w1+w2+w3 normalized to 1
+/** modelLoadForT via a single-parameter power model anchored at 20s
+ * We set K from nearest-to-20 (or the best available), then L(T) = K*(20/T)^beta
  */
+function modelLoadForT(anchors, T) {
+  if (!anchors) return null;
+  const { a20, beta } = anchors;
+  if (!a20 || !beta || T <= 0) return null;
+  return a20 * Math.pow(20 / T, beta);
+}
 
-function triExp(T, p) {
+/** ---- Optional 3-exponential shape (manual sliders) ----
+ * L_adj(T) = L_base(T) * [ triShape(T) / triShape(20) ]
+ * triShape(T) = w1*exp(-T/t1) + w2*exp(-T/t2) + w3*exp(-T/t3), weights normalized
+ */
+function triShape(T, p) {
   const wsum = Math.max(1e-9, (p.w1 || 0) + (p.w2 || 0) + (p.w3 || 0));
-  const w1 = wsum ? p.w1 / wsum : 1, w2 = wsum ? p.w2 / wsum : 0, w3 = wsum ? p.w3 / wsum : 0;
+  const w1 = (p.w1 || 0) / wsum, w2 = (p.w2 || 0) / wsum, w3 = (p.w3 || 0) / wsum;
   const e1 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t1 || 1));
   const e2 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t2 || 1));
   const e3 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t3 || 1));
@@ -158,8 +109,8 @@ function triExp(T, p) {
 function adjustedModelLoadForT(anchors, T, p) {
   const base = modelLoadForT(anchors, T);
   if (base == null) return null;
-  const k = triExp(T, p);
-  const k20 = triExp(20, p);
+  const k = triShape(T, p);
+  const k20 = triShape(20, p);
   return k20 > 0 ? base * (k / k20) : base;
 }
 function buildAdjustedCurve(anchors, p) {
@@ -173,136 +124,77 @@ function buildAdjustedCurve(anchors, p) {
   }
   return xs;
 }
-function triExp(T, p) {
-  const wsum = (p.w1 || 0) + (p.w2 || 0) + (p.w3 || 0);
-  const w1 = wsum ? p.w1 / wsum : 1, w2 = wsum ? p.w2 / wsum : 0, w3 = wsum ? p.w3 / wsum : 0;
-  const e1 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t1 || 1));
-  const e2 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t2 || 1));
-  const e3 = Math.exp(-Math.max(0, T) / Math.max(1e-6, p.t3 || 1));
-  return w1 * e1 + w2 * e2 + w3 * e3;
+
+/** fitAnchors: estimate a20 using nearest record to 20s, otherwise regress to 20s */
+function fitAnchors(history) {
+  if (!history || history.length === 0) return { a20: null, beta: 0.7 };
+  const beta = fitBeta(history);
+  const near20 = nearestByTime(history, 20);
+  let a20 = null;
+  if (near20 && Math.abs(near20.duration - 20) <= 5) {
+    a20 = N(near20.load, 0);
+  } else {
+    let sum = 0, n = 0;
+    for (const r of history) {
+      const L = N(r.load, 0);
+      const T = N(r.duration, 0);
+      if (L > 0 && T > 0) { sum += L * Math.pow(T / 20, beta); n++; }
+    }
+    a20 = n > 0 ? sum / n : null;
+  }
+  const a60 = a20 && beta ? a20 * Math.pow(20 / 60, beta) : null;
+  const a180 = a20 && beta ? a20 * Math.pow(20 / 180, beta) : null;
+  return { a20, a60, a180, beta };
 }
 
-function adjustedModelLoadForT(anchors, T, p) {
-  const base = modelLoadForT(anchors, T);
-  if (base == null) return null;
-  const k = triExp(T, p);
-  const k20 = triExp(20, p);
-  if (k20 <= 0) return base;
-  return base * (k / k20);
+/** ratioSuggestLoad: given the nearest record and beta, suggest L_target */
+function ratioSuggestLoad(near, beta, Ttarget) {
+  if (!near || !beta || !Ttarget) return null;
+  const Lnear = N(near.load, 0);
+  const Tnear = N(near.duration, 0);
+  if (Lnear <= 0 || Tnear <= 0) return null;
+  return Lnear * Math.pow(Tnear / Ttarget, beta);
 }
 
-function buildAdjustedCurve(anchors, p) {
+/** build fatigue curve (% of 20s) from anchors (base model) */
+function buildFatigueCurve(anchors) {
   const xs = [];
   for (let t = 10; t <= 400; t += 10) {
-    const Lb = modelLoadForT(anchors, t);
-    const La = adjustedModelLoadForT(anchors, t, p);
-    const ref = anchors.a20 || Lb || La;
-    const pct = ref ? ((La || Lb) / ref) * 100 : null;
-    if (pct != null) xs.push({ t, pct: +pct.toFixed(2) });
+    const L = modelLoadForT(anchors, t);
+    xs.push({ t, pct: L ? (L / (anchors.a20 || L)) * 100 : null });
   }
-  return xs;
+  return xs.filter((d) => d.pct != null);
 }
-/** =============================== History helpers =============================== */
 
-function buildCombinedRows(hL, hR) {
-  // group by (date(YYYY-MM-DD) | grip) so L/R appear together
-  const keyOf = (r) => `${dayKey(r.date)}|${(r.grip || "").trim()}`;
-  const map = new Map();
-
-  for (const r of hL) {
-    const k = keyOf(r);
-    const row = map.get(k) || { date: r.date, grip: (r.grip || "").trim() };
-    row.L = r;
-    map.set(k, row);
+/** multi-set planner: taper slightly so each set finishes near target TUT */
+function multiSetPlan({ targetT, base, beta, reps, rest }) {
+  if (!base || !beta || !reps) return [];
+  const loads = [];
+  // crude fatigue accumulation by rest; lighten ~2–5% per subsequent set depending on rest
+  const restFactor = Math.max(0, Math.min(1, rest / 180)); // 0 (no rest) .. 1 (full)
+  const step = 0.05 * (1 - restFactor); // more taper if rest is short
+  for (let i = 0; i < reps; i++) {
+    const factor = Math.max(0.7, 1 - step * i);
+    loads.push(Math.round(base * factor * 10) / 10);
   }
-  for (const r of hR) {
-    const k = keyOf(r);
-    const row = map.get(k) || { date: r.date, grip: (r.grip || "").trim() };
-    row.R = r;
-    map.set(k, row);
-  }
-
-  return Array.from(map.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
+  return loads;
 }
 
-function dailyTrends(hL, hR, aL, aR) {
-  const byDay = new Map(); // date -> {loads:[], durs:[]}
-  const add = (r) => {
-    const k = dayKey(r.date);
-    const v = byDay.get(k) || { loads: [], durs: [] };
-    v.loads.push(r.load);
-    v.durs.push(r.duration);
-    byDay.set(k, v);
-  };
-  hL.forEach(add);
-  hR.forEach(add);
-
-  const days = Array.from(byDay.entries()).sort(
-    (a, b) => new Date(a[0]) - new Date(b[0])
-  );
-
-  return days.map(([d, v]) => {
-    const avgLoad = v.loads.reduce((a, b) => a + b, 0) / v.loads.length;
-    const avgDur = v.durs.reduce((a, b) => a + b, 0) / v.durs.length;
-    // approximate modeled %: average of each hand's curve at avgDur, normalized to its ~20s anchor
-    const mL = modelLoadForT(aL, avgDur);
-    const mR = modelLoadForT(aR, avgDur);
-    let pct = null;
-    if (mL && aL.a20) pct = (mL / aL.a20) * 50;
-    if (mR && aR.a20) pct = (pct == null ? 0 : pct) + (mR / aR.a20) * 50;
-    pct = pct == null ? null : +pct.toFixed(2);
-    return {
-      date: d,
-      avgLoad: +avgLoad.toFixed(2),
-      avgDur: +avgDur.toFixed(2),
-      modeledPct: pct ?? 0,
-    };
-  });
-}
-
-/** =============================== Small UI atoms =============================== */
-
-function MetricCard({ label, value, help }) {
-  return (
-    <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 10, minHeight: 70 }}>
-      <div style={{ fontSize: 12, color: "#666" }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700 }}>{value}</div>
-      {help && <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{help}</div>}
-    </div>
-  );
-}
-
-/** =============================== App =============================== */
-
+/* ===================== App ===================== */
 export default function App() {
-  // Histories
-  const [hL, setHL] = useState(() => LS.get("histL", []));
-  const [hR, setHR] = useState(() => LS.get("histR", []));
-  useEffect(() => LS.set("histL", hL), [hL]);
-  useEffect(() => LS.set("histR", hR), [hR]);
+  const [tab, setTab] = useState("sessions"); // sessions | history | model | recommend
 
-  // One-time migration: if grip was stored in notes in old data, move it.
-  useEffect(() => {
-    const moveGripFromNotes = (setter) => {
-      setter((arr) =>
-        arr.map((r) => {
-          if (!r.grip && r.notes && r.notes.trim()) {
-            return { ...r, grip: r.notes.trim(), notes: "" };
-          }
-          return r;
-        })
-      );
-    };
-    moveGripFromNotes(setHL);
-    moveGripFromNotes(setHR);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  /* ---------- history state (localStorage) ---------- */
+  const [hL, setHL] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LS_L) || "[]"); } catch { return []; }
+  });
+  const [hR, setHR] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LS_R) || "[]"); } catch { return []; }
+  });
+  useEffect(() => { localStorage.setItem(LS_L, JSON.stringify(hL)); }, [hL]);
+  useEffect(() => { localStorage.setItem(LS_R, JSON.stringify(hR)); }, [hR]);
 
-  // Tabs
-  const [tab, setTab] = useState("recommend"); // recommend | sessions | history | model
-
-  /** ------- Sessions form ------- */
-  const todayISO = new Date().toISOString().slice(0, 10);
+  /* ---------- Sessions form ---------- */
   const [form, setForm] = useState({
     date: todayISO,
     grip: "",
@@ -320,35 +212,31 @@ export default function App() {
     const rest = N(form.rest, 0);
     const notes = form.notes || "";
 
-    const next = [];
-    if (form.leftLoad || form.leftDur) {
-      next.push({
-        id: uid(),
-        hand: "L",
-        date,
-        grip,
-        load: N(form.leftLoad, 0),
-        duration: N(form.leftDur, 0),
-        rest,
-        notes,
-      });
-    }
-    if (form.rightLoad || form.rightDur) {
-      next.push({
-        id: uid(),
-        hand: "R",
-        date,
-        grip,
-        load: N(form.rightLoad, 0),
-        duration: N(form.rightDur, 0),
-        rest,
-        notes,
-      });
-    }
-    if (!next.length) return;
+    const Lload = N(form.leftLoad, 0);
+    const Rload = N(form.rightLoad, 0);
+    const Ldur  = N(form.leftDur, 0);
+    const Rdur  = N(form.rightDur, 0);
 
-    setHL((arr) => arr.concat(next.filter((r) => r.hand === "L")));
-    setHR((arr) => arr.concat(next.filter((r) => r.hand === "R")));
+    const leftValid  = Lload > 0 && Ldur > 0;
+    const rightValid = Rload > 0 && Rdur > 0;
+
+    if (!leftValid && !rightValid) {
+      alert("Please enter BOTH load and duration (> 0) for Left and/or Right.");
+      return;
+    }
+
+    const toAdd = [];
+    if (leftValid) {
+      toAdd.push({ id: uid(), hand: "L", date, grip, load: Lload, duration: Ldur, rest, notes });
+    }
+    if (rightValid) {
+      toAdd.push({ id: uid(), hand: "R", date, grip, load: Rload, duration: Rdur, rest, notes });
+    }
+
+    if (toAdd.some(r => r.hand === "L")) setHL(a => a.concat(toAdd.filter(r => r.hand === "L")));
+    if (toAdd.some(r => r.hand === "R")) setHR(a => a.concat(toAdd.filter(r => r.hand === "R")));
+
+    alert(`Saved ${toAdd.length} record${toAdd.length === 1 ? "" : "s"}.`);
 
     setForm({
       date,
@@ -362,36 +250,40 @@ export default function App() {
     });
   };
 
-  const onDelete = (hand, id) => {
-    const ok = window.confirm("Delete this record?");
-    if (!ok) return;
-    if (hand === "L") setHL((arr) => arr.filter((r) => r.id !== id));
-    else setHR((arr) => arr.filter((r) => r.id !== id));
+  const onClearAll = () => {
+    if (!window.confirm("This will delete ALL history for BOTH hands on THIS DEVICE. Continue?")) return;
+    if (!window.confirm("Are you absolutely sure? This cannot be undone.")) return;
+    setHL([]); setHR([]);
   };
 
-  const clearAll = () => {
-    const ok1 = window.confirm("This will delete ALL Left & Right history. Continue?");
-    if (!ok1) return;
-    const ok2 = window.confirm("Really delete EVERYTHING? This cannot be undone.");
-    if (!ok2) return;
-    setHL([]);
-    setHR([]);
+  /* ---------- History editing ---------- */
+  const [editingId, setEditingId] = useState(null);
+  const [editBuf, setEditBuf] = useState(null);
+  const onEdit = (rec) => { setEditingId(rec.id); setEditBuf({ ...rec }); };
+  const onCancelEdit = () => { setEditingId(null); setEditBuf(null); };
+  const onSaveEdit = () => {
+    if (!editBuf) return;
+    const up = (arr) => arr.map(r => (r.id === editBuf.id ? { ...editBuf } : r));
+    if (editBuf.hand === "L") setHL(up);
+    else setHR(up);
+    setEditingId(null); setEditBuf(null);
+  };
+  const onDelete = (rec) => {
+    if (!window.confirm("Delete this record?")) return;
+    if (rec.hand === "L") setHL(a => a.filter(r => r.id !== rec.id));
+    else setHR(a => a.filter(r => r.id !== rec.id));
   };
 
+  /* ---------- Import/Export ---------- */
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ left: hL, right: hR }, null, 2)], {
-      type: "application/json",
-    });
+    const payload = { left: hL, right: hR, exportedAt: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `finger-training-history-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
+    a.href = url; a.download = "finger-training-history.json";
     a.click();
-    a.remove();
     URL.revokeObjectURL(url);
   };
-
   const importJSON = (file) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -407,7 +299,7 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  /** ------- Learning & recommendations ------- */
+  /* ---------- Learning & recommendations ---------- */
   const anchorsL = useMemo(() => fitAnchors(hL), [hL]);
   const anchorsR = useMemo(() => fitAnchors(hR), [hR]);
   const betaL = useMemo(() => fitBeta(hL), [hL]);
@@ -417,34 +309,30 @@ export default function App() {
   const [tutR, setTutR] = useState(20);
 
   // Manual model sliders (optional tri-exponential adjustment)
-const [useAdjusted, setUseAdjusted] = useState(false);
-const [params, setParams] = useState({
-  w1: 0.6, w2: 0.3, w3: 0.1,   // weights
-  t1: 8,   t2: 45,  t3: 180,   // time constants in seconds
-});
-  // Base model (no slider shaping)
-const baseModelLoadL = useMemo(() => modelLoadForT(anchorsL, tutL), [anchorsL, tutL]);
-const baseModelLoadR = useMemo(() => modelLoadForT(anchorsR, tutR), [anchorsR, tutR]);
+  const [useAdjusted, setUseAdjusted] = useState(false);
+  const [params, setParams] = useState({ w1: 0.6, w2: 0.3, w3: 0.1, t1: 8, t2: 45, t3: 180 });
 
-// Adjusted model (uses the tri-exponential sliders)
-const adjModelLoadL = useMemo(
-  () => adjustedModelLoadForT(anchorsL, tutL, params),
-  [anchorsL, tutL, params]
-);
-const adjModelLoadR = useMemo(
-  () => adjustedModelLoadForT(anchorsR, tutR, params),
-  [anchorsR, tutR, params]
-);
+  // Base model
+  const baseModelLoadL = useMemo(() => modelLoadForT(anchorsL, tutL), [anchorsL, tutL]);
+  const baseModelLoadR = useMemo(() => modelLoadForT(anchorsR, tutR), [anchorsR, tutR]);
 
-// Final model loads used everywhere else (toggled by useAdjusted)
-const modelLoadL = useMemo(
-  () => (useAdjusted ? adjModelLoadL : baseModelLoadL),
-  [useAdjusted, adjModelLoadL, baseModelLoadL]
-);
-const modelLoadR = useMemo(
-  () => (useAdjusted ? adjModelLoadR : baseModelLoadR),
-  [useAdjusted, adjModelLoadR, baseModelLoadR]
-);
+  // Adjusted model
+  const adjModelLoadL = useMemo(
+    () => adjustedModelLoadForT(anchorsL, tutL, params), [anchorsL, tutL, params]
+  );
+  const adjModelLoadR = useMemo(
+    () => adjustedModelLoadForT(anchorsR, tutR, params), [anchorsR, tutR, params]
+  );
+
+  // Final model loads used by recs
+  const modelLoadL = useMemo(
+    () => (useAdjusted ? adjModelLoadL : baseModelLoadL),
+    [useAdjusted, adjModelLoadL, baseModelLoadL]
+  );
+  const modelLoadR = useMemo(
+    () => (useAdjusted ? adjModelLoadR : baseModelLoadR),
+    [useAdjusted, adjModelLoadR, baseModelLoadR]
+  );
 
   const nearL = useMemo(() => nearestByTime(hL, tutL), [hL, tutL]);
   const nearR = useMemo(() => nearestByTime(hR, tutR), [hR, tutR]);
@@ -455,48 +343,32 @@ const modelLoadR = useMemo(
   const combinedL = useMemo(() => {
     const xs = [modelLoadL, ratioLoadL].filter((v) => v != null);
     if (!xs.length) return null;
-    return round1(xs.reduce((a, b) => a + b, 0) / xs.length);
+    return Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10;
   }, [modelLoadL, ratioLoadL]);
-
   const combinedR = useMemo(() => {
     const xs = [modelLoadR, ratioLoadR].filter((v) => v != null);
     if (!xs.length) return null;
-    return round1(xs.reduce((a, b) => a + b, 0) / xs.length);
+    return Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10;
   }, [modelLoadR, ratioLoadR]);
 
-  // Planner controls (shared)
+  // Multi-set planner
   const [planReps, setPlanReps] = useState(5);
   const [planRest, setPlanRest] = useState(120);
   const planL = useMemo(
-    () =>
-      combinedL != null
-        ? multiSetPlan({ targetT: tutL, base: combinedL, beta: betaL, reps: planReps, rest: planRest })
-        : [],
+    () => (combinedL != null ? multiSetPlan({ targetT: tutL, base: combinedL, beta: betaL, reps: planReps, rest: planRest }) : []),
     [combinedL, betaL, tutL, planReps, planRest]
   );
   const planR = useMemo(
-    () =>
-      combinedR != null
-        ? multiSetPlan({ targetT: tutR, base: combinedR, beta: betaR, reps: planReps, rest: planRest })
-        : [],
+    () => (combinedR != null ? multiSetPlan({ targetT: tutR, base: combinedR, beta: betaR, reps: planReps, rest: planRest }) : []),
     [combinedR, betaR, tutR, planReps, planRest]
   );
 
-  // Curves & trends
-  const curveL = useMemo(() => buildFatigueCurve(anchorsL), [anchorsL]);
-  const curveR = useMemo(() => buildFatigueCurve(anchorsR), [anchorsR]);
-  const rows = useMemo(() => buildCombinedRows(hL, hR), [hL, hR]);
-  const trends = useMemo(() => dailyTrends(hL, hR, anchorsL, anchorsR), [hL, hR, anchorsL, anchorsR]);
-
-  /** =============================== UI =============================== */
-
+  /* ===================== Render ===================== */
   return (
-    <div style={{ maxWidth: 1200, margin: "20px auto", padding: "0 12px", fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" }}>
-      <h2 style={{ marginTop: 0 }}>Finger Training Planner</h2>
-
+    <div style={{ padding: 16, maxWidth: 1200, margin: "0 auto", fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" }}>
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        {["recommend", "sessions", "history", "model"].map((t) => (
+        {["sessions", "history", "model", "recommend"].map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -504,14 +376,290 @@ const modelLoadR = useMemo(
               padding: "8px 12px",
               borderRadius: 8,
               border: "1px solid #ddd",
-              background: tab === t ? "#f0f6ff" : "white",
-              fontWeight: tab === t ? 700 : 500,
+              background: tab === t ? "#0d6efd" : "#fff",
+              color: tab === t ? "#fff" : "#333",
+              cursor: "pointer",
             }}
           >
             {t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+  <button
+    onClick={exportJSON}
+    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #ddd" }}
+  >
+    Export JSON
+  </button>
+
+  <label
+    style={{
+      padding: "8px 12px",
+      borderRadius: 8,
+      border: "1px solid #ddd",
+      cursor: "pointer",
+    }}
+  >
+    Import JSON
+    <input
+      type="file"
+      accept="application/json"
+      style={{ display: "none" }}
+      onChange={(e) => {
+        const f = e.target.files && e.target.files[0];
+        if (f) importJSON(f);
+        e.target.value = ""; // reset for same-file re-imports
+      }}
+    />
+  </label>
+
+  <button
+    onClick={onClearAll}
+    style={{
+      padding: "8px 12px",
+      borderRadius: 8,
+      border: "1px solid #ddd",
+      color: "#b00020",
+      background: "#fff",
+    }}
+  >
+    Clear All
+  </button>
+</div>
       </div>
+
+      {/* SESSIONS */}
+      {tab === "sessions" && (
+        <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: 16 }}>
+          {/* Left column: vertical form */}
+          <Card title="Add Session">
+            {/* Date */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <Label>Date</Label>
+              <input type="date" value={form.date} onChange={(e) => setForm(f => ({ ...f, date: e.target.value }))}
+                     style={{ flex: 1, padding: 6 }} />
+            </div>
+            {/* Grip/Exercise */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <Label>Grip / Exercise</Label>
+              <input value={form.grip} onChange={(e) => setForm(f => ({ ...f, grip: e.target.value }))}
+                     placeholder="e.g., 3-finger half crimp" style={{ flex: 1, padding: 6 }} />
+            </div>
+            {/* Loads row */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <div>
+                <div style={{ fontSize: 12, marginBottom: 4 }}>Left Load (lb, required)</div>
+                <input value={form.leftLoad} onChange={(e) => setForm(f => ({ ...f, leftLoad: e.target.value }))}
+                       inputMode="decimal" placeholder="e.g., 95" style={{ width: "100%", padding: 6 }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, marginBottom: 4 }}>Right Load (lb, required)</div>
+                <input value={form.rightLoad} onChange={(e) => setForm(f => ({ ...f, rightLoad: e.target.value }))}
+                       inputMode="decimal" placeholder="e.g., 95" style={{ width: "100%", padding: 6 }} />
+              </div>
+            </div>
+            {/* Durations row */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <div>
+                <div style={{ fontSize: 12, marginBottom: 4 }}>Left Duration (s, required)</div>
+                <input value={form.leftDur} onChange={(e) => setForm(f => ({ ...f, leftDur: e.target.value }))}
+                       inputMode="numeric" placeholder="e.g., 20" style={{ width: "100%", padding: 6 }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, marginBottom: 4 }}>Right Duration (s, required)</div>
+                <input value={form.rightDur} onChange={(e) => setForm(f => ({ ...f, rightDur: e.target.value }))}
+                       inputMode="numeric" placeholder="e.g., 20" style={{ width: "100%", padding: 6 }} />
+              </div>
+            </div>
+            {/* Rest */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <Label>Rest (s)</Label>
+              <input value={form.rest} onChange={(e) => setForm(f => ({ ...f, rest: e.target.value }))}
+                     inputMode="numeric" placeholder="e.g., 120" style={{ flex: 1, padding: 6 }} />
+            </div>
+            {/* Notes */}
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8 }}>
+              <Label>Notes</Label>
+              <textarea value={form.notes} onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
+                        placeholder="Anything useful…" rows={3} style={{ flex: 1, padding: 6 }} />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={onAdd} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #ddd", background: "#0d6efd", color: "#fff" }}>
+                Add Session
+              </button>
+            </div>
+          </Card>
+
+          {/* Right column: quick actions & hints */}
+          <Card title="Quick Actions / Hints">
+            <div style={{ fontSize: 14, color: "#333" }}>
+              • Enter both load and duration for each hand you want to save.<br />
+              • Use consistent <b>time-under-tension</b> targets (20s/60s/180s) so the model learns faster.<br />
+              • Edit or delete mistakes from the History tab (each record has its own controls).<br />
+              • Export/Import JSON to move data between devices.
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* HISTORY */}
+      {tab === "history" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          {/* Trends */}
+          <Card title="Trends (Load over Time)">
+            <div style={{ height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart
+                  data={(function () {
+                    // build time series of avg load per date
+                    const map = new Map(); // date -> {sum, n, Lsum, Rsum}
+                    const add = (r) => {
+                      const k = dayKey(r.date);
+                      if (!map.has(k)) map.set(k, { sum: 0, n: 0, Lsum: 0, Rsum: 0 });
+                      const o = map.get(k);
+                      o.sum += N(r.load, 0);
+                      o.n += 1;
+                      if (r.hand === "L") o.Lsum += N(r.load, 0);
+                      else o.Rsum += N(r.load, 0);
+                    };
+                    hL.forEach(add);
+                    hR.forEach(add);
+                    const rows = [...map.entries()].map(([d, o]) => ({
+                      date: d,
+                      avg: o.n ? o.sum / o.n : 0,
+                      leftLoad: o.Lsum || 0,
+                      rightLoad: o.Rsum || 0,
+                    })).sort((a, b) => (a.date < b.date ? -1 : 1));
+                    return rows;
+                  })()}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="leftLoad" name="Left Load (sum)" />
+                  <Bar dataKey="rightLoad" name="Right Load (sum)" />
+                  <Line type="monotone" dataKey="avg" name="Avg Load" strokeWidth={2} dot={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          {/* Tables */}
+          <Card title="Left History">
+            <HistoryTable rows={hL} onEdit={onEdit} onDelete={onDelete}
+              editingId={editingId} editBuf={editBuf} setEditBuf={setEditBuf}
+              onSaveEdit={onSaveEdit} onCancelEdit={onCancelEdit} />
+          </Card>
+          <Card title="Right History">
+            <HistoryTable rows={hR} onEdit={onEdit} onDelete={onDelete}
+              editingId={editingId} editBuf={editBuf} setEditBuf={setEditBuf}
+              onSaveEdit={onSaveEdit} onCancelEdit={onCancelEdit} />
+          </Card>
+        </div>
+      )}
+
+      {/* MODEL */}
+      {tab === "model" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          {/* Sliders panel spanning both columns */}
+          <div style={{ gridColumn: "1 / span 2", border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+            <h3 style={{ marginTop: 0 }}>Manual Shape (3-Exponential) — Optional</h3>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <input type="checkbox" checked={useAdjusted} onChange={(e) => setUseAdjusted(e.target.checked)} />
+              <span>Use sliders to shape recommendations</span>
+            </label>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              {/* Weights */}
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Weights</div>
+                {["w1", "w2", "w3"].map((k) => (
+                  <div key={k} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: "#555" }}>{k.toUpperCase()} = {params[k].toFixed(2)}</div>
+                    <input
+                      type="range" min="0" max="1" step="0.01"
+                      value={params[k]}
+                      onChange={(e) => setParams(p => ({ ...p, [k]: Number(e.target.value) }))}
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                ))}
+                <div style={{ fontSize: 12, color: "#666" }}>Weights are auto-normalized.</div>
+              </div>
+
+              {/* Time constants */}
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Time Constants (s)</div>
+                {[["t1", 2, 40], ["t2", 20, 120], ["t3", 60, 400]].map(([k, lo, hi]) => (
+                  <div key={k} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: "#555" }}>{k.toUpperCase()} = {Math.round(params[k])} s</div>
+                    <input
+                      type="range" min={lo} max={hi} step="1"
+                      value={params[k]}
+                      onChange={(e) => setParams(p => ({ ...p, [k]: Number(e.target.value) }))}
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                ))}
+                <div style={{ fontSize: 12, color: "#666" }}>Rule of thumb: t1 ~ ATP/PCr, t2 ~ glycolytic, t3 ~ oxidative.</div>
+              </div>
+
+              {/* Preview */}
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Preview (Left)</div>
+                <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>
+                  Blue = learned; Orange = slider-shaped (normalized at 20s).
+                </div>
+                <div style={{ height: 180 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis type="number" dataKey="t" domain={[0, 200]} />
+                      <YAxis domain={[0, "auto"]} />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" data={buildFatigueCurve(anchorsL)} dataKey="pct" name="Learned (Left)" dot={false} strokeWidth={2} />
+                      <Line type="monotone" data={buildAdjustedCurve(anchorsL, params)} dataKey="pct" name="Slider Overlay" dot={false} strokeWidth={2} strokeDasharray="5 3" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Base model curves */}
+          <Card title="Fatigue Curve (Left)">
+            <div style={{ height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={buildFatigueCurve(anchorsL)}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type="number" dataKey="t" domain={[0, 200]} label={{ value: "Time (s)", position: "insideBottomRight", offset: -5 }} />
+                  <YAxis domain={[0, "auto"]} />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="pct" name="% of 20s Load" dot={false} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+          <Card title="Fatigue Curve (Right)">
+            <div style={{ height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={buildFatigueCurve(anchorsR)}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type="number" dataKey="t" domain={[0, 200]} label={{ value: "Time (s)", position: "insideBottomRight", offset: -5 }} />
+                  <YAxis domain={[0, "auto"]} />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="pct" name="% of 20s Load" dot={false} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* RECOMMENDATIONS */}
       {tab === "recommend" && (
@@ -521,6 +669,8 @@ const modelLoadR = useMemo(
             nextTUT={tutL}
             onSetTUT={setTutL}
             modelLoad={modelLoadL}
+            baseModelLoad={baseModelLoadL}
+            adjModelLoad={adjModelLoadL}
             ratioLoad={ratioLoadL}
             combined={combinedL}
             near={nearL}
@@ -533,6 +683,8 @@ const modelLoadR = useMemo(
             nextTUT={tutR}
             onSetTUT={setTutR}
             modelLoad={modelLoadR}
+            baseModelLoad={baseModelLoadR}
+            adjModelLoad={adjModelLoadR}
             ratioLoad={ratioLoadR}
             combined={combinedR}
             near={nearR}
@@ -562,388 +714,11 @@ const modelLoadR = useMemo(
           </div>
         </div>
       )}
-
-      {/* SESSIONS */}
-      {tab === "sessions" && (
-        <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 16 }}>
-          {/* LEFT: Vertical form container */}
-          <div style={{ border: "1px solid #ddd", borderRadius: 10, padding: 14 }}>
-            <h3 style={{ marginTop: 0 }}>Log a Session</h3>
-
-            {/* Date */}
-            <div style={{ marginBottom: 10 }}>
-              <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Date</label>
-              <input
-                type="date"
-                value={form.date}
-                onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-                style={{ width: "100%", padding: 8 }}
-              />
-            </div>
-
-            {/* Grip / Exercise */}
-            <div style={{ marginBottom: 10 }}>
-              <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Grip / Exercise</label>
-              <input
-                type="text"
-                placeholder="e.g., 20mm Half Crimp or Rolling Thunder"
-                value={form.grip}
-                onChange={(e) => setForm((f) => ({ ...f, grip: e.target.value }))}
-                style={{ width: "100%", padding: 8 }}
-              />
-            </div>
-
-            {/* Left/Right Load */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-              <div>
-                <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Left Load (lb)</label>
-                <input
-                  type="number"
-                  value={form.leftLoad}
-                  onChange={(e) => setForm((f) => ({ ...f, leftLoad: e.target.value }))}
-                  style={{ width: "100%", padding: 8 }}
-                />
-              </div>
-              <div>
-                <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Right Load (lb)</label>
-                <input
-                  type="number"
-                  value={form.rightLoad}
-                  onChange={(e) => setForm((f) => ({ ...f, rightLoad: e.target.value }))}
-                  style={{ width: "100%", padding: 8 }}
-                />
-              </div>
-            </div>
-
-            {/* Left/Right Duration */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-              <div>
-                <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Left Duration (s)</label>
-                <input
-                  type="number"
-                  value={form.leftDur}
-                  onChange={(e) => setForm((f) => ({ ...f, leftDur: e.target.value }))}
-                  style={{ width: "100%", padding: 8 }}
-                />
-              </div>
-              <div>
-                <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Right Duration (s)</label>
-                <input
-                  type="number"
-                  value={form.rightDur}
-                  onChange={(e) => setForm((f) => ({ ...f, rightDur: e.target.value }))}
-                  style={{ width: "100%", padding: 8 }}
-                />
-              </div>
-            </div>
-
-            {/* Rest */}
-            <div style={{ marginBottom: 10 }}>
-              <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Rest (s)</label>
-              <input
-                type="number"
-                value={form.rest}
-                onChange={(e) => setForm((f) => ({ ...f, rest: e.target.value }))}
-                style={{ width: "100%", padding: 8 }}
-              />
-            </div>
-
-            {/* Notes */}
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Notes</label>
-              <input
-                type="text"
-                value={form.notes}
-                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                style={{ width: "100%", padding: 8 }}
-                placeholder="optional"
-              />
-            </div>
-
-            <button onClick={onAdd} style={{ width: "100%", padding: 12, fontWeight: 700 }}>
-              + Add Session
-            </button>
-          </div>
-
-          {/* RIGHT: Quick actions / tips */}
-          <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 14 }}>
-            <h3 style={{ marginTop: 0 }}>Quick Actions</h3>
-            <div style={{ fontSize: 13, color: "#555" }}>
-              Aim to fail within ±2–3 s. If a set runs long, log the <b>actual</b> duration — the model and controller
-              will adjust the next loads automatically.
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <button onClick={() => alert("Learning is automatic from history (20/60/180s anchors + ratio controller).")}>
-                What does “Learn” mean?
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* HISTORY */}
-      {tab === "history" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-            <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <button onClick={exportJSON}>Export JSON</button>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span>Import JSON</span>
-                <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importJSON(e.target.files[0])} />
-              </label>
-              <button onClick={clearAll} style={{ marginLeft: "auto", color: "#b00020" }}>
-                Clear ALL history…
-              </button>
-            </div>
-
-            <h3 style={{ marginTop: 0 }}>Session History (most recent first)</h3>
-
-            {rows.length === 0 ? (
-              <div style={{ color: "#666" }}>No sessions yet.</div>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ background: "#fafafa" }}>
-                      <th style={thS}>Date</th>
-                      <th style={thS}>Grip</th>
-                      <th style={thS}>Left Load</th>
-                      <th style={thS}>Right Load</th>
-                      <th style={thS}>Left Dur (s)</th>
-                      <th style={thS}>Right Dur (s)</th>
-                      <th style={thS}>Notes</th>
-                      <th style={thS}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row, i) => {
-                      const L = row.L, R = row.R;
-                      return (
-                        <tr key={i}>
-                          <td style={tdS}>{new Date(row.date).toLocaleDateString()}</td>
-
-                          {/* Grip (edits both L/R) */}
-                          <td style={tdS}>
-                            <input
-                              style={{ width: 180, padding: 4 }}
-                              type="text"
-                              value={row.grip || ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (L) setHL((arr) => arr.map((r) => (r.id === L.id ? { ...r, grip: v } : r)));
-                                if (R) setHR((arr) => arr.map((r) => (r.id === R.id ? { ...r, grip: v } : r)));
-                              }}
-                            />
-                          </td>
-
-                          {/* Left / Right Loads */}
-                          <td style={tdS}>
-                            {L ? (
-                              <input
-                                style={{ width: 80, padding: 4 }}
-                                type="number"
-                                value={L.load}
-                                onChange={(e) =>
-                                  setHL((arr) =>
-                                    arr.map((r) => (r.id === L.id ? { ...r, load: N(e.target.value, L.load) } : r))
-                                  )
-                                }
-                              />
-                            ) : "—"}
-                          </td>
-                          <td style={tdS}>
-                            {R ? (
-                              <input
-                                style={{ width: 80, padding: 4 }}
-                                type="number"
-                                value={R.load}
-                                onChange={(e) =>
-                                  setHR((arr) =>
-                                    arr.map((r) => (r.id === R.id ? { ...r, load: N(e.target.value, R.load) } : r))
-                                  )
-                                }
-                              />
-                            ) : "—"}
-                          </td>
-
-                          {/* Left / Right Durations */}
-                          <td style={tdS}>
-                            {L ? (
-                              <input
-                                style={{ width: 80, padding: 4 }}
-                                type="number"
-                                value={L.duration}
-                                onChange={(e) =>
-                                  setHL((arr) =>
-                                    arr.map((r) =>
-                                      r.id === L.id ? { ...r, duration: N(e.target.value, L.duration) } : r
-                                    )
-                                  )
-                                }
-                              />
-                            ) : "—"}
-                          </td>
-                          <td style={tdS}>
-                            {R ? (
-                              <input
-                                style={{ width: 80, padding: 4 }}
-                                type="number"
-                                value={R.duration}
-                                onChange={(e) =>
-                                  setHR((arr) =>
-                                    arr.map((r) =>
-                                      r.id === R.id ? { ...r, duration: N(e.target.value, R.duration) } : r
-                                    )
-                                  )
-                                }
-                              />
-                            ) : "—"}
-                          </td>
-
-                          {/* Notes (independent of grip) */}
-                          <td style={tdS}>
-                            <input
-                              style={{ width: 220, padding: 4 }}
-                              type="text"
-                              value={L?.notes ?? R?.notes ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (L) setHL((arr) => arr.map((r) => (r.id === L.id ? { ...r, notes: v } : r)));
-                                if (R) setHR((arr) => arr.map((r) => (r.id === R.id ? { ...r, notes: v } : r)));
-                              }}
-                            />
-                          </td>
-
-                          <td style={tdS}>
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                              <button
-                                disabled={!L}
-                                onClick={() => L && onDelete("L", L.id)}
-                                style={{ color: "#b00020", opacity: L ? 1 : 0.5 }}
-                              >
-                                Delete L
-                              </button>
-                              <button
-                                disabled={!R}
-                                onClick={() => R && onDelete("R", R.id)}
-                                style={{ color: "#b00020", opacity: R ? 1 : 0.5 }}
-                              >
-                                Delete R
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <div style={{ marginTop: 10, fontSize: 12, color: "#666" }}>
-              Tip: Edit values inline; changes are saved immediately to your browser.
-            </div>
-          </div>
-
-          {/* Trends */}
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Trends (Averages)</h3>
-            {trends.length === 0 ? (
-              <div style={{ color: "#666" }}>No data yet.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={trends} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis yAxisId="left" domain={[0, "auto"]} />
-                  <YAxis yAxisId="right" orientation="right" domain={[0, 100]} />
-                  <Tooltip />
-                  <Legend />
-                  <Line yAxisId="left" type="monotone" dataKey="avgDur" name="Avg Duration (s)" dot={false} strokeWidth={2} />
-                  <Line yAxisId="left" type="monotone" dataKey="avgLoad" name="Avg Load (L/R)" dot={false} strokeWidth={2} />
-                  <Line yAxisId="right" type="monotone" dataKey="modeledPct" name="Modeled %MVC (avg)" dot={false} strokeWidth={2} strokeDasharray="4 4" />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* MODEL */}
-      {tab === "model" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          {/* Left fatigue */}
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Left: Fatigue Curve</h3>
-            {curveL.length === 0 ? (
-              <div style={{ color: "#666" }}>Add sets near 20/60/180s to learn anchors.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={curveL}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" dataKey="t" domain={[0, 400]} label={{ value: "Time (s)", position: "insideBottomRight", offset: -5 }} />
-                  <YAxis domain={[0, "auto"]} />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="pct" name="% relative to ~20s" dot={false} strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-            {hL.length > 0 && (
-              <div style={{ height: 220 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" dataKey="duration" name="Time (s)" domain={[0, 400]} />
-                    <YAxis type="number" dataKey="load" name="Load (lb)" />
-                    <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-                    <Legend />
-                    <Scatter name="Left Sets" data={hL} />
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-
-          {/* Right fatigue */}
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Right: Fatigue Curve</h3>
-            {curveR.length === 0 ? (
-              <div style={{ color: "#666" }}>Add sets near 20/60/180s to learn anchors.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={curveR}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" dataKey="t" domain={[0, 400]} label={{ value: "Time (s)", position: "insideBottomRight", offset: -5 }} />
-                  <YAxis domain={[0, "auto"]} />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="pct" name="% relative to ~20s" dot={false} strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-            {hR.length > 0 && (
-              <div style={{ height: 220 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" dataKey="duration" name="Time (s)" domain={[0, 400]} />
-                    <YAxis type="number" dataKey="load" name="Load (lb)" />
-                    <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-                    <Legend />
-                    <Scatter name="Right Sets" data={hR} />
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-/** =============================== Subcomponents =============================== */
+/* ===================== Sub-components ===================== */
 
 function RecPanel({
   title,
@@ -956,44 +731,74 @@ function RecPanel({
   planLoads,
   planReps,
   planRest,
+  baseModelLoad,
+  adjModelLoad,
 }) {
-  const singleSetText =
-    "Single-Set Suggestion: " +
-    (combined != null ? combined + " lb @ " + nextTUT + "s" : "Add history and click Learn");
-
   return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-      <h3 style={{ marginTop: 0 }}>{title}</h3>
-
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-        <label>Target TUT (s)</label>
-        <input
-          type="number"
-          value={nextTUT}
-          onChange={(e) => onSetTUT(Number(e.target.value) || nextTUT)}
-          style={{ width: 100, padding: 6 }}
-        />
+    <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ fontWeight: 700 }}>{title}</div>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 12, color: "#555" }}>TUT (s)</label>
+          <input
+            type="number"
+            min={5}
+            max={200}
+            step={1}
+            value={nextTUT}
+            onChange={(e) => onSetTUT(Math.max(1, Number(e.target.value) || 1))}
+            style={{ width: 72, padding: 6 }}
+          />
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-        <MetricCard
-          label="Model-Based"
-          value={modelLoad != null ? round1(modelLoad) + " lb" : "—"}
-          help="Interpolates learned 20/60/180 anchors."
-        />
-        <MetricCard
-          label="Ratio-Based"
-          value={ratioLoad != null ? round1(ratioLoad) + " lb" : "—"}
-          help="Nearest set scaled by L ∝ t^{-β}."
-        />
+      {/* numbers */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ padding: 10, background: "#fafafa", borderRadius: 8 }}>
+          <div style={{ fontSize: 12, color: "#666" }}>Model-Based</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>
+            {modelLoad != null ? (modelLoad.toFixed(1) + " lb") : "—"}
+          </div>
+        </div>
+        <div style={{ padding: 10, background: "#fafafa", borderRadius: 8 }}>
+          <div style={{ fontSize: 12, color: "#666" }}>Ratio-Controller</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>
+            {ratioLoad != null ? (ratioLoad.toFixed(1) + " lb") : "—"}
+          </div>
+        </div>
+
+        <div style={{ gridColumn: "1 / span 2", padding: 10, background: "#f5faff", borderRadius: 8 }}>
+          <div style={{ fontSize: 12, color: "#336" }}>Combined Suggestion</div>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>
+            {combined != null ? (combined.toFixed(1) + " lb @ " + nextTUT + "s") : "—"}
+          </div>
+        </div>
       </div>
 
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>{singleSetText}</div>
+      {/* Base vs Adjusted comparison */}
+      <div style={{ marginTop: 12, padding: 10, border: "1px solid #eee", borderRadius: 8 }}>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>Model Comparison</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 12, color: "#666" }}>Base Model</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>
+              {baseModelLoad != null ? (baseModelLoad.toFixed(1) + " lb @ " + nextTUT + "s") : "—"}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "#666" }}>Slider-Adjusted</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>
+              {adjModelLoad != null ? (adjModelLoad.toFixed(1) + " lb @ " + nextTUT + "s") : "—"}
+            </div>
+          </div>
+        </div>
+      </div>
 
+      {/* Multi-set plan */}
       {planLoads && planLoads.length > 0 && (
-        <div style={{ marginTop: 6 }}>
+        <div style={{ marginTop: 12 }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            Multi-Set Plan ({planReps} sets, rest {planRest}s):
+            Multi-Set Plan ({planReps} sets, rest {planRest}s)
           </div>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {planLoads.map((L, i) => (
@@ -1001,38 +806,108 @@ function RecPanel({
             ))}
           </ul>
           <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
-            Loads taper slightly using your model so each set finishes near {nextTUT}s.
+            Loads taper slightly so each set finishes near {nextTUT}s.
           </div>
         </div>
       )}
 
       <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
         {near ? (
-          <span>
-            Nearest set: {near.load} lb @ {near.duration}s {near.notes ? "— " + near.notes : ""}
-          </span>
-        ) : (
-          "No nearby set yet."
-        )}
+          <span>Nearest set: {near.load} lb @ {near.duration}s {near.notes ? "— " + near.notes : ""}</span>
+        ) : ("No nearby set yet.")}
       </div>
     </div>
   );
 }
 
-/** =============================== Styles for table headers/cells =============================== */
+function HistoryTable({ rows, onEdit, onDelete, editingId, editBuf, setEditBuf, onSaveEdit, onCancelEdit }) {
+  const sorted = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      if (a.date === b.date) return (a.hand < b.hand ? -1 : 1);
+      return a.date < b.date ? 1 : -1; // newest first
+    });
+  }, [rows]);
 
-const thS = {
-  textAlign: "left",
-  padding: "8px 6px",
-  borderBottom: "1px solid #eee",
-  fontWeight: 600,
-  fontSize: 13,
-  color: "#333",
-  whiteSpace: "nowrap",
-};
-
-const tdS = {
-  padding: "8px 6px",
-  borderBottom: "1px solid #f0f0f0",
-  verticalAlign: "top",
-};
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid #eee" }}>
+            <th style={{ textAlign: "left", padding: "8px 6px" }}>Date</th>
+            <th style={{ textAlign: "left", padding: "8px 6px" }}>Hand</th>
+            <th style={{ textAlign: "left", padding: "8px 6px" }}>Grip</th>
+            <th style={{ textAlign: "left", padding: "8px 6px" }}>Load (lb)</th>
+            <th style={{ textAlign: "left", padding: "8px 6px" }}>Duration (s)</th>
+            <th style={{ textAlign: "left", padding: "8px 6px" }}>Rest (s)</th>
+            <th style={{ textAlign: "left", padding: "8px 6px" }}>Notes</th>
+            <th style={{ textAlign: "left", padding: "8px 6px" }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => {
+            const isEd = editingId === r.id;
+            return (
+              <tr key={r.id} style={{ borderBottom: "1px solid #f3f3f3" }}>
+                <td style={{ padding: "8px 6px" }}>
+                  {isEd ? (
+                    <input value={editBuf.date} onChange={(e) => setEditBuf(b => ({ ...b, date: e.target.value }))}
+                           type="date" style={{ padding: 4 }} />
+                  ) : r.date}
+                </td>
+                <td style={{ padding: "8px 6px" }}>{r.hand}</td>
+                <td style={{ padding: "8px 6px" }}>
+                  {isEd ? (
+                    <input value={editBuf.grip || ""} onChange={(e) => setEditBuf(b => ({ ...b, grip: e.target.value }))}
+                           style={{ padding: 4, width: 160 }} />
+                  ) : (r.grip || "")}
+                </td>
+                <td style={{ padding: "8px 6px" }}>
+                  {isEd ? (
+                    <input value={String(editBuf.load)} onChange={(e) => setEditBuf(b => ({ ...b, load: N(e.target.value, b.load) }))}
+                           inputMode="decimal" style={{ padding: 4, width: 80 }} />
+                  ) : r.load}
+                </td>
+                <td style={{ padding: "8px 6px" }}>
+                  {isEd ? (
+                    <input value={String(editBuf.duration)} onChange={(e) => setEditBuf(b => ({ ...b, duration: N(e.target.value, b.duration) }))}
+                           inputMode="numeric" style={{ padding: 4, width: 80 }} />
+                  ) : r.duration}
+                </td>
+                <td style={{ padding: "8px 6px" }}>
+                  {isEd ? (
+                    <input value={String(r.rest ?? 0)} onChange={(e) => setEditBuf(b => ({ ...b, rest: N(e.target.value, b.rest ?? 0) }))}
+                           inputMode="numeric" style={{ padding: 4, width: 80 }} />
+                  ) : (r.rest ?? 0)}
+                </td>
+                <td style={{ padding: "8px 6px" }}>
+                  {isEd ? (
+                    <input value={editBuf.notes || ""} onChange={(e) => setEditBuf(b => ({ ...b, notes: e.target.value }))}
+                           style={{ padding: 4, width: 240 }} />
+                  ) : (r.notes || "")}
+                </td>
+                <td style={{ padding: "8px 6px" }}>
+                  {isEd ? (
+                    <>
+                      <button onClick={onSaveEdit} style={{ marginRight: 6 }}>Save</button>
+                      <button onClick={onCancelEdit}>Cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => onEdit(r)} style={{ marginRight: 6 }}>Edit</button>
+                      <button onClick={() => onDelete(r)} style={{ color: "#b00020" }}>Delete</button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+          {sorted.length === 0 && (
+            <tr>
+              <td colSpan={8} style={{ padding: 12, color: "#666" }}>No records yet.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
