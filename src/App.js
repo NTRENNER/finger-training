@@ -33,6 +33,57 @@ const saveLS = (k, v) => {
   } catch {}
 };
 
+// --- CSV helpers ---
+function csvEscape(val = "") {
+  const s = String(val ?? "");
+  // escape quotes by doubling them; wrap in quotes if it has comma, quote, or newline
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+function rowsToCSV(rows) {
+  const headers = [
+    "id","date","grip",
+    "leftLoad","rightLoad","leftDur","rightDur","rest",
+    "pctL","pctR","recL","recR",
+    "notes"
+  ];
+  const lines = [headers.join(",")];
+  for (const r of rows) {
+    const line = [
+      r.id,
+      r.date,
+      r.grip,
+      r.leftLoad,
+      r.rightLoad,
+      r.leftDur,
+      r.rightDur,
+      r.rest,
+      // write modeled percentages as 0–100 with 1 decimal
+      r.pctL != null ? (100*Number(r.pctL)).toFixed(1) : "",
+      r.pctR != null ? (100*Number(r.pctR)).toFixed(1) : "",
+      r.recL != null ? (100*Number(r.recL)).toFixed(1) : "",
+      r.recR != null ? (100*Number(r.recR)).toFixed(1) : "",
+      r.notes ?? ""
+    ].map(csvEscape).join(",");
+    lines.push(line);
+  }
+  // BOM helps Excel recognize UTF-8
+  return "\uFEFF" + lines.join("\n");
+}
+function downloadCSV(rows, filename = "finger-training-history.csv") {
+  if (!rows?.length) return;
+  const csv = rowsToCSV(rows);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // ---------- 3-exp fatigue + recovery ----------
 function fAt(t, w, tau) {
   const e = (x) => Math.exp(-t / Math.max(1e-9, x));
@@ -742,6 +793,26 @@ function App() {
           </div>
         </>
       )}
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+  <button
+    onClick={() => {
+      if (window.confirm("Clear ALL history? This cannot be undone.")) {
+        setS((s) => ({ ...s, history: [] }));
+      }
+    }}
+    style={{ background: "#fff3f3", borderColor: "#f2bcbc", color: "#b00000" }}
+  >
+    Clear All
+  </button>
+
+  <button
+    onClick={() => downloadCSV(S.history)}
+    disabled={!S.history.length}
+    title={S.history.length ? "Download all history as CSV" : "No history yet"}
+  >
+    Download CSV
+  </button>
+</div>
 
       {/* ---------- MODEL ---------- */}
       {S.tab === "model" && (
