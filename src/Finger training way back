@@ -1,0 +1,1195 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  ComposedChart, LineChart, AreaChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend, ReferenceLine, Scatter
+} from "recharts";
+
+// ------------------- minimal styles -------------------
+const wrap = {
+  maxWidth: "1100px",
+  margin: "0 auto",
+  padding: "16px",
+  fontFamily: "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
+};
+const h1 = { fontSize: 24, fontWeight: 600, margin: 0 };
+const sub = { color: "#666", fontSize: 13, marginTop: 6 };
+const tabsRow = { marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" };
+const card = { border: "1px solid #e5e5e5", borderRadius: 12, padding: 16, background: "#fff", flex: 1, minWidth: 280 };
+const label = { fontSize: 12, color: "#666", marginBottom: 6, display: "block" };
+const smallMono = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 };
+const btn = {
+  background: "#111827", color: "white", border: 0, borderRadius: 8, padding: "8px 12px",
+  cursor: "pointer"
+};
+const btnGhost = { ...btn, background: "#f3f4f6", color: "#111827" };
+const btnDanger = { ...btnGhost, color: "#b91c1c" };
+const input = { width: "100%", padding: 8, borderRadius: 8, border: "1px solid #e5e5e5" };
+const metric = { background: "#f9fafb", padding: 12, borderRadius: 10 };
+const grid2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
+const grid3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
+// ------------------------------------------------------
+
+const STORAGE_PARAMS = "finger3expo_params_v6";
+const STORAGE_HISTORY = "finger3expo_history_v3";
+
+// ===== DEFAULTS =====
+const defaultParams = {
+  maxLoad: 230,
+  // taus (shared)
+  tau1: 7,
+  tau2: 45,
+  tau3: 180,
+  tau1Rec: 30,
+  tau2Rec: 300,
+  tau3Rec: 1800,
+  restDefault: 180,
+  // per-hand weights (raw, auto-normalized)
+  wL1: 0.5, wL2: 0.3, wL3: 0.2,
+  wR1: 0.5, wR2: 0.3, wR3: 0.2,
+  // TUT presets
+  powerTUT: 20,
+  strengthTUT: 60,
+  enduranceTUT: 180,
+  // Precision mode + EMA
+  precisionMode: true,
+  precisionWindowSec: 3,
+  emaAlpha: 0.3,
+  // EMA anchors (absolute loads)
+  emaL20: null, emaL60: null, emaL180: null,
+  emaR20: null, emaR60: null, emaR180: null
+};
+
+const round = (x, d = 3) => Math.round(x * 10 ** d) / 10 ** d;
+const num = (v, fb = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fb;
+};
+
+function usePersistentState(key, initial) {
+  const [state, setState] = useState(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : initial;
+    } catch {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(state)); } catch {}
+  }, [key, state]);
+  return [state, setState];
+}
+
+function normalizeWeights(w1, w2, w3) {
+  const s = w1 + w2 + w3;
+  if (s <= 0) return { w1n: 1, w2n: 0, w3n: 0, sum: s };
+  return { w1n: w1 / s, w2n: w2 / s, w3n: w3 / s, sum: s };
+}
+
+function fSumGeneric(t, weights, taus) {
+  const { w1n, w2n, w3n } = normalizeWeights(weights.w1, weights.w2, weights.w3);
+  const e1 = Math.exp(-t / Math.max(1e-9, taus.tau1));
+  const e2 = Math.exp(-t / Math.max(1e-9, taus.tau2));
+  const e3 = Math.exp(-t / Math.max(1e-9, taus.tau3));
+  return w1n * e1 + w2n * e2 + w3n * e3;
+}
+
+function recoveryFrac(rest, weights, tauRec) {
+  const { w1n, w2n, w3n } = normalizeWeights(weights.w1, weights.w2, weights.w3);
+  const e1 = Math.exp(-rest / Math.max(1e-9, tauRec.tau1Rec));
+  const e2 = Math.exp(-rest / Math.max(1e-9, tauRec.tau2Rec));
+  const e3 = Math.exp(-rest / Math.max(1e-9, tauRec.tau3Rec));
+  return 1 - (w1n * e1 + w2n * e2 + w3n * e3);
+}
+
+// ---------- small linear algebra for 3x3 inversion ----------
+function invert3x3(m) {
+  const [a,b,c, d,e,f, g,h,i] = m;
+  const A =  (e*i - f*h);
+  const B = -(d*i - f*g);
+  const C =  (d*h - e*g);
+  const D = -(b*i - c*h);
+  const E =  (a*i - c*g);
+  const F = -(a*h - b*g);
+  const G =  (b*f - c*e);
+  const H = -(a*f - c*d);
+  const I =  (a*e - b*d);
+  const det = a*A + b*B + c*C;
+  if (Math.abs(det) < 1e-12) return null;
+  const inv = [A,B,C, D,E,F, G,H,I].map(v => v / det);
+  return inv;
+}
+function matMul3x3Vec(m, v) {
+  return [
+    m[0]*v[0] + m[1]*v[1] + m[2]*v[2],
+    m[3]*v[0] + m[4]*v[1] + m[5]*v[2],
+    m[6]*v[0] + m[7]*v[1] + m[8]*v[2],
+  ];
+}
+
+// Fit weights (w1,w2,w3) from f(20), f(60), f(180) with fixed taus
+function fitWeightsFromThreePoints({ f20, f60, f180, tau1, tau2, tau3 }) {
+  const a11 = Math.exp(-20 / Math.max(1e-9, tau1));
+  const a12 = Math.exp(-20 / Math.max(1e-9, tau2));
+  const a13 = Math.exp(-20 / Math.max(1e-9, tau3));
+  const a21 = Math.exp(-60 / Math.max(1e-9, tau1));
+  const a22 = Math.exp(-60 / Math.max(1e-9, tau2));
+  const a23 = Math.exp(-60 / Math.max(1e-9, tau3));
+  const a31 = Math.exp(-180 / Math.max(1e-9, tau1));
+  const a32 = Math.exp(-180 / Math.max(1e-9, tau2));
+  const a33 = Math.exp(-180 / Math.max(1e-9, tau3));
+  const A = [a11,a12,a13, a21,a22,a23, a31,a32,a33];
+  const invA = invert3x3(A);
+  if (!invA) return [1/3,1/3,1/3];
+  let [w1,w2,w3] = matMul3x3Vec(invA, [f20,f60,f180]);
+  w1 = Math.max(0,w1); w2 = Math.max(0,w2); w3 = Math.max(0,w3);
+  const s = w1 + w2 + w3;
+  return s > 1e-12 ? [w1/s, w2/s, w3/s] : [1/3,1/3,1/3];
+}
+
+// ---------- history helpers ----------
+function combinedLoad(row) {
+  const L = Number(row.leftLoad) || 0;
+  const R = Number(row.rightLoad) || 0;
+  if (L && R) return (L + R) / 2;
+  return L || R || 0;
+}
+function combinedDuration(row) {
+  const L = Number(row.leftDuration) || 0;
+  const R = Number(row.rightDuration) || 0;
+  if (L && R) return (L + R) / 2;
+  return L || R || 0;
+}
+function pickRecentLoadsNearHAND(history, hand, targetSec, windowSec=12, maxSamples=6) {
+  const durKey = hand === "L" ? "leftDuration" : "rightDuration";
+  const loadKey = hand === "L" ? "leftLoad" : "rightLoad";
+  const near = history.filter(r => {
+    const d = Number(r[durKey]);
+    const L = Number(r[loadKey]);
+    return Number.isFinite(d) && Math.abs(d - targetSec) <= windowSec && (Number.isFinite(L) && L > 0);
+  });
+  return near.slice(0, maxSamples).map(r => Number(r[loadKey])).filter(Number.isFinite);
+}
+function pickNearestRecordHAND(history, hand, targetSec) {
+  const durKey = hand === "L" ? "leftDuration" : "rightDuration";
+  const loadKey = hand === "L" ? "leftLoad" : "rightLoad";
+  let best = null, bestErr = Infinity;
+  for (const r of history) {
+    const d = Number(r[durKey]); const L = Number(r[loadKey]);
+    if (!Number.isFinite(d) || !Number.isFinite(L) || L<=0) continue;
+    const e = Math.abs(d - targetSec);
+    if (e < bestErr) { bestErr = e; best = { load: L, t: d, row: r }; }
+  }
+  return best; // {load, t, row} or null
+}
+function p70(loads) {
+  if (!loads.length) return null;
+  const s = [...loads].sort((a,b)=>a-b);
+  return s[Math.floor(s.length*0.7)] ?? s[s.length-1];
+}
+
+// ===== MAIN APP =====
+export default function App() {
+  const [tab, setTab] = useState("recommendations");
+  const [params, setParams] = usePersistentState(STORAGE_PARAMS, defaultParams);
+  const [history, setHistory] = usePersistentState(STORAGE_HISTORY, []);
+
+  const taus = useMemo(() => ({ tau1: params.tau1, tau2: params.tau2, tau3: params.tau3 }), [params]);
+  const tausRec = useMemo(() => ({ tau1Rec: params.tau1Rec, tau2Rec: params.tau2Rec, tau3Rec: params.tau3Rec }), [params]);
+
+  const weightsL = useMemo(() => ({ w1: params.wL1, w2: params.wL2, w3: params.wL3 }), [params]);
+  const weightsR = useMemo(() => ({ w1: params.wR1, w2: params.wR2, w3: params.wR3 }), [params]);
+
+  const fAtL = (T) => fSumGeneric(T, weightsL, taus);
+  const fAtR = (T) => fSumGeneric(T, weightsR, taus);
+  const recAtL = (R) => recoveryFrac(R, weightsL, tausRec);
+  const recAtR = (R) => recoveryFrac(R, weightsR, tausRec);
+
+  // --------- Session logging ---------
+  const [session, setSession] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    grip: "20mm Half Crimp",
+    leftLoad: "",
+    rightLoad: "",
+    leftDuration: params.powerTUT,
+    rightDuration: params.powerTUT,
+    rest: params.restDefault,
+    notes: ""
+  });
+
+  const addSession = () => {
+    const leftDuration = num(session.leftDuration, 0);
+    const rightDuration = num(session.rightDuration, 0);
+    const rest = num(session.rest, 0);
+    const leftLoad = num(session.leftLoad, 0);
+    const rightLoad = num(session.rightLoad, 0);
+    const row = {
+      date: session.date,
+      grip: session.grip,
+      leftLoad,
+      rightLoad,
+      leftDuration,
+      rightDuration,
+      rest,
+      modeled_pctMVC_L: round(fAtL(leftDuration), 4),
+      modeled_pctMVC_R: round(fAtR(rightDuration), 4),
+      mode_recov_frac_L: round(recAtL(rest), 4),
+      mode_recov_frac_R: round(recAtR(rest), 4),
+      notes: session.notes
+    };
+    setHistory((h) => [row, ...h]);
+    setSession(s => ({ ...s, leftLoad: "", rightLoad: "" }));
+  };
+
+  const deleteSession = (i) => setHistory(h => h.filter((_, idx) => idx !== i));
+  const updateSession = (i, field, value) => {
+    setHistory(h => h.map((row, idx) => {
+      if (idx !== i) return row;
+      const updated = { ...row, [field]: value };
+      if (field === "leftDuration") {
+        const d = num(value, 0);
+        updated.modeled_pctMVC_L = round(fAtL(d), 4);
+      }
+      if (field === "rightDuration") {
+        const d = num(value, 0);
+        updated.modeled_pctMVC_R = round(fAtR(d), 4);
+      }
+      if (field === "rest") {
+        const r = num(value, 0);
+        updated.mode_recov_frac_L = round(recAtL(r), 4);
+        updated.mode_recov_frac_R = round(recAtR(r), 4);
+      }
+      return updated;
+    }));
+  };
+
+  // ===== CSV Export / Import =====
+  const exportCSV = () => {
+    const csv = toCSV(history);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `finger_training_history_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const importCSV = (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const rows = fromCSV(String(e.target?.result || ""));
+      const parsed = rows.map(r => {
+        const legacyDuration = Number(r.duration);
+        const leftDuration = Number(r.leftDuration);
+        const rightDuration = Number(r.rightDuration);
+        const LDur = Number.isFinite(leftDuration) && leftDuration > 0 ? leftDuration : (Number.isFinite(legacyDuration) ? legacyDuration : 0);
+        const RDur = Number.isFinite(rightDuration) && rightDuration > 0 ? rightDuration : (Number.isFinite(legacyDuration) ? legacyDuration : 0);
+        return {
+          date: r.date || "",
+          grip: r.grip || "",
+          leftLoad: Number(r.leftLoad) || 0,
+          rightLoad: Number(r.rightLoad) || 0,
+          leftDuration: LDur,
+          rightDuration: RDur,
+          rest: Number(r.rest) || 0,
+          modeled_pctMVC_L: Number(r.modeled_pctMVC_L) || (Number.isFinite(LDur) ? round(fAtL(LDur),4) : 0),
+          modeled_pctMVC_R: Number(r.modeled_pctMVC_R) || (Number.isFinite(RDur) ? round(fAtR(RDur),4) : 0),
+          mode_recov_frac_L: Number(r.mode_recov_frac_L) || 0,
+          mode_recov_frac_R: Number(r.mode_recov_frac_R) || 0,
+          notes: r.notes || ""
+        };
+      });
+      setHistory(h => parsed.concat(h));
+    };
+    reader.readAsText(file);
+  };
+
+  // ---------- Learning (PER HAND) ----------
+  function emaUpdate(prev, x, alpha) {
+    if (x == null || !Number.isFinite(x)) return prev;
+    if (prev == null) return x;
+    return alpha * x + (1 - alpha) * prev;
+  }
+  function learnFromHistoryHand(hand) {
+    const maxLoad = Number(params.maxLoad) || 1;
+    const windowSec = params.precisionMode ? (params.precisionWindowSec ?? 3) : 12;
+
+    const L20s = pickRecentLoadsNearHAND(history, hand, params.powerTUT ?? 20, windowSec, 10);
+    const L60s = pickRecentLoadsNearHAND(history, hand, params.strengthTUT ?? 60, windowSec, 10);
+    const L180s = pickRecentLoadsNearHAND(history, hand, params.enduranceTUT ?? 180, windowSec, 10);
+
+    const raw20 = L20s.length ? p70(L20s) : null;
+    const raw60 = L60s.length ? p70(L60s) : null;
+    const raw180 = L180s.length ? p70(L180s) : null;
+
+    const alpha = Number(params.emaAlpha) ?? 0.3;
+
+    if (hand === "L") {
+      const ema20 = emaUpdate(params.emaL20, raw20, alpha);
+      const ema60 = emaUpdate(params.emaL60, raw60, alpha);
+      const ema180 = emaUpdate(params.emaL180, raw180, alpha);
+
+      const f20 = ema20 != null ? Math.min(1, Math.max(0, ema20 / maxLoad)) : fAtL(20);
+      const f60 = ema60 != null ? Math.min(1, Math.max(0, ema60 / maxLoad)) : fAtL(60);
+      const f180 = ema180 != null ? Math.min(1, Math.max(0, ema180 / maxLoad)) : fAtL(180);
+
+      const [w1, w2, w3] = fitWeightsFromThreePoints({
+        f20, f60, f180,
+        tau1: params.tau1, tau2: params.tau2, tau3: params.tau3
+      });
+
+      setParams(p => ({ ...p, wL1: w1, wL2: w2, wL3: w3, emaL20: ema20, emaL60: ema60, emaL180: ema180 }));
+    } else {
+      const ema20 = emaUpdate(params.emaR20, raw20, alpha);
+      const ema60 = emaUpdate(params.emaR60, raw60, alpha);
+      const ema180 = emaUpdate(params.emaR180, raw180, alpha);
+
+      const f20 = ema20 != null ? Math.min(1, Math.max(0, ema20 / maxLoad)) : fAtR(20);
+      const f60 = ema60 != null ? Math.min(1, Math.max(0, ema60 / maxLoad)) : fAtR(60);
+      const f180 = ema180 != null ? Math.min(1, Math.max(0, ema180 / maxLoad)) : fAtR(180);
+
+      const [w1, w2, w3] = fitWeightsFromThreePoints({
+        f20, f60, f180,
+        tau1: params.tau1, tau2: params.tau2, tau3: params.tau3
+      });
+
+      setParams(p => ({ ...p, wR1: w1, wR2: w2, wR3: w3, emaR20: ema20, emaR60: ema60, emaR180: ema180 }));
+    }
+  }
+
+  // ===== Precision Ratio Controller =====
+  function fHand(hand, T) { return hand === "L" ? fAtL(T) : fAtR(T); }
+  function computeNextLoad(hand, targetTUT, currentLoad, observedT) {
+    const fTarget = fHand(hand, targetTUT);
+    const fObs = fHand(hand, observedT);
+    if (!Number.isFinite(fTarget) || !Number.isFinite(fObs) || fObs <= 0) return currentLoad;
+    return currentLoad * (fTarget / fObs);
+  }
+  function capLoadChange(Lcurrent, Lnext, stage) {
+    const cap = stage === "first" ? 0.10 : 0.05;
+    const maxUp = Lcurrent * (1 + cap);
+    const maxDown = Lcurrent * (1 - cap);
+    return Math.min(Math.max(Lnext, maxDown), maxUp);
+  }
+
+  // ----- Effective per-hand max from EMA 20s (for plotting & model loads) -----
+  const effMaxL = useMemo(() => effectiveHandMax("L", params, fAtL), [params]);
+  const effMaxR = useMemo(() => effectiveHandMax("R", params, fAtR), [params]);
+
+  // ---------- Recommendations model loads (per hand, using effective max) ----------
+  const powerLoadL     = useMemo(() => effMaxL * fAtL(params.powerTUT),     [effMaxL, params.powerTUT]);
+  const strengthLoadL  = useMemo(() => effMaxL * fAtL(params.strengthTUT),  [effMaxL, params.strengthTUT]);
+  const enduranceLoadL = useMemo(() => effMaxL * fAtL(params.enduranceTUT), [effMaxL, params.enduranceTUT]);
+
+  const powerLoadR     = useMemo(() => effMaxR * fAtR(params.powerTUT),     [effMaxR, params.powerTUT]);
+  const strengthLoadR  = useMemo(() => effMaxR * fAtR(params.strengthTUT),  [effMaxR, params.strengthTUT]);
+  const enduranceLoadR = useMemo(() => effMaxR * fAtR(params.enduranceTUT), [effMaxR, params.enduranceTUT]);
+
+  // Next Session per hand
+  const [nextTUTL, setNextTUTL] = useState(180);
+  const [nextTUTR, setNextTUTR] = useState(180);
+  const nextTargetLoadL = useMemo(() => effMaxL * fAtL(nextTUTL), [effMaxL, nextTUTL]);
+  const nextTargetLoadR = useMemo(() => effMaxR * fAtR(nextTUTR), [effMaxR, nextTUTR]);
+
+  function recentLoadsNear(hand, tut) { return pickRecentLoadsNearHAND(history, hand, tut, params.precisionMode ? params.precisionWindowSec : 12, 8); }
+  const recentL = useMemo(()=>recentLoadsNear("L", nextTUTL), [history, nextTUTL, params.precisionMode, params.precisionWindowSec]);
+  const recentR = useMemo(()=>recentLoadsNear("R", nextTUTR), [history, nextTUTR, params.precisionMode, params.precisionWindowSec]);
+  const p70L = useMemo(()=>p70(recentL), [recentL]);
+  const p70R = useMemo(()=>p70(recentR), [recentR]);
+
+  function tightnessOf(arr) {
+    if (!arr.length) return null;
+    const mean = arr.reduce((a,b)=>a+b,0)/arr.length;
+    const sd = Math.sqrt(arr.reduce((s,x)=>s+(x-mean)**2,0)/(arr.length||1));
+    return { mean, sd };
+  }
+  const tightL = useMemo(()=>tightnessOf(recentL), [recentL]);
+  const tightR = useMemo(()=>tightnessOf(recentR), [recentR]);
+
+  // Precision quick estimator: nearest record → controller next
+  const nearestL = useMemo(()=>pickNearestRecordHAND(history, "L", nextTUTL), [history, nextTUTL]);
+  const nearestR = useMemo(()=>pickNearestRecordHAND(history, "R", nextTUTR), [history, nextTUTR]);
+  const ctrlNextL = useMemo(()=>{
+    if (!nearestL) return null;
+    const Lnext = computeNextLoad("L", nextTUTL, nearestL.load, nearestL.t);
+    return capLoadChange(nearestL.load, Lnext, "later");
+  }, [nearestL, nextTUTL]);
+  const ctrlNextR = useMemo(()=>{
+    if (!nearestR) return null;
+    const Lnext = computeNextLoad("R", nextTUTR, nearestR.load, nearestR.t);
+    return capLoadChange(nearestR.load, Lnext, "later");
+  }, [nearestR, nextTUTR]);
+
+  // normalized weights (for UI)
+  const normL = useMemo(()=>normalizeWeights(params.wL1, params.wL2, params.wL3), [params.wL1, params.wL2, params.wL3]);
+  const normR = useMemo(()=>normalizeWeights(params.wR1, params.wR2, params.wR3), [params.wR1, params.wR2, params.wR3]);
+
+  // --------- chart data for history (trends card) ---------
+  const chartHistory = history.map(r => {
+    const avgLoad = combinedLoad(r);
+    const avgDuration = combinedDuration(r);
+    const mL = Number.isFinite(Number(r.leftDuration)) ? fAtL(Number(r.leftDuration)) : null;
+    const mR = Number.isFinite(Number(r.rightDuration)) ? fAtR(Number(r.rightDuration)) : null;
+    const modeledPct =
+      mL != null && mR != null ? ((mL + mR) / 2) * 100 :
+      mL != null ? mL * 100 :
+      mR != null ? mR * 100 : 0;
+    return { ...r, avgLoad, avgDuration, modeledPct };
+  });
+
+  // ====== CHART CURVES ======
+  // EXTENDED: 0..600 s to reveal curvature
+  const tVals = useMemo(() => Array.from({ length: 601 }, (_, i) => i), []);
+  const curveData = useMemo(() => tVals.map(t => ({
+    t,
+    fast: Math.exp(-t / Math.max(1e-9, params.tau1)),
+    med: Math.exp(-t / Math.max(1e-9, params.tau2)),
+    slow: Math.exp(-t / Math.max(1e-9, params.tau3)),
+    fsumL: fSumGeneric(t, weightsL, taus),
+    fsumR: fSumGeneric(t, weightsR, taus),
+  })), [tVals, params, weightsL, weightsR, taus]);
+
+  const recDataL = useMemo(() => {
+    const out = [];
+    for (let r = 0; r <= 1800; r += 10) out.push({ rest: r, recovery: recoveryFrac(r, weightsL, tausRec) });
+    return out;
+  }, [weightsL, tausRec]);
+  const recDataR = useMemo(() => {
+    const out = [];
+    for (let r = 0; r <= 1800; r += 10) out.push({ rest: r, recovery: recoveryFrac(r, weightsR, tausRec) });
+    return out;
+  }, [weightsR, tausRec]);
+
+  // Scatter datasets (history) on 0–1 axis using effective max per hand
+  const scatterL = useMemo(() => {
+    const anchor = Number.isFinite(effMaxL) && effMaxL > 0 ? effMaxL : (Number(params.maxLoad) || 1);
+    return history
+      .filter(r => Number(r.leftDuration) > 0 && Number(r.leftLoad) > 0)
+      .map(r => ({ t: Number(r.leftDuration), y: Math.min(1, Number(r.leftLoad) / anchor) }));
+  }, [history, effMaxL, params.maxLoad]);
+
+  const scatterR = useMemo(() => {
+    const anchor = Number.isFinite(effMaxR) && effMaxR > 0 ? effMaxR : (Number(params.maxLoad) || 1);
+    return history
+      .filter(r => Number(r.rightDuration) > 0 && Number(r.rightLoad) > 0)
+      .map(r => ({ t: Number(r.rightDuration), y: Math.min(1, Number(r.rightLoad) / anchor) }));
+  }, [history, effMaxR, params.maxLoad]);
+
+  // ======== UI ========
+  return (
+    <div style={wrap}>
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+        <h1 style={h1}>Finger Training Dosing — Precision Mode (Per Hand)</h1>
+        <p style={sub}>
+          Aim to fail within ±2–3 s. Learn per hand, ratio-control your next load, smooth anchors with EMA, and see your sets on the curve.
+        </p>
+      </motion.div>
+
+      {/* Tabs */}
+      <div style={tabsRow}>
+        {["recommendations", "sessions", "history", "model"].map(k => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            style={{ ...btn, background: tab === k ? "#111827" : "#e5e5eebf", color: tab === k ? "white" : "#111827" }}
+          >
+            {k[0].toUpperCase() + k.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* RECOMMENDATIONS TAB */}
+      {tab === "recommendations" && (
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          {/* Precision Settings */}
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Precision Settings</div>
+            <div style={grid3}>
+              <div>
+                <label style={label}>Precision Mode</label>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button
+                    style={{ ...btn, background: params.precisionMode ? "#111827" : "#e5e5e5" }}
+                    onClick={() => setParams(p => ({ ...p, precisionMode: !p.precisionMode }))}
+                  >
+                    {params.precisionMode ? "ON" : "OFF"}
+                  </button>
+                  <span style={smallMono}>±{params.precisionWindowSec}s window, ratio controller, EMA anchors.</span>
+                </div>
+              </div>
+              <div>
+                <label style={label}>Learning Window (±s)</label>
+                <input style={input} type="number" value={params.precisionWindowSec}
+                  onChange={e => setParams(p => ({ ...p, precisionWindowSec: num(e.target.value, p.precisionWindowSec) }))}/>
+              </div>
+              <div>
+                <label style={label}>EMA α (0–1)</label>
+                <input style={input} type="number" step="0.05" min="0" max="1" value={params.emaAlpha}
+                  onChange={e => setParams(p => ({ ...p, emaAlpha: Math.min(1, Math.max(0, Number(e.target.value))) }))}/>
+              </div>
+            </div>
+          </div>
+
+          {/* Learn per hand */}
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Anchor TUTs</div>
+            <div style={grid3}>
+              <div>
+                <label style={label}>Power TUT (s)</label>
+                <input style={input} type="number" value={params.powerTUT}
+                  onChange={e => setParams({ ...params, powerTUT: num(e.target.value, params.powerTUT) })} />
+              </div>
+              <div>
+                <label style={label}>Strength TUT (s)</label>
+                <input style={input} type="number" value={params.strengthTUT}
+                  onChange={e => setParams({ ...params, strengthTUT: num(e.target.value, params.strengthTUT) })} />
+              </div>
+              <div>
+                <label style={label}>Endurance TUT (s)</label>
+                <input style={input} type="number" value={params.enduranceTUT}
+                  onChange={e => setParams({ ...params, enduranceTUT: num(e.target.value, params.enduranceTUT) })} />
+              </div>
+            </div>
+            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button style={btn} onClick={() => learnFromHistoryHand("L")}>Learn Left</button>
+              <button style={btn} onClick={() => learnFromHistoryHand("R")}>Learn Right</button>
+              <span style={{ ...smallMono, color: "#555" }}>
+                Uses p70 within ±{params.precisionMode ? params.precisionWindowSec : 12}s and blends with EMA.
+              </span>
+            </div>
+          </div>
+
+          {/* Per-hand model loads */}
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Model-Based Loads — LEFT</div>
+            <div style={grid3}>
+              <MetricBox title={`Power (${params.powerTUT}s)`} value={round(powerLoadL,2)} />
+              <MetricBox title={`Strength (${params.strengthTUT}s)`} value={round(strengthLoadL,2)} />
+              <MetricBox title={`Endurance (${params.enduranceTUT}s)`} value={round(enduranceLoadL,2)} />
+            </div>
+          </div>
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Model-Based Loads — RIGHT</div>
+            <div style={grid3}>
+              <MetricBox title={`Power (${params.powerTUT}s)`} value={round(powerLoadR,2)} />
+              <MetricBox title={`Strength (${params.strengthTUT}s)`} value={round(strengthLoadR,2)} />
+              <MetricBox title={`Endurance (${params.enduranceTUT}s)`} value={round(enduranceLoadR,2)} />
+            </div>
+          </div>
+
+          {/* Next Session cards with side-by-side + GAP */}
+          <NextSessionCard
+            hand="LEFT"
+            nextTUT={nextTUTL}
+            setNextTUT={setNextTUTL}
+            modelTarget={nextTargetLoadL}
+            p70val={p70L}
+            recentN={recentL.length}
+            tight={tightL}
+            nearest={nearestL}
+            ctrlNext={ctrlNextL}
+            precisionOn={params.precisionMode}
+          />
+          <NextSessionCard
+            hand="RIGHT"
+            nextTUT={nextTUTR}
+            setNextTUT={setNextTUTR}
+            modelTarget={nextTargetLoadR}
+            p70val={p70R}
+            recentN={recentR.length}
+            tight={tightR}
+            nearest={nearestR}
+            ctrlNext={ctrlNextR}
+            precisionOn={params.precisionMode}
+          />
+
+          {/* Precision Controllers */}
+          <PrecisionController
+            title="Precision Controller — LEFT"
+            hand="L"
+            defaultTUT={nextTUTL}
+            fAt={fAtL}
+            onCompute={(rec) => {
+              setSession(s => ({ ...s, leftLoad: round(rec.nextLoad,2), leftDuration: rec.targetTUT }));
+            }}
+          />
+          <PrecisionController
+            title="Precision Controller — RIGHT"
+            hand="R"
+            defaultTUT={nextTUTR}
+            fAt={fAtR}
+            onCompute={(rec) => {
+              setSession(s => ({ ...s, rightLoad: round(rec.nextLoad,2), rightDuration: rec.targetTUT }));
+            }}
+          />
+        </div>
+      )}
+
+      {/* SESSIONS TAB */}
+      {tab === "sessions" && (
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Log a Session</div>
+
+            <label style={label}>Date</label>
+            <input style={input} type="date" value={session.date}
+                   onChange={e => setSession({ ...session, date: e.target.value })} />
+
+            <label style={label}>Grip / Exercise</label>
+            <input style={input} value={session.grip}
+                   onChange={e => setSession({ ...session, grip: e.target.value })} />
+
+            <div style={grid2}>
+              <div>
+                <label style={label}>Left Load</label>
+                <input style={input} type="number" value={session.leftLoad}
+                       onChange={e => setSession({ ...session, leftLoad: e.target.value })} />
+              </div>
+              <div>
+                <label style={label}>Right Load</label>
+                <input style={input} type="number" value={session.rightLoad}
+                       onChange={e => setSession({ ...session, rightLoad: e.target.value })} />
+              </div>
+            </div>
+
+            <div style={grid2}>
+              <div>
+                <label style={label}>Left Duration (s)</label>
+                <input style={input} type="number" value={session.leftDuration}
+                       onChange={e => setSession({ ...session, leftDuration: e.target.value })} />
+              </div>
+              <div>
+                <label style={label}>Right Duration (s)</label>
+                <input style={input} type="number" value={session.rightDuration}
+                       onChange={e => setSession({ ...session, rightDuration: e.target.value })} />
+              </div>
+            </div>
+
+            <label style={label}>Rest (s)</label>
+            <input style={input} type="number" value={session.rest}
+                   onChange={e => setSession({ ...session, rest: e.target.value })} />
+
+            <label style={label}>Notes</label>
+            <textarea style={{ ...input, minHeight: 60 }} value={session.notes}
+                      onChange={e => setSession({ ...session, notes: e.target.value })} />
+
+            <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button style={btn} onClick={addSession}>Add Session</button>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={card}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Today’s Modeled Values</div>
+              <div style={grid3}>
+                <div style={metric}>
+                  <div style={{ color: "#666", fontSize: 12 }}>%MVC Left @ {session.leftDuration}s</div>
+                  <div style={{ fontSize: 18, fontFamily: "monospace" }}>
+                    {round(fAtL(num(session.leftDuration, 0)) * 100, 2)}%
+                  </div>
+                  <div style={{ color: "#666", fontSize: 12, marginTop: 6 }}>Suggested Left Load</div>
+                  <div style={{ fontSize: 18, fontFamily: "monospace" }}>
+                    {round(effMaxL * fAtL(num(session.leftDuration, 0)), 2)}
+                  </div>
+                </div>
+                <div style={metric}>
+                  <div style={{ color: "#666", fontSize: 12 }}>%MVC Right @ {session.rightDuration}s</div>
+                  <div style={{ fontSize: 18, fontFamily: "monospace" }}>
+                    {round(fAtR(num(session.rightDuration, 0)) * 100, 2)}%
+                  </div>
+                  <div style={{ color: "#666", fontSize: 12, marginTop: 6 }}>Suggested Right Load</div>
+                  <div style={{ fontSize: 18, fontFamily: "monospace" }}>
+                    {round(effMaxR * fAtR(num(session.rightDuration, 0)), 2)}
+                  </div>
+                </div>
+                <div style={metric}>
+                  <div style={{ color: "#666", fontSize: 12 }}>Recovery after {session.rest}s</div>
+                  <div style={{ fontSize: 18, fontFamily: "monospace" }}>
+                    Left {round(recAtL(num(session.rest, 0)) * 100, 2)}% · Right {round(recAtR(num(session.rest, 0)) * 100, 2)}%
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={card}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Quick Tips</div>
+              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
+                <li>Precision Mode narrows learning to your <b>exact</b> TUT (±{params.precisionWindowSec}s).</li>
+                <li>After a set, type <b>observed time</b> to get the <b>ratio-controlled</b> Next Load instantly.</li>
+                <li>Re-hit <b>Learn Left/Right</b> after a few converged sets to keep the curve honest.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* HISTORY TAB */}
+      {tab === "history" && (
+        <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={btnGhost} onClick={exportCSV}>Export CSV</button>
+            <label style={{ ...btnGhost, display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              Import CSV
+              <input type="file" accept=".csv" style={{ display: "none" }}
+                     onChange={(e) => { const f = e.target.files?.[0]; if (f) importCSV(f); }} />
+            </label>
+            <button style={btnDanger} onClick={() => setHistory([])}>Clear All</button>
+          </div>
+
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Session History (most recent first)</div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e5e5" }}>
+                    {["Date","Grip","Left Load","Right Load","Left Dur (s)","Right Dur (s)","% L","% R","Recov L","Recov R","Notes","Actions"].map(h => (
+                      <th key={h} style={{ padding: "8px 12px" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.length === 0 ? (
+                    <tr><td colSpan={12} style={{ padding: 24, textAlign: "center", color: "#777" }}>No sessions yet. Log some on the Sessions tab.</td></tr>
+                  ) : history.map((r, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                      <td style={{ padding: "8px 12px" }}>{r.date}</td>
+                      <td style={{ padding: "8px 12px" }}>{r.grip}</td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <input style={{ width: 70 }} value={r.leftLoad}
+                               onChange={e => updateSession(i,"leftLoad", e.target.value)} />
+                      </td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <input style={{ width: 70 }} value={r.rightLoad}
+                               onChange={e => updateSession(i,"rightLoad", e.target.value)} />
+                      </td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <input style={{ width: 90 }} value={r.leftDuration}
+                               onChange={e => updateSession(i,"leftDuration", e.target.value)} />
+                      </td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <input style={{ width: 90 }} value={r.rightDuration}
+                               onChange={e => updateSession(i,"rightDuration", e.target.value)} />
+                      </td>
+                      <td style={{ padding: "8px 12px", fontFamily: "monospace" }}>
+                        {round((Number(r.modeled_pctMVC_L)||0) * 100, 2)}%
+                      </td>
+                      <td style={{ padding: "8px 12px", fontFamily: "monospace" }}>
+                        {round((Number(r.modeled_pctMVC_R)||0) * 100, 2)}%
+                      </td>
+                      <td style={{ padding: "8px 12px", fontFamily: "monospace" }}>
+                        {round((Number(r.mode_recov_frac_L)||0) * 100, 2)}%
+                      </td>
+                      <td style={{ padding: "8px 12px", fontFamily: "monospace" }}>
+                        {round((Number(r.mode_recov_frac_R)||0) * 100, 2)}%
+                      </td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <input style={{ width: 160 }} value={r.notes}
+                               onChange={e => updateSession(i,"notes", e.target.value)} />
+                      </td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <button style={btnDanger} onClick={() => deleteSession(i)}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Trends (averages)</div>
+            <div style={{ height: 260 }}>
+              <ResponsiveContainer>
+                <LineChart data={[...chartHistory].reverse()} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis yAxisId="left" />
+                  <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => `${Math.round(v)}%`} />
+                  <Tooltip />
+                  <Legend />
+                  <Line yAxisId="left" type="monotone" dataKey="avgLoad" name="Avg Load (L/R)" dot={false} strokeWidth={2} />
+                  <Line yAxisId="left" type="monotone" dataKey="avgDuration" name="Avg Duration (s)" dot={false} strokeDasharray="5 3" />
+                  <Line yAxisId="right" type="monotone" dataKey="modeledPct" name="Modeled %MVC (avg)" dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODEL TAB */}
+      {tab === "model" && (
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Parameters</div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={label}>Max Load (fallback anchor, your units)</label>
+              <input style={input} type="number" value={params.maxLoad}
+                     onChange={e => setParams({ ...params, maxLoad: num(e.target.value, params.maxLoad) })} />
+              <div style={{ ...smallMono, color: "#666", marginTop: 4 }}>
+                If you log 20s sets, the chart uses an effective per-hand max from your EMA 20s.
+              </div>
+            </div>
+
+            {/* LEFT weights */}
+            <div style={{ marginBottom: 8, fontWeight: 600 }}>Left Weights (normalized shown)</div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ ...label, marginBottom: 2 }}>
+                wL1 fast — normalized <span style={smallMono}>{round(normL.w1n, 3)}</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.01" value={params.wL1}
+                     onChange={e => setParams({ ...params, wL1: num(e.target.value, params.wL1) })} style={{ width: "100%" }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ ...label, marginBottom: 2 }}>
+                wL2 med — normalized <span style={smallMono}>{round(normL.w2n, 3)}</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.01" value={params.wL2}
+                     onChange={e => setParams({ ...params, wL2: num(e.target.value, params.wL2) })} style={{ width: "100%" }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ ...label, marginBottom: 2 }}>
+                wL3 slow — normalized <span style={smallMono}>{round(normL.w3n, 3)}</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.01" value={params.wL3}
+                     onChange={e => setParams({ ...params, wL3: num(e.target.value, params.wL3) })} style={{ width: "100%" }} />
+            </div>
+
+            {/* RIGHT weights */}
+            <div style={{ marginBottom: 8, fontWeight: 600 }}>Right Weights (normalized shown)</div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ ...label, marginBottom: 2 }}>
+                wR1 fast — normalized <span style={smallMono}>{round(normR.w1n, 3)}</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.01" value={params.wR1}
+                     onChange={e => setParams({ ...params, wR1: num(e.target.value, params.wR1) })} style={{ width: "100%" }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ ...label, marginBottom: 2 }}>
+                wR2 med — normalized <span style={smallMono}>{round(normR.w2n, 3)}</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.01" value={params.wR2}
+                     onChange={e => setParams({ ...params, wR2: num(e.target.value, params.wR2) })} style={{ width: "100%" }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ ...label, marginBottom: 2 }}>
+                wR3 slow — normalized <span style={smallMono}>{round(normR.w3n, 3)}</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.01" value={params.wR3}
+                     onChange={e => setParams({ ...params, wR3: num(e.target.value, params.wR3) })} style={{ width: "100%" }} />
+            </div>
+
+            {/* Taus (shared) */}
+            <div style={{ marginTop: 8 }}>
+              <label style={label}>τ1 fast (s): {Math.round(params.tau1)}</label>
+              <input type="range" min="2" max="60" step="1" value={params.tau1}
+                     onChange={e => setParams({ ...params, tau1: num(e.target.value, params.tau1) })} style={{ width: "100%" }} />
+              <label style={label}>τ2 medium (s): {Math.round(params.tau2)}</label>
+              <input type="range" min="10" max="240" step="1" value={params.tau2}
+                     onChange={e => setParams({ ...params, tau2: num(e.target.value, params.tau2) })} style={{ width: "100%" }} />
+              <label style={label}>τ3 slow (s): {Math.round(params.tau3)}</label>
+              <input type="range" min="60" max="600" step="5" value={params.tau3}
+                     onChange={e => setParams({ ...params, tau3: num(e.target.value, params.tau3) })} style={{ width: "100%" }} />
+            </div>
+
+            {/* Recovery taus + defaults */}
+            <div style={{ marginTop: 8 }}>
+              <label style={label}>Recovery τ fast (s): {Math.round(params.tau1Rec)}</label>
+              <input type="range" min="5" max="120" step="1" value={params.tau1Rec}
+                     onChange={e => setParams({ ...params, tau1Rec: num(e.target.value, params.tau1Rec) })} style={{ width: "100%" }} />
+              <label style={label}>Recovery τ medium (s): {Math.round(params.tau2Rec)}</label>
+              <input type="range" min="30" max="1200" step="10" value={params.tau2Rec}
+                     onChange={e => setParams({ ...params, tau2Rec: num(e.target.value, params.tau2Rec) })} style={{ width: "100%" }} />
+              <label style={label}>Recovery τ slow (s): {Math.round(params.tau3Rec)}</label>
+              <input type="range" min="300" max="3600" step="30" value={params.tau3Rec}
+                     onChange={e => setParams({ ...params, tau3Rec: num(e.target.value, params.tau3Rec) })} style={{ width: "100%" }} />
+              <label style={label}>Default Rest (s): {Math.round(params.restDefault)}</label>
+              <input type="range" min="30" max="600" step="5" value={params.restDefault}
+                     onChange={e => setParams({ ...params, restDefault: num(e.target.value, params.restDefault) })} style={{ width: "100%" }} />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={card}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Fatigue Curve f(t) with Sets</div>
+              <div style={{ height: 360 }}>
+                <ResponsiveContainer>
+                  <ComposedChart data={curveData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="t" label={{ value: "Time (s)", position: "insideBottomRight", offset: -5 }} />
+                    <YAxis domain={[0, 1]} tickFormatter={(v) => `${Math.round(v * 100)}%`} />
+                    <Tooltip />
+                    <Legend />
+                    {/* Component curves (to visualize mix) */}
+                    <Line type="monotone" dataKey="fast" name="fast (τ1)" dot={false} strokeDasharray="3 3" />
+                    <Line type="monotone" dataKey="med"  name="med (τ2)"  dot={false} strokeDasharray="3 3" />
+                    <Line type="monotone" dataKey="slow" name="slow (τ3)" dot={false} strokeDasharray="3 3" />
+                    {/* Model sums */}
+                    <Line type="monotone" dataKey="fsumL" name="f_L(t)" dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="fsumR" name="f_R(t)" dot={false} strokeDasharray="5 3" />
+                    {/* Anchor lines */}
+                    <ReferenceLine x={params.powerTUT} stroke="#888" strokeDasharray="4 4" label="20s" />
+                    <ReferenceLine x={params.strengthTUT} stroke="#888" strokeDasharray="4 4" label="60s" />
+                    <ReferenceLine x={params.enduranceTUT} stroke="#888" strokeDasharray="4 4" label="180s" />
+                    {/* Actual sets as dots (mapped to 0–1 via effective per-hand max) */}
+                    <Scatter name="Left sets"  data={scatterL} dataKey="y" fill="#111827" />
+                    <Scatter name="Right sets" data={scatterR} dataKey="y" fill="#6b7280" />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={{ ...smallMono, color: "#666", marginTop: 6 }}>
+                Tip: If the curve still looks straight, reduce τ3 and/or increase w1/w2 slightly, or extend time beyond 600 s.
+              </div>
+            </div>
+
+            <div style={grid2}>
+              <div style={card}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Recovery vs Rest — LEFT</div>
+                <div style={{ height: 220 }}>
+                  <ResponsiveContainer>
+                    <AreaChart data={recDataL} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="rest" label={{ value: "Rest (s)", position: "insideBottomRight", offset: -5 }} />
+                      <YAxis domain={[0, 1]} tickFormatter={(v) => `${Math.round(v * 100)}%`} />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="recovery" name="Recovery Fraction L" strokeWidth={2} />
+                      <ReferenceLine x={params.restDefault} stroke="#888" strokeDasharray="4 4" label="Default Rest" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div style={card}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Recovery vs Rest — RIGHT</div>
+                <div style={{ height: 220 }}>
+                  <ResponsiveContainer>
+                    <AreaChart data={recDataR} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="rest" label={{ value: "Rest (s)", position: "insideBottomRight", offset: -5 }} />
+                      <YAxis domain={[0, 1]} tickFormatter={(v) => `${Math.round(v * 100)}%`} />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="recovery" name="Recovery Fraction R" strokeWidth={2} />
+                      <ReferenceLine x={params.restDefault} stroke="#888" strokeDasharray="4 4" label="Default Rest" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Subcomponents ----------
+function MetricBox({ title, value }) {
+  return (
+    <div style={metric}>
+      <div style={{ color: "#666", fontSize: 12 }}>{title}</div>
+      <div style={{ fontSize: 18, fontFamily: "monospace" }}>{value}</div>
+    </div>
+  );
+}
+
+function NextSessionCard({
+  hand, nextTUT, setNextTUT, modelTarget, p70val, recentN, tight, nearest, ctrlNext, precisionOn
+}) {
+  const gap = percentGap(modelTarget, ctrlNext ?? NaN);
+  const gapText = gap == null ? "—" : `${round(gap, 1)}% ${gap > 0 ? "(practice > theory)" : gap < 0 ? "(practice < theory)" : ""}`;
+
+  return (
+    <div style={card}>
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>Next Session — {hand}</div>
+
+      {/* Target + Model Target */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div>
+          <label style={{ fontSize: 12, color: "#666", marginBottom: 6, display: "block" }}>Target TUT (s)</label>
+          <input style={input} type="number" value={nextTUT} onChange={e => setNextTUT(num(e.target.value, nextTUT))} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, color: "#666", marginBottom: 6, display: "block" }}>Model-Based Load (theory)</label>
+          <div style={{ ...metric, fontFamily: "monospace" }}>{round(modelTarget, 2)}</div>
+        </div>
+      </div>
+
+      {/* Recent context */}
+      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div style={metric}>
+          <div style={{ color: "#666", fontSize: 12 }}>Recent p70 @ {nextTUT}s</div>
+          <div style={{ fontFamily: "monospace" }}>{p70val ? round(p70val, 2) : "—"}</div>
+        </div>
+        <div style={metric}>
+          <div style={{ color: "#666", fontSize: 12 }}>History N (±window)</div>
+          <div style={{ fontFamily: "monospace" }}>{recentN}</div>
+        </div>
+        <div style={metric}>
+          <div style={{ color: "#666", fontSize: 12 }}>Tightness (sd)</div>
+          <div style={{ fontFamily: "monospace" }}>{tight ? round(tight.sd, 2) : "—"}</div>
+        </div>
+      </div>
+
+      {/* Side-by-side: theory vs ratio (and gap) */}
+      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div style={metric}>
+          <div style={{ color: "#666", fontSize: 12 }}>Model-Based (theory)</div>
+          <div style={{ fontFamily: "monospace" }}>{round(modelTarget, 2)}</div>
+        </div>
+        <div style={metric}>
+          <div style={{ color: "#666", fontSize: 12 }}>Ratio-Corrected (practice)</div>
+          <div style={{ fontFamily: "monospace" }}>
+            {nearest ? <>from {round(nearest.load,2)} @ {nearest.t}s → <b>{round(ctrlNext ?? 0, 2)}</b></> : "—"}
+          </div>
+        </div>
+        <div style={metric}>
+          <div style={{ color: "#666", fontSize: 12 }}>Gap (practice vs theory)</div>
+          <div style={{ fontFamily: "monospace" }}>{gapText}</div>
+        </div>
+      </div>
+
+      {precisionOn && (
+        <div style={{ ...smallMono, color: "#666", marginTop: 8 }}>
+          Tip: Use the Precision Controller below after each set—enter observed time to get an exact Next Load.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PrecisionController({ title, hand, defaultTUT, fAt, onCompute }) {
+  const [stage, setStage] = useState("first"); // "first" or "later"
+  const [targetTUT, setTargetTUT] = useState(defaultTUT);
+  const [currentLoad, setCurrentLoad] = useState("");
+  const [observedT, setObservedT] = useState("");
+  const [nextLoad, setNextLoad] = useState(null);
+
+  function compute() {
+    const Lc = num(currentLoad, NaN);
+    const Tob = num(observedT, NaN);
+    if (!Number.isFinite(Lc) || !Number.isFinite(Tob) || Tob <= 0) return;
+    const fTarget = fAt(num(targetTUT, 0));
+    const fObs = fAt(Tob);
+    if (!Number.isFinite(fTarget) || !Number.isFinite(fObs) || fObs <= 0) return;
+    let Lnext = Lc * (fTarget / fObs);
+    const cap = stage === "first" ? 0.10 : 0.05;
+    Lnext = Math.min(Math.max(Lnext, Lc * (1 - cap)), Lc * (1 + cap));
+    setNextLoad(Lnext);
+    onCompute?.({ hand, targetTUT: num(targetTUT, 0), currentLoad: Lc, observedT: Tob, nextLoad: Lnext });
+  }
+
+  return (
+    <div style={card}>
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>{title}</div>
+      <div style={grid3}>
+        <div>
+          <label style={label}>Target TUT (s)</label>
+          <input style={input} type="number" value={targetTUT}
+                 onChange={e => setTargetTUT(num(e.target.value, targetTUT))} />
+        </div>
+        <div>
+          <label style={label}>Current Load</label>
+          <input style={input} type="number" value={currentLoad}
+                 onChange={e => setCurrentLoad(e.target.value)} />
+        </div>
+        <div>
+          <label style={label}>Observed Time (s)</label>
+          <input style={input} type="number" value={observedT}
+                 onChange={e => setObservedT(e.target.value)} />
+        </div>
+      </div>
+      <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div>
+          <label style={label}>Correction Stage</label>
+          <select
+            value={stage}
+            onChange={e => setStage(e.target.value)}
+            style={{ ...input, padding: 6 }}
+          >
+            <option value="first">First correction (±10%)</option>
+            <option value="later">Later corrections (±5%)</option>
+          </select>
+        </div>
+        <button style={btn} onClick={compute}>Compute Next Load</button>
+        {nextLoad != null && (
+          <div style={{ ...metric, fontFamily: "monospace" }}>Next ≈ {round(nextLoad,2)}</div>
+        )}
+      </div>
+      <div style={{ ...smallMono, color: "#666", marginTop: 6 }}>
+        Formula: L<sub>next</sub> = L<sub>current</sub> × f(T<sub>target</sub>) / f(T<sub>obs</sub>) with caps.
+      </div>
+    </div>
+  );
+}
+
+// === CSV helpers ===
+function toCSV(rows) {
+  const headers = [
+    "date","grip","leftLoad","rightLoad",
+    "leftDuration","rightDuration","rest",
+    "modeled_pctMVC_L","modeled_pctMVC_R","mode_recov_frac_L","mode_recov_frac_R",
+    "notes",
+    "duration" // legacy placeholder
+  ];
+  if (!rows?.length) return headers.join(",") + "\n";
+  const esc = (s) => {
+    if (s == null) return "";
+    const str = String(s);
+    if (/[",\n]/.test(str)) return `"${str.replaceAll(`"`, `""`)}"`;
+    return str;
+  };
+  return [
+    headers.join(","),
+    ...rows.map(r => headers.map(h => esc(r[h])).join(","))
+  ].join("\n");
+}
+function fromCSV(csv) {
+  const lines = csv.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (!lines.length) return [];
+  const headers = splitCSVLine(lines[0]);
+  const rows = lines.slice(1).map(line => {
+    const fields = splitCSVLine(line);
+    const obj = {};
+    headers.forEach((h, k) => obj[h] = fields[k] ?? "");
+    return obj;
+  });
+  return rows;
+}
+function splitCSVLine(line) {
+  const out = [];
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === '"') {
+      let j = i + 1, val = "";
+      while (j < line.length) {
+        if (line[j] === '"' && line[j + 1] === '"') { val += '"'; j += 2; continue; }
+        if (line[j] === '"') { j++; break; }
+        val += line[j]; j++;
+      }
+      if (line[j] === ",") j++;
+      out.push(val);
+      i = j;
+    } else {
+      let j = line.indexOf(",", i);
+      if (j === -1) j = line.length;
+      out.push(line.slice(i, j));
+      i = j + 1;
+    }
+  }
+  return out;
+}
+
+// ===== New helpers placed at end =====
+function percentGap(theory, practice) {
+  if (!Number.isFinite(theory) || !Number.isFinite(practice) || theory === 0) return null;
+  return ((practice - theory) / theory) * 100;
+}
+function effectiveHandMax(hand, params, fAt) {
+  const f20 = fAt(params.powerTUT ?? 20);
+  if (f20 <= 0 || !Number.isFinite(f20)) return Number(params.maxLoad) || 1;
+  const ema = hand === "L" ? params.emaL20 : params.emaR20;
+  if (ema == null || !Number.isFinite(ema) || ema <= 0) return Number(params.maxLoad) || 1;
+  return ema / f20;
+}
