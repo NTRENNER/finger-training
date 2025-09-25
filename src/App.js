@@ -120,45 +120,69 @@ function historyPoints(history, hand) {
     .sort((a, b) => a.t - b.t);
 }
 
-// Ratio interpolation (fallback/secondary view)
+// Robust ratio interpolation (monotone, log-space)
 function ratioLoadForT(targetT, pts) {
-  if (!pts.length) return 0;
-  const exact = pts.find((p) => Math.abs(p.t - targetT) < 1e-6);
-  if (exact) return exact.L;
-  let lo = null,
-    hi = null;
+  if (!pts?.length) return 0;
+
+  // 1) Aggregate duplicates (same TUT) by averaging load
+  const byT = new Map();
   for (const p of pts) {
-    if (p.t < targetT) lo = p;
-    if (p.t > targetT && !hi) {
-      hi = p;
-      break;
+    const t = Number(p.t) || 0;
+    const L = Number(p.L) || 0;
+    if (t <= 0 || L <= 0) continue;
+    const cur = byT.get(t);
+    if (cur) byT.set(t, { sum: cur.sum + L, n: cur.n + 1 });
+    else byT.set(t, { sum: L, n: 1 });
+  }
+  let arr = Array.from(byT.entries())
+    .map(([t, v]) => ({ t: Number(t), L: v.sum / v.n }))
+    .sort((a, b) => a.t - b.t);
+  if (!arr.length) return 0;
+
+  // 2) Enforce monotone decreasing L(t) via a simple PAVA (Pool Adjacent Violators)
+  // We want L[i] >= L[i+1].
+  const stack = [];
+  for (const p of arr) {
+    // each block holds {tSum, wSum, L} where L is block mean
+    stack.push({ tSum: p.t, wSum: 1, L: p.L });
+    // merge while monotonicity is violated
+    while (stack.length >= 2) {
+      const a = stack[stack.length - 2];
+      const b = stack[stack.length - 1];
+      if (a.L < b.L) {
+        // merge a and b
+        const tSum = a.tSum + b.tSum;
+        const wSum = a.wSum + b.wSum;
+        const L = (a.L * a.wSum + b.L * b.wSum) / wSum;
+        stack.splice(stack.length - 2, 2, { tSum, wSum, L });
+      } else {
+        break;
+      }
     }
   }
-  if (lo && hi) {
-    const r = (targetT - lo.t) / Math.max(1e-9, hi.t - lo.t);
-    return lo.L + r * (hi.L - lo.L);
-  }
-  if (lo) {
-    const i = pts.indexOf(lo);
-    const s = pts[Math.max(0, i - 1)];
-    if (s) {
-      const m = (lo.L - s.L) / Math.max(1e-9, lo.t - s.t);
-      return Math.max(0, lo.L + m * (targetT - lo.t));
+  // expand blocks back to points (use block-average t)
+  arr = stack.map((blk) => ({ t: blk.tSum / blk.wSum, L: blk.L }))
+             .sort((a, b) => a.t - b.t);
+
+  // 3) Edge clamps
+  if (targetT <= arr[0].t) return arr[0].L;
+  if (targetT >= arr[arr.length - 1].t) return arr[arr.length - 1].L;
+
+  // 4) Find bracket and interpolate in log-space
+  for (let i = 0; i < arr.length - 1; i++) {
+    const a = arr[i], b = arr[i + 1];
+    if (a.t <= targetT && targetT <= b.t) {
+      const r = (targetT - a.t) / Math.max(eps, b.t - a.t);
+      const La = Math.max(eps, a.L);
+      const Lb = Math.max(eps, b.L);
+      const logL = (1 - r) * Math.log(La) + r * Math.log(Lb);
+      return Math.exp(logL);
     }
-    return lo.L;
   }
-  if (hi) {
-    const i = pts.indexOf(hi);
-    const s = pts[Math.min(pts.length - 1, i + 1)];
-    if (s) {
-      const m = (s.L - hi.L) / Math.max(1e-9, s.t - hi.t);
-      return Math.max(0, hi.L + m * (targetT - hi.t));
-    }
-    return hi.L;
-  }
-  return pts[0].L;
+  return arr[arr.length - 1].L; // fallback (shouldn’t hit)
 }
 
+// === Learned scale from history ===
 // === Learned scale from history ===
 // Model: L_i ≈ scale * f(t_i)  ⇒ scale ≈ avg(L_i / f(t_i))
 function scaleFromHistory(pts, w, tau, manualScale) {
@@ -493,17 +517,17 @@ export default function App() {
 
   // Planner state (now includes anchor)
   const [planL, setPlanL] = useState({
-    sets: 5,
-    TUT: 60,
-    rest: 120,
+    sets: 1,
+    TUT: 0,
+    rest: 0,
     cap: 0.15,
     precise: true,
     anchor: "min",
   });
   const [planR, setPlanR] = useState({
-    sets: 5,
-    TUT: 60,
-    rest: 120,
+    sets: 1,
+    TUT: 0,
+    rest: 0,
     cap: 0.15,
     precise: true,
     anchor: "min",
