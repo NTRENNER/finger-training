@@ -159,8 +159,8 @@ function ratioLoadForT(targetT, pts) {
   return pts[0].L;
 }
 
-// === NEW: scale learned from history ===
-// Model: L_i ≈ scale * f(t_i)  ⇒ scale_i = L_i / f(t_i)
+// === Learned scale from history ===
+// Model: L_i ≈ scale * f(t_i)  ⇒ scale ≈ avg(L_i / f(t_i))
 function scaleFromHistory(pts, w, tau, manualScale) {
   if (manualScale > 0) return manualScale;
   let sum = 0,
@@ -175,13 +175,13 @@ function scaleFromHistory(pts, w, tau, manualScale) {
   return n ? sum / n : 0;
 }
 
-// Model-based recommended load for target TUT
+// Model-based recommended load for target TUT (first-set estimate)
 function modelLoadForT(T, pts, w, tau, manualScale) {
   const scale = scaleFromHistory(pts, w, tau, manualScale);
   return scale * fAt(T, w, tau); // decreases as T increases
 }
 
-// Multi-set planner (corrected for new model)
+// Multi-set planner (now supports anchor: 'min' | 'model' | 'ratio')
 function planSets({
   TUT,
   sets,
@@ -192,18 +192,27 @@ function planSets({
   manualScale,
   capDrop = 0.15,
   precise = false,
+  anchor = "min",
 }) {
   const scale0 = scaleFromHistory(pts, w, tau, manualScale);
   if (scale0 <= 0) return Array.from({ length: sets }, () => 0);
+
+  // First-set base according to anchor
+  const modelBase = scale0 * fAt(TUT, w, tau);
+  const ratioBase = ratioLoadForT(TUT, pts) || 0;
+  let base;
+  if (anchor === "ratio") base = ratioBase || modelBase;
+  else if (anchor === "model") base = modelBase;
+  else base = Math.min(modelBase, ratioBase || Infinity); // conservative
 
   let currentCapacity = 1.0; // capacity before each set (0..1)
   const out = [];
 
   for (let s = 1; s <= sets; s++) {
-    // If capacity is c, effective curve is c * f(t).
-    // Load that ends near TUT: L = scale0 * c * f(TUT)
-    const base = scale0 * currentCapacity * fAt(TUT, w, tau);
-    const load = precise ? base : base; // both use same closed-form here
+    // Effective curve is currentCapacity * f(t)
+    // Load that ends near TUT: scale0 * currentCapacity * f(TUT)
+    const closedForm = scale0 * currentCapacity * fAt(TUT, w, tau);
+    const load = precise ? closedForm : base * currentCapacity;
     out.push(Math.max(0, load));
 
     // Fatigue during the set
@@ -218,7 +227,7 @@ function planSets({
     );
   }
 
-  // “Cap increase” safeguard (later sets shouldn’t wildly exceed the first)
+  // Cap: later sets shouldn’t wildly exceed the first
   if (out.length > 1) {
     const first = out[0];
     for (let i = 1; i < out.length; i++) {
@@ -446,7 +455,7 @@ export default function App() {
     return arr;
   }, [S.tau, chartTmax]);
 
-  // History dots for fatigue overlay (y = observed fatigue fraction = L / scale)
+  // History dots for fatigue overlay (y = observed fatigue fraction = L / learned-scale)
   const histDotsL = useMemo(
     () =>
       ptsL.map((p) => ({
@@ -482,9 +491,23 @@ export default function App() {
   const recL = recs("L");
   const recR = recs("R");
 
-  // Planner state
-  const [planL, setPlanL] = useState({ sets: 5, TUT: 60, rest: 120, cap: 0.15, precise: true });
-  const [planR, setPlanR] = useState({ sets: 5, TUT: 60, rest: 120, cap: 0.15, precise: true });
+  // Planner state (now includes anchor)
+  const [planL, setPlanL] = useState({
+    sets: 5,
+    TUT: 60,
+    rest: 120,
+    cap: 0.15,
+    precise: true,
+    anchor: "min",
+  });
+  const [planR, setPlanR] = useState({
+    sets: 5,
+    TUT: 60,
+    rest: 120,
+    cap: 0.15,
+    precise: true,
+    anchor: "min",
+  });
 
   const loadsPlanL = useMemo(
     () =>
@@ -498,6 +521,7 @@ export default function App() {
         tau: S.tau,
         manualScale: S.model.manualScaleL,
         precise: planL.precise,
+        anchor: planL.anchor,
       }),
     [planL, ptsL, S.wLeft, S.tau, S.model.manualScaleL]
   );
@@ -513,6 +537,7 @@ export default function App() {
         tau: S.tau,
         manualScale: S.model.manualScaleR,
         precise: planR.precise,
+        anchor: planR.anchor,
       }),
     [planR, ptsR, S.wRight, S.tau, S.model.manualScaleR]
   );
@@ -578,7 +603,7 @@ export default function App() {
         ))}
       </div>
 
-      {/* Sessions — vertical layout like your screenshot */}
+      {/* Sessions — vertical layout */}
       {tab === "sessions" && (
         <div
           style={{
@@ -1067,9 +1092,23 @@ function PlannerControls({ plan, setPlan }) {
       <Num label="Sets" v={plan.sets}
         set={(v) => setPlan((p) => ({ ...p, sets: clamp(Number(v) || 1, 1, 20) }))} />
       <Num label="TUT (s)" v={plan.TUT}
-        set={(v) => setPlan((p) => ({ ...p, TUT: clamp(Number(v) || 5, 5, 300) }))} />
+        set={(v) => setPlan((p) => ({ ...p, TUT: clamp(Number(v) || 0, 0, 300) }))} />
       <Num label="Rest (s)" v={plan.rest}
         set={(v) => setPlan((p) => ({ ...p, rest: clamp(Number(v) || 0, 0, 900) }))} />
+
+      {/* Anchor select */}
+      <div>
+        <label style={{ fontSize: 12, opacity: 0.7 }}>Anchor</label>
+        <select
+          value={plan.anchor || "min"}
+          onChange={(e) => setPlan((p) => ({ ...p, anchor: e.target.value }))}
+          style={{ width: "100%", padding: 8 }}
+        >
+          <option value="min">min(Model, Ratio)</option>
+          <option value="model">Model</option>
+          <option value="ratio">Ratio</option>
+        </select>
+      </div>
 
       <div style={{ gridColumn: "1/-1" }}>
         <label style={{ fontSize: 12, opacity: 0.7 }}>Cap later-set increase (fraction)</label>
