@@ -1,1034 +1,1027 @@
+// src/App.js
 import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "./lib/supabase";
 import {
+  ResponsiveContainer,
+  ComposedChart,
   LineChart,
   Line,
+  Scatter,
   XAxis,
   YAxis,
-  CartesianGrid,
   Tooltip,
+  CartesianGrid,
   Legend,
-  ResponsiveContainer,
   ReferenceLine,
-  AreaChart,
-  Area,
 } from "recharts";
 
-// ---------- utilities ----------
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const round1 = (x) => Math.round(x * 10) / 10;
-const pct = (x) => `${round1(100 * x)}%`;
+/* ====================== Utilities ====================== */
 
-const loadLS = (k, fallback) => {
+const LS_KEY = "ft_state_v2";
+const uid = () => Math.random().toString(36).slice(2);
+const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+const eps = 1e-9;
+
+const loadLS = () => {
   try {
-    const raw = localStorage.getItem(k);
-    if (!raw) return fallback;
-    return JSON.parse(raw);
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? JSON.parse(raw) : null;
   } catch {
-    return fallback;
+    return null;
   }
 };
-const saveLS = (k, v) => {
+const saveLS = (s) => {
   try {
-    localStorage.setItem(k, JSON.stringify(v));
+    localStorage.setItem(LS_KEY, JSON.stringify(s));
   } catch {}
 };
 
-// --- CSV helpers ---
-function csvEscape(val = "") {
-  const s = String(val ?? "");
-  // escape quotes by doubling them; wrap in quotes if it has comma, quote, or newline
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
+// CSV
+function csvEscape(v = "") {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
-function rowsToCSV(rows) {
+function toCSV(rows) {
   const headers = [
-    "id","date","grip",
-    "leftLoad","rightLoad","leftDur","rightDur","rest",
-    "pctL","pctR","recL","recR",
-    "notes"
+    "id",
+    "date",
+    "grip",
+    "leftLoad",
+    "leftDur",
+    "rightLoad",
+    "rightDur",
+    "rest",
+    "notes",
   ];
   const lines = [headers.join(",")];
   for (const r of rows) {
-    const line = [
-      r.id,
-      r.date,
-      r.grip,
-      r.leftLoad,
-      r.rightLoad,
-      r.leftDur,
-      r.rightDur,
-      r.rest,
-      // write modeled percentages as 0–100 with 1 decimal
-      r.pctL != null ? (100*Number(r.pctL)).toFixed(1) : "",
-      r.pctR != null ? (100*Number(r.pctR)).toFixed(1) : "",
-      r.recL != null ? (100*Number(r.recL)).toFixed(1) : "",
-      r.recR != null ? (100*Number(r.recR)).toFixed(1) : "",
-      r.notes ?? ""
-    ].map(csvEscape).join(",");
-    lines.push(line);
+    lines.push(
+      [
+        r.id,
+        r.date,
+        r.grip,
+        r.leftLoad,
+        r.leftDur,
+        r.rightLoad,
+        r.rightDur,
+        r.rest,
+        r.notes,
+      ]
+        .map(csvEscape)
+        .join(",")
+    );
   }
-  // BOM helps Excel recognize UTF-8
   return "\uFEFF" + lines.join("\n");
 }
-function downloadCSV(rows, filename = "finger-training-history.csv") {
+function downloadCSV(rows, name = "finger-training-history.csv") {
   if (!rows?.length) return;
-  const csv = rowsToCSV(rows);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
+  a.remove();
   URL.revokeObjectURL(url);
 }
 
-// ---------- 3-exp fatigue + recovery ----------
+/* ====================== Model ====================== */
+
+// 3-exponential curve f(t) in [0..1] (remaining capacity fraction)
+function normalizeWeights(w1, w2, w3) {
+  const s = Math.max(1e-9, Number(w1) + Number(w2) + Number(w3));
+  return { w1n: w1 / s, w2n: w2 / s, w3n: w3 / s };
+}
 function fAt(t, w, tau) {
-  const e = (x) => Math.exp(-t / Math.max(1e-9, x));
-  return w.w1 * e(tau.tau1) + w.w2 * e(tau.tau2) + w.w3 * e(tau.tau3);
+  const { w1n, w2n, w3n } = normalizeWeights(w.w1, w.w2, w.w3);
+  const e1 = Math.exp(-t / Math.max(1e-9, tau.t1));
+  const e2 = Math.exp(-t / Math.max(1e-9, tau.t2));
+  const e3 = Math.exp(-t / Math.max(1e-9, tau.t3));
+  return w1n * e1 + w2n * e2 + w3n * e3; // remaining capacity after t
 }
-// Recovery fraction over rest r (how much of the missing capacity you get back)
-function Rof(r, w, rec) {
-  const e = (x) => Math.exp(-r / Math.max(1e-9, x));
-  return 1 - (w.w1 * e(rec.r1) + w.w2 * e(rec.r2) + w.w3 * e(rec.r3));
+function recoveryFrac(t, tau) {
+  // simple complementary recovery proxy using same taus
+  const e1 = 1 - Math.exp(-t / Math.max(1e-9, tau.t1));
+  const e2 = 1 - Math.exp(-t / Math.max(1e-9, tau.t2));
+  const e3 = 1 - Math.exp(-t / Math.max(1e-9, tau.t3));
+  return (e1 + e2 + e3) / 3;
 }
 
-// capacity simulation across a plan
-function simulateCapacityPlan({
-  sets,
-  repsPerSet,
-  T,
-  restRep,
-  restSet,
-  w,
-  tau,
-  rec,
-}) {
-  const fT = fAt(T, w, tau);
-  const repFactor = 1 - Rof(restRep, w, rec); // = sum w_i e^{-r/ρ_i}
-  const setFactor = 1 - Rof(restSet, w, rec);
+// History → (t, L) points per hand
+function historyPoints(history, hand) {
+  return history
+    .map((r) =>
+      hand === "L"
+        ? { t: Number(r.leftDur) || 0, L: Number(r.leftLoad) || 0 }
+        : { t: Number(r.rightDur) || 0, L: Number(r.rightLoad) || 0 }
+    )
+    .filter((p) => p.t > 0 && p.L > 0)
+    .sort((a, b) => a.t - b.t);
+}
 
-  let C = 1; // fresh
-  const capacities = []; // C before each rep
-  for (let s = 0; s < sets; s++) {
-    for (let r = 0; r < repsPerSet; r++) {
-      capacities.push(C);
-      const Cend = C * fT;
-      const isLastInSet = r === repsPerSet - 1;
-      const factor = isLastInSet ? setFactor : repFactor;
-      C = 1 - (1 - Cend) * factor;
+// Ratio interpolation (fallback/secondary view)
+function ratioLoadForT(targetT, pts) {
+  if (!pts.length) return 0;
+  const exact = pts.find((p) => Math.abs(p.t - targetT) < 1e-6);
+  if (exact) return exact.L;
+  let lo = null,
+    hi = null;
+  for (const p of pts) {
+    if (p.t < targetT) lo = p;
+    if (p.t > targetT && !hi) {
+      hi = p;
+      break;
     }
   }
-  return { capacities, fT };
+  if (lo && hi) {
+    const r = (targetT - lo.t) / Math.max(1e-9, hi.t - lo.t);
+    return lo.L + r * (hi.L - lo.L);
+  }
+  if (lo) {
+    const i = pts.indexOf(lo);
+    const s = pts[Math.max(0, i - 1)];
+    if (s) {
+      const m = (lo.L - s.L) / Math.max(1e-9, lo.t - s.t);
+      return Math.max(0, lo.L + m * (targetT - lo.t));
+    }
+    return lo.L;
+  }
+  if (hi) {
+    const i = pts.indexOf(hi);
+    const s = pts[Math.min(pts.length - 1, i + 1)];
+    if (s) {
+      const m = (s.L - hi.L) / Math.max(1e-9, s.t - hi.t);
+      return Math.max(0, hi.L + m * (targetT - hi.t));
+    }
+    return hi.L;
+  }
+  return pts[0].L;
 }
 
-// recommended load so that the last rep (or last rep of first set) fails at T
-function recommendLoadForPlan({
-  max,
+// === NEW: scale learned from history ===
+// Model: L_i ≈ scale * f(t_i)  ⇒ scale_i = L_i / f(t_i)
+function scaleFromHistory(pts, w, tau, manualScale) {
+  if (manualScale > 0) return manualScale;
+  let sum = 0,
+    n = 0;
+  for (const p of pts) {
+    const denom = fAt(p.t, w, tau);
+    if (denom > eps) {
+      sum += p.L / denom;
+      n++;
+    }
+  }
+  return n ? sum / n : 0;
+}
+
+// Model-based recommended load for target TUT
+function modelLoadForT(T, pts, w, tau, manualScale) {
+  const scale = scaleFromHistory(pts, w, tau, manualScale);
+  return scale * fAt(T, w, tau); // decreases as T increases
+}
+
+// Multi-set planner (corrected for new model)
+function planSets({
+  TUT,
   sets,
-  repsPerSet,
-  T,
-  restRep,
-  restSet,
+  restSec,
+  pts,
   w,
   tau,
-  rec,
-  anchor = "planEnd",
+  manualScale,
+  capDrop = 0.15,
+  precise = false,
 }) {
-  const { capacities, fT } = simulateCapacityPlan({
-    sets,
-    repsPerSet,
-    T,
-    restRep,
-    restSet,
-    w,
-    tau,
-    rec,
-  });
-  let idx =
-    anchor === "planEnd" ? capacities.length - 1 : Math.max(0, repsPerSet - 1);
-  const Cbefore = clamp(capacities[idx], 0, 1);
-  return max * Cbefore * fT;
+  const scale0 = scaleFromHistory(pts, w, tau, manualScale);
+  if (scale0 <= 0) return Array.from({ length: sets }, () => 0);
+
+  let currentCapacity = 1.0; // capacity before each set (0..1)
+  const out = [];
+
+  for (let s = 1; s <= sets; s++) {
+    // If capacity is c, effective curve is c * f(t).
+    // Load that ends near TUT: L = scale0 * c * f(TUT)
+    const base = scale0 * currentCapacity * fAt(TUT, w, tau);
+    const load = precise ? base : base; // both use same closed-form here
+    out.push(Math.max(0, load));
+
+    // Fatigue during the set
+    currentCapacity *= fAt(TUT, w, tau);
+
+    // Recovery
+    const rec = recoveryFrac(restSec, tau); // 0..1
+    currentCapacity = clamp(
+      currentCapacity + (1 - currentCapacity) * rec,
+      0.1,
+      1.0
+    );
+  }
+
+  // “Cap increase” safeguard (later sets shouldn’t wildly exceed the first)
+  if (out.length > 1) {
+    const first = out[0];
+    for (let i = 1; i < out.length; i++) {
+      out[i] = Math.min(out[i], first * (1 + capDrop));
+    }
+  }
+  return out;
 }
 
-// ---------- default model state ----------
-const defaultState = {
-  // UI
-  tab: "recommend",
-  // anchors / learning
-  targetPower: 20,
-  targetStrength: 60,
-  targetEndurance: 180,
-  // per-hand effective max (you can update via Learn buttons)
-  maxLeft: 145,
-  maxRight: 145,
-  // 3-exp weights
-  wLeft: { w1: 0.293, w2: 0.0, w3: 0.707 },
-  wRight: { w1: 0.293, w2: 0.0, w3: 0.707 },
-  // fatigue taus
-  tau: { tau1: 7, tau2: 45, tau3: 180 },
-  // recovery taus
-  rec: { r1: 30, r2: 300, r3: 1800 },
-  // history rows
-  history: [],
-  // planner
-  plan: { sets: 3, repsPerSet: 5, T: 20, restRep: 60, restSet: 180, anchor: "planEnd" },
-  // model chart range
-  chartMax: 300,
-};
+/* ====================== App ====================== */
 
-function App() {
-  const [S, setS] = useState(() => loadLS("state-v2", defaultState));
-  useEffect(() => saveLS("state-v2", S), [S]);
+export default function App() {
+  /* ---------- auth + core state ---------- */
+  const [tab, setTab] = useState("sessions"); // sessions | history | model | recs
+  const [user, setUser] = useState(null);
+  const [loginEmail, setLoginEmail] = useState("");
 
-  // convenient setters
-  const setTab = (t) => setS((s) => ({ ...s, tab: t }));
-  const setPlan = (p) => setS((s) => ({ ...s, plan: { ...s.plan, ...p } }));
-
-  // ------- Recommendations: model-based loads (per hand) -------
-  const f20L = useMemo(() => fAt(S.targetPower, S.wLeft, S.tau), [S]);
-  const f60L = useMemo(() => fAt(S.targetStrength, S.wLeft, S.tau), [S]);
-  const f180L = useMemo(() => fAt(S.targetEndurance, S.wLeft, S.tau), [S]);
-
-  const f20R = useMemo(() => fAt(S.targetPower, S.wRight, S.tau), [S]);
-  const f60R = useMemo(() => fAt(S.targetStrength, S.wRight, S.tau), [S]);
-  const f180R = useMemo(() => fAt(S.targetEndurance, S.wRight, S.tau), [S]);
-
-  const modelLoadsLeft = useMemo(
-    () => ({
-      power: S.maxLeft * f20L,
-      strength: S.maxLeft * f60L,
-      endurance: S.maxLeft * f180L,
-    }),
-    [S, f20L, f60L, f180L]
-  );
-  const modelLoadsRight = useMemo(
-    () => ({
-      power: S.maxRight * f20R,
-      strength: S.maxRight * f60R,
-      endurance: S.maxRight * f180R,
-    }),
-    [S, f20R, f60R, f180R]
-  );
-
-  // ------- Reps Planner (new) -------
-  const recLeft = useMemo(
+  const [S, setS] = useState(
     () =>
-      recommendLoadForPlan({
-        max: S.maxLeft,
-        sets: S.plan.sets,
-        repsPerSet: S.plan.repsPerSet,
-        T: S.plan.T,
-        restRep: S.plan.restRep,
-        restSet: S.plan.restSet,
-        w: S.wLeft,
-        tau: S.tau,
-        rec: S.rec,
-        anchor: S.plan.anchor,
-      }),
-    [S]
+      loadLS() || {
+        history: [],
+        tau: { t1: 10, t2: 60, t3: 240 },
+        wLeft: { w1: 1, w2: 1, w3: 1 },
+        wRight: { w1: 1, w2: 1, w3: 1 },
+        targets: { power: 20, strength: 60, endurance: 180 },
+        model: {
+          manualScaleL: 0,
+          manualScaleR: 0,
+          maxChartTime: 300,
+        },
+      }
   );
-  const recRight = useMemo(
-    () =>
-      recommendLoadForPlan({
-        max: S.maxRight,
-        sets: S.plan.sets,
-        repsPerSet: S.plan.repsPerSet,
-        T: S.plan.T,
-        restRep: S.plan.restRep,
-        restSet: S.plan.restSet,
-        w: S.wRight,
-        tau: S.tau,
-        rec: S.rec,
-        anchor: S.plan.anchor,
-      }),
-    [S]
-  );
+  useEffect(() => saveLS(S), [S]);
 
-  // small capacity preview (left)
-  const planPreviewLeft = useMemo(
-    () =>
-      simulateCapacityPlan({
-        sets: S.plan.sets,
-        repsPerSet: S.plan.repsPerSet,
-        T: S.plan.T,
-        restRep: S.plan.restRep,
-        restSet: S.plan.restSet,
-        w: S.wLeft,
-        tau: S.tau,
-        rec: S.rec,
-      }).capacities,
-    [S]
-  );
+  // Supabase auth
+  useEffect(() => {
+    supabase
+      .auth
+      .getSession()
+      .then(({ data }) => setUser(data.session?.user ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) =>
+      setUser(s?.user ?? null)
+    );
+    return () => sub.subscription.unsubscribe();
+  }, []);
+  async function sendMagicLink(e) {
+    e?.preventDefault();
+    if (!loginEmail) return;
+    const { error } = await supabase.auth.signInWithOtp({
+      email: loginEmail,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    if (error) alert(error.message);
+    else alert("Check your email to finish signing in.");
+  }
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
 
-  // ------- Sessions / History -------
-  const [session, setSession] = useState({
+  // Load cloud history on login
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data, error } = await supabase
+        .from("sessions")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) {
+        console.warn(error);
+        return;
+      }
+      const mapped = (data || []).map((r) => ({
+        id: r.id,
+        date: r.date ?? new Date().toISOString().slice(0, 10),
+        grip: r.grip ?? "",
+        leftLoad: Number(r.left_load) || 0,
+        leftDur: Number(r.left_dur) || 0,
+        rightLoad: Number(r.right_load) || 0,
+        rightDur: Number(r.right_dur) || 0,
+        rest: Number(r.rest) || 0,
+        notes: r.notes ?? "",
+      }));
+      setS((s) => ({ ...s, history: mapped }));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  /* ---------- Sessions (entry) ---------- */
+  const [form, setForm] = useState(() => ({
     date: new Date().toISOString().slice(0, 10),
-    grip: "20mm Half Crimp",
+    grip: "",
     leftLoad: "",
+    leftDur: "",
     rightLoad: "",
-    leftDur: S.targetPower,
-    rightDur: S.targetPower,
-    rest: 180,
+    rightDur: "",
+    rest: "",
     notes: "",
-  });
+  }));
+  const canAdd =
+    (Number(form.leftLoad) > 0 || Number(form.rightLoad) > 0) &&
+    (Number(form.leftDur) > 0 || Number(form.rightDur) > 0);
 
-  const addSession = () => {
+  async function onAddSession() {
+    if (!canAdd) return;
     const row = {
-      id: Date.now(),
-      date: session.date,
-      grip: session.grip,
-      leftLoad: Number(session.leftLoad) || 0,
-      rightLoad: Number(session.rightLoad) || 0,
-      leftDur: Number(session.leftDur) || 0,
-      rightDur: Number(session.rightDur) || 0,
-      rest: Number(session.rest) || 0,
-      notes: session.notes || "",
-      // quick model stamps for history table
-      pctL: fAt(Number(session.leftDur) || 0, S.wLeft, S.tau),
-      pctR: fAt(Number(session.rightDur) || 0, S.wRight, S.tau),
-      recL: Rof(S.targetEndurance, S.wLeft, S.rec),
-      recR: Rof(S.targetEndurance, S.wRight, S.rec),
+      id: uid(),
+      date: form.date || new Date().toISOString().slice(0, 10),
+      grip: form.grip || "",
+      leftLoad: Number(form.leftLoad) || 0,
+      leftDur: Number(form.leftDur) || 0,
+      rightLoad: Number(form.rightLoad) || 0,
+      rightDur: Number(form.rightDur) || 0,
+      rest: Number(form.rest) || 0,
+      notes: form.notes || "",
     };
     setS((s) => ({ ...s, history: [row, ...s.history] }));
-    setSession((x) => ({ ...x, leftLoad: "", rightLoad: "", notes: "" }));
-  };
-  const updateRow = (id, patch) =>
+    setForm((f) => ({
+      ...f,
+      leftLoad: "",
+      leftDur: "",
+      rightLoad: "",
+      rightDur: "",
+      notes: "",
+    }));
+
+    if (user) {
+      const payload = {
+        user_id: user.id,
+        date: row.date,
+        grip: row.grip,
+        left_load: row.leftLoad || null,
+        left_dur: row.leftDur || null,
+        right_load: row.rightLoad || null,
+        right_dur: row.rightDur || null,
+        rest: row.rest || null,
+        notes: row.notes || null,
+      };
+      const { data, error } = await supabase
+        .from("sessions")
+        .insert(payload)
+        .select()
+        .single();
+      if (!error && data) {
+        setS((s) => ({
+          ...s,
+          history: s.history.map((h) =>
+            h.id === row.id ? { ...h, id: data.id } : h
+          ),
+        }));
+      }
+    }
+  }
+
+  /* ---------- History edit/delete ---------- */
+  function onEditCell(id, patch) {
     setS((s) => ({
       ...s,
       history: s.history.map((r) => (r.id === id ? { ...r, ...patch } : r)),
     }));
-  const deleteRow = (id) =>
+    if (user) {
+      const dbPatch = {};
+      if (patch.date !== undefined) dbPatch.date = patch.date;
+      if (patch.grip !== undefined) dbPatch.grip = patch.grip;
+      if (patch.leftLoad !== undefined) dbPatch.left_load = patch.leftLoad;
+      if (patch.leftDur !== undefined) dbPatch.left_dur = patch.leftDur;
+      if (patch.rightLoad !== undefined) dbPatch.right_load = patch.rightLoad;
+      if (patch.rightDur !== undefined) dbPatch.right_dur = patch.rightDur;
+      if (patch.rest !== undefined) dbPatch.rest = patch.rest;
+      if (patch.notes !== undefined) dbPatch.notes = patch.notes;
+      supabase.from("sessions").update(dbPatch).eq("id", id);
+    }
+  }
+  function onDeleteRow(id) {
+    if (!window.confirm("Delete this record?")) return;
+    const row = S.history.find((r) => r.id === id);
     setS((s) => ({ ...s, history: s.history.filter((r) => r.id !== id) }));
-
-  // trends chart data
-  const trends = useMemo(() => {
-    if (!S.history.length) return [];
-    // simple date groups
-    const byDay = {};
-    for (const r of S.history) {
-      if (!byDay[r.date]) byDay[r.date] = [];
-      byDay[r.date].push(r);
+    if (user && row && String(row.id).length > 10) {
+      supabase.from("sessions").delete().eq("id", id);
     }
-    const rows = Object.keys(byDay)
-      .sort()
-      .map((d) => {
-        const L = byDay[d];
-        const avg = (arr, k) =>
-          arr.length ? arr.reduce((a, x) => a + (Number(x[k]) || 0), 0) / arr.length : 0;
-        const avgDur = (avg(L, "leftDur") + avg(L, "rightDur")) / 2;
-        const avgLoad = (avg(L, "leftLoad") + avg(L, "rightLoad")) / 2;
-        const avgPct = (avg(L, "pctL") + avg(L, "pctR")) / 2;
-        return { day: d, avgDur, avgLoad, avgPct: 100 * avgPct };
-      });
-    return rows;
-  }, [S.history]);
+  }
+  function onClearAll() {
+    if (!window.confirm("Clear ALL history?")) return;
+    setS((s) => ({ ...s, history: [] }));
+  }
 
-  // ------- Model charts -------
-  const fatigueData = useMemo(() => {
-    const out = [];
-    for (let t = 0; t <= S.chartMax; t += 10) {
-      out.push({
-        t,
-        fL: 100 * fAt(t, S.wLeft, S.tau),
-        fR: 100 * fAt(t, S.wRight, S.tau),
-        fast: 100 * (S.wLeft.w1 * Math.exp(-t / S.tau.tau1)),
-        med: 100 * (S.wLeft.w2 * Math.exp(-t / S.tau.tau2)),
-        slow: 100 * (S.wLeft.w3 * Math.exp(-t / S.tau.tau3)),
-      });
+  /* ---------- Model helpers & series ---------- */
+  const setTau = (k, v) =>
+    setS((s) => ({
+      ...s,
+      tau: { ...s.tau, [k]: clamp(Number(v) || 1, 1, 900) },
+    }));
+  const setW = (hand, k, v) =>
+    setS((s) =>
+      hand === "L"
+        ? { ...s, wLeft: { ...s.wLeft, [k]: clamp(Number(v) || 0.1, 0.1, 10) } }
+        : {
+            ...s,
+            wRight: { ...s.wRight, [k]: clamp(Number(v) || 0.1, 0.1, 10) },
+          }
+    );
+  const setModelCfg = (k, v) =>
+    setS((s) => ({ ...s, model: { ...s.model, [k]: Number(v) || 0 } }));
+
+  const ptsL = useMemo(() => historyPoints(S.history, "L"), [S.history]);
+  const ptsR = useMemo(() => historyPoints(S.history, "R"), [S.history]);
+
+  // learned scales for overlay + recommendations
+  const scaleL = useMemo(
+    () => scaleFromHistory(ptsL, S.wLeft, S.tau, S.model.manualScaleL),
+    [ptsL, S.wLeft, S.tau, S.model.manualScaleL]
+  );
+  const scaleR = useMemo(
+    () => scaleFromHistory(ptsR, S.wRight, S.tau, S.model.manualScaleR),
+    [ptsR, S.wRight, S.tau, S.model.manualScaleR]
+  );
+
+  const chartTmax = S.model.maxChartTime || 300;
+
+  // Recovery curve for the Recovery panel
+  const recSeries = useMemo(() => {
+    const arr = [];
+    for (let t = 0; t <= chartTmax; t += 5) {
+      arr.push({ t, recovery: recoveryFrac(t, S.tau) });
     }
-    return out;
-  }, [S.wLeft, S.wRight, S.tau, S.chartMax]);
+    return arr;
+  }, [S.tau, chartTmax]);
 
-  // ---------- UI ----------
+  // History dots for fatigue overlay (y = observed fatigue fraction = L / scale)
+  const histDotsL = useMemo(
+    () =>
+      ptsL.map((p) => ({
+        t: p.t,
+        y: clamp(scaleL > 0 ? p.L / scaleL : 0, 0, 1),
+      })),
+    [ptsL, scaleL]
+  );
+  const histDotsR = useMemo(
+    () =>
+      ptsR.map((p) => ({
+        t: p.t,
+        y: clamp(scaleR > 0 ? p.L / scaleR : 0, 0, 1),
+      })),
+    [ptsR, scaleR]
+  );
+
+  /* ---------- Recommendations ---------- */
+  const targets = S.targets;
+  function recs(hand) {
+    const pts = hand === "L" ? ptsL : ptsR;
+    const w = hand === "L" ? S.wLeft : S.wRight;
+    const manualScale = hand === "L" ? S.model.manualScaleL : S.model.manualScaleR;
+    return {
+      model20: modelLoadForT(targets.power, pts, w, S.tau, manualScale),
+      model60: modelLoadForT(targets.strength, pts, w, S.tau, manualScale),
+      model180: modelLoadForT(targets.endurance, pts, w, S.tau, manualScale),
+      ratio20: ratioLoadForT(targets.power, pts),
+      ratio60: ratioLoadForT(targets.strength, pts),
+      ratio180: ratioLoadForT(targets.endurance, pts),
+    };
+  }
+  const recL = recs("L");
+  const recR = recs("R");
+
+  // Planner state
+  const [planL, setPlanL] = useState({ sets: 5, TUT: 60, rest: 120, cap: 0.15, precise: true });
+  const [planR, setPlanR] = useState({ sets: 5, TUT: 60, rest: 120, cap: 0.15, precise: true });
+
+  const loadsPlanL = useMemo(
+    () =>
+      planSets({
+        TUT: planL.TUT,
+        sets: planL.sets,
+        restSec: planL.rest,
+        capDrop: planL.cap,
+        pts: ptsL,
+        w: S.wLeft,
+        tau: S.tau,
+        manualScale: S.model.manualScaleL,
+        precise: planL.precise,
+      }),
+    [planL, ptsL, S.wLeft, S.tau, S.model.manualScaleL]
+  );
+  const loadsPlanR = useMemo(
+    () =>
+      planSets({
+        TUT: planR.TUT,
+        sets: planR.sets,
+        restSec: planR.rest,
+        capDrop: planR.cap,
+        pts: ptsR,
+        w: S.wRight,
+        tau: S.tau,
+        manualScale: S.model.manualScaleR,
+        precise: planR.precise,
+      }),
+    [planR, ptsR, S.wRight, S.tau, S.model.manualScaleR]
+  );
+
+  /* ====================== UI ====================== */
+
   return (
-    <div style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto", padding: 16 }}>
-      <h2 style={{ marginTop: 0 }}>
-        Finger Training Dosing — Precision Mode (Per Hand)
-      </h2>
-      <div style={{ color: "#666", marginTop: -8, marginBottom: 12 }}>
-        Aim to fail within ±2–3 s. Learn per hand, ratio-control your next load, smooth anchors
-        with EMA, and see your sets on the curve.
+    <div style={{ fontFamily: "ui-sans-serif, system-ui, -apple-system", padding: 16 }}>
+      {/* Auth bar */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ fontSize: 12, opacity: 0.75 }}>
+          {user ? `Signed in as ${user.email}` : "Not signed in (local only)"}
+        </div>
+        <div>
+          {!user ? (
+            <form onSubmit={sendMagicLink} style={{ display: "inline-flex", gap: 8 }}>
+              <input
+                type="email"
+                required
+                placeholder="you@example.com"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                style={{ padding: "6px 8px" }}
+              />
+              <button type="submit">Send Magic Link</button>
+            </form>
+          ) : (
+            <button onClick={signOut}>Sign out</button>
+          )}
+        </div>
       </div>
 
-      {/* tabs */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {[
-          ["recommend", "Recommendations"],
           ["sessions", "Sessions"],
           ["history", "History"],
           ["model", "Model"],
-        ].map(([key, label]) => (
+          ["recs", "Recommendations"],
+        ].map(([k, lbl]) => (
           <button
-            key={key}
-            onClick={() => setTab(key)}
+            key={k}
+            onClick={() => setTab(k)}
             style={{
-              padding: "6px 10px",
+              padding: "8px 12px",
               borderRadius: 8,
               border: "1px solid #ddd",
-              background: S.tab === key ? "#111" : "#f7f7f7",
-              color: S.tab === key ? "#fff" : "#111",
-              cursor: "pointer",
+              background: tab === k ? "#111" : "#fff",
+              color: tab === k ? "#fff" : "#111",
             }}
           >
-            {label}
+            {lbl}
           </button>
         ))}
       </div>
 
-      {/* ---------- RECOMMENDATIONS ---------- */}
-      {S.tab === "recommend" && (
-        <>
-          {/* Precision settings + anchors */}
-          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 12 }}>
-            <div className="card">
-              <h3>Precision Settings</h3>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-                <div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Max Left</div>
-                  <input
-                    type="number"
-                    value={S.maxLeft}
-                    onChange={(e) =>
-                      setS((s) => ({ ...s, maxLeft: Math.max(1, Number(e.target.value) || 1) }))
-                    }
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Max Right</div>
-                  <input
-                    type="number"
-                    value={S.maxRight}
-                    onChange={(e) =>
-                      setS((s) => ({ ...s, maxRight: Math.max(1, Number(e.target.value) || 1) }))
-                    }
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Chart max time (s)</div>
-                  <input
-                    type="number"
-                    value={S.chartMax}
-                    onChange={(e) =>
-                      setS((s) => ({ ...s, chartMax: Math.max(60, Number(e.target.value) || 300) }))
-                    }
-                  />
-                </div>
-              </div>
-            </div>
+      {/* Sessions — vertical layout like your screenshot */}
+      {tab === "sessions" && (
+        <div
+          style={{
+            border: "1px solid #eee",
+            borderRadius: 12,
+            padding: 16,
+            maxWidth: 680,
+          }}
+        >
+          <h3 style={{ marginTop: 0 }}>Log a Session</h3>
 
-            <div className="card">
-              <h3>Anchor TUTs</h3>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-                <label>
-                  Power TUT (s)
-                  <input
-                    type="number"
-                    value={S.targetPower}
-                    onChange={(e) =>
-                      setS((s) => ({ ...s, targetPower: Math.max(1, Number(e.target.value) || 1) }))
-                    }
-                  />
-                </label>
-                <label>
-                  Strength TUT (s)
-                  <input
-                    type="number"
-                    value={S.targetStrength}
-                    onChange={(e) =>
-                      setS((s) => ({
-                        ...s,
-                        targetStrength: Math.max(1, Number(e.target.value) || 1),
-                      }))
-                    }
-                  />
-                </label>
-                <label>
-                  Endurance TUT (s)
-                  <input
-                    type="number"
-                    value={S.targetEndurance}
-                    onChange={(e) =>
-                      setS((s) => ({
-                        ...s,
-                        targetEndurance: Math.max(1, Number(e.target.value) || 1),
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
-                These TUTs are used for the model-based loads and curves.
-              </div>
-            </div>
+          <div style={{ marginBottom: 10 }}>
+            <label>Date</label>
+            <input
+              type="date"
+              value={form.date}
+              onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+              style={{ width: "100%", padding: 10 }}
+            />
           </div>
 
-          {/* Model-based loads */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-            <div className="card">
-              <h3>Model-Based Loads — LEFT</h3>
-              <div className="grid3">
-                <Pill label="Power (20s)" value={round1(modelLoadsLeft.power)} />
-                <Pill label="Strength (60s)" value={round1(modelLoadsLeft.strength)} />
-                <Pill label="Endurance (180s)" value={round1(modelLoadsLeft.endurance)} />
-              </div>
-            </div>
-            <div className="card">
-              <h3>Model-Based Loads — RIGHT</h3>
-              <div className="grid3">
-                <Pill label="Power (20s)" value={round1(modelLoadsRight.power)} />
-                <Pill label="Strength (60s)" value={round1(modelLoadsRight.strength)} />
-                <Pill label="Endurance (180s)" value={round1(modelLoadsRight.endurance)} />
-              </div>
-            </div>
+          <div style={{ marginBottom: 10 }}>
+            <label>Grip / Exercise</label>
+            <input
+              type="text"
+              placeholder="e.g., Half crimp"
+              value={form.grip}
+              onChange={(e) => setForm((f) => ({ ...f, grip: e.target.value }))}
+              style={{ width: "100%", padding: 10 }}
+            />
           </div>
 
-          {/* NEW: Reps Planner */}
-          <div className="card" style={{ marginTop: 12 }}>
-            <h3>Reps Planner (3-exp fatigue + 3-exp recovery)</h3>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(6, minmax(130px,1fr))",
-                gap: 10,
-              }}
-            >
-              <label>
-                Sets
-                <input
-                  type="number"
-                  min={1}
-                  value={S.plan.sets}
-                  onChange={(e) => setPlan({ sets: Math.max(1, Number(e.target.value) || 1) })}
-                />
-              </label>
-              <label>
-                Reps / Set
-                <input
-                  type="number"
-                  min={1}
-                  value={S.plan.repsPerSet}
-                  onChange={(e) =>
-                    setPlan({ repsPerSet: Math.max(1, Number(e.target.value) || 1) })
-                  }
-                />
-              </label>
-              <label>
-                TUT (s)
-                <input
-                  type="number"
-                  min={1}
-                  value={S.plan.T}
-                  onChange={(e) => setPlan({ T: Math.max(1, Number(e.target.value) || 1) })}
-                />
-              </label>
-              <label>
-                Rest between reps (s)
-                <input
-                  type="number"
-                  min={0}
-                  value={S.plan.restRep}
-                  onChange={(e) => setPlan({ restRep: Math.max(0, Number(e.target.value) || 0) })}
-                />
-              </label>
-              <label>
-                Rest between sets (s)
-                <input
-                  type="number"
-                  min={0}
-                  value={S.plan.restSet}
-                  onChange={(e) => setPlan({ restSet: Math.max(0, Number(e.target.value) || 0) })}
-                />
-              </label>
-              <label>
-                Anchor
-                <select
-                  value={S.plan.anchor}
-                  onChange={(e) => setPlan({ anchor: e.target.value })}
-                >
-                  <option value="planEnd">Fail at end of plan</option>
-                  <option value="endOfEachSet">Fail at end of each set</option>
-                </select>
-              </label>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+              marginBottom: 10,
+            }}
+          >
+            <div>
+              <label>Left Load (lb)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={form.leftLoad}
+                onChange={(e) => setForm((f) => ({ ...f, leftLoad: e.target.value }))}
+                style={{ width: "100%", padding: 10 }}
+              />
+            </div>
+            <div>
+              <label>Right Load (lb)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={form.rightLoad}
+                onChange={(e) => setForm((f) => ({ ...f, rightLoad: e.target.value }))}
+                style={{ width: "100%", padding: 10 }}
+              />
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, minmax(220px,1fr))",
-                gap: 12,
-                marginTop: 10,
-              }}
-            >
-              <BigPill title="Recommended Left Load" value={round1(recLeft)} />
-              <BigPill title="Recommended Right Load" value={round1(recRight)} />
+            <div>
+              <label>Left Duration (s)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.leftDur}
+                onChange={(e) => setForm((f) => ({ ...f, leftDur: e.target.value }))}
+                style={{ width: "100%", padding: 10 }}
+              />
             </div>
-
-            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 8 }}>
-              Capacity before reps (Left):{" "}
-              {planPreviewLeft.map((c, i) => (i ? ", " : "") + pct(c))}
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ---------- SESSIONS ---------- */}
-      {S.tab === "sessions" && (
-        <div className="grid2">
-          <div className="card">
-            <h3>Log a Session</h3>
-            <div className="form">
-              <label>
-                Date
-                <input
-                  type="date"
-                  value={session.date}
-                  onChange={(e) => setSession({ ...session, date: e.target.value })}
-                />
-              </label>
-              <label>
-                Grip / Exercise
-                <input
-                  value={session.grip}
-                  onChange={(e) => setSession({ ...session, grip: e.target.value })}
-                />
-              </label>
-              <div className="grid2">
-                <label>
-                  Left Load
-                  <input
-                    type="number"
-                    value={session.leftLoad}
-                    onChange={(e) =>
-                      setSession({ ...session, leftLoad: Number(e.target.value) || 0 })
-                    }
-                  />
-                </label>
-                <label>
-                  Right Load
-                  <input
-                    type="number"
-                    value={session.rightLoad}
-                    onChange={(e) =>
-                      setSession({ ...session, rightLoad: Number(e.target.value) || 0 })
-                    }
-                  />
-                </label>
-              </div>
-              <div className="grid2">
-                <label>
-                  Left Duration (s)
-                  <input
-                    type="number"
-                    value={session.leftDur}
-                    onChange={(e) =>
-                      setSession({ ...session, leftDur: Number(e.target.value) || 0 })
-                    }
-                  />
-                </label>
-                <label>
-                  Right Duration (s)
-                  <input
-                    type="number"
-                    value={session.rightDur}
-                    onChange={(e) =>
-                      setSession({ ...session, rightDur: Number(e.target.value) || 0 })
-                    }
-                  />
-                </label>
-              </div>
-              <label>
-                Rest (s)
-                <input
-                  type="number"
-                  value={session.rest}
-                  onChange={(e) => setSession({ ...session, rest: Number(e.target.value) || 0 })}
-                />
-              </label>
-              <label>
-                Notes
-                <textarea
-                  rows={3}
-                  value={session.notes}
-                  onChange={(e) => setSession({ ...session, notes: e.target.value })}
-                />
-              </label>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={addSession}>Add Session</button>
-              </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <h3>Today’s Modeled Values</h3>
-            <div className="grid3">
-              <Pill label="%MVC Left @ 20s" value={pct(f20L)} />
-              <Pill label="%MVC Right @ 20s" value={pct(f20R)} />
-              <Pill
-                label={`Recovery after ${S.targetEndurance}s`}
-                value={`Left ${pct(Rof(S.targetEndurance, S.wLeft, S.rec))} · Right ${pct(
-                  Rof(S.targetEndurance, S.wRight, S.rec)
-                )}`}
+            <div>
+              <label>Right Duration (s)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.rightDur}
+                onChange={(e) => setForm((f) => ({ ...f, rightDur: e.target.value }))}
+                style={{ width: "100%", padding: 10 }}
               />
             </div>
           </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <label>Rest (s)</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.rest}
+              onChange={(e) => setForm((f) => ({ ...f, rest: e.target.value }))}
+              style={{ width: "100%", padding: 10 }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label>Notes</label>
+            <textarea
+              rows={3}
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              style={{ width: "100%", padding: 10, resize: "vertical" }}
+            />
+          </div>
+
+          <button disabled={!canAdd} onClick={onAddSession} style={{ padding: "10px 14px" }}>
+            Add Session
+          </button>
         </div>
       )}
 
-      {/* ---------- HISTORY ---------- */}
-      {S.tab === "history" && (
-        <>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+      {/* History */}
+      {tab === "history" && (
+        <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
             <button
-              onClick={() => {
-                if (window.confirm("Clear ALL history? This cannot be undone.")) {
-                  setS((s) => ({ ...s, history: [] }));
-                }
-              }}
+              onClick={onClearAll}
               style={{ background: "#fff3f3", borderColor: "#f2bcbc", color: "#b00000" }}
             >
               Clear All
             </button>
+            <button onClick={() => downloadCSV(S.history)} disabled={!S.history.length}>
+              Download CSV
+            </button>
           </div>
 
-          <div className="card">
-            <h3>Session History (most recent first)</h3>
-            <div className="table">
-              <div className="thead">
-                <div>Actions</div>
-                <div>Date</div>
-                <div>Grip</div>
-                <div>Left Load</div>
-                <div>Right Load</div>
-                <div>Left Dur (s)</div>
-                <div>Right Dur (s)</div>
-                <div>% L</div>
-                <div>% R</div>
-                <div>Recov L</div>
-                <div>Recov R</div>
-                <div>Notes</div>
-              </div>
-              {S.history.map((r) => (
-                <div className="trow" key={r.id}>
-                  <div>
-                    <button
-                      onClick={() =>
-                        window.confirm("Delete this row?") && deleteRow(r.id)
-                      }
-                      style={{ background: "#fff3f3", borderColor: "#f2bcbc", color: "#b00000" }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                  <div>{r.date}</div>
-                  <div>
-                    <input
-                      value={r.grip}
-                      onChange={(e) => updateRow(r.id, { grip: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="number"
-                      value={r.leftLoad}
-                      onChange={(e) => updateRow(r.id, { leftLoad: Number(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="number"
-                      value={r.rightLoad}
-                      onChange={(e) => updateRow(r.id, { rightLoad: Number(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="number"
-                      value={r.leftDur}
-                      onChange={(e) => updateRow(r.id, { leftDur: Number(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="number"
-                      value={r.rightDur}
-                      onChange={(e) => updateRow(r.id, { rightDur: Number(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div>{pct(r.pctL)}</div>
-                  <div>{pct(r.pctR)}</div>
-                  <div>{pct(r.recL)}</div>
-                  <div>{pct(r.recR)}</div>
-                  <div>
-                    <input
-                      value={r.notes}
-                      onChange={(e) => updateRow(r.id, { notes: e.target.value })}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#f7f7f7" }}>
+                  {["Date", "Grip", "L Load", "L Dur", "R Load", "R Dur", "Rest", "Notes", ""].map(
+                    (h) => (
+                      <th
+                        key={h}
+                        style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #eee" }}
+                      >
+                        {h}
+                      </th>
+                    )
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {S.history.map((r) => (
+                  <tr key={r.id}>
+                    <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
+                      <input
+                        type="date"
+                        value={r.date}
+                        onChange={(e) => onEditCell(r.id, { date: e.target.value })}
+                      />
+                    </td>
+                    <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
+                      <input
+                        type="text"
+                        value={r.grip}
+                        onChange={(e) => onEditCell(r.id, { grip: e.target.value })}
+                      />
+                    </td>
+                    <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
+                      <input
+                        type="number"
+                        value={r.leftLoad}
+                        onChange={(e) =>
+                          onEditCell(r.id, { leftLoad: Number(e.target.value) || 0 })
+                        }
+                        style={{ width: 90 }}
+                      />
+                    </td>
+                    <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
+                      <input
+                        type="number"
+                        value={r.leftDur}
+                        onChange={(e) =>
+                          onEditCell(r.id, { leftDur: Number(e.target.value) || 0 })
+                        }
+                        style={{ width: 90 }}
+                      />
+                    </td>
+                    <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
+                      <input
+                        type="number"
+                        value={r.rightLoad}
+                        onChange={(e) =>
+                          onEditCell(r.id, { rightLoad: Number(e.target.value) || 0 })
+                        }
+                        style={{ width: 90 }}
+                      />
+                    </td>
+                    <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
+                      <input
+                        type="number"
+                        value={r.rightDur}
+                        onChange={(e) =>
+                          onEditCell(r.id, { rightDur: Number(e.target.value) || 0 })
+                        }
+                        style={{ width: 90 }}
+                      />
+                    </td>
+                    <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
+                      <input
+                        type="number"
+                        value={r.rest}
+                        onChange={(e) => onEditCell(r.id, { rest: Number(e.target.value) || 0 })}
+                        style={{ width: 90 }}
+                      />
+                    </td>
+                    <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
+                      <input
+                        type="text"
+                        value={r.notes}
+                        onChange={(e) => onEditCell(r.id, { notes: e.target.value })}
+                        style={{ width: "100%" }}
+                      />
+                    </td>
+                    <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
+                      <button onClick={() => onDeleteRow(r.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+                {!S.history.length && (
+                  <tr>
+                    <td colSpan={9} style={{ padding: 12, opacity: 0.6 }}>
+                      No history yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
 
           {/* Trends */}
-          <div className="card" style={{ marginTop: 12 }}>
-            <h3>Trends (averages)</h3>
-            <div style={{ width: "100%", height: 260 }}>
-              <ResponsiveContainer>
-                <LineChart data={trends} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="day" />
-                  <YAxis yAxisId="left" />
-                  <YAxis yAxisId="right" orientation="right" domain={[0, 100]} />
-                  <Tooltip />
-                  <Legend />
-                  <Line yAxisId="left" type="monotone" dataKey="avgLoad" name="Avg Load (L/R)" dot={false} />
-                  <Line yAxisId="left" type="monotone" dataKey="avgDur" name="Avg Duration (s)" dot={false} />
-                  <Line yAxisId="right" type="monotone" dataKey="avgPct" name="Modeled %MVC (avg)" dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </>
+          <Trends history={S.history} />
+        </div>
       )}
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-  <button
-    onClick={() => {
-      if (window.confirm("Clear ALL history? This cannot be undone.")) {
-        setS((s) => ({ ...s, history: [] }));
-      }
-    }}
-    style={{ background: "#fff3f3", borderColor: "#f2bcbc", color: "#b00000" }}
-  >
-    Clear All
-  </button>
 
-  <button
-    onClick={() => downloadCSV(S.history)}
-    disabled={!S.history.length}
-    title={S.history.length ? "Download all history as CSV" : "No history yet"}
-  >
-    Download CSV
-  </button>
-</div>
-
-      {/* ---------- MODEL ---------- */}
-      {S.tab === "model" && (
-        <div className="grid2">
-          <div className="card">
-            <h3>Parameters</h3>
-
-            <label>
-              Max Left
-              <input
-                type="number"
-                value={S.maxLeft}
-                onChange={(e) => setS((s) => ({ ...s, maxLeft: Number(e.target.value) || 0 }))}
-              />
-            </label>
-            <label>
-              Max Right
-              <input
-                type="number"
-                value={S.maxRight}
-                onChange={(e) => setS((s) => ({ ...s, maxRight: Number(e.target.value) || 0 }))}
-              />
-            </label>
-
-            <h4>Left Weights</h4>
-            {["w1", "w2", "w3"].map((k) => (
-              <SliderRow
-                key={`L-${k}`}
-                label={`${k}`}
-                value={S.wLeft[k]}
-                min={0}
-                max={1}
-                step={0.01}
-                onChange={(v) =>
-                  setS((s) => ({ ...s, wLeft: { ...s.wLeft, [k]: clamp(v, 0, 1) } }))
-                }
-              />
-            ))}
-
-            <h4>Right Weights</h4>
-            {["w1", "w2", "w3"].map((k) => (
-              <SliderRow
-                key={`R-${k}`}
-                label={`${k}`}
-                value={S.wRight[k]}
-                min={0}
-                max={1}
-                step={0.01}
-                onChange={(v) =>
-                  setS((s) => ({ ...s, wRight: { ...s.wRight, [k]: clamp(v, 0, 1) } }))
-                }
-              />
-            ))}
-
-            <h4>Fatigue τ (s)</h4>
-            {[
-              ["tau1", 1, 60],
-              ["tau2", 10, 600],
-              ["tau3", 30, 1800],
-            ].map(([k, lo, hi]) => (
+      {/* Model */}
+      {tab === "model" && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))",
+            gap: 16,
+          }}
+        >
+          <Panel title="Taus (s)">
+            {["t1", "t2", "t3"].map((k) => (
               <SliderRow
                 key={k}
                 label={k}
                 value={S.tau[k]}
-                min={lo}
-                max={hi}
+                min={5}
+                max={900}
                 step={1}
-                onChange={(v) => setS((s) => ({ ...s, tau: { ...s.tau, [k]: Math.max(1, v) } }))}
+                onChange={(v) => setTau(k, v)}
+                unit="s"
               />
             ))}
+            <SliderRow
+              label="Chart X-max"
+              value={S.model.maxChartTime}
+              min={120}
+              max={600}
+              step={10}
+              onChange={(v) => setModelCfg("maxChartTime", v)}
+              unit="s"
+            />
+          </Panel>
 
-            <h4>Recovery τ (s)</h4>
-            {[
-              ["r1", 10, 300],
-              ["r2", 60, 3600],
-              ["r3", 300, 7200],
-            ].map(([k, lo, hi]) => (
+          <Panel title="Left Weights & Scale">
+            {["w1", "w2", "w3"].map((k) => (
               <SliderRow
                 key={k}
                 label={k}
-                value={S.rec[k]}
-                min={lo}
-                max={hi}
-                step={1}
-                onChange={(v) => setS((s) => ({ ...s, rec: { ...s.rec, [k]: Math.max(1, v) } }))}
+                value={S.wLeft[k]}
+                min={0.1}
+                max={10}
+                step={0.1}
+                onChange={(v) => setW("L", k, v)}
               />
             ))}
+            <SliderRow
+              label="Manual Scale (0=auto)"
+              value={S.model.manualScaleL}
+              min={0}
+              max={1000}
+              step={1}
+              onChange={(v) => setModelCfg("manualScaleL", v)}
+            />
+          </Panel>
 
-            <label>
-              Chart max time (s)
-              <input
-                type="number"
-                value={S.chartMax}
-                onChange={(e) =>
-                  setS((s) => ({ ...s, chartMax: Math.max(60, Number(e.target.value) || 300) }))
-                }
+          <Panel title="Right Weights & Scale">
+            {["w1", "w2", "w3"].map((k) => (
+              <SliderRow
+                key={k}
+                label={k}
+                value={S.wRight[k]}
+                min={0.1}
+                max={10}
+                step={0.1}
+                onChange={(v) => setW("R", k, v)}
               />
-            </label>
-          </div>
+            ))}
+            <SliderRow
+              label="Manual Scale (0=auto)"
+              value={S.model.manualScaleR}
+              min={0}
+              max={1000}
+              step={1}
+              onChange={(v) => setModelCfg("manualScaleR", v)}
+            />
+          </Panel>
 
-          <div className="card">
-            <h3>Fatigue Curve f(t) with Sets</h3>
-            <div style={{ width: "100%", height: 320 }}>
-              <ResponsiveContainer>
-                <LineChart data={fatigueData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
+          {/* Fatigue (Left vs Right) with history overlay */}
+          <Panel title="Fatigue Curve f(t) + History">
+            <div style={{ height: 300 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart
+                  data={Array.from(
+                    { length: Math.floor(chartTmax / 5) + 1 },
+                    (_, i) => ({ t: i * 5 })
+                  )}
+                >
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
                     type="number"
                     dataKey="t"
-                    domain={[0, S.chartMax]}
+                    domain={[0, chartTmax]}
                     label={{ value: "Time (s)", position: "insideBottomRight", offset: -5 }}
                   />
-                  <YAxis domain={[0, 100]} />
+                  <YAxis domain={[0, 1]} />
                   <Tooltip />
                   <Legend />
-                  <Line type="monotone" dataKey="fL" name="f_L(t)" dot={false} />
-                  <Line type="monotone" dataKey="fR" name="f_R(t)" dot={false} />
-                  <Line type="monotone" dataKey="fast" name="fast (τ1)" dot={false} strokeDasharray="5 5" />
-                  <Line type="monotone" dataKey="med" name="med (τ2)" dot={false} strokeDasharray="5 5" />
-                  <Line type="monotone" dataKey="slow" name="slow (τ3)" dot={false} strokeDasharray="5 5" />
-                  <ReferenceLine x={S.targetPower} stroke="#bbb" strokeDasharray="3 3" />
-                  <ReferenceLine x={S.targetStrength} stroke="#bbb" strokeDasharray="3 3" />
-                  <ReferenceLine x={S.targetEndurance} stroke="#bbb" strokeDasharray="3 3" />
+                  <Line
+                    dataKey={(d) => fAt(d.t, S.wLeft, S.tau)}
+                    name="Left f(t)"
+                    dot={false}
+                    type="monotone"
+                  />
+                  <Line
+                    dataKey={(d) => fAt(d.t, S.wRight, S.tau)}
+                    name="Right f(t)"
+                    dot={false}
+                    type="monotone"
+                  />
+                  <Scatter data={histDotsL} name="Left sets" fill="#1f77b4" />
+                  <Scatter data={histDotsR} name="Right sets" fill="#ff7f0e" />
+                  <ReferenceLine y={0.5} stroke="#aaa" strokeDasharray="4 4" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <small style={{ opacity: 0.7 }}>
+              Dots are your sets mapped to fatigue fraction = Load / learned-scale. As you add data,
+              dots should hover around the curves.
+            </small>
+          </Panel>
+
+          {/* Recovery */}
+          <Panel title="Recovery Fraction">
+            <div style={{ height: 260 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={recSeries}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="t"
+                    type="number"
+                    domain={[0, chartTmax]}
+                    label={{ value: "Rest (s)", position: "insideBottomRight", offset: -5 }}
+                  />
+                  <YAxis domain={[0, 1]} />
+                  <Tooltip />
+                  <Legend />
+                  <Line dataKey="recovery" name="Recovery" dot={false} type="monotone" />
                 </LineChart>
               </ResponsiveContainer>
             </div>
-
-            {/* Recovery preview (Left) */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-              <div>
-                <h4>Recovery vs Rest — LEFT</h4>
-                <div style={{ width: "100%", height: 200 }}>
-                  <ResponsiveContainer>
-                    <AreaChart data={Array.from({ length: 19 }).map((_, i) => {
-                      const rest = i * 100;
-                      return { rest, rec: 100 * Rof(rest, S.wLeft, S.rec) };
-                    })}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="rest" />
-                      <YAxis domain={[0, 100]} />
-                      <Tooltip />
-                      <Area dataKey="rec" name="Recovery (%)" />
-                      <ReferenceLine x={S.targetEndurance} stroke="#bbb" strokeDasharray="3 3" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-              <div>
-                <h4>Recovery vs Rest — RIGHT</h4>
-                <div style={{ width: "100%", height: 200 }}>
-                  <ResponsiveContainer>
-                    <AreaChart data={Array.from({ length: 19 }).map((_, i) => {
-                      const rest = i * 100;
-                      return { rest, rec: 100 * Rof(rest, S.wRight, S.rec) };
-                    })}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="rest" />
-                      <YAxis domain={[0, 100]} />
-                      <Tooltip />
-                      <Area dataKey="rec" name="Recovery (%)" />
-                      <ReferenceLine x={S.targetEndurance} stroke="#bbb" strokeDasharray="3 3" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-          </div>
+          </Panel>
         </div>
       )}
 
-      {/* --------- tiny styles --------- */}
-      <style>{`
-        .grid2 { display:grid; grid-template-columns: 1.1fr 1fr; gap:12px; }
-        .grid3 { display:grid; grid-template-columns: repeat(3, minmax(120px,1fr)); gap:8px; }
-        .card { border:1px solid #e6e6e6; border-radius:12px; padding:12px; background:#fff; }
-        .pill { border:1px solid #ececec; border-radius:10px; padding:10px; background:#fafafa; }
-        .table { display:grid; gap:6px; }
-        .thead, .trow {
-          display:grid; grid-template-columns: 90px 105px 160px 90px 90px 90px 90px 80px 80px 90px 90px 1fr;
-          gap:6px; align-items:center;
-        }
-        .thead { font-weight:600; color:#333; }
-        input, select, textarea, button {
-          width:100%; padding:8px; border-radius:8px; border:1px solid #ddd; background:#fff;
-        }
-        button { cursor:pointer; }
-        h3 { margin-top:0; }
-        h4 { margin-bottom:6px; }
-      `}</style>
+      {/* Recommendations */}
+      {tab === "recs" && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))",
+            gap: 16,
+          }}
+        >
+          <Panel title="Left — Model vs Ratio">
+            <DenseRecs label="Power (20s)" m={recL.model20} r={recL.ratio20} />
+            <DenseRecs label="Strength (60s)" m={recL.model60} r={recL.ratio60} />
+            <DenseRecs label="Endurance (180s)" m={recL.model180} r={recL.ratio180} />
+            <small style={{ opacity: 0.75 }}>
+              Model: L(T) = scale · f(T) (learned from your sets). As T↑, f(T)↓ so load decreases.
+              Ratio interpolates nearby points. Pick the lower if unsure.
+            </small>
+          </Panel>
+
+          <Panel title="Right — Model vs Ratio">
+            <DenseRecs label="Power (20s)" m={recR.model20} r={recR.ratio20} />
+            <DenseRecs label="Strength (60s)" m={recR.model60} r={recR.ratio60} />
+            <DenseRecs label="Endurance (180s)" m={recR.model180} r={recR.ratio180} />
+          </Panel>
+
+          <Panel title="Planner — Left">
+            <PlannerControls plan={planL} setPlan={setPlanL} />
+            <PlannedList loads={loadsPlanL} />
+          </Panel>
+
+          <Panel title="Planner — Right">
+            <PlannerControls plan={planR} setPlan={setPlanR} />
+            <PlannedList loads={loadsPlanR} />
+          </Panel>
+        </div>
+      )}
     </div>
   );
 }
 
-// ---------- small UI pieces ----------
-function Pill({ label, value }) {
+/* ====================== Subcomponents ====================== */
+
+function Panel({ title, children }) {
   return (
-    <div className="pill">
-      <div style={{ fontSize: 12, opacity: 0.7 }}>{label}</div>
-      <div style={{ fontWeight: 700 }}>{value}</div>
+    <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12 }}>
+      <h3 style={{ marginTop: 0 }}>{title}</h3>
+      {children}
     </div>
   );
 }
-function BigPill({ title, value }) {
+function SliderRow({ label, value, onChange, min, max, step = 1, unit = "" }) {
   return (
-    <div className="pill" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-      <div style={{ fontSize: 12, opacity: 0.7 }}>{title}</div>
-      <div style={{ fontSize: 26, fontWeight: 800 }}>{value}</div>
-    </div>
-  );
-}
-function SliderRow({ label, value, min, max, step, onChange }) {
-  return (
-    <div style={{ marginBottom: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, opacity: 0.8 }}>
-        <span>{label}</span>
-        <span>{round1(value)}</span>
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <label style={{ fontSize: 12, opacity: 0.7 }}>{label}</label>
+        <div style={{ fontFeatureSettings: "tnum" }}>
+          {Number(value).toFixed(step < 1 ? 1 : 0)}
+          {unit}
+        </div>
       </div>
       <input
         type="range"
@@ -1036,10 +1029,118 @@ function SliderRow({ label, value, min, max, step, onChange }) {
         max={max}
         step={step}
         value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ width: "100%" }}
       />
     </div>
   );
 }
+function DenseRecs({ label, m, r }) {
+  const mm = Number(m || 0).toFixed(1);
+  const rr = Number(r || 0).toFixed(1);
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1.2fr 1fr 1fr",
+        gap: 8,
+        marginBottom: 6,
+        alignItems: "center",
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>{label}</div>
+      <div>Model: <b>{mm}</b></div>
+      <div>Ratio: <b>{rr}</b></div>
+    </div>
+  );
+}
+function PlannerControls({ plan, setPlan }) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(3,1fr)",
+        gap: 8,
+        marginBottom: 8,
+      }}
+    >
+      <Num label="Sets" v={plan.sets}
+        set={(v) => setPlan((p) => ({ ...p, sets: clamp(Number(v) || 1, 1, 20) }))} />
+      <Num label="TUT (s)" v={plan.TUT}
+        set={(v) => setPlan((p) => ({ ...p, TUT: clamp(Number(v) || 5, 5, 300) }))} />
+      <Num label="Rest (s)" v={plan.rest}
+        set={(v) => setPlan((p) => ({ ...p, rest: clamp(Number(v) || 0, 0, 900) }))} />
 
-export default App;
+      <div style={{ gridColumn: "1/-1" }}>
+        <label style={{ fontSize: 12, opacity: 0.7 }}>Cap later-set increase (fraction)</label>
+        <input
+          type="number" step="0.01" min="0" max="1" value={plan.cap}
+          onChange={(e) => setPlan((p) => ({ ...p, cap: clamp(Number(e.target.value) || 0, 0, 1) }))}
+          style={{ width: "100%", padding: 8 }}
+        />
+      </div>
+
+      <div style={{ gridColumn: "1/-1", display: "flex", alignItems: "center", gap: 8 }}>
+        <input id="precise" type="checkbox" checked={!!plan.precise}
+          onChange={(e) => setPlan((p) => ({ ...p, precise: e.target.checked }))} />
+        <label htmlFor="precise"><b>Precise TUT mode</b> (each set ends near target TUT)</label>
+      </div>
+    </div>
+  );
+}
+function PlannedList({ loads }) {
+  if (!loads?.length)
+    return <div style={{ opacity: 0.6 }}>No plan yet — add some history first.</div>;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8 }}>
+      {loads.map((L, i) => (
+        <div key={i} style={{ border: "1px solid #eee", borderRadius: 8, padding: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Set {i + 1}</div>
+          <div style={{ fontWeight: 700 }}>{L.toFixed(1)} lb</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function Num({ label, v, set }) {
+  return (
+    <div>
+      <label style={{ fontSize: 12, opacity: 0.7 }}>{label}</label>
+      <input type="number" value={v} onChange={(e) => set(e.target.value)} style={{ width: "100%", padding: 8 }} />
+    </div>
+  );
+}
+function Trends({ history }) {
+  const series = useMemo(() => {
+    const byDate = new Map();
+    for (const r of history) {
+      const d = r.date || "";
+      const v = byDate.get(d) || { n: 0, lsum: 0, rsum: 0 };
+      if (Number(r.leftLoad) > 0) v.lsum += Number(r.leftLoad);
+      if (Number(r.rightLoad) > 0) v.rsum += Number(r.rightLoad);
+      v.n++;
+      byDate.set(d, v);
+    }
+    const out = [];
+    for (const [d, v] of byDate.entries())
+      out.push({ date: d, left: v.n ? v.lsum / v.n : 0, right: v.n ? v.rsum / v.n : 0 });
+    out.sort((a, b) => (a.date > b.date ? 1 : -1));
+    return out;
+  }, [history]);
+
+  return (
+    <div style={{ height: 280, marginTop: 16 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={series}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="date" />
+          <YAxis />
+          <Tooltip />
+          <Legend />
+          <Line type="monotone" dataKey="left" name="Left Avg Load" dot={false} />
+          <Line type="monotone" dataKey="right" name="Right Avg Load" dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
