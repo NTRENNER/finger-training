@@ -950,10 +950,7 @@ export default function App() {
             <div style={{ height: 300 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
-                  data={Array.from(
-                    { length: Math.floor(chartTmax / 5) + 1 },
-                    (_, i) => ({ t: i * 5 })
-                  )}
+                  data={Array.from({ length: Math.floor(chartTmax / 5) + 1 }, (_, i) => ({ t: i * 5 }))}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
@@ -962,24 +959,53 @@ export default function App() {
                     domain={[0, chartTmax]}
                     label={{ value: "Time (s)", position: "insideBottomRight", offset: -5 }}
                   />
-                  <YAxis domain={[0, 1]} />
+
+                  {/* Two Y axes: one for curves, one (hidden) for dots */}
+                  <YAxis yAxisId="curve" domain={[0, 1]} />
+                  <YAxis yAxisId="dots" type="number" domain={[0, 1]} hide />
+
                   <Tooltip />
                   <Legend />
+
+                  {/* Curves on 'curve' axis */}
                   <Line
+                    yAxisId="curve"
                     dataKey={(d) => fAt(d.t, S.wLeft, S.tau)}
                     name="Left f(t)"
                     dot={false}
                     type="monotone"
                   />
                   <Line
+                    yAxisId="curve"
                     dataKey={(d) => fAt(d.t, S.wRight, S.tau)}
                     name="Right f(t)"
                     dot={false}
                     type="monotone"
                   />
-                  <Scatter data={histDotsL} name="Left sets" fill="#1f77b4" shape="circle" r={3} />
-                  <Scatter data={histDotsR} name="Right sets" fill="#ff7f0e" shape="circle" r={3} />
-                  <ReferenceLine y={0.5} stroke="#aaa" strokeDasharray="4 4" />
+
+                  {/* Dots on 'dots' axis (reads {t,y}) */}
+                  <Scatter
+                    yAxisId="dots"
+                    data={histDotsL}
+                    dataKey="y"
+                    name="Left sets"
+                    fill="#1f77b4"
+                    shape="circle"
+                    r={3}
+                    isAnimationActive={false}
+                  />
+                  <Scatter
+                    yAxisId="dots"
+                    data={histDotsR}
+                    dataKey="y"
+                    name="Right sets"
+                    fill="#ff7f0e"
+                    shape="circle"
+                    r={3}
+                    isAnimationActive={false}
+                  />
+
+                  <ReferenceLine y={0.5} yAxisId="curve" stroke="#aaa" strokeDasharray="4 4" />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
