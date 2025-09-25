@@ -527,7 +527,7 @@ export default function App() {
   const [planR, setPlanR] = useState({
     sets: 1,
     TUT: 0,
-    rest: 0,
+    rest: 120,
     cap: 0.15,
     precise: true,
     anchor: "min",
@@ -977,8 +977,8 @@ export default function App() {
                     dot={false}
                     type="monotone"
                   />
-                  <Scatter data={histDotsL} name="Left sets" fill="#1f77b4" />
-                  <Scatter data={histDotsR} name="Right sets" fill="#ff7f0e" />
+                  <Scatter data={histDotsL} name="Left sets" fill="#1f77b4" shape="circle" r={3} />
+                  <Scatter data={histDotsR} name="Right sets" fill="#ff7f0e" shape="circle" r={3} />
                   <ReferenceLine y={0.5} stroke="#aaa" strokeDasharray="4 4" />
                 </ComposedChart>
               </ResponsiveContainer>
