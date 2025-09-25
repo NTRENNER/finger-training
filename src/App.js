@@ -1011,7 +1011,7 @@ const histDotsR = useMemo(
                     stroke="#ff7f0e"
                     strokeWidth={1.5}
                     fillOpacity={0.8}
-                    shape="square"
+                    shape="circle"
                     r={4}
                     isAnimationActive={false}
                   />
