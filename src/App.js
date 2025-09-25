@@ -480,22 +480,27 @@ export default function App() {
   }, [S.tau, chartTmax]);
 
   // History dots for fatigue overlay (y = observed fatigue fraction = L / learned-scale)
-  const histDotsL = useMemo(
-    () =>
-      ptsL.map((p) => ({
-        t: p.t,
-        y: clamp(scaleL > 0 ? p.L / scaleL : 0, 0, 1),
-      })),
-    [ptsL, scaleL]
-  );
-  const histDotsR = useMemo(
-    () =>
-      ptsR.map((p) => ({
-        t: p.t,
-        y: clamp(scaleR > 0 ? p.L / scaleR : 0, 0, 1),
-      })),
-    [ptsR, scaleR]
-  );
+  // Add tiny x-offset so L/R dots don't overlap visually
+const L_OFF = -0.8;
+const R_OFF = +0.8;
+
+const histDotsL = useMemo(
+  () =>
+    ptsL.map((p) => ({
+      t: Math.max(0, Math.min(chartTmax, (p.t || 0) + L_OFF)),
+      y: clamp(scaleL > 0 ? p.L / scaleL : 0, 0, 1),
+    })),
+  [ptsL, scaleL, chartTmax]
+);
+
+const histDotsR = useMemo(
+  () =>
+    ptsR.map((p) => ({
+      t: Math.max(0, Math.min(chartTmax, (p.t || 0) + R_OFF)),
+      y: clamp(scaleR > 0 ? p.L / scaleR : 0, 0, 1),
+    })),
+  [ptsR, scaleR, chartTmax]
+);
 
   /* ---------- Recommendations ---------- */
   const targets = S.targets;
@@ -990,8 +995,11 @@ export default function App() {
                     dataKey="y"
                     name="Left sets"
                     fill="#1f77b4"
+                    stroke="#1f77b4"
+                    strokeWidth={1.5}
+                    fillOpacity={0.8}
                     shape="circle"
-                    r={3}
+                    r={4}
                     isAnimationActive={false}
                   />
                   <Scatter
@@ -1000,8 +1008,11 @@ export default function App() {
                     dataKey="y"
                     name="Right sets"
                     fill="#ff7f0e"
-                    shape="circle"
-                    r={3}
+                    stroke="#ff7f0e"
+                    strokeWidth={1.5}
+                    fillOpacity={0.8}
+                    shape="square"
+                    r={4}
                     isAnimationActive={false}
                   />
 
