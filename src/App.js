@@ -371,6 +371,13 @@ export default function App() {
     (Number(form.leftLoad) > 0 || Number(form.rightLoad) > 0) &&
     (Number(form.leftDur) > 0 || Number(form.rightDur) > 0);
 
+  // Prefill form.grip from active grip selection
+  useEffect(() => {
+    if (gripFilter && !form.grip) {
+      setForm((f) => ({ ...f, grip: gripFilter }));
+    }
+  }, [gripFilter, form.grip]);
+
   async function onAddSession() {
     if (!canAdd) return;
     const row = {
@@ -679,23 +686,7 @@ const histDotsR = useMemo(
             maxWidth: 680,
           }}
         >
-          {/* If user selects a grip and form.grip is empty, prefill it */}
-          {/*
-            This effect is placed before the return, but after form/setForm.
-            It primes the form's grip when gripFilter is set and form.grip is empty.
-          */}
-          {(() => {
-            // dummy IIFE for effect placement
-            // useEffect must be at top level, so move this code above return.
-            return null;
-          })()}
           <h3 style={{ marginTop: 0 }}>Log a Session</h3>
-  // If user selects a grip and form.grip is empty, prefill it
-  useEffect(() => {
-    if (gripFilter && !form.grip) {
-      setForm(f => ({ ...f, grip: gripFilter }));
-    }
-  }, [gripFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
           <div style={{ marginBottom: 10 }}>
             <label>Date</label>
