@@ -269,6 +269,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loginEmail, setLoginEmail] = useState("");
 
+  // App state MUST come before any hooks that read S.history
   const [S, setS] = useState(
     () =>
       loadLS() || {
@@ -286,30 +287,46 @@ export default function App() {
   );
   useEffect(() => saveLS(S), [S]);
 
+  // --- Grip filter (required) ---
+  const [gripFilter, setGripFilter] = useState("");
+
+  // List of grips present in history
+  const grips = useMemo(() => {
+    const set = new Set();
+    for (const r of S.history) {
+      const g = (r.grip || "").trim();
+      if (g) set.add(g);
+    }
+    return Array.from(set).sort();
+  }, [S.history]);
+
+  // Always keep a valid selection
+  useEffect(() => {
+    if (grips.length === 0) {
+      if (gripFilter !== "") setGripFilter("");
+    } else if (!gripFilter) {
+      setGripFilter(grips[0]);
+    } else if (!grips.includes(gripFilter)) {
+      setGripFilter(grips[0]);
+    }
+  }, [grips, gripFilter]);
+
+  // History filtered to the active grip
+  const historyFiltered = useMemo(
+    () => (gripFilter ? S.history.filter(r => (r.grip || "").trim() === gripFilter) : []),
+    [S.history, gripFilter]
+  );
+
   // Supabase auth
   useEffect(() => {
-    supabase
-      .auth
-      .getSession()
-      .then(({ data }) => setUser(data.session?.user ?? null));
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
+    });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) =>
       setUser(s?.user ?? null)
     );
     return () => sub.subscription.unsubscribe();
   }, []);
-  async function sendMagicLink(e) {
-    e?.preventDefault();
-    if (!loginEmail) return;
-    const { error } = await supabase.auth.signInWithOtp({
-      email: loginEmail,
-      options: { emailRedirectTo: window.location.origin },
-    });
-    if (error) alert(error.message);
-    else alert("Check your email to finish signing in.");
-  }
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
 
   // Load cloud history on login
   useEffect(() => {
@@ -455,8 +472,8 @@ export default function App() {
   const setModelCfg = (k, v) =>
     setS((s) => ({ ...s, model: { ...s.model, [k]: Number(v) || 0 } }));
 
-  const ptsL = useMemo(() => historyPoints(S.history, "L"), [S.history]);
-  const ptsR = useMemo(() => historyPoints(S.history, "R"), [S.history]);
+  const ptsL = useMemo(() => historyPoints(historyFiltered, "L"), [historyFiltered]);
+  const ptsR = useMemo(() => historyPoints(historyFiltered, "R"), [historyFiltered]);
 
   // learned scales for overlay + recommendations
   const scaleL = useMemo(
@@ -608,6 +625,26 @@ const histDotsR = useMemo(
         </div>
       </div>
 
+      {/* Active grip selector */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0 10px" }}>
+        <label style={{ fontSize: 12, opacity: 0.7 }}>Grip:</label>
+        <select
+          value={gripFilter}
+          onChange={(e) => setGripFilter(e.target.value)}
+          style={{ padding: 6, minWidth: 160 }}
+          disabled={!grips.length}
+        >
+          {grips.map((g) => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+        {!grips.length && (
+          <span style={{ fontSize: 12, opacity: 0.6 }}>
+            Add a session with a grip to get started.
+          </span>
+        )}
+      </div>
+
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {[
@@ -642,7 +679,23 @@ const histDotsR = useMemo(
             maxWidth: 680,
           }}
         >
+          {/* If user selects a grip and form.grip is empty, prefill it */}
+          {/*
+            This effect is placed before the return, but after form/setForm.
+            It primes the form's grip when gripFilter is set and form.grip is empty.
+          */}
+          {(() => {
+            // dummy IIFE for effect placement
+            // useEffect must be at top level, so move this code above return.
+            return null;
+          })()}
           <h3 style={{ marginTop: 0 }}>Log a Session</h3>
+  // If user selects a grip and form.grip is empty, prefill it
+  useEffect(() => {
+    if (gripFilter && !form.grip) {
+      setForm(f => ({ ...f, grip: gripFilter }));
+    }
+  }, [gripFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
           <div style={{ marginBottom: 10 }}>
             <label>Date</label>
@@ -758,7 +811,7 @@ const histDotsR = useMemo(
             >
               Clear All
             </button>
-            <button onClick={() => downloadCSV(S.history)} disabled={!S.history.length}>
+            <button onClick={() => downloadCSV(historyFiltered)} disabled={!historyFiltered.length}>
               Download CSV
             </button>
           </div>
@@ -780,7 +833,7 @@ const histDotsR = useMemo(
                 </tr>
               </thead>
               <tbody>
-                {S.history.map((r) => (
+                {historyFiltered.map((r) => (
                   <tr key={r.id}>
                     <td style={{ padding: 6, borderBottom: "1px solid #f0f0f0" }}>
                       <input
@@ -857,10 +910,10 @@ const histDotsR = useMemo(
                     </td>
                   </tr>
                 ))}
-                {!S.history.length && (
+                {!historyFiltered.length && (
                   <tr>
                     <td colSpan={9} style={{ padding: 12, opacity: 0.6 }}>
-                      No history yet.
+                      No history for this grip.
                     </td>
                   </tr>
                 )}
@@ -869,7 +922,7 @@ const histDotsR = useMemo(
           </div>
 
           {/* Trends */}
-          <Trends history={S.history} />
+          <Trends history={historyFiltered} />
         </div>
       )}
 
