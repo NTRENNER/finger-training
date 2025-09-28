@@ -21,6 +21,8 @@ const LS_KEY = "ft_state_v2";
 const uid = () => Math.random().toString(36).slice(2);
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const eps = 1e-9;
+const L_OFF = -0.8;
+const R_OFF = 0.8;
 
 const loadLS = () => {
   try {
@@ -100,12 +102,14 @@ function fAt(t, w, tau) {
   const e3 = Math.exp(-t / Math.max(1e-9, tau.t3));
   return w1n * e1 + w2n * e2 + w3n * e3; // remaining capacity after t
 }
-function recoveryFrac(t, tau) {
-  // simple complementary recovery proxy using same taus
-  const e1 = 1 - Math.exp(-t / Math.max(1e-9, tau.t1));
-  const e2 = 1 - Math.exp(-t / Math.max(1e-9, tau.t2));
-  const e3 = 1 - Math.exp(-t / Math.max(1e-9, tau.t3));
-  return (e1 + e2 + e3) / 3;
+// Weighted recovery with separate kinetics (uses the same normalized weights as fatigue)
+function recoveryFrac(rest, w, tauRec) {
+  const { w1n, w2n, w3n } = normalizeWeights(w.w1, w.w2, w.w3);
+  const e1 = Math.exp(-rest / Math.max(1e-9, tauRec.t1));
+  const e2 = Math.exp(-rest / Math.max(1e-9, tauRec.t2));
+  const e3 = Math.exp(-rest / Math.max(1e-9, tauRec.t3));
+  // fraction of capacity restored during 'rest'
+  return 1 - (w1n * e1 + w2n * e2 + w3n * e3);
 }
 
 // History → (t, L) points per hand
@@ -124,7 +128,7 @@ function historyPoints(history, hand) {
 function ratioLoadForT(targetT, pts) {
   if (!pts?.length) return 0;
 
-  // 1) Aggregate duplicates (same TUT) by averaging load
+  // 1) Aggregate duplicates (same TUT) and keep counts
   const byT = new Map();
   for (const p of pts) {
     const t = Number(p.t) || 0;
@@ -135,34 +139,34 @@ function ratioLoadForT(targetT, pts) {
     else byT.set(t, { sum: L, n: 1 });
   }
   let arr = Array.from(byT.entries())
-    .map(([t, v]) => ({ t: Number(t), L: v.sum / v.n }))
+    .map(([t, v]) => ({ t: Number(t), L: v.sum / v.n, w: v.n })) // keep weight = count
     .sort((a, b) => a.t - b.t);
   if (!arr.length) return 0;
 
-  // 2) Enforce monotone decreasing L(t) via a simple PAVA (Pool Adjacent Violators)
+  // 2) Enforce monotone decreasing L(t) via a weighted PAVA
   // We want L[i] >= L[i+1].
   const stack = [];
   for (const p of arr) {
-    // each block holds {tSum, wSum, L} where L is block mean
-    stack.push({ tSum: p.t, wSum: 1, L: p.L });
+    // each block holds {tSum, wSum, L}, where w is the duplicate count
+    stack.push({ tSum: p.t * p.w, wSum: p.w, L: p.L });
     // merge while monotonicity is violated
     while (stack.length >= 2) {
       const a = stack[stack.length - 2];
       const b = stack[stack.length - 1];
       if (a.L < b.L) {
-        // merge a and b
-        const tSum = a.tSum + b.tSum;
         const wSum = a.wSum + b.wSum;
-        const L = (a.L * a.wSum + b.L * b.wSum) / wSum;
+        const tSum = a.tSum + b.tSum;
+        const L = (a.L * a.wSum + b.L * b.wSum) / Math.max(eps, wSum);
         stack.splice(stack.length - 2, 2, { tSum, wSum, L });
       } else {
         break;
       }
     }
   }
-  // expand blocks back to points (use block-average t)
-  arr = stack.map((blk) => ({ t: blk.tSum / blk.wSum, L: blk.L }))
-             .sort((a, b) => a.t - b.t);
+  // expand blocks back to representative points (use weight-averaged t)
+  arr = stack
+    .map((blk) => ({ t: blk.tSum / Math.max(eps, blk.wSum), L: blk.L }))
+    .sort((a, b) => a.t - b.t);
 
   // 3) Edge clamps
   if (targetT <= arr[0].t) return arr[0].L;
@@ -182,7 +186,6 @@ function ratioLoadForT(targetT, pts) {
   return arr[arr.length - 1].L; // fallback (shouldn’t hit)
 }
 
-// === Learned scale from history ===
 // === Learned scale from history ===
 // Model: L_i ≈ scale * f(t_i)  ⇒ scale ≈ avg(L_i / f(t_i))
 function scaleFromHistory(pts, w, tau, manualScale) {
@@ -213,6 +216,7 @@ function planSets({
   pts,
   w,
   tau,
+  tauRec,
   manualScale,
   capDrop = 0.15,
   precise = false,
@@ -243,7 +247,7 @@ function planSets({
     currentCapacity *= fAt(TUT, w, tau);
 
     // Recovery
-    const rec = recoveryFrac(restSec, tau); // 0..1
+    const rec = recoveryFrac(restSec, w, tauRec); // 0..1
     currentCapacity = clamp(
       currentCapacity + (1 - currentCapacity) * rec,
       0.1,
@@ -270,21 +274,31 @@ export default function App() {
   const [loginEmail, setLoginEmail] = useState("");
 
   // App state MUST come before any hooks that read S.history
-  const [S, setS] = useState(
-    () =>
-      loadLS() || {
-        history: [],
-        tau: { t1: 10, t2: 60, t3: 240 },
-        wLeft: { w1: 1, w2: 1, w3: 1 },
-        wRight: { w1: 1, w2: 1, w3: 1 },
-        targets: { power: 20, strength: 60, endurance: 180 },
-        model: {
-          manualScaleL: 0,
-          manualScaleR: 0,
-          maxChartTime: 300,
-        },
-      }
-  );
+  const [S, setS] = useState(() => {
+    const initial = loadLS();
+    if (initial) {
+      return {
+        ...initial,
+        // back-fill defaults if missing
+        tau:    { t1: 10, t2: 60, t3: 240, ...(initial.tau || {}) },
+        tauRec: { t1: 30, t2: 300, t3: 1800, ...(initial.tauRec || {}) },
+        wLeft:  { w1: 1, w2: 1, w3: 1, ...(initial.wLeft || {}) },
+        wRight: { w1: 1, w2: 1, w3: 1, ...(initial.wRight || {}) },
+        targets: { power: 20, strength: 60, endurance: 180, ...(initial.targets || {}) },
+        model: { manualScaleL: 0, manualScaleR: 0, maxChartTime: 300, ...(initial.model || {}) },
+      };
+    }
+    // fresh defaults if no local storage yet
+    return {
+      history: [],
+      tau: { t1: 10, t2: 60, t3: 240 },
+      tauRec: { t1: 30, t2: 300, t3: 1800 },
+      wLeft: { w1: 1, w2: 1, w3: 1 },
+      wRight: { w1: 1, w2: 1, w3: 1 },
+      targets: { power: 20, strength: 60, endurance: 180 },
+      model: { manualScaleL: 0, manualScaleR: 0, maxChartTime: 300 },
+    };
+  });
   useEffect(() => saveLS(S), [S]);
 
   // --- Grip filter (required) ---
@@ -371,6 +385,25 @@ export default function App() {
     (Number(form.leftLoad) > 0 || Number(form.rightLoad) > 0) &&
     (Number(form.leftDur) > 0 || Number(form.rightDur) > 0);
 
+  // Auth actions for the header
+  async function sendMagicLink(e) {
+    e?.preventDefault();
+    if (!loginEmail) return;
+    const { error } = await supabase.auth.signInWithOtp({
+      email: loginEmail,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    if (error) {
+      alert(error.message);
+    } else {
+      alert("Check your email to finish signing in.");
+    }
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
   // Prefill form.grip from active grip selection
   useEffect(() => {
     if (gripFilter && !form.grip) {
@@ -452,7 +485,9 @@ export default function App() {
     if (!window.confirm("Delete this record?")) return;
     const row = S.history.find((r) => r.id === id);
     setS((s) => ({ ...s, history: s.history.filter((r) => r.id !== id) }));
-    if (user && row && String(row.id).length > 10) {
+    // only attempt cloud delete if this looks like a real DB UUID id
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(row?.id || ""));
+    if (user && row && isUUID) {
       supabase.from("sessions").delete().eq("id", id);
     }
   }
@@ -466,6 +501,11 @@ export default function App() {
     setS((s) => ({
       ...s,
       tau: { ...s.tau, [k]: clamp(Number(v) || 1, 1, 900) },
+    }));
+  const setTauRec = (k, v) =>
+    setS((s) => ({
+      ...s,
+      tauRec: { ...s.tauRec, [k]: clamp(Number(v) || 1, 1, 3600) },
     }));
   const setW = (hand, k, v) =>
     setS((s) =>
@@ -493,20 +533,20 @@ export default function App() {
   );
 
   const chartTmax = S.model.maxChartTime || 300;
+  const [recHand, setRecHand] = useState("L");
+  const wForRec = recHand === "L" ? S.wLeft : S.wRight;
 
   // Recovery curve for the Recovery panel
   const recSeries = useMemo(() => {
     const arr = [];
     for (let t = 0; t <= chartTmax; t += 5) {
-      arr.push({ t, recovery: recoveryFrac(t, S.tau) });
+      arr.push({ t, recovery: recoveryFrac(t, wForRec, S.tauRec) });
     }
     return arr;
-  }, [S.tau, chartTmax]);
+  }, [wForRec, S.tauRec, chartTmax]);
 
   // History dots for fatigue overlay (y = observed fatigue fraction = L / learned-scale)
   // Add tiny x-offset so L/R dots don't overlap visually
-const L_OFF = -0.8;
-const R_OFF = +0.8;
 
 const histDotsL = useMemo(
   () =>
@@ -572,11 +612,12 @@ const histDotsR = useMemo(
         pts: ptsL,
         w: S.wLeft,
         tau: S.tau,
+        tauRec: S.tauRec,
         manualScale: S.model.manualScaleL,
         precise: planL.precise,
         anchor: planL.anchor,
       }),
-    [planL, ptsL, S.wLeft, S.tau, S.model.manualScaleL]
+    [planL, ptsL, S.wLeft, S.tau, S.tauRec, S.model.manualScaleL]
   );
   const loadsPlanR = useMemo(
     () =>
@@ -588,11 +629,12 @@ const histDotsR = useMemo(
         pts: ptsR,
         w: S.wRight,
         tau: S.tau,
+        tauRec: S.tauRec,
         manualScale: S.model.manualScaleR,
         precise: planR.precise,
         anchor: planR.anchor,
       }),
-    [planR, ptsR, S.wRight, S.tau, S.model.manualScaleR]
+    [planR, ptsR, S.wRight, S.tau, S.tauRec, S.model.manualScaleR]
   );
 
   /* ====================== UI ====================== */
@@ -802,8 +844,19 @@ const histDotsR = useMemo(
             >
               Clear All
             </button>
-            <button onClick={() => downloadCSV(historyFiltered)} disabled={!historyFiltered.length}>
-              Download CSV
+            <button onClick={() => downloadCSV(S.history)} disabled={!S.history.length}>
+              Download All CSV
+            </button>
+            <button
+              onClick={() =>
+                downloadCSV(
+                  historyFiltered,
+                  gripFilter ? `finger-training-${gripFilter}.csv` : "finger-training-grip.csv"
+                )
+              }
+              disabled={!historyFiltered.length}
+            >
+              Download This Grip CSV
             </button>
           </div>
 
@@ -950,6 +1003,22 @@ const histDotsR = useMemo(
             />
           </Panel>
 
+          {/* NEW: Recovery taus (separate kinetics) */}
+          <Panel title="Recovery Taus (s)">
+            {["t1", "t2", "t3"].map((k) => (
+              <SliderRow
+                key={k}
+                label={k}
+                value={S.tauRec[k]}
+                min={5}
+                max={3600}
+                step={1}
+                onChange={(v) => setTauRec(k, v)}
+                unit="s"
+              />
+            ))}
+          </Panel>
+
           <Panel title="Left Weights & Scale">
             {["w1", "w2", "w3"].map((k) => (
               <SliderRow
@@ -1072,6 +1141,17 @@ const histDotsR = useMemo(
 
           {/* Recovery */}
           <Panel title="Recovery Fraction">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <label style={{ fontSize: 12, opacity: 0.7 }}>Recovery weights:</label>
+              <select
+                value={recHand}
+                onChange={(e) => setRecHand(e.target.value)}
+                style={{ padding: 6 }}
+              >
+                <option value="L">Left</option>
+                <option value="R">Right</option>
+              </select>
+            </div>
             <div style={{ height: 260 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={recSeries}>
@@ -1095,39 +1175,60 @@ const histDotsR = useMemo(
 
       {/* Recommendations */}
       {tab === "recs" && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))",
-            gap: 16,
-          }}
-        >
-          <Panel title="Left — Model vs Ratio">
-            <DenseRecs label="Power (20s)" m={recL.model20} r={recL.ratio20} />
-            <DenseRecs label="Strength (60s)" m={recL.model60} r={recL.ratio60} />
-            <DenseRecs label="Endurance (180s)" m={recL.model180} r={recL.ratio180} />
-            <small style={{ opacity: 0.75 }}>
-              Model: L(T) = scale · f(T) (learned from your sets). As T↑, f(T)↓ so load decreases.
-              Ratio interpolates nearby points. Pick the lower if unsure.
-            </small>
-          </Panel>
+        <>
+          {/* Grip selector (scoped for Recommendations tab as well) */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 10px" }}>
+            <label style={{ fontSize: 12, opacity: 0.7 }}>Grip:</label>
+            <select
+              value={gripFilter}
+              onChange={(e) => setGripFilter(e.target.value)}
+              style={{ padding: 6, minWidth: 160 }}
+              disabled={!grips.length}
+            >
+              {grips.map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+            {!grips.length && (
+              <span style={{ fontSize: 12, opacity: 0.6 }}>
+                Add a session with a grip to get started.
+              </span>
+            )}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))",
+              gap: 16,
+            }}
+          >
+            <Panel title={`Left — Model vs Ratio (Grip: ${gripFilter || "—"})`}>
+              <DenseRecs label="Power (20s)" m={recL.model20} r={recL.ratio20} />
+              <DenseRecs label="Strength (60s)" m={recL.model60} r={recL.ratio60} />
+              <DenseRecs label="Endurance (180s)" m={recL.model180} r={recL.ratio180} />
+              <small style={{ opacity: 0.75 }}>
+                Model: L(T) = scale · f(T) (learned from your sets). As T↑, f(T)↓ so load decreases.
+                Ratio interpolates nearby points. Pick the lower if unsure.
+              </small>
+            </Panel>
 
-          <Panel title="Right — Model vs Ratio">
-            <DenseRecs label="Power (20s)" m={recR.model20} r={recR.ratio20} />
-            <DenseRecs label="Strength (60s)" m={recR.model60} r={recR.ratio60} />
-            <DenseRecs label="Endurance (180s)" m={recR.model180} r={recR.ratio180} />
-          </Panel>
+            <Panel title={`Right — Model vs Ratio (Grip: ${gripFilter || "—"})`}>
+              <DenseRecs label="Power (20s)" m={recR.model20} r={recR.ratio20} />
+              <DenseRecs label="Strength (60s)" m={recR.model60} r={recR.ratio60} />
+              <DenseRecs label="Endurance (180s)" m={recR.model180} r={recR.ratio180} />
+            </Panel>
 
-          <Panel title="Planner — Left">
-            <PlannerControls plan={planL} setPlan={setPlanL} />
-            <PlannedList loads={loadsPlanL} />
-          </Panel>
+            <Panel title={`Planner — Left (Grip: ${gripFilter || "—"})`}>
+              <PlannerControls plan={planL} setPlan={setPlanL} />
+              <PlannedList loads={loadsPlanL} />
+            </Panel>
 
-          <Panel title="Planner — Right">
-            <PlannerControls plan={planR} setPlan={setPlanR} />
-            <PlannedList loads={loadsPlanR} />
-          </Panel>
-        </div>
+            <Panel title={`Planner — Right (Grip: ${gripFilter || "—"})`}>
+              <PlannerControls plan={planR} setPlan={setPlanR} />
+              <PlannedList loads={loadsPlanR} />
+            </Panel>
+          </div>
+        </>
       )}
     </div>
   );
