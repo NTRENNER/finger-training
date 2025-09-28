@@ -54,6 +54,8 @@ function toCSV(rows) {
     "rightDur",
     "rest",
     "notes",
+    "group_id",
+    "set_index",
   ];
   const lines = [headers.join(",")];
   for (const r of rows) {
@@ -68,6 +70,8 @@ function toCSV(rows) {
         r.rightDur,
         r.rest,
         r.notes,
+        r.group_id ?? "",
+        r.set_index ?? "",
       ]
         .map(csvEscape)
         .join(",")
@@ -190,8 +194,7 @@ function ratioLoadForT(targetT, pts) {
 // Model: L_i ≈ scale * f(t_i)  ⇒ scale ≈ avg(L_i / f(t_i))
 function scaleFromHistory(pts, w, tau, manualScale) {
   if (manualScale > 0) return manualScale;
-  let sum = 0,
-    n = 0;
+  let sum = 0, n = 0;
   for (const p of pts) {
     const denom = fAt(p.t, w, tau);
     if (denom > eps) {
@@ -208,7 +211,7 @@ function modelLoadForT(T, pts, w, tau, manualScale) {
   return scale * fAt(T, w, tau); // decreases as T increases
 }
 
-// Multi-set planner (now supports anchor: 'min' | 'model' | 'ratio')
+// Multi-set planner (supports anchor: 'min' | 'model' | 'ratio')
 function planSets({
   TUT,
   sets,
@@ -233,20 +236,27 @@ function planSets({
   else if (anchor === "model") base = modelBase;
   else base = Math.min(modelBase, ratioBase || Infinity); // conservative
 
+  // Non-precise mode should “hold” the first-set base, not re-evaluate every set
+  const firstSetBase = base;
+
+  // Optional: session-level degradation (empirical)
+  const sessionDecay = 0.95; // ~5% extra capacity loss per additional hang
+
   let currentCapacity = 1.0; // capacity before each set (0..1)
   const out = [];
 
   for (let s = 1; s <= sets; s++) {
-    // Effective curve is currentCapacity * f(t)
-    // Load that ends near TUT: scale0 * currentCapacity * f(TUT)
-    const closedForm = scale0 * currentCapacity * fAt(TUT, w, tau);
-    const load = precise ? closedForm : base * currentCapacity;
+    const sessionAdjustedCapacity = currentCapacity * Math.pow(sessionDecay, s - 1);
+
+    // If precise: choose load that ends near TUT on this exact capacity
+    const closedForm = scale0 * sessionAdjustedCapacity * fAt(TUT, w, tau);
+    const load = precise ? closedForm : firstSetBase * sessionAdjustedCapacity;
     out.push(Math.max(0, load));
 
     // Fatigue during the set
     currentCapacity *= fAt(TUT, w, tau);
 
-    // Recovery
+    // Recovery during rest
     const rec = recoveryFrac(restSec, w, tauRec); // 0..1
     currentCapacity = clamp(
       currentCapacity + (1 - currentCapacity) * rec,
@@ -255,13 +265,14 @@ function planSets({
     );
   }
 
-  // Cap: later sets shouldn’t wildly exceed the first
+  // Cap: later sets shouldn’t exceed the first by too much
   if (out.length > 1) {
     const first = out[0];
     for (let i = 1; i < out.length; i++) {
       out[i] = Math.min(out[i], first * (1 + capDrop));
     }
   }
+
   return out;
 }
 
@@ -355,7 +366,7 @@ export default function App() {
         return;
       }
       const mapped = (data || []).map((r) => ({
-        id: r.id,
+        id: r.id, // UUID from DB
         date: r.date ?? new Date().toISOString().slice(0, 10),
         grip: r.grip ?? "",
         leftLoad: Number(r.left_load) || 0,
@@ -364,6 +375,8 @@ export default function App() {
         rightDur: Number(r.right_dur) || 0,
         rest: Number(r.rest) || 0,
         notes: r.notes ?? "",
+        group_id: r.group_id ?? null,
+        set_index: r.set_index != null ? Number(r.set_index) : null,
       }));
       setS((s) => ({ ...s, history: mapped }));
     })();
@@ -381,6 +394,7 @@ export default function App() {
     rest: "",
     notes: "",
   }));
+  const [multi, setMulti] = useState({ count: 1, groupNow: true });
   const canAdd =
     (Number(form.leftLoad) > 0 || Number(form.rightLoad) > 0) &&
     (Number(form.leftDur) > 0 || Number(form.rightDur) > 0);
@@ -413,8 +427,11 @@ export default function App() {
 
   async function onAddSession() {
     if (!canAdd) return;
-    const row = {
-      id: uid(),
+
+    const count = Math.max(1, Number(multi.count) || 1);
+    const groupId = multi.groupNow && count > 1 ? uid() : null;
+
+    const base = {
       date: form.date || new Date().toISOString().slice(0, 10),
       grip: form.grip || "",
       leftLoad: Number(form.leftLoad) || 0,
@@ -424,7 +441,19 @@ export default function App() {
       rest: Number(form.rest) || 0,
       notes: form.notes || "",
     };
-    setS((s) => ({ ...s, history: [row, ...s.history] }));
+
+    // Build local rows
+    const rows = Array.from({ length: count }, (_, i) => ({
+      id: uid(),
+      ...base,
+      group_id: groupId,
+      set_index: count > 1 ? i + 1 : null,
+    }));
+
+    // Optimistic local prepend
+    setS((s) => ({ ...s, history: [...rows, ...s.history] }));
+
+    // Reset inputs for convenience
     setForm((f) => ({
       ...f,
       leftLoad: "",
@@ -433,31 +462,41 @@ export default function App() {
       rightDur: "",
       notes: "",
     }));
+    setMulti((m) => ({ ...m, count: 1 }));
 
     if (user) {
-      const payload = {
+      const payload = rows.map((r) => ({
         user_id: user.id,
-        date: row.date,
-        grip: row.grip,
-        left_load: row.leftLoad || null,
-        left_dur: row.leftDur || null,
-        right_load: row.rightLoad || null,
-        right_dur: row.rightDur || null,
-        rest: row.rest || null,
-        notes: row.notes || null,
-      };
-      const { data, error } = await supabase
-        .from("sessions")
-        .insert(payload)
-        .select()
-        .single();
-      if (!error && data) {
-        setS((s) => ({
-          ...s,
-          history: s.history.map((h) =>
-            h.id === row.id ? { ...h, id: data.id } : h
-          ),
-        }));
+        date: r.date,
+        grip: r.grip,
+        left_load: r.leftLoad || null,
+        left_dur: r.leftDur || null,
+        right_load: r.rightLoad || null,
+        right_dur: r.rightDur || null,
+        rest: r.rest || null,
+        notes: r.notes || null,
+        group_id: r.group_id || null,
+        set_index: r.set_index || null,
+      }));
+
+      const { data, error } = await supabase.from("sessions").insert(payload).select();
+
+      if (!error && Array.isArray(data) && data.length) {
+        // Replace temp ids with DB ids by order
+        setS((s) => {
+          const idMap = new Map();
+          for (let i = 0; i < rows.length; i++) {
+            const tempRow = rows[i];
+            const dbRow = data[i];
+            if (tempRow && dbRow) idMap.set(tempRow.id, dbRow.id);
+          }
+          return {
+            ...s,
+            history: s.history.map((h) => (idMap.has(h.id) ? { ...h, id: idMap.get(h.id) } : h)),
+          };
+        });
+      } else if (error) {
+        console.warn("Insert error:", error);
       }
     }
   }
@@ -524,13 +563,13 @@ export default function App() {
 
   // learned scales for overlay + recommendations
   const scaleL = useMemo(
-    () => scaleFromHistory(ptsL, S.wLeft, S.tau, S.model.manualScaleL),
-    [ptsL, S.wLeft, S.tau, S.model.manualScaleL]
-  );
-  const scaleR = useMemo(
-    () => scaleFromHistory(ptsR, S.wRight, S.tau, S.model.manualScaleR),
-    [ptsR, S.wRight, S.tau, S.model.manualScaleR]
-  );
+  () => scaleFromHistory(ptsL, S.wLeft, S.tau, S.model.manualScaleL),
+  [ptsL, S.wLeft, S.tau, S.model.manualScaleL]
+);
+const scaleR = useMemo(
+  () => scaleFromHistory(ptsR, S.wRight, S.tau, S.model.manualScaleR),
+  [ptsR, S.wRight, S.tau, S.model.manualScaleR]
+);
 
   const chartTmax = S.model.maxChartTime || 300;
   const [recHand, setRecHand] = useState("L");
@@ -603,39 +642,39 @@ const histDotsR = useMemo(
   });
 
   const loadsPlanL = useMemo(
-    () =>
-      planSets({
-        TUT: planL.TUT,
-        sets: planL.sets,
-        restSec: planL.rest,
-        capDrop: planL.cap,
-        pts: ptsL,
-        w: S.wLeft,
-        tau: S.tau,
-        tauRec: S.tauRec,
-        manualScale: S.model.manualScaleL,
-        precise: planL.precise,
-        anchor: planL.anchor,
-      }),
-    [planL, ptsL, S.wLeft, S.tau, S.tauRec, S.model.manualScaleL]
-  );
+  () =>
+    planSets({
+      TUT: planL.TUT,
+      sets: planL.sets,
+      restSec: planL.rest,
+      capDrop: planL.cap,
+      pts: ptsL,
+      w: S.wLeft,
+      tau: S.tau,
+      tauRec: S.tauRec,
+      manualScale: S.model.manualScaleL,
+      precise: planL.precise,
+      anchor: planL.anchor,
+    }),
+  [planL, ptsL, S.wLeft, S.tau, S.tauRec, S.model.manualScaleL, historyFiltered]
+);
   const loadsPlanR = useMemo(
-    () =>
-      planSets({
-        TUT: planR.TUT,
-        sets: planR.sets,
-        restSec: planR.rest,
-        capDrop: planR.cap,
-        pts: ptsR,
-        w: S.wRight,
-        tau: S.tau,
-        tauRec: S.tauRec,
-        manualScale: S.model.manualScaleR,
-        precise: planR.precise,
-        anchor: planR.anchor,
-      }),
-    [planR, ptsR, S.wRight, S.tau, S.tauRec, S.model.manualScaleR]
-  );
+  () =>
+    planSets({
+      TUT: planR.TUT,
+      sets: planR.sets,
+      restSec: planR.rest,
+      capDrop: planR.cap,
+      pts: ptsR,
+      w: S.wRight,
+      tau: S.tau,
+      tauRec: S.tauRec,
+      manualScale: S.model.manualScaleR,
+      precise: planR.precise,
+      anchor: planR.anchor,
+    }),
+  [planR, ptsR, S.wRight, S.tau, S.tauRec, S.model.manualScaleR, historyFiltered]
+);
 
   /* ====================== UI ====================== */
 
@@ -828,6 +867,32 @@ const histDotsR = useMemo(
             />
           </div>
 
+          {/* Multi-set helper */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div>
+              <label>Sets (count)</label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={multi.count}
+                onChange={(e) =>
+                  setMulti((m) => ({ ...m, count: Math.max(1, Number(e.target.value) || 1) }))
+                }
+                style={{ width: "100%", padding: 10 }}
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                id="groupNow"
+                type="checkbox"
+                checked={!!multi.groupNow}
+                onChange={(e) => setMulti((m) => ({ ...m, groupNow: e.target.checked }))}
+              />
+              <label htmlFor="groupNow">Group these sets together</label>
+            </div>
+          </div>
+
           <button disabled={!canAdd} onClick={onAddSession} style={{ padding: "10px 14px" }}>
             Add Session
           </button>
@@ -967,6 +1032,9 @@ const histDotsR = useMemo(
 
           {/* Trends */}
           <Trends history={historyFiltered} />
+          <Panel title="Per-Group Set Decline (normalized)">
+            <DeclineChart history={historyFiltered} scaleL={scaleL} scaleR={scaleR} />
+          </Panel>
         </div>
       )}
 
@@ -1344,6 +1412,52 @@ function PlannedList({ loads }) {
           <div style={{ fontWeight: 700 }}>{L.toFixed(1)} lb</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function DeclineChart({ history, scaleL, scaleR }) {
+  const points = React.useMemo(() => {
+    const outL = [];
+    const outR = [];
+    for (const r of history) {
+      if (!r.group_id || !r.set_index) continue;
+      const idx = Number(r.set_index) || 0;
+      if (Number(r.leftLoad) > 0 && scaleL > 0) {
+        outL.push({ x: idx, y: Math.max(0, Math.min(1.5, r.leftLoad / scaleL)) });
+      }
+      if (Number(r.rightLoad) > 0 && scaleR > 0) {
+        outR.push({ x: idx, y: Math.max(0, Math.min(1.5, r.rightLoad / scaleR)) });
+      }
+    }
+    // Sort by x to make tooltips nicer
+    outL.sort((a, b) => a.x - b.x);
+    outR.sort((a, b) => a.x - b.x);
+    return { outL, outR };
+  }, [history, scaleL, scaleR]);
+
+  if (!points.outL.length && !points.outR.length) {
+    return <div style={{ opacity: 0.6, marginTop: 8 }}>Log grouped sets to see per-set decline.</div>;
+  }
+
+  return (
+    <div style={{ height: 260, marginTop: 16 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={[]}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis
+            type="number"
+            domain={[1, "dataMax + 0.5"]}
+            label={{ value: "Set index", position: "insideBottomRight", offset: -5 }}
+          />
+          <YAxis domain={[0, 1.5]} label={{ value: "Load / learned scale", angle: -90, position: "insideLeft" }} />
+          <Tooltip />
+          <Legend />
+          <Scatter data={points.outL} dataKey="y" name="Left (normalized)" shape="circle" r={4} />
+          <Scatter data={points.outR} dataKey="y" name="Right (normalized)" shape="triangle" r={5} />
+          <ReferenceLine y={1} stroke="#aaa" strokeDasharray="4 4" />
+        </ComposedChart>
+      </ResponsiveContainer>
     </div>
   );
 }
