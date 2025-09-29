@@ -189,6 +189,121 @@ function ratioLoadForT(targetT, pts) {
   }
   return arr[arr.length - 1].L; // fallback (shouldn’t hit)
 }
+// ---- Auto-fit taus (fatigue) from history ----
+// Error between observed fatigue fractions and f(t)
+function fitError(pts, w, tau, manualScale) {
+  const scale = scaleFromHistory(pts, w, tau, manualScale);
+  if (scale <= 0) return Infinity;
+  let sse = 0, n = 0;
+  for (const p of pts) {
+    const y = p.L / scale;         // observed fatigue fraction
+    const yhat = fAt(p.t, w, tau); // model prediction
+    const e = y - yhat;
+    sse += e * e;
+    n++;
+  }
+  return n ? sse / n : Infinity;
+}
+
+// Coordinate-descent in log-time (keeps taus positive)
+function fitTausFromPts(pts, w, tauInit, manualScale = 0) {
+  let x = {
+    t1: Math.log(Math.max(1e-3, tauInit.t1)),
+    t2: Math.log(Math.max(1e-3, tauInit.t2)),
+    t3: Math.log(Math.max(1e-3, tauInit.t3)),
+  };
+  const asTau = (x) => ({ t1: Math.exp(x.t1), t2: Math.exp(x.t2), t3: Math.exp(x.t3) });
+
+  let best = fitError(pts, w, asTau(x), manualScale);
+  if (!isFinite(best)) return tauInit;
+
+  let step = 0.25;      // multiplicative ≈ ×1.28 per step
+  const minStep = 0.01;
+  const maxIters = 200;
+
+  for (let iter = 0; iter < maxIters && step >= minStep; iter++) {
+    let improved = false;
+    for (const k of ["t1","t2","t3"]) {
+      const tryDelta = (sgn) => {
+        const x2 = { ...x, [k]: x[k] + sgn * step };
+        return { err: fitError(pts, w, asTau(x2), manualScale), x2 };
+      };
+      const up = tryDelta(+1), dn = tryDelta(-1);
+      if (up.err < best || dn.err < best) {
+        if (up.err <= dn.err) { x = up.x2; best = up.err; } else { x = dn.x2; best = dn.err; }
+        improved = true;
+      }
+    }
+    if (!improved) step *= 0.5;
+  }
+  return asTau(x);
+}
+
+// ---- Auto-fit taus from BOTH hands ----
+
+// Average squared error across both hands, with each hand using its own scale
+function fitErrorBoth(ptsL, wL, manualScaleL, ptsR, wR, manualScaleR, tau) {
+  const scaleL = scaleFromHistory(ptsL, wL, tau, manualScaleL);
+  const scaleR = scaleFromHistory(ptsR, wR, tau, manualScaleR);
+  if (scaleL <= 0 && scaleR <= 0) return Infinity;
+
+  let sse = 0, n = 0;
+
+  if (scaleL > 0) {
+    for (const p of ptsL) {
+      const y = p.L / scaleL;      // observed fatigue fraction
+      const yhat = fAt(p.t, wL, tau);
+      const e = y - yhat;
+      sse += e * e;
+      n++;
+    }
+  }
+  if (scaleR > 0) {
+    for (const p of ptsR) {
+      const y = p.L / scaleR;
+      const yhat = fAt(p.t, wR, tau);
+      const e = y - yhat;
+      sse += e * e;
+      n++;
+    }
+  }
+  return n ? sse / n : Infinity;
+}
+
+// Coordinate-descent in log-time over BOTH hands
+function fitTausFromBoth(ptsL, wL, manualScaleL, ptsR, wR, manualScaleR, tauInit) {
+  let x = {
+    t1: Math.log(Math.max(1e-3, tauInit.t1)),
+    t2: Math.log(Math.max(1e-3, tauInit.t2)),
+    t3: Math.log(Math.max(1e-3, tauInit.t3)),
+  };
+  const asTau = (x) => ({ t1: Math.exp(x.t1), t2: Math.exp(x.t2), t3: Math.exp(x.t3) });
+
+  let best = fitErrorBoth(ptsL, wL, manualScaleL, ptsR, wR, manualScaleR, asTau(x));
+  if (!isFinite(best)) return tauInit;
+
+  let step = 0.25;       // multiplicative ≈ ×1.28 per step
+  const minStep = 0.01;
+  const maxIters = 200;
+
+  for (let iter = 0; iter < maxIters && step >= minStep; iter++) {
+    let improved = false;
+    for (const k of ["t1","t2","t3"]) {
+      const tryDelta = (sgn) => {
+        const x2 = { ...x, [k]: x[k] + sgn * step };
+        const err = fitErrorBoth(ptsL, wL, manualScaleL, ptsR, wR, manualScaleR, asTau(x2));
+        return { err, x2 };
+      };
+      const up = tryDelta(+1), dn = tryDelta(-1);
+      if (up.err < best || dn.err < best) {
+        if (up.err <= dn.err) { x = up.x2; best = up.err; } else { x = dn.x2; best = dn.err; }
+        improved = true;
+      }
+    }
+    if (!improved) step *= 0.5;
+  }
+  return asTau(x);
+}
 
 // === Learned scale from history ===
 // Model: L_i ≈ scale * f(t_i)  ⇒ scale ≈ avg(L_i / f(t_i))
@@ -1060,6 +1175,44 @@ const histDotsR = useMemo(
                 unit="s"
               />
             ))}
+
+            {/* NEW: auto-fit buttons */}
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={() => {
+                  const newTau = fitTausFromBoth(
+                    ptsL, S.wLeft, S.model.manualScaleL,
+                    ptsR, S.wRight, S.model.manualScaleR,
+                    S.tau
+                  );
+                  setS((s) => ({ ...s, tau: newTau }));
+                }}
+                disabled={!ptsL.length && !ptsR.length}
+              >
+                Auto-fit taus from BOTH hands
+              </button>
+
+              <button
+                onClick={() => {
+                  const newTau = fitTausFromPts(ptsL, S.wLeft, S.tau, S.model.manualScaleL);
+                  setS((s) => ({ ...s, tau: newTau }));
+                }}
+                disabled={!ptsL.length}
+              >
+                Auto-fit taus from Left history
+              </button>
+
+              <button
+                onClick={() => {
+                  const newTau = fitTausFromPts(ptsR, S.wRight, S.tau, S.model.manualScaleR);
+                  setS((s) => ({ ...s, tau: newTau }));
+                }}
+                disabled={!ptsR.length}
+              >
+                Auto-fit taus from Right history
+              </button>
+            </div>
+
             <SliderRow
               label="Chart X-max"
               value={S.model.maxChartTime}
