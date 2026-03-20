@@ -1532,21 +1532,28 @@ CREATE POLICY "auth_all" ON reps
       </Card>
 
       <Card>
-        <Sect title="Supabase Setup">
-          <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>
-            If this is a fresh install, run this SQL in your Supabase project to create the new <code>reps</code> table.
+        <details>
+          <summary style={{ fontSize: 12, color: C.muted, cursor: "pointer", userSelect: "none" }}>
+            Developer options
+          </summary>
+          <div style={{ marginTop: 12 }}>
+            <Sect title="Supabase Setup">
+              <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>
+                If this is a fresh install, run this SQL in your Supabase project to create the <code>reps</code> table.
+              </div>
+              <Btn small onClick={() => setShowSQL(s => !s)} color={C.muted}>
+                {showSQL ? "Hide SQL" : "Show Setup SQL"}
+              </Btn>
+              {showSQL && (
+                <pre style={{
+                  marginTop: 12, background: C.bg, border: `1px solid ${C.border}`,
+                  borderRadius: 8, padding: 12, fontSize: 11, color: C.green,
+                  whiteSpace: "pre-wrap", overflowX: "auto",
+                }}>{sql}</pre>
+              )}
+            </Sect>
           </div>
-          <Btn small onClick={() => setShowSQL(s => !s)} color={C.muted}>
-            {showSQL ? "Hide SQL" : "Show Setup SQL"}
-          </Btn>
-          {showSQL && (
-            <pre style={{
-              marginTop: 12, background: C.bg, border: `1px solid ${C.border}`,
-              borderRadius: 8, padding: 12, fontSize: 11, color: C.green,
-              whiteSpace: "pre-wrap", overflowX: "auto",
-            }}>{sql}</pre>
-          )}
-        </Sect>
+        </details>
       </Card>
 
       <Card>
