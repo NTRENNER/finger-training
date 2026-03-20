@@ -43,9 +43,10 @@ const DEF_FAT = {
 const LEVEL_STEP = 1.05; // 5% improvement per level
 
 const LEVEL_TITLES = [
-  "Rock Toucher","Gym Rat","Projector","Crusher","Boulderer",
-  "Route Climber","Crimper","Pocket Puller","Flash Artist","Legend",
+  "Fresh Fighter","Popeye","Ten Sleep Tough Guy","Black Hills Buff","Southern Gun",
+  "Ten Pound Trout","Chalk Norris","Nail Bender","Captain of Crush","Realization",
 ];
+const LEVEL_EMOJIS = ["🥊","💪","🏔️","⛰️","🤠","🐟","👊","🔨","💎","🏆"];
 
 // ─────────────────────────────────────────────────────────────
 // UTILITIES
@@ -951,9 +952,9 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
         <Card style={{ background: "#1c1f0a", borderColor: C.yellow, marginBottom: 20 }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 48 }}>⭐</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: C.yellow }}>Level Up!</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.yellow }}>Badge Unlocked!</div>
             <div style={{ fontSize: 16, color: C.text, marginTop: 4 }}>
-              You are now Level {newLevel} — {levelTitle(newLevel)}!
+              {LEVEL_EMOJIS[Math.min(newLevel - 1, LEVEL_EMOJIS.length - 1)]} {levelTitle(newLevel)}
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>
               5% strength improvement achieved 💪
@@ -1037,41 +1038,107 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
 // CHARACTER VIEW
 // ─────────────────────────────────────────────────────────────
 function CharacterView({ history }) {
-  const [selHand, setSelHand]   = useState("L");
+  const [selHand,   setSelHand]   = useState("L");
   const [selTarget, setSelTarget] = useState(45);
-  const [selGrip,  setSelGrip]  = useState("");
+  const [selGrip,   setSelGrip]   = useState("");
+  const [charName,  setCharName]  = useState(() => loadLS("char_name") || "");
+  const [editing,   setEditing]   = useState(false);
+  const [nameInput, setNameInput] = useState("");
 
   const grips = useMemo(() => {
     return [...new Set(history.map(r => r.grip).filter(Boolean))].sort();
   }, [history]);
 
-  const level     = calcLevel(history, selHand, selGrip, selTarget);
-  const best      = getBestLoad(history, selHand, selGrip, selTarget);
-  const nextPct   = nextLevelPct(history, selHand, selGrip, selTarget);
-  const title     = levelTitle(level);
+  const level   = calcLevel(history, selHand, selGrip, selTarget);
+  const best    = getBestLoad(history, selHand, selGrip, selTarget);
+  const nextPct = nextLevelPct(history, selHand, selGrip, selTarget);
+
+  // Compute baseline for badge thresholds
+  const baseline = useMemo(() => {
+    const matches = history.filter(r =>
+      r.hand === selHand && (!selGrip || r.grip === selGrip) &&
+      r.target_duration === selTarget && effectiveLoad(r) > 0
+    ).sort((a, b) => a.date < b.date ? -1 : 1);
+    return matches.length > 0 ? effectiveLoad(matches[0]) : null;
+  }, [history, selHand, selGrip, selTarget]);
 
   // Sparkline: best load per month
   const sparkData = useMemo(() => {
     const byMonth = {};
     history
-      .filter(r => r.hand === selHand && (!selGrip || r.grip === selGrip) && r.target_duration === selTarget && r.weight_kg > 0)
+      .filter(r => r.hand === selHand && (!selGrip || r.grip === selGrip) &&
+        r.target_duration === selTarget && effectiveLoad(r) > 0)
       .forEach(r => {
         const m = (r.date || "").slice(0, 7);
         if (!m) return;
-        byMonth[m] = Math.max(byMonth[m] || 0, r.weight_kg);
+        byMonth[m] = Math.max(byMonth[m] || 0, effectiveLoad(r));
       });
     return Object.entries(byMonth).sort().map(([m, v]) => ({ month: m, kg: v }));
   }, [history, selHand, selGrip, selTarget]);
 
-  const emoji = ["🧗","🧗‍♂️","🏔️","⛰️","🌟","⭐","🔥","💎","👑","🏆"][Math.min(level - 1, 9)];
+  const saveName = () => {
+    const n = nameInput.trim();
+    setCharName(n);
+    saveLS("char_name", n);
+    setEditing(false);
+  };
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Your Character</h2>
 
+      {/* Character name */}
+      <Card style={{ textAlign: "center", background: "linear-gradient(135deg, #161b22, #0d1117)", marginBottom: 16 }}>
+        {editing ? (
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", alignItems: "center" }}>
+            <input
+              autoFocus
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditing(false); }}
+              placeholder="Enter your name"
+              style={{
+                background: C.border, border: "none", borderRadius: 8, padding: "8px 12px",
+                color: C.text, fontSize: 18, fontWeight: 700, width: 200, textAlign: "center",
+              }}
+            />
+            <button onClick={saveName} style={{
+              background: C.green, border: "none", borderRadius: 8, color: "#000",
+              padding: "8px 14px", fontWeight: 700, cursor: "pointer",
+            }}>Save</button>
+          </div>
+        ) : (
+          <div
+            onClick={() => { setNameInput(charName); setEditing(true); }}
+            style={{ cursor: "pointer" }}
+            title="Click to set your name"
+          >
+            <div style={{ fontSize: 32, fontWeight: 800, color: C.yellow }}>
+              {charName || <span style={{ color: C.muted, fontSize: 20 }}>Tap to set your name</span>}
+            </div>
+          </div>
+        )}
+        {best != null && (
+          <div style={{ marginTop: 12, fontSize: 14, color: C.text }}>
+            Best: <b style={{ color: C.blue }}>{fmt1(best)} kg</b> at {fmtTime(selTarget)}
+          </div>
+        )}
+        {nextPct != null && (
+          <div style={{ marginTop: 4, fontSize: 13, color: C.muted }}>
+            Next badge at <b style={{ color: C.green }}>{fmt1(nextPct)} kg</b>
+            {best != null && ` (+${fmt1(nextPct - best)} kg)`}
+          </div>
+        )}
+        {sparkData.length === 0 && (
+          <div style={{ marginTop: 12, fontSize: 13, color: C.muted }}>
+            Log some sessions to see your progress!
+          </div>
+        )}
+      </Card>
+
       {/* Filters */}
-      <Card>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: grips.length > 0 ? 12 : 0 }}>
           {["L","R"].map(h => (
             <button key={h} onClick={() => setSelHand(h)} style={{
               padding: "6px 18px", borderRadius: 20, cursor: "pointer", fontWeight: 600,
@@ -1105,27 +1172,43 @@ function CharacterView({ history }) {
         )}
       </Card>
 
-      {/* Character card */}
-      <Card style={{ textAlign: "center", background: "linear-gradient(135deg, #161b22, #0d1117)" }}>
-        <div style={{ fontSize: 72, lineHeight: 1, marginBottom: 8 }}>{emoji}</div>
-        <div style={{ fontSize: 36, fontWeight: 800, color: C.yellow }}>Level {level}</div>
-        <div style={{ fontSize: 18, color: C.muted, marginTop: 4 }}>{title}</div>
-        {best != null && (
-          <div style={{ marginTop: 16, fontSize: 14, color: C.text }}>
-            Best: <b style={{ color: C.blue }}>{fmt1(best)} kg</b> at {fmtTime(selTarget)}
-          </div>
-        )}
-        {nextPct != null && (
-          <div style={{ marginTop: 8, fontSize: 13, color: C.muted }}>
-            Next level at <b style={{ color: C.green }}>{fmt1(nextPct)} kg</b>
-            {best != null && ` (+${fmt1(nextPct - best)} kg)`}
-          </div>
-        )}
-        {sparkData.length === 0 && (
-          <div style={{ marginTop: 16, fontSize: 13, color: C.muted }}>
-            Log some sessions to see your progress!
-          </div>
-        )}
+      {/* Badge grid */}
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>Badges</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+          {LEVEL_TITLES.map((title, i) => {
+            const earned = i === 0 ? (best != null) : (level > i);
+            const isCurrent = level === i + 1;
+            // Threshold this badge was earned at
+            const threshold = baseline != null
+              ? Math.round(baseline * Math.pow(LEVEL_STEP, i) * 10) / 10
+              : null;
+            return (
+              <div key={title} style={{
+                background: earned ? (isCurrent ? "#1c2a1c" : C.border) : "#0d1117",
+                border: `1px solid ${earned ? (isCurrent ? C.green : C.border) : "#1a1a1a"}`,
+                borderRadius: 10, padding: "10px 12px",
+                opacity: earned ? 1 : 0.35,
+                display: "flex", alignItems: "center", gap: 10,
+              }}>
+                <div style={{ fontSize: 28, lineHeight: 1 }}>{LEVEL_EMOJIS[i]}</div>
+                <div>
+                  <div style={{
+                    fontSize: 13, fontWeight: 700,
+                    color: earned ? (isCurrent ? C.green : C.text) : C.muted,
+                  }}>{title}</div>
+                  {earned && threshold != null && (
+                    <div style={{ fontSize: 11, color: C.muted }}>≥ {fmt1(threshold)} kg</div>
+                  )}
+                  {!earned && threshold != null && (
+                    <div style={{ fontSize: 11, color: C.muted }}>{fmt1(threshold)} kg</div>
+                  )}
+                </div>
+                {earned && <div style={{ marginLeft: "auto", fontSize: 14 }}>✓</div>}
+              </div>
+            );
+          })}
+        </div>
       </Card>
 
       {/* Progress chart */}
