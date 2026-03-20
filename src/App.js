@@ -1278,10 +1278,11 @@ function CharacterView({ history, unit = "lbs" }) {
 // ─────────────────────────────────────────────────────────────
 // HISTORY VIEW
 // ─────────────────────────────────────────────────────────────
-function HistoryView({ history, onDownload, unit = "lbs" }) {
-  const [grip,   setGrip]   = useState("");
-  const [hand,   setHand]   = useState("");
-  const [target, setTarget] = useState(0);
+function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession }) {
+  const [grip,        setGrip]        = useState("");
+  const [hand,        setHand]        = useState("");
+  const [target,      setTarget]      = useState(0);
+  const [confirmKey,  setConfirmKey]  = useState(null);
 
   const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
 
@@ -1340,31 +1341,54 @@ function HistoryView({ history, onDownload, unit = "lbs" }) {
         </div>
       )}
 
-      {grouped.slice(0, 30).map((sess, i) => (
-        <Card key={i} style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-            <div>
-              <b>{sess.grip}</b>
-              <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>
-                {sess.hand === "L" ? "Left" : sess.hand === "R" ? "Right" : "Both"}
-                {" · "}{TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
-              </span>
-            </div>
-            <span style={{ fontSize: 12, color: C.muted }}>{sess.date}</span>
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {sess.reps.sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num).map((r, j) => (
-              <div key={j} style={{
-                padding: "4px 10px", borderRadius: 8, fontSize: 12,
-                background: r.actual_time_s >= sess.target_duration ? "#1a2f1a" : "#2f1a1a",
-                border: `1px solid ${r.actual_time_s >= sess.target_duration ? C.green : C.red}`,
-              }}>
-                <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
+      {grouped.slice(0, 30).map((sess, i) => {
+        const sessKey = sess.reps[0]?.session_id || sess.date;
+        const isConfirming = confirmKey === sessKey;
+        return (
+          <Card key={i} style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <div>
+                <b>{sess.grip}</b>
+                <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>
+                  {sess.hand === "L" ? "Left" : sess.hand === "R" ? "Right" : "Both"}
+                  {" · "}{TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
+                </span>
               </div>
-            ))}
-          </div>
-        </Card>
-      ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 12, color: C.muted }}>{sess.date}</span>
+                {isConfirming ? (
+                  <>
+                    <button onClick={() => { onDeleteSession(sessKey); setConfirmKey(null); }} style={{
+                      background: C.red, border: "none", borderRadius: 6, color: "#fff",
+                      fontSize: 11, fontWeight: 700, padding: "3px 8px", cursor: "pointer",
+                    }}>Delete</button>
+                    <button onClick={() => setConfirmKey(null)} style={{
+                      background: C.border, border: "none", borderRadius: 6, color: C.muted,
+                      fontSize: 11, padding: "3px 8px", cursor: "pointer",
+                    }}>Cancel</button>
+                  </>
+                ) : (
+                  <button onClick={() => setConfirmKey(sessKey)} style={{
+                    background: "none", border: "none", color: C.muted,
+                    fontSize: 14, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+                  }} title="Delete session">🗑</button>
+                )}
+              </div>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {sess.reps.sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num).map((r, j) => (
+                <div key={j} style={{
+                  padding: "4px 10px", borderRadius: 8, fontSize: 12,
+                  background: r.actual_time_s >= sess.target_duration ? "#1a2f1a" : "#2f1a1a",
+                  border: `1px solid ${r.actual_time_s >= sess.target_duration ? C.green : C.red}`,
+                }}>
+                  <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -1579,6 +1603,18 @@ export default function App() {
       return [...fresh, ...h];
     });
     if (user) newReps.forEach(pushRep);
+  }, [user]);
+
+  const deleteSession = useCallback(async (sessionKey) => {
+    // sessionKey is session_id or date (same key used in grouping)
+    setHistory(h => h.filter(r => (r.session_id || r.date) !== sessionKey));
+    if (user) {
+      // Fetch the ids to delete (already removed from state, use a snapshot)
+      // Delete from Supabase by session_id if available, else by date
+      const { error } = await supabase.from("reps").delete()
+        .or(`session_id.eq.${sessionKey},and(session_id.is.null,date.eq.${sessionKey})`);
+      if (error) console.warn("Supabase delete:", error.message);
+    }
   }, [user]);
 
   // ── Tab ───────────────────────────────────────────────────
@@ -1888,7 +1924,7 @@ export default function App() {
       })()}
 
       {tab === 1 && <CharacterView history={history} unit={unit} />}
-      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} />}
+      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} />}
       {tab === 3 && <TrendsView history={history} unit={unit} />}
       {tab === 4 && (
         <SettingsView
