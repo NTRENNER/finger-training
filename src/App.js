@@ -43,10 +43,10 @@ const DEF_FAT = {
 const LEVEL_STEP = 1.05; // 5% improvement per level
 
 const LEVEL_TITLES = [
-  "Wimpy","Popeye","Fresh Fighter","Black Hills Buff","Southern Gun",
+  "Wimpy","Popeye","Fresh Fighter","Ten Sleep Tough Guy","Black Hills Buff","Southern Gun",
   "Ten Pound Trout","Chalk Norris","Nail Bender","Captain of Crush","Realization",
 ];
-const LEVEL_EMOJIS = ["🥊","💪","🏔️","⛰️","🤠","🐟","👊","🔨","💎","🏆"];
+const LEVEL_EMOJIS = ["🍔","💪","🥊","🏔️","⛰️","🤠","🐟","👊","🔨","💎","🏆"];
 
 // ─────────────────────────────────────────────────────────────
 // UTILITIES
