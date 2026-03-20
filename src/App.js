@@ -1229,26 +1229,25 @@ function CharacterView({ history, unit = "lbs" }) {
               : null;
             return (
               <div key={title} style={{
-                background: earned ? (isCurrent ? "#1c2a1c" : C.border) : "#0d1117",
-                border: `1px solid ${earned ? (isCurrent ? C.green : C.border) : "#1a1a1a"}`,
+                background: earned ? (isCurrent ? "#1c2a1c" : C.border) : C.card,
+                border: `1px solid ${earned ? (isCurrent ? C.green : C.border) : C.border}`,
                 borderRadius: 10, padding: "10px 12px",
-                opacity: earned ? 1 : 0.35,
                 display: "flex", alignItems: "center", gap: 10,
               }}>
-                <div style={{ fontSize: 28, lineHeight: 1 }}>{LEVEL_EMOJIS[i]}</div>
+                <div style={{ fontSize: 28, lineHeight: 1, opacity: earned ? 1 : 0.4 }}>{LEVEL_EMOJIS[i]}</div>
                 <div>
                   <div style={{
                     fontSize: 13, fontWeight: 700,
                     color: earned ? (isCurrent ? C.green : C.text) : C.muted,
                   }}>{title}</div>
-                  {earned && threshold != null && (
-                    <div style={{ fontSize: 11, color: C.muted }}>≥ {fmtW(threshold, unit)} {unit}</div>
-                  )}
-                  {!earned && threshold != null && (
-                    <div style={{ fontSize: 11, color: C.muted }}>{fmtW(threshold, unit)} {unit}</div>
+                  {threshold != null && (
+                    <div style={{ fontSize: 11, color: C.muted }}>
+                      {earned ? "≥ " : ""}{fmtW(threshold, unit)} {unit}
+                    </div>
                   )}
                 </div>
-                {earned && <div style={{ marginLeft: "auto", fontSize: 14 }}>✓</div>}
+                {earned && <div style={{ marginLeft: "auto", fontSize: 14, color: C.green }}>✓</div>}
+                {!earned && <div style={{ marginLeft: "auto", fontSize: 14, color: C.muted }}>🔒</div>}
               </div>
             );
           })}
