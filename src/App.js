@@ -43,7 +43,7 @@ const DEF_FAT = {
 const LEVEL_STEP = 1.05; // 5% improvement per level
 
 const LEVEL_TITLES = [
-  "Fresh Fighter","Popeye","Ten Sleep Tough Guy","Black Hills Buff","Southern Gun",
+  "Wimpy","Popeye","Fresh Fighter","Black Hills Buff","Southern Gun",
   "Ten Pound Trout","Chalk Norris","Nail Bender","Captain of Crush","Realization",
 ];
 const LEVEL_EMOJIS = ["🥊","💪","🏔️","⛰️","🤠","🐟","👊","🔨","💎","🏆"];
@@ -613,6 +613,21 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs" }) {
           </div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>3 s – 4 min</div>
         </Sect>
+
+        <Sect title="Rest Between Sets">
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <input
+              type="range" min={60} max={600} step={30}
+              value={config.setRestTime}
+              onChange={e => setConfig(c => ({ ...c, setRestTime: Number(e.target.value) }))}
+              style={{ flex: 1, accentColor: C.purple }}
+            />
+            <span style={{ fontSize: 20, fontWeight: 700, minWidth: 42, textAlign: "right" }}>
+              {fmtTime(config.setRestTime)}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>1 min – 10 min</div>
+        </Sect>
       </Card>
 
       {(refWeightL != null || refWeightR != null) && (
@@ -915,17 +930,38 @@ function RestView({ lastRep, nextWeight, restSeconds, onRestDone, setNum, numSet
 // ─────────────────────────────────────────────────────────────
 // BETWEEN-SETS VIEW
 // ─────────────────────────────────────────────────────────────
-function BetweenSetsView({ completedSet, totalSets, onNextSet }) {
+function BetweenSetsView({ completedSet, totalSets, onNextSet, setRestTime = 180 }) {
+  const [remaining, setRemaining] = useState(setRestTime);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    setRemaining(setRestTime);
+    intervalRef.current = setInterval(() => {
+      setRemaining(r => {
+        if (r <= 1) { clearInterval(intervalRef.current); onNextSet(); return 0; }
+        return r - 1;
+      });
+    }, 1000);
+    return () => clearInterval(intervalRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setRestTime]);
+
+  const pct = remaining / setRestTime;
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "40px 16px", textAlign: "center" }}>
       <div style={{ fontSize: 48 }}>🏔️</div>
-      <h2 style={{ margin: "12px 0 8px" }}>Set {completedSet} of {totalSets} done!</h2>
-      <p style={{ color: C.muted, marginBottom: 32 }}>
-        Rest as long as you need before the next set.
-      </p>
+      <h2 style={{ margin: "12px 0 4px" }}>Set {completedSet} of {totalSets} done!</h2>
+      <p style={{ color: C.muted, marginBottom: 24 }}>Rest between sets</p>
+      <div style={{ fontSize: 72, fontWeight: 900, color: pct > 0.3 ? C.green : C.orange, lineHeight: 1, marginBottom: 16 }}>
+        {fmtTime(remaining)}
+      </div>
+      <div style={{ height: 8, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: 32, maxWidth: 300, margin: "0 auto 32px" }}>
+        <div style={{ height: "100%", width: `${pct * 100}%`, background: pct > 0.3 ? C.green : C.orange, borderRadius: 4, transition: "width 1s linear" }} />
+      </div>
       {completedSet < totalSets && (
         <Btn
-          onClick={onNextSet}
+          onClick={() => { clearInterval(intervalRef.current); onNextSet(); }}
           style={{ padding: "16px 48px", fontSize: 17, borderRadius: 12 }}
         >
           Start Set {completedSet + 1} →
@@ -1557,6 +1593,7 @@ export default function App() {
     numSets:    3,
     targetTime: 45,
     restTime:   20,
+    setRestTime: 180,
   }));
 
   // ── Session State Machine ─────────────────────────────────
@@ -1830,6 +1867,7 @@ export default function App() {
               completedSet={currentSet}
               totalSets={config.numSets}
               onNextSet={handleNextSet}
+              setRestTime={config.setRestTime}
             />
           );
         }
