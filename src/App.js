@@ -55,6 +55,14 @@ const uid    = () => Math.random().toString(36).slice(2, 10);
 const today  = () => new Date().toISOString().slice(0, 10);
 const clamp  = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const fmt1   = (n) => (typeof n === "number" && isFinite(n)) ? n.toFixed(1) : "—";
+
+const KG_TO_LBS = 2.20462;
+// Convert stored kg → display unit
+const toDisp   = (kg, unit) => (unit === "lbs" && typeof kg === "number") ? kg * KG_TO_LBS : kg;
+// Convert display unit → kg for storage
+const fromDisp = (val, unit) => (unit === "lbs" && typeof val === "number") ? val / KG_TO_LBS : val;
+// Format a kg value for display in the current unit
+const fmtW = (kg, unit) => fmt1(toDisp(kg, unit));
 const fmtTime = (s) => {
   if (!isFinite(s) || s < 0) return "—";
   const m = Math.floor(s / 60), sec = Math.floor(s % 60);
@@ -438,15 +446,15 @@ function BigTimer({ seconds, targetSeconds, running }) {
   );
 }
 
-function ForceGauge({ force, avg, peak, maxDisplay = 50 }) {
+function ForceGauge({ force, avg, peak, maxDisplay = 50, unit = "lbs" }) {
   const fPct   = clamp(force / maxDisplay, 0, 1);
   const avgPct = clamp(avg   / maxDisplay, 0, 1);
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 4 }}>
-        <span>Live: <b style={{ color: C.blue }}>{fmt1(force)} kg</b></span>
-        <span>Avg: <b style={{ color: C.green }}>{fmt1(avg)} kg</b></span>
-        <span>Peak: <b style={{ color: C.orange }}>{fmt1(peak)} kg</b></span>
+        <span>Live: <b style={{ color: C.blue }}>{fmtW(force, unit)} {unit}</b></span>
+        <span>Avg: <b style={{ color: C.green }}>{fmtW(avg, unit)} {unit}</b></span>
+        <span>Peak: <b style={{ color: C.orange }}>{fmtW(peak, unit)} {unit}</b></span>
       </div>
       <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
         {/* Live force bar */}
@@ -481,7 +489,7 @@ function RepDots({ total, done, current }) {
 // ─────────────────────────────────────────────────────────────
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
-function SetupView({ config, setConfig, onStart, history }) {
+function SetupView({ config, setConfig, onStart, history, unit = "lbs" }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -617,7 +625,7 @@ function SetupView({ config, setConfig, onStart, history }) {
               <div>
                 <Label>Left</Label>
                 <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
-                  {refWeightL != null ? `${fmt1(refWeightL)} kg` : "—"}
+                  {refWeightL != null ? `${fmtW(refWeightL, unit)} ${unit}` : "—"}
                 </span>
               </div>
             )}
@@ -625,7 +633,7 @@ function SetupView({ config, setConfig, onStart, history }) {
               <div>
                 <Label>Right</Label>
                 <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
-                  {refWeightR != null ? `${fmt1(refWeightR)} kg` : "—"}
+                  {refWeightR != null ? `${fmtW(refWeightR, unit)} ${unit}` : "—"}
                 </span>
               </div>
             )}
@@ -647,7 +655,7 @@ function SetupView({ config, setConfig, onStart, history }) {
 // ─────────────────────────────────────────────────────────────
 // ACTIVE SESSION VIEW
 // ─────────────────────────────────────────────────────────────
-function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false }) {
+function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, unit = "lbs" }) {
   const { config, currentSet, currentRep, fatigue } = session;
 
   // repPhase: 'ready' (show Start button, first rep only)
@@ -737,7 +745,7 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
             {countdown === 0 ? "GO" : countdown}
           </div>
           <div style={{ fontSize: 14, color: C.muted, marginTop: 8 }}>
-            {fmt1(sug?.suggested ?? 0)} kg
+            {fmtW(sug?.suggested ?? 0, unit)} {unit}
           </div>
         </Card>
       )}
@@ -747,7 +755,7 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
         <Card>
           <BigTimer seconds={elapsed} targetSeconds={config.targetTime} running={true} />
           {tindeq.connected ? (
-            <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} />
+            <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} unit={unit} />
           ) : (
             <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
               No Tindeq — tap Done when you let go.
@@ -769,25 +777,25 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
                 <div key={h}>
                   <Label>{h === "L" ? "Left" : "Right"}</Label>
                   <span style={{ fontSize: 28, fontWeight: 700, color: C.blue }}>
-                    {suggestions[h].suggested != null ? `${fmt1(suggestions[h].suggested)} kg` : "—"}
+                    {suggestions[h].suggested != null ? `${fmtW(suggestions[h].suggested, unit)} ${unit}` : "—"}
                   </span>
                 </div>
               ))}
             </div>
           ) : (
             <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
-              {sug?.suggested != null ? `${fmt1(sug.suggested)} kg` : "—"}
+              {sug?.suggested != null ? `${fmtW(sug.suggested, unit)} ${unit}` : "—"}
             </div>
           )}
           <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
             <input
               type="number" min={0} step={0.5}
-              value={manualWeight ?? ""}
-              onChange={e => setManualWeight(e.target.value === "" ? null : Number(e.target.value))}
-              placeholder="Override kg…"
+              value={manualWeight != null ? fmtW(manualWeight, unit) : ""}
+              onChange={e => setManualWeight(e.target.value === "" ? null : fromDisp(Number(e.target.value), unit))}
+              placeholder={`Override ${unit}…`}
               style={{ width: 120, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 15 }}
             />
-            <span style={{ fontSize: 12, color: C.muted }}>kg (override)</span>
+            <span style={{ fontSize: 12, color: C.muted }}>{unit} (override)</span>
           </div>
         </Card>
       )}
@@ -820,7 +828,7 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
 // ─────────────────────────────────────────────────────────────
 // REST VIEW
 // ─────────────────────────────────────────────────────────────
-function RestView({ lastRep, nextWeight, restSeconds, onRestDone, setNum, numSets, repNum, repsPerSet }) {
+function RestView({ lastRep, nextWeight, restSeconds, onRestDone, setNum, numSets, repNum, repsPerSet, unit = "lbs" }) {
   const [remaining, setRemaining] = useState(restSeconds);
   const intervalRef = useRef(null);
 
@@ -876,7 +884,7 @@ function RestView({ lastRep, nextWeight, restSeconds, onRestDone, setNum, numSet
               <div>
                 <Label>Peak Force</Label>
                 <span style={{ fontSize: 28, fontWeight: 700, color: C.orange }}>
-                  {fmt1(lastRep.peakForce)} kg
+                  {fmtW(lastRep.peakForce, unit)} {unit}
                 </span>
               </div>
             )}
@@ -888,7 +896,7 @@ function RestView({ lastRep, nextWeight, restSeconds, onRestDone, setNum, numSet
         <Card style={{ borderColor: C.blue }}>
           <Label>Next rep suggested weight</Label>
           <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
-            {fmt1(nextWeight)} kg
+            {fmtW(nextWeight, unit)} {unit}
           </div>
         </Card>
       )}
@@ -930,7 +938,7 @@ function BetweenSetsView({ completedSet, totalSets, onNextSet }) {
 // ─────────────────────────────────────────────────────────────
 // SESSION SUMMARY
 // ─────────────────────────────────────────────────────────────
-function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
+function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = "lbs" }) {
   const sets = useMemo(() => {
     const groups = {};
     for (const r of reps) {
@@ -977,13 +985,13 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
           </div>
           <div>
             <Label>Top Weight</Label>
-            <div style={{ fontSize: 28, fontWeight: 700 }}>{fmt1(maxWeight)} kg</div>
+            <div style={{ fontSize: 28, fontWeight: 700 }}>{fmtW(maxWeight, unit)} {unit}</div>
           </div>
           {hasForce && (
             <div style={{ gridColumn: "1 / -1" }}>
               <Label>Avg Force (Tindeq)</Label>
               <div style={{ fontSize: 22, fontWeight: 700, color: C.green }}>
-                {fmt1(reps.reduce((a, r) => a + (r.avg_force_kg || 0), 0) / reps.filter(r => r.avg_force_kg > 0).length)} kg
+                {fmtW(reps.reduce((a, r) => a + (r.avg_force_kg || 0), 0) / reps.filter(r => r.avg_force_kg > 0).length, unit)} {unit}
               </div>
             </div>
           )}
@@ -1006,13 +1014,13 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
               {sReps.map(r => (
                 <tr key={r.rep_num} style={{ borderTop: `1px solid ${C.border}` }}>
                   <td style={{ padding: "6px 0" }}>{r.rep_num}</td>
-                  <td style={{ textAlign: "right" }}>{fmt1(r.weight_kg)} kg</td>
+                  <td style={{ textAlign: "right" }}>{fmtW(r.weight_kg, unit)} {unit}</td>
                   <td style={{ textAlign: "right", color: r.actual_time_s >= config.targetTime ? C.green : C.red }}>
                     {fmtTime(r.actual_time_s)}
                   </td>
                   {hasForce && (
                     <td style={{ textAlign: "right", color: C.green }}>
-                      {r.avg_force_kg > 0 ? `${fmt1(r.avg_force_kg)} kg` : "—"}
+                      {r.avg_force_kg > 0 ? `${fmtW(r.avg_force_kg, unit)} ${unit}` : "—"}
                     </td>
                   )}
                 </tr>
@@ -1037,7 +1045,7 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
 // ─────────────────────────────────────────────────────────────
 // CHARACTER VIEW
 // ─────────────────────────────────────────────────────────────
-function CharacterView({ history }) {
+function CharacterView({ history, unit = "lbs" }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selTarget, setSelTarget] = useState(45);
   const [selGrip,   setSelGrip]   = useState("");
@@ -1073,8 +1081,8 @@ function CharacterView({ history }) {
         if (!m) return;
         byMonth[m] = Math.max(byMonth[m] || 0, effectiveLoad(r));
       });
-    return Object.entries(byMonth).sort().map(([m, v]) => ({ month: m, kg: v }));
-  }, [history, selHand, selGrip, selTarget]);
+    return Object.entries(byMonth).sort().map(([m, v]) => ({ month: m, kg: toDisp(v, unit) }));
+  }, [history, selHand, selGrip, selTarget, unit]);
 
   const saveName = () => {
     const n = nameInput.trim();
@@ -1120,13 +1128,13 @@ function CharacterView({ history }) {
         )}
         {best != null && (
           <div style={{ marginTop: 12, fontSize: 14, color: C.text }}>
-            Best: <b style={{ color: C.blue }}>{fmt1(best)} kg</b> at {fmtTime(selTarget)}
+            Best: <b style={{ color: C.blue }}>{fmtW(best, unit)} {unit}</b> at {fmtTime(selTarget)}
           </div>
         )}
         {nextPct != null && (
           <div style={{ marginTop: 4, fontSize: 13, color: C.muted }}>
-            Next badge at <b style={{ color: C.green }}>{fmt1(nextPct)} kg</b>
-            {best != null && ` (+${fmt1(nextPct - best)} kg)`}
+            Next badge at <b style={{ color: C.green }}>{fmtW(nextPct, unit)} {unit}</b>
+            {best != null && ` (+${fmtW(nextPct - best, unit)} ${unit})`}
           </div>
         )}
         {sparkData.length === 0 && (
@@ -1198,10 +1206,10 @@ function CharacterView({ history }) {
                     color: earned ? (isCurrent ? C.green : C.text) : C.muted,
                   }}>{title}</div>
                   {earned && threshold != null && (
-                    <div style={{ fontSize: 11, color: C.muted }}>≥ {fmt1(threshold)} kg</div>
+                    <div style={{ fontSize: 11, color: C.muted }}>≥ {fmtW(threshold, unit)} {unit}</div>
                   )}
                   {!earned && threshold != null && (
-                    <div style={{ fontSize: 11, color: C.muted }}>{fmt1(threshold)} kg</div>
+                    <div style={{ fontSize: 11, color: C.muted }}>{fmtW(threshold, unit)} {unit}</div>
                   )}
                 </div>
                 {earned && <div style={{ marginLeft: "auto", fontSize: 14 }}>✓</div>}
@@ -1221,9 +1229,9 @@ function CharacterView({ history }) {
             <LineChart data={sparkData}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="month" tick={{ fill: C.muted, fontSize: 11 }} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit=" kg" />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit={` ${unit}`} />
               <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
-              <Line type="monotone" dataKey="kg" stroke={C.blue} strokeWidth={2} dot={{ fill: C.blue }} name="Best (kg)" />
+              <Line type="monotone" dataKey="kg" stroke={C.blue} strokeWidth={2} dot={{ fill: C.blue }} name={`Best (${unit})`} />
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -1235,7 +1243,7 @@ function CharacterView({ history }) {
 // ─────────────────────────────────────────────────────────────
 // HISTORY VIEW
 // ─────────────────────────────────────────────────────────────
-function HistoryView({ history, onDownload }) {
+function HistoryView({ history, onDownload, unit = "lbs" }) {
   const [grip,   setGrip]   = useState("");
   const [hand,   setHand]   = useState("");
   const [target, setTarget] = useState(0);
@@ -1316,7 +1324,7 @@ function HistoryView({ history, onDownload }) {
                 background: r.actual_time_s >= sess.target_duration ? "#1a2f1a" : "#2f1a1a",
                 border: `1px solid ${r.actual_time_s >= sess.target_duration ? C.green : C.red}`,
               }}>
-                <b>{fmt1(r.weight_kg)}kg</b> · {fmtTime(r.actual_time_s)}
+                <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
               </div>
             ))}
           </div>
@@ -1329,19 +1337,20 @@ function HistoryView({ history, onDownload }) {
 // ─────────────────────────────────────────────────────────────
 // TRENDS VIEW
 // ─────────────────────────────────────────────────────────────
-function TrendsView({ history }) {
+function TrendsView({ history, unit = "lbs" }) {
   const [sel, setSel] = useState(45);
 
   const data = useMemo(() => {
     const byDate = {};
-    for (const r of history.filter(r => r.target_duration === sel && r.weight_kg > 0)) {
+    for (const r of history.filter(r => r.target_duration === sel && effectiveLoad(r) > 0)) {
       const d = r.date || "";
-      if (!byDate[d]) byDate[d] = { date: d, L: 0, R: 0 };
-      if (r.hand === "L") byDate[d].L = Math.max(byDate[d].L, r.weight_kg);
-      if (r.hand === "R") byDate[d].R = Math.max(byDate[d].R, r.weight_kg);
+      if (!byDate[d]) byDate[d] = { date: d, L: null, R: null };
+      const load = toDisp(effectiveLoad(r), unit);
+      if (r.hand === "L") byDate[d].L = Math.max(byDate[d].L ?? 0, load);
+      if (r.hand === "R") byDate[d].R = Math.max(byDate[d].R ?? 0, load);
     }
     return Object.values(byDate).sort((a, b) => a.date < b.date ? -1 : 1);
-  }, [history, sel]);
+  }, [history, sel, unit]);
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -1368,7 +1377,7 @@ function TrendsView({ history }) {
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit=" kg" />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit={` ${unit}`} />
               <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
               <Legend />
               <Line type="monotone" dataKey="L" stroke={C.blue}   strokeWidth={2} dot={false} name="Left"  connectNulls />
@@ -1384,7 +1393,7 @@ function TrendsView({ history }) {
 // ─────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────
-function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut }) {
+function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut, unit = "lbs", onUnitChange = () => {} }) {
   const [showSQL, setShowSQL] = useState(false);
   const sql = `-- Run this once in your Supabase SQL editor:
 CREATE TABLE reps (
@@ -1404,6 +1413,20 @@ CREATE POLICY "auth_all" ON reps
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Settings</h2>
+
+      <Card>
+        <Sect title="Units">
+          <div style={{ display: "flex", gap: 8 }}>
+            {["lbs", "kg"].map(u => (
+              <button key={u} onClick={() => onUnitChange(u)} style={{
+                flex: 1, padding: "10px 0", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 16,
+                background: unit === u ? C.blue : C.border,
+                color: unit === u ? "#fff" : C.muted, border: "none",
+              }}>{u}</button>
+            ))}
+          </div>
+        </Sect>
+      </Card>
 
       <Card>
         <Sect title="Cloud Sync (Supabase)">
@@ -1493,6 +1516,10 @@ export default function App() {
   // ── Auth ──────────────────────────────────────────────────
   const [user,       setUser]       = useState(null);
   const [loginEmail, setLoginEmail] = useState("");
+
+  // ── Unit preference ───────────────────────────────────────
+  const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
+  const saveUnit = (u) => { setUnit(u); saveLS("unit_pref", u); };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -1725,7 +1752,7 @@ export default function App() {
         if (phase === "idle") {
           return (
             <>
-              <SetupView config={config} setConfig={setConfig} onStart={startSession} history={history} />
+              <SetupView config={config} setConfig={setConfig} onStart={startSession} history={history} unit={unit} />
               {/* Tindeq connect button */}
               <div style={{ maxWidth: 480, margin: "0 auto", padding: "0 16px 32px" }}>
                 <Card>
@@ -1752,7 +1779,7 @@ export default function App() {
                   </div>
                   {tindeq.connected && (
                     <div style={{ marginTop: 8, fontSize: 13, color: C.text }}>
-                      Live force: <b style={{ color: C.blue }}>{tindeq.force.toFixed(1)} kg</b>
+                      Live force: <b style={{ color: C.blue }}>{fmtW(tindeq.force, unit)} {unit}</b>
                       <span style={{ marginLeft: 12, color: C.muted, fontSize: 12 }}>
                         (tap Tare to zero before your session)
                       </span>
@@ -1776,6 +1803,7 @@ export default function App() {
               onAbort={handleAbort}
               tindeq={tindeq}
               autoStart={phase === "rep_active"}
+              unit={unit}
             />
           );
         }
@@ -1791,6 +1819,7 @@ export default function App() {
               numSets={config.numSets}
               repNum={currentRep}
               repsPerSet={config.repsPerSet}
+              unit={unit}
             />
           );
         }
@@ -1813,6 +1842,7 @@ export default function App() {
               leveledUp={leveledUp}
               newLevel={newLevel}
               onDone={() => setPhase("idle")}
+              unit={unit}
             />
           );
         }
@@ -1820,9 +1850,9 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <CharacterView history={history} />}
-      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} />}
-      {tab === 3 && <TrendsView history={history} />}
+      {tab === 1 && <CharacterView history={history} unit={unit} />}
+      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} />}
+      {tab === 3 && <TrendsView history={history} unit={unit} />}
       {tab === 4 && (
         <SettingsView
           user={user}
@@ -1830,6 +1860,8 @@ export default function App() {
           setLoginEmail={setLoginEmail}
           onMagicLink={sendMagicLink}
           onSignOut={signOut}
+          unit={unit}
+          onUnitChange={saveUnit}
         />
       )}
     </div>
