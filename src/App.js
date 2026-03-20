@@ -111,6 +111,15 @@ const availFrac = (F) => clamp(1 - F, 0.05, 1.0);
 // ─────────────────────────────────────────────────────────────
 // HISTORICAL ESTIMATION
 // ─────────────────────────────────────────────────────────────
+// Effective load for a rep — prefer Tindeq avg_force_kg, fall back to weight_kg
+function effectiveLoad(r) {
+  const f = Number(r.avg_force_kg);
+  const w = Number(r.weight_kg);
+  if (f > 0 && f < 500) return f;
+  if (w > 0) return w;
+  return 0;
+}
+
 // Returns the weighted-recent-average weight at which the user
 // achieved close to targetDuration seconds to failure.
 function estimateRefWeight(history, hand, grip, targetDuration) {
@@ -121,12 +130,12 @@ function estimateRefWeight(history, hand, grip, targetDuration) {
     (!grip || r.grip === grip) &&
     r.actual_time_s > 0 &&
     Math.abs(r.actual_time_s - targetDuration) <= tol &&
-    r.weight_kg > 0
+    effectiveLoad(r) > 0
   );
   if (matches.length === 0) return null;
   const sorted = [...matches].sort((a, b) => a.date < b.date ? -1 : 1).slice(-10);
   let wSum = 0, wKg = 0;
-  sorted.forEach((r, i) => { const w = i + 1; wSum += w; wKg += r.weight_kg * w; });
+  sorted.forEach((r, i) => { const w = i + 1; wSum += w; wKg += effectiveLoad(r) * w; });
   return wKg / wSum;
 }
 
@@ -143,10 +152,10 @@ function getBestLoad(history, hand, grip, targetDuration) {
     r.hand === hand &&
     (!grip || r.grip === grip) &&
     r.target_duration === targetDuration &&
-    r.weight_kg > 0
+    effectiveLoad(r) > 0
   );
   if (matches.length === 0) return null;
-  return Math.max(...matches.map(r => r.weight_kg));
+  return Math.max(...matches.map(r => effectiveLoad(r)));
 }
 
 function calcLevel(history, hand, grip, targetDuration) {
@@ -154,11 +163,11 @@ function calcLevel(history, hand, grip, targetDuration) {
     r.hand === hand &&
     (!grip || r.grip === grip) &&
     r.target_duration === targetDuration &&
-    r.weight_kg > 0
+    effectiveLoad(r) > 0
   ).sort((a, b) => a.date < b.date ? -1 : 1);
   if (matches.length < 2) return 1;
-  const baseline = matches[0].weight_kg;
-  const best = Math.max(...matches.map(r => r.weight_kg));
+  const baseline = effectiveLoad(matches[0]);
+  const best = Math.max(...matches.map(r => effectiveLoad(r)));
   if (best <= baseline) return 1;
   return Math.max(1, 1 + Math.floor(Math.log(best / baseline) / Math.log(LEVEL_STEP)));
 }
@@ -323,6 +332,7 @@ async function fetchReps() {
     target_duration: Number(r.target_duration) || 45,
     weight_kg: Number(r.weight_kg) || 0,
     actual_time_s: Number(r.actual_time_s) || 0,
+    avg_force_kg: Number(r.avg_force_kg) || 0,
     peak_force_kg: Number(r.peak_force_kg) || 0,
     set_num: Number(r.set_num) || 1,
     rep_num: Number(r.rep_num) || 1,
