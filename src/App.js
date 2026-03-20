@@ -20,8 +20,9 @@ const LS_KEY = "ft_v3";
 const TINDEQ_SERVICE = "7e4e1701-1ea6-40c9-9dcc-13d34ffead57";
 const TINDEQ_NOTIFY  = "7e4e1702-1ea6-40c9-9dcc-13d34ffead57";
 const TINDEQ_WRITE   = "7e4e1703-1ea6-40c9-9dcc-13d34ffead57";
-const CMD_START = new Uint8Array([0x64]);
-const CMD_STOP  = new Uint8Array([0x65]);
+const CMD_TARE  = new Uint8Array([0x64]); // zero/tare the scale
+const CMD_START = new Uint8Array([0x65]); // start weight measurement
+const CMD_STOP  = new Uint8Array([0x66]); // stop weight measurement
 const RESPONSE_WEIGHT = 0x01;
 
 const TARGET_OPTIONS = [
@@ -30,9 +31,7 @@ const TARGET_OPTIONS = [
   { label: "Endurance", seconds: 240 },
 ];
 
-const GRIP_PRESETS = [
-  "Half Crimp", "Full Crimp", "Open Hand", "Pinch", "Sloper", "Mono", "Two-Finger",
-];
+const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
 
 // Three-compartment fatigue decay parameters (defaults; fitted from history over time)
 const DEF_FAT = {
@@ -272,7 +271,12 @@ function useTindeq({ onAutoFailure }) {
     peakRef.current = 0; setPeak(0);
   }, []);
 
-  return { connected, force, peak, bleError, connect, startMeasuring, stopMeasuring, resetPeak };
+  const tare = useCallback(async () => {
+    if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_TARE);
+    peakRef.current = 0; setPeak(0); setForce(0);
+  }, []);
+
+  return { connected, force, peak, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -649,24 +653,26 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq }) {
     setElapsed(0);
     startTimeRef.current = Date.now();
     setRepRunning(true);
+    if (tindeq.connected) await tindeq.tare(); // auto-tare at rep start
     if (tindeq.connected) await tindeq.startMeasuring();
     timerRef.current = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
     }, 100);
   }, [tindeq]);
 
-  // Stop / record
+  // Stop / record — works for manual tap OR Tindeq auto-detect
   const endRep = useCallback(async (autoFail = false) => {
-    if (!repRunning && !autoFail) return;
+    if (!startTimeRef.current) return; // no rep in progress
     clearInterval(timerRef.current);
     const actualTime = (Date.now() - startTimeRef.current) / 1000;
+    startTimeRef.current = null; // prevent double-fire
     setRepRunning(false);
     if (tindeq.connected) await tindeq.stopMeasuring();
     onRepDone({
       actualTime: actualTime,
       peakForce:  tindeq.peak,
     });
-  }, [repRunning, tindeq, onRepDone]);
+  }, [tindeq, onRepDone]);
 
   // Auto-fail callback from Tindeq
   useEffect(() => {
@@ -1614,15 +1620,28 @@ export default function App() {
                         {tindeq.connected ? "Connected ✓" : tindeq.bleError || "Not connected"}
                       </div>
                     </div>
-                    <Btn
-                      small
-                      onClick={tindeq.connect}
-                      disabled={tindeq.connected}
-                      color={tindeq.connected ? C.green : C.blue}
-                    >
-                      {tindeq.connected ? "Connected" : "Connect BLE"}
-                    </Btn>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {tindeq.connected && (
+                        <Btn small onClick={tindeq.tare} color={C.muted}>Tare</Btn>
+                      )}
+                      <Btn
+                        small
+                        onClick={tindeq.connect}
+                        disabled={tindeq.connected}
+                        color={tindeq.connected ? C.green : C.blue}
+                      >
+                        {tindeq.connected ? "Connected" : "Connect BLE"}
+                      </Btn>
+                    </div>
                   </div>
+                  {tindeq.connected && (
+                    <div style={{ marginTop: 8, fontSize: 13, color: C.text }}>
+                      Live force: <b style={{ color: C.blue }}>{tindeq.force.toFixed(1)} kg</b>
+                      <span style={{ marginLeft: 12, color: C.muted, fontSize: 12 }}>
+                        (tap Tare to zero before your session)
+                      </span>
+                    </div>
+                  )}
                   {tindeq.bleError && (
                     <div style={{ marginTop: 8, fontSize: 12, color: C.red }}>{tindeq.bleError}</div>
                   )}
