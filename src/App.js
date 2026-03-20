@@ -178,37 +178,24 @@ function nextLevelPct(history, hand, grip, targetDuration) {
 // ─────────────────────────────────────────────────────────────
 // BLE packet format (Progressor firmware):
 //   Byte 0     : response code (0x01 = weight data)
-//   Bytes 1..N : samples, each 8 bytes:
+//   Byte  1    : payload length in bytes (0x78 = 120 = 15 samples × 8 bytes)
+//   Bytes 2..N : samples, each 8 bytes:
 //                  [0..3] float32 LE — weight in kg
 //                  [4..7] uint32  LE — timestamp in µs from session start
 //
 // If your device uses a different format, update parseTindeqPacket().
-let _tindeqPacketCount = 0;
 function parseTindeqPacket(dataView, onSample) {
-  if (dataView.byteLength < 1) return;
-
-  // Log first 20 packets so we can inspect raw bytes in DevTools console
-  if (_tindeqPacketCount < 20) {
-    const bytes = Array.from({ length: dataView.byteLength }, (_, i) =>
-      '0x' + dataView.getUint8(i).toString(16).padStart(2, '0')
-    );
-    console.log(`[Tindeq] pkt#${_tindeqPacketCount} kind=0x${dataView.getUint8(0).toString(16)} len=${dataView.byteLength} bytes:`, bytes.join(' '));
-    _tindeqPacketCount++;
-  }
+  if (dataView.byteLength < 2) return;
 
   if (dataView.getUint8(0) !== RESPONSE_WEIGHT) return;
-  let offset = 1;
+  // Byte 1 is payload length; samples start at byte 2
+  let offset = 2;
   while (offset + 8 <= dataView.byteLength) {
     const kg = dataView.getFloat32(offset, /* littleEndian= */ true);
     const ts = dataView.getUint32(offset + 4, true); // µs
 
     // Sanity check — valid finger-training forces are 0–500 kg
     if (!isFinite(kg) || kg > 500 || kg < -10) {
-      console.warn('[Tindeq] Skipping out-of-range sample kg=', kg, 'ts=', ts,
-        'bytes:', Array.from({ length: 8 }, (_, i) =>
-          '0x' + dataView.getUint8(offset + i).toString(16).padStart(2, '0')
-        ).join(' ')
-      );
       offset += 8;
       continue;
     }
