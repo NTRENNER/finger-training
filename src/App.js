@@ -199,10 +199,13 @@ function useTindeq({ onAutoFailure }) {
   const [connected,  setConnected]  = useState(false);
   const [force,      setForce]      = useState(0);
   const [peak,       setPeak]       = useState(0);
+  const [avgForce,   setAvgForce]   = useState(0);
   const [bleError,   setBleError]   = useState(null);
 
   const ctrlRef          = useRef(null);
   const peakRef          = useRef(0);
+  const sumRef           = useRef(0);   // running sum for average
+  const countRef         = useRef(0);   // sample count for average
   const belowSinceRef    = useRef(null);
   const measuringRef     = useRef(false);
   const onAutoFailureRef = useRef(onAutoFailure);
@@ -229,18 +232,11 @@ function useTindeq({ onAutoFailure }) {
           setForce(kg);
           if (kg > peakRef.current) { peakRef.current = kg; setPeak(kg); }
 
-          // Auto failure detection: force < 50% of peak for >500 ms
-          if (measuringRef.current && peakRef.current > 1.0) {
-            if (kg < peakRef.current * 0.50) {
-              if (!belowSinceRef.current) belowSinceRef.current = Date.now();
-              else if (Date.now() - belowSinceRef.current > 500) {
-                measuringRef.current  = false;
-                belowSinceRef.current = null;
-                onAutoFailureRef.current?.();
-              }
-            } else {
-              belowSinceRef.current = null;
-            }
+          // Running average — only accumulate while measuring
+          if (measuringRef.current && kg > 0) {
+            sumRef.current   += kg;
+            countRef.current += 1;
+            setAvgForce(sumRef.current / countRef.current);
           }
         });
       });
@@ -256,7 +252,10 @@ function useTindeq({ onAutoFailure }) {
   }, []);
 
   const startMeasuring = useCallback(async () => {
-    peakRef.current = 0; setPeak(0); setForce(0);
+    peakRef.current  = 0;  setPeak(0);
+    sumRef.current   = 0;
+    countRef.current = 0;  setAvgForce(0);
+    setForce(0);
     belowSinceRef.current = null;
     measuringRef.current  = true;
     if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_START);
@@ -276,7 +275,7 @@ function useTindeq({ onAutoFailure }) {
     peakRef.current = 0; setPeak(0); setForce(0);
   }, []);
 
-  return { connected, force, peak, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare };
+  return { connected, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -297,7 +296,7 @@ async function pushRep(rep) {
   const { error } = await supabase.from("reps").insert([{
     date: rep.date, grip: rep.grip, hand: rep.hand,
     target_duration: rep.target_duration, weight_kg: rep.weight_kg,
-    actual_time_s: rep.actual_time_s, peak_force_kg: rep.peak_force_kg,
+    actual_time_s: rep.actual_time_s, avg_force_kg: rep.avg_force_kg,
     set_num: rep.set_num, rep_num: rep.rep_num,
     rest_s: rep.rest_s, session_id: rep.session_id,
   }]);
@@ -418,23 +417,21 @@ function BigTimer({ seconds, targetSeconds, running }) {
   );
 }
 
-function ForceGauge({ force, peak, maxDisplay = 50 }) {
+function ForceGauge({ force, avg, peak, maxDisplay = 50 }) {
   const fPct   = clamp(force / maxDisplay, 0, 1);
-  const pkPct  = clamp(peak  / maxDisplay, 0, 1);
+  const avgPct = clamp(avg   / maxDisplay, 0, 1);
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 4 }}>
-        <span>Force</span>
+        <span>Live: <b style={{ color: C.blue }}>{fmt1(force)} kg</b></span>
+        <span>Avg: <b style={{ color: C.green }}>{fmt1(avg)} kg</b></span>
         <span>Peak: <b style={{ color: C.orange }}>{fmt1(peak)} kg</b></span>
       </div>
       <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
+        {/* Live force bar */}
         <div style={{ position: "absolute", height: "100%", width: `${fPct * 100}%`, background: C.blue, borderRadius: 6, transition: "width 0.05s" }} />
-        <div style={{ position: "absolute", top: 0, bottom: 0, left: `${pkPct * 100}%`, width: 2, background: C.orange }} />
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", paddingLeft: 10 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", mixBlendMode: "difference" }}>
-            {fmt1(force)} kg
-          </span>
-        </div>
+        {/* Average marker */}
+        <div style={{ position: "absolute", top: 0, bottom: 0, left: `${avgPct * 100}%`, width: 3, background: C.green }} />
       </div>
     </div>
   );
@@ -629,62 +626,67 @@ function SetupView({ config, setConfig, onStart, history }) {
 // ─────────────────────────────────────────────────────────────
 // ACTIVE SESSION VIEW
 // ─────────────────────────────────────────────────────────────
-function ActiveSessionView({ session, onRepDone, onAbort, tindeq }) {
+function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false }) {
   const { config, currentSet, currentRep, fatigue } = session;
-  const [elapsed,       setElapsed]       = useState(0);
-  const [repRunning,    setRepRunning]    = useState(false);
-  const [manualWeight,  setManualWeight]  = useState(null);
+
+  // repPhase: 'ready' (show Start button, first rep only)
+  //           'countdown' (3-2-1)
+  //           'active' (rep in progress)
+  const [repPhase,     setRepPhase]    = useState(autoStart ? "active" : "ready");
+  const [countdown,    setCountdown]   = useState(3);
+  const [elapsed,      setElapsed]     = useState(0);
+  const [manualWeight, setManualWeight] = useState(null);
   const startTimeRef = useRef(null);
   const timerRef     = useRef(null);
 
-  // Compute suggested weight for each hand
+  // Suggested weight per hand
   const suggestions = useMemo(() => {
     const handList = config.hand === "Both" ? ["L", "R"] : [config.hand];
     return Object.fromEntries(
       handList.map(h => [h, {
-        ref: session.refWeights?.[h] ?? null,
         suggested: suggestWeight(session.refWeights?.[h] ?? null, fatigue),
       }])
     );
   }, [config.hand, session.refWeights, fatigue]);
 
-  // Start timer
+  // Actually start recording the rep
   const startRep = useCallback(async () => {
     setElapsed(0);
     startTimeRef.current = Date.now();
-    setRepRunning(true);
-    if (tindeq.connected) await tindeq.tare(); // auto-tare at rep start
-    if (tindeq.connected) await tindeq.startMeasuring();
+    setRepPhase("active");
+    if (tindeq.connected) {
+      await tindeq.tare();
+      await tindeq.startMeasuring();
+    }
     timerRef.current = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
     }, 100);
   }, [tindeq]);
 
-  // Stop / record — works for manual tap OR Tindeq auto-detect
-  const endRep = useCallback(async (autoFail = false) => {
-    if (!startTimeRef.current) return; // no rep in progress
+  // Auto-start on mount when autoStart=true
+  useEffect(() => {
+    if (autoStart) { startRep(); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 3-2-1 countdown
+  useEffect(() => {
+    if (repPhase !== "countdown") return;
+    if (countdown <= 0) { startRep(); return; }
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [repPhase, countdown, startRep]);
+
+  // End rep — manual tap only
+  const endRep = useCallback(async () => {
+    if (!startTimeRef.current) return;
     clearInterval(timerRef.current);
     const actualTime = (Date.now() - startTimeRef.current) / 1000;
-    startTimeRef.current = null; // prevent double-fire
-    setRepRunning(false);
+    startTimeRef.current = null;
+    setRepPhase("ready");
     if (tindeq.connected) await tindeq.stopMeasuring();
-    onRepDone({
-      actualTime: actualTime,
-      peakForce:  tindeq.peak,
-    });
+    onRepDone({ actualTime, avgForce: tindeq.avgForce });
   }, [tindeq, onRepDone]);
-
-  // Auto-fail callback from Tindeq
-  useEffect(() => {
-    if (tindeq.connected) {
-      // The hook calls onAutoFailure — we wire it via ref in parent
-    }
-  }, [tindeq.connected]);
-
-  // Wire auto-fail
-  useEffect(() => {
-    tindeq._autoFailRef && (tindeq._autoFailRef.current = () => endRep(true));
-  });
 
   useEffect(() => () => clearInterval(timerRef.current), []);
 
@@ -706,79 +708,87 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq }) {
 
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
 
-      {/* Timer */}
-      <Card>
-        <BigTimer seconds={elapsed} targetSeconds={config.targetTime} running={repRunning} />
-
-        {/* Force gauge (Tindeq) */}
-        {tindeq.connected && (
-          <ForceGauge force={tindeq.force} peak={tindeq.peak} />
-        )}
-
-        {!tindeq.connected && (
-          <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
-            No Tindeq connected — tap "Failure" when you can't hold on.
+      {/* Countdown overlay */}
+      {repPhase === "countdown" && (
+        <Card style={{ textAlign: "center", padding: "40px 0" }}>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Get ready…</div>
+          <div style={{ fontSize: 96, fontWeight: 900, color: C.yellow, lineHeight: 1 }}>
+            {countdown === 0 ? "GO" : countdown}
           </div>
-        )}
-      </Card>
+          <div style={{ fontSize: 14, color: C.muted, marginTop: 8 }}>
+            {fmt1(sug?.suggested ?? 0)} kg
+          </div>
+        </Card>
+      )}
 
-      {/* Weight suggestion */}
-      <Card>
-        <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
-          Rep {currentRep + 1} suggested weight
-          {fatigue > 0.05 && (
-            <span style={{ marginLeft: 8, color: C.orange }}>
-              (fatigue {Math.round(fatigue * 100)}%)
-            </span>
+      {/* Timer (shown during active rep) */}
+      {repPhase === "active" && (
+        <Card>
+          <BigTimer seconds={elapsed} targetSeconds={config.targetTime} running={true} />
+          {tindeq.connected ? (
+            <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} />
+          ) : (
+            <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
+              No Tindeq — tap Done when you let go.
+            </div>
           )}
-        </div>
-        {config.hand === "Both" ? (
-          <div style={{ display: "flex", gap: 32 }}>
-            {handList.map(h => (
-              <div key={h}>
-                <Label>{h === "L" ? "Left" : "Right"}</Label>
-                <span style={{ fontSize: 28, fontWeight: 700, color: C.blue }}>
-                  {suggestions[h].suggested != null ? `${fmt1(suggestions[h].suggested)} kg` : "—"}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
-            {sug?.suggested != null ? `${fmt1(sug.suggested)} kg` : "Enter manually ↓"}
-          </div>
-        )}
+        </Card>
+      )}
 
-        {/* Manual override */}
-        <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            type="number" min={0} step={0.5}
-            value={manualWeight ?? ""}
-            onChange={e => setManualWeight(e.target.value === "" ? null : Number(e.target.value))}
-            placeholder="Override kg…"
-            style={{ width: 120, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 15 }}
-          />
-          <span style={{ fontSize: 12, color: C.muted }}>kg (override)</span>
-        </div>
-      </Card>
+      {/* Weight suggestion (shown when ready) */}
+      {repPhase === "ready" && (
+        <Card>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
+            Rep {currentRep + 1} suggested weight
+            {fatigue > 0.05 && <span style={{ marginLeft: 8, color: C.orange }}>(fatigue {Math.round(fatigue * 100)}%)</span>}
+          </div>
+          {config.hand === "Both" ? (
+            <div style={{ display: "flex", gap: 32 }}>
+              {handList.map(h => (
+                <div key={h}>
+                  <Label>{h === "L" ? "Left" : "Right"}</Label>
+                  <span style={{ fontSize: 28, fontWeight: 700, color: C.blue }}>
+                    {suggestions[h].suggested != null ? `${fmt1(suggestions[h].suggested)} kg` : "—"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
+              {sug?.suggested != null ? `${fmt1(sug.suggested)} kg` : "—"}
+            </div>
+          )}
+          <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              type="number" min={0} step={0.5}
+              value={manualWeight ?? ""}
+              onChange={e => setManualWeight(e.target.value === "" ? null : Number(e.target.value))}
+              placeholder="Override kg…"
+              style={{ width: 120, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 15 }}
+            />
+            <span style={{ fontSize: 12, color: C.muted }}>kg (override)</span>
+          </div>
+        </Card>
+      )}
 
       {/* Controls */}
-      <div style={{ display: "flex", gap: 12 }}>
-        {!repRunning ? (
+      <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+        {repPhase === "ready" && (
           <Btn
-            onClick={startRep}
+            onClick={() => { setCountdown(3); setRepPhase("countdown"); }}
             style={{ flex: 1, padding: "18px 0", fontSize: 18, borderRadius: 12 }}
             color={C.green}
           >
             ▶ Start Rep
           </Btn>
-        ) : (
+        )}
+        {repPhase === "active" && (
           <Btn
-            onClick={() => endRep(false)}
+            onClick={endRep}
             style={{ flex: 1, padding: "18px 0", fontSize: 18, borderRadius: 12 }}
             color={C.red}
           >
-            ✕ Failure
+            ✕ Done
           </Btn>
         )}
       </div>
@@ -912,8 +922,8 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
 
   const totalReps  = reps.length;
   const avgTime    = totalReps > 0 ? reps.reduce((a, r) => a + r.actual_time_s, 0) / totalReps : 0;
-  const maxPeak    = Math.max(...reps.map(r => r.peak_force_kg), 0);
   const maxWeight  = Math.max(...reps.map(r => r.weight_kg), 0);
+  const hasForce   = reps.some(r => (r.avg_force_kg || 0) > 0);
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -948,10 +958,12 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
             <Label>Top Weight</Label>
             <div style={{ fontSize: 28, fontWeight: 700 }}>{fmt1(maxWeight)} kg</div>
           </div>
-          {maxPeak > 0 && (
+          {hasForce && (
             <div style={{ gridColumn: "1 / -1" }}>
-              <Label>Peak Force (Tindeq)</Label>
-              <div style={{ fontSize: 22, fontWeight: 700, color: C.orange }}>{fmt1(maxPeak)} kg</div>
+              <Label>Avg Force (Tindeq)</Label>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.green }}>
+                {fmt1(reps.reduce((a, r) => a + (r.avg_force_kg || 0), 0) / reps.filter(r => r.avg_force_kg > 0).length)} kg
+              </div>
             </div>
           )}
         </div>
@@ -966,7 +978,7 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
                 <th style={{ textAlign: "left", paddingBottom: 6 }}>Rep</th>
                 <th style={{ textAlign: "right", paddingBottom: 6 }}>Weight</th>
                 <th style={{ textAlign: "right", paddingBottom: 6 }}>Time</th>
-                {maxPeak > 0 && <th style={{ textAlign: "right", paddingBottom: 6 }}>Peak F</th>}
+                {hasForce && <th style={{ textAlign: "right", paddingBottom: 6 }}>Avg F</th>}
               </tr>
             </thead>
             <tbody>
@@ -977,9 +989,9 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
                   <td style={{ textAlign: "right", color: r.actual_time_s >= config.targetTime ? C.green : C.red }}>
                     {fmtTime(r.actual_time_s)}
                   </td>
-                  {maxPeak > 0 && (
-                    <td style={{ textAlign: "right", color: C.orange }}>
-                      {r.peak_force_kg > 0 ? `${fmt1(r.peak_force_kg)} kg` : "—"}
+                  {hasForce && (
+                    <td style={{ textAlign: "right", color: C.green }}>
+                      {r.avg_force_kg > 0 ? `${fmt1(r.avg_force_kg)} kg` : "—"}
                     </td>
                   )}
                 </tr>
@@ -1466,10 +1478,9 @@ export default function App() {
   }, [history, config]);
 
   // ── Handle rep completion ─────────────────────────────────
-  const handleRepDone = useCallback(({ actualTime, peakForce }) => {
+  const handleRepDone = useCallback(({ actualTime, avgForce }) => {
     const weight = (() => {
       const hands = config.hand === "Both" ? ["L", "R"] : [config.hand];
-      // Use suggested weight (already shown to user); average for Both
       const ws = hands.map(h => suggestWeight(refWeights[h], fatigue)).filter(Boolean);
       return ws.length > 0 ? ws.reduce((a, b) => a + b, 0) / ws.length : 0;
     })();
@@ -1482,14 +1493,14 @@ export default function App() {
       target_duration: config.targetTime,
       weight_kg:       Math.round(weight * 10) / 10,
       actual_time_s:   Math.round(actualTime * 10) / 10,
-      peak_force_kg:   Math.round((peakForce || 0) * 10) / 10,
+      avg_force_kg:    Math.round((avgForce || 0) * 10) / 10,
       set_num:         currentSet + 1,
       rep_num:         currentRep + 1,
       rest_s:          config.restTime,
       session_id:      sessionId,
     };
 
-    setLastRepResult({ actualTime, peakForce, targetTime: config.targetTime });
+    setLastRepResult({ actualTime, avgForce, targetTime: config.targetTime });
     setSessionReps(reps => [...reps, repRecord]);
     addReps([repRecord]);
 
@@ -1535,9 +1546,9 @@ export default function App() {
   }, [config, history]);
 
   const handleRestDone = useCallback(() => {
-    // After rest, apply fatigue decay then start next rep
+    // Decay fatigue over the rest period, then auto-start the next rep
     setFatigue(f => fatigueAfterRest(f, config.restTime));
-    setPhase("rep_ready");
+    setPhase("rep_active"); // autoStart=true — no button needed
   }, [config.restTime]);
 
   const handleNextSet = useCallback(() => {
@@ -1654,10 +1665,12 @@ export default function App() {
         if (phase === "rep_ready" || phase === "rep_active") {
           return (
             <ActiveSessionView
+              key={`${currentSet}-${currentRep}-${phase}`}
               session={{ config, currentSet, currentRep, fatigue, sessionId, refWeights }}
               onRepDone={handleRepDone}
               onAbort={handleAbort}
               tindeq={tindeq}
+              autoStart={phase === "rep_active"}
             />
           );
         }
