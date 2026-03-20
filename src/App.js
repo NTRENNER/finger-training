@@ -183,13 +183,36 @@ function nextLevelPct(history, hand, grip, targetDuration) {
 //                  [4..7] uint32  LE — timestamp in µs from session start
 //
 // If your device uses a different format, update parseTindeqPacket().
+let _tindeqPacketCount = 0;
 function parseTindeqPacket(dataView, onSample) {
   if (dataView.byteLength < 1) return;
+
+  // Log first 20 packets so we can inspect raw bytes in DevTools console
+  if (_tindeqPacketCount < 20) {
+    const bytes = Array.from({ length: dataView.byteLength }, (_, i) =>
+      '0x' + dataView.getUint8(i).toString(16).padStart(2, '0')
+    );
+    console.log(`[Tindeq] pkt#${_tindeqPacketCount} kind=0x${dataView.getUint8(0).toString(16)} len=${dataView.byteLength} bytes:`, bytes.join(' '));
+    _tindeqPacketCount++;
+  }
+
   if (dataView.getUint8(0) !== RESPONSE_WEIGHT) return;
   let offset = 1;
   while (offset + 8 <= dataView.byteLength) {
     const kg = dataView.getFloat32(offset, /* littleEndian= */ true);
     const ts = dataView.getUint32(offset + 4, true); // µs
+
+    // Sanity check — valid finger-training forces are 0–500 kg
+    if (!isFinite(kg) || kg > 500 || kg < -10) {
+      console.warn('[Tindeq] Skipping out-of-range sample kg=', kg, 'ts=', ts,
+        'bytes:', Array.from({ length: 8 }, (_, i) =>
+          '0x' + dataView.getUint8(offset + i).toString(16).padStart(2, '0')
+        ).join(' ')
+      );
+      offset += 8;
+      continue;
+    }
+
     onSample({ kg: Math.max(0, kg), ts });
     offset += 8;
   }
@@ -923,7 +946,7 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone }) {
   const totalReps  = reps.length;
   const avgTime    = totalReps > 0 ? reps.reduce((a, r) => a + r.actual_time_s, 0) / totalReps : 0;
   const maxWeight  = Math.max(...reps.map(r => r.weight_kg), 0);
-  const hasForce   = reps.some(r => (r.avg_force_kg || 0) > 0);
+  const hasForce   = reps.some(r => r.avg_force_kg > 0 && r.avg_force_kg < 500);
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -1493,7 +1516,9 @@ export default function App() {
       target_duration: config.targetTime,
       weight_kg:       Math.round(weight * 10) / 10,
       actual_time_s:   Math.round(actualTime * 10) / 10,
-      avg_force_kg:    Math.round((avgForce || 0) * 10) / 10,
+      avg_force_kg:    (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
+                         ? Math.round(avgForce * 10) / 10
+                         : null,
       set_num:         currentSet + 1,
       rep_num:         currentRep + 1,
       rest_s:          config.restTime,
