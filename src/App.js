@@ -156,28 +156,56 @@ function suggestWeight(refWeight, fatigue) {
 // ─────────────────────────────────────────────────────────────
 // GAMIFICATION
 // ─────────────────────────────────────────────────────────────
-function getBestLoad(history, hand, grip, targetDuration) {
+
+// A rep counts toward badges only if the athlete completed at least
+// 80% of the target duration (screens out bailed reps).
+function isQualifyingRep(r, targetDuration) {
+  if (!r.actual_time_s || !targetDuration) return true; // no time data → don't exclude
+  return r.actual_time_s >= targetDuration * 0.8;
+}
+
+// Group reps into sessions by their session_id (or date as fallback),
+// returning an array of { sessionKey, date, reps[] } sorted oldest first.
+function groupSessions(history, hand, grip, targetDuration) {
   const matches = history.filter(r =>
     r.hand === hand &&
     (!grip || r.grip === grip) &&
     r.target_duration === targetDuration &&
-    effectiveLoad(r) > 0
+    effectiveLoad(r) > 0 &&
+    isQualifyingRep(r, targetDuration)
   );
-  if (matches.length === 0) return null;
-  return Math.max(...matches.map(r => effectiveLoad(r)));
+  const map = new Map();
+  matches.forEach(r => {
+    const key = r.session_id || r.date;
+    if (!map.has(key)) map.set(key, { key, date: r.date, reps: [] });
+    map.get(key).reps.push(r);
+  });
+  return [...map.values()].sort((a, b) => a.date < b.date ? -1 : 1);
+}
+
+// Baseline = best qualifying rep from the FIRST session only.
+function getBaseline(history, hand, grip, targetDuration) {
+  const sessions = groupSessions(history, hand, grip, targetDuration);
+  if (sessions.length === 0) return null;
+  const firstReps = sessions[0].reps;
+  return Math.max(...firstReps.map(r => effectiveLoad(r)));
+}
+
+// Best load = best qualifying rep from sessions AFTER the first.
+// (First session always = badge 1 regardless of within-session variance.)
+function getBestLoad(history, hand, grip, targetDuration) {
+  const sessions = groupSessions(history, hand, grip, targetDuration);
+  if (sessions.length < 2) return null; // no improvement sessions yet
+  const laterReps = sessions.slice(1).flatMap(s => s.reps);
+  if (laterReps.length === 0) return null;
+  return Math.max(...laterReps.map(r => effectiveLoad(r)));
 }
 
 function calcLevel(history, hand, grip, targetDuration) {
-  const matches = history.filter(r =>
-    r.hand === hand &&
-    (!grip || r.grip === grip) &&
-    r.target_duration === targetDuration &&
-    effectiveLoad(r) > 0
-  ).sort((a, b) => a.date < b.date ? -1 : 1);
-  if (matches.length < 2) return 1;
-  const baseline = effectiveLoad(matches[0]);
-  const best = Math.max(...matches.map(r => effectiveLoad(r)));
-  if (best <= baseline) return 1;
+  const baseline = getBaseline(history, hand, grip, targetDuration);
+  if (!baseline || baseline <= 0) return 1;
+  const best = getBestLoad(history, hand, grip, targetDuration);
+  if (!best || best <= baseline) return 1; // first session or no improvement yet
   return Math.max(1, 1 + Math.floor(Math.log(best / baseline) / Math.log(LEVEL_STEP)));
 }
 
@@ -185,10 +213,12 @@ function levelTitle(level) {
   return LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)];
 }
 
-function nextLevelPct(history, hand, grip, targetDuration) {
-  const best = getBestLoad(history, hand, grip, targetDuration);
-  if (!best) return null;
-  return Math.round(best * LEVEL_STEP * 10) / 10;
+// Next badge threshold = baseline × LEVEL_STEP^(currentLevel)
+function nextLevelTarget(history, hand, grip, targetDuration) {
+  const baseline = getBaseline(history, hand, grip, targetDuration);
+  if (!baseline) return null;
+  const level = calcLevel(history, hand, grip, targetDuration);
+  return Math.round(baseline * Math.pow(LEVEL_STEP, level) * 10) / 10;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1140,18 +1170,13 @@ function CharacterView({ history, unit = "lbs" }) {
     return [...new Set(history.map(r => r.grip).filter(Boolean))].sort();
   }, [history]);
 
-  const level   = calcLevel(history, selHand, selGrip, selTarget);
-  const best    = getBestLoad(history, selHand, selGrip, selTarget);
-  const nextPct = nextLevelPct(history, selHand, selGrip, selTarget);
-
-  // Compute baseline for badge thresholds
-  const baseline = useMemo(() => {
-    const matches = history.filter(r =>
-      r.hand === selHand && (!selGrip || r.grip === selGrip) &&
-      r.target_duration === selTarget && effectiveLoad(r) > 0
-    ).sort((a, b) => a.date < b.date ? -1 : 1);
-    return matches.length > 0 ? effectiveLoad(matches[0]) : null;
-  }, [history, selHand, selGrip, selTarget]);
+  const level    = calcLevel(history, selHand, selGrip, selTarget);
+  const best     = getBestLoad(history, selHand, selGrip, selTarget);
+  const nextTgt  = nextLevelTarget(history, selHand, selGrip, selTarget);
+  const baseline = useMemo(
+    () => getBaseline(history, selHand, selGrip, selTarget),
+    [history, selHand, selGrip, selTarget]
+  );
 
   // Sparkline: best load per month
   const sparkData = useMemo(() => {
@@ -1214,10 +1239,10 @@ function CharacterView({ history, unit = "lbs" }) {
             Best: <b style={{ color: C.blue }}>{fmtW(best, unit)} {unit}</b> at {fmtTime(selTarget)}
           </div>
         )}
-        {nextPct != null && (
+        {nextTgt != null && (
           <div style={{ marginTop: 4, fontSize: 13, color: C.muted }}>
-            Next badge at <b style={{ color: C.green }}>{fmtW(nextPct, unit)} {unit}</b>
-            {best != null && ` (+${fmtW(nextPct - best, unit)} ${unit})`}
+            Next badge at <b style={{ color: C.green }}>{fmtW(nextTgt, unit)} {unit}</b>
+            {best != null && nextTgt > best && ` (+${fmtW(nextTgt - best, unit)} ${unit})`}
           </div>
         )}
         {sparkData.length === 0 && (
@@ -1268,9 +1293,10 @@ function CharacterView({ history, unit = "lbs" }) {
         <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>Badges</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
           {LEVEL_TITLES.map((title, i) => {
-            const earned = i === 0 ? (best != null) : (level > i);
+            // Badge 0 (Wimpy) = earned on first session; others need improvement over baseline
+            const earned = i === 0 ? (baseline != null) : (level > i);
             const isCurrent = level === i + 1;
-            // Threshold this badge was earned at
+            // Threshold: badge 0 = baseline itself; badge i = baseline × LEVEL_STEP^i
             const threshold = baseline != null
               ? Math.round(baseline * Math.pow(LEVEL_STEP, i) * 10) / 10
               : null;
@@ -1795,12 +1821,15 @@ export default function App() {
   const [activeHand,  setActiveHand]  = useState("L"); // tracks current hand in Both mode
 
   // Max strength estimate (for fatigue dose calculation)
+  // Use post-session-1 best; fall back to baseline (first session); then 20 kg if no data
   const sMaxL = useMemo(() => {
-    const best = getBestLoad(history, "L", config.grip, config.targetTime);
-    return best ? best * 1.2 : 20; // estimate ceiling 20% above best
+    const best = getBestLoad(history, "L", config.grip, config.targetTime)
+               || getBaseline(history, "L", config.grip, config.targetTime);
+    return best ? best * 1.2 : 20;
   }, [history, config.grip, config.targetTime]);
   const sMaxR = useMemo(() => {
-    const best = getBestLoad(history, "R", config.grip, config.targetTime);
+    const best = getBestLoad(history, "R", config.grip, config.targetTime)
+               || getBaseline(history, "R", config.grip, config.targetTime);
     return best ? best * 1.2 : 20;
   }, [history, config.grip, config.targetTime]);
 
