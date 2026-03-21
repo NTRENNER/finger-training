@@ -12,7 +12,8 @@ import {
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────
-const LS_KEY = "ft_v3";
+const LS_KEY       = "ft_v3";
+const LS_QUEUE_KEY = "ft_push_queue"; // reps that failed to reach Supabase
 
 // Tindeq Progressor BLE UUIDs & commands
 // NOTE: If your Progressor firmware uses a different packet format,
@@ -364,15 +365,52 @@ function useTindeq({ onAutoFailure }) {
 //   );
 //   ALTER TABLE reps ENABLE ROW LEVEL SECURITY;
 //   CREATE POLICY "auth_all" ON reps FOR ALL USING (auth.uid() IS NOT NULL);
-async function pushRep(rep) {
-  const { error } = await supabase.from("reps").insert([{
+function repPayload(rep) {
+  return {
     date: rep.date, grip: rep.grip, hand: rep.hand,
     target_duration: rep.target_duration, weight_kg: rep.weight_kg,
     actual_time_s: rep.actual_time_s, avg_force_kg: rep.avg_force_kg,
+    peak_force_kg: rep.peak_force_kg ?? 0,
     set_num: rep.set_num, rep_num: rep.rep_num,
     rest_s: rep.rest_s, session_id: rep.session_id,
-  }]);
-  if (error) console.warn("Supabase push:", error.message);
+  };
+}
+
+// Returns true on success, false on failure (caller should queue the rep).
+async function pushRep(rep) {
+  try {
+    const { error } = await supabase.from("reps").insert([repPayload(rep)]);
+    if (error) { console.warn("Supabase push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase push exception:", e.message);
+    return false;
+  }
+}
+
+// Add reps to the local retry queue.
+function enqueueReps(reps) {
+  const q = loadLS(LS_QUEUE_KEY) || [];
+  const existing = new Set(q.map(r => r.id));
+  const toAdd = reps.filter(r => r.id && !existing.has(r.id));
+  if (toAdd.length > 0) saveLS(LS_QUEUE_KEY, [...q, ...toAdd]);
+}
+
+// Attempt to push all queued reps; remove each one on success.
+async function flushQueue() {
+  const q = loadLS(LS_QUEUE_KEY) || [];
+  if (q.length === 0) return 0;
+  let remaining = [...q];
+  let flushed = 0;
+  for (const rep of q) {
+    const ok = await pushRep(rep);
+    if (ok) {
+      remaining = remaining.filter(r => r.id !== rep.id);
+      flushed++;
+    }
+  }
+  saveLS(LS_QUEUE_KEY, remaining);
+  return flushed;
 }
 
 async function fetchReps() {
@@ -1752,15 +1790,25 @@ export default function App() {
   const [history, setHistory] = useState(() => loadLS(LS_KEY) || []);
   useEffect(() => saveLS(LS_KEY, history), [history]);
 
-  // Load from Supabase when signed in.
+  // Track how many reps are waiting to be synced to Supabase.
+  const [pendingCount, setPendingCount] = useState(() => (loadLS(LS_QUEUE_KEY) || []).length);
+  const refreshPending = () => setPendingCount((loadLS(LS_QUEUE_KEY) || []).length);
+
+  // Load from Supabase when signed in; also flush any queued reps.
   // Only replace local history if Supabase actually returned rows — an empty
   // response (expired JWT silently blocked by RLS, network hiccup, etc.) must
   // never wipe out a good local cache.
   useEffect(() => {
     if (!user) return;
-    fetchReps().then(reps => {
-      if (reps && reps.length > 0) setHistory(reps);
+    // Flush queued reps first, then reload full history.
+    flushQueue().then(flushed => {
+      if (flushed > 0) refreshPending();
+      fetchReps().then(reps => {
+        if (reps && reps.length > 0) setHistory(reps);
+        refreshPending();
+      });
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const addReps = useCallback((newReps) => {
@@ -1769,8 +1817,15 @@ export default function App() {
       const fresh    = newReps.filter(r => !existing.has(r.id));
       return [...fresh, ...h];
     });
-    if (user) newReps.forEach(pushRep);
-  }, [user]);
+    if (user) {
+      // Push each rep; enqueue any that fail for later retry.
+      newReps.forEach(rep => {
+        pushRep(rep).then(ok => {
+          if (!ok) { enqueueReps([rep]); refreshPending(); }
+        });
+      });
+    }
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateSession = useCallback(async (sessionKey, updates) => {
     // updates: { hand?, grip? }
@@ -2012,6 +2067,27 @@ export default function App() {
           <div style={{ marginLeft: "auto", fontSize: 11, color: C.green }}>⚡ Tindeq</div>
         )}
       </div>
+
+      {/* Unsaved reps warning banner */}
+      {pendingCount > 0 && (
+        <div style={{
+          background: "#3a1f00", borderBottom: `1px solid ${C.orange}`,
+          padding: "8px 16px", display: "flex", alignItems: "center", gap: 10,
+          fontSize: 13, color: C.orange,
+        }}>
+          <span>⚠️</span>
+          <span>
+            {pendingCount} rep{pendingCount !== 1 ? "s" : ""} couldn't sync to the cloud.
+            {user ? " Retrying…" : " Sign in to retry."}
+          </span>
+          {user && (
+            <button onClick={() => flushQueue().then(refreshPending)} style={{
+              marginLeft: "auto", background: "none", border: `1px solid ${C.orange}`,
+              color: C.orange, borderRadius: 6, padding: "2px 10px", cursor: "pointer", fontSize: 12,
+            }}>Retry now</button>
+          )}
+        </div>
+      )}
 
       {/* Train tab */}
       {tab === 0 && (() => {
