@@ -256,7 +256,7 @@ function useTindeq({ onAutoFailure }) {
       ctrlRef.current = await svc.getCharacteristic(TINDEQ_WRITE);
 
       dataC.addEventListener("characteristicvaluechanged", (evt) => {
-        parseTindeqPacket(evt.target.value, ({ kg }) => {
+        parseTindeqPacket(evt.target.value, ({ kg, ts }) => {
           setForce(kg);
           if (kg > peakRef.current) { peakRef.current = kg; setPeak(kg); }
 
@@ -265,6 +265,20 @@ function useTindeq({ onAutoFailure }) {
             sumRef.current   += kg;
             countRef.current += 1;
             setAvgForce(sumRef.current / countRef.current);
+          }
+
+          // Auto-failure: if force drops below 80% of peak for >500 ms, fire
+          if (measuringRef.current && peakRef.current > 2) {
+            const threshold = peakRef.current * 0.80;
+            if (kg < threshold) {
+              if (belowSinceRef.current === null) belowSinceRef.current = Date.now();
+              else if (Date.now() - belowSinceRef.current > 500) {
+                belowSinceRef.current = null;
+                onAutoFailureRef.current?.();
+              }
+            } else {
+              belowSinceRef.current = null;
+            }
           }
         });
       });
@@ -433,7 +447,7 @@ function BigTimer({ seconds, targetSeconds, running }) {
   const color = running ? (over ? C.green : C.blue) : C.muted;
   return (
     <div style={{ textAlign: "center", padding: "24px 0" }}>
-      <div style={{ fontSize: 72, fontWeight: 800, fontVariantNumeric: "tabular-nums", color, lineHeight: 1 }}>
+      <div style={{ fontSize: 108, fontWeight: 800, fontVariantNumeric: "tabular-nums", color, lineHeight: 1 }}>
         {fmtTime(seconds)}
       </div>
       <div style={{ marginTop: 12, fontSize: 13, color: C.muted }}>
@@ -671,7 +685,7 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs" }) {
 // ACTIVE SESSION VIEW
 // ─────────────────────────────────────────────────────────────
 function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, unit = "lbs" }) {
-  const { config, currentSet, currentRep, fatigue } = session;
+  const { config, currentSet, currentRep, fatigue, activeHand } = session;
 
   // repPhase: 'ready' (show Start button, first rep only)
   //           'countdown' (3-2-1)
@@ -744,7 +758,9 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
         <div>
           <div style={{ fontSize: 13, color: C.muted }}>Set {currentSet + 1} of {config.numSets}</div>
           <div style={{ fontSize: 18, fontWeight: 700 }}>
-            {config.grip} · {config.hand === "Both" ? "Both Hands" : config.hand === "L" ? "Left" : "Right"}
+            {config.grip} · {config.hand === "Both"
+              ? (activeHand === "L" ? "Left Hand" : "Right Hand")
+              : config.hand === "L" ? "Left" : "Right"}
           </div>
         </div>
         <Btn small color={C.red} onClick={onAbort}>End Session</Btn>
@@ -930,6 +946,37 @@ function RestView({ lastRep, nextWeight, restSeconds, onRestDone, setNum, numSet
 // ─────────────────────────────────────────────────────────────
 // BETWEEN-SETS VIEW
 // ─────────────────────────────────────────────────────────────
+function SwitchHandsView({ onReady }) {
+  const [remaining, setRemaining] = useState(10);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      setRemaining(r => {
+        if (r <= 1) { clearInterval(intervalRef.current); onReady(); return 0; }
+        return r - 1;
+      });
+    }, 1000);
+    return () => clearInterval(intervalRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "40px 16px", textAlign: "center" }}>
+      <div style={{ fontSize: 56 }}>🤚➡️✋</div>
+      <h2 style={{ margin: "16px 0 8px" }}>Switch to Right Hand</h2>
+      <p style={{ color: C.muted, marginBottom: 24 }}>Left hand complete. Get ready to train right hand.</p>
+      <div style={{ fontSize: 80, fontWeight: 900, color: remaining > 3 ? C.green : C.orange, lineHeight: 1, marginBottom: 24 }}>
+        {remaining}
+      </div>
+      <Btn onClick={() => { clearInterval(intervalRef.current); onReady(); }}
+        style={{ padding: "14px 40px", fontSize: 16, borderRadius: 12 }}>
+        Ready →
+      </Btn>
+    </div>
+  );
+}
+
 function BetweenSetsView({ completedSet, totalSets, onNextSet, setRestTime = 180 }) {
   const [remaining, setRemaining] = useState(setRestTime);
   const intervalRef = useRef(null);
@@ -1278,11 +1325,14 @@ function CharacterView({ history, unit = "lbs" }) {
 // ─────────────────────────────────────────────────────────────
 // HISTORY VIEW
 // ─────────────────────────────────────────────────────────────
-function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession }) {
+function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession }) {
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
   const [confirmKey,  setConfirmKey]  = useState(null);
+  const [editKey,     setEditKey]     = useState(null);
+  const [editHand,    setEditHand]    = useState("L");
+  const [editGrip,    setEditGrip]    = useState("");
 
   const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
 
@@ -1344,6 +1394,7 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession }) {
       {grouped.slice(0, 30).map((sess, i) => {
         const sessKey = sess.reps[0]?.session_id || sess.date;
         const isConfirming = confirmKey === sessKey;
+        const isEditing    = editKey    === sessKey;
         return (
           <Card key={i} style={{ marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
@@ -1356,7 +1407,19 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession }) {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 12, color: C.muted }}>{sess.date}</span>
-                {isConfirming ? (
+                {!isConfirming && !isEditing && (
+                  <>
+                    <button onClick={() => { setEditKey(sessKey); setEditHand(sess.hand); setEditGrip(sess.grip); setConfirmKey(null); }} style={{
+                      background: "none", border: "none", color: C.muted,
+                      fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+                    }} title="Edit session">✏️</button>
+                    <button onClick={() => { setConfirmKey(sessKey); setEditKey(null); }} style={{
+                      background: "none", border: "none", color: C.muted,
+                      fontSize: 14, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+                    }} title="Delete session">🗑</button>
+                  </>
+                )}
+                {isConfirming && (
                   <>
                     <button onClick={() => { onDeleteSession(sessKey); setConfirmKey(null); }} style={{
                       background: C.red, border: "none", borderRadius: 6, color: "#fff",
@@ -1367,14 +1430,39 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession }) {
                       fontSize: 11, padding: "3px 8px", cursor: "pointer",
                     }}>Cancel</button>
                   </>
-                ) : (
-                  <button onClick={() => setConfirmKey(sessKey)} style={{
-                    background: "none", border: "none", color: C.muted,
-                    fontSize: 14, cursor: "pointer", padding: "0 2px", lineHeight: 1,
-                  }} title="Delete session">🗑</button>
                 )}
               </div>
             </div>
+
+            {/* Edit UI */}
+            {isEditing && (
+              <div style={{ marginBottom: 10, padding: 10, background: C.bg, borderRadius: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {["L","R","B"].map(h => (
+                    <button key={h} onClick={() => setEditHand(h)} style={{
+                      padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                      background: editHand === h ? C.purple : C.border,
+                      color: editHand === h ? "#fff" : C.muted,
+                    }}>{h === "L" ? "Left" : h === "R" ? "Right" : "Both"}</button>
+                  ))}
+                </div>
+                <input
+                  value={editGrip}
+                  onChange={e => setEditGrip(e.target.value)}
+                  placeholder="Grip type"
+                  style={{ flex: 1, minWidth: 80, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 12 }}
+                />
+                <button onClick={() => { onUpdateSession(sessKey, { hand: editHand, grip: editGrip }); setEditKey(null); }} style={{
+                  background: C.green, border: "none", borderRadius: 6, color: "#000",
+                  fontSize: 11, fontWeight: 700, padding: "4px 10px", cursor: "pointer",
+                }}>Save</button>
+                <button onClick={() => setEditKey(null)} style={{
+                  background: C.border, border: "none", borderRadius: 6, color: C.muted,
+                  fontSize: 11, padding: "4px 8px", cursor: "pointer",
+                }}>Cancel</button>
+              </div>
+            )}
+
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {sess.reps.sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num).map((r, j) => (
                 <div key={j} style={{
@@ -1397,11 +1485,19 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession }) {
 // TRENDS VIEW
 // ─────────────────────────────────────────────────────────────
 function TrendsView({ history, unit = "lbs" }) {
-  const [sel, setSel] = useState(45);
+  const [sel,     setSel]     = useState(45);
+  const [selHand, setSelHand] = useState("");   // "" = both
+  const [selGrip, setSelGrip] = useState("");   // "" = all grips
+
+  const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
 
   const data = useMemo(() => {
     const byDate = {};
-    for (const r of history.filter(r => r.target_duration === sel && effectiveLoad(r) > 0)) {
+    for (const r of history.filter(r =>
+      r.target_duration === sel &&
+      effectiveLoad(r) > 0 &&
+      (!selGrip || r.grip === selGrip)
+    )) {
       const d = r.date || "";
       if (!byDate[d]) byDate[d] = { date: d, L: null, R: null };
       const load = toDisp(effectiveLoad(r), unit);
@@ -1409,28 +1505,59 @@ function TrendsView({ history, unit = "lbs" }) {
       if (r.hand === "R") byDate[d].R = Math.max(byDate[d].R ?? 0, load);
     }
     return Object.values(byDate).sort((a, b) => a.date < b.date ? -1 : 1);
-  }, [history, sel, unit]);
+  }, [history, sel, selGrip, unit]);
+
+  const lines = selHand === "L" ? [{ key: "L", color: C.blue,   name: "Left"  }]
+              : selHand === "R" ? [{ key: "R", color: C.orange, name: "Right" }]
+              : [{ key: "L", color: C.blue, name: "Left" }, { key: "R", color: C.orange, name: "Right" }];
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Trends</h2>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        {["L","R"].map(h => (
+          <button key={h} onClick={() => setSelHand(selHand === h ? "" : h)} style={{
+            padding: "6px 18px", borderRadius: 20, cursor: "pointer", fontWeight: 600, border: "none",
+            background: selHand === h ? C.purple : C.border,
+            color: selHand === h ? "#fff" : C.muted,
+          }}>{h === "L" ? "Left" : "Right"}</button>
+        ))}
         {TARGET_OPTIONS.map(o => (
           <button key={o.seconds} onClick={() => setSel(o.seconds)} style={{
-            flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer", fontWeight: 600,
+            padding: "6px 18px", borderRadius: 20, cursor: "pointer", fontWeight: 600, border: "none",
             background: sel === o.seconds ? C.blue : C.border,
-            color: sel === o.seconds ? "#fff" : C.muted, border: "none",
+            color: sel === o.seconds ? "#fff" : C.muted,
           }}>{o.label}</button>
         ))}
       </div>
+      {grips.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+          <button onClick={() => setSelGrip("")} style={{
+            padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
+            background: !selGrip ? C.orange : C.border,
+            color: !selGrip ? "#fff" : C.muted,
+          }}>All Grips</button>
+          {grips.map(g => (
+            <button key={g} onClick={() => setSelGrip(selGrip === g ? "" : g)} style={{
+              padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
+              background: selGrip === g ? C.orange : C.border,
+              color: selGrip === g ? "#fff" : C.muted,
+            }}>{g}</button>
+          ))}
+        </div>
+      )}
+
       {data.length === 0 ? (
         <div style={{ textAlign: "center", color: C.muted, marginTop: 60 }}>
-          No data for this target yet.
+          No data for this filter yet.
         </div>
       ) : (
         <Card>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
-            Best daily load · {TARGET_OPTIONS.find(o => o.seconds === sel)?.label} ({sel}s)
+            Best daily load · {TARGET_OPTIONS.find(o => o.seconds === sel)?.label}
+            {selGrip ? ` · ${selGrip}` : ""}
           </div>
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={data}>
@@ -1439,8 +1566,10 @@ function TrendsView({ history, unit = "lbs" }) {
               <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit={` ${unit}`} />
               <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
               <Legend />
-              <Line type="monotone" dataKey="L" stroke={C.blue}   strokeWidth={2} dot={false} name="Left"  connectNulls />
-              <Line type="monotone" dataKey="R" stroke={C.orange} strokeWidth={2} dot={false} name="Right" connectNulls />
+              {lines.map(l => (
+                <Line key={l.key} type="monotone" dataKey={l.key} stroke={l.color}
+                  strokeWidth={2} dot={false} name={l.name} connectNulls />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -1612,6 +1741,19 @@ export default function App() {
     if (user) newReps.forEach(pushRep);
   }, [user]);
 
+  const updateSession = useCallback(async (sessionKey, updates) => {
+    // updates: { hand?, grip? }
+    setHistory(h => h.map(r =>
+      (r.session_id || r.date) === sessionKey ? { ...r, ...updates } : r
+    ));
+    if (user) {
+      const { error } = await supabase.from("reps")
+        .update(updates)
+        .eq("session_id", sessionKey);
+      if (error) console.warn("Supabase update:", error.message);
+    }
+  }, [user]);
+
   const deleteSession = useCallback(async (sessionKey) => {
     // sessionKey is session_id or date (same key used in grouping)
     setHistory(h => h.filter(r => (r.session_id || r.date) !== sessionKey));
@@ -1639,7 +1781,7 @@ export default function App() {
   }));
 
   // ── Session State Machine ─────────────────────────────────
-  // phase: 'idle' | 'rep_ready' | 'rep_active' | 'resting' | 'between_sets' | 'done'
+  // phase: 'idle' | 'rep_ready' | 'rep_active' | 'resting' | 'between_sets' | 'switch_hands' | 'done'
   const [phase,       setPhase]       = useState("idle");
   const [currentSet,  setCurrentSet]  = useState(0);
   const [currentRep,  setCurrentRep]  = useState(0);
@@ -1650,6 +1792,7 @@ export default function App() {
   const [lastRepResult, setLastRepResult] = useState(null);
   const [leveledUp,   setLeveledUp]   = useState(false);
   const [newLevel,    setNewLevel]    = useState(1);
+  const [activeHand,  setActiveHand]  = useState("L"); // tracks current hand in Both mode
 
   // Max strength estimate (for fatigue dose calculation)
   const sMaxL = useMemo(() => {
@@ -1682,23 +1825,24 @@ export default function App() {
     setFatigue(0);
     setLeveledUp(false);
     setLastRepResult(null);
+    setActiveHand(config.hand === "Both" ? "L" : config.hand);
     setPhase("rep_ready");
     setTab(0); // stay on Train tab
   }, [history, config]);
 
   // ── Handle rep completion ─────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce }) => {
+    const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
     const weight = (() => {
-      const hands = config.hand === "Both" ? ["L", "R"] : [config.hand];
-      const ws = hands.map(h => suggestWeight(refWeights[h], fatigue)).filter(Boolean);
-      return ws.length > 0 ? ws.reduce((a, b) => a + b, 0) / ws.length : 0;
+      const ws = [suggestWeight(refWeights[effectiveHand], fatigue)].filter(Boolean);
+      return ws.length > 0 ? ws[0] : 0;
     })();
 
     const repRecord = {
       id:              uid(),
       date:            today(),
       grip:            config.grip,
-      hand:            config.hand === "Both" ? "B" : config.hand,
+      hand:            effectiveHand,
       target_duration: config.targetTime,
       weight_kg:       Math.round(weight * 10) / 10,
       actual_time_s:   Math.round(actualTime * 10) / 10,
@@ -1725,12 +1869,21 @@ export default function App() {
       // Set complete
       const nextSet = currentSet + 1;
       if (nextSet >= config.numSets) {
-        // Session done — check for level up
-        finishSession([...sessionReps, repRecord]);
+        // All sets done for this hand
+        if (config.hand === "Both" && activeHand === "L") {
+          // Switch to right hand
+          setCurrentSet(0);
+          setCurrentRep(0);
+          setFatigue(0);
+          setActiveHand("R");
+          setPhase("switch_hands");
+        } else {
+          finishSession([...sessionReps, repRecord]);
+        }
       } else {
         setCurrentSet(nextSet);
         setCurrentRep(0);
-        setFatigue(0); // reset fatigue between sets
+        setFatigue(0);
         setPhase("between_sets");
       }
     } else {
@@ -1738,7 +1891,7 @@ export default function App() {
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentRep, currentSet, fatigue, refWeights, sessionId, sessionReps, addReps, sMaxL, sMaxR]);
+  }, [config, currentRep, currentSet, fatigue, refWeights, sessionId, sessionReps, addReps, sMaxL, sMaxR, activeHand]);
 
   const finishSession = useCallback((allReps) => {
     // Check for level up
@@ -1776,9 +1929,9 @@ export default function App() {
   const nextWeight = useMemo(() => {
     if (phase !== "resting") return null;
     const restFatigue = fatigueAfterRest(fatigue, config.restTime);
-    const hand = config.hand === "Both" ? "L" : config.hand;
+    const hand = config.hand === "Both" ? activeHand : config.hand;
     return suggestWeight(refWeights[hand], restFatigue);
-  }, [phase, fatigue, config.restTime, config.hand, refWeights]);
+  }, [phase, fatigue, config.restTime, config.hand, refWeights, activeHand]);
 
   // ── Auth helpers ──────────────────────────────────────────
   const sendMagicLink = async () => {
@@ -1876,8 +2029,8 @@ export default function App() {
         if (phase === "rep_ready" || phase === "rep_active") {
           return (
             <ActiveSessionView
-              key={`${currentSet}-${currentRep}-${phase}`}
-              session={{ config, currentSet, currentRep, fatigue, sessionId, refWeights }}
+              key={`${activeHand}-${currentSet}-${currentRep}-${phase}`}
+              session={{ config, currentSet, currentRep, fatigue, sessionId, refWeights, activeHand }}
               onRepDone={handleRepDone}
               onAbort={handleAbort}
               tindeq={tindeq}
@@ -1885,6 +2038,10 @@ export default function App() {
               unit={unit}
             />
           );
+        }
+
+        if (phase === "switch_hands") {
+          return <SwitchHandsView onReady={() => setPhase("rep_ready")} />;
         }
 
         if (phase === "resting") {
@@ -1931,7 +2088,7 @@ export default function App() {
       })()}
 
       {tab === 1 && <CharacterView history={history} unit={unit} />}
-      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} />}
+      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} />}
       {tab === 3 && <TrendsView history={history} unit={unit} />}
       {tab === 4 && (
         <SettingsView
