@@ -1752,10 +1752,15 @@ export default function App() {
   const [history, setHistory] = useState(() => loadLS(LS_KEY) || []);
   useEffect(() => saveLS(LS_KEY, history), [history]);
 
-  // Load from Supabase when signed in
+  // Load from Supabase when signed in.
+  // Only replace local history if Supabase actually returned rows — an empty
+  // response (expired JWT silently blocked by RLS, network hiccup, etc.) must
+  // never wipe out a good local cache.
   useEffect(() => {
     if (!user) return;
-    fetchReps().then(reps => { if (reps) setHistory(reps); });
+    fetchReps().then(reps => {
+      if (reps && reps.length > 0) setHistory(reps);
+    });
   }, [user]);
 
   const addReps = useCallback((newReps) => {
