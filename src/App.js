@@ -161,7 +161,7 @@ function suggestWeight(refWeight, fatigue) {
 // 80% of the target duration (screens out bailed reps).
 function isQualifyingRep(r, targetDuration) {
   if (!r.actual_time_s || !targetDuration) return true; // no time data → don't exclude
-  return r.actual_time_s >= targetDuration * 0.8;
+  return r.actual_time_s >= targetDuration * 0.98;
 }
 
 // Group reps into sessions by their session_id (or date as fallback),
