@@ -42,6 +42,10 @@ const DEF_FAT = {
   A3: 0.20, tau3: 600,  // slow   — metabolic byproducts (s)
 };
 
+const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
+const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
+const LS_READINESS_KEY = "ft_readiness"; // { [date]: 1-5 } subjective daily rating
+
 const LEVEL_STEP = 1.05; // 5% improvement per level
 
 const LEVEL_TITLES = [
@@ -92,6 +96,63 @@ function downloadCSV(reps) {
   });
   a.click();
 }
+
+// ─────────────────────────────────────────────────────────────
+// READINESS / RECOVERY HELPERS
+// ─────────────────────────────────────────────────────────────
+// Computes a 1-10 readiness score from recent training history.
+// Uses an exponential decay model with ~24h recovery half-life.
+// Score 10 = fully fresh; 1 = extremely fatigued.
+function computeReadiness(history) {
+  if (!history || history.length === 0) return 10;
+  const todayStr = today();
+
+  // Session load = sum of normalized rep doses (weight/refW × sqrt(dur/refDur))
+  const byDate = {};
+  for (const r of history) {
+    if (!r.date) continue;
+    if (!byDate[r.date]) byDate[r.date] = [];
+    byDate[r.date].push(r);
+  }
+
+  let totalRemaining = 0;
+  for (const [date, reps] of Object.entries(byDate)) {
+    const load = reps.reduce((sum, r) => {
+      const w = effectiveLoad(r) || r.weight_kg || 10;
+      const d = r.actual_time_s || 10;
+      return sum + (w / 20) * Math.sqrt(d / 45);
+    }, 0);
+
+    // Estimate hours since this session (no time-of-day stored, approximate)
+    const hoursAgo = date === todayStr
+      ? 3                          // trained today — assume a few hours ago
+      : (new Date(todayStr) - new Date(date)) / (1000 * 3600 * 24) * 24 + 8;
+
+    // Exponential decay: ~50% remaining after 24h
+    totalRemaining += load * Math.exp(-hoursAgo / 24);
+  }
+
+  // Reference: a heavy session of 15 reps at baseline → load ≈ 15
+  // 15 remaining = max fatigue (score 1); 0 = fully fresh (score 10)
+  return Math.max(1, Math.round(10 - clamp(totalRemaining / 15 * 9, 0, 9)));
+}
+
+function recoveryLabel(score) {
+  if (score >= 8) return { text: "Good day to push",            color: C.green,  emoji: "🟢" };
+  if (score >= 5) return { text: "Quality volume day",          color: C.yellow, emoji: "🟡" };
+  return              { text: "Consider light work or rest",   color: C.red,    emoji: "🔴" };
+}
+
+// 5-point subjective feeling scale → 1-10 score + label
+const FEEL_OPTIONS = [
+  { val: 1, emoji: "😴", label: "Wrecked"    },
+  { val: 2, emoji: "😓", label: "Tired"      },
+  { val: 3, emoji: "😐", label: "OK"         },
+  { val: 4, emoji: "💪", label: "Good"       },
+  { val: 5, emoji: "🔥", label: "Fired up"   },
+];
+// Map 1-5 subjective → 1-10 display score
+const subjToScore = (v) => v * 2;
 
 // ─────────────────────────────────────────────────────────────
 // FATIGUE MODEL — THREE-COMPARTMENT IV-KINETICS ANALOGY
@@ -255,22 +316,26 @@ function parseTindeqPacket(dataView, onSample) {
   }
 }
 
-function useTindeq({ onAutoFailure }) {
+function useTindeq() {
   const [connected,  setConnected]  = useState(false);
   const [force,      setForce]      = useState(0);
   const [peak,       setPeak]       = useState(0);
   const [avgForce,   setAvgForce]   = useState(0);
   const [bleError,   setBleError]   = useState(null);
 
-  const ctrlRef          = useRef(null);
-  const peakRef          = useRef(0);
-  const sumRef           = useRef(0);   // running sum for average
-  const countRef         = useRef(0);   // sample count for average
-  const belowSinceRef    = useRef(null);
-  const measuringRef     = useRef(false);
-  const onAutoFailureRef = useRef(onAutoFailure);
-  const targetKgRef      = useRef(null); // set by ActiveSessionView each rep
-  useEffect(() => { onAutoFailureRef.current = onAutoFailure; }, [onAutoFailure]);
+  const ctrlRef             = useRef(null);
+  const peakRef             = useRef(0);
+  const sumRef              = useRef(0);   // running sum for average
+  const countRef            = useRef(0);   // sample count for average
+  const belowSinceRef       = useRef(null);
+  const measuringRef        = useRef(false);
+  const autoFailCallbackRef = useRef(null); // set by ActiveSessionView / CalibrationView
+  const targetKgRef         = useRef(null); // set by ActiveSessionView each rep
+
+  // Stable setter — lets views register/clear the callback without prop drilling
+  const setAutoFailCallback = useCallback((fn) => {
+    autoFailCallbackRef.current = fn ?? null;
+  }, []);
 
   const connect = useCallback(async () => {
     setBleError(null);
@@ -300,19 +365,18 @@ function useTindeq({ onAutoFailure }) {
             setAvgForce(sumRef.current / countRef.current);
           }
 
-          // Auto-failure: if force drops below 95% of target for >3 s, end the rep.
-          // Uses target weight (not peak) so the bar is fixed and honest —
-          // you're supposed to be holding the target, not 80% of your opener.
-          // 3 s filters out brief dips from grip shifts or breathing.
+          // Auto-failure: if force drops below 95% of target for >1.5 s, end the rep.
+          // Uses target weight (not peak) so the bar is fixed and honest.
+          // 1.5 s filters brief dips from grip shifts without letting a failed rep drag on.
           if (measuringRef.current) {
             const tgt = targetKgRef.current;
             if (tgt != null && tgt > 0) {
               const threshold = tgt * 0.95;
               if (kg < threshold) {
                 if (belowSinceRef.current === null) belowSinceRef.current = Date.now();
-                else if (Date.now() - belowSinceRef.current > 3000) {
+                else if (Date.now() - belowSinceRef.current > 1500) {
                   belowSinceRef.current = null;
-                  onAutoFailureRef.current?.();
+                  autoFailCallbackRef.current?.();
                 }
               } else {
                 belowSinceRef.current = null;
@@ -356,7 +420,7 @@ function useTindeq({ onAutoFailure }) {
     peakRef.current = 0; setPeak(0); setForce(0);
   }, []);
 
-  return { connected, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef };
+  return { connected, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -605,9 +669,492 @@ function RepDots({ total, done, current }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// CALIBRATION VIEW
+// ─────────────────────────────────────────────────────────────
+const CAL_STEPS = [
+  {
+    id: "power", label: "Power", emoji: "⚡",
+    duration: 10, color: C.red,
+    desc: "10-second max-effort hang. Go all out from the start.",
+    tip:  "Use your strongest grip. This anchors your W′ (anaerobic work capacity).",
+  },
+  {
+    id: "strength", label: "Strength", emoji: "💪",
+    duration: 45, color: C.orange,
+    desc: "45-second hard hang. Challenging but sustained.",
+    tip:  "Aim for ~85% effort. Pace yourself to last the full 45 s.",
+  },
+  {
+    id: "endurance", label: "Endurance", emoji: "🏔️",
+    duration: null, color: C.blue,
+    desc: "Hang to complete failure. Endure as long as possible.",
+    tip:  "Target ~50% of your Power test force. The hang ends when you can't hold.",
+  },
+];
+const CAL_REST = 300; // 5 min between steps
+
+function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
+  const [calPhase,      setCalPhase]      = useState("intro");
+  const [stepIdx,       setStepIdx]       = useState(0);
+  const [countdown,     setCountdown]     = useState(3);
+  const [elapsed,       setElapsed]       = useState(0);
+  const [restRemaining, setRestRemaining] = useState(CAL_REST);
+  const [results,       setResults]       = useState([]); // { actualTime, avgForce, peakForce, failed }
+
+  const startTimeRef  = useRef(null);
+  const timerRef      = useRef(null);
+  const restTimerRef  = useRef(null);
+  const autoFailedRef = useRef(false);
+  const endHangRef    = useRef(null);
+
+  const step = CAL_STEPS[stepIdx];
+
+  // For endurance step: suggest ~50% of power step avg force
+  const enduranceSuggestKg = results[0]?.avgForce > 0 ? results[0].avgForce * 0.5 : null;
+  const targetKg = step.id === "endurance" ? enduranceSuggestKg : null;
+
+  // Keep Tindeq auto-failure target in sync (endurance step only)
+  useEffect(() => {
+    tindeq.targetKgRef.current = (calPhase === "active" && step.id === "endurance")
+      ? targetKg
+      : null;
+  }, [calPhase, step, targetKg, tindeq]);
+
+  // Wire auto-failure → endHang for the endurance step only.
+  useEffect(() => {
+    if (calPhase !== "active" || step.id !== "endurance") {
+      tindeq.setAutoFailCallback(null);
+      return;
+    }
+    tindeq.setAutoFailCallback(() => {
+      autoFailedRef.current = true;
+      endHangRef.current?.();
+    });
+    return () => tindeq.setAutoFailCallback(null);
+  }, [calPhase, step, tindeq]);
+
+  const endHang = useCallback(async () => {
+    if (!startTimeRef.current) return;
+    autoFailedRef.current = false;
+    clearInterval(timerRef.current);
+    const actualTime = (Date.now() - startTimeRef.current) / 1000;
+    startTimeRef.current = null;
+    // Endurance is always a failure rep by design; others are not
+    const failed = step.id === "endurance";
+    if (tindeq.connected) await tindeq.stopMeasuring();
+    const result = {
+      actualTime,
+      avgForce:  tindeq.avgForce,
+      peakForce: tindeq.peak,
+      failed,
+    };
+    setResults(prev => [...prev, result]);
+    setCalPhase("result");
+  }, [tindeq, step]);
+
+  // Keep endHang ref current so setInterval closure is always fresh
+  endHangRef.current = endHang;
+
+  const startHang = useCallback(async () => {
+    setElapsed(0);
+    startTimeRef.current = Date.now();
+    setCalPhase("active");
+    if (tindeq.connected) {
+      await tindeq.tare();
+      await tindeq.startMeasuring();
+    }
+    timerRef.current = setInterval(() => {
+      if (!startTimeRef.current) return;
+      const t = (Date.now() - startTimeRef.current) / 1000;
+      setElapsed(Math.floor(t));
+      // Auto-complete timed steps when duration is reached
+      if (step.duration && t >= step.duration) {
+        clearInterval(timerRef.current);
+        endHangRef.current?.();
+      }
+    }, 100);
+  }, [tindeq, step]);
+
+  // 3-2-1 countdown
+  useEffect(() => {
+    if (calPhase !== "countdown") return;
+    if (countdown <= 0) { startHang(); return; }
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [calPhase, countdown, startHang]);
+
+  // Rest timer
+  useEffect(() => {
+    if (calPhase !== "resting") return;
+    setRestRemaining(CAL_REST);
+    restTimerRef.current = setInterval(() => {
+      setRestRemaining(r => {
+        if (r <= 1) { clearInterval(restTimerRef.current); advanceStep(); return 0; }
+        return r - 1;
+      });
+    }, 1000);
+    return () => clearInterval(restTimerRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calPhase]);
+
+  // Cleanup on unmount
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    clearInterval(restTimerRef.current);
+  }, []);
+
+  const advanceStep = () => {
+    const next = stepIdx + 1;
+    if (next >= CAL_STEPS.length) {
+      setCalPhase("complete");
+    } else {
+      setStepIdx(next);
+      setCountdown(3);
+      setCalPhase("countdown");
+    }
+  };
+
+  const handleResultNext = () => {
+    if (stepIdx >= CAL_STEPS.length - 1) setCalPhase("complete");
+    else setCalPhase("resting");
+  };
+
+  const handleComplete = () => {
+    const sessionId = uid();
+    const reps = results.map((r, i) => {
+      const s = CAL_STEPS[i];
+      return {
+        id:              uid(),
+        date:            today(),
+        grip:            "Calibration",
+        hand:            "Both",
+        target_duration: s.duration ?? Math.round(r.actualTime),
+        weight_kg:       0,
+        actual_time_s:   Math.round(r.actualTime * 10) / 10,
+        avg_force_kg:    (isFinite(r.avgForce) && r.avgForce > 0 && r.avgForce < 500)
+                           ? Math.round(r.avgForce * 10) / 10
+                           : 0,
+        peak_force_kg:   (isFinite(r.peakForce) && r.peakForce > 0)
+                           ? Math.round(r.peakForce * 10) / 10
+                           : 0,
+        set_num:         1,
+        rep_num:         i + 1,
+        rest_s:          CAL_REST,
+        session_id:      sessionId,
+        failed:          r.failed,
+      };
+    });
+    onComplete(reps);
+  };
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 13, color: C.muted }}>Calibration</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>Force-Duration Profile</div>
+        </div>
+        {calPhase === "intro" && (
+          <Btn small color={C.muted} onClick={onCancel}>Cancel</Btn>
+        )}
+      </div>
+
+      {/* Step progress dots */}
+      {calPhase !== "intro" && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+          {CAL_STEPS.map((s, i) => (
+            <div key={s.id} style={{
+              flex: 1, height: 6, borderRadius: 3,
+              background: i < results.length ? s.color : C.border,
+              opacity: i > stepIdx && calPhase !== "complete" ? 0.3 : 1,
+              transition: "background 0.4s",
+            }} />
+          ))}
+        </div>
+      )}
+
+      {/* ── INTRO ── */}
+      {calPhase === "intro" && (
+        <>
+          <Card>
+            <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
+              <div style={{ fontSize: 48, marginBottom: 8 }}>📊</div>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 10 }}>
+                Calibrate Your Strength
+              </div>
+              <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.65 }}>
+                3 quick tests across different time domains. Seeds your force-duration
+                curve and powers accurate training recommendations from day one.
+              </div>
+            </div>
+          </Card>
+
+          {CAL_STEPS.map((s, i) => (
+            <Card key={s.id} style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                <div style={{
+                  fontSize: 24, width: 44, height: 44, borderRadius: 22, flexShrink: 0,
+                  background: s.color + "22",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  {s.emoji}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: s.color }}>
+                    Step {i + 1}: {s.label}
+                    <span style={{ fontWeight: 400, color: C.muted, marginLeft: 6, fontSize: 13 }}>
+                      {s.duration ? `${s.duration}s` : "to failure"}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, color: C.text, marginTop: 3 }}>{s.desc}</div>
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{s.tip}</div>
+                </div>
+              </div>
+            </Card>
+          ))}
+
+          <div style={{
+            marginTop: 12, padding: "12px 16px",
+            background: "#1a1f2e", borderRadius: 10,
+            fontSize: 12, color: C.muted,
+          }}>
+            ⏱ Plan ~20 min total — 5-minute rest between each test.
+          </div>
+
+          <Btn
+            onClick={() => { setStepIdx(0); setCountdown(3); setCalPhase("countdown"); }}
+            style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12, marginTop: 14 }}
+            color={C.blue}
+          >
+            Begin Calibration →
+          </Btn>
+        </>
+      )}
+
+      {/* ── COUNTDOWN ── */}
+      {calPhase === "countdown" && (
+        <Card style={{ textAlign: "center", padding: "40px 24px" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: step.color, marginBottom: 6 }}>
+            {step.emoji} Step {stepIdx + 1} of {CAL_STEPS.length}: {step.label}
+          </div>
+          <div style={{ fontSize: 14, color: C.muted, marginBottom: 28 }}>{step.desc}</div>
+          <div style={{ fontSize: 96, fontWeight: 900, color: C.yellow, lineHeight: 1 }}>
+            {countdown === 0 ? "GO" : countdown}
+          </div>
+          {step.id === "endurance" && enduranceSuggestKg != null && (
+            <div style={{ fontSize: 14, color: C.muted, marginTop: 20 }}>
+              Target force: <b style={{ color: C.blue }}>{fmtW(enduranceSuggestKg, unit)} {unit}</b>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* ── ACTIVE ── */}
+      {calPhase === "active" && (
+        <>
+          <Card>
+            <div style={{ textAlign: "center", marginBottom: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: step.color }}>
+                {step.emoji} {step.label}
+              </span>
+              {step.duration && (
+                <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>
+                  — target {step.duration}s
+                </span>
+              )}
+              {step.id === "endurance" && enduranceSuggestKg != null && (
+                <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>
+                  — target {fmtW(enduranceSuggestKg, unit)} {unit}
+                </span>
+              )}
+            </div>
+            <BigTimer
+              seconds={elapsed}
+              targetSeconds={step.duration ?? null}
+              running={true}
+            />
+            {tindeq.connected ? (
+              <ForceGauge
+                force={tindeq.force}
+                avg={tindeq.avgForce}
+                peak={tindeq.peak}
+                targetKg={targetKg}
+                unit={unit}
+              />
+            ) : (
+              <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
+                No Tindeq — tap the button below when you let go.
+              </div>
+            )}
+          </Card>
+          <Btn
+            onClick={endHang}
+            style={{ width: "100%", padding: "18px 0", fontSize: 18, borderRadius: 12, marginTop: 8 }}
+            color={step.id === "endurance" ? C.red : C.muted}
+          >
+            {step.id === "endurance" ? "✕ I Failed" : "✓ Done"}
+          </Btn>
+        </>
+      )}
+
+      {/* ── RESULT ── */}
+      {calPhase === "result" && (() => {
+        const r = results[results.length - 1];
+        const isLast = stepIdx >= CAL_STEPS.length - 1;
+        return (
+          <>
+            <Card style={{ borderColor: step.color }}>
+              <div style={{ textAlign: "center", padding: "8px 0 12px" }}>
+                <div style={{ fontSize: 36 }}>{step.emoji}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: step.color, marginTop: 6 }}>
+                  {step.label} Complete
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap", marginTop: 8 }}>
+                <div style={{ textAlign: "center" }}>
+                  <Label>Time</Label>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: C.text }}>
+                    {fmtTime(r.actualTime)}
+                  </div>
+                </div>
+                {r.avgForce > 0 && (
+                  <div style={{ textAlign: "center" }}>
+                    <Label>Avg Force</Label>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: step.color }}>
+                      {fmtW(r.avgForce, unit)} {unit}
+                    </div>
+                  </div>
+                )}
+                {r.peakForce > 0 && (
+                  <div style={{ textAlign: "center" }}>
+                    <Label>Peak</Label>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: C.purple }}>
+                      {fmtW(r.peakForce, unit)} {unit}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {step.id === "power" && r.avgForce > 0 && (
+                <div style={{
+                  marginTop: 14, padding: "10px 14px",
+                  background: C.bg, borderRadius: 8,
+                  fontSize: 12, color: C.muted,
+                }}>
+                  💡 Endurance target will be{" "}
+                  <b style={{ color: C.blue }}>
+                    {fmtW(r.avgForce * 0.5, unit)} {unit}
+                  </b>{" "}
+                  (~50% of your Power test)
+                </div>
+              )}
+            </Card>
+            <Btn
+              onClick={handleResultNext}
+              style={{ width: "100%", padding: "16px 0", fontSize: 16, borderRadius: 12, marginTop: 12 }}
+              color={isLast ? C.green : C.blue}
+            >
+              {isLast ? "✓ View My Results" : `Rest 5 min → Step ${stepIdx + 2}: ${CAL_STEPS[stepIdx + 1].label}`}
+            </Btn>
+          </>
+        );
+      })()}
+
+      {/* ── RESTING ── */}
+      {calPhase === "resting" && (
+        <>
+          <Card>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
+                Rest before Step {stepIdx + 2}: {CAL_STEPS[stepIdx + 1]?.label}
+              </div>
+              <div style={{
+                fontSize: 72, fontWeight: 900, lineHeight: 1,
+                color: restRemaining > 60 ? C.green : C.orange,
+              }}>
+                {fmtTime(restRemaining)}
+              </div>
+              <div style={{ marginTop: 14, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%",
+                  width: `${(restRemaining / CAL_REST) * 100}%`,
+                  background: restRemaining > 60 ? C.green : C.orange,
+                  borderRadius: 3, transition: "width 1s linear",
+                }} />
+              </div>
+            </div>
+          </Card>
+          <div style={{
+            marginTop: 12, padding: "12px 16px",
+            background: "#1a1f2e", borderRadius: 10,
+            fontSize: 13, color: C.muted,
+          }}>
+            🧘 <b style={{ color: C.text }}>Up next:</b> {CAL_STEPS[stepIdx + 1]?.desc}
+          </div>
+          <Btn
+            onClick={() => { clearInterval(restTimerRef.current); advanceStep(); }}
+            style={{ width: "100%", padding: "14px 0", fontSize: 15, borderRadius: 12, marginTop: 12 }}
+            color={C.muted}
+          >
+            Skip rest — I'm ready →
+          </Btn>
+        </>
+      )}
+
+      {/* ── COMPLETE ── */}
+      {calPhase === "complete" && (
+        <>
+          <Card style={{ borderColor: C.green }}>
+            <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
+              <div style={{ fontSize: 48 }}>🎯</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: C.green, marginTop: 8 }}>
+                Calibration Complete!
+              </div>
+              <div style={{ fontSize: 13, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
+                Your force-duration curve is seeded. Head to the Analysis tab
+                for your Critical Force estimate and training recommendations.
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+              {results.map((r, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "10px 14px", background: C.bg, borderRadius: 8,
+                }}>
+                  <span style={{ fontSize: 22 }}>{CAL_STEPS[i].emoji}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: CAL_STEPS[i].color }}>
+                      {CAL_STEPS[i].label}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.muted }}>
+                      {fmtTime(r.actualTime)}
+                      {r.avgForce > 0 && ` · ${fmtW(r.avgForce, unit)} ${unit} avg`}
+                    </div>
+                  </div>
+                  <span style={{ color: C.green, fontSize: 16 }}>✓</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Btn
+            onClick={handleComplete}
+            style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12, marginTop: 16 }}
+            color={C.green}
+          >
+            View My Analysis →
+          </Btn>
+        </>
+      )}
+
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
-function SetupView({ config, setConfig, onStart, history, unit = "lbs" }) {
+function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -617,6 +1164,42 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs" }) {
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
+
+      {/* Calibration prompt — prominent when no history, subtle otherwise */}
+      {history.length === 0 ? (
+        <div style={{
+          marginBottom: 20, padding: "16px 18px",
+          background: "#0d1f3c", border: `1px solid ${C.blue}`,
+          borderRadius: 12,
+        }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.blue, marginBottom: 6 }}>
+            📊 No training history yet
+          </div>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 14, lineHeight: 1.6 }}>
+            Run a quick 3-step calibration to seed your force-duration curve and get
+            personalized weight suggestions from your very first session.
+          </div>
+          <Btn onClick={onCalibrate} style={{ width: "100%", padding: "12px 0", borderRadius: 10 }} color={C.blue}>
+            Start Calibration →
+          </Btn>
+        </div>
+      ) : (
+        onCalibrate && (
+          <div style={{
+            marginBottom: 16, padding: "12px 16px",
+            background: C.card, border: `1px solid ${C.border}`,
+            borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
+          }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>📊 Force-Duration Calibration</div>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                3-step test · seeds your Analysis curve
+              </div>
+            </div>
+            <Btn small onClick={onCalibrate} color={C.blue}>Run →</Btn>
+          </div>
+        )
+      )}
 
       <Card>
         <Sect title="Target Duration">
@@ -774,6 +1357,72 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs" }) {
         </Card>
       )}
 
+      {/* Readiness / how-do-you-feel widget */}
+      {(() => {
+        const rl = readiness != null ? recoveryLabel(readiness) : null;
+        const selectedFeel = FEEL_OPTIONS.find(f => f.val === todaySubj);
+        return (
+          <div style={{
+            marginBottom: 16, padding: "14px 16px",
+            background: C.card, border: `1px solid ${rl ? rl.color + "44" : C.border}`,
+            borderRadius: 12,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+                How do you feel today?
+              </div>
+              {readiness != null && rl && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: 18,
+                    background: rl.color + "22",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 18, fontWeight: 900, color: rl.color,
+                  }}>
+                    {readiness}
+                  </div>
+                  <div style={{ fontSize: 12, color: rl.color, fontWeight: 600 }}>{rl.text}</div>
+                </div>
+              )}
+            </div>
+
+            {/* 5-emoji picker */}
+            <div style={{ display: "flex", gap: 8 }}>
+              {FEEL_OPTIONS.map(f => {
+                const selected = todaySubj === f.val;
+                return (
+                  <button
+                    key={f.val}
+                    onClick={() => onSubjReadiness(f.val)}
+                    title={f.label}
+                    style={{
+                      flex: 1, padding: "10px 0", borderRadius: 10, cursor: "pointer",
+                      border: selected ? `2px solid ${recoveryLabel(subjToScore(f.val)).color}` : `2px solid ${C.border}`,
+                      background: selected ? recoveryLabel(subjToScore(f.val)).color + "22" : C.bg,
+                      fontSize: 22, lineHeight: 1, transition: "all 0.15s",
+                    }}
+                  >
+                    {f.emoji}
+                    <div style={{ fontSize: 9, color: selected ? recoveryLabel(subjToScore(f.val)).color : C.muted, marginTop: 3, fontWeight: selected ? 700 : 400 }}>
+                      {f.label}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Source label */}
+            <div style={{ marginTop: 9, fontSize: 11, color: C.muted, textAlign: "right" }}>
+              {todaySubj != null
+                ? `You rated today ${selectedFeel?.emoji} ${selectedFeel?.label} — tap to update`
+                : isEstimated
+                  ? "Estimated from logged training only — doesn't include climbing or other activity"
+                  : ""}
+            </div>
+          </div>
+        );
+      })()}
+
       <Btn
         onClick={onStart}
         disabled={!config.grip}
@@ -855,13 +1504,20 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
     onRepDone({ actualTime, avgForce: tindeq.avgForce, failed });
   }, [tindeq, onRepDone]);
 
-  // Wire auto-failure → endRep, flagging the rep as failed.
+  // Wire auto-failure → endRep for the duration of an active rep only.
+  // Cleanup nulls the callback whenever phase changes or the component unmounts,
+  // eliminating the stale-ref gap that caused auto-fail to silently stop working
+  // after the first rep.
   useEffect(() => {
-    if (tindeq._autoFailRef) {
-      tindeq._autoFailRef.current = repPhase === "active"
-        ? () => { autoFailedRef.current = true; endRep(); }
-        : null;
+    if (repPhase !== "active") {
+      tindeq.setAutoFailCallback(null);
+      return;
     }
+    tindeq.setAutoFailCallback(() => {
+      autoFailedRef.current = true;
+      endRep();
+    });
+    return () => tindeq.setAutoFailCallback(null);
   }, [tindeq, repPhase, endRep]);
 
   useEffect(() => () => clearInterval(timerRef.current), []);
@@ -1447,7 +2103,7 @@ function CharacterView({ history, unit = "lbs" }) {
 // ─────────────────────────────────────────────────────────────
 // HISTORY VIEW
 // ─────────────────────────────────────────────────────────────
-function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession }) {
+function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession, notes = {}, onNoteChange }) {
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
@@ -1455,6 +2111,7 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
   const [editKey,     setEditKey]     = useState(null);
   const [editHand,    setEditHand]    = useState("L");
   const [editGrip,    setEditGrip]    = useState("");
+  const [noteKey,     setNoteKey]     = useState(null); // session currently showing note editor
 
   const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
 
@@ -1531,11 +2188,20 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
                 <span style={{ fontSize: 12, color: C.muted }}>{sess.date}</span>
                 {!isConfirming && !isEditing && (
                   <>
-                    <button onClick={() => { setEditKey(sessKey); setEditHand(sess.hand); setEditGrip(sess.grip); setConfirmKey(null); }} style={{
+                    <button
+                      onClick={() => setNoteKey(noteKey === sessKey ? null : sessKey)}
+                      style={{
+                        background: "none", border: "none",
+                        color: notes[sessKey] ? C.yellow : C.muted,
+                        fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+                      }}
+                      title={notes[sessKey] ? "View/edit note" : "Add note"}
+                    >📝</button>
+                    <button onClick={() => { setEditKey(sessKey); setEditHand(sess.hand); setEditGrip(sess.grip); setConfirmKey(null); setNoteKey(null); }} style={{
                       background: "none", border: "none", color: C.muted,
                       fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1,
                     }} title="Edit session">✏️</button>
-                    <button onClick={() => { setConfirmKey(sessKey); setEditKey(null); }} style={{
+                    <button onClick={() => { setConfirmKey(sessKey); setEditKey(null); setNoteKey(null); }} style={{
                       background: "none", border: "none", color: C.muted,
                       fontSize: 14, cursor: "pointer", padding: "0 2px", lineHeight: 1,
                     }} title="Delete session">🗑</button>
@@ -1596,6 +2262,51 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
                 </div>
               ))}
             </div>
+
+            {/* Note preview (when note exists and editor is closed) */}
+            {notes[sessKey] && noteKey !== sessKey && (
+              <div style={{
+                marginTop: 10, padding: "7px 10px",
+                background: "#1f1a00", borderRadius: 7,
+                fontSize: 12, color: C.yellow, lineHeight: 1.5,
+                borderLeft: `3px solid ${C.yellow}`,
+              }}>
+                📝 {notes[sessKey]}
+              </div>
+            )}
+
+            {/* Note editor */}
+            {noteKey === sessKey && (
+              <div style={{ marginTop: 10 }}>
+                <textarea
+                  autoFocus
+                  value={notes[sessKey] || ""}
+                  onChange={e => onNoteChange(sessKey, e.target.value)}
+                  placeholder="Add a note — how did it feel? Any context?"
+                  rows={3}
+                  style={{
+                    width: "100%", boxSizing: "border-box",
+                    background: "#1f1a00", border: `1px solid ${C.yellow}55`,
+                    borderRadius: 7, padding: "8px 10px",
+                    color: C.text, fontSize: 12, lineHeight: 1.5,
+                    resize: "vertical",
+                  }}
+                />
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
+                  {notes[sessKey] && (
+                    <button onClick={() => { onNoteChange(sessKey, ""); setNoteKey(null); }} style={{
+                      background: "none", border: `1px solid ${C.border}`,
+                      color: C.muted, borderRadius: 6, padding: "3px 10px", fontSize: 11, cursor: "pointer",
+                    }}>Clear</button>
+                  )}
+                  <button onClick={() => setNoteKey(null)} style={{
+                    background: C.yellow, border: "none",
+                    color: "#000", borderRadius: 6, padding: "3px 12px", fontSize: 11,
+                    fontWeight: 700, cursor: "pointer",
+                  }}>Done</button>
+                </div>
+              </div>
+            )}
           </Card>
         );
       })}
@@ -1626,8 +2337,27 @@ function TrendsView({ history, unit = "lbs" }) {
       if (r.hand === "L") byDate[d].L = Math.max(byDate[d].L ?? 0, load);
       if (r.hand === "R") byDate[d].R = Math.max(byDate[d].R ?? 0, load);
     }
-    return Object.values(byDate).sort((a, b) => a.date < b.date ? -1 : 1);
+    // Sort chronologically, then flag PR points
+    const sorted = Object.values(byDate).sort((a, b) => a.date < b.date ? -1 : 1);
+    let maxL = -Infinity, maxR = -Infinity;
+    return sorted.map(d => {
+      const isPR_L = d.L != null && d.L > maxL;
+      const isPR_R = d.R != null && d.R > maxR;
+      if (isPR_L) maxL = d.L;
+      if (isPR_R) maxR = d.R;
+      return { ...d, isPR_L, isPR_R };
+    });
   }, [history, sel, selGrip, unit]);
+
+  // Latest PR values for summary display
+  const latestPR = useMemo(() => {
+    const prsL = data.filter(d => d.isPR_L);
+    const prsR = data.filter(d => d.isPR_R);
+    return {
+      L: prsL.length ? prsL[prsL.length - 1] : null,
+      R: prsR.length ? prsR[prsR.length - 1] : null,
+    };
+  }, [data]);
 
   const lines = selHand === "L" ? [{ key: "L", color: C.blue,   name: "Left"  }]
               : selHand === "R" ? [{ key: "R", color: C.orange, name: "Right" }]
@@ -1676,25 +2406,80 @@ function TrendsView({ history, unit = "lbs" }) {
           No data for this filter yet.
         </div>
       ) : (
-        <Card>
-          <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
-            Best daily load · {TARGET_OPTIONS.find(o => o.seconds === sel)?.label}
-            {selGrip ? ` · ${selGrip}` : ""}
-          </div>
-          <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit={` ${unit}`} />
-              <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
-              <Legend />
-              {lines.map(l => (
-                <Line key={l.key} type="monotone" dataKey={l.key} stroke={l.color}
-                  strokeWidth={2} dot={false} name={l.name} connectNulls />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
+        <>
+          {/* PR summary */}
+          {(latestPR.L || latestPR.R) && (
+            <Card style={{ marginBottom: 12, borderColor: C.yellow + "55" }}>
+              <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
+                <span style={{ fontSize: 18 }}>🏆</span>
+                {latestPR.L && (selHand === "" || selHand === "L") && (
+                  <div>
+                    <Label>Left PR</Label>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: C.yellow }}>
+                      {fmt1(latestPR.L.L)} {unit}
+                    </span>
+                    <div style={{ fontSize: 11, color: C.muted }}>{latestPR.L.date}</div>
+                  </div>
+                )}
+                {latestPR.R && (selHand === "" || selHand === "R") && (
+                  <div>
+                    <Label>Right PR</Label>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: C.yellow }}>
+                      {fmt1(latestPR.R.R)} {unit}
+                    </span>
+                    <div style={{ fontSize: 11, color: C.muted }}>{latestPR.R.date}</div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
+
+          <Card>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
+              Best daily load · {TARGET_OPTIONS.find(o => o.seconds === sel)?.label}
+              {selGrip ? ` · ${selGrip}` : ""}
+            </div>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+              <span style={{ color: C.yellow }}>★</span> = personal record
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <LineChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
+                <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit={` ${unit}`} />
+                <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
+                <Legend />
+                {lines.map(l => (
+                  <Line
+                    key={l.key}
+                    type="monotone"
+                    dataKey={l.key}
+                    stroke={l.color}
+                    strokeWidth={2}
+                    name={l.name}
+                    connectNulls
+                    dot={(props) => {
+                      const { cx, cy, payload } = props;
+                      const isPR = l.key === "L" ? payload.isPR_L : payload.isPR_R;
+                      const val  = payload[l.key];
+                      if (val == null) return null;
+                      if (!isPR) return (
+                        <circle key={`dot-${cx}-${cy}`} cx={cx} cy={cy} r={2.5} fill={l.color} opacity={0.6} />
+                      );
+                      return (
+                        <g key={`pr-${cx}-${cy}`}>
+                          <circle cx={cx} cy={cy} r={7} fill={C.yellow} opacity={0.2} />
+                          <circle cx={cx} cy={cy} r={4} fill={C.yellow} />
+                          <text x={cx} y={cy - 12} textAnchor="middle" fill={C.yellow} fontSize={9} fontWeight="bold">PR</text>
+                        </g>
+                      );
+                    }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </Card>
+        </>
       )}
     </div>
   );
@@ -1707,9 +2492,10 @@ function TrendsView({ history, unit = "lbs" }) {
 const POWER_MAX    = 20;
 const STRENGTH_MAX = 120;
 
-function AnalysisView({ history, unit = "lbs" }) {
-  const [selHand, setSelHand] = useState("L");
-  const [selGrip, setSelGrip] = useState("");
+function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = null }) {
+  const [selHand,   setSelHand]   = useState("L");
+  const [selGrip,   setSelGrip]   = useState("");
+  const [relMode,   setRelMode]   = useState(false); // relative strength toggle
 
   const grips = useMemo(() =>
     [...new Set(history.map(r => r.grip).filter(Boolean))].sort(),
@@ -1727,20 +2513,7 @@ function AnalysisView({ history, unit = "lbs" }) {
   const failures  = reps.filter(r => r.failed);
   const successes = reps.filter(r => !r.failed);
 
-  // Scatter data for chart — separate series for colour coding
-  const successDots = successes.map(r => ({
-    x: r.actual_time_s,
-    y: toDisp(r.avg_force_kg, unit),
-    date: r.date, grip: r.grip,
-  }));
-  const failureDots = failures.map(r => ({
-    x: r.actual_time_s,
-    y: toDisp(r.avg_force_kg, unit),
-    date: r.date, grip: r.grip,
-  }));
-
-  const maxDur   = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
-  const maxForce = Math.max(...reps.map(r => toDisp(r.avg_force_kg, unit)), 40);
+  const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
   // ── Critical Force estimation via Monod-Scherrer linearization ──
   // F = CF + W'/t  →  linear regression on (1/t, F) using failure points.
@@ -1771,6 +2544,57 @@ function AnalysisView({ history, unit = "lbs" }) {
       return { x: t, y: toDisp(Math.max(CF + W / t, CF), unit) };
     });
   }, [cfEstimate, maxDur, unit]);
+
+  // ── Relative strength helpers ──
+  const useRel = relMode && bodyWeight != null && bodyWeight > 0;
+  // Convert a kg force value to the display value (abs or relative)
+  const fmtForce = (kg) => {
+    if (kg == null) return "—";
+    if (useRel) return fmt1(kg / bodyWeight);     // unitless ratio
+    return fmtW(kg, unit);
+  };
+  const forceUnit = useRel ? "× BW" : unit;
+
+  // Scatter data — recalculated when relMode toggles
+  const successDotsRel = successes.map(r => ({
+    x: r.actual_time_s,
+    y: useRel ? r.avg_force_kg / bodyWeight : toDisp(r.avg_force_kg, unit),
+    date: r.date, grip: r.grip,
+  }));
+  const failureDotsRel = failures.map(r => ({
+    x: r.actual_time_s,
+    y: useRel ? r.avg_force_kg / bodyWeight : toDisp(r.avg_force_kg, unit),
+    date: r.date, grip: r.grip,
+  }));
+  const curveDataRel = curveData.map(d => ({
+    x: d.x,
+    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
+  }));
+  const maxForceRel = Math.max(
+    ...(useRel
+      ? reps.map(r => r.avg_force_kg / bodyWeight)
+      : reps.map(r => toDisp(r.avg_force_kg, unit))),
+    useRel ? 0.5 : 40
+  );
+
+  // ── IV Kinetics recovery model data ──
+  // Shows how each energy compartment recovers over a rest period.
+  // x = rest duration in seconds (0–1200s = 0–20 min)
+  const recoveryData = useMemo(() => {
+    const { A1, tau1, A2, tau2, A3, tau3 } = DEF_FAT;
+    return Array.from({ length: 121 }, (_, i) => {
+      const t   = i * 10; // 0, 10, 20 … 1200 s
+      const pcr = Math.round((1 - Math.exp(-t / tau1)) * 100);
+      const gly = Math.round((1 - Math.exp(-t / tau2)) * 100);
+      const ox  = Math.round((1 - Math.exp(-t / tau3)) * 100);
+      const tot = Math.round(
+        (A1 * (1 - Math.exp(-t / tau1)) +
+         A2 * (1 - Math.exp(-t / tau2)) +
+         A3 * (1 - Math.exp(-t / tau3))) * 100
+      );
+      return { t, pcr, gly, ox, tot };
+    });
+  }, []);
 
   // ── Zone breakdown (power / strength / endurance) ──
   const zones = useMemo(() => {
@@ -1820,21 +2644,29 @@ function AnalysisView({ history, unit = "lbs" }) {
     .map(([, z]) => z.label);
 
   // Custom tooltip for scatter chart
-  const ScatterTooltip = ({ active, payload }) => {
+  const ScatterTooltip = ({ active, payload, unit: tipUnit }) => {
     if (!active || !payload?.[0]) return null;
     const d = payload[0].payload;
+    const u = tipUnit || unit;
     return (
       <div style={{ background: C.card, border: `1px solid ${C.border}`, padding: "8px 12px", borderRadius: 8, fontSize: 12 }}>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>{d.date}{d.grip ? ` · ${d.grip}` : ""}</div>
         <div>Duration: <b>{fmt1(d.x)}s</b></div>
-        <div>Force: <b>{fmt1(d.y)} {unit}</b></div>
+        <div>Force: <b>{fmt1(d.y)} {u}</b></div>
       </div>
     );
   };
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
-      <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Force-Duration Analysis</h2>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 4, gap: 12 }}>
+        <h2 style={{ margin: 0, fontSize: 22 }}>Force-Duration Analysis</h2>
+        {onCalibrate && (
+          <Btn small onClick={onCalibrate} color={C.blue} style={{ flexShrink: 0, marginTop: 4 }}>
+            📊 Calibrate
+          </Btn>
+        )}
+      </div>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
         Where failures fall on the fatigue curve reveals which energy system is your limiter — and what to train next.
       </p>
@@ -1879,12 +2711,26 @@ function AnalysisView({ history, unit = "lbs" }) {
 
         {/* ── Force-Duration scatter ── */}
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Force vs. Duration</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>Force vs. Duration</div>
+            {bodyWeight != null && (
+              <div style={{ display: "flex", gap: 4 }}>
+                {["Absolute", "Relative"].map(mode => (
+                  <button key={mode} onClick={() => setRelMode(mode === "Relative")} style={{
+                    padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                    background: (mode === "Relative") === relMode ? C.purple : C.border,
+                    color: (mode === "Relative") === relMode ? "#fff" : C.muted,
+                  }}>{mode}</button>
+                ))}
+              </div>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
             <span><span style={{ color: C.green }}>●</span> Completed</span>
             <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
             {cfEstimate && <span><span style={{ color: C.purple }}>―</span> F-D curve</span>}
             {cfEstimate && <span><span style={{ color: C.purple }}>╌</span> Critical Force</span>}
+            {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
           </div>
           <ResponsiveContainer width="100%" height={260}>
             <ComposedChart margin={{ top: 10, right: 16, bottom: 28, left: 0 }}>
@@ -1897,11 +2743,12 @@ function AnalysisView({ history, unit = "lbs" }) {
               />
               <YAxis
                 type="number"
-                domain={[0, Math.ceil(maxForce * 1.15 / 10) * 10]}
+                domain={[0, Math.ceil(maxForceRel * 1.15 / (useRel ? 0.1 : 10)) * (useRel ? 0.1 : 10)]}
                 tick={{ fill: C.muted, fontSize: 11 }}
-                width={38}
+                unit={useRel ? "" : ` ${unit}`}
+                width={42}
               />
-              <Tooltip content={<ScatterTooltip />} />
+              <Tooltip content={<ScatterTooltip unit={forceUnit} />} />
               {/* Zone backgrounds */}
               <ReferenceArea x1={0}            x2={POWER_MAX}    fill={C.red}    fillOpacity={0.07} />
               <ReferenceArea x1={POWER_MAX}    x2={STRENGTH_MAX} fill={C.orange} fillOpacity={0.07} />
@@ -1909,19 +2756,19 @@ function AnalysisView({ history, unit = "lbs" }) {
               {/* Critical Force horizontal line */}
               {cfEstimate && (
                 <ReferenceLine
-                  y={toDisp(cfEstimate.CF, unit)}
+                  y={useRel ? cfEstimate.CF / bodyWeight : toDisp(cfEstimate.CF, unit)}
                   stroke={C.purple} strokeDasharray="6 3" strokeWidth={1.5}
-                  label={{ value: `CF ${fmtW(cfEstimate.CF, unit)} ${unit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
+                  label={{ value: `CF ${fmtForce(cfEstimate.CF)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
                 />
               )}
               {/* Fitted force-duration curve */}
-              {curveData.length > 0 && (
-                <Line data={curveData} dataKey="y" stroke={C.purple} strokeWidth={2} dot={false} legendType="none" />
+              {curveDataRel.length > 0 && (
+                <Line data={curveDataRel} dataKey="y" stroke={C.purple} strokeWidth={2} dot={false} legendType="none" />
               )}
               {/* Completed reps */}
-              <Scatter data={successDots} fill={C.green} opacity={0.85} name="Completed" />
+              <Scatter data={successDotsRel} fill={C.green} opacity={0.85} name="Completed" />
               {/* Failed reps */}
-              <Scatter data={failureDots} fill={C.red} opacity={0.95} name="Auto-failed" />
+              <Scatter data={failureDotsRel} fill={C.red} opacity={0.95} name="Auto-failed" />
             </ComposedChart>
           </ResponsiveContainer>
           {/* Zone labels */}
@@ -2033,6 +2880,78 @@ function AnalysisView({ history, unit = "lbs" }) {
           </Card>
         )}
 
+      {/* ── IV Kinetics Recovery Model ── */}
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
+          Energy System Recovery
+        </div>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.6 }}>
+          How each energy compartment recovers after a maximal effort.
+          This is the three-compartment IV-kinetics model that drives your weight suggestions and rest timers.
+        </div>
+
+        {/* Legend */}
+        <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 8, flexWrap: "wrap" }}>
+          <span><span style={{ color: C.red }}>―</span> ⚡ Phosphocreatine (PCr) τ=15s</span>
+          <span><span style={{ color: C.orange }}>―</span> 💪 Glycolytic τ=90s</span>
+          <span><span style={{ color: C.blue }}>―</span> 🏔️ Oxidative τ=600s</span>
+          <span><span style={{ color: "#aaa" }}>―</span> Total</span>
+        </div>
+
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={recoveryData} margin={{ top: 8, right: 16, bottom: 28, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+            <XAxis
+              dataKey="t"
+              type="number"
+              domain={[0, 1200]}
+              tickFormatter={v => v < 60 ? `${v}s` : `${v / 60}m`}
+              label={{ value: "Rest duration", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
+              tick={{ fill: C.muted, fontSize: 10 }}
+              ticks={[0, 30, 60, 120, 180, 300, 600, 900, 1200]}
+            />
+            <YAxis
+              domain={[0, 100]}
+              tick={{ fill: C.muted, fontSize: 11 }}
+              unit="%"
+              width={38}
+            />
+            <Tooltip
+              contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text, fontSize: 12 }}
+              labelFormatter={v => v < 60 ? `Rest: ${v}s` : `Rest: ${fmt1(v / 60)} min`}
+              formatter={(val, name) => [`${val}%`, name]}
+            />
+            {/* Reference lines for common rest periods */}
+            <ReferenceLine x={30}  stroke={C.border} strokeDasharray="3 3"
+              label={{ value: "30s", position: "top", fill: C.muted, fontSize: 9 }} />
+            <ReferenceLine x={180} stroke={C.border} strokeDasharray="3 3"
+              label={{ value: "3m",  position: "top", fill: C.muted, fontSize: 9 }} />
+            <ReferenceLine x={300} stroke={C.border} strokeDasharray="3 3"
+              label={{ value: "5m",  position: "top", fill: C.muted, fontSize: 9 }} />
+            <Line dataKey="pcr" stroke={C.red}    strokeWidth={2} dot={false} name="PCr (⚡ Power)"     />
+            <Line dataKey="gly" stroke={C.orange} strokeWidth={2} dot={false} name="Glycolytic (💪 Strength)" />
+            <Line dataKey="ox"  stroke={C.blue}   strokeWidth={2} dot={false} name="Oxidative (🏔️ Endurance)" />
+            <Line dataKey="tot" stroke="#888"      strokeWidth={1.5} dot={false} name="Total" strokeDasharray="4 2" />
+          </LineChart>
+        </ResponsiveContainer>
+
+        {/* Interpretation guide */}
+        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+          {[
+            { color: C.red,    label: "30–45s rest",  text: "PCr ~95% recovered. Enough for next power rep; glycolytic still depleted." },
+            { color: C.orange, label: "3–5 min rest", text: "Glycolytic ~85% recovered. Ideal between-set rest for strength training." },
+            { color: C.blue,   label: "20–30 min rest", text: "Oxidative approaches full recovery. Required between maximal endurance efforts." },
+          ].map(row => (
+            <div key={row.label} style={{ display: "flex", gap: 10, fontSize: 12 }}>
+              <div style={{ width: 70, flexShrink: 0, color: row.color, fontWeight: 700, fontSize: 11, paddingTop: 1 }}>
+                {row.label}
+              </div>
+              <div style={{ color: C.muted, lineHeight: 1.5 }}>{row.text}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
       </>)}
     </div>
   );
@@ -2041,7 +2960,7 @@ function AnalysisView({ history, unit = "lbs" }) {
 // ─────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────
-function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut, unit = "lbs", onUnitChange = () => {} }) {
+function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut, unit = "lbs", onUnitChange = () => {}, bodyWeight = null, onBWChange = () => {} }) {
   const [showSQL, setShowSQL] = useState(false);
   const sql = `-- Run this once in your Supabase SQL editor (fresh install):
 CREATE TABLE reps (
@@ -2076,6 +2995,37 @@ CREATE POLICY "auth_all" ON reps
                 color: unit === u ? "#fff" : C.muted, border: "none",
               }}>{u}</button>
             ))}
+          </div>
+        </Sect>
+      </Card>
+
+      <Card>
+        <Sect title="Body Weight">
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+            Used to show <b>relative strength</b> (force ÷ bodyweight) in the Analysis tab.
+            Helps compare progress through weight changes.
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input
+              type="number" min={30} max={200} step={0.5}
+              value={bodyWeight != null ? fmtW(bodyWeight, unit) : ""}
+              onChange={e => {
+                const v = e.target.value === "" ? null : fromDisp(Number(e.target.value), unit);
+                onBWChange(v);
+              }}
+              placeholder={`Weight in ${unit}`}
+              style={{
+                width: 110, background: C.bg,
+                border: `1px solid ${C.border}`, borderRadius: 8,
+                padding: "8px 12px", color: C.text, fontSize: 15,
+              }}
+            />
+            <span style={{ fontSize: 14, color: C.muted }}>{unit}</span>
+            {bodyWeight != null && (
+              <span style={{ fontSize: 12, color: C.muted, marginLeft: 4 }}>
+                ({unit === "lbs" ? `${fmt1(bodyWeight)} kg` : `${fmt1(bodyWeight * KG_TO_LBS)} lbs`})
+              </span>
+            )}
           </div>
         </Sect>
       </Card>
@@ -2180,6 +3130,22 @@ export default function App() {
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
   const saveUnit = (u) => { setUnit(u); saveLS("unit_pref", u); };
 
+  // ── Body weight ───────────────────────────────────────────
+  const [bodyWeight, setBodyWeight] = useState(() => loadLS(LS_BW_KEY) ?? null);
+  const saveBW = (kg) => { setBodyWeight(kg); saveLS(LS_BW_KEY, kg); };
+
+  // ── Session notes ─────────────────────────────────────────
+  const [notes, setNotes] = useState(() => loadLS(LS_NOTES_KEY) || {});
+  const handleNoteChange = useCallback((sessKey, text) => {
+    setNotes(prev => {
+      const updated = text ? { ...prev, [sessKey]: text } : Object.fromEntries(
+        Object.entries(prev).filter(([k]) => k !== sessKey)
+      );
+      saveLS(LS_NOTES_KEY, updated);
+      return updated;
+    });
+  }, []);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setUser(s?.user ?? null));
@@ -2255,6 +3221,33 @@ export default function App() {
   // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
 
+  // ── Readiness score ───────────────────────────────────────
+  const computedReadiness = useMemo(() => computeReadiness(history), [history]);
+
+  // Subjective daily check-in: { [date]: 1-5 }
+  const [subjReadiness, setSubjReadiness] = useState(() => loadLS(LS_READINESS_KEY) || {});
+  const todaySubj = subjReadiness[today()] ?? null; // null = not rated yet today
+
+  const handleSubjReadiness = useCallback((val) => {
+    setSubjReadiness(prev => {
+      const updated = { ...prev, [today()]: val };
+      saveLS(LS_READINESS_KEY, updated);
+      return updated;
+    });
+  }, []);
+
+  // Displayed readiness: subjective if rated today, otherwise computed estimate
+  const readiness = todaySubj != null ? subjToScore(todaySubj) : computedReadiness;
+
+  // ── Calibration mode ──────────────────────────────────────
+  const [calMode, setCalMode] = useState(false);
+
+  const handleCalibrationComplete = useCallback((calReps) => {
+    addReps(calReps);
+    setCalMode(false);
+    setTab(4); // navigate to Analysis tab
+  }, [addReps]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Session Config ────────────────────────────────────────
   const [config, setConfig] = useState(() => ({
     hand:       "L",
@@ -2294,10 +3287,7 @@ export default function App() {
   }, [history, config.grip, config.targetTime]);
 
   // ── Tindeq ────────────────────────────────────────────────
-  const autoFailRef = useRef(null);
-  const tindeq = useTindeq({ onAutoFailure: () => autoFailRef.current?.() });
-  // Also expose an _autoFailRef for ActiveSessionView to wire
-  tindeq._autoFailRef = autoFailRef;
+  const tindeq = useTindeq();
 
   // ── Start session ─────────────────────────────────────────
   const startSession = useCallback(() => {
@@ -2492,10 +3482,32 @@ export default function App() {
 
       {/* Train tab */}
       {tab === 0 && (() => {
+        if (phase === "idle" && calMode) {
+          return (
+            <CalibrationView
+              tindeq={tindeq}
+              unit={unit}
+              onComplete={handleCalibrationComplete}
+              onCancel={() => setCalMode(false)}
+            />
+          );
+        }
+
         if (phase === "idle") {
           return (
             <>
-              <SetupView config={config} setConfig={setConfig} onStart={startSession} history={history} unit={unit} />
+              <SetupView
+                config={config}
+                setConfig={setConfig}
+                onStart={startSession}
+                onCalibrate={() => setCalMode(true)}
+                history={history}
+                unit={unit}
+                readiness={readiness}
+                todaySubj={todaySubj}
+                onSubjReadiness={handleSubjReadiness}
+                isEstimated={todaySubj == null}
+              />
               {/* Tindeq connect button */}
               <div style={{ maxWidth: 480, margin: "0 auto", padding: "0 16px 32px" }}>
                 <Card>
@@ -2599,9 +3611,9 @@ export default function App() {
       })()}
 
       {tab === 1 && <CharacterView history={history} unit={unit} />}
-      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} />}
+      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
       {tab === 3 && <TrendsView history={history} unit={unit} />}
-      {tab === 4 && <AnalysisView history={history} unit={unit} />}
+      {tab === 4 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 5 && (
         <SettingsView
           user={user}
@@ -2611,6 +3623,8 @@ export default function App() {
           onSignOut={signOut}
           unit={unit}
           onUnitChange={saveUnit}
+          bodyWeight={bodyWeight}
+          onBWChange={saveBW}
         />
       )}
     </div>
