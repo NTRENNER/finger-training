@@ -528,21 +528,45 @@ function BigTimer({ seconds, targetSeconds, running }) {
   );
 }
 
-function ForceGauge({ force, avg, peak, maxDisplay = 50, unit = "lbs" }) {
-  const fPct   = clamp(force / maxDisplay, 0, 1);
-  const avgPct = clamp(avg   / maxDisplay, 0, 1);
+// targetKg: the weight the user is aiming to hit (suggested or manual, in kg)
+function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs" }) {
+  const fPct    = clamp(force / maxDisplay, 0, 1);
+  const avgPct  = clamp(avg   / maxDisplay, 0, 1);
+  const tgtPct  = targetKg != null ? clamp(targetKg / maxDisplay, 0, 1) : null;
+
+  // Color zones relative to target:
+  //   below target         → orange
+  //   at/above target      → green
+  //   10%+ above target    → purple
+  let barColor = C.blue; // no target = neutral blue
+  let numColor = C.blue;
+  if (targetKg != null && targetKg > 0) {
+    if (force >= targetKg * 1.10) { barColor = C.purple; numColor = C.purple; }
+    else if (force >= targetKg * 0.99) { barColor = C.green;  numColor = C.green;  }
+    else                               { barColor = C.orange; numColor = C.orange; }
+  }
+
   return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 4 }}>
-        <span>Live: <b style={{ color: C.blue }}>{fmtW(force, unit)} {unit}</b></span>
+    <div style={{ marginTop: 8 }}>
+      {/* Large live-force number, same scale as BigTimer */}
+      <div style={{ textAlign: "center", fontSize: 108, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: numColor, lineHeight: 1 }}>
+        {fmtW(force, unit)}
+      </div>
+      <div style={{ textAlign: "center", fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 10 }}>
+        {unit}{targetKg != null ? ` · target ${fmtW(targetKg, unit)} ${unit}` : ""}
+      </div>
+      {/* Stats row */}
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 6 }}>
         <span>Avg: <b style={{ color: C.green }}>{fmtW(avg, unit)} {unit}</b></span>
         <span>Peak: <b style={{ color: C.orange }}>{fmtW(peak, unit)} {unit}</b></span>
       </div>
+      {/* Bar */}
       <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
-        {/* Live force bar */}
-        <div style={{ position: "absolute", height: "100%", width: `${fPct * 100}%`, background: C.blue, borderRadius: 6, transition: "width 0.05s" }} />
-        {/* Average marker */}
+        <div style={{ position: "absolute", height: "100%", width: `${fPct * 100}%`, background: barColor, borderRadius: 6, transition: "width 0.05s" }} />
         <div style={{ position: "absolute", top: 0, bottom: 0, left: `${avgPct * 100}%`, width: 3, background: C.green }} />
+        {tgtPct != null && (
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: `${tgtPct * 100}%`, width: 2, background: "#ffffff60" }} />
+        )}
       </div>
     </div>
   );
@@ -803,7 +827,7 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
     return () => clearTimeout(t);
   }, [repPhase, countdown, startRep]);
 
-  // End rep — manual tap only
+  // End rep (manual tap OR auto-failure from 20% force drop)
   const endRep = useCallback(async () => {
     if (!startTimeRef.current) return;
     clearInterval(timerRef.current);
@@ -814,10 +838,21 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
     onRepDone({ actualTime, avgForce: tindeq.avgForce });
   }, [tindeq, onRepDone]);
 
+  // Wire auto-failure → endRep so a 20% force drop ends the rep and
+  // transitions immediately into the rest/between-sets phase.
+  useEffect(() => {
+    if (tindeq._autoFailRef) {
+      tindeq._autoFailRef.current = repPhase === "active" ? endRep : null;
+    }
+  }, [tindeq, repPhase, endRep]);
+
   useEffect(() => () => clearInterval(timerRef.current), []);
 
   const handList = config.hand === "Both" ? ["L", "R"] : [config.hand];
   const sug = handList.length === 1 ? suggestions[handList[0]] : null;
+
+  // Effective target weight in kg for color-coding the force gauge
+  const targetKg = manualWeight ?? sug?.suggested ?? null;
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -854,7 +889,7 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
         <Card>
           <BigTimer seconds={elapsed} targetSeconds={config.targetTime} running={true} />
           {tindeq.connected ? (
-            <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} unit={unit} />
+            <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />
           ) : (
             <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
               No Tindeq — tap Done when you let go.
