@@ -5,8 +5,9 @@ import React, {
 } from "react";
 import { supabase } from "./lib/supabase";
 import {
-  ResponsiveContainer, LineChart, Line,
+  ResponsiveContainer, LineChart, Line, ComposedChart, Scatter,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  ReferenceLine, ReferenceArea,
 } from "recharts";
 
 // ─────────────────────────────────────────────────────────────
@@ -367,8 +368,10 @@ function useTindeq({ onAutoFailure }) {
 //     created_at timestamptz DEFAULT now(),
 //     date text, grip text, hand text,
 //     target_duration integer, weight_kg real, actual_time_s real,
-//     peak_force_kg real, set_num integer, rep_num integer,
-//     rest_s integer, session_id text
+//     avg_force_kg real, peak_force_kg real,
+//     set_num integer, rep_num integer,
+//     rest_s integer, session_id text,
+//     failed boolean DEFAULT false
 //   );
 //   ALTER TABLE reps ENABLE ROW LEVEL SECURITY;
 //   CREATE POLICY "auth_all" ON reps FOR ALL USING (auth.uid() IS NOT NULL);
@@ -380,6 +383,7 @@ function repPayload(rep) {
     peak_force_kg: rep.peak_force_kg ?? 0,
     set_num: rep.set_num, rep_num: rep.rep_num,
     rest_s: rep.rest_s, session_id: rep.session_id,
+    failed: rep.failed ?? false,
   };
 }
 
@@ -436,6 +440,7 @@ async function fetchReps() {
     rep_num: Number(r.rep_num) || 1,
     rest_s: Number(r.rest_s) || 20,
     session_id: r.session_id ?? "",
+    failed: r.failed ?? false,
   }));
 }
 
@@ -834,22 +839,28 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
     return () => clearTimeout(t);
   }, [repPhase, countdown, startRep]);
 
-  // End rep (manual tap OR auto-failure from 20% force drop)
+  // Tracks whether this rep was ended by auto-failure (vs manual tap).
+  const autoFailedRef = useRef(false);
+
+  // End rep — called by manual tap (failed=false) or auto-failure (failed=true).
   const endRep = useCallback(async () => {
     if (!startTimeRef.current) return;
+    const failed = autoFailedRef.current;
+    autoFailedRef.current = false;
     clearInterval(timerRef.current);
     const actualTime = (Date.now() - startTimeRef.current) / 1000;
     startTimeRef.current = null;
     setRepPhase("ready");
     if (tindeq.connected) await tindeq.stopMeasuring();
-    onRepDone({ actualTime, avgForce: tindeq.avgForce });
+    onRepDone({ actualTime, avgForce: tindeq.avgForce, failed });
   }, [tindeq, onRepDone]);
 
-  // Wire auto-failure → endRep so a 20% force drop ends the rep and
-  // transitions immediately into the rest/between-sets phase.
+  // Wire auto-failure → endRep, flagging the rep as failed.
   useEffect(() => {
     if (tindeq._autoFailRef) {
-      tindeq._autoFailRef.current = repPhase === "active" ? endRep : null;
+      tindeq._autoFailRef.current = repPhase === "active"
+        ? () => { autoFailedRef.current = true; endRep(); }
+        : null;
     }
   }, [tindeq, repPhase, endRep]);
 
@@ -1690,24 +1701,366 @@ function TrendsView({ history, unit = "lbs" }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// ANALYSIS VIEW  — Force-Duration Curve + Training Recommendations
+// ─────────────────────────────────────────────────────────────
+// Zone boundaries (seconds)
+const POWER_MAX    = 20;
+const STRENGTH_MAX = 120;
+
+function AnalysisView({ history, unit = "lbs" }) {
+  const [selHand, setSelHand] = useState("L");
+  const [selGrip, setSelGrip] = useState("");
+
+  const grips = useMemo(() =>
+    [...new Set(history.map(r => r.grip).filter(Boolean))].sort(),
+    [history]
+  );
+
+  // All reps with usable force + time data for the selected filters
+  const reps = useMemo(() => history.filter(r =>
+    r.hand === selHand &&
+    (!selGrip || r.grip === selGrip) &&
+    r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
+    r.actual_time_s > 0
+  ), [history, selHand, selGrip]);
+
+  const failures  = reps.filter(r => r.failed);
+  const successes = reps.filter(r => !r.failed);
+
+  // Scatter data for chart — separate series for colour coding
+  const successDots = successes.map(r => ({
+    x: r.actual_time_s,
+    y: toDisp(r.avg_force_kg, unit),
+    date: r.date, grip: r.grip,
+  }));
+  const failureDots = failures.map(r => ({
+    x: r.actual_time_s,
+    y: toDisp(r.avg_force_kg, unit),
+    date: r.date, grip: r.grip,
+  }));
+
+  const maxDur   = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
+  const maxForce = Math.max(...reps.map(r => toDisp(r.avg_force_kg, unit)), 40);
+
+  // ── Critical Force estimation via Monod-Scherrer linearization ──
+  // F = CF + W'/t  →  linear regression on (1/t, F) using failure points.
+  // CF  = force you can sustain indefinitely (the aerobic asymptote).
+  // W'  = finite anaerobic work capacity above CF (units: force × time).
+  const cfEstimate = useMemo(() => {
+    if (failures.length < 2) return null;
+    const pts = failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
+    const n   = pts.length;
+    const sx  = pts.reduce((a, p) => a + p.x, 0);
+    const sy  = pts.reduce((a, p) => a + p.y, 0);
+    const sxx = pts.reduce((a, p) => a + p.x * p.x, 0);
+    const sxy = pts.reduce((a, p) => a + p.x * p.y, 0);
+    const den = n * sxx - sx * sx;
+    if (Math.abs(den) < 1e-12) return null;
+    const W  = (n * sxy - sx * sy) / den;   // slope = W' (kg·s)
+    const CF = (sy - W * sx) / n;            // intercept = CF (kg)
+    if (CF < 0 || W < 0) return null;
+    return { CF, W, n };
+  }, [failures]);
+
+  // Fitted force-duration curve points for overlay
+  const curveData = useMemo(() => {
+    if (!cfEstimate) return [];
+    const { CF, W } = cfEstimate;
+    return Array.from({ length: 80 }, (_, i) => {
+      const t = 2 + ((maxDur - 2) / 79) * i;
+      return { x: t, y: toDisp(Math.max(CF + W / t, CF), unit) };
+    });
+  }, [cfEstimate, maxDur, unit]);
+
+  // ── Zone breakdown (power / strength / endurance) ──
+  const zones = useMemo(() => {
+    const zoneStats = (lo, hi) => {
+      const z = reps.filter(r => r.actual_time_s >= lo && r.actual_time_s < hi);
+      const f = z.filter(r => r.failed).length;
+      return { total: z.length, failures: f, successes: z.length - f,
+               failRate: z.length > 0 ? f / z.length : null };
+    };
+    return {
+      power:     { ...zoneStats(0, POWER_MAX),                label: "Power",     color: C.red,    desc: "0–20s",    system: "Phosphocreatine",  tau: "τ₁ ≈ 15s"  },
+      strength:  { ...zoneStats(POWER_MAX, STRENGTH_MAX),     label: "Strength",  color: C.orange, desc: "20–120s",  system: "Glycolytic",       tau: "τ₂ ≈ 90s"  },
+      endurance: { ...zoneStats(STRENGTH_MAX, Infinity),      label: "Endurance", color: C.blue,   desc: "120s+",    system: "Oxidative",        tau: "τ₃ ≈ 600s" },
+    };
+  }, [reps]);
+
+  // ── Training recommendation ──
+  const recommendation = useMemo(() => {
+    if (failures.length === 0) return null;
+    const ranked = Object.entries(zones)
+      .filter(([, z]) => z.failRate !== null)
+      .sort(([, a], [, b]) => b.failRate - a.failRate);
+    if (!ranked.length) return null;
+    const [key, limiter] = ranked[0];
+    const details = {
+      power: {
+        title:    "Train Power",
+        insight:  "Your phosphocreatine system is the rate-limiter. Heavy, short maximal efforts with full recovery between sets are the prescription — quality over volume.",
+        protocol: "5–10s hang  ·  90–100% max load  ·  3–5 min rest  ·  4–6 reps",
+      },
+      strength: {
+        title:    "Train Strength",
+        insight:  "Your glycolytic system is the rate-limiter. Progressive overload in your current time domain, or classic 7s-on / 3s-off repeaters, will drive the most adaptation.",
+        protocol: "45s hang  ·  75–85% max  ·  3 min rest  ·  3–5 sets",
+      },
+      endurance: {
+        title:    "Train Endurance",
+        insight:  "Your oxidative system is the rate-limiter. Raising Critical Force is the highest-leverage move — it lifts the aerobic ceiling and improves every other zone by default.",
+        protocol: "2–5 min hang  ·  40–60% max  ·  2 min rest  ·  3–4 sets",
+      },
+    };
+    return { key, color: limiter.color, ...details[key] };
+  }, [zones, failures]);
+
+  const unexplored = Object.entries(zones)
+    .filter(([, z]) => z.total === 0)
+    .map(([, z]) => z.label);
+
+  // Custom tooltip for scatter chart
+  const ScatterTooltip = ({ active, payload }) => {
+    if (!active || !payload?.[0]) return null;
+    const d = payload[0].payload;
+    return (
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, padding: "8px 12px", borderRadius: 8, fontSize: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>{d.date}{d.grip ? ` · ${d.grip}` : ""}</div>
+        <div>Duration: <b>{fmt1(d.x)}s</b></div>
+        <div>Force: <b>{fmt1(d.y)} {unit}</b></div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Force-Duration Analysis</h2>
+      <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+        Where failures fall on the fatigue curve reveals which energy system is your limiter — and what to train next.
+      </p>
+
+      {/* Filters */}
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: grips.length ? 10 : 0 }}>
+          {["L", "R"].map(h => (
+            <button key={h} onClick={() => setSelHand(h)} style={{
+              padding: "6px 18px", borderRadius: 20, cursor: "pointer",
+              fontWeight: 600, border: "none",
+              background: selHand === h ? C.purple : C.border,
+              color: selHand === h ? "#fff" : C.muted,
+            }}>{h === "L" ? "Left" : "Right"}</button>
+          ))}
+        </div>
+        {grips.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => setSelGrip("")} style={{
+              padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
+              background: !selGrip ? C.orange : C.border, color: !selGrip ? "#fff" : C.muted,
+            }}>All Grips</button>
+            {grips.map(g => (
+              <button key={g} onClick={() => setSelGrip(g)} style={{
+                padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
+                background: selGrip === g ? C.orange : C.border, color: selGrip === g ? "#fff" : C.muted,
+              }}>{g}</button>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {reps.length === 0 ? (
+        <Card>
+          <div style={{ textAlign: "center", padding: "32px 0", color: C.muted }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+            <div>No session data yet for this selection.</div>
+            <div style={{ fontSize: 12, marginTop: 8 }}>Complete some sessions to see your force-duration curve.</div>
+          </div>
+        </Card>
+      ) : (<>
+
+        {/* ── Force-Duration scatter ── */}
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Force vs. Duration</div>
+          <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
+            <span><span style={{ color: C.green }}>●</span> Completed</span>
+            <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
+            {cfEstimate && <span><span style={{ color: C.purple }}>―</span> F-D curve</span>}
+            {cfEstimate && <span><span style={{ color: C.purple }}>╌</span> Critical Force</span>}
+          </div>
+          <ResponsiveContainer width="100%" height={260}>
+            <ComposedChart margin={{ top: 10, right: 16, bottom: 28, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis
+                type="number" dataKey="x"
+                domain={[0, maxDur + 10]}
+                label={{ value: "Duration (s)", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
+                tick={{ fill: C.muted, fontSize: 11 }}
+              />
+              <YAxis
+                type="number"
+                domain={[0, Math.ceil(maxForce * 1.15 / 10) * 10]}
+                tick={{ fill: C.muted, fontSize: 11 }}
+                width={38}
+              />
+              <Tooltip content={<ScatterTooltip />} />
+              {/* Zone backgrounds */}
+              <ReferenceArea x1={0}            x2={POWER_MAX}    fill={C.red}    fillOpacity={0.07} />
+              <ReferenceArea x1={POWER_MAX}    x2={STRENGTH_MAX} fill={C.orange} fillOpacity={0.07} />
+              <ReferenceArea x1={STRENGTH_MAX} x2={maxDur + 10}  fill={C.blue}   fillOpacity={0.07} />
+              {/* Critical Force horizontal line */}
+              {cfEstimate && (
+                <ReferenceLine
+                  y={toDisp(cfEstimate.CF, unit)}
+                  stroke={C.purple} strokeDasharray="6 3" strokeWidth={1.5}
+                  label={{ value: `CF ${fmtW(cfEstimate.CF, unit)} ${unit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
+                />
+              )}
+              {/* Fitted force-duration curve */}
+              {curveData.length > 0 && (
+                <Line data={curveData} dataKey="y" stroke={C.purple} strokeWidth={2} dot={false} legendType="none" />
+              )}
+              {/* Completed reps */}
+              <Scatter data={successDots} fill={C.green} opacity={0.85} name="Completed" />
+              {/* Failed reps */}
+              <Scatter data={failureDots} fill={C.red} opacity={0.95} name="Auto-failed" />
+            </ComposedChart>
+          </ResponsiveContainer>
+          {/* Zone labels */}
+          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+            <span style={{ color: C.red }}>⚡ Power &lt;20s</span>
+            <span style={{ color: C.orange }}>💪 Strength 20–120s</span>
+            <span style={{ color: C.blue }}>🔄 Endurance 120s+</span>
+          </div>
+        </Card>
+
+        {/* ── Critical Force card ── */}
+        {cfEstimate ? (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Critical Force Estimate</div>
+            <div style={{ display: "flex", gap: 0, marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Critical Force (CF)</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: C.purple, lineHeight: 1 }}>
+                  {fmtW(cfEstimate.CF, unit)}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit} · max sustainable</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Anaerobic Capacity (W′)</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: C.orange, lineHeight: 1 }}>
+                  {fmtW(cfEstimate.W, unit)}·s
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit}·s · finite reserve above CF</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: C.muted, borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+              Estimated from {cfEstimate.n} failure point{cfEstimate.n !== 1 ? "s" : ""}. Accuracy improves as failures span multiple time domains — try power hangs (5–10s) and endurance hangs (2+ min) to sharpen the curve.
+            </div>
+          </Card>
+        ) : (
+          <Card style={{ marginBottom: 16, border: `1px solid ${C.yellow}30` }}>
+            <div style={{ fontSize: 13, color: C.yellow, marginBottom: 6 }}>
+              {failures.length === 0 ? "⚠ Critical Force requires failure data" : "⚠ Need 2+ failures at different durations to fit the curve"}
+            </div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+              {failures.length === 0
+                ? "The shape of your force-duration curve is defined by reps that end in auto-failure. Completed reps set the floor; failed reps define the curve."
+                : "You have failure data in one time domain. Add failures at a shorter or longer duration to fit the Monod-Scherrer curve and estimate Critical Force."}
+            </div>
+          </Card>
+        )}
+
+        {/* ── Energy system breakdown ── */}
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Energy System Breakdown</div>
+          {Object.entries(zones).map(([, z]) => (
+            <div key={z.label} style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 5 }}>
+                <span>
+                  <span style={{ color: z.color, fontWeight: 700 }}>{z.label}</span>
+                  <span style={{ color: C.muted }}> · {z.system} · {z.tau}</span>
+                </span>
+                <span style={{ color: C.muted }}>
+                  {z.total === 0 ? "No data" : `${z.failures} fail / ${z.total} total`}
+                </span>
+              </div>
+              <div style={{ height: 10, background: C.border, borderRadius: 5, overflow: "hidden" }}>
+                {z.failRate !== null && (
+                  <div style={{ height: "100%", width: `${z.failRate * 100}%`, background: z.color, borderRadius: 5, transition: "width 0.4s" }} />
+                )}
+              </div>
+              {z.total === 0 && (
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>
+                  Add {z.desc} hangs to characterise this system.
+                </div>
+              )}
+            </div>
+          ))}
+        </Card>
+
+        {/* ── Training recommendation ── */}
+        {recommendation ? (
+          <Card style={{ marginBottom: 16, border: `1px solid ${recommendation.color}` }}>
+            <div style={{ fontSize: 11, color: recommendation.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+              Recommended Focus
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: recommendation.color, marginBottom: 10 }}>
+              {recommendation.title}
+            </div>
+            <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
+              {recommendation.insight}
+            </div>
+            <div style={{ background: C.bg, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: C.muted, fontFamily: "monospace", letterSpacing: "0.02em" }}>
+              {recommendation.protocol}
+            </div>
+          </Card>
+        ) : (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+              🔬 Train close to your limit in at least one time domain so the auto-failure system can record a failure point. That unlocks personalized training recommendations.
+            </div>
+          </Card>
+        )}
+
+        {/* Unexplored zones notice */}
+        {unexplored.length > 0 && (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: C.yellow, marginBottom: 6 }}>
+              📍 Unexplored: <b>{unexplored.join(", ")}</b>
+            </div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+              Data from {unexplored.join(" and ").toLowerCase()} hangs would complete your profile and reveal hidden limiters. A single session to failure in each zone is enough to start.
+            </div>
+          </Card>
+        )}
+
+      </>)}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────
 function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut, unit = "lbs", onUnitChange = () => {} }) {
   const [showSQL, setShowSQL] = useState(false);
-  const sql = `-- Run this once in your Supabase SQL editor:
+  const sql = `-- Run this once in your Supabase SQL editor (fresh install):
 CREATE TABLE reps (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   created_at timestamptz DEFAULT now(),
   date text, grip text, hand text,
   target_duration integer,
   weight_kg real, actual_time_s real,
-  peak_force_kg real,
+  avg_force_kg real, peak_force_kg real,
   set_num integer, rep_num integer,
-  rest_s integer, session_id text
+  rest_s integer, session_id text,
+  failed boolean DEFAULT false
 );
 ALTER TABLE reps ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "auth_all" ON reps
-  FOR ALL USING (auth.uid() IS NOT NULL);`;
+  FOR ALL USING (auth.uid() IS NOT NULL);
+
+-- If upgrading an existing table, run this instead:
+-- ALTER TABLE reps ADD COLUMN IF NOT EXISTS failed boolean DEFAULT false;`;
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -1816,7 +2169,7 @@ CREATE POLICY "auth_all" ON reps
 // ─────────────────────────────────────────────────────────────
 // MAIN APP
 // ─────────────────────────────────────────────────────────────
-const TABS = ["Train", "Character", "History", "Trends", "Settings"];
+const TABS = ["Train", "Character", "History", "Trends", "Analysis", "Settings"];
 
 export default function App() {
   // ── Auth ──────────────────────────────────────────────────
@@ -1967,7 +2320,7 @@ export default function App() {
   }, [history, config]);
 
   // ── Handle rep completion ─────────────────────────────────
-  const handleRepDone = useCallback(({ actualTime, avgForce }) => {
+  const handleRepDone = useCallback(({ actualTime, avgForce, failed = false }) => {
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
     const weight = (() => {
       const ws = [suggestWeight(refWeights[effectiveHand], fatigue)].filter(Boolean);
@@ -1989,6 +2342,7 @@ export default function App() {
       rep_num:         currentRep + 1,
       rest_s:          config.restTime,
       session_id:      sessionId,
+      failed:          failed,
     };
 
     setLastRepResult({ actualTime, avgForce, targetTime: config.targetTime });
@@ -2247,7 +2601,8 @@ export default function App() {
       {tab === 1 && <CharacterView history={history} unit={unit} />}
       {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} />}
       {tab === 3 && <TrendsView history={history} unit={unit} />}
-      {tab === 4 && (
+      {tab === 4 && <AnalysisView history={history} unit={unit} />}
+      {tab === 5 && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}
