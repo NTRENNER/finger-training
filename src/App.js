@@ -298,12 +298,14 @@ function useTindeq({ onAutoFailure }) {
             setAvgForce(sumRef.current / countRef.current);
           }
 
-          // Auto-failure: if force drops below 80% of peak for >500 ms, fire
+          // Auto-failure: if force drops below 80% of peak for >3 s, end the rep.
+          // 3 s filters out brief dips from grip shifts or breathing while still
+          // feeling responsive after a genuine failure.
           if (measuringRef.current && peakRef.current > 2) {
             const threshold = peakRef.current * 0.80;
             if (kg < threshold) {
               if (belowSinceRef.current === null) belowSinceRef.current = Date.now();
-              else if (Date.now() - belowSinceRef.current > 500) {
+              else if (Date.now() - belowSinceRef.current > 3000) {
                 belowSinceRef.current = null;
                 onAutoFailureRef.current?.();
               }
