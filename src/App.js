@@ -268,6 +268,7 @@ function useTindeq({ onAutoFailure }) {
   const belowSinceRef    = useRef(null);
   const measuringRef     = useRef(false);
   const onAutoFailureRef = useRef(onAutoFailure);
+  const targetKgRef      = useRef(null); // set by ActiveSessionView each rep
   useEffect(() => { onAutoFailureRef.current = onAutoFailure; }, [onAutoFailure]);
 
   const connect = useCallback(async () => {
@@ -298,19 +299,23 @@ function useTindeq({ onAutoFailure }) {
             setAvgForce(sumRef.current / countRef.current);
           }
 
-          // Auto-failure: if force drops below 80% of peak for >3 s, end the rep.
-          // 3 s filters out brief dips from grip shifts or breathing while still
-          // feeling responsive after a genuine failure.
-          if (measuringRef.current && peakRef.current > 2) {
-            const threshold = peakRef.current * 0.80;
-            if (kg < threshold) {
-              if (belowSinceRef.current === null) belowSinceRef.current = Date.now();
-              else if (Date.now() - belowSinceRef.current > 3000) {
+          // Auto-failure: if force drops below 95% of target for >3 s, end the rep.
+          // Uses target weight (not peak) so the bar is fixed and honest —
+          // you're supposed to be holding the target, not 80% of your opener.
+          // 3 s filters out brief dips from grip shifts or breathing.
+          if (measuringRef.current) {
+            const tgt = targetKgRef.current;
+            if (tgt != null && tgt > 0) {
+              const threshold = tgt * 0.95;
+              if (kg < threshold) {
+                if (belowSinceRef.current === null) belowSinceRef.current = Date.now();
+                else if (Date.now() - belowSinceRef.current > 3000) {
+                  belowSinceRef.current = null;
+                  onAutoFailureRef.current?.();
+                }
+              } else {
                 belowSinceRef.current = null;
-                onAutoFailureRef.current?.();
               }
-            } else {
-              belowSinceRef.current = null;
             }
           }
         });
@@ -350,7 +355,7 @@ function useTindeq({ onAutoFailure }) {
     peakRef.current = 0; setPeak(0); setForce(0);
   }, []);
 
-  return { connected, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare };
+  return { connected, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -853,8 +858,13 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
   const handList = config.hand === "Both" ? ["L", "R"] : [config.hand];
   const sug = handList.length === 1 ? suggestions[handList[0]] : null;
 
-  // Effective target weight in kg for color-coding the force gauge
+  // Effective target weight in kg for color-coding and auto-failure threshold
   const targetKg = manualWeight ?? sug?.suggested ?? null;
+
+  // Keep the Tindeq hook's target ref in sync so auto-failure uses the right threshold
+  useEffect(() => {
+    tindeq.targetKgRef.current = repPhase === "active" ? targetKg : null;
+  }, [tindeq, repPhase, targetKg]);
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
