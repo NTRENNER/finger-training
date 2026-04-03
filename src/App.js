@@ -45,6 +45,7 @@ const DEF_FAT = {
 const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
 const LS_READINESS_KEY = "ft_readiness"; // { [date]: 1-5 } subjective daily rating
+const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-calibration snapshot
 
 const LEVEL_STEP = 1.05; // 5% improvement per level
 
@@ -96,6 +97,29 @@ function downloadCSV(reps) {
   });
   a.click();
 }
+
+// ─────────────────────────────────────────────────────────────
+// MONOD-SCHERRER CURVE FIT  (standalone — used by CalibrationView & AnalysisView)
+// ─────────────────────────────────────────────────────────────
+// pts: array of { x: 1/duration_s, y: avg_force_kg }
+// Returns { CF, W, n } or null if not enough data / degenerate.
+function fitCF(pts) {
+  if (!pts || pts.length < 2) return null;
+  const n   = pts.length;
+  const sx  = pts.reduce((a, p) => a + p.x, 0);
+  const sy  = pts.reduce((a, p) => a + p.y, 0);
+  const sxx = pts.reduce((a, p) => a + p.x * p.x, 0);
+  const sxy = pts.reduce((a, p) => a + p.x * p.y, 0);
+  const den = n * sxx - sx * sx;
+  if (Math.abs(den) < 1e-12) return null;
+  const W  = (n * sxy - sx * sy) / den;   // slope  = W′  (kg·s)
+  const CF = (sy - W * sx) / n;           // intercept = CF (kg)
+  if (CF < 0 || W < 0) return null;
+  return { CF, W, n };
+}
+
+// Predicted force at a given duration (s) from a CF/W fit.
+function predForce(fit, t) { return fit.CF + fit.W / t; }
 
 // ─────────────────────────────────────────────────────────────
 // READINESS / RECOVERY HELPERS
@@ -2492,7 +2516,7 @@ function TrendsView({ history, unit = "lbs" }) {
 const POWER_MAX    = 20;
 const STRENGTH_MAX = 120;
 
-function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = null }) {
+function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = null, baseline = null }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selGrip,   setSelGrip]   = useState("");
   const [relMode,   setRelMode]   = useState(false); // relative strength toggle
@@ -2516,24 +2540,91 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
   // ── Critical Force estimation via Monod-Scherrer linearization ──
-  // F = CF + W'/t  →  linear regression on (1/t, F) using failure points.
-  // CF  = force you can sustain indefinitely (the aerobic asymptote).
-  // W'  = finite anaerobic work capacity above CF (units: force × time).
+  // Delegates to the standalone fitCF() helper so CalibrationView & App can share the logic.
   const cfEstimate = useMemo(() => {
     if (failures.length < 2) return null;
     const pts = failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
-    const n   = pts.length;
-    const sx  = pts.reduce((a, p) => a + p.x, 0);
-    const sy  = pts.reduce((a, p) => a + p.y, 0);
-    const sxx = pts.reduce((a, p) => a + p.x * p.x, 0);
-    const sxy = pts.reduce((a, p) => a + p.x * p.y, 0);
-    const den = n * sxx - sx * sx;
-    if (Math.abs(den) < 1e-12) return null;
-    const W  = (n * sxy - sx * sy) / den;   // slope = W' (kg·s)
-    const CF = (sy - W * sx) / n;            // intercept = CF (kg)
-    if (CF < 0 || W < 0) return null;
-    return { CF, W, n };
+    return fitCF(pts);
   }, [failures]);
+
+  // ── Capacity improvement % vs baseline ──
+  // Reference durations for each domain (seconds)
+  const REF = { power: 10, strength: 45, endurance: 180 };
+
+  const improvement = useMemo(() => {
+    if (!baseline || !cfEstimate) return null;
+    const pct = (t) => {
+      const cur  = predForce(cfEstimate, t);
+      const base = predForce(baseline,   t);
+      if (base <= 0) return null;
+      return Math.round((cur / base - 1) * 100);
+    };
+    const p = pct(REF.power);
+    const s = pct(REF.strength);
+    const e = pct(REF.endurance);
+    if (p == null || s == null || e == null) return null;
+    return {
+      power:     p,
+      strength:  s,
+      endurance: e,
+      total:     Math.round((p + s + e) / 3),
+    };
+  }, [baseline, cfEstimate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Per-hand / per-grip improvement breakdown ──
+  // Groups ALL failure reps (including calibration) by grip × hand,
+  // splits each group into first-2 (baseline) vs all (current), fits CF/W′ for each.
+  const perHandImprovement = useMemo(() => {
+    if (!baseline) return null;
+    const groups = {};
+    for (const r of history) {
+      if (!r.failed || !r.grip || !r.hand || r.hand === "Both") continue;
+      if (r.avg_force_kg <= 0 || r.actual_time_s <= 0) continue;
+      const key = `${r.grip}|${r.hand}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    }
+    const result = {};
+    for (const [key, reps] of Object.entries(groups)) {
+      if (reps.length < 2) continue;
+      const sorted = [...reps].sort((a, b) => a.date.localeCompare(b.date));
+      // Use calibration snapshot as baseline; current = fitCF over all failures for this key
+      const curPts = sorted.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
+      const cur    = fitCF(curPts);
+      if (!cur) continue;
+      const [grip, hand] = key.split("|");
+      const pct = (t) => Math.round((predForce(cur, t) / predForce(baseline, t) - 1) * 100);
+      result[key] = {
+        grip, hand, n: reps.length,
+        power:     pct(REF.power),
+        strength:  pct(REF.strength),
+        endurance: pct(REF.endurance),
+        total:     Math.round((pct(REF.power) + pct(REF.strength) + pct(REF.endurance)) / 3),
+      };
+    }
+    return Object.keys(result).length > 0 ? result : null;
+  }, [history, baseline]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Cumulative improvement time-series ──
+  // For each unique date with failure data, compute CF/W′ from all failures up to that date
+  // and compute % improvement vs baseline.
+  const cumulativeData = useMemo(() => {
+    if (!baseline || failures.length < 2) return [];
+    const sorted = [...failures].sort((a, b) => a.date.localeCompare(b.date));
+    const dates  = [...new Set(sorted.map(r => r.date))];
+    return dates.map(date => {
+      const upTo = sorted.filter(r => r.date <= date);
+      if (upTo.length < 2) return null;
+      const fit = fitCF(upTo.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
+      if (!fit) return null;
+      return {
+        date,
+        power:     Math.round((predForce(fit, REF.power)     / predForce(baseline, REF.power)     - 1) * 100),
+        strength:  Math.round((predForce(fit, REF.strength)   / predForce(baseline, REF.strength)   - 1) * 100),
+        endurance: Math.round((predForce(fit, REF.endurance)  / predForce(baseline, REF.endurance)  - 1) * 100),
+      };
+    }).filter(Boolean);
+  }, [baseline, failures]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fitted force-duration curve points for overlay
   const curveData = useMemo(() => {
@@ -2698,6 +2789,129 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
           </div>
         )}
       </Card>
+
+      {/* ── Capacity Improvement summary (shown whenever baseline + any data exist) ── */}
+      {baseline && improvement && (
+        <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>Capacity Improvement</div>
+            <div style={{ fontSize: 11, color: C.muted }}>since {baseline.date}</div>
+          </div>
+          {/* Total headline */}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 14 }}>
+            <div style={{ fontSize: 40, fontWeight: 900, color: improvement.total >= 0 ? C.green : C.red, lineHeight: 1 }}>
+              {improvement.total >= 0 ? "+" : ""}{improvement.total}%
+            </div>
+            <div style={{ fontSize: 13, color: C.muted }}>Total Capacity</div>
+          </div>
+          {/* Three domains */}
+          <div style={{ display: "flex", gap: 8 }}>
+            {[
+              { label: "⚡ Power",     val: improvement.power,     color: C.red    },
+              { label: "💪 Strength",  val: improvement.strength,  color: C.orange },
+              { label: "🏔️ Endurance", val: improvement.endurance, color: C.blue   },
+            ].map(({ label, val, color }) => (
+              <div key={label} style={{
+                flex: 1, background: C.bg, borderRadius: 10, padding: "10px 8px", textAlign: "center",
+                border: `1px solid ${color}30`,
+              }}>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: val >= 0 ? color : C.red }}>
+                  {val >= 0 ? "+" : ""}{val}%
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Cumulative improvement time-series ── */}
+      {cumulativeData.length >= 2 && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Improvement Over Time</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+            % change vs. baseline as more failure data accumulates.
+          </div>
+          <div style={{ display: "flex", gap: 14, fontSize: 11, color: C.muted, marginBottom: 8, flexWrap: "wrap" }}>
+            <span><span style={{ color: C.red }}>―</span> ⚡ Power</span>
+            <span><span style={{ color: C.orange }}>―</span> 💪 Strength</span>
+            <span><span style={{ color: C.blue }}>―</span> 🏔️ Endurance</span>
+          </div>
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={cumulativeData} margin={{ top: 6, right: 16, bottom: 28, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
+                label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit="%" width={40} />
+              <ReferenceLine y={0} stroke={C.border} strokeDasharray="3 3" />
+              <Tooltip
+                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                formatter={(val, name) => [`${val >= 0 ? "+" : ""}${val}%`, name]}
+              />
+              <Line dataKey="power"     stroke={C.red}    strokeWidth={2} dot={false} name="Power"     />
+              <Line dataKey="strength"  stroke={C.orange} strokeWidth={2} dot={false} name="Strength"  />
+              <Line dataKey="endurance" stroke={C.blue}   strokeWidth={2} dot={false} name="Endurance" />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+
+      {/* ── Per-hand / per-grip breakdown ── */}
+      {perHandImprovement && (() => {
+        // Group rows by grip
+        const byGrip = {};
+        for (const row of Object.values(perHandImprovement)) {
+          if (!byGrip[row.grip]) byGrip[row.grip] = {};
+          byGrip[row.grip][row.hand] = row;
+        }
+        return (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Per-Hand Improvement</div>
+            {Object.entries(byGrip).map(([grip, hands]) => (
+              <div key={grip} style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 8 }}>{grip}</div>
+                {["L", "R"].filter(h => hands[h]).map(h => {
+                  const row = hands[h];
+                  return (
+                    <div key={h} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <div style={{ width: 28, fontSize: 12, fontWeight: 700, color: C.muted, flexShrink: 0 }}>
+                        {h === "L" ? "←L" : "R→"}
+                      </div>
+                      {[
+                        { label: "⚡", val: row.power,     color: C.red    },
+                        { label: "💪", val: row.strength,  color: C.orange },
+                        { label: "🏔️", val: row.endurance, color: C.blue   },
+                      ].map(({ label, val, color }) => (
+                        <div key={label} style={{
+                          flex: 1, background: C.bg, borderRadius: 8, padding: "5px 6px", textAlign: "center",
+                          border: `1px solid ${color}25`,
+                        }}>
+                          <div style={{ fontSize: 9, color: C.muted }}>{label}</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: val >= 0 ? color : C.red }}>
+                            {val >= 0 ? "+" : ""}{val}%
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{
+                        width: 50, background: C.bg, borderRadius: 8, padding: "5px 6px", textAlign: "center",
+                        border: `1px solid ${C.purple}25`, flexShrink: 0,
+                      }}>
+                        <div style={{ fontSize: 9, color: C.muted }}>Total</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: row.total >= 0 ? C.purple : C.red }}>
+                          {row.total >= 0 ? "+" : ""}{row.total}%
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
+              Compared to your initial calibration baseline · {baseline?.date}
+            </div>
+          </Card>
+        );
+      })()}
 
       {reps.length === 0 ? (
         <Card>
@@ -3242,8 +3456,25 @@ export default function App() {
   // ── Calibration mode ──────────────────────────────────────
   const [calMode, setCalMode] = useState(false);
 
+  // Permanent baseline snapshot — set once from first calibration, never overwritten.
+  const [baseline, setBaseline] = useState(() => loadLS(LS_BASELINE_KEY));
+
   const handleCalibrationComplete = useCallback((calReps) => {
     addReps(calReps);
+
+    // Snapshot CF/W′ baseline from the 3 calibration reps if we don't have one yet.
+    if (!loadLS(LS_BASELINE_KEY)) {
+      const pts = calReps
+        .filter(r => r.avg_force_kg > 0 && r.actual_time_s > 0)
+        .map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
+      const fit = fitCF(pts);
+      if (fit) {
+        const snap = { date: today(), CF: fit.CF, W: fit.W };
+        saveLS(LS_BASELINE_KEY, snap);
+        setBaseline(snap);
+      }
+    }
+
     setCalMode(false);
     setTab(4); // navigate to Analysis tab
   }, [addReps]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -3613,7 +3844,7 @@ export default function App() {
       {tab === 1 && <CharacterView history={history} unit={unit} />}
       {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
       {tab === 3 && <TrendsView history={history} unit={unit} />}
-      {tab === 4 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
+      {tab === 4 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 5 && (
         <SettingsView
           user={user}
