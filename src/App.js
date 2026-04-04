@@ -122,6 +122,47 @@ function fitCF(pts) {
 function predForce(fit, t) { return fit.CF + fit.W / t; }
 
 // ─────────────────────────────────────────────────────────────
+// SESSION PLANNER — per-rep fatigue curve prediction
+// ─────────────────────────────────────────────────────────────
+// Uses a three-compartment depletion/recovery model (same time constants as DEF_FAT).
+// Each compartment depletes during a hang and recovers during rest.
+// Returns an array of predicted hold times (seconds) for each rep.
+function predictRepTimes({ numReps, firstRepTime, restSeconds }) {
+  // Compartments: [amplitude, depletion_tau, recovery_tau]
+  const comps = [
+    { A: 0.50, tauD: 10,  tauR: 15  },  // PCr  — fast
+    { A: 0.30, tauD: 30,  tauR: 90  },  // Glycolytic — medium
+    { A: 0.20, tauD: 180, tauR: 600 },  // Oxidative  — slow
+  ];
+
+  // State: available fraction (0–1) for each compartment, starting fresh
+  const state = comps.map(c => ({ ...c, avail: 1.0 }));
+
+  const times = [];
+  for (let i = 0; i < numReps; i++) {
+    // Capacity this rep = weighted sum of available fractions
+    const capacity = state.reduce((s, c) => s + c.A * c.avail, 0); // sum(Ai) = 1
+    const t = Math.max(0, Math.round(firstRepTime * capacity * 10) / 10);
+    times.push(t);
+
+    // Deplete each compartment over this rep's duration
+    for (const c of state) {
+      const dep = 1 - Math.exp(-t / c.tauD);
+      c.avail = Math.max(0, c.avail * (1 - dep));
+    }
+
+    // Recover during rest (if not the last rep)
+    if (i < numReps - 1) {
+      for (const c of state) {
+        const rec = 1 - Math.exp(-restSeconds / c.tauR);
+        c.avail = Math.min(1, c.avail + (1 - c.avail) * rec);
+      }
+    }
+  }
+  return times;
+}
+
+// ─────────────────────────────────────────────────────────────
 // READINESS / RECOVERY HELPERS
 // ─────────────────────────────────────────────────────────────
 // Computes a 1-10 readiness score from recent training history.
@@ -1178,7 +1219,126 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
 // ─────────────────────────────────────────────────────────────
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
-function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false }) {
+// ─────────────────────────────────────────────────────────────
+// SESSION PLANNER CARD
+// ─────────────────────────────────────────────────────────────
+// Shows a goal picker + predicted per-rep fatigue curve + "Use this plan" button.
+// Requires a live CF/W′ estimate fitted from training history.
+const GOAL_CONFIG = {
+  power:     { label: "Power",     emoji: "⚡", color: "#e05560", refTime: 10,  restDefault: 180, repsDefault: 6,  intensity: "Max effort · short hangs"     },
+  strength:  { label: "Strength",  emoji: "💪", color: "#e07a30", refTime: 45,  restDefault: 60,  repsDefault: 5,  intensity: "Hard hangs · moderate rest"    },
+  endurance: { label: "Endurance", emoji: "🏔️", color: "#3b82f6", refTime: 120, restDefault: 20,  repsDefault: 8,  intensity: "Sub-max · short rest repeaters" },
+};
+
+function SessionPlannerCard({ liveEstimate, onApplyPlan }) {
+  const [goal, setGoal]       = useState("strength");
+  const [numReps, setNumReps] = useState(GOAL_CONFIG.strength.repsDefault);
+  const [rest, setRest]       = useState(GOAL_CONFIG.strength.restDefault);
+
+  // When goal changes, reset reps/rest to sensible defaults
+  const handleGoal = (g) => {
+    setGoal(g);
+    setNumReps(GOAL_CONFIG[g].repsDefault);
+    setRest(GOAL_CONFIG[g].restDefault);
+  };
+
+  const gc = GOAL_CONFIG[goal];
+
+  // First rep target from CF/W′ — adjusted to training intensity, not absolute max
+  // Power: slightly above CF+W/10 peak → use ref time directly
+  // We target the zone's reference duration as the first-rep goal
+  const firstRepTime = gc.refTime;
+
+  const repTimes = useMemo(
+    () => predictRepTimes({ numReps, firstRepTime, restSeconds: rest }),
+    [numReps, firstRepTime, rest]
+  );
+
+  const chartData = repTimes.map((t, i) => ({ rep: i + 1, time: t, pct: Math.round((t / firstRepTime) * 100) }));
+
+  // Tail: last rep as % of first
+  const tail = repTimes.length > 1 ? Math.round((repTimes[repTimes.length - 1] / firstRepTime) * 100) : 100;
+
+  return (
+    <Card style={{ marginBottom: 16, border: `1px solid ${gc.color}40` }}>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>🗓 Session Planner</div>
+
+      {/* Goal picker */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {Object.entries(GOAL_CONFIG).map(([key, g]) => (
+          <button key={key} onClick={() => handleGoal(key)} style={{
+            flex: 1, padding: "8px 4px", borderRadius: 10, border: "none", cursor: "pointer",
+            background: goal === key ? g.color : C.border,
+            color: goal === key ? "#fff" : C.muted,
+            fontWeight: 700, fontSize: 12, transition: "all 0.15s",
+          }}>
+            <div style={{ fontSize: 16 }}>{g.emoji}</div>
+            <div style={{ marginTop: 2 }}>{g.label}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* First rep + intensity note */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14,
+        background: C.bg, borderRadius: 10, padding: "10px 14px" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, color: C.muted }}>First Rep Target</div>
+          <div style={{ fontSize: 28, fontWeight: 900, color: gc.color, lineHeight: 1 }}>{firstRepTime}s</div>
+        </div>
+        <div style={{ fontSize: 11, color: C.muted, textAlign: "right", lineHeight: 1.5 }}>{gc.intensity}</div>
+      </div>
+
+      {/* Reps + Rest sliders */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Reps</span><span style={{ fontWeight: 700, color: C.text }}>{numReps}</span>
+          </div>
+          <input type="range" min={3} max={12} value={numReps} onChange={e => setNumReps(Number(e.target.value))}
+            style={{ width: "100%", accentColor: gc.color }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Rest</span><span style={{ fontWeight: 700, color: C.text }}>{fmtTime(rest)}</span>
+          </div>
+          <input type="range" min={5} max={300} step={5} value={rest} onChange={e => setRest(Number(e.target.value))}
+            style={{ width: "100%", accentColor: gc.color }} />
+        </div>
+      </div>
+
+      {/* Predicted fatigue curve */}
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>
+        Predicted hold time per rep · tail at <b style={{ color: gc.color }}>{tail}%</b> of first rep
+      </div>
+      <ResponsiveContainer width="100%" height={140}>
+        <LineChart data={chartData} margin={{ top: 4, right: 12, bottom: 24, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+          <XAxis dataKey="rep" tick={{ fill: C.muted, fontSize: 11 }}
+            label={{ value: "Rep", position: "insideBottom", offset: -14, fill: C.muted, fontSize: 11 }} />
+          <YAxis tick={{ fill: C.muted, fontSize: 10 }} unit="s" width={34} domain={[0, firstRepTime * 1.1]} />
+          <ReferenceLine y={firstRepTime} stroke={C.border} strokeDasharray="4 2" />
+          <Tooltip
+            contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+            formatter={(val, name) => [`${val}s`, "Hold"]}
+          />
+          <Line dataKey="time" stroke={gc.color} strokeWidth={2.5}
+            dot={{ fill: gc.color, r: 4, strokeWidth: 0 }} name="Hold" />
+        </LineChart>
+      </ResponsiveContainer>
+
+      {/* CTA */}
+      <Btn
+        onClick={() => onApplyPlan({ targetTime: firstRepTime, repsPerSet: numReps, restTime: rest })}
+        color={gc.color}
+        style={{ width: "100%", marginTop: 12, padding: "12px 0", borderRadius: 10, fontSize: 14, fontWeight: 700 }}
+      >
+        Use This Plan →
+      </Btn>
+    </Card>
+  );
+}
+
+function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -1379,6 +1539,16 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
             )}
           </div>
         </Card>
+      )}
+
+      {/* Session Planner — shown when we have a live CF/W′ estimate */}
+      {liveEstimate && (
+        <SessionPlannerCard
+          liveEstimate={liveEstimate}
+          onApplyPlan={({ targetTime, repsPerSet, restTime }) =>
+            setConfig(c => ({ ...c, targetTime, repsPerSet, restTime }))
+          }
+        />
       )}
 
       {/* Readiness / how-do-you-feel widget */}
@@ -3453,6 +3623,14 @@ export default function App() {
   // Displayed readiness: subjective if rated today, otherwise computed estimate
   const readiness = todaySubj != null ? subjToScore(todaySubj) : computedReadiness;
 
+  // ── Live CF/W′ estimate (all failure reps, both hands, all grips) ─────────────
+  // Used by SessionPlannerCard and AnalysisView. Updates as training data grows.
+  const liveEstimate = useMemo(() => {
+    const failures = history.filter(r => r.failed && r.avg_force_kg > 0 && r.actual_time_s > 0);
+    if (failures.length < 2) return null;
+    return fitCF(failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
+  }, [history]);
+
   // ── Calibration mode ──────────────────────────────────────
   const [calMode, setCalMode] = useState(false);
 
@@ -3738,6 +3916,7 @@ export default function App() {
                 todaySubj={todaySubj}
                 onSubjReadiness={handleSubjReadiness}
                 isEstimated={todaySubj == null}
+                liveEstimate={liveEstimate}
               />
               {/* Tindeq connect button */}
               <div style={{ maxWidth: 480, margin: "0 auto", padding: "0 16px 32px" }}>
