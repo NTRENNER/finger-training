@@ -1225,28 +1225,42 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
 // Shows a goal picker + predicted per-rep fatigue curve + "Use this plan" button.
 // Requires a live CF/W′ estimate fitted from training history.
 const GOAL_CONFIG = {
-  power:     { label: "Power",     emoji: "⚡", color: "#e05560", refTime: 10,  restDefault: 180, repsDefault: 6,  intensity: "Max effort · short hangs"     },
-  strength:  { label: "Strength",  emoji: "💪", color: "#e07a30", refTime: 45,  restDefault: 60,  repsDefault: 5,  intensity: "Hard hangs · moderate rest"    },
-  endurance: { label: "Endurance", emoji: "🏔️", color: "#3b82f6", refTime: 120, restDefault: 20,  repsDefault: 8,  intensity: "Sub-max · short rest repeaters" },
+  power: {
+    label: "Power", emoji: "⚡", color: "#e05560",
+    refTime: 10, restDefault: 180, repsDefault: 5, setsDefault: 5, setRestDefault: 300,
+    intensity: "Max effort · short hangs",
+    setsRationale: "Multiple sets at full recovery maximise total quality reps. Quality degrades sharply past rep 3 — more sets, not more reps, is how you accumulate power volume. 5 min between sets lets PCr fully reload.",
+  },
+  strength: {
+    label: "Strength", emoji: "💪", color: "#e07a30",
+    refTime: 45, restDefault: 60, repsDefault: 5, setsDefault: 4, setRestDefault: 180,
+    intensity: "Hard hangs · moderate rest",
+    setsRationale: "3–4 sets spread glycolytic stress across multiple loading bouts, driving more adaptation than a single long set. 3 min between sets is enough for partial glycolytic recovery while keeping total session density high.",
+  },
+  endurance: {
+    label: "Endurance", emoji: "🏔️", color: "#3b82f6",
+    refTime: 120, restDefault: 20, repsDefault: 8, setsDefault: 3, setRestDefault: 1200,
+    intensity: "Sub-max · short rest repeaters",
+    setsRationale: "The oxidative system takes 20+ min to fully reload between sets. Multiple sets train your ability to work in a partially recovered state — exactly what climbing cruxes demand. Don't rush set rest.",
+  },
 };
 
 function SessionPlannerCard({ liveEstimate, onApplyPlan }) {
-  const [goal, setGoal]       = useState("strength");
+  const [goal,    setGoal]    = useState("strength");
   const [numReps, setNumReps] = useState(GOAL_CONFIG.strength.repsDefault);
-  const [rest, setRest]       = useState(GOAL_CONFIG.strength.restDefault);
+  const [rest,    setRest]    = useState(GOAL_CONFIG.strength.restDefault);
+  const [numSets,  setNumSets]  = useState(GOAL_CONFIG.strength.setsDefault);
+  const [setRestS, setSetRestS] = useState(GOAL_CONFIG.strength.setRestDefault);
 
-  // When goal changes, reset reps/rest to sensible defaults
   const handleGoal = (g) => {
     setGoal(g);
     setNumReps(GOAL_CONFIG[g].repsDefault);
     setRest(GOAL_CONFIG[g].restDefault);
+    setNumSets(GOAL_CONFIG[g].setsDefault);
+    setSetRestS(GOAL_CONFIG[g].setRestDefault);
   };
 
   const gc = GOAL_CONFIG[goal];
-
-  // First rep target from CF/W′ — adjusted to training intensity, not absolute max
-  // Power: slightly above CF+W/10 peak → use ref time directly
-  // We target the zone's reference duration as the first-rep goal
   const firstRepTime = gc.refTime;
 
   const repTimes = useMemo(
@@ -1254,10 +1268,11 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan }) {
     [numReps, firstRepTime, rest]
   );
 
-  const chartData = repTimes.map((t, i) => ({ rep: i + 1, time: t, pct: Math.round((t / firstRepTime) * 100) }));
-
-  // Tail: last rep as % of first
+  const chartData = repTimes.map((t, i) => ({ rep: i + 1, time: t }));
   const tail = repTimes.length > 1 ? Math.round((repTimes[repTimes.length - 1] / firstRepTime) * 100) : 100;
+
+  // Total session volume: sum of all predicted hold times across all sets
+  const totalVolume = Math.round(repTimes.reduce((s, t) => s + t, 0) * numSets);
 
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${gc.color}40` }}>
@@ -1278,48 +1293,94 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan }) {
         ))}
       </div>
 
-      {/* First rep + intensity note */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14,
-        background: C.bg, borderRadius: 10, padding: "10px 14px" }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, color: C.muted }}>First Rep Target</div>
-          <div style={{ fontSize: 28, fontWeight: 900, color: gc.color, lineHeight: 1 }}>{firstRepTime}s</div>
-        </div>
-        <div style={{ fontSize: 11, color: C.muted, textAlign: "right", lineHeight: 1.5 }}>{gc.intensity}</div>
+      {/* Prescription summary strip */}
+      <div style={{
+        display: "flex", gap: 6, marginBottom: 14,
+        background: C.bg, borderRadius: 10, padding: "10px 14px", alignItems: "center",
+      }}>
+        {[
+          { label: "First rep",  value: `${firstRepTime}s` },
+          { label: "Reps",       value: numReps },
+          { label: "Sets",       value: numSets },
+          { label: "Rep rest",   value: fmtTime(rest) },
+          { label: "Set rest",   value: fmtTime(setRestS) },
+        ].map(({ label, value }, i, arr) => (
+          <React.Fragment key={label}>
+            <div style={{ textAlign: "center", flex: 1 }}>
+              <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: gc.color }}>{value}</div>
+            </div>
+            {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
+          </React.Fragment>
+        ))}
       </div>
 
-      {/* Reps + Rest sliders */}
+      {/* Sliders — within-set structure */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+        Within Set
+      </div>
       <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
             <span>Reps</span><span style={{ fontWeight: 700, color: C.text }}>{numReps}</span>
           </div>
-          <input type="range" min={3} max={12} value={numReps} onChange={e => setNumReps(Number(e.target.value))}
+          <input type="range" min={2} max={12} value={numReps} onChange={e => setNumReps(Number(e.target.value))}
             style={{ width: "100%", accentColor: gc.color }} />
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Rest</span><span style={{ fontWeight: 700, color: C.text }}>{fmtTime(rest)}</span>
+            <span>Rep rest</span><span style={{ fontWeight: 700, color: C.text }}>{fmtTime(rest)}</span>
           </div>
           <input type="range" min={5} max={300} step={5} value={rest} onChange={e => setRest(Number(e.target.value))}
             style={{ width: "100%", accentColor: gc.color }} />
         </div>
       </div>
 
-      {/* Predicted fatigue curve */}
-      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>
-        Predicted hold time per rep · tail at <b style={{ color: gc.color }}>{tail}%</b> of first rep
+      {/* Sliders — between-set structure */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+        Between Sets
       </div>
-      <ResponsiveContainer width="100%" height={140}>
+      <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Sets</span><span style={{ fontWeight: 700, color: C.text }}>{numSets}</span>
+          </div>
+          <input type="range" min={1} max={8} value={numSets} onChange={e => setNumSets(Number(e.target.value))}
+            style={{ width: "100%", accentColor: gc.color }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Set rest</span><span style={{ fontWeight: 700, color: C.text }}>{fmtTime(setRestS)}</span>
+          </div>
+          <input type="range" min={60} max={1800} step={60} value={setRestS} onChange={e => setSetRestS(Number(e.target.value))}
+            style={{ width: "100%", accentColor: gc.color }} />
+        </div>
+      </div>
+
+      {/* Sets rationale */}
+      <div style={{
+        background: gc.color + "12", borderLeft: `3px solid ${gc.color}`,
+        borderRadius: "0 8px 8px 0", padding: "8px 12px", marginBottom: 14,
+        fontSize: 12, color: C.muted, lineHeight: 1.6,
+      }}>
+        {gc.setsRationale}
+      </div>
+
+      {/* Predicted fatigue curve (within one set) */}
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>
+        Predicted hold time per rep · tail at <b style={{ color: gc.color }}>{tail}%</b>
+        &nbsp;· total volume ~<b style={{ color: gc.color }}>{totalVolume}s</b> across {numSets} set{numSets !== 1 ? "s" : ""}
+      </div>
+      <ResponsiveContainer width="100%" height={130}>
         <LineChart data={chartData} margin={{ top: 4, right: 12, bottom: 24, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
           <XAxis dataKey="rep" tick={{ fill: C.muted, fontSize: 11 }}
-            label={{ value: "Rep", position: "insideBottom", offset: -14, fill: C.muted, fontSize: 11 }} />
-          <YAxis tick={{ fill: C.muted, fontSize: 10 }} unit="s" width={34} domain={[0, firstRepTime * 1.1]} />
+            label={{ value: "Rep (within set)", position: "insideBottom", offset: -14, fill: C.muted, fontSize: 11 }} />
+          <YAxis tick={{ fill: C.muted, fontSize: 10 }} unit="s" width={34} domain={[0, firstRepTime * 1.15]} />
           <ReferenceLine y={firstRepTime} stroke={C.border} strokeDasharray="4 2" />
           <Tooltip
             contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-            formatter={(val, name) => [`${val}s`, "Hold"]}
+            formatter={(val) => [`${val}s`, "Hold"]}
           />
           <Line dataKey="time" stroke={gc.color} strokeWidth={2.5}
             dot={{ fill: gc.color, r: 4, strokeWidth: 0 }} name="Hold" />
@@ -1328,7 +1389,10 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan }) {
 
       {/* CTA */}
       <Btn
-        onClick={() => onApplyPlan({ targetTime: firstRepTime, repsPerSet: numReps, restTime: rest })}
+        onClick={() => onApplyPlan({
+          targetTime: firstRepTime, repsPerSet: numReps, restTime: rest,
+          numSets, setRestTime: setRestS,
+        })}
         color={gc.color}
         style={{ width: "100%", marginTop: 12, padding: "12px 0", borderRadius: 10, fontSize: 14, fontWeight: 700 }}
       >
@@ -1545,8 +1609,8 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
       {liveEstimate && (
         <SessionPlannerCard
           liveEstimate={liveEstimate}
-          onApplyPlan={({ targetTime, repsPerSet, restTime }) =>
-            setConfig(c => ({ ...c, targetTime, repsPerSet, restTime }))
+          onApplyPlan={({ targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
+            setConfig(c => ({ ...c, targetTime, repsPerSet, restTime, numSets, setRestTime }))
           }
         />
       )}
