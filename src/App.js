@@ -122,17 +122,6 @@ function fitCF(pts) {
 // Predicted force at a given duration (s) from a CF/W fit.
 function predForce(fit, t) { return fit.CF + fit.W / t; }
 
-// ── AUC of Monod-Scherrer curve (kg·s) ───────────────────────
-// ∫(tMin→tMax) (CF + W/t) dt = CF*(tMax-tMin) + W*ln(tMax/tMin)
-// Single scalar summarising total force-duration capacity.
-const AUC_TMIN = 5;   // s — covers short power hangs
-const AUC_TMAX = 300; // s — covers long endurance hangs
-function computeAUC(fit) {
-  if (!fit) return null;
-  const { CF, W } = fit;
-  return CF * (AUC_TMAX - AUC_TMIN) + W * Math.log(AUC_TMAX / AUC_TMIN);
-}
-
 // ─────────────────────────────────────────────────────────────
 // SESSION PLANNER — per-rep fatigue curve prediction
 // ─────────────────────────────────────────────────────────────
@@ -1681,29 +1670,6 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
       )}
 
       <Card>
-        <Sect title="Target Duration">
-          <div style={{ display: "flex", gap: 10 }}>
-            {TARGET_OPTIONS.map(opt => (
-              <button
-                key={opt.seconds}
-                onClick={() => setConfig(c => ({ ...c, targetTime: opt.seconds }))}
-                style={{
-                  flex: 1, padding: "10px 0", borderRadius: 8, fontWeight: 700,
-                  fontSize: 14, cursor: "pointer",
-                  background: config.targetTime === opt.seconds ? C.blue : C.border,
-                  color: config.targetTime === opt.seconds ? "#fff" : C.muted,
-                  border: "none",
-                }}
-              >
-                {opt.label}
-                <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>
-                  {opt.seconds}s
-                </div>
-              </button>
-            ))}
-          </div>
-        </Sect>
-
         <Sect title="Hand">
           <div style={{ display: "flex", gap: 10 }}>
             {["L", "R", "Both"].map(h => (
