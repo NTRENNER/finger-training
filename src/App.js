@@ -1234,9 +1234,9 @@ const GOAL_CONFIG = {
   },
   strength: {
     label: "Strength", emoji: "💪", color: "#e07a30",
-    refTime: 45, restDefault: 60, repsDefault: 5, setsDefault: 4, setRestDefault: 180,
-    intensity: "Hard hangs · moderate rest",
-    setsRationale: "3–4 sets spread glycolytic stress across multiple loading bouts, driving more adaptation than a single long set. 3 min between sets is enough for partial glycolytic recovery while keeping total session density high.",
+    refTime: 45, restDefault: 90, repsDefault: 5, setsDefault: 4, setRestDefault: 180,
+    intensity: "Hard hangs · quality-focused rest",
+    setsRationale: "4 sets with near-full PCr recovery between reps lets you maintain force quality across the session. Glycolytic stress accumulates across sets even with 90s rep rest — endurance sessions cover the metabolic density work, so strength sessions can prioritise load.",
   },
   endurance: {
     label: "Endurance", emoji: "🏔️", color: "#3b82f6",
