@@ -2990,7 +2990,7 @@ function TrendsView({ history, unit = "lbs" }) {
 const POWER_MAX    = 20;
 const STRENGTH_MAX = 120;
 
-function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = null, baseline = null }) {
+function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = null, baseline = null, activities = [] }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selGrip,   setSelGrip]   = useState("");
   const [relMode,   setRelMode]   = useState(false); // relative strength toggle
@@ -3100,45 +3100,6 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
     }).filter(Boolean);
   }, [baseline, failures]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── AUC Capacity history ──
-  // For each unique date that has cumulative failure data, compute the AUC of the fitted
-  // CF/W′ curve — a single number that tracks overall force-duration capacity over time.
-  const aucHistory = useMemo(() => {
-    const allFailures = history.filter(r => r.failed && r.avg_force_kg > 0 && r.actual_time_s > 0);
-    if (allFailures.length < 2) return [];
-    const sorted  = [...allFailures].sort((a, b) => a.date.localeCompare(b.date));
-    const dates   = [...new Set(sorted.map(r => r.date))];
-    const baseAUC = baseline ? computeAUC(baseline) : null;
-    return dates.map(date => {
-      const upTo = sorted.filter(r => r.date <= date);
-      if (upTo.length < 2) return null;
-      const fit  = fitCF(upTo.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
-      if (!fit) return null;
-      const auc  = computeAUC(fit);
-      return {
-        date,
-        auc,
-        pct: baseAUC ? Math.round((auc / baseAUC - 1) * 100) : null,
-      };
-    }).filter(Boolean);
-  }, [history, baseline]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Rolling 30-session AUC mean — the headline "Capacity" number.
-  const rollingCapacity = useMemo(() => {
-    if (aucHistory.length === 0) return null;
-    const baseAUC   = baseline ? computeAUC(baseline) : null;
-    const window30  = aucHistory.slice(-30);
-    const avgAUC    = window30.reduce((s, d) => s + d.auc, 0) / window30.length;
-    const latest    = aucHistory[aucHistory.length - 1];
-    const prev      = aucHistory.length >= 2 ? aucHistory[aucHistory.length - 2] : null;
-    return {
-      avgAUC,
-      pctVsBaseline: baseAUC ? Math.round((avgAUC / baseAUC - 1) * 100) : null,
-      sessionTrend:  prev ? Math.round((latest.auc / prev.auc - 1) * 100) : null,
-      windowSize:    window30.length,
-    };
-  }, [aucHistory, baseline]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Fitted force-duration curve points for overlay
   const curveData = useMemo(() => {
     if (!cfEstimate) return [];
@@ -3181,25 +3142,6 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
     useRel ? 0.5 : 40
   );
 
-  // ── IV Kinetics recovery model data ──
-  // Shows how each energy compartment recovers over a rest period.
-  // x = rest duration in seconds (0–1200s = 0–20 min)
-  const recoveryData = useMemo(() => {
-    const { A1, tau1, A2, tau2, A3, tau3 } = DEF_FAT;
-    return Array.from({ length: 121 }, (_, i) => {
-      const t   = i * 10; // 0, 10, 20 … 1200 s
-      const pcr = Math.round((1 - Math.exp(-t / tau1)) * 100);
-      const gly = Math.round((1 - Math.exp(-t / tau2)) * 100);
-      const ox  = Math.round((1 - Math.exp(-t / tau3)) * 100);
-      const tot = Math.round(
-        (A1 * (1 - Math.exp(-t / tau1)) +
-         A2 * (1 - Math.exp(-t / tau2)) +
-         A3 * (1 - Math.exp(-t / tau3))) * 100
-      );
-      return { t, pcr, gly, ox, tot };
-    });
-  }, []);
-
   // ── Zone breakdown (power / strength / endurance) ──
   const zones = useMemo(() => {
     const zoneStats = (lo, hi) => {
@@ -3215,33 +3157,57 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
     };
   }, [reps]);
 
-  // ── Training recommendation ──
+  // ── Unified training recommendation ──
+  // Combines two signals: physiological limiter (fail rate) and zone coverage gap.
+  // Limiter is primary — what your body is struggling with RIGHT NOW.
+  // Coverage gap is secondary — what you've been neglecting recently.
   const recommendation = useMemo(() => {
-    if (failures.length === 0) return null;
+    const ZONE_DETAILS = {
+      power: {
+        title: "Train Power", color: C.red,
+        insight: "Your phosphocreatine system is the rate-limiter. Heavy, short maximal efforts with full recovery are the prescription — quality over volume.",
+        protocol: "5–10s hang · 90–100% max load · 3–5 min rest · 4–6 reps",
+      },
+      strength: {
+        title: "Train Strength", color: C.orange,
+        insight: "Your glycolytic system is the rate-limiter. Progressive overload in the medium time domain, or 7s-on/3s-off repeaters, drives the most adaptation.",
+        protocol: "45s hang · 75–85% max · 3 min rest · 3–5 sets",
+      },
+      endurance: {
+        title: "Train Endurance", color: C.blue,
+        insight: "Your oxidative system is the rate-limiter. Raising Critical Force is the highest-leverage move — it lifts the aerobic ceiling and improves every other zone.",
+        protocol: "2–5 min hang · 40–60% max · 2 min rest · 3–4 sets",
+      },
+    };
+
+    // Signal 1: physiological limiter (highest fail rate among zones with data)
     const ranked = Object.entries(zones)
       .filter(([, z]) => z.failRate !== null)
       .sort(([, a], [, b]) => b.failRate - a.failRate);
-    if (!ranked.length) return null;
-    const [key, limiter] = ranked[0];
-    const details = {
-      power: {
-        title:    "Train Power",
-        insight:  "Your phosphocreatine system is the rate-limiter. Heavy, short maximal efforts with full recovery between sets are the prescription — quality over volume.",
-        protocol: "5–10s hang  ·  90–100% max load  ·  3–5 min rest  ·  4–6 reps",
-      },
-      strength: {
-        title:    "Train Strength",
-        insight:  "Your glycolytic system is the rate-limiter. Progressive overload in your current time domain, or classic 7s-on / 3s-off repeaters, will drive the most adaptation.",
-        protocol: "45s hang  ·  75–85% max  ·  3 min rest  ·  3–5 sets",
-      },
-      endurance: {
-        title:    "Train Endurance",
-        insight:  "Your oxidative system is the rate-limiter. Raising Critical Force is the highest-leverage move — it lifts the aerobic ceiling and improves every other zone by default.",
-        protocol: "2–5 min hang  ·  40–60% max  ·  2 min rest  ·  3–4 sets",
-      },
+    const limiterKey = ranked.length > 0 ? ranked[0][0] : null;
+
+    // Signal 2: zone coverage gap (least-trained in last 30 days)
+    const coverage = computeZoneCoverage(history, activities);
+    const coverageKey = coverage.total > 0 ? coverage.recommended : null;
+
+    if (!limiterKey && !coverageKey) return null;
+
+    // Primary: limiter. Fall back to coverage if no failure data.
+    const primaryKey = limiterKey ?? coverageKey;
+    const details    = ZONE_DETAILS[primaryKey];
+
+    // Are the two signals aligned?
+    const agree = !limiterKey || !coverageKey || limiterKey === coverageKey;
+
+    return {
+      key: primaryKey,
+      ...details,
+      limiterKey,
+      coverageKey,
+      agree,
+      coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
     };
-    return { key, color: limiter.color, ...details[key] };
-  }, [zones, failures]);
+  }, [zones, failures, history, activities]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unexplored = Object.entries(zones)
     .filter(([, z]) => z.total === 0)
@@ -3334,65 +3300,6 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
                 </div>
               </div>
             ))}
-          </div>
-        </Card>
-      )}
-
-      {/* ── AUC Rolling Capacity ── */}
-      {aucHistory.length > 0 && (
-        <Card style={{ marginBottom: 16, border: `1px solid ${C.green}40` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Rolling Capacity</div>
-              <div style={{ fontSize: 11, color: C.muted }}>Area under force-duration curve · 5–300s</div>
-            </div>
-            <div style={{ fontSize: 11, color: C.muted, textAlign: "right", lineHeight: 1.4 }}>
-              {rollingCapacity?.windowSize ?? 0}-session<br/>rolling avg
-            </div>
-          </div>
-          {rollingCapacity && (
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 14 }}>
-              <div style={{
-                fontSize: 42, fontWeight: 900, lineHeight: 1,
-                color: (rollingCapacity.pctVsBaseline ?? 0) >= 0 ? C.green : C.red,
-              }}>
-                {rollingCapacity.pctVsBaseline != null
-                  ? `${rollingCapacity.pctVsBaseline >= 0 ? "+" : ""}${rollingCapacity.pctVsBaseline}%`
-                  : "—"}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                <div style={{ fontSize: 12, color: C.muted }}>vs calibration baseline</div>
-                {rollingCapacity.sessionTrend != null && (
-                  <div style={{
-                    fontSize: 12, fontWeight: 700,
-                    color: rollingCapacity.sessionTrend >= 0 ? C.green : C.red,
-                  }}>
-                    {rollingCapacity.sessionTrend >= 0 ? "▲" : "▼"}{" "}
-                    {Math.abs(rollingCapacity.sessionTrend)}% last session
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          <ResponsiveContainer width="100%" height={110}>
-            <LineChart data={aucHistory} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }}
-                tickFormatter={d => d.slice(5)} interval="preserveStartEnd" />
-              <YAxis hide domain={["auto", "auto"]} />
-              <ReferenceLine y={0} stroke={C.muted} strokeDasharray="4 2" />
-              <Tooltip
-                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
-                formatter={(v) => [`${v != null && v >= 0 ? "+" : ""}${v}%`, "vs baseline"]}
-                labelFormatter={d => d}
-              />
-              <Line type="monotone" dataKey="pct" name="Capacity"
-                stroke={C.green} strokeWidth={2.5} dot={{ r: 3, fill: C.green }} connectNulls />
-            </LineChart>
-          </ResponsiveContainer>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
-            Integrated area under your CF/W′ curve from 5–300s. Rising trend = growing total capacity.
-            Each point is the cumulative fit up to that date.
           </div>
         </Card>
       )}
@@ -3668,11 +3575,11 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
           ))}
         </Card>
 
-        {/* ── Training recommendation ── */}
+        {/* ── Unified training recommendation ── */}
         {recommendation ? (
-          <Card style={{ marginBottom: 16, border: `1px solid ${recommendation.color}` }}>
-            <div style={{ fontSize: 11, color: recommendation.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-              Recommended Focus
+          <Card style={{ marginBottom: 16, border: `1px solid ${recommendation.color}40` }}>
+            <div style={{ fontSize: 11, color: recommendation.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+              Next Session Focus
             </div>
             <div style={{ fontSize: 22, fontWeight: 800, color: recommendation.color, marginBottom: 10 }}>
               {recommendation.title}
@@ -3680,8 +3587,32 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
             <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
               {recommendation.insight}
             </div>
-            <div style={{ background: C.bg, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: C.muted, fontFamily: "monospace", letterSpacing: "0.02em" }}>
+            <div style={{ background: C.bg, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: C.muted, fontFamily: "monospace", letterSpacing: "0.02em", marginBottom: 12 }}>
               {recommendation.protocol}
+            </div>
+            {/* Signal explanation */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {recommendation.limiterKey && (
+                <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <span style={{ color: recommendation.color, fontWeight: 700, flexShrink: 0 }}>↑ Limiter:</span>
+                  <span>Highest fail rate in this zone — your body is telling you this is the weak link.</span>
+                </div>
+              )}
+              {recommendation.coverageKey && recommendation.agree && (
+                <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Coverage:</span>
+                  <span>Also least-trained in the last 30 days — both signals agree.</span>
+                </div>
+              )}
+              {recommendation.coverageKey && !recommendation.agree && (
+                <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <span style={{ color: C.yellow, fontWeight: 700, flexShrink: 0 }}>⚡ Note:</span>
+                  <span>
+                    Zone coverage suggests {recommendation.coverageZoneLabel} (least-trained recently),
+                    but your fail rate points here as the physiological bottleneck. Limiter takes priority.
+                  </span>
+                </div>
+              )}
             </div>
           </Card>
         ) : (
@@ -3703,78 +3634,6 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
             </div>
           </Card>
         )}
-
-      {/* ── IV Kinetics Recovery Model ── */}
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
-          Energy System Recovery
-        </div>
-        <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.6 }}>
-          How each energy compartment recovers after a maximal effort.
-          This is the three-compartment IV-kinetics model that drives your weight suggestions and rest timers.
-        </div>
-
-        {/* Legend */}
-        <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 8, flexWrap: "wrap" }}>
-          <span><span style={{ color: C.red }}>―</span> ⚡ Phosphocreatine (PCr) τ=15s</span>
-          <span><span style={{ color: C.orange }}>―</span> 💪 Glycolytic τ=90s</span>
-          <span><span style={{ color: C.blue }}>―</span> 🏔️ Oxidative τ=600s</span>
-          <span><span style={{ color: "#aaa" }}>―</span> Total</span>
-        </div>
-
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={recoveryData} margin={{ top: 8, right: 16, bottom: 28, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-            <XAxis
-              dataKey="t"
-              type="number"
-              domain={[0, 1200]}
-              tickFormatter={v => v < 60 ? `${v}s` : `${v / 60}m`}
-              label={{ value: "Rest duration", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
-              tick={{ fill: C.muted, fontSize: 10 }}
-              ticks={[0, 30, 60, 120, 180, 300, 600, 900, 1200]}
-            />
-            <YAxis
-              domain={[0, 100]}
-              tick={{ fill: C.muted, fontSize: 11 }}
-              unit="%"
-              width={38}
-            />
-            <Tooltip
-              contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text, fontSize: 12 }}
-              labelFormatter={v => v < 60 ? `Rest: ${v}s` : `Rest: ${fmt1(v / 60)} min`}
-              formatter={(val, name) => [`${val}%`, name]}
-            />
-            {/* Reference lines for common rest periods */}
-            <ReferenceLine x={30}  stroke={C.border} strokeDasharray="3 3"
-              label={{ value: "30s", position: "top", fill: C.muted, fontSize: 9 }} />
-            <ReferenceLine x={180} stroke={C.border} strokeDasharray="3 3"
-              label={{ value: "3m",  position: "top", fill: C.muted, fontSize: 9 }} />
-            <ReferenceLine x={300} stroke={C.border} strokeDasharray="3 3"
-              label={{ value: "5m",  position: "top", fill: C.muted, fontSize: 9 }} />
-            <Line dataKey="pcr" stroke={C.red}    strokeWidth={2} dot={false} name="PCr (⚡ Power)"     />
-            <Line dataKey="gly" stroke={C.orange} strokeWidth={2} dot={false} name="Glycolytic (💪 Strength)" />
-            <Line dataKey="ox"  stroke={C.blue}   strokeWidth={2} dot={false} name="Oxidative (🏔️ Endurance)" />
-            <Line dataKey="tot" stroke="#888"      strokeWidth={1.5} dot={false} name="Total" strokeDasharray="4 2" />
-          </LineChart>
-        </ResponsiveContainer>
-
-        {/* Interpretation guide */}
-        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-          {[
-            { color: C.red,    label: "30–45s rest",  text: "PCr ~95% recovered. Enough for next power rep; glycolytic still depleted." },
-            { color: C.orange, label: "3–5 min rest", text: "Glycolytic ~85% recovered. Ideal between-set rest for strength training." },
-            { color: C.blue,   label: "20–30 min rest", text: "Oxidative approaches full recovery. Required between maximal endurance efforts." },
-          ].map(row => (
-            <div key={row.label} style={{ display: "flex", gap: 10, fontSize: 12 }}>
-              <div style={{ width: 70, flexShrink: 0, color: row.color, fontWeight: 700, fontSize: 11, paddingTop: 1 }}>
-                {row.label}
-              </div>
-              <div style={{ color: C.muted, lineHeight: 1.5 }}>{row.text}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
 
       </>)}
     </div>
@@ -4474,7 +4333,7 @@ export default function App() {
       {tab === 1 && <CharacterView history={history} unit={unit} />}
       {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
       {tab === 3 && <TrendsView history={history} unit={unit} />}
-      {tab === 4 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
+      {tab === 4 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 5 && (
         <SettingsView
           user={user}
