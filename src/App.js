@@ -406,6 +406,19 @@ function useTindeq() {
   const autoFailCallbackRef = useRef(null); // set by ActiveSessionView / CalibrationView
   const targetKgRef         = useRef(null); // set by ActiveSessionView each rep
 
+  // ── Auto-detect mode (spring-strap / no-hands-needed workflow) ───────────
+  const adOnStartRef    = useRef(null);   // () => void — called when pull begins
+  const adOnEndRef      = useRef(null);   // ({actualTime, avgForce}) => void — called when rep ends
+  const adActiveRef     = useRef(false);  // true while a rep is in progress
+  const adStartTimeRef  = useRef(null);   // Date.now() when pull began
+  const adSumRef        = useRef(0);      // accumulating force sum
+  const adCountRef      = useRef(0);      // sample count
+  const adBelowRef      = useRef(null);   // timestamp when force first dipped below end-threshold
+  const AD_START_KG  = 4;    // force must exceed this to begin auto-rep
+  const AD_END_KG    = 3;    // force must drop below this to end auto-rep
+  const AD_END_MS    = 500;  // ms below end-threshold before rep is confirmed done
+  const AD_MIN_MS    = 1500; // minimum rep duration — filters noise
+
   // Stable setter — lets views register/clear the callback without prop drilling
   const setAutoFailCallback = useCallback((fn) => {
     autoFailCallbackRef.current = fn ?? null;
@@ -457,6 +470,54 @@ function useTindeq() {
               }
             }
           }
+
+          // ── Auto-detect (spring-strap mode) ───────────────────────────
+          // Runs independently of measuringRef — detects pull-start and pull-end
+          // purely from force thresholds, no target weight required.
+          if (adOnStartRef.current || adOnEndRef.current) {
+            const now = Date.now();
+            if (!adActiveRef.current) {
+              // Waiting for pull to start
+              if (kg >= AD_START_KG) {
+                adActiveRef.current  = true;
+                adStartTimeRef.current = now;
+                adSumRef.current     = kg;
+                adCountRef.current   = 1;
+                adBelowRef.current   = null;
+                adOnStartRef.current?.();
+              }
+            } else {
+              // Rep in progress — accumulate samples and watch for release
+              adSumRef.current  += kg;
+              adCountRef.current += 1;
+              if (kg < AD_END_KG) {
+                if (adBelowRef.current === null) adBelowRef.current = now;
+                else if (now - adBelowRef.current >= AD_END_MS) {
+                  const actualTime = (adBelowRef.current - adStartTimeRef.current) / 1000;
+                  if (actualTime * 1000 >= AD_MIN_MS) {
+                    const avgForce = adSumRef.current / adCountRef.current;
+                    const cb = adOnEndRef.current;
+                    // Reset before firing to prevent double-fire
+                    adActiveRef.current    = false;
+                    adStartTimeRef.current = null;
+                    adSumRef.current       = 0;
+                    adCountRef.current     = 0;
+                    adBelowRef.current     = null;
+                    cb?.({ actualTime, avgForce });
+                  } else {
+                    // Too short — treat as noise, reset
+                    adActiveRef.current    = false;
+                    adStartTimeRef.current = null;
+                    adSumRef.current       = 0;
+                    adCountRef.current     = 0;
+                    adBelowRef.current     = null;
+                  }
+                }
+              } else {
+                adBelowRef.current = null;
+              }
+            }
+          }
         });
       });
 
@@ -494,7 +555,28 @@ function useTindeq() {
     peakRef.current = 0; setPeak(0); setForce(0);
   }, []);
 
-  return { connected, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback };
+  // Start auto-detect mode: Tindeq streams continuously, reps are detected by
+  // force threshold crossings. onRepStart fires when a pull begins; onRepEnd
+  // fires with { actualTime, avgForce } when the force drops back to baseline.
+  const startAutoDetect = useCallback(async (onRepStart, onRepEnd) => {
+    adActiveRef.current    = false;
+    adStartTimeRef.current = null;
+    adSumRef.current       = 0;
+    adCountRef.current     = 0;
+    adBelowRef.current     = null;
+    adOnStartRef.current   = onRepStart ?? null;
+    adOnEndRef.current     = onRepEnd   ?? null;
+    if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_START);
+  }, []);
+
+  const stopAutoDetect = useCallback(async () => {
+    adOnStartRef.current = null;
+    adOnEndRef.current   = null;
+    adActiveRef.current  = false;
+    if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_STOP);
+  }, []);
+
+  return { connected, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -4029,6 +4111,105 @@ function BadgesView({ history, liveEstimate, genesisSnap }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// AUTO REP SESSION VIEW
+// ─────────────────────────────────────────────────────────────
+// Touchless session mode for spring-strap / pre-calibrated setups.
+// Tindeq detects pull start and release automatically — no button taps needed.
+// Each detected rep calls onRepDone with {actualTime, avgForce, failed:false}.
+function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" }) {
+  const { config, currentSet, currentRep } = session;
+
+  const [repActive, setRepActive] = useState(false);
+  const [elapsed,   setElapsed]   = useState(0);
+  const startTimeRef = useRef(null);
+  const timerRef     = useRef(null);
+
+  const handleRepEnd = useCallback(({ actualTime, avgForce }) => {
+    clearInterval(timerRef.current);
+    setRepActive(false);
+    setElapsed(0);
+    startTimeRef.current = null;
+    onRepDone({ actualTime, avgForce, failed: false });
+  }, [onRepDone]);
+
+  const handleRepStart = useCallback(() => {
+    startTimeRef.current = Date.now();
+    setRepActive(true);
+    setElapsed(0);
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 100);
+  }, []);
+
+  useEffect(() => {
+    tindeq.startAutoDetect(handleRepStart, handleRepEnd);
+    return () => {
+      tindeq.stopAutoDetect();
+      clearInterval(timerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);  // mount/unmount only — handleRepStart/End are stable refs
+
+  const targetReached = elapsed >= config.targetTime;
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 13, color: C.muted }}>Set {currentSet + 1} of {config.numSets}</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>{config.grip} · {config.hand === "L" ? "Left" : config.hand === "R" ? "Right" : "Both"}</div>
+        </div>
+        <Btn small color={C.red} onClick={onAbort}>End Session</Btn>
+      </div>
+
+      <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
+
+      {/* Status card */}
+      <Card style={{ textAlign: "center", padding: "32px 16px", marginTop: 12 }}>
+        {repActive ? (
+          <>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Holding — release when done</div>
+            <div style={{
+              fontSize: 96, fontWeight: 900, lineHeight: 1,
+              color: targetReached ? C.green : C.blue,
+              fontVariantNumeric: "tabular-nums",
+            }}>
+              {elapsed}s
+            </div>
+            <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
+              target {config.targetTime}s
+              {targetReached && <span style={{ color: C.green, marginLeft: 8 }}>✓ target reached</span>}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>⬇</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>Pull to begin rep {currentRep + 1}</div>
+            <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
+              Target: <strong>{config.targetTime}s</strong> · Release when done
+            </div>
+          </>
+        )}
+      </Card>
+
+      {/* Live force */}
+      {tindeq.connected && (
+        <Card style={{ marginTop: 12 }}>
+          <ForceGauge
+            force={tindeq.force}
+            avg={0}
+            peak={tindeq.peak}
+            targetKg={null}
+            unit={unit}
+          />
+        </Card>
+      )}
+    </div>
+  );
+}
+
 const TABS = ["Train", "Character", "History", "Trends", "Analysis", "Journey", "Settings"];
 
 export default function App() {
@@ -4355,10 +4536,12 @@ export default function App() {
   }, [config, history]);
 
   const handleRestDone = useCallback(() => {
-    // Decay fatigue over the rest period, then auto-start the next rep
     setFatigue(f => fatigueAfterRest(f, config.restTime));
-    setPhase("rep_active"); // autoStart=true — no button needed
-  }, [config.restTime]);
+    // When Tindeq is connected, go to rep_ready so AutoRepSessionView can arm
+    // auto-detection and wait for the next pull. When not connected, auto-start
+    // the countdown so the user doesn't need to tap Start Rep.
+    setPhase(tindeq.connected ? "rep_ready" : "rep_active");
+  }, [config.restTime, tindeq.connected]);
 
   const handleNextSet = useCallback(() => {
     setFatigue(0);
@@ -4518,6 +4701,21 @@ export default function App() {
         }
 
         if (phase === "rep_ready" || phase === "rep_active") {
+          // When Tindeq is connected, use touchless auto-detect mode:
+          // reps start and end automatically from force threshold crossings.
+          // When not connected, fall back to the manual tap flow.
+          if (tindeq.connected && phase === "rep_ready") {
+            return (
+              <AutoRepSessionView
+                key={`auto-${activeHand}-${currentSet}-${currentRep}`}
+                session={{ config, currentSet, currentRep, fatigue, sessionId, refWeights, activeHand }}
+                onRepDone={handleRepDone}
+                onAbort={handleAbort}
+                tindeq={tindeq}
+                unit={unit}
+              />
+            );
+          }
           return (
             <ActiveSessionView
               key={`${activeHand}-${currentSet}-${currentRep}-${phase}`}
