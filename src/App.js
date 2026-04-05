@@ -28,9 +28,9 @@ const CMD_STOP  = new Uint8Array([0x66]); // stop weight measurement
 const RESPONSE_WEIGHT = 0x01;
 
 const TARGET_OPTIONS = [
-  { label: "Power",     seconds: 20  },
+  { label: "Power",     seconds: 10  },
   { label: "Strength",  seconds: 45  },
-  { label: "Endurance", seconds: 240 },
+  { label: "Endurance", seconds: 120 },
 ];
 
 const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
