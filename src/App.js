@@ -1605,15 +1605,13 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
         </Card>
       )}
 
-      {/* Session Planner — shown when we have a live CF/W′ estimate */}
-      {liveEstimate && (
-        <SessionPlannerCard
-          liveEstimate={liveEstimate}
-          onApplyPlan={({ targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
-            setConfig(c => ({ ...c, targetTime, repsPerSet, restTime, numSets, setRestTime }))
-          }
-        />
-      )}
+      {/* Session Planner — always shown; works from day 1 */}
+      <SessionPlannerCard
+        liveEstimate={liveEstimate}
+        onApplyPlan={({ targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
+          setConfig(c => ({ ...c, targetTime, repsPerSet, restTime, numSets, setRestTime }))
+        }
+      />
 
       {/* Readiness / how-do-you-feel widget */}
       {(() => {
