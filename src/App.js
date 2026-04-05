@@ -4338,6 +4338,17 @@ export default function App() {
     return fitCF(failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
   }, [history]);
 
+  // ── Calibration mode ──────────────────────────────────────
+  const [calMode, setCalMode] = useState(false);
+
+  // Permanent baseline snapshot — set once from first calibration, never overwritten.
+  const [baseline, setBaseline] = useState(() => loadLS(LS_BASELINE_KEY));
+  const [activities, setActivities] = useState(() => loadLS(LS_ACTIVITY_KEY) || []);
+
+  // Genesis badge snapshot — saved the first time all 3 zones have a session.
+  // Must be declared BEFORE the detection useEffect below.
+  const [genesisSnap, setGenesisSnap] = useState(() => loadLS(LS_GENESIS_KEY));
+
   // ── Genesis badge detection ───────────────────────────────
   // Snapshot CF/W′ the first time the user has logged at least one session
   // in each zone (Power 10s, Strength 45s, Endurance 120s). This becomes
@@ -4355,16 +4366,6 @@ export default function App() {
       setGenesisSnap(snap);
     }
   }, [history, liveEstimate, genesisSnap]);
-
-  // ── Calibration mode ──────────────────────────────────────
-  const [calMode, setCalMode] = useState(false);
-
-  // Permanent baseline snapshot — set once from first calibration, never overwritten.
-  const [baseline, setBaseline] = useState(() => loadLS(LS_BASELINE_KEY));
-  const [activities, setActivities] = useState(() => loadLS(LS_ACTIVITY_KEY) || []);
-
-  // Genesis badge snapshot — saved the first time all 3 zones have a session.
-  const [genesisSnap, setGenesisSnap] = useState(() => loadLS(LS_GENESIS_KEY));
 
   const addActivity = useCallback((act) => {
     setActivities(prev => {
