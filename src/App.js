@@ -46,6 +46,7 @@ const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
 const LS_READINESS_KEY = "ft_readiness"; // { [date]: 1-5 } subjective daily rating
 const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-calibration snapshot
+const LS_ACTIVITY_KEY  = "ft_activity";  // [{ date, type, duration_min, intensity }] climbing / other sessions
 
 const LEVEL_STEP = 1.05; // 5% improvement per level
 
@@ -120,6 +121,17 @@ function fitCF(pts) {
 
 // Predicted force at a given duration (s) from a CF/W fit.
 function predForce(fit, t) { return fit.CF + fit.W / t; }
+
+// ── AUC of Monod-Scherrer curve (kg·s) ───────────────────────
+// ∫(tMin→tMax) (CF + W/t) dt = CF*(tMax-tMin) + W*ln(tMax/tMin)
+// Single scalar summarising total force-duration capacity.
+const AUC_TMIN = 5;   // s — covers short power hangs
+const AUC_TMAX = 300; // s — covers long endurance hangs
+function computeAUC(fit) {
+  if (!fit) return null;
+  const { CF, W } = fit;
+  return CF * (AUC_TMAX - AUC_TMIN) + W * Math.log(AUC_TMAX / AUC_TMIN);
+}
 
 // ─────────────────────────────────────────────────────────────
 // SESSION PLANNER — per-rep fatigue curve prediction
@@ -1245,12 +1257,14 @@ const GOAL_CONFIG = {
   },
 };
 
-function SessionPlannerCard({ liveEstimate, onApplyPlan }) {
-  const [goal,    setGoal]    = useState("strength");
-  const [numReps, setNumReps] = useState(GOAL_CONFIG.strength.repsDefault);
-  const [rest,    setRest]    = useState(GOAL_CONFIG.strength.restDefault);
-  const [numSets,  setNumSets]  = useState(GOAL_CONFIG.strength.setsDefault);
-  const [setRestS, setSetRestS] = useState(GOAL_CONFIG.strength.setRestDefault);
+function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null }) {
+  // Default goal to the undertrained zone when we know it; fall back to strength
+  const initGoal = (recommendedZone && GOAL_CONFIG[recommendedZone]) ? recommendedZone : "strength";
+  const [goal,    setGoal]    = useState(initGoal);
+  const [numReps, setNumReps] = useState(GOAL_CONFIG[initGoal].repsDefault);
+  const [rest,    setRest]    = useState(GOAL_CONFIG[initGoal].restDefault);
+  const [numSets,  setNumSets]  = useState(GOAL_CONFIG[initGoal].setsDefault);
+  const [setRestS, setSetRestS] = useState(GOAL_CONFIG[initGoal].setRestDefault);
 
   const handleGoal = (g) => {
     setGoal(g);
@@ -1280,17 +1294,31 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan }) {
 
       {/* Goal picker */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        {Object.entries(GOAL_CONFIG).map(([key, g]) => (
-          <button key={key} onClick={() => handleGoal(key)} style={{
-            flex: 1, padding: "8px 4px", borderRadius: 10, border: "none", cursor: "pointer",
-            background: goal === key ? g.color : C.border,
-            color: goal === key ? "#fff" : C.muted,
-            fontWeight: 700, fontSize: 12, transition: "all 0.15s",
-          }}>
-            <div style={{ fontSize: 16 }}>{g.emoji}</div>
-            <div style={{ marginTop: 2 }}>{g.label}</div>
-          </button>
-        ))}
+        {Object.entries(GOAL_CONFIG).map(([key, g]) => {
+          const isRec = key === recommendedZone;
+          return (
+            <button key={key} onClick={() => handleGoal(key)} style={{
+              flex: 1, padding: "8px 4px", borderRadius: 10, cursor: "pointer",
+              background: goal === key ? g.color : C.border,
+              color: goal === key ? "#fff" : C.muted,
+              fontWeight: 700, fontSize: 12, transition: "all 0.15s",
+              border: isRec ? `2px solid ${g.color}` : "2px solid transparent",
+              position: "relative",
+            }}>
+              {isRec && (
+                <div style={{
+                  position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)",
+                  fontSize: 9, fontWeight: 700, background: g.color, color: "#fff",
+                  padding: "1px 5px", borderRadius: 6, whiteSpace: "nowrap",
+                }}>
+                  undertrained
+                </div>
+              )}
+              <div style={{ fontSize: 16 }}>{g.emoji}</div>
+              <div style={{ marginTop: 2 }}>{g.label}</div>
+            </button>
+          );
+        })}
       </div>
 
       {/* Prescription summary strip */}
@@ -1402,7 +1430,210 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan }) {
   );
 }
 
-function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null }) {
+// ─────────────────────────────────────────────────────────────
+// ZONE COVERAGE CARD
+// Rolling 30-day count of Power / Strength / Endurance sessions.
+// Shows which zone is undertrained and should be trained next.
+// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// CLIMBING LOG WIDGET
+// Quick-log a climbing session so zone coverage accounts for it.
+// ─────────────────────────────────────────────────────────────
+const CLIMB_INTENSITIES = [
+  { key: "easy",       label: "Easy",       emoji: "🟢", desc: "Cruisy / warm-up",   zone: "Endurance" },
+  { key: "moderate",   label: "Moderate",   emoji: "🟡", desc: "Pumpy / sustained",   zone: "Endurance" },
+  { key: "hard",       label: "Hard",       emoji: "🔴", desc: "Limit / crux-heavy",  zone: "Strength"  },
+  { key: "bouldering", label: "Bouldering", emoji: "⚡", desc: "Power / explosive",   zone: "Power"     },
+];
+
+function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
+  const [open,      setOpen]      = useState(false);
+  const [intensity, setIntensity] = useState("moderate");
+  const [duration,  setDuration]  = useState(90);
+  const [logged,    setLogged]    = useState(false);
+
+  const todayActivities = activities.filter(a => a.date === today() && a.type === "climbing");
+  const hasToday        = todayActivities.length > 0;
+
+  const handleLog = () => {
+    onLog({ date: today(), type: "climbing", duration_min: duration, intensity });
+    setLogged(true);
+    setOpen(false);
+    setTimeout(() => setLogged(false), 3000);
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {/* Collapsed row */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          style={{
+            width: "100%", padding: "10px 16px", borderRadius: 10, cursor: "pointer",
+            background: C.card, border: `1px solid ${C.border}`,
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            color: C.text, fontSize: 13,
+          }}
+        >
+          <span>
+            🧗 {hasToday
+              ? `Climbing logged today (${todayActivities.length}×)`
+              : logged ? "✓ Climbing session logged!" : "Log a climbing session"}
+          </span>
+          <span style={{ fontSize: 11, color: C.muted }}>counts toward zone coverage +</span>
+        </button>
+      )}
+
+      {/* Expanded form */}
+      {open && (
+        <Card style={{ border: `1px solid ${C.blue}40` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>🧗 Log Climbing Session</div>
+            <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
+          </div>
+
+          {/* Intensity picker */}
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>Climbing style</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+            {CLIMB_INTENSITIES.map(({ key, label, emoji, desc, zone }) => (
+              <button key={key} onClick={() => setIntensity(key)} style={{
+                flex: "1 1 40%", padding: "8px 6px", borderRadius: 8, cursor: "pointer",
+                border: intensity === key ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
+                background: intensity === key ? C.blue + "22" : C.bg,
+                color: C.text, textAlign: "left",
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{emoji} {label}</div>
+                <div style={{ fontSize: 10, color: C.muted }}>{desc} · {zone}</div>
+              </button>
+            ))}
+          </div>
+
+          {/* Duration */}
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>Duration</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+            {[60, 90, 120, 180].map(d => (
+              <button key={d} onClick={() => setDuration(d)} style={{
+                flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer",
+                background: duration === d ? C.blue : C.border,
+                color: duration === d ? "#fff" : C.muted,
+                fontSize: 12, fontWeight: 600,
+              }}>{d >= 60 ? `${d / 60}h` : `${d}m`}</button>
+            ))}
+          </div>
+
+          <Btn onClick={handleLog} color={C.blue} style={{ width: "100%", padding: "10px 0", borderRadius: 8 }}>
+            Log Climbing Session
+          </Btn>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// Map climbing intensity to training zone (for zone coverage accounting)
+const CLIMB_ZONE = { easy: "endurance", moderate: "endurance", hard: "strength", bouldering: "power" };
+
+function computeZoneCoverage(history, activities = []) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  // Grip-training sessions
+  const sessions = {};
+  for (const r of history) {
+    if ((r.date ?? "") < cutoffStr) continue;
+    const sid = r.session_id || r.date;
+    if (!sessions[sid]) sessions[sid] = { date: r.date, durations: [] };
+    const d = r.target_duration || r.actual_time_s;
+    if (d > 0) sessions[sid].durations.push(d);
+  }
+
+  let power = 0, strength = 0, endurance = 0;
+  for (const s of Object.values(sessions)) {
+    if (!s.durations.length) continue;
+    const sorted = [...s.durations].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    if (median <= POWER_MAX)         power++;
+    else if (median <= STRENGTH_MAX) strength++;
+    else                             endurance++;
+  }
+
+  // Add climbing / activity sessions
+  for (const a of activities) {
+    if ((a.date ?? "") < cutoffStr) continue;
+    const zone = CLIMB_ZONE[a.intensity] ?? "endurance";
+    if (zone === "power")     power++;
+    else if (zone === "strength") strength++;
+    else                      endurance++;
+  }
+
+  const total = power + strength + endurance;
+  const recommended =
+    power <= strength && power <= endurance ? "power" :
+    strength <= endurance                    ? "strength" : "endurance";
+
+  return { power, strength, endurance, total, recommended };
+}
+
+function ZoneCoverageCard({ history, activities = [] }) {
+  const coverage = useMemo(() => computeZoneCoverage(history, activities),
+    [history, activities]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (coverage.total === 0) return null;
+
+  const zones = [
+    { key: "power",     label: "⚡ Power",     val: coverage.power,     color: "#e05560" },
+    { key: "strength",  label: "💪 Strength",  val: coverage.strength,  color: "#e07a30" },
+    { key: "endurance", label: "🏔️ Endurance", val: coverage.endurance, color: "#3b82f6" },
+  ];
+  const recZone = zones.find(z => z.key === coverage.recommended);
+  const maxVal  = Math.max(coverage.power, coverage.strength, coverage.endurance, 1);
+  const advice  = {
+    power:     "Power is least-trained. Short max-effort hangs build your phosphocreatine system — quality over volume.",
+    strength:  "Strength is least-trained. Progressive hangs with partial recovery drive glycolytic adaptation.",
+    endurance: "Endurance is least-trained. Sub-max repeaters raise Critical Force and lift every other zone by default.",
+  };
+
+  return (
+    <Card style={{ marginBottom: 16, border: `1px solid ${recZone?.color ?? C.border}30` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Zone Coverage</div>
+        <div style={{ fontSize: 11, color: C.muted }}>last 30 days · {coverage.total} sessions</div>
+      </div>
+      {zones.map(({ key, label, val, color }) => {
+        const isRec = key === coverage.recommended;
+        return (
+          <div key={key} style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: isRec ? 700 : 400, color: isRec ? color : C.muted, display: "flex", alignItems: "center", gap: 6 }}>
+                {label}
+                {isRec && (
+                  <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: color + "22", color }}>
+                    train next
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>{val}</div>
+            </div>
+            <div style={{ height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+              <div style={{
+                height: "100%", borderRadius: 3,
+                width: `${(val / maxVal) * 100}%`,
+                background: color,
+                opacity: isRec ? 1 : 0.4,
+              }} />
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
+        {advice[coverage.recommended]}
+      </div>
+    </Card>
+  );
+}
+
+function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, activities = [], onLogActivity = () => {} }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -1605,9 +1836,20 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
         </Card>
       )}
 
-      {/* Session Planner — always shown; works from day 1 */}
+      {/* Zone Coverage — rolling 30-day zone balance */}
+      {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
+
+      {/* Climbing / Activity Log */}
+      <ClimbingLogWidget activities={activities} onLog={onLogActivity} />
+
+      {/* Session Planner — always shown; defaults to undertrained zone */}
       <SessionPlannerCard
         liveEstimate={liveEstimate}
+        recommendedZone={(() => {
+          const cov = computeZoneCoverage(history, activities);
+          if (cov.total === 0) return null;
+          return cov.recommended;
+        })()}
         onApplyPlan={({ targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
           setConfig(c => ({ ...c, targetTime, repsPerSet, restTime, numSets, setRestTime }))
         }
@@ -2858,6 +3100,45 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
     }).filter(Boolean);
   }, [baseline, failures]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── AUC Capacity history ──
+  // For each unique date that has cumulative failure data, compute the AUC of the fitted
+  // CF/W′ curve — a single number that tracks overall force-duration capacity over time.
+  const aucHistory = useMemo(() => {
+    const allFailures = history.filter(r => r.failed && r.avg_force_kg > 0 && r.actual_time_s > 0);
+    if (allFailures.length < 2) return [];
+    const sorted  = [...allFailures].sort((a, b) => a.date.localeCompare(b.date));
+    const dates   = [...new Set(sorted.map(r => r.date))];
+    const baseAUC = baseline ? computeAUC(baseline) : null;
+    return dates.map(date => {
+      const upTo = sorted.filter(r => r.date <= date);
+      if (upTo.length < 2) return null;
+      const fit  = fitCF(upTo.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
+      if (!fit) return null;
+      const auc  = computeAUC(fit);
+      return {
+        date,
+        auc,
+        pct: baseAUC ? Math.round((auc / baseAUC - 1) * 100) : null,
+      };
+    }).filter(Boolean);
+  }, [history, baseline]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Rolling 30-session AUC mean — the headline "Capacity" number.
+  const rollingCapacity = useMemo(() => {
+    if (aucHistory.length === 0) return null;
+    const baseAUC   = baseline ? computeAUC(baseline) : null;
+    const window30  = aucHistory.slice(-30);
+    const avgAUC    = window30.reduce((s, d) => s + d.auc, 0) / window30.length;
+    const latest    = aucHistory[aucHistory.length - 1];
+    const prev      = aucHistory.length >= 2 ? aucHistory[aucHistory.length - 2] : null;
+    return {
+      avgAUC,
+      pctVsBaseline: baseAUC ? Math.round((avgAUC / baseAUC - 1) * 100) : null,
+      sessionTrend:  prev ? Math.round((latest.auc / prev.auc - 1) * 100) : null,
+      windowSize:    window30.length,
+    };
+  }, [aucHistory, baseline]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fitted force-duration curve points for overlay
   const curveData = useMemo(() => {
     if (!cfEstimate) return [];
@@ -3057,6 +3338,65 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
         </Card>
       )}
 
+      {/* ── AUC Rolling Capacity ── */}
+      {aucHistory.length > 0 && (
+        <Card style={{ marginBottom: 16, border: `1px solid ${C.green}40` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Rolling Capacity</div>
+              <div style={{ fontSize: 11, color: C.muted }}>Area under force-duration curve · 5–300s</div>
+            </div>
+            <div style={{ fontSize: 11, color: C.muted, textAlign: "right", lineHeight: 1.4 }}>
+              {rollingCapacity?.windowSize ?? 0}-session<br/>rolling avg
+            </div>
+          </div>
+          {rollingCapacity && (
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 14 }}>
+              <div style={{
+                fontSize: 42, fontWeight: 900, lineHeight: 1,
+                color: (rollingCapacity.pctVsBaseline ?? 0) >= 0 ? C.green : C.red,
+              }}>
+                {rollingCapacity.pctVsBaseline != null
+                  ? `${rollingCapacity.pctVsBaseline >= 0 ? "+" : ""}${rollingCapacity.pctVsBaseline}%`
+                  : "—"}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <div style={{ fontSize: 12, color: C.muted }}>vs calibration baseline</div>
+                {rollingCapacity.sessionTrend != null && (
+                  <div style={{
+                    fontSize: 12, fontWeight: 700,
+                    color: rollingCapacity.sessionTrend >= 0 ? C.green : C.red,
+                  }}>
+                    {rollingCapacity.sessionTrend >= 0 ? "▲" : "▼"}{" "}
+                    {Math.abs(rollingCapacity.sessionTrend)}% last session
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <ResponsiveContainer width="100%" height={110}>
+            <LineChart data={aucHistory} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }}
+                tickFormatter={d => d.slice(5)} interval="preserveStartEnd" />
+              <YAxis hide domain={["auto", "auto"]} />
+              <ReferenceLine y={0} stroke={C.muted} strokeDasharray="4 2" />
+              <Tooltip
+                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
+                formatter={(v) => [`${v != null && v >= 0 ? "+" : ""}${v}%`, "vs baseline"]}
+                labelFormatter={d => d}
+              />
+              <Line type="monotone" dataKey="pct" name="Capacity"
+                stroke={C.green} strokeWidth={2.5} dot={{ r: 3, fill: C.green }} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
+            Integrated area under your CF/W′ curve from 5–300s. Rising trend = growing total capacity.
+            Each point is the cumulative fit up to that date.
+          </div>
+        </Card>
+      )}
+
       {/* ── Cumulative improvement time-series ── */}
       {cumulativeData.length >= 2 && (
         <Card style={{ marginBottom: 16 }}>
@@ -3245,6 +3585,44 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
                 <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit}·s · finite reserve above CF</div>
               </div>
             </div>
+            {/* ── Curve Shape Indicator ── */}
+            {(() => {
+              // W′/CF in seconds = how many seconds of W′ reserve per unit of CF.
+              // Low  (<30s)  → flat curve  = CF-dominant (strong aerobic base)
+              // Med  (30-80s)→ balanced
+              // High (>80s)  → steep curve = W′-dominant (strong short-term, lower base)
+              const ratio = cfEstimate.CF > 0 ? cfEstimate.W / cfEstimate.CF : 0;
+              const pct   = Math.min(100, Math.max(0, (ratio / 120) * 100));
+              const { shape, color: sc, advice } =
+                ratio < 30  ? { shape: "CF-dominant (Flat)",    color: C.blue,   advice: "Strong aerobic base. Power training will give you the biggest gains — short maximal hangs build W′." } :
+                ratio < 80  ? { shape: "Balanced",              color: C.green,  advice: "Good balance of CF and W′. Cycle power and endurance sessions to keep both systems growing." } :
+                              { shape: "W′-dominant (Steep)",   color: C.orange, advice: "Strong short burst capacity. Endurance training (sub-max hangs, long efforts) will raise your CF ceiling and benefit all zones." };
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 5 }}>
+                    <span>Curve Shape</span>
+                    <span style={{ color: sc, fontWeight: 700 }}>{shape}</span>
+                  </div>
+                  {/* Gradient bar: flat (blue) → balanced (green) → steep (orange) */}
+                  <div style={{ position: "relative", height: 8, borderRadius: 4, overflow: "hidden",
+                    background: "linear-gradient(to right, #3b82f6, #22c55e, #e07a30)" }}>
+                    <div style={{
+                      position: "absolute", top: "50%", left: `${pct}%`,
+                      transform: "translate(-50%, -50%)",
+                      width: 14, height: 14, borderRadius: 7,
+                      background: "#fff", border: `2px solid ${sc}`,
+                      boxShadow: "0 0 4px rgba(0,0,0,0.4)",
+                    }} />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.muted, marginTop: 3 }}>
+                    <span>Flat (CF dominant)</span><span>Steep (W′ dominant)</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.5, fontStyle: "italic" }}>
+                    {advice}
+                  </div>
+                </div>
+              );
+            })()}
             <div style={{ fontSize: 12, color: C.muted, borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
               Estimated from {cfEstimate.n} failure point{cfEstimate.n !== 1 ? "s" : ""}. Accuracy improves as failures span multiple time domains — try power hangs (5–10s) and endurance hangs (2+ min) to sharpen the curve.
             </div>
@@ -3698,6 +4076,15 @@ export default function App() {
 
   // Permanent baseline snapshot — set once from first calibration, never overwritten.
   const [baseline, setBaseline] = useState(() => loadLS(LS_BASELINE_KEY));
+  const [activities, setActivities] = useState(() => loadLS(LS_ACTIVITY_KEY) || []);
+
+  const addActivity = useCallback((act) => {
+    setActivities(prev => {
+      const next = [...prev, { ...act, id: uid() }];
+      saveLS(LS_ACTIVITY_KEY, next);
+      return next;
+    });
+  }, []);
 
   const handleCalibrationComplete = useCallback((calReps) => {
     addReps(calReps);
@@ -3979,6 +4366,8 @@ export default function App() {
                 onSubjReadiness={handleSubjReadiness}
                 isEstimated={todaySubj == null}
                 liveEstimate={liveEstimate}
+                activities={activities}
+                onLogActivity={addActivity}
               />
               {/* Tindeq connect button */}
               <div style={{ maxWidth: 480, margin: "0 auto", padding: "0 16px 32px" }}>
