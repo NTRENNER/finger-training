@@ -1519,6 +1519,85 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// 1RM WARM-UP WIDGET
+// Logs a rolling-thunder (or equivalent) 1RM before climbing.
+// Counts as Power credit in zone coverage. Tracked separately from
+// the Monod-Scherrer model — it's a different kind of metric.
+// ─────────────────────────────────────────────────────────────
+function OneRMWidget({ activities = [], onLog = () => {}, unit = "lbs" }) {
+  const [open,   setOpen]   = useState(false);
+  const [weight, setWeight] = useState("");
+  const [logged, setLogged] = useState(false);
+
+  const todayRM = activities
+    .filter(a => a.date === today() && a.type === "oneRM")
+    .reduce((max, a) => Math.max(max, a.weight_kg ?? 0), 0);
+
+  const handleLog = () => {
+    const kg = fromDisp(Number(weight), unit);
+    if (!kg || kg <= 0) return;
+    onLog({ date: today(), type: "oneRM", weight_kg: kg });
+    setLogged(true);
+    setOpen(false);
+    setWeight("");
+    setTimeout(() => setLogged(false), 3000);
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {!open && (
+        <button onClick={() => setOpen(true)} style={{
+          width: "100%", padding: "10px 16px", borderRadius: 10, cursor: "pointer",
+          background: C.card, border: `1px solid ${C.border}`,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          color: C.text, fontSize: 13,
+        }}>
+          <span>
+            🏋️{" "}
+            {todayRM > 0
+              ? `1RM logged: ${fmtW(todayRM, unit)} ${unit}`
+              : logged ? "✓ 1RM logged!" : "Log 1RM warm-up"}
+          </span>
+          <span style={{ fontSize: 11, color: C.muted }}>⚡ Power credit +</span>
+        </button>
+      )}
+      {open && (
+        <Card style={{ border: `1px solid ${"#e05560"}40` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>🏋️ Log 1RM Warm-up</div>
+            <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+            Rolling thunder floor lift (or equivalent) · max single effort
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
+            <input
+              type="number"
+              value={weight}
+              onChange={e => setWeight(e.target.value)}
+              placeholder="0"
+              style={{
+                flex: 1, background: C.bg, border: `1px solid ${C.border}`,
+                borderRadius: 8, padding: "10px 12px", color: C.text, fontSize: 18,
+                fontWeight: 700,
+              }}
+            />
+            <div style={{ fontSize: 14, color: C.muted, fontWeight: 600, minWidth: 28 }}>{unit}</div>
+          </div>
+          <Btn
+            onClick={handleLog}
+            color={"#e05560"}
+            style={{ width: "100%", padding: "10px 0", borderRadius: 8 }}
+          >
+            Log It
+          </Btn>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // Map climbing intensity to training zone (for zone coverage accounting)
 const CLIMB_ZONE = { easy: "endurance", moderate: "endurance", hard: "strength", bouldering: "power" };
 
@@ -1550,10 +1629,11 @@ function computeZoneCoverage(history, activities = []) {
   // Add climbing / activity sessions
   for (const a of activities) {
     if ((a.date ?? "") < cutoffStr) continue;
+    if (a.type === "oneRM") { power++; continue; }         // 1RM = pure PCr = Power
     const zone = CLIMB_ZONE[a.intensity] ?? "endurance";
-    if (zone === "power")     power++;
+    if (zone === "power")         power++;
     else if (zone === "strength") strength++;
-    else                      endurance++;
+    else                          endurance++;
   }
 
   const total = power + strength + endurance;
@@ -1632,42 +1712,6 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
-
-      {/* Calibration prompt — prominent when no history, subtle otherwise */}
-      {history.length === 0 ? (
-        <div style={{
-          marginBottom: 20, padding: "16px 18px",
-          background: "#0d1f3c", border: `1px solid ${C.blue}`,
-          borderRadius: 12,
-        }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.blue, marginBottom: 6 }}>
-            📊 No training history yet
-          </div>
-          <div style={{ fontSize: 13, color: C.muted, marginBottom: 14, lineHeight: 1.6 }}>
-            Run a quick 3-step calibration to seed your force-duration curve and get
-            personalized weight suggestions from your very first session.
-          </div>
-          <Btn onClick={onCalibrate} style={{ width: "100%", padding: "12px 0", borderRadius: 10 }} color={C.blue}>
-            Start Calibration →
-          </Btn>
-        </div>
-      ) : (
-        onCalibrate && (
-          <div style={{
-            marginBottom: 16, padding: "12px 16px",
-            background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
-          }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>📊 Force-Duration Calibration</div>
-              <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-                3-step test · seeds your Analysis curve
-              </div>
-            </div>
-            <Btn small onClick={onCalibrate} color={C.blue}>Run →</Btn>
-          </div>
-        )
-      )}
 
       <Card>
         <Sect title="Hand">
@@ -1751,7 +1795,8 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
       {/* Zone Coverage — rolling 30-day zone balance */}
       {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
 
-      {/* Climbing / Activity Log */}
+      {/* Activity Logs */}
+      <OneRMWidget activities={activities} onLog={onLogActivity} unit={unit} />
       <ClimbingLogWidget activities={activities} onLog={onLogActivity} />
 
       {/* Session Planner — always shown; defaults to undertrained zone */}
@@ -3153,6 +3198,25 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
         Where failures fall on the fatigue curve reveals which energy system is your limiter — and what to train next.
       </p>
 
+      {/* Calibration nudge for new users — only when no baseline set yet */}
+      {!baseline && onCalibrate && (
+        <div style={{
+          marginBottom: 16, padding: "14px 16px",
+          background: "#0d1f3c", border: `1px solid ${C.blue}40`, borderRadius: 12,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.blue, marginBottom: 6 }}>
+            📊 No baseline yet
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.6 }}>
+            A quick 3-step calibration seeds your force-duration curve and unlocks improvement tracking.
+            Takes about 15 minutes — do it fresh, before any hard training.
+          </div>
+          <Btn onClick={onCalibrate} color={C.blue} style={{ padding: "10px 0", width: "100%", borderRadius: 8 }}>
+            Run Calibration →
+          </Btn>
+        </div>
+      )}
+
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: grips.length ? 10 : 0 }}>
@@ -3180,6 +3244,60 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
           </div>
         )}
       </Card>
+
+      {/* ── 1RM PR tracker ── */}
+      {(() => {
+        const rmReps = activities.filter(a => a.type === "oneRM" && a.weight_kg > 0);
+        if (rmReps.length === 0) return null;
+        const byDate = {};
+        for (const a of rmReps) {
+          if (!byDate[a.date] || a.weight_kg > byDate[a.date]) byDate[a.date] = a.weight_kg;
+        }
+        const rmData = Object.entries(byDate)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([date, kg]) => ({ date, weight: toDisp(kg, unit) }));
+        const allTimePR = Math.max(...rmData.map(d => d.weight));
+        const latest    = rmData[rmData.length - 1];
+        const isPR      = latest?.weight >= allTimePR;
+        return (
+          <Card style={{ marginBottom: 16, border: `1px solid ${"#e05560"}30` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>🏋️ 1RM Progress</div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: C.muted }}>All-time PR</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#e05560", lineHeight: 1.1 }}>
+                  {fmtW(allTimePR / (unit === "lbs" ? 1 : 1), unit)} {unit}
+                </div>
+              </div>
+            </div>
+            {isPR && rmData.length > 1 && (
+              <div style={{ fontSize: 12, color: "#e05560", fontWeight: 600, marginBottom: 8 }}>
+                🎉 Current session is a PR!
+              </div>
+            )}
+            {rmData.length >= 2 && (
+              <ResponsiveContainer width="100%" height={100}>
+                <LineChart data={rmData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                  <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }}
+                    tickFormatter={d => d.slice(5)} interval="preserveStartEnd" />
+                  <YAxis hide domain={["auto", "auto"]} />
+                  <Tooltip
+                    contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
+                    formatter={(v) => [`${fmt1(v)} ${unit}`, "1RM"]}
+                    labelFormatter={d => d}
+                  />
+                  <Line type="monotone" dataKey="weight"
+                    stroke="#e05560" strokeWidth={2.5} dot={{ r: 3, fill: "#e05560" }} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
+              Rolling thunder floor lift · max single effort · logged pre-climb
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* ── Capacity Improvement summary (shown whenever baseline + any data exist) ── */}
       {baseline && improvement && (
