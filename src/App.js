@@ -1756,60 +1756,6 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
         </Sect>
       </Card>
 
-      <Card>
-        <Sect title="Set Structure">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <div>
-              <Label>Reps per set</Label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Btn small onClick={() => setConfig(c => ({ ...c, repsPerSet: Math.max(1, c.repsPerSet - 1) }))}>−</Btn>
-                <span style={{ fontSize: 24, fontWeight: 700, minWidth: 28, textAlign: "center" }}>{config.repsPerSet}</span>
-                <Btn small onClick={() => setConfig(c => ({ ...c, repsPerSet: Math.min(10, c.repsPerSet + 1) }))}>+</Btn>
-              </div>
-              <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>1 – 10</div>
-            </div>
-            <div>
-              <Label>Number of sets</Label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Btn small onClick={() => setConfig(c => ({ ...c, numSets: Math.max(1, c.numSets - 1) }))}>−</Btn>
-                <span style={{ fontSize: 24, fontWeight: 700, minWidth: 28, textAlign: "center" }}>{config.numSets}</span>
-                <Btn small onClick={() => setConfig(c => ({ ...c, numSets: Math.min(10, c.numSets + 1) }))}>+</Btn>
-              </div>
-            </div>
-          </div>
-        </Sect>
-
-        <Sect title="Rest Between Reps">
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <input
-              type="range" min={3} max={240} step={1}
-              value={config.restTime}
-              onChange={e => setConfig(c => ({ ...c, restTime: Number(e.target.value) }))}
-              style={{ flex: 1, accentColor: C.blue }}
-            />
-            <span style={{ fontSize: 20, fontWeight: 700, minWidth: 42, textAlign: "right" }}>
-              {fmtTime(config.restTime)}
-            </span>
-          </div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>3 s – 4 min</div>
-        </Sect>
-
-        <Sect title="Rest Between Sets">
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <input
-              type="range" min={60} max={600} step={30}
-              value={config.setRestTime}
-              onChange={e => setConfig(c => ({ ...c, setRestTime: Number(e.target.value) }))}
-              style={{ flex: 1, accentColor: C.purple }}
-            />
-            <span style={{ fontSize: 20, fontWeight: 700, minWidth: 42, textAlign: "right" }}>
-              {fmtTime(config.setRestTime)}
-            </span>
-          </div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>1 min – 10 min</div>
-        </Sect>
-      </Card>
-
       {(refWeightL != null || refWeightR != null) && (
         <Card style={{ borderColor: C.blue }}>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
