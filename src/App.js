@@ -51,11 +51,8 @@ const LS_GENESIS_KEY   = "ft_genesis";   // { date, CF, W, auc } — snapshot wh
 
 const LEVEL_STEP = 1.05; // 5% improvement per level
 
-const LEVEL_TITLES = [
-  "Wimpy","Popeye","Fresh Fighter","Ten Sleep Tough Guy","Black Hills Buff","Southern Gun",
-  "Ten Pound Trout","Chalk Norris","Nail Bender","Captain of Crush","Realization",
-];
-const LEVEL_EMOJIS = ["🍔","💪","🥊","🏔️","⛰️","🤠","🐟","👊","🔨","💎","🏆"];
+// Level display — numeric only, no old badge names
+const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","⭐","💎","🏆","🌟"];
 
 // ─────────────────────────────────────────────────────────────
 // UTILITIES
@@ -347,7 +344,7 @@ function calcLevel(history, hand, grip, targetDuration) {
 }
 
 function levelTitle(level) {
-  return LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)];
+  return `Level ${level}`;
 }
 
 // Next badge threshold = baseline × LEVEL_STEP^(currentLevel)
@@ -1814,6 +1811,13 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
   const refWeightL = estimateRefWeight(history, "L", config.grip, config.targetTime);
   const refWeightR = estimateRefWeight(history, "R", config.grip, config.targetTime);
 
+  // Level progress for current config
+  const displayHand = config.hand === "Both" ? "L" : config.hand;
+  const currentLevel = calcLevel(history, displayHand, config.grip, config.targetTime);
+  const bestLoad     = getBestLoad(history, displayHand, config.grip, config.targetTime);
+  const nextTarget   = nextLevelTarget(history, displayHand, config.grip, config.targetTime);
+  const hasLevelData = bestLoad != null && config.grip;
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
@@ -1898,6 +1902,37 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
       )}
 
       {/* Zone Coverage — rolling 30-day zone balance */}
+      {/* Level progress for selected config */}
+      {hasLevelData && (
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontSize: 13, color: C.muted, marginBottom: 2 }}>
+                {config.grip} · {displayHand === "L" ? "Left" : "Right"} · {config.targetTime}s
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>
+                {LEVEL_EMOJIS[Math.min(currentLevel - 1, LEVEL_EMOJIS.length - 1)]} Level {currentLevel}
+              </div>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                Best {fmtW(bestLoad, unit)} {unit}
+                {nextTarget != null && <span> · next at {fmtW(nextTarget, unit)} {unit}</span>}
+              </div>
+            </div>
+            {nextTarget != null && (
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>to next level</div>
+                <div style={{ width: 80, height: 6, background: C.border, borderRadius: 3 }}>
+                  <div style={{
+                    height: "100%", borderRadius: 3, background: C.green,
+                    width: `${Math.min(100, (bestLoad / nextTarget) * 100)}%`,
+                  }} />
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
       {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
 
       {/* Activity Logs */}
@@ -2382,15 +2417,15 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       {leveledUp && (
-        <Card style={{ background: "#1c1f0a", borderColor: C.yellow, marginBottom: 20 }}>
+        <Card style={{ background: "#1c1f0a", borderColor: C.green, marginBottom: 20 }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 48 }}>⭐</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: C.yellow }}>Badge Unlocked!</div>
+            <div style={{ fontSize: 48 }}>{LEVEL_EMOJIS[Math.min(newLevel - 1, LEVEL_EMOJIS.length - 1)]}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.green }}>Level Up!</div>
             <div style={{ fontSize: 16, color: C.text, marginTop: 4 }}>
-              {LEVEL_EMOJIS[Math.min(newLevel - 1, LEVEL_EMOJIS.length - 1)]} {levelTitle(newLevel)}
+              {levelTitle(newLevel)}
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>
-              5% strength improvement achieved 💪
+              5% load improvement — keep going
             </div>
           </div>
         </Card>
@@ -2467,9 +2502,8 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = 
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// CHARACTER VIEW
-// ─────────────────────────────────────────────────────────────
+// CharacterView removed — level progress now lives in SetupView (Train tab)
+// and overall badge journey lives in the Journey tab.
 function CharacterView({ history, unit = "lbs" }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selTarget, setSelTarget] = useState(45);
@@ -2598,45 +2632,6 @@ function CharacterView({ history, unit = "lbs" }) {
             ))}
           </div>
         )}
-      </Card>
-
-      {/* Badge grid */}
-      <Card>
-        <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>Badges</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-          {LEVEL_TITLES.map((title, i) => {
-            // Badge 0 (Wimpy) = earned on first session; others need improvement over baseline
-            const earned = i === 0 ? (baseline != null) : (level > i);
-            const isCurrent = level === i + 1;
-            // Threshold: badge 0 = baseline itself; badge i = baseline × LEVEL_STEP^i
-            const threshold = baseline != null
-              ? Math.round(baseline * Math.pow(LEVEL_STEP, i) * 10) / 10
-              : null;
-            return (
-              <div key={title} style={{
-                background: earned ? (isCurrent ? "#1c2a1c" : C.border) : C.card,
-                border: `1px solid ${earned ? (isCurrent ? C.green : C.border) : C.border}`,
-                borderRadius: 10, padding: "10px 12px",
-                display: "flex", alignItems: "center", gap: 10,
-              }}>
-                <div style={{ fontSize: 28, lineHeight: 1, opacity: earned ? 1 : 0.4 }}>{LEVEL_EMOJIS[i]}</div>
-                <div>
-                  <div style={{
-                    fontSize: 13, fontWeight: 700,
-                    color: earned ? (isCurrent ? C.green : C.text) : C.muted,
-                  }}>{title}</div>
-                  {threshold != null && (
-                    <div style={{ fontSize: 11, color: C.muted }}>
-                      {earned ? "≥ " : ""}{fmtW(threshold, unit)} {unit}
-                    </div>
-                  )}
-                </div>
-                {earned && <div style={{ marginLeft: "auto", fontSize: 14, color: C.green }}>✓</div>}
-                {!earned && <div style={{ marginLeft: "auto", fontSize: 14, color: C.muted }}>🔒</div>}
-              </div>
-            );
-          })}
-        </div>
       </Card>
 
       {/* Progress chart */}
@@ -4210,7 +4205,7 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
   );
 }
 
-const TABS = ["Train", "Character", "History", "Trends", "Analysis", "Journey", "Settings"];
+const TABS = ["Train", "History", "Trends", "Analysis", "Journey", "Settings"];
 
 export default function App() {
   // ── Auth ──────────────────────────────────────────────────
@@ -4392,7 +4387,7 @@ export default function App() {
     }
 
     setCalMode(false);
-    setTab(4); // navigate to Analysis tab
+    setTab(3); // navigate to Analysis tab
   }, [addReps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Session Config ────────────────────────────────────────
@@ -4777,12 +4772,11 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <CharacterView history={history} unit={unit} />}
-      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
-      {tab === 3 && <TrendsView history={history} unit={unit} />}
-      {tab === 4 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
-      {tab === 5 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
-      {tab === 6 && (
+      {tab === 1 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
+      {tab === 2 && <TrendsView history={history} unit={unit} />}
+      {tab === 3 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
+      {tab === 4 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
+      {tab === 5 && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}
