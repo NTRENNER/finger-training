@@ -2534,7 +2534,87 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = 
 // ─────────────────────────────────────────────────────────────
 // HISTORY VIEW
 // ─────────────────────────────────────────────────────────────
-function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession, notes = {}, onNoteChange }) {
+// ── Workout session history sub-view ──────────────────────────
+function WorkoutHistoryView({ wLog, unit = "lbs" }) {
+  if (!wLog.length) return (
+    <div style={{ textAlign: "center", color: C.muted, marginTop: 60, fontSize: 15 }}>
+      No workout sessions yet — start a workout!
+    </div>
+  );
+
+  const sorted = [...wLog].sort((a, b) => a.date < b.date ? 1 : -1);
+
+  return (
+    <div>
+      {sorted.map((session, i) => {
+        const wkDef = DEFAULT_WORKOUTS[session.workout] || {};
+        const exercises = wkDef.exercises || [];
+        return (
+          <Card key={i} style={{ marginBottom: 10 }}>
+            {/* Session header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+              <div>
+                <span style={{ fontWeight: 700, fontSize: 15 }}>Workout {session.workout}</span>
+                {wkDef.name && (
+                  <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>{wkDef.name}</span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                {session.sessionNumber && (
+                  <span style={{ fontSize: 11, color: C.muted }}>#{session.sessionNumber}</span>
+                )}
+                <span style={{ fontSize: 12, color: C.muted }}>{session.date}</span>
+              </div>
+            </div>
+
+            {/* Exercises */}
+            {exercises.map(ex => {
+              const data = session.exercises?.[ex.id];
+              if (!data) return null;
+              const exName = ex.name || ex.id.replace(/_/g, " ");
+
+              // Weight-logged exercise: show per-set chips
+              if (data.sets && data.sets.length) {
+                const anyDone = data.sets.some(s => s.done);
+                if (!anyDone) return null;
+                return (
+                  <div key={ex.id} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{exName}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {data.sets.map((s, si) => (
+                        <span key={si} style={{
+                          padding: "3px 10px", borderRadius: 7, fontSize: 12,
+                          background: s.done ? "#1a2f1a" : C.border,
+                          border: `1px solid ${s.done ? C.green : C.border}`,
+                          color: s.done ? C.text : C.muted,
+                        }}>
+                          {s.weight ? `${s.weight} ${unit}` : "—"}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+
+              // Done-only exercise: simple checkmark line
+              if (data.done) {
+                return (
+                  <div key={ex.id} style={{ fontSize: 12, color: C.muted, marginBottom: 3 }}>
+                    <span style={{ color: C.green, marginRight: 5 }}>✓</span>{exName}
+                  </div>
+                );
+              }
+              return null;
+            })}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession, notes = {}, onNoteChange, wLog = [] }) {
+  const [domain,      setDomain]      = useState("fingers"); // "fingers" | "workout"
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
@@ -2567,8 +2647,24 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22 }}>History</h2>
-        <Btn small onClick={onDownload} color={C.muted}>↓ CSV</Btn>
+        {domain === "fingers" && <Btn small onClick={onDownload} color={C.muted}>↓ CSV</Btn>}
       </div>
+
+      {/* Domain toggle */}
+      <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
+        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"]].map(([key, label]) => (
+          <button key={key} onClick={() => setDomain(key)} style={{
+            flex: 1, padding: "8px 0", borderRadius: 20, border: "none", cursor: "pointer",
+            fontWeight: 700, fontSize: 13,
+            background: domain === key ? C.blue : "transparent",
+            color: domain === key ? "#fff" : C.muted,
+            transition: "background 0.15s",
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {domain === "workout" && <WorkoutHistoryView wLog={wLog} unit={unit} />}
+      {domain === "fingers" && <>
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
@@ -2741,6 +2837,7 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
           </Card>
         );
       })}
+      </>}
     </div>
   );
 }
@@ -5467,7 +5564,7 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
+      {tab === 1 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
       {tab === 2 && <TrendsView history={history} unit={unit} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
       {tab === 3 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 4 && <WorkoutTab unit={unit} />}
