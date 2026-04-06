@@ -4997,7 +4997,7 @@ function WorkoutTab({ unit }) {
   );
 }
 
-const TABS = ["Fingers", "History", "Trends", "Analysis", "Workout", "Journey", "Settings"];
+const TABS = ["Fingers", "Analysis", "Journey", "Workout", "History", "Trends", "Settings"];
 
 export default function App() {
   // ── Auth ──────────────────────────────────────────────────
@@ -5179,7 +5179,7 @@ export default function App() {
     }
 
     setCalMode(false);
-    setTab(3); // navigate to Analysis tab
+    setTab(1); // navigate to Analysis tab
   }, [addReps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Session Config ────────────────────────────────────────
@@ -5564,11 +5564,11 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
-      {tab === 2 && <TrendsView history={history} unit={unit} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
-      {tab === 3 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
-      {tab === 4 && <WorkoutTab unit={unit} />}
-      {tab === 5 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
+      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
+      {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
+      {tab === 3 && <WorkoutTab unit={unit} />}
+      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
+      {tab === 5 && <TrendsView history={history} unit={unit} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
       {tab === 6 && (
         <SettingsView
           user={user}
