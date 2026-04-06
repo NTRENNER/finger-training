@@ -1623,28 +1623,42 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
 
 // ─────────────────────────────────────────────────────────────
 // 1RM WARM-UP WIDGET
-// Logs a rolling-thunder (or equivalent) 1RM before climbing.
+// Logs a pre-climb 1RM for Micro or Crusher grip.
 // Counts as Power credit in zone coverage. Tracked separately from
 // the Monod-Scherrer model — it's a different kind of metric.
 // ─────────────────────────────────────────────────────────────
+const RM_GRIPS = ["Micro", "Crusher"];
+
 function OneRMWidget({ activities = [], onLog = () => {}, unit = "lbs" }) {
   const [open,   setOpen]   = useState(false);
   const [weight, setWeight] = useState("");
+  const [grip,   setGrip]   = useState("Micro");
   const [logged, setLogged] = useState(false);
 
-  const todayRM = activities
-    .filter(a => a.date === today() && a.type === "oneRM")
-    .reduce((max, a) => Math.max(max, a.weight_kg ?? 0), 0);
+  // Today's best per grip
+  const todayBest = RM_GRIPS.reduce((acc, g) => {
+    acc[g] = activities
+      .filter(a => a.date === today() && a.type === "oneRM" && (a.grip === g || (!a.grip && g === "Micro")))
+      .reduce((max, a) => Math.max(max, a.weight_kg ?? 0), 0);
+    return acc;
+  }, {});
+  const anyLoggedToday = RM_GRIPS.some(g => todayBest[g] > 0);
 
   const handleLog = () => {
     const kg = fromDisp(Number(weight), unit);
     if (!kg || kg <= 0) return;
-    onLog({ date: today(), type: "oneRM", weight_kg: kg });
+    onLog({ date: today(), type: "oneRM", weight_kg: kg, grip });
     setLogged(true);
     setOpen(false);
     setWeight("");
     setTimeout(() => setLogged(false), 3000);
   };
+
+  const summaryText = anyLoggedToday
+    ? RM_GRIPS.filter(g => todayBest[g] > 0)
+        .map(g => `${g}: ${fmtW(todayBest[g], unit)}`)
+        .join(" · ")
+    : logged ? "✓ Logged!" : "Log 1RM warm-up";
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -1655,29 +1669,44 @@ function OneRMWidget({ activities = [], onLog = () => {}, unit = "lbs" }) {
           display: "flex", alignItems: "center", justifyContent: "space-between",
           color: C.text, fontSize: 13,
         }}>
-          <span>
-            🏋️{" "}
-            {todayRM > 0
-              ? `1RM logged: ${fmtW(todayRM, unit)} ${unit}`
-              : logged ? "✓ 1RM logged!" : "Log 1RM warm-up"}
-          </span>
+          <span>🏋️ {summaryText}</span>
           <span style={{ fontSize: 11, color: C.muted }}>⚡ Power credit +</span>
         </button>
       )}
       {open && (
         <Card style={{ border: `1px solid ${"#e05560"}40` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div style={{ fontSize: 14, fontWeight: 700 }}>🏋️ Log 1RM Warm-up</div>
             <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
           </div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-            Rolling thunder floor lift (or equivalent) · max single effort
+
+          {/* Grip selector */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {RM_GRIPS.map(g => (
+              <button key={g} onClick={() => { setGrip(g); setWeight(""); }} style={{
+                flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer",
+                fontWeight: 700, fontSize: 13, border: "none",
+                background: grip === g ? "#e05560" : C.border,
+                color: grip === g ? "#fff" : C.muted,
+              }}>{g}</button>
+            ))}
           </div>
+
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+            {grip === "Micro" ? "Small edge · open-hand max effort" : "Full hand · max single effort"}
+            {todayBest[grip] > 0 && (
+              <span style={{ marginLeft: 8, color: C.green }}>
+                Today: {fmtW(todayBest[grip], unit)} {unit}
+              </span>
+            )}
+          </div>
+
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
             <input
               type="number"
               value={weight}
               onChange={e => setWeight(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleLog()}
               placeholder="0"
               style={{
                 flex: 1, background: C.bg, border: `1px solid ${C.border}`,
@@ -1692,7 +1721,7 @@ function OneRMWidget({ activities = [], onLog = () => {}, unit = "lbs" }) {
             color={"#e05560"}
             style={{ width: "100%", padding: "10px 0", borderRadius: 8 }}
           >
-            Log It
+            Log {grip} 1RM
           </Btn>
         </Card>
       )}
@@ -3349,51 +3378,81 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
       {(() => {
         const rmReps = activities.filter(a => a.type === "oneRM" && a.weight_kg > 0);
         if (rmReps.length === 0) return null;
-        const byDate = {};
-        for (const a of rmReps) {
-          if (!byDate[a.date] || a.weight_kg > byDate[a.date]) byDate[a.date] = a.weight_kg;
+
+        // Build per-grip datasets
+        const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+        const allDates = [...new Set(rmReps.map(a => a.date))].sort();
+        const gripData = {};
+        for (const g of RM_GRIPS) {
+          const byDate = {};
+          for (const a of rmReps.filter(r => r.grip === g || (!r.grip && g === "Micro"))) {
+            if (!byDate[a.date] || a.weight_kg > byDate[a.date]) byDate[a.date] = a.weight_kg;
+          }
+          if (Object.keys(byDate).length > 0) {
+            gripData[g] = {
+              pr: Math.max(...Object.values(byDate)),
+              latest: byDate[allDates.filter(d => byDate[d]).at(-1)] ?? 0,
+              byDate,
+            };
+          }
         }
-        const rmData = Object.entries(byDate)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([date, kg]) => ({ date, weight: toDisp(kg, unit) }));
-        const allTimePR = Math.max(...rmData.map(d => d.weight));
-        const latest    = rmData[rmData.length - 1];
-        const isPR      = latest?.weight >= allTimePR;
+        if (Object.keys(gripData).length === 0) return null;
+
+        // Merge into chart data — one row per date, one column per grip
+        const chartData = allDates.map(date => {
+          const row = { date };
+          for (const g of RM_GRIPS) {
+            if (gripData[g]?.byDate[date]) row[g] = toDisp(gripData[g].byDate[date], unit);
+          }
+          return row;
+        });
+        const hasChart = chartData.length >= 2;
+
         return (
           <Card style={{ marginBottom: 16, border: `1px solid ${"#e05560"}30` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>🏋️ 1RM Progress</div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 11, color: C.muted }}>All-time PR</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#e05560", lineHeight: 1.1 }}>
-                  {fmtW(allTimePR / (unit === "lbs" ? 1 : 1), unit)} {unit}
-                </div>
-              </div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏋️ 1RM Progress</div>
+
+            {/* PR summary per grip */}
+            <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+              {RM_GRIPS.filter(g => gripData[g]).map(g => {
+                const { pr, latest } = gripData[g];
+                const isPR = latest >= pr;
+                return (
+                  <div key={g}>
+                    <div style={{ fontSize: 11, color: C.muted }}>{g} PR</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: GRIP_COLORS[g], lineHeight: 1.1 }}>
+                      {fmtW(pr, unit)} {unit}
+                    </div>
+                    {isPR && chartData.length > 1 && (
+                      <div style={{ fontSize: 11, color: GRIP_COLORS[g], fontWeight: 600 }}>🎉 PR today!</div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            {isPR && rmData.length > 1 && (
-              <div style={{ fontSize: 12, color: "#e05560", fontWeight: 600, marginBottom: 8 }}>
-                🎉 Current session is a PR!
-              </div>
-            )}
-            {rmData.length >= 2 && (
-              <ResponsiveContainer width="100%" height={100}>
-                <LineChart data={rmData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+
+            {hasChart && (
+              <ResponsiveContainer width="100%" height={110}>
+                <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
                   <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }}
                     tickFormatter={d => d.slice(5)} interval="preserveStartEnd" />
                   <YAxis hide domain={["auto", "auto"]} />
                   <Tooltip
                     contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
-                    formatter={(v) => [`${fmt1(v)} ${unit}`, "1RM"]}
+                    formatter={(v, name) => [`${fmt1(v)} ${unit}`, name]}
                     labelFormatter={d => d}
                   />
-                  <Line type="monotone" dataKey="weight"
-                    stroke="#e05560" strokeWidth={2.5} dot={{ r: 3, fill: "#e05560" }} connectNulls />
+                  {RM_GRIPS.filter(g => gripData[g]).map(g => (
+                    <Line key={g} type="monotone" dataKey={g}
+                      stroke={GRIP_COLORS[g]} strokeWidth={2.5}
+                      dot={{ r: 3, fill: GRIP_COLORS[g] }} connectNulls />
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
             )}
             <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
-              Rolling thunder floor lift · max single effort · logged pre-climb
+              Max single effort · logged pre-climb
             </div>
           </Card>
         );
