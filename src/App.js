@@ -4155,8 +4155,9 @@ const DEFAULT_WORKOUTS = {
       { id: "micro_1rm",   name: "Micro 1RM",   type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "" },
       { id: "crusher_1rm", name: "Crusher 1RM", type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "" },
       { id: "slam_balls",  name: "Slam balls",  type: "P", sets: 4,    reps: "8–10",   logWeight: true,  note: "Advance weight when 10 reps hold full speed" },
-      { id: "kb_snatch",   name: "KB snatch",   type: "P", sets: 4,    reps: "5/side", logWeight: true,  note: "Full hip snap, crisp catch" },
-      { id: "stretch",     name: "Stretching",  type: "X", sets: null, reps: null,     logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
+      { id: "kb_snatch",    name: "KB snatch",    type: "P", sets: 4,    reps: "5/side",  logWeight: true,  note: "Full hip snap, crisp catch" },
+      { id: "bicep_curls",  name: "Bicep curls",  type: "S", sets: 3,    reps: "8–12",    logWeight: true,  note: "Undercling strength — light" },
+      { id: "stretch",      name: "Stretching",   type: "X", sets: null, reps: null,      logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
     ],
   },
   C: {
@@ -4216,50 +4217,84 @@ function ExerciseRow({ ex, last }) {
 }
 
 // ── Session logging row ───────────────────────────────────────
-function SessionExRow({ ex, unit, prevWeight, value, onChange, done, onToggle, last }) {
-  const setsReps = [ex.sets && `${ex.sets}×`, ex.reps].filter(Boolean).join(" ");
+function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onToggle, last }) {
+  const allSetsDone = ex.logWeight && setsData?.sets
+    ? setsData.sets.every(s => s.done)
+    : !!done;
+  const inputStyle = {
+    width: 72, background: C.bg, border: `1px solid ${C.border}`,
+    color: C.text, borderRadius: 6, padding: "4px 7px", fontSize: 14,
+    textAlign: "center",
+  };
+  const doneBtn = (isDone, onPress) => (
+    <button onClick={onPress} style={{
+      width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+      background: isDone ? C.green : "transparent",
+      border: `2px solid ${isDone ? C.green : C.border}`,
+      color: isDone ? "#000" : C.muted,
+      cursor: "pointer", fontSize: 12, display: "flex",
+      alignItems: "center", justifyContent: "center",
+    }}>{isDone ? "✓" : ""}</button>
+  );
   return (
     <div style={{
-      display: "flex", alignItems: "flex-start", gap: 10,
       padding: "12px 0",
       borderBottom: last ? "none" : `1px solid ${C.border}`,
-      opacity: done ? 0.55 : 1,
+      opacity: allSetsDone ? 0.55 : 1,
     }}>
-      <WTypeBadge type={ex.type} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 15, color: C.text }}>{ex.name}</div>
-        {setsReps && <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{setsReps}</div>}
-        {ex.note ? <div style={{ fontSize: 12, color: C.muted, marginTop: 1 }}>{ex.note}</div> : null}
-        {ex.logWeight && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-            <input
-              type="number" inputMode="decimal"
-              value={value || ""}
-              onChange={e => onChange(e.target.value)}
-              placeholder={prevWeight ? `prev: ${prevWeight}` : `weight (${unit})`}
-              style={{
-                width: 110, background: C.bg, border: `1px solid ${C.border}`,
-                color: C.text, borderRadius: 6, padding: "5px 8px", fontSize: 14,
-              }}
-            />
-            <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
-            {prevWeight && (
-              <span style={{ fontSize: 12, color: C.muted }}>prev: {prevWeight}</span>
-            )}
-          </div>
-        )}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <WTypeBadge type={ex.type} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, color: C.text }}>{ex.name}</div>
+          {ex.note ? <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{ex.note}</div> : null}
+
+          {ex.logWeight && setsData?.sets ? (
+            // ── Per-set rows ──
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: C.muted, width: 44 }}></span>
+                <span style={{ fontSize: 11, color: C.muted, width: 72, textAlign: "center" }}>weight</span>
+                {prevSets?.length > 0 && (
+                  <span style={{ fontSize: 11, color: C.muted, width: 72, textAlign: "center" }}>prev</span>
+                )}
+              </div>
+              {setsData.sets.map((s, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: C.muted, width: 44, flexShrink: 0 }}>
+                    Set {i + 1} {ex.reps ? `× ${ex.reps}` : ""}
+                  </span>
+                  <input
+                    type="number" inputMode="decimal"
+                    value={s.weight}
+                    onChange={e => {
+                      const next = [...setsData.sets];
+                      next[i] = { ...next[i], weight: e.target.value };
+                      onSetsChange({ sets: next });
+                    }}
+                    style={inputStyle}
+                  />
+                  <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
+                  {prevSets?.[i] && (
+                    <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevSets[i]}</span>
+                  )}
+                  {doneBtn(s.done, () => {
+                    const next = [...setsData.sets];
+                    next[i] = { ...next[i], done: !next[i].done };
+                    onSetsChange({ sets: next });
+                  })}
+                </div>
+              ))}
+            </div>
+          ) : (
+            // ── No weight, just reps label ──
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>
+              {[ex.sets && `${ex.sets}×`, ex.reps].filter(Boolean).join(" ")}
+            </div>
+          )}
+        </div>
+        {/* Single done button for non-weight exercises */}
+        {!ex.logWeight && doneBtn(!!done, onToggle)}
       </div>
-      <button
-        onClick={onToggle}
-        style={{
-          width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
-          background: done ? C.green : "transparent",
-          border: `2px solid ${done ? C.green : C.border}`,
-          color: done ? "#000" : C.muted,
-          cursor: "pointer", fontSize: 14, display: "flex",
-          alignItems: "center", justifyContent: "center",
-        }}
-      >{done ? "✓" : ""}</button>
     </div>
   );
 }
@@ -4409,32 +4444,42 @@ function WorkoutTab({ unit }) {
   const sessionN  = wState.sessionCount + 1;
   const wtr       = weeksToTrip();
 
-  // Previous best weight for an exercise in this workout slot
-  const prevBest = (exId) => {
+  // Previous best set weights for an exercise in this workout slot
+  const prevBestSets = (exId) => {
     for (let i = wLog.length - 1; i >= 0; i--) {
       const e = wLog[i];
-      if (e.workout === rotKey && e.exercises?.[exId]?.weight) {
-        return e.exercises[exId].weight;
+      if (e.workout === rotKey && e.exercises?.[exId]?.sets) {
+        return e.exercises[exId].sets.map(s => s.weight).filter(Boolean);
       }
     }
-    return null;
+    return [];
   };
 
   const startSession = () => {
+    // Pre-populate weights from last session for this workout
+    const prevLog = [...wLog].reverse().find(e => e.workout === rotKey);
     const init = {};
-    workout.exercises.forEach(ex => { init[ex.id] = { weight: "", done: false }; });
+    workout.exercises.forEach(ex => {
+      const prevEx = prevLog?.exercises?.[ex.id];
+      if (ex.logWeight && ex.sets) {
+        init[ex.id] = {
+          sets: Array.from({ length: ex.sets }, (_, i) => ({
+            weight: prevEx?.sets?.[i]?.weight || "",
+            done: false,
+          }))
+        };
+      } else {
+        init[ex.id] = { done: false };
+      }
+    });
     setSessionData(init);
     setSessionActive(true);
   };
 
   const completeSession = () => {
-    const entry = {
-      date: today(),
-      workout: rotKey,
-      sessionNumber: sessionN,
-      exercises: sessionData,
-    };
-    saveLog([...wLog, entry]);
+    saveLog([...wLog, {
+      date: today(), workout: rotKey, sessionNumber: sessionN, exercises: sessionData,
+    }]);
     saveState({
       rotationIndex: (wState.rotationIndex + 1) % WK_ROTATION.length,
       sessionCount: wState.sessionCount + 1,
@@ -4443,7 +4488,12 @@ function WorkoutTab({ unit }) {
     setSessionData({});
   };
 
-  const allDone = workout && workout.exercises.every(ex => sessionData[ex.id]?.done);
+  const allDone = workout && workout.exercises.every(ex => {
+    const d = sessionData[ex.id];
+    if (!d) return false;
+    if (ex.logWeight && d.sets) return d.sets.every(s => s.done);
+    return !!d.done;
+  });
 
   // ── Sub-tab pill bar ──
   const tabPill = (label, key) => (
@@ -4567,9 +4617,9 @@ function WorkoutTab({ unit }) {
               key={ex.id}
               ex={ex}
               unit={unit}
-              prevWeight={prevBest(ex.id)}
-              value={sessionData[ex.id]?.weight || ""}
-              onChange={(val) => setSessionData(prev => ({ ...prev, [ex.id]: { ...prev[ex.id], weight: val } }))}
+              prevSets={prevBestSets(ex.id)}
+              setsData={sessionData[ex.id]}
+              onSetsChange={(val) => setSessionData(prev => ({ ...prev, [ex.id]: val }))}
               done={!!sessionData[ex.id]?.done}
               onToggle={() => setSessionData(prev => ({
                 ...prev,
