@@ -4264,7 +4264,593 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
   );
 }
 
-const TABS = ["Train", "History", "Trends", "Analysis", "Journey", "Settings"];
+// ─────────────────────────────────────────────────────────────
+// WORKOUT PLAN
+// ─────────────────────────────────────────────────────────────
+const LS_WORKOUT_PLAN_KEY  = "ft_workout_plan";
+const LS_WORKOUT_STATE_KEY = "ft_workout_state";
+const LS_WORKOUT_LOG_KEY   = "ft_workout_log";
+const TRIP_DATE_STR        = "2026-08-22";
+const WK_ROTATION          = ["A", "B", "C"];
+
+function weeksToTrip() {
+  const trip = new Date(TRIP_DATE_STR + "T00:00:00");
+  return Math.max(0, Math.ceil((trip - new Date()) / (7 * 24 * 60 * 60 * 1000)));
+}
+
+const WTYPE_META = {
+  F: { label: "F", bg: "#1a2d4a", color: "#58a6ff" },
+  S: { label: "S", bg: "#2d1f00", color: "#e3b341" },
+  H: { label: "H", bg: "#2d0000", color: "#f85149" },
+  P: { label: "P", bg: "#2d1200", color: "#f0883e" },
+  C: { label: "C", bg: "#002d10", color: "#3fb950" },
+  X: { label: "↔", bg: "#1e1e2e", color: "#8b949e" },
+  D: { label: "D", bg: "#1e1535", color: "#bc8cff" },
+};
+
+const DEFAULT_WORKOUTS = {
+  A: {
+    name: "Fingers + Push",
+    exercises: [
+      { id: "micro_1rm",   name: "Micro 1RM",           type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "FDP recruitment — log in app" },
+      { id: "crusher_1rm", name: "Crusher 1RM",         type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "FDS recruitment — log in app" },
+      { id: "kb_press",    name: "KB / barbell press",  type: "S", sets: 3,    reps: "5",      logWeight: true,  note: "" },
+      { id: "pull_ups",    name: "Weighted pull-ups",   type: "S", sets: 5,    reps: "5",      logWeight: true,  note: "" },
+      { id: "nordic_curl", name: "Nordic curl",         type: "H", sets: 3,    reps: "3–5",    logWeight: false, note: "Slow lowering; add 1 rep/1–2 wks" },
+      { id: "cph_plank",   name: "Copenhagen plank",    type: "C", sets: 3,    reps: "20–40s", logWeight: false, note: "Progress bent → straight leg" },
+      { id: "knee_raises", name: "Hanging knee raises", type: "C", sets: 3,    reps: "8",      logWeight: false, note: "Toes-to-bar when ready" },
+      { id: "stretch",     name: "Stretching",          type: "X", sets: null, reps: null,     logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
+    ],
+  },
+  B: {
+    name: "Fingers + Power",
+    exercises: [
+      { id: "micro_1rm",   name: "Micro 1RM",   type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "" },
+      { id: "crusher_1rm", name: "Crusher 1RM", type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "" },
+      { id: "slam_balls",  name: "Slam balls",  type: "P", sets: 4,    reps: "8–10",   logWeight: true,  note: "Advance weight when 10 reps hold full speed" },
+      { id: "kb_snatch",   name: "KB snatch",   type: "P", sets: 4,    reps: "5/side", logWeight: true,  note: "Full hip snap, crisp catch" },
+      { id: "stretch",     name: "Stretching",  type: "X", sets: null, reps: null,     logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
+    ],
+  },
+  C: {
+    name: "Fingers + Pull / Hinge",
+    exercises: [
+      { id: "micro_1rm",     name: "Micro 1RM",             type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "" },
+      { id: "crusher_1rm",   name: "Crusher 1RM",           type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "" },
+      { id: "bench_press",   name: "Bench press",           type: "S", sets: 4,    reps: "5",      logWeight: true,  note: "" },
+      { id: "landmine_rows", name: "One-arm landmine rows", type: "S", sets: 4,    reps: "5/side", logWeight: true,  note: "Alternate sides" },
+      { id: "rdl",           name: "RDL",                   type: "H", sets: 3,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
+      { id: "ring_ham_curl", name: "Ring hamstring curl",   type: "H", sets: 3,    reps: "6–8",    logWeight: false, note: "Slow eccentric; single-leg when ready" },
+      { id: "stretch",       name: "Stretching",            type: "X", sets: null, reps: null,     logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
+    ],
+  },
+  D: {
+    name: "Outdoor / Gym Climbing",
+    exercises: [
+      { id: "micro_1rm",   name: "Micro 1RM",   type: "F", sets: 1,    reps: "Max",  logWeight: false, note: "" },
+      { id: "crusher_1rm", name: "Crusher 1RM", type: "F", sets: 1,    reps: "Max",  logWeight: false, note: "" },
+      { id: "climb",       name: "Climb",        type: "D", sets: null, reps: null,   logWeight: false, note: "Project focus" },
+      { id: "stretch",     name: "Stretching",   type: "X", sets: null, reps: null,   logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
+    ],
+  },
+};
+
+// ── Type badge ────────────────────────────────────────────────
+function WTypeBadge({ type }) {
+  const m = WTYPE_META[type] || WTYPE_META.X;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+      background: m.bg, color: m.color, fontSize: 11, fontWeight: 700,
+    }}>{m.label}</span>
+  );
+}
+
+// ── Exercise row (read-only) ──────────────────────────────────
+function ExerciseRow({ ex, last }) {
+  const setsReps = [ex.sets && `${ex.sets}×`, ex.reps].filter(Boolean).join(" ");
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 12,
+      padding: "11px 0",
+      borderBottom: last ? "none" : `1px solid ${C.border}`,
+    }}>
+      <WTypeBadge type={ex.type} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 15, color: C.text }}>{ex.name}</div>
+        {ex.note ? <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{ex.note}</div> : null}
+      </div>
+      {setsReps && (
+        <div style={{ fontSize: 13, color: C.muted, whiteSpace: "nowrap" }}>{setsReps}</div>
+      )}
+    </div>
+  );
+}
+
+// ── Session logging row ───────────────────────────────────────
+function SessionExRow({ ex, unit, prevWeight, value, onChange, done, onToggle, last }) {
+  const setsReps = [ex.sets && `${ex.sets}×`, ex.reps].filter(Boolean).join(" ");
+  return (
+    <div style={{
+      display: "flex", alignItems: "flex-start", gap: 10,
+      padding: "12px 0",
+      borderBottom: last ? "none" : `1px solid ${C.border}`,
+      opacity: done ? 0.55 : 1,
+    }}>
+      <WTypeBadge type={ex.type} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 15, color: C.text }}>{ex.name}</div>
+        {setsReps && <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{setsReps}</div>}
+        {ex.note ? <div style={{ fontSize: 12, color: C.muted, marginTop: 1 }}>{ex.note}</div> : null}
+        {ex.logWeight && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+            <input
+              type="number" inputMode="decimal"
+              value={value || ""}
+              onChange={e => onChange(e.target.value)}
+              placeholder={prevWeight ? `prev: ${prevWeight}` : `weight (${unit})`}
+              style={{
+                width: 110, background: C.bg, border: `1px solid ${C.border}`,
+                color: C.text, borderRadius: 6, padding: "5px 8px", fontSize: 14,
+              }}
+            />
+            <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
+            {prevWeight && (
+              <span style={{ fontSize: 12, color: C.muted }}>prev: {prevWeight}</span>
+            )}
+          </div>
+        )}
+      </div>
+      <button
+        onClick={onToggle}
+        style={{
+          width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+          background: done ? C.green : "transparent",
+          border: `2px solid ${done ? C.green : C.border}`,
+          color: done ? "#000" : C.muted,
+          cursor: "pointer", fontSize: 14, display: "flex",
+          alignItems: "center", justifyContent: "center",
+        }}
+      >{done ? "✓" : ""}</button>
+    </div>
+  );
+}
+
+// ── Plan editor for one workout ───────────────────────────────
+function WorkoutEditor({ wKey, workout, onSave, onClose, onReset }) {
+  const [exercises, setExercises] = useState(() => workout.exercises.map(e => ({ ...e })));
+  const [name, setName] = useState(workout.name);
+
+  const updateEx = (idx, field, val) => {
+    setExercises(prev => prev.map((e, i) => i === idx ? { ...e, [field]: val } : e));
+  };
+  const addEx = () => setExercises(prev => [...prev, {
+    id: `ex_${Date.now()}`, name: "New exercise", type: "S",
+    sets: 3, reps: "5", logWeight: true, note: "",
+  }]);
+  const removeEx = (idx) => setExercises(prev => prev.filter((_, i) => i !== idx));
+  const moveEx = (idx, dir) => {
+    const next = [...exercises];
+    const swapIdx = idx + dir;
+    if (swapIdx < 0 || swapIdx >= next.length) return;
+    [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+    setExercises(next);
+  };
+
+  const inputStyle = {
+    background: C.bg, border: `1px solid ${C.border}`,
+    color: C.text, borderRadius: 6, padding: "4px 8px", fontSize: 13,
+  };
+
+  return (
+    <div style={{ padding: "0 16px 32px" }}>
+      {/* Workout name */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>Workout name</div>
+        <input
+          value={name} onChange={e => setName(e.target.value)}
+          style={{ ...inputStyle, width: "100%", fontSize: 15 }}
+        />
+      </div>
+
+      {/* Exercise rows */}
+      {exercises.map((ex, idx) => (
+        <div key={ex.id} style={{
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 8, padding: 12, marginBottom: 8,
+        }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            {/* Type selector */}
+            <select
+              value={ex.type}
+              onChange={e => updateEx(idx, "type", e.target.value)}
+              style={{ ...inputStyle, width: 52 }}
+            >
+              {Object.keys(WTYPE_META).map(t => (
+                <option key={t} value={t}>{WTYPE_META[t].label}</option>
+              ))}
+            </select>
+            {/* Name */}
+            <input
+              value={ex.name}
+              onChange={e => updateEx(idx, "name", e.target.value)}
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            {/* Move up/down */}
+            <button onClick={() => moveEx(idx, -1)} style={{ ...inputStyle, padding: "4px 7px", cursor: "pointer" }}>↑</button>
+            <button onClick={() => moveEx(idx, 1)}  style={{ ...inputStyle, padding: "4px 7px", cursor: "pointer" }}>↓</button>
+            {/* Delete */}
+            <button onClick={() => removeEx(idx)} style={{ ...inputStyle, padding: "4px 7px", color: C.red, cursor: "pointer" }}>✕</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 12, color: C.muted }}>Sets</span>
+              <input
+                type="number" value={ex.sets ?? ""}
+                onChange={e => updateEx(idx, "sets", e.target.value ? Number(e.target.value) : null)}
+                style={{ ...inputStyle, width: 48 }}
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 12, color: C.muted }}>Reps</span>
+              <input
+                value={ex.reps ?? ""}
+                onChange={e => updateEx(idx, "reps", e.target.value || null)}
+                style={{ ...inputStyle, width: 72 }}
+              />
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: C.muted, cursor: "pointer" }}>
+              <input
+                type="checkbox" checked={!!ex.logWeight}
+                onChange={e => updateEx(idx, "logWeight", e.target.checked)}
+              />
+              Log weight
+            </label>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <input
+              value={ex.note || ""}
+              onChange={e => updateEx(idx, "note", e.target.value)}
+              placeholder="Note (optional)"
+              style={{ ...inputStyle, width: "100%", fontSize: 12 }}
+            />
+          </div>
+        </div>
+      ))}
+
+      <button onClick={addEx} style={{
+        width: "100%", padding: "10px", marginBottom: 8,
+        background: "transparent", border: `1px dashed ${C.border}`,
+        color: C.muted, borderRadius: 8, cursor: "pointer", fontSize: 14,
+      }}>+ Add exercise</button>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button onClick={() => onSave(name, exercises)} style={{
+          flex: 1, padding: "11px", background: C.blue, color: "#000",
+          border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 14,
+        }}>Save</button>
+        <button onClick={onClose} style={{
+          flex: 1, padding: "11px", background: C.bg, color: C.text,
+          border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer", fontSize: 14,
+        }}>Cancel</button>
+        <button onClick={onReset} style={{
+          padding: "11px 14px", background: C.bg, color: C.red,
+          border: `1px solid ${C.red}`, borderRadius: 8, cursor: "pointer", fontSize: 13,
+        }}>Reset</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main WorkoutTab ───────────────────────────────────────────
+function WorkoutTab({ unit }) {
+  const [subTab, setSubTab]         = useState("today");
+  const [plan,   setPlan]           = useState(() => loadLS(LS_WORKOUT_PLAN_KEY)  || DEFAULT_WORKOUTS);
+  const [wState, setWState]         = useState(() => loadLS(LS_WORKOUT_STATE_KEY) || { rotationIndex: 0, sessionCount: 0 });
+  const [wLog,   setWLog]           = useState(() => loadLS(LS_WORKOUT_LOG_KEY)   || []);
+  const [sessionActive, setSessionActive] = useState(false);
+  const [sessionData,   setSessionData]   = useState({});  // exId → {weight, done}
+  const [editingKey, setEditingKey] = useState(null);      // "A"|"B"|"C"|"D"|null
+
+  const savePlan  = (p) => { setPlan(p);  saveLS(LS_WORKOUT_PLAN_KEY,  p); };
+  const saveState = (s) => { setWState(s); saveLS(LS_WORKOUT_STATE_KEY, s); };
+  const saveLog   = (l) => { setWLog(l);  saveLS(LS_WORKOUT_LOG_KEY,   l); };
+
+  const rotKey    = WK_ROTATION[wState.rotationIndex % WK_ROTATION.length];
+  const workout   = plan[rotKey];
+  const sessionN  = wState.sessionCount + 1;
+  const wtr       = weeksToTrip();
+
+  // Previous best weight for an exercise in this workout slot
+  const prevBest = (exId) => {
+    for (let i = wLog.length - 1; i >= 0; i--) {
+      const e = wLog[i];
+      if (e.workout === rotKey && e.exercises?.[exId]?.weight) {
+        return e.exercises[exId].weight;
+      }
+    }
+    return null;
+  };
+
+  const startSession = () => {
+    const init = {};
+    workout.exercises.forEach(ex => { init[ex.id] = { weight: "", done: false }; });
+    setSessionData(init);
+    setSessionActive(true);
+  };
+
+  const completeSession = () => {
+    const entry = {
+      date: today(),
+      workout: rotKey,
+      sessionNumber: sessionN,
+      exercises: sessionData,
+    };
+    saveLog([...wLog, entry]);
+    saveState({
+      rotationIndex: (wState.rotationIndex + 1) % WK_ROTATION.length,
+      sessionCount: wState.sessionCount + 1,
+    });
+    setSessionActive(false);
+    setSessionData({});
+  };
+
+  const allDone = workout && workout.exercises.every(ex => sessionData[ex.id]?.done);
+
+  // ── Sub-tab pill bar ──
+  const tabPill = (label, key) => (
+    <button
+      key={key}
+      onClick={() => { setSubTab(key); setEditingKey(null); }}
+      style={{
+        flex: 1, padding: "9px 0", fontSize: 13, fontWeight: subTab === key ? 700 : 400,
+        color: subTab === key ? C.blue : C.muted,
+        background: "none", border: "none",
+        borderBottom: subTab === key ? `2px solid ${C.blue}` : "2px solid transparent",
+        cursor: "pointer",
+      }}
+    >{label}</button>
+  );
+
+  // ── Week calendar ──
+  const WEEK_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+  const WEEK_ROLES  = ["Climb", "Train", "Rest", "Climb+Train", "Rest", "Climb+Train", "Sabbath"];
+  const todayDow    = new Date().getDay(); // 0=Sun
+
+  // ── Render ──
+  return (
+    <div style={{ padding: "16px 16px 80px" }}>
+      {/* Sub-tab nav */}
+      <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, marginBottom: 20 }}>
+        {tabPill("Today", "today")}
+        {tabPill("Plan", "plan")}
+      </div>
+
+      {/* ─── TODAY view ─────────────────────────────────────── */}
+      {subTab === "today" && !sessionActive && (
+        <>
+          {/* Workout card */}
+          <Card style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+              {/* Letter badge */}
+              <div style={{
+                width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                background: WTYPE_META.S.bg, border: `1px solid ${C.border}`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 18, fontWeight: 800, color: C.blue,
+              }}>{rotKey}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>WORKOUT {rotKey}  ·  NEXT UP</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{workout.name}</div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>
+                  {workout.exercises.filter(e => e.type !== "X").map(e => e.name).join(" · ")}
+                </div>
+              </div>
+            </div>
+
+            {/* Metrics row */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+              {[["Session #", sessionN], ["Weeks to trip", wtr]].map(([label, val]) => (
+                <div key={label} style={{
+                  background: C.bg, borderRadius: 8, padding: "10px 14px",
+                  border: `1px solid ${C.border}`,
+                }}>
+                  <div style={{ fontSize: 11, color: C.muted }}>{label}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: C.text }}>{val}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Exercise list */}
+            <div>
+              {workout.exercises.map((ex, i) => (
+                <ExerciseRow key={ex.id} ex={ex} last={i === workout.exercises.length - 1} />
+              ))}
+            </div>
+
+            <button
+              onClick={startSession}
+              style={{
+                width: "100%", marginTop: 16, padding: "14px",
+                background: C.blue, color: "#000",
+                border: "none", borderRadius: 10, fontWeight: 700,
+                fontSize: 16, cursor: "pointer",
+              }}
+            >Start session</button>
+          </Card>
+
+          {/* Week calendar */}
+          <Card>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 12, letterSpacing: 1 }}>THIS WEEK</div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              {WEEK_LABELS.map((lbl, i) => {
+                const isToday = i === todayDow;
+                const role = WEEK_ROLES[i];
+                const abbr = role === "Climb+Train" ? "CT" : role === "Sabbath" ? "S" : role[0];
+                return (
+                  <div key={lbl} style={{ textAlign: "center", flex: 1 }}>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>{lbl}</div>
+                    <div style={{
+                      width: 34, height: 34, borderRadius: "50%", margin: "0 auto",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      border: isToday ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
+                      background: isToday ? "#1a2d4a" : C.bg,
+                      fontSize: 11, fontWeight: isToday ? 700 : 400,
+                      color: isToday ? C.blue : C.muted,
+                    }}>{abbr}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </>
+      )}
+
+      {/* ─── SESSION ACTIVE view ────────────────────────────── */}
+      {subTab === "today" && sessionActive && (
+        <Card>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: C.muted }}>WORKOUT {rotKey}  ·  SESSION #{sessionN}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{workout.name}</div>
+          </div>
+
+          {workout.exercises.map((ex, i) => (
+            <SessionExRow
+              key={ex.id}
+              ex={ex}
+              unit={unit}
+              prevWeight={prevBest(ex.id)}
+              value={sessionData[ex.id]?.weight || ""}
+              onChange={(val) => setSessionData(prev => ({ ...prev, [ex.id]: { ...prev[ex.id], weight: val } }))}
+              done={!!sessionData[ex.id]?.done}
+              onToggle={() => setSessionData(prev => ({
+                ...prev,
+                [ex.id]: { ...prev[ex.id], done: !prev[ex.id]?.done },
+              }))}
+              last={i === workout.exercises.length - 1}
+            />
+          ))}
+
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button
+              onClick={completeSession}
+              disabled={!allDone}
+              style={{
+                flex: 1, padding: "13px",
+                background: allDone ? C.green : C.border,
+                color: allDone ? "#000" : C.muted,
+                border: "none", borderRadius: 10, fontWeight: 700,
+                fontSize: 15, cursor: allDone ? "pointer" : "default",
+              }}
+            >Complete session ✓</button>
+            <button
+              onClick={() => { setSessionActive(false); setSessionData({}); }}
+              style={{
+                padding: "13px 16px", background: "transparent",
+                border: `1px solid ${C.border}`, color: C.muted,
+                borderRadius: 10, cursor: "pointer", fontSize: 14,
+              }}
+            >Abandon</button>
+          </div>
+        </Card>
+      )}
+
+      {/* ─── PLAN view ──────────────────────────────────────── */}
+      {subTab === "plan" && (
+        <>
+          {editingKey ? (
+            <WorkoutEditor
+              wKey={editingKey}
+              workout={plan[editingKey]}
+              onSave={(name, exercises) => {
+                savePlan({ ...plan, [editingKey]: { name, exercises } });
+                setEditingKey(null);
+              }}
+              onClose={() => setEditingKey(null)}
+              onReset={() => {
+                if (window.confirm(`Reset Workout ${editingKey} to defaults?`)) {
+                  savePlan({ ...plan, [editingKey]: DEFAULT_WORKOUTS[editingKey] });
+                  setEditingKey(null);
+                }
+              }}
+            />
+          ) : (
+            <>
+              {/* Sequence rule callout */}
+              <div style={{
+                background: "#1a2d1a", border: `1px solid ${C.green}`,
+                borderRadius: 8, padding: "10px 14px", marginBottom: 16,
+                fontSize: 13, color: C.green,
+              }}>
+                <strong>A → B → C</strong>
+                <span style={{ color: C.muted, fontWeight: 400 }}> · session-sequenced, not day-specific · C requires a rest day before climbing</span>
+              </div>
+
+              {/* Workout cards */}
+              {["A", "B", "C", "D"].map(key => {
+                const wk = plan[key];
+                const isNext = key === rotKey;
+                return (
+                  <Card key={key} style={{ marginBottom: 10, borderColor: isNext ? C.blue : C.border }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                      <div style={{
+                        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                        background: isNext ? "#1a2d4a" : C.bg,
+                        border: `1px solid ${isNext ? C.blue : C.border}`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 16, fontWeight: 800, color: isNext ? C.blue : C.muted,
+                      }}>{key}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{wk.name}</div>
+                        <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                          {wk.exercises.filter(e => e.type !== "X").map(e => e.name).join(" · ")}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setEditingKey(key)}
+                        style={{
+                          padding: "6px 12px", background: "transparent",
+                          border: `1px solid ${C.border}`, color: C.muted,
+                          borderRadius: 6, cursor: "pointer", fontSize: 12,
+                        }}
+                      >Edit</button>
+                    </div>
+                    {wk.exercises.map((ex, i) => (
+                      <ExerciseRow key={ex.id} ex={ex} last={i === wk.exercises.length - 1} />
+                    ))}
+                  </Card>
+                );
+              })}
+
+              {/* Tensleep timeline */}
+              <Card style={{ marginTop: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 10, letterSpacing: 1 }}>TENSLEEP TIMELINE</div>
+                {[
+                  ["Now → June",      "Build base · All workout types · Establish loads"],
+                  ["July",            "Push loads · Increase Micro/Crusher targets · Steep terrain"],
+                  ["Aug 1–14",        "Peak — max loads, limit bouldering priority"],
+                  ["Aug 15–21",       "Taper — cut volume 40%, hold intensity"],
+                  ["Aug 22",          "🏔️ Tensleep"],
+                ].map(([period, focus]) => (
+                  <div key={period} style={{
+                    display: "flex", gap: 10, padding: "7px 0",
+                    borderBottom: period === "Aug 22" ? "none" : `1px solid ${C.border}`,
+                  }}>
+                    <div style={{ fontSize: 13, color: C.yellow, fontWeight: 600, minWidth: 90 }}>{period}</div>
+                    <div style={{ fontSize: 13, color: C.muted }}>{focus}</div>
+                  </div>
+                ))}
+              </Card>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const TABS = ["Train", "Workout", "History", "Trends", "Analysis", "Journey", "Settings"];
 
 export default function App() {
   // ── Auth ──────────────────────────────────────────────────
@@ -4446,7 +5032,7 @@ export default function App() {
     }
 
     setCalMode(false);
-    setTab(3); // navigate to Analysis tab
+    setTab(4); // navigate to Analysis tab
   }, [addReps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Session Config ────────────────────────────────────────
@@ -4831,11 +5417,12 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
-      {tab === 2 && <TrendsView history={history} unit={unit} />}
-      {tab === 3 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
-      {tab === 4 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
-      {tab === 5 && (
+      {tab === 1 && <WorkoutTab unit={unit} />}
+      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
+      {tab === 3 && <TrendsView history={history} unit={unit} />}
+      {tab === 4 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
+      {tab === 5 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
+      {tab === 6 && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}
