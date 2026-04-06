@@ -2748,7 +2748,143 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
 // ─────────────────────────────────────────────────────────────
 // TRENDS VIEW
 // ─────────────────────────────────────────────────────────────
-function TrendsView({ history, unit = "lbs" }) {
+// ── Workout strength-trend sub-view ──────────────────────────
+function WorkoutTrendsView({ wLog, unit = "lbs" }) {
+  // All exercises that have logged weight data
+  const exerciseOptions = useMemo(() => {
+    const seen = new Map(); // id → name
+    for (const session of wLog) {
+      for (const [id, data] of Object.entries(session.exercises || {})) {
+        if (data.sets && data.sets.some(s => s.weight && s.done)) {
+          if (!seen.has(id)) {
+            let name = id.replace(/_/g, " ");
+            for (const wk of Object.values(DEFAULT_WORKOUTS)) {
+              const ex = (wk.exercises || []).find(e => e.id === id);
+              if (ex && ex.name) { name = ex.name; break; }
+            }
+            seen.set(id, name);
+          }
+        }
+      }
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name }));
+  }, [wLog]);
+
+  const [selEx, setSelEx] = useState(null);
+  // Auto-select first available exercise
+  const activeEx = selEx && exerciseOptions.find(e => e.id === selEx) ? selEx : (exerciseOptions[0]?.id || null);
+
+  const chartData = useMemo(() => {
+    if (!activeEx) return [];
+    const points = [];
+    for (const session of wLog) {
+      const exData = session.exercises?.[activeEx];
+      if (!exData?.sets) continue;
+      const weights = exData.sets
+        .filter(s => s.done && s.weight)
+        .map(s => parseFloat(s.weight))
+        .filter(w => !isNaN(w) && w > 0);
+      if (!weights.length) continue;
+      const maxW = Math.max(...weights);
+      const dispW = unit === "kg" ? Math.round(maxW / 2.205 * 10) / 10 : maxW;
+      points.push({ date: session.date, max: dispW, workout: session.workout });
+    }
+    points.sort((a, b) => a.date < b.date ? -1 : 1);
+    let pr = -Infinity;
+    return points.map(p => {
+      const isPR = p.max > pr;
+      if (isPR) pr = p.max;
+      return { ...p, isPR };
+    });
+  }, [wLog, activeEx, unit]);
+
+  const currentPR = useMemo(() => [...chartData].filter(d => d.isPR).slice(-1)[0], [chartData]);
+
+  if (!exerciseOptions.length) return (
+    <div style={{ textAlign: "center", color: C.muted, marginTop: 60, fontSize: 14 }}>
+      Complete a workout session to see strength trends.
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Exercise selector */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {exerciseOptions.map(ex => (
+          <button key={ex.id} onClick={() => setSelEx(ex.id)} style={{
+            padding: "6px 14px", borderRadius: 20, cursor: "pointer", fontWeight: 600, border: "none", fontSize: 12,
+            background: activeEx === ex.id ? C.blue : C.border,
+            color: activeEx === ex.id ? "#fff" : C.muted,
+          }}>{ex.name}</button>
+        ))}
+      </div>
+
+      {currentPR && (
+        <Card style={{ marginBottom: 12, borderColor: C.yellow + "55" }}>
+          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+            <span style={{ fontSize: 18 }}>🏆</span>
+            <div>
+              <Label>Personal Record</Label>
+              <span style={{ fontSize: 22, fontWeight: 800, color: C.yellow }}>
+                {currentPR.max} {unit}
+              </span>
+              <div style={{ fontSize: 11, color: C.muted }}>{currentPR.date}</div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {chartData.length < 2 ? (
+        <Card>
+          <div style={{ color: C.muted, fontSize: 13, textAlign: "center", padding: "16px 0" }}>
+            Log 2+ sessions with this exercise to see a trend line.
+          </div>
+        </Card>
+      ) : (
+        <Card>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
+            Max weight per session · {exerciseOptions.find(e => e.id === activeEx)?.name}
+          </div>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+            <span style={{ color: C.yellow }}>★</span> = personal record
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit={` ${unit}`} />
+              <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
+              <Line
+                type="monotone"
+                dataKey="max"
+                stroke={C.blue}
+                strokeWidth={2}
+                name="Max weight"
+                connectNulls
+                dot={(props) => {
+                  const { cx, cy, payload } = props;
+                  if (!payload.isPR) return (
+                    <circle key={`dot-${cx}-${cy}`} cx={cx} cy={cy} r={2.5} fill={C.blue} opacity={0.6} />
+                  );
+                  return (
+                    <g key={`pr-${cx}-${cy}`}>
+                      <circle cx={cx} cy={cy} r={7} fill={C.yellow} opacity={0.2} />
+                      <circle cx={cx} cy={cy} r={4} fill={C.yellow} />
+                      <text x={cx} y={cy - 12} textAnchor="middle" fill={C.yellow} fontSize={9} fontWeight="bold">PR</text>
+                    </g>
+                  );
+                }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function TrendsView({ history, unit = "lbs", wLog = [] }) {
+  const [domain, setDomain] = useState("fingers"); // "fingers" | "workout"
   const [sel,     setSel]     = useState(45);
   const [selHand, setSelHand] = useState("");   // "" = both
   const [selGrip, setSelGrip] = useState("");   // "" = all grips
@@ -2797,6 +2933,22 @@ function TrendsView({ history, unit = "lbs" }) {
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Trends</h2>
+
+      {/* Domain toggle: Fingers vs Workout */}
+      <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
+        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"]].map(([key, label]) => (
+          <button key={key} onClick={() => setDomain(key)} style={{
+            flex: 1, padding: "8px 0", borderRadius: 20, border: "none", cursor: "pointer",
+            fontWeight: 700, fontSize: 13,
+            background: domain === key ? C.blue : "transparent",
+            color: domain === key ? "#fff" : C.muted,
+            transition: "background 0.15s",
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {domain === "workout" && <WorkoutTrendsView wLog={wLog} unit={unit} />}
+      {domain === "fingers" && <>
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
@@ -2912,6 +3064,7 @@ function TrendsView({ history, unit = "lbs" }) {
           </Card>
         </>
       )}
+      </>}
     </div>
   );
 }
@@ -4747,7 +4900,7 @@ function WorkoutTab({ unit }) {
   );
 }
 
-const TABS = ["Train", "Workout", "History", "Trends", "Analysis", "Journey", "Settings"];
+const TABS = ["Fingers", "History", "Trends", "Analysis", "Workout", "Journey", "Settings"];
 
 export default function App() {
   // ── Auth ──────────────────────────────────────────────────
@@ -4929,7 +5082,7 @@ export default function App() {
     }
 
     setCalMode(false);
-    setTab(4); // navigate to Analysis tab
+    setTab(3); // navigate to Analysis tab
   }, [addReps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Session Config ────────────────────────────────────────
@@ -5135,7 +5288,7 @@ export default function App() {
             }}
           >
             {t}
-            {t === "Train" && phase !== "idle" && (
+            {t === "Fingers" && phase !== "idle" && (
               <span style={{ marginLeft: 4, background: C.red, color: "#fff", borderRadius: 10, fontSize: 10, padding: "1px 5px" }}>●</span>
             )}
           </button>
@@ -5314,10 +5467,10 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <WorkoutTab unit={unit} />}
-      {tab === 2 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
-      {tab === 3 && <TrendsView history={history} unit={unit} />}
-      {tab === 4 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
+      {tab === 1 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} />}
+      {tab === 2 && <TrendsView history={history} unit={unit} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
+      {tab === 3 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
+      {tab === 4 && <WorkoutTab unit={unit} />}
       {tab === 5 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 6 && (
         <SettingsView
