@@ -57,8 +57,10 @@ const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","�
 // ─────────────────────────────────────────────────────────────
 // UTILITIES
 // ─────────────────────────────────────────────────────────────
-const uid    = () => Math.random().toString(36).slice(2, 10);
-const today  = () => new Date().toISOString().slice(0, 10);
+const uid     = () => Math.random().toString(36).slice(2, 10);
+const today   = () => new Date().toISOString().slice(0, 10);
+const nowISO      = () => new Date().toISOString();
+const fmtClock    = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 const clamp  = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const fmt1   = (n) => (typeof n === "number" && isFinite(n)) ? n.toFixed(1) : "—";
 
@@ -594,6 +596,7 @@ async function pushWorkoutSession(session) {
     const { error } = await supabase.from("workout_sessions").upsert({
       id:             session.id,
       date:           session.date,
+      completed_at:   session.completedAt ?? null,
       workout:        session.workout,
       session_number: session.sessionNumber,
       exercises:      session.exercises,
@@ -615,6 +618,7 @@ async function fetchWorkoutSessions() {
   return (data || []).map(s => ({
     id:            s.id,
     date:          s.date,
+    completedAt:   s.completed_at ?? null,
     workout:       s.workout,
     sessionNumber: s.session_number,
     exercises:     s.exercises || {},
@@ -643,6 +647,7 @@ function repPayload(rep) {
     set_num: rep.set_num, rep_num: rep.rep_num,
     rest_s: rep.rest_s, session_id: rep.session_id,
     failed: rep.failed ?? false,
+    session_started_at: rep.session_started_at ?? null,
   };
 }
 
@@ -700,6 +705,7 @@ async function fetchReps() {
     rest_s: Number(r.rest_s) || 20,
     session_id: r.session_id ?? "",
     failed: r.failed ?? false,
+    session_started_at: r.session_started_at ?? null,
   }));
 }
 
@@ -2640,7 +2646,9 @@ function WorkoutHistoryView({ unit = "lbs" }) {
                 {session.sessionNumber && !isEditing && (
                   <span style={{ fontSize: 11, color: C.muted }}>#{session.sessionNumber}</span>
                 )}
-                <span style={{ fontSize: 12, color: C.muted }}>{session.date}</span>
+                <span style={{ fontSize: 12, color: C.muted }}>
+                  {session.date}{session.completedAt ? " · " + fmtClock(session.completedAt) : ""}
+                </span>
                 {!isEditing && (
                   <button
                     onClick={() => { setEditIdx(origIdx); setEditWorkout(session.workout); }}
@@ -2888,7 +2896,9 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 12, color: C.muted }}>{sess.date}</span>
+                <span style={{ fontSize: 12, color: C.muted }}>
+                  {sess.date}{sess.reps[0]?.session_started_at ? " · " + fmtClock(sess.reps[0].session_started_at) : ""}
+                </span>
                 {!isConfirming && !isEditing && (
                   <>
                     <button
@@ -5064,7 +5074,7 @@ function WorkoutTab({ unit, onSessionSaved }) {
   };
 
   const completeSession = () => {
-    const session = { id: genId(), date: today(), workout: rotKey, sessionNumber: sessionN, exercises: sessionData };
+    const session = { id: genId(), date: today(), completedAt: nowISO(), workout: rotKey, sessionNumber: sessionN, exercises: sessionData };
     saveLog([...wLog, session]);
     if (onSessionSaved) onSessionSaved(session);
     saveState({
@@ -5581,8 +5591,9 @@ export default function App() {
   const [currentRep,  setCurrentRep]  = useState(0);
   const [fatigue,     setFatigue]     = useState(0);
   const [sessionReps, setSessionReps] = useState([]);
-  const [sessionId,   setSessionId]   = useState("");
-  const [refWeights,  setRefWeights]  = useState({});
+  const [sessionId,        setSessionId]        = useState("");
+  const [sessionStartedAt, setSessionStartedAt] = useState("");
+  const [refWeights,       setRefWeights]        = useState({});
   const [lastRepResult, setLastRepResult] = useState(null);
   const [leveledUp,   setLeveledUp]   = useState(false);
   const [newLevel,    setNewLevel]    = useState(1);
@@ -5611,7 +5622,9 @@ export default function App() {
     ["L", "R"].forEach(h => {
       rw[h] = estimateRefWeight(history, h, config.grip, config.targetTime);
     });
+    const startedAt = nowISO();
     setSessionId(sid);
+    setSessionStartedAt(startedAt);
     setRefWeights(rw);
     setSessionReps([]);
     setCurrentSet(0);
@@ -5645,9 +5658,10 @@ export default function App() {
                          : null,
       set_num:         currentSet + 1,
       rep_num:         currentRep + 1,
-      rest_s:          config.restTime,
-      session_id:      sessionId,
-      failed:          failed,
+      rest_s:             config.restTime,
+      session_id:         sessionId,
+      failed:             failed,
+      session_started_at: sessionStartedAt || null,
     };
 
     setLastRepResult({ actualTime, avgForce, targetTime: config.targetTime });
@@ -5686,7 +5700,7 @@ export default function App() {
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentRep, currentSet, fatigue, refWeights, sessionId, sessionReps, addReps, sMaxL, sMaxR, activeHand]);
+  }, [config, currentRep, currentSet, fatigue, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, sMaxL, sMaxR, activeHand]);
 
   const finishSession = useCallback((allReps) => {
     // Check for level up
