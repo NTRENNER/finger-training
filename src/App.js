@@ -2680,7 +2680,8 @@ function WorkoutHistoryView({ wLog, unit = "lbs" }) {
 }
 
 function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession, onDeleteRep, onUpdateRep, onAddRep, notes = {}, onNoteChange, wLog = [] }) {
-  const [domain,      setDomain]      = useState("fingers"); // "fingers" | "workout"
+  const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
+  const switchDomain = (d) => { setDomain(d); saveLS(LS_HISTORY_DOMAIN_KEY, d); };
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
@@ -2782,7 +2783,7 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
       {/* Domain toggle */}
       <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
         {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"]].map(([key, label]) => (
-          <button key={key} onClick={() => setDomain(key)} style={{
+          <button key={key} onClick={() => switchDomain(key)} style={{
             flex: 1, padding: "8px 0", borderRadius: 20, border: "none", cursor: "pointer",
             fontWeight: 700, fontSize: 13,
             background: domain === key ? C.blue : "transparent",
@@ -4602,9 +4603,10 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
 // ─────────────────────────────────────────────────────────────
 // WORKOUT PLAN
 // ─────────────────────────────────────────────────────────────
-const LS_WORKOUT_PLAN_KEY  = "ft_workout_plan";
-const LS_WORKOUT_STATE_KEY = "ft_workout_state";
-const LS_WORKOUT_LOG_KEY   = "ft_workout_log";
+const LS_WORKOUT_PLAN_KEY    = "ft_workout_plan";
+const LS_WORKOUT_STATE_KEY   = "ft_workout_state";
+const LS_WORKOUT_LOG_KEY     = "ft_workout_log";
+const LS_HISTORY_DOMAIN_KEY  = "ft_history_domain";
 const TRIP_DATE_STR        = "2026-08-22";
 const WK_ROTATION          = ["A", "B", "C"];
 
@@ -5164,16 +5166,21 @@ function WorkoutTab({ unit }) {
 
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button
-              onClick={completeSession}
-              disabled={!allDone}
+              onClick={() => {
+                if (allDone) {
+                  completeSession();
+                } else if (window.confirm("Some exercises aren't fully checked off — finish session anyway?")) {
+                  completeSession();
+                }
+              }}
               style={{
                 flex: 1, padding: "13px",
-                background: allDone ? C.green : C.border,
-                color: allDone ? "#000" : C.muted,
+                background: allDone ? C.green : C.blue,
+                color: "#000",
                 border: "none", borderRadius: 10, fontWeight: 700,
-                fontSize: 15, cursor: allDone ? "pointer" : "default",
+                fontSize: 15, cursor: "pointer",
               }}
-            >Complete session ✓</button>
+            >{allDone ? "Complete session ✓" : "Finish session →"}</button>
             <button
               onClick={() => { setSessionActive(false); setSessionData({}); }}
               style={{
