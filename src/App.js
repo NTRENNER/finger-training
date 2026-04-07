@@ -2535,10 +2535,14 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = 
 // HISTORY VIEW
 // ─────────────────────────────────────────────────────────────
 // ── Workout session history sub-view ──────────────────────────
-function WorkoutHistoryView({ wLog, unit = "lbs" }) {
-  const [log,         setLog]         = useState(wLog);
+function WorkoutHistoryView({ unit = "lbs" }) {
+  // Always read fresh from localStorage — no useState wrapper so newly
+  // completed sessions appear immediately without needing a remount.
+  const [tick,        setTick]        = useState(0); // increment to force re-read
   const [editIdx,     setEditIdx]     = useState(null);
   const [editWorkout, setEditWorkout] = useState(null);
+
+  const log = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Flat name lookup across all workout definitions so reclassifying
   // doesn't hide exercises logged under a different workout letter
@@ -2561,8 +2565,8 @@ function WorkoutHistoryView({ wLog, unit = "lbs" }) {
 
   const saveEdit = (origIdx) => {
     const updated = log.map((s, i) => i === origIdx ? { ...s, workout: editWorkout } : s);
-    setLog(updated);
     saveLS(LS_WORKOUT_LOG_KEY, updated);
+    setTick(t => t + 1); // re-read localStorage
     setEditIdx(null);
     setEditWorkout(null);
   };
@@ -2679,7 +2683,7 @@ function WorkoutHistoryView({ wLog, unit = "lbs" }) {
   );
 }
 
-function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession, onDeleteRep, onUpdateRep, onAddRep, notes = {}, onNoteChange, wLog = [] }) {
+function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession, onDeleteRep, onUpdateRep, onAddRep, notes = {}, onNoteChange }) {
   const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
   const switchDomain = (d) => { setDomain(d); saveLS(LS_HISTORY_DOMAIN_KEY, d); };
   const [grip,        setGrip]        = useState("");
@@ -2793,7 +2797,7 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
         ))}
       </div>
 
-      {domain === "workout" && <WorkoutHistoryView wLog={wLog} unit={unit} />}
+      {domain === "workout" && <WorkoutHistoryView unit={unit} />}
       {domain === "fingers" && <>
 
       {/* Filters */}
@@ -3085,7 +3089,9 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
 // TRENDS VIEW
 // ─────────────────────────────────────────────────────────────
 // ── Workout strength-trend sub-view ──────────────────────────
-function WorkoutTrendsView({ wLog, unit = "lbs" }) {
+function WorkoutTrendsView({ unit = "lbs" }) {
+  // Always read fresh from localStorage
+  const wLog = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], []); // eslint-disable-line react-hooks/exhaustive-deps
   // All exercises that have logged weight data
   const exerciseOptions = useMemo(() => {
     const seen = new Map(); // id → name
@@ -3219,7 +3225,7 @@ function WorkoutTrendsView({ wLog, unit = "lbs" }) {
   );
 }
 
-function TrendsView({ history, unit = "lbs", wLog = [] }) {
+function TrendsView({ history, unit = "lbs" }) {
   const [domain, setDomain] = useState("fingers"); // "fingers" | "workout"
   const [sel,     setSel]     = useState(45);
   const [selHand, setSelHand] = useState("");   // "" = both
@@ -3283,7 +3289,7 @@ function TrendsView({ history, unit = "lbs", wLog = [] }) {
         ))}
       </div>
 
-      {domain === "workout" && <WorkoutTrendsView wLog={wLog} unit={unit} />}
+      {domain === "workout" && <WorkoutTrendsView unit={unit} />}
       {domain === "fingers" && <>
 
       {/* Filters */}
@@ -5879,8 +5885,8 @@ export default function App() {
       {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} />}
-      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps([rep])} notes={notes} onNoteChange={handleNoteChange} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
-      {tab === 5 && <TrendsView history={history} unit={unit} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
+      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps([rep])} notes={notes} onNoteChange={handleNoteChange} />}
+      {tab === 5 && <TrendsView history={history} unit={unit} />}
       {tab === 6 && (
         <SettingsView
           user={user}
