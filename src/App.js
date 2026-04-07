@@ -2613,6 +2613,8 @@ function WorkoutHistoryView({ unit = "lbs" }) {
   const [tick,        setTick]        = useState(0); // increment to force re-read
   const [editIdx,     setEditIdx]     = useState(null);
   const [editWorkout, setEditWorkout] = useState(null);
+  const [filterType,  setFilterType]  = useState("");   // "" = all, or "A"/"B"/"C" etc.
+  const [filterDays,  setFilterDays]  = useState(0);    // 0 = all time, else last N days
 
   const log = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2628,11 +2630,28 @@ function WorkoutHistoryView({ unit = "lbs" }) {
     return map;
   }, []);
 
+  // Unique workout types present in the log
+  const workoutTypes = useMemo(() =>
+    [...new Set(log.map(s => s.workout).filter(Boolean))].sort(),
+    [log]
+  );
+
+  // Apply filters
+  const filtered = useMemo(() => {
+    const cutoff = filterDays > 0
+      ? new Date(Date.now() - filterDays * 864e5).toISOString().slice(0, 10)
+      : null;
+    return log.filter(s =>
+      (!filterType || s.workout === filterType) &&
+      (!cutoff    || s.date >= cutoff)
+    );
+  }, [log, filterType, filterDays]);
+
   // Sorted newest-first for display; track original index for saves
   const sorted = useMemo(() =>
-    log.map((s, origIdx) => ({ ...s, origIdx }))
-       .sort((a, b) => a.date < b.date ? 1 : -1),
-    [log]
+    filtered.map((s) => ({ ...s, origIdx: log.indexOf(s) }))
+            .sort((a, b) => a.date < b.date ? 1 : -1),
+    [filtered, log]
   );
 
   const saveEdit = (origIdx) => {
@@ -2654,6 +2673,34 @@ function WorkoutHistoryView({ unit = "lbs" }) {
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
         <Btn small onClick={() => downloadWorkoutCSV(log)} color={C.muted}>↓ CSV</Btn>
       </div>
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {workoutTypes.map(type => {
+          const name = DEFAULT_WORKOUTS[type]?.name || type;
+          return (
+            <button key={type} onClick={() => setFilterType(filterType === type ? "" : type)} style={{
+              padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+              background: filterType === type ? C.orange : C.border,
+              color: filterType === type ? "#fff" : C.muted, border: "none",
+            }}>{type} · {name}</button>
+          );
+        })}
+        {[30, 60, 90].map(days => (
+          <button key={days} onClick={() => setFilterDays(filterDays === days ? 0 : days)} style={{
+            padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+            background: filterDays === days ? C.blue : C.border,
+            color: filterDays === days ? "#fff" : C.muted, border: "none",
+          }}>{days}d</button>
+        ))}
+      </div>
+
+      {sorted.length === 0 && (
+        <div style={{ textAlign: "center", color: C.muted, marginTop: 40, fontSize: 15 }}>
+          No sessions match these filters.
+        </div>
+      )}
+
       {sorted.map((session) => {
         const { origIdx } = session;
         const isEditing = editIdx === origIdx;
