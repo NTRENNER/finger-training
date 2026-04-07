@@ -62,6 +62,11 @@ const uid     = () => Math.random().toString(36).slice(2, 10);
 const today   = () => new Date().toISOString().slice(0, 10);
 const nowISO      = () => new Date().toISOString();
 const fmtClock    = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+// Return the most recent BW log entry on or before `date` (YYYY-MM-DD), or null.
+const bwOnDate = (bwLog, date) => {
+  const candidates = (bwLog || []).filter(e => e.date <= date);
+  return candidates.length ? candidates[candidates.length - 1] : null;
+};
 const clamp  = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const fmt1   = (n) => (typeof n === "number" && isFinite(n)) ? n.toFixed(1) : "—";
 
@@ -2618,7 +2623,8 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
   const [filterDays, setFilterDays] = useState(0);   // 0 = all time, else last N days
   const [relMode,    setRelMode]    = useState(false);
 
-  const log = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const log   = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const bwLog = useMemo(() => loadLS(LS_BW_LOG_KEY)     || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Flat name lookup across all workout definitions
   const exNames = useMemo(() => {
@@ -2736,6 +2742,7 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
                 )}
                 <span style={{ fontSize: 12, color: C.muted }}>
                   {session.date}{session.completedAt ? " · " + fmtClock(session.completedAt) : ""}
+                  {(() => { const e = bwOnDate(bwLog, session.date); return e ? " · " + fmt1(toDisp(e.kg, unit)) + " " + unit : ""; })()}
                 </span>
                 {!isEditing && (
                   <button
@@ -2905,6 +2912,8 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
     closeRepEdit();
   };
 
+  const bwLog = useMemo(() => loadLS(LS_BW_LOG_KEY) || [], []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
 
   const filtered = useMemo(() => history.filter(r =>
@@ -2995,6 +3004,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 12, color: C.muted }}>
                   {sess.date}{sess.reps[0]?.session_started_at ? " · " + fmtClock(sess.reps[0].session_started_at) : ""}
+                  {(() => { const e = bwOnDate(bwLog, sess.date); return e ? " · " + fmt1(toDisp(e.kg, unit)) + " " + unit : ""; })()}
                 </span>
                 {!isConfirming && !isEditing && (
                   <>
