@@ -2698,8 +2698,9 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
   const [filterDays, setFilterDays] = useState(0);   // 0 = all time, else last N days
   const [relMode,    setRelMode]    = useState(false);
 
-  const log   = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
-  const bwLog = useMemo(() => loadLS(LS_BW_LOG_KEY)     || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const log      = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY)  || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const bwLog    = useMemo(() => loadLS(LS_BW_LOG_KEY)       || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const syncedIds = useMemo(() => new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Flat name lookup across all workout definitions
   const exNames = useMemo(() => {
@@ -2818,6 +2819,12 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
                 <span style={{ fontSize: 12, color: C.muted }}>
                   {session.date}{session.completedAt ? " · " + fmtClock(session.completedAt) : ""}
                   {(() => { const e = bwOnDate(bwLog, session.date); return e ? " · " + fmt1(toDisp(e.kg, unit)) + " " + unit : ""; })()}
+                </span>
+                <span
+                  title={session.id && syncedIds.has(session.id) ? "Synced to cloud" : "Local only — not yet synced"}
+                  style={{ fontSize: 13, opacity: 0.7 }}
+                >
+                  {session.id && syncedIds.has(session.id) ? "☁️" : "📱"}
                 </span>
                 {!isEditing && (
                   <button
@@ -4922,6 +4929,7 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
 const LS_WORKOUT_PLAN_KEY    = "ft_workout_plan";
 const LS_WORKOUT_STATE_KEY   = "ft_workout_state";
 const LS_WORKOUT_LOG_KEY     = "ft_workout_log";
+const LS_WORKOUT_SYNCED_KEY  = "ft_workout_synced"; // Set<id> of sessions confirmed in Supabase
 const LS_HISTORY_DOMAIN_KEY  = "ft_history_domain";
 const TRIP_DATE_STR        = "2026-08-22";
 const WK_ROTATION          = ["A", "B", "C"];
@@ -5680,18 +5688,52 @@ export default function App() {
   }, [user]);
 
   // ── Workout session sync ─────────────────────────────────
+  const markSynced = (id) => {
+    if (!id) return;
+    const s = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
+    s.add(id);
+    saveLS(LS_WORKOUT_SYNCED_KEY, [...s]);
+  };
+
   const handleWorkoutSessionSaved = useCallback(async (session) => {
-    if (user) await pushWorkoutSession(session);
+    if (!user) return;
+    const ok = await pushWorkoutSession(session);
+    if (ok) markSynced(session.id);
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!user) return;
-    fetchWorkoutSessions().then(sessions => {
-      if (!sessions || !sessions.length) return;
+    fetchWorkoutSessions().then(async (remote) => {
       const local = loadLS(LS_WORKOUT_LOG_KEY) || [];
+
+      // Mark all remote sessions as synced
+      const remoteIds = new Set((remote || []).map(s => s.id).filter(Boolean));
+      const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
+      remoteIds.forEach(id => synced.add(id));
+
+      // Merge any remote sessions not yet in local
       const localIds = new Set(local.map(s => s.id).filter(Boolean));
-      const merged = [...local, ...sessions.filter(s => !localIds.has(s.id))];
+      const merged = [...local, ...(remote || []).filter(s => !localIds.has(s.id))];
       if (merged.length > local.length) saveLS(LS_WORKOUT_LOG_KEY, merged);
+
+      // ── One-time migration: push local sessions missing from Supabase ──
+      // Assign IDs to old sessions that never got one, then push all unsynced
+      let changed = false;
+      const genId = () => { try { return crypto.randomUUID(); } catch { return `ws_${Date.now()}_${Math.random().toString(36).slice(2,9)}`; } };
+      const toMigrate = merged.map(s => {
+        if (!s.id) { changed = true; return { ...s, id: genId() }; }
+        return s;
+      });
+      if (changed) saveLS(LS_WORKOUT_LOG_KEY, toMigrate);
+
+      for (const s of toMigrate) {
+        if (!remoteIds.has(s.id)) {
+          const ok = await pushWorkoutSession(s);
+          if (ok) synced.add(s.id);
+        }
+      }
+
+      saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
