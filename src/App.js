@@ -2802,7 +2802,7 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
                             if (relMode && bodyWeight != null && bodyWeight > 0) {
                               const bwDisp = toDisp(bodyWeight, unit);
                               const pct = Math.round((w / bwDisp) * 100);
-                              return `+${pct}% BW`;
+                              return `${w >= bwDisp ? "+" : ""}${pct}% BW`;
                             }
                             return `${s.weight} ${unit}`;
                           })()}
