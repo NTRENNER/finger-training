@@ -4739,39 +4739,83 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
           {ex.logWeight && setsData?.sets ? (
             // ── Per-set rows ──
             <div style={{ marginTop: 10 }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                <span style={{ fontSize: 11, color: C.muted, width: 44 }}></span>
+              {/* Column headers */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: C.muted, width: 36, flexShrink: 0 }}></span>
+                <span style={{ fontSize: 11, color: C.muted, width: 48, textAlign: "center" }}>reps</span>
                 <span style={{ fontSize: 11, color: C.muted, width: 72, textAlign: "center" }}>weight</span>
                 {prevSets?.length > 0 && (
-                  <span style={{ fontSize: 11, color: C.muted, width: 72, textAlign: "center" }}>prev</span>
+                  <span style={{ fontSize: 11, color: C.muted, width: 44, textAlign: "center" }}>prev</span>
                 )}
               </div>
-              {setsData.sets.map((s, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 12, color: C.muted, width: 44, flexShrink: 0 }}>
-                    Set {i + 1} {ex.reps ? `× ${ex.reps}` : ""}
-                  </span>
-                  <input
-                    type="number" inputMode="decimal"
-                    value={s.weight}
-                    onChange={e => {
+
+              {setsData.sets.map((s, i) => {
+                const isExtra = i >= (ex.sets || 0);
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    {/* Set label */}
+                    <span style={{ fontSize: 12, color: isExtra ? C.orange : C.muted, width: 36, flexShrink: 0 }}>
+                      S{i + 1}
+                    </span>
+                    {/* Reps input */}
+                    <input
+                      type="text" inputMode="text"
+                      value={s.reps ?? ex.reps ?? ""}
+                      onChange={e => {
+                        const next = [...setsData.sets];
+                        next[i] = { ...next[i], reps: e.target.value };
+                        onSetsChange({ sets: next });
+                      }}
+                      style={{ ...inputStyle, width: 48, fontSize: 13 }}
+                      placeholder={ex.reps || ""}
+                    />
+                    {/* Weight input */}
+                    <input
+                      type="number" inputMode="decimal"
+                      value={s.weight}
+                      onChange={e => {
+                        const next = [...setsData.sets];
+                        next[i] = { ...next[i], weight: e.target.value };
+                        onSetsChange({ sets: next });
+                      }}
+                      style={inputStyle}
+                    />
+                    <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
+                    {/* Prev weight */}
+                    {prevSets?.[i] ? (
+                      <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevSets[i]}</span>
+                    ) : prevSets?.length > 0 ? (
+                      <span style={{ width: 44 }} />
+                    ) : null}
+                    {/* Done button */}
+                    {doneBtn(s.done, () => {
                       const next = [...setsData.sets];
-                      next[i] = { ...next[i], weight: e.target.value };
+                      next[i] = { ...next[i], done: !next[i].done };
                       onSetsChange({ sets: next });
-                    }}
-                    style={inputStyle}
-                  />
-                  <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
-                  {prevSets?.[i] && (
-                    <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevSets[i]}</span>
-                  )}
-                  {doneBtn(s.done, () => {
-                    const next = [...setsData.sets];
-                    next[i] = { ...next[i], done: !next[i].done };
-                    onSetsChange({ sets: next });
-                  })}
-                </div>
-              ))}
+                    })}
+                    {/* Remove extra set */}
+                    {isExtra && (
+                      <button
+                        onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
+                        style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1 }}
+                        title="Remove this set"
+                      >−</button>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Add set button */}
+              <button
+                onClick={() => onSetsChange({
+                  sets: [...setsData.sets, { weight: "", reps: ex.reps || "", done: false }]
+                })}
+                style={{
+                  marginTop: 4, width: "100%", padding: "5px 0",
+                  background: "none", border: `1px dashed ${C.border}`,
+                  color: C.muted, borderRadius: 6, fontSize: 12, cursor: "pointer",
+                }}
+              >+ Set</button>
             </div>
           ) : (
             // ── No weight, just reps label ──
@@ -4944,7 +4988,7 @@ function WorkoutTab({ unit }) {
   };
 
   const startSession = () => {
-    // Pre-populate weights from last session for this workout
+    // Pre-populate weights and reps from last session for this workout
     const prevLog = [...wLog].reverse().find(e => e.workout === rotKey);
     const init = {};
     workout.exercises.forEach(ex => {
@@ -4953,6 +4997,7 @@ function WorkoutTab({ unit }) {
         init[ex.id] = {
           sets: Array.from({ length: ex.sets }, (_, i) => ({
             weight: prevEx?.sets?.[i]?.weight || "",
+            reps:   prevEx?.sets?.[i]?.reps   || ex.reps || "",
             done: false,
           }))
         };
