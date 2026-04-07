@@ -2679,7 +2679,7 @@ function WorkoutHistoryView({ wLog, unit = "lbs" }) {
   );
 }
 
-function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession, notes = {}, onNoteChange, wLog = [] }) {
+function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession, onDeleteRep, onUpdateRep, notes = {}, onNoteChange, wLog = [] }) {
   const [domain,      setDomain]      = useState("fingers"); // "fingers" | "workout"
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
@@ -2690,6 +2690,28 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
   const [editGrip,    setEditGrip]    = useState("");
   const [editTarget,  setEditTarget]  = useState(null); // target_duration seconds
   const [noteKey,     setNoteKey]     = useState(null); // session currently showing note editor
+  // Per-rep editing
+  const [repEditMode, setRepEditMode] = useState(null);        // sessKey with reps in edit mode
+  const [editingRep,  setEditingRep]  = useState(null);        // { sessKey, repIdx, rep }
+  const [editRepLoad, setEditRepLoad] = useState("");          // display-unit load string
+  const [editRepTime, setEditRepTime] = useState("");          // seconds string
+
+  const openRepEdit = (sessKey, repIdx, rep) => {
+    setEditingRep({ sessKey, repIdx, rep });
+    setEditRepLoad(String(fmt1(toDisp(effectiveLoad(rep), unit))));
+    setEditRepTime(String(rep.actual_time_s));
+  };
+  const closeRepEdit = () => setEditingRep(null);
+  const saveRepEdit = () => {
+    if (!editingRep) return;
+    const loadKg = fromDisp(parseFloat(editRepLoad), unit);
+    const updates = { actual_time_s: parseFloat(editRepTime) };
+    // Update whichever load field the rep uses
+    if (editingRep.rep.avg_force_kg > 0) updates.avg_force_kg = loadKg;
+    else updates.weight_kg = loadKg;
+    onUpdateRep(editingRep.rep, updates);
+    closeRepEdit();
+  };
 
   const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
 
@@ -2861,17 +2883,92 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
               </div>
             )}
 
+            {/* Edit-reps toggle */}
+            {!isEditing && !isConfirming && (
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                <button
+                  onClick={() => { setRepEditMode(repEditMode === sessKey ? null : sessKey); closeRepEdit(); }}
+                  style={{
+                    background: "none", border: `1px solid ${repEditMode === sessKey ? C.red : C.border}`,
+                    color: repEditMode === sessKey ? C.red : C.muted,
+                    borderRadius: 12, padding: "2px 10px", fontSize: 11, cursor: "pointer",
+                  }}
+                >{repEditMode === sessKey ? "Done" : "Edit reps"}</button>
+              </div>
+            )}
+
+            {/* Rep chips */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {sess.reps.sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num).map((r, j) => (
-                <div key={j} style={{
-                  padding: "4px 10px", borderRadius: 8, fontSize: 12,
-                  background: r.actual_time_s >= sess.target_duration ? "#1a2f1a" : "#2f1a1a",
-                  border: `1px solid ${r.actual_time_s >= sess.target_duration ? C.green : C.red}`,
-                }}>
-                  <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
-                </div>
-              ))}
+              {sess.reps.sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num).map((r, j) => {
+                const isRepEditing = editingRep?.sessKey === sessKey && editingRep?.repIdx === j;
+                const passed = r.actual_time_s >= sess.target_duration;
+                return (
+                  <div key={j} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 0 }}>
+                    <div
+                      onClick={() => repEditMode === sessKey && !isRepEditing && openRepEdit(sessKey, j, r)}
+                      style={{
+                        padding: "4px 10px", borderRadius: 8, fontSize: 12,
+                        background: isRepEditing ? C.blue + "33" : passed ? "#1a2f1a" : "#2f1a1a",
+                        border: `1px solid ${isRepEditing ? C.blue : passed ? C.green : C.red}`,
+                        cursor: repEditMode === sessKey ? "pointer" : "default",
+                        paddingRight: repEditMode === sessKey ? 22 : 10,
+                      }}
+                    >
+                      <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
+                    </div>
+                    {repEditMode === sessKey && (
+                      <button
+                        onClick={() => onDeleteRep(r)}
+                        title="Delete this rep"
+                        style={{
+                          position: "absolute", right: 3, top: "50%", transform: "translateY(-50%)",
+                          background: C.red, color: "#fff", border: "none", borderRadius: "50%",
+                          width: 16, height: 16, fontSize: 10, lineHeight: "16px", textAlign: "center",
+                          cursor: "pointer", padding: 0, fontWeight: 700,
+                        }}
+                      >×</button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+
+            {/* Inline rep editor */}
+            {editingRep?.sessKey === sessKey && (
+              <div style={{ marginTop: 10, padding: 10, background: C.bg, borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Edit rep</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    <label style={{ fontSize: 10, color: C.muted }}>Load ({unit})</label>
+                    <input
+                      type="number"
+                      value={editRepLoad}
+                      onChange={e => setEditRepLoad(e.target.value)}
+                      style={{ width: 80, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 13 }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    <label style={{ fontSize: 10, color: C.muted }}>Time (s)</label>
+                    <input
+                      type="number"
+                      value={editRepTime}
+                      onChange={e => setEditRepTime(e.target.value)}
+                      style={{ width: 60, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 13 }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={saveRepEdit} style={{
+                    background: C.green, border: "none", borderRadius: 6, color: "#000",
+                    fontSize: 11, fontWeight: 700, padding: "4px 10px", cursor: "pointer",
+                  }}>Save</button>
+                  <button onClick={closeRepEdit} style={{
+                    background: C.border, border: "none", borderRadius: 6, color: C.muted,
+                    fontSize: 11, padding: "4px 8px", cursor: "pointer",
+                  }}>Cancel</button>
+                </div>
+              </div>
+            )}
 
             {/* Note preview (when note exists and editor is closed) */}
             {notes[sessKey] && noteKey !== sessKey && (
@@ -5155,7 +5252,7 @@ export default function App() {
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateSession = useCallback(async (sessionKey, updates) => {
-    // updates: { hand?, grip? }
+    // updates: { hand?, grip?, target_duration? }
     setHistory(h => h.map(r =>
       (r.session_id || r.date) === sessionKey ? { ...r, ...updates } : r
     ));
@@ -5166,6 +5263,28 @@ export default function App() {
       if (error) console.warn("Supabase update:", error.message);
     }
   }, [user]);
+
+  // Rep-level identity: prefer Supabase id, fall back to composite key
+  const repMatchKey = (r) =>
+    r.id ? `id:${r.id}` : `${r.session_id || r.date}|${r.set_num}|${r.rep_num}`;
+
+  const deleteRep = useCallback(async (rep) => {
+    const k = repMatchKey(rep);
+    setHistory(h => h.filter(r => repMatchKey(r) !== k));
+    if (user && rep.id) {
+      const { error } = await supabase.from("reps").delete().eq("id", rep.id);
+      if (error) console.warn("Supabase deleteRep:", error.message);
+    }
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateRep = useCallback(async (rep, updates) => {
+    const k = repMatchKey(rep);
+    setHistory(h => h.map(r => repMatchKey(r) === k ? { ...r, ...updates } : r));
+    if (user && rep.id) {
+      const { error } = await supabase.from("reps").update(updates).eq("id", rep.id);
+      if (error) console.warn("Supabase updateRep:", error.message);
+    }
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const deleteSession = useCallback(async (sessionKey) => {
     // sessionKey is session_id or date (same key used in grouping)
@@ -5650,7 +5769,7 @@ export default function App() {
       {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} />}
-      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} notes={notes} onNoteChange={handleNoteChange} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
+      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} notes={notes} onNoteChange={handleNoteChange} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
       {tab === 5 && <TrendsView history={history} unit={unit} wLog={loadLS(LS_WORKOUT_LOG_KEY) || []} />}
       {tab === 6 && (
         <SettingsView
