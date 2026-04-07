@@ -44,6 +44,7 @@ const DEF_FAT = {
 
 const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
+const LS_BW_LOG_KEY    = "ft_bw_log";    // [{ date, kg }] body weight history
 const LS_READINESS_KEY = "ft_readiness"; // { [date]: 1-5 } subjective daily rating
 const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-calibration snapshot
 const LS_ACTIVITY_KEY  = "ft_activity";  // [{ date, type, duration_min, intensity }] climbing / other sessions
@@ -3373,6 +3374,81 @@ function WorkoutTrendsView({ unit = "lbs" }) {
   );
 }
 
+function BodyWeightTrendsView({ unit = "lbs" }) {
+  const bwLog = useMemo(() => loadLS(LS_BW_LOG_KEY) || [], []); // eslint-disable-line react-hooks/exhaustive-deps
+  const chartData = useMemo(() =>
+    bwLog.map(e => ({ date: e.date, weight: Math.round(toDisp(e.kg, unit) * 10) / 10 })),
+    [bwLog, unit]
+  );
+  const latest = chartData[chartData.length - 1];
+  const first  = chartData[0];
+  const delta  = latest && first && chartData.length > 1
+    ? Math.round((latest.weight - first.weight) * 10) / 10
+    : null;
+
+  if (!chartData.length) return (
+    <div style={{ textAlign: "center", color: C.muted, marginTop: 60, fontSize: 14 }}>
+      Update your body weight in Settings to start tracking it here.
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <Card style={{ flex: 1 }}>
+          <Label>Current</Label>
+          <div style={{ fontSize: 22, fontWeight: 800, color: C.text }}>
+            {latest?.weight} <span style={{ fontSize: 13, fontWeight: 400, color: C.muted }}>{unit}</span>
+          </div>
+          <div style={{ fontSize: 11, color: C.muted }}>{latest?.date}</div>
+        </Card>
+        {delta != null && (
+          <Card style={{ flex: 1 }}>
+            <Label>Change</Label>
+            <div style={{ fontSize: 22, fontWeight: 800, color: delta < 0 ? C.green : delta > 0 ? C.orange : C.muted }}>
+              {delta > 0 ? "+" : ""}{delta} <span style={{ fontSize: 13, fontWeight: 400, color: C.muted }}>{unit}</span>
+            </div>
+            <div style={{ fontSize: 11, color: C.muted }}>since {first?.date}</div>
+          </Card>
+        )}
+      </div>
+
+      {chartData.length < 2 ? (
+        <Card>
+          <div style={{ color: C.muted, fontSize: 13, textAlign: "center", padding: "16px 0" }}>
+            Log your weight again after updating it in Settings to see a trend line.
+          </div>
+        </Card>
+      ) : (
+        <Card>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>Body weight over time</div>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
+              <YAxis
+                tick={{ fill: C.muted, fontSize: 11 }}
+                unit={` ${unit}`}
+                domain={["auto", "auto"]}
+              />
+              <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
+              <Line
+                type="monotone"
+                dataKey="weight"
+                stroke={C.purple}
+                strokeWidth={2}
+                name={`Weight (${unit})`}
+                dot={{ r: 4, fill: C.purple }}
+                activeDot={{ r: 6 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function TrendsView({ history, unit = "lbs" }) {
   const [domain, setDomain] = useState("fingers"); // "fingers" | "workout"
   const [sel,     setSel]     = useState(45);
@@ -3424,12 +3500,12 @@ function TrendsView({ history, unit = "lbs" }) {
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Trends</h2>
 
-      {/* Domain toggle: Fingers vs Workout */}
+      {/* Domain toggle: Fingers / Workout / Body */}
       <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
-        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"]].map(([key, label]) => (
+        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["body", "⚖️ Body"]].map(([key, label]) => (
           <button key={key} onClick={() => setDomain(key)} style={{
             flex: 1, padding: "8px 0", borderRadius: 20, border: "none", cursor: "pointer",
-            fontWeight: 700, fontSize: 13,
+            fontWeight: 700, fontSize: 12,
             background: domain === key ? C.blue : "transparent",
             color: domain === key ? "#fff" : C.muted,
             transition: "background 0.15s",
@@ -3438,6 +3514,7 @@ function TrendsView({ history, unit = "lbs" }) {
       </div>
 
       {domain === "workout" && <WorkoutTrendsView unit={unit} />}
+      {domain === "body"    && <BodyWeightTrendsView unit={unit} />}
       {domain === "fingers" && <>
 
       {/* Filters */}
@@ -5459,7 +5536,17 @@ export default function App() {
 
   // ── Body weight ───────────────────────────────────────────
   const [bodyWeight, setBodyWeight] = useState(() => loadLS(LS_BW_KEY) ?? null);
-  const saveBW = (kg) => { setBodyWeight(kg); saveLS(LS_BW_KEY, kg); };
+  const saveBW = (kg) => {
+    setBodyWeight(kg);
+    saveLS(LS_BW_KEY, kg);
+    if (kg != null) {
+      const log = loadLS(LS_BW_LOG_KEY) || [];
+      const d = today();
+      // Replace existing entry for today if present, otherwise append
+      const updated = log.filter(e => e.date !== d);
+      saveLS(LS_BW_LOG_KEY, [...updated, { date: d, kg }].sort((a, b) => a.date < b.date ? -1 : 1));
+    }
+  };
 
   // ── Session notes ─────────────────────────────────────────
   const [notes, setNotes] = useState(() => loadLS(LS_NOTES_KEY) || {});
