@@ -816,6 +816,80 @@ function Sect({ title, children }) {
   );
 }
 
+// Inline body-weight prompt — shown in session setup when BW is stale (>3 days)
+function BwPrompt({ unit = "lbs", onSave }) {
+  const bwLog  = loadLS(LS_BW_LOG_KEY) || [];
+  const latest = bwLog.length ? bwLog[bwLog.length - 1] : null;
+  const daysSince = latest
+    ? Math.floor((Date.now() - new Date(latest.date).getTime()) / 864e5)
+    : Infinity;
+
+  const [editing,  setEditing]  = useState(false);
+  const [inputVal, setInputVal] = useState(() =>
+    latest ? String(fmt1(toDisp(latest.kg, unit))) : ""
+  );
+
+  // Only show if stale or never set
+  if (daysSince < 3) return null;
+
+  const save = () => {
+    const kg = fromDisp(parseFloat(inputVal), unit);
+    if (!isNaN(kg) && kg > 0) { onSave(kg); setEditing(false); }
+  };
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "10px 14px", borderRadius: 10, marginBottom: 14,
+      background: C.card, border: `1px solid ${C.border}`,
+    }}>
+      <span style={{ fontSize: 16 }}>⚖️</span>
+      {!editing ? (
+        <>
+          <span style={{ flex: 1, fontSize: 13, color: C.muted }}>
+            {latest
+              ? <>Still <b style={{ color: C.text }}>{fmt1(toDisp(latest.kg, unit))} {unit}</b>?</>
+              : <span>Body weight not set</span>}
+          </span>
+          <button onClick={() => setEditing(true)} style={{
+            padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: C.border, color: C.text, fontSize: 12, fontWeight: 600,
+          }}>{latest ? "Update" : "Set"}</button>
+          {latest && (
+            <button onClick={() => onSave(latest.kg)} style={{
+              padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+              background: C.green + "33", color: C.green, fontSize: 12, fontWeight: 600,
+            }}>✓ Yes</button>
+          )}
+        </>
+      ) : (
+        <>
+          <input
+            type="number"
+            value={inputVal}
+            onChange={e => setInputVal(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && save()}
+            autoFocus
+            style={{
+              flex: 1, background: C.bg, border: `1px solid ${C.border}`,
+              borderRadius: 6, color: C.text, fontSize: 14, padding: "5px 8px",
+            }}
+          />
+          <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
+          <button onClick={save} style={{
+            padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: C.blue, color: "#000", fontSize: 12, fontWeight: 700,
+          }}>Save</button>
+          <button onClick={() => setEditing(false)} style={{
+            padding: "5px 8px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: C.border, color: C.muted, fontSize: 12,
+          }}>✕</button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function BigTimer({ seconds, targetSeconds, running }) {
   const pct = targetSeconds ? Math.min(seconds / targetSeconds, 1) : 0;
   const over = seconds >= targetSeconds;
@@ -1911,7 +1985,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
   );
 }
 
-function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, activities = [], onLogActivity = () => {} }) {
+function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, activities = [], onLogActivity = () => {} }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -2125,6 +2199,7 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
         );
       })()}
 
+      <BwPrompt unit={unit} onSave={onBwSave} />
       <Btn
         onClick={onStart}
         disabled={!config.grip}
@@ -5202,7 +5277,7 @@ function WorkoutEditor({ wKey, workout, onSave, onClose, onReset }) {
 }
 
 // ── Main WorkoutTab ───────────────────────────────────────────
-function WorkoutTab({ unit, onSessionSaved }) {
+function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
   const [subTab, setSubTab]         = useState("today");
   const [plan,   setPlan]           = useState(() => loadLS(LS_WORKOUT_PLAN_KEY)  || DEFAULT_WORKOUTS);
   const [wState, setWState]         = useState(() => loadLS(LS_WORKOUT_STATE_KEY) || { rotationIndex: 0, sessionCount: 0 });
@@ -5347,10 +5422,13 @@ function WorkoutTab({ unit, onSessionSaved }) {
               ))}
             </div>
 
+            <div style={{ marginTop: 16 }}>
+              <BwPrompt unit={unit} onSave={onBwSave} />
+            </div>
             <button
               onClick={startSession}
               style={{
-                width: "100%", marginTop: 16, padding: "14px",
+                width: "100%", padding: "14px",
                 background: C.blue, color: "#000",
                 border: "none", borderRadius: 10, fontWeight: 700,
                 fontSize: 16, cursor: "pointer",
@@ -6028,6 +6106,7 @@ export default function App() {
                 onCalibrate={() => setCalMode(true)}
                 history={history}
                 unit={unit}
+                onBwSave={saveBW}
                 readiness={readiness}
                 todaySubj={todaySubj}
                 onSubjReadiness={handleSubjReadiness}
@@ -6155,7 +6234,7 @@ export default function App() {
 
       {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
-      {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} />}
+      {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} />}
       {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps([rep])} notes={notes} onNoteChange={handleNoteChange} />}
       {tab === 5 && <TrendsView history={history} unit={unit} />}
       {tab === 6 && (
