@@ -2607,7 +2607,7 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = 
 // HISTORY VIEW
 // ─────────────────────────────────────────────────────────────
 // ── Workout session history sub-view ──────────────────────────
-function WorkoutHistoryView({ unit = "lbs" }) {
+function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
   // Always read fresh from localStorage — no useState wrapper so newly
   // completed sessions appear immediately without needing a remount.
   const [tick,        setTick]        = useState(0); // increment to force re-read
@@ -2615,6 +2615,7 @@ function WorkoutHistoryView({ unit = "lbs" }) {
   const [editWorkout, setEditWorkout] = useState(null);
   const [filterEx,   setFilterEx]   = useState("");  // "" = all, or exercise id
   const [filterDays, setFilterDays] = useState(0);   // 0 = all time, else last N days
+  const [relMode,    setRelMode]    = useState(false);
 
   const log = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2678,7 +2679,14 @@ function WorkoutHistoryView({ unit = "lbs" }) {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 8 }}>
+        {bodyWeight != null && (
+          <button onClick={() => setRelMode(r => !r)} style={{
+            padding: "5px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
+            background: relMode ? C.purple : C.border,
+            color: relMode ? "#fff" : C.muted, fontWeight: relMode ? 700 : 400,
+          }}>% BW</button>
+        )}
         <Btn small onClick={() => downloadWorkoutCSV(log)} color={C.muted}>↓ CSV</Btn>
       </div>
 
@@ -2788,7 +2796,16 @@ function WorkoutHistoryView({ unit = "lbs" }) {
                           border: `1px solid ${s.done ? C.green : C.border}`,
                           color: s.done ? C.text : C.muted,
                         }}>
-                          {s.weight ? `${s.weight} ${unit}` : "—"}
+                          {(() => {
+                            if (!s.weight) return "—";
+                            const w = parseFloat(s.weight);
+                            if (relMode && bodyWeight != null && bodyWeight > 0) {
+                              const bwDisp = toDisp(bodyWeight, unit);
+                              const pct = Math.round((w / bwDisp) * 100);
+                              return `+${pct}% BW`;
+                            }
+                            return `${s.weight} ${unit}`;
+                          })()}
                         </span>
                       ))}
                     </div>
@@ -2812,7 +2829,7 @@ function WorkoutHistoryView({ unit = "lbs" }) {
   );
 }
 
-function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpdateSession, onDeleteRep, onUpdateRep, onAddRep, notes = {}, onNoteChange }) {
+function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onDeleteSession, onUpdateSession, onDeleteRep, onUpdateRep, onAddRep, notes = {}, onNoteChange }) {
   const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
   const switchDomain = (d) => { setDomain(d); saveLS(LS_HISTORY_DOMAIN_KEY, d); };
   const [grip,        setGrip]        = useState("");
@@ -2926,7 +2943,7 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
         ))}
       </div>
 
-      {domain === "workout" && <WorkoutHistoryView unit={unit} />}
+      {domain === "workout" && <WorkoutHistoryView unit={unit} bodyWeight={bodyWeight} />}
       {domain === "fingers" && <>
 
       {/* Filters */}
@@ -6041,7 +6058,7 @@ export default function App() {
       {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} />}
-      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps([rep])} notes={notes} onNoteChange={handleNoteChange} />}
+      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps([rep])} notes={notes} onNoteChange={handleNoteChange} />}
       {tab === 5 && <TrendsView history={history} unit={unit} />}
       {tab === 6 && (
         <SettingsView
