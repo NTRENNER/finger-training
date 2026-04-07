@@ -99,6 +99,30 @@ function downloadCSV(reps) {
   a.click();
 }
 
+function downloadWorkoutCSV(log) {
+  // Flatten sessions → one row per set
+  const rows = [];
+  for (const s of log) {
+    for (const [exId, exData] of Object.entries(s.exercises || {})) {
+      const exName = exId.replace(/_/g, " ");
+      if (exData.sets && exData.sets.length > 0) {
+        exData.sets.forEach((set, i) => {
+          rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, set.reps ?? "", set.weight ?? "", set.done ? "yes" : "no"]);
+        });
+      } else {
+        rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, "", "", "", exData.done ? "yes" : "no"]);
+      }
+    }
+  }
+  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "reps", "weight", "done"];
+  const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = Object.assign(document.createElement("a"), {
+    href: URL.createObjectURL(blob), download: "workout-history.csv",
+  });
+  a.click();
+}
+
 // ─────────────────────────────────────────────────────────────
 // MONOD-SCHERRER CURVE FIT  (standalone — used by CalibrationView & AnalysisView)
 // ─────────────────────────────────────────────────────────────
@@ -2627,6 +2651,9 @@ function WorkoutHistoryView({ unit = "lbs" }) {
 
   return (
     <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <Btn small onClick={() => downloadWorkoutCSV(log)} color={C.muted}>↓ CSV</Btn>
+      </div>
       {sorted.map((session) => {
         const { origIdx } = session;
         const isEditing = editIdx === origIdx;
