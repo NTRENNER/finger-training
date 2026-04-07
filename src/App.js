@@ -579,6 +579,48 @@ function useTindeq() {
 // ─────────────────────────────────────────────────────────────
 // SUPABASE HELPERS
 // ─────────────────────────────────────────────────────────────
+// workout_sessions table — run once in Supabase SQL editor:
+//   CREATE TABLE workout_sessions (
+//     id text PRIMARY KEY,
+//     date text, workout text, session_number integer,
+//     exercises jsonb,
+//     created_at timestamptz DEFAULT now()
+//   );
+//   ALTER TABLE workout_sessions ENABLE ROW LEVEL SECURITY;
+//   CREATE POLICY "auth_all" ON workout_sessions FOR ALL USING (auth.uid() IS NOT NULL);
+
+async function pushWorkoutSession(session) {
+  try {
+    const { error } = await supabase.from("workout_sessions").upsert({
+      id:             session.id,
+      date:           session.date,
+      workout:        session.workout,
+      session_number: session.sessionNumber,
+      exercises:      session.exercises,
+    }, { onConflict: "id" });
+    if (error) { console.warn("Supabase workout push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase workout push exception:", e.message);
+    return false;
+  }
+}
+
+async function fetchWorkoutSessions() {
+  const { data, error } = await supabase
+    .from("workout_sessions")
+    .select("*")
+    .order("date", { ascending: false });
+  if (error) { console.warn("Supabase workout fetch:", error.message); return null; }
+  return (data || []).map(s => ({
+    id:            s.id,
+    date:          s.date,
+    workout:       s.workout,
+    sessionNumber: s.session_number,
+    exercises:     s.exercises || {},
+  }));
+}
+
 // The new schema uses a `reps` table. Create it with:
 //   CREATE TABLE reps (
 //     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -4966,7 +5008,7 @@ function WorkoutEditor({ wKey, workout, onSave, onClose, onReset }) {
 }
 
 // ── Main WorkoutTab ───────────────────────────────────────────
-function WorkoutTab({ unit }) {
+function WorkoutTab({ unit, onSessionSaved }) {
   const [subTab, setSubTab]         = useState("today");
   const [plan,   setPlan]           = useState(() => loadLS(LS_WORKOUT_PLAN_KEY)  || DEFAULT_WORKOUTS);
   const [wState, setWState]         = useState(() => loadLS(LS_WORKOUT_STATE_KEY) || { rotationIndex: 0, sessionCount: 0 });
@@ -5017,10 +5059,14 @@ function WorkoutTab({ unit }) {
     setSessionActive(true);
   };
 
+  const genId = () => {
+    try { return crypto.randomUUID(); } catch { return `ws_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`; }
+  };
+
   const completeSession = () => {
-    saveLog([...wLog, {
-      date: today(), workout: rotKey, sessionNumber: sessionN, exercises: sessionData,
-    }]);
+    const session = { id: genId(), date: today(), workout: rotKey, sessionNumber: sessionN, exercises: sessionData };
+    saveLog([...wLog, session]);
+    if (onSessionSaved) onSessionSaved(session);
     saveState({
       rotationIndex: (wState.rotationIndex + 1) % WK_ROTATION.length,
       sessionCount: wState.sessionCount + 1,
@@ -5347,6 +5393,23 @@ export default function App() {
         if (reps && reps.length > 0) setHistory(reps);
         refreshPending();
       });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // ── Workout session sync ─────────────────────────────────
+  const handleWorkoutSessionSaved = useCallback(async (session) => {
+    if (user) await pushWorkoutSession(session);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user) return;
+    fetchWorkoutSessions().then(sessions => {
+      if (!sessions || !sessions.length) return;
+      const local = loadLS(LS_WORKOUT_LOG_KEY) || [];
+      const localIds = new Set(local.map(s => s.id).filter(Boolean));
+      const merged = [...local, ...sessions.filter(s => !localIds.has(s.id))];
+      if (merged.length > local.length) saveLS(LS_WORKOUT_LOG_KEY, merged);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
@@ -5884,7 +5947,7 @@ export default function App() {
 
       {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
-      {tab === 3 && <WorkoutTab unit={unit} />}
+      {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} />}
       {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps([rep])} notes={notes} onNoteChange={handleNoteChange} />}
       {tab === 5 && <TrendsView history={history} unit={unit} />}
       {tab === 6 && (
