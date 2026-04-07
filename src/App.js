@@ -2536,49 +2536,116 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = 
 // ─────────────────────────────────────────────────────────────
 // ── Workout session history sub-view ──────────────────────────
 function WorkoutHistoryView({ wLog, unit = "lbs" }) {
-  if (!wLog.length) return (
+  const [log,         setLog]         = useState(wLog);
+  const [editIdx,     setEditIdx]     = useState(null);
+  const [editWorkout, setEditWorkout] = useState(null);
+
+  // Flat name lookup across all workout definitions so reclassifying
+  // doesn't hide exercises logged under a different workout letter
+  const exNames = useMemo(() => {
+    const map = {};
+    for (const wk of Object.values(DEFAULT_WORKOUTS)) {
+      for (const ex of (wk.exercises || [])) {
+        if (!map[ex.id]) map[ex.id] = ex.name || ex.id.replace(/_/g, " ");
+      }
+    }
+    return map;
+  }, []);
+
+  // Sorted newest-first for display; track original index for saves
+  const sorted = useMemo(() =>
+    log.map((s, origIdx) => ({ ...s, origIdx }))
+       .sort((a, b) => a.date < b.date ? 1 : -1),
+    [log]
+  );
+
+  const saveEdit = (origIdx) => {
+    const updated = log.map((s, i) => i === origIdx ? { ...s, workout: editWorkout } : s);
+    setLog(updated);
+    saveLS(LS_WORKOUT_LOG_KEY, updated);
+    setEditIdx(null);
+    setEditWorkout(null);
+  };
+
+  if (!log.length) return (
     <div style={{ textAlign: "center", color: C.muted, marginTop: 60, fontSize: 15 }}>
       No workout sessions yet — start a workout!
     </div>
   );
 
-  const sorted = [...wLog].sort((a, b) => a.date < b.date ? 1 : -1);
-
   return (
     <div>
-      {sorted.map((session, i) => {
+      {sorted.map((session) => {
+        const { origIdx } = session;
+        const isEditing = editIdx === origIdx;
         const wkDef = DEFAULT_WORKOUTS[session.workout] || {};
-        const exercises = wkDef.exercises || [];
+
         return (
-          <Card key={i} style={{ marginBottom: 10 }}>
+          <Card key={origIdx} style={{ marginBottom: 10 }}>
             {/* Session header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div>
                 <span style={{ fontWeight: 700, fontSize: 15 }}>Workout {session.workout}</span>
-                {wkDef.name && (
+                {wkDef.name && !isEditing && (
                   <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>{wkDef.name}</span>
                 )}
               </div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                {session.sessionNumber && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {session.sessionNumber && !isEditing && (
                   <span style={{ fontSize: 11, color: C.muted }}>#{session.sessionNumber}</span>
                 )}
                 <span style={{ fontSize: 12, color: C.muted }}>{session.date}</span>
+                {!isEditing && (
+                  <button
+                    onClick={() => { setEditIdx(origIdx); setEditWorkout(session.workout); }}
+                    style={{ background: "none", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
+                    title="Edit workout type"
+                  >✏️</button>
+                )}
               </div>
             </div>
 
-            {/* Exercises */}
-            {exercises.map(ex => {
-              const data = session.exercises?.[ex.id];
-              if (!data) return null;
-              const exName = ex.name || ex.id.replace(/_/g, " ");
+            {/* Edit: reclassify workout type */}
+            {isEditing && (
+              <div style={{ marginBottom: 12, padding: 10, background: C.bg, borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Change workout type:</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                  {Object.keys(DEFAULT_WORKOUTS).map(key => (
+                    <button key={key} onClick={() => setEditWorkout(key)} style={{
+                      padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+                      fontWeight: 700, fontSize: 13, textAlign: "center",
+                      background: editWorkout === key ? C.blue : C.border,
+                      color: editWorkout === key ? "#fff" : C.muted,
+                    }}>
+                      <div>{key}</div>
+                      <div style={{ fontSize: 9, fontWeight: 400, marginTop: 1, opacity: 0.8 }}>
+                        {DEFAULT_WORKOUTS[key]?.name || ""}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => saveEdit(origIdx)} style={{
+                    background: C.green, border: "none", borderRadius: 6, color: "#000",
+                    fontSize: 12, fontWeight: 700, padding: "5px 14px", cursor: "pointer",
+                  }}>Save</button>
+                  <button onClick={() => { setEditIdx(null); setEditWorkout(null); }} style={{
+                    background: C.border, border: "none", borderRadius: 6, color: C.muted,
+                    fontSize: 12, padding: "5px 10px", cursor: "pointer",
+                  }}>Cancel</button>
+                </div>
+              </div>
+            )}
 
-              // Weight-logged exercise: show per-set chips
+            {/* Exercises — render all that have actual data, regardless of workout definition */}
+            {Object.entries(session.exercises || {}).map(([id, data]) => {
+              const exName = exNames[id] || id.replace(/_/g, " ");
+
               if (data.sets && data.sets.length) {
                 const anyDone = data.sets.some(s => s.done);
                 if (!anyDone) return null;
                 return (
-                  <div key={ex.id} style={{ marginBottom: 8 }}>
+                  <div key={id} style={{ marginBottom: 8 }}>
                     <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{exName}</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {data.sets.map((s, si) => (
@@ -2596,10 +2663,9 @@ function WorkoutHistoryView({ wLog, unit = "lbs" }) {
                 );
               }
 
-              // Done-only exercise: simple checkmark line
               if (data.done) {
                 return (
-                  <div key={ex.id} style={{ fontSize: 12, color: C.muted, marginBottom: 3 }}>
+                  <div key={id} style={{ fontSize: 12, color: C.muted, marginBottom: 3 }}>
                     <span style={{ color: C.green, marginRight: 5 }}>✓</span>{exName}
                   </div>
                 );
