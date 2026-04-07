@@ -2613,13 +2613,12 @@ function WorkoutHistoryView({ unit = "lbs" }) {
   const [tick,        setTick]        = useState(0); // increment to force re-read
   const [editIdx,     setEditIdx]     = useState(null);
   const [editWorkout, setEditWorkout] = useState(null);
-  const [filterType,  setFilterType]  = useState("");   // "" = all, or "A"/"B"/"C" etc.
-  const [filterDays,  setFilterDays]  = useState(0);    // 0 = all time, else last N days
+  const [filterEx,   setFilterEx]   = useState("");  // "" = all, or exercise id
+  const [filterDays, setFilterDays] = useState(0);   // 0 = all time, else last N days
 
   const log = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Flat name lookup across all workout definitions so reclassifying
-  // doesn't hide exercises logged under a different workout letter
+  // Flat name lookup across all workout definitions
   const exNames = useMemo(() => {
     const map = {};
     for (const wk of Object.values(DEFAULT_WORKOUTS)) {
@@ -2630,22 +2629,31 @@ function WorkoutHistoryView({ unit = "lbs" }) {
     return map;
   }, []);
 
-  // Unique workout types present in the log
-  const workoutTypes = useMemo(() =>
-    [...new Set(log.map(s => s.workout).filter(Boolean))].sort(),
-    [log]
-  );
+  // Exercises that appear in the log with actual sets (reps + weight) — the measurable ones
+  const measurableExIds = useMemo(() => {
+    const seen = new Set();
+    for (const s of log) {
+      for (const [id, data] of Object.entries(s.exercises || {})) {
+        if (data.sets && data.sets.length > 0) seen.add(id);
+      }
+    }
+    return [...seen].sort((a, b) => (exNames[a] || a).localeCompare(exNames[b] || b));
+  }, [log, exNames]);
 
-  // Apply filters
+  // Apply filters — a session matches if it contains the selected exercise with sets
   const filtered = useMemo(() => {
     const cutoff = filterDays > 0
       ? new Date(Date.now() - filterDays * 864e5).toISOString().slice(0, 10)
       : null;
-    return log.filter(s =>
-      (!filterType || s.workout === filterType) &&
-      (!cutoff    || s.date >= cutoff)
-    );
-  }, [log, filterType, filterDays]);
+    return log.filter(s => {
+      if (cutoff && s.date < cutoff) return false;
+      if (filterEx) {
+        const exData = s.exercises?.[filterEx];
+        if (!exData?.sets?.length) return false;
+      }
+      return true;
+    });
+  }, [log, filterEx, filterDays]);
 
   // Sorted newest-first for display; track original index for saves
   const sorted = useMemo(() =>
@@ -2676,16 +2684,13 @@ function WorkoutHistoryView({ unit = "lbs" }) {
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        {workoutTypes.map(type => {
-          const name = DEFAULT_WORKOUTS[type]?.name || type;
-          return (
-            <button key={type} onClick={() => setFilterType(filterType === type ? "" : type)} style={{
-              padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
-              background: filterType === type ? C.orange : C.border,
-              color: filterType === type ? "#fff" : C.muted, border: "none",
-            }}>{type} · {name}</button>
-          );
-        })}
+        {measurableExIds.map(id => (
+          <button key={id} onClick={() => setFilterEx(filterEx === id ? "" : id)} style={{
+            padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+            background: filterEx === id ? C.orange : C.border,
+            color: filterEx === id ? "#fff" : C.muted, border: "none",
+          }}>{exNames[id] || id}</button>
+        ))}
         {[30, 60, 90].map(days => (
           <button key={days} onClick={() => setFilterDays(filterDays === days ? 0 : days)} style={{
             padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
