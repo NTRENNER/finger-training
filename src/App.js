@@ -2688,6 +2688,7 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
   const [editKey,     setEditKey]     = useState(null);
   const [editHand,    setEditHand]    = useState("L");
   const [editGrip,    setEditGrip]    = useState("");
+  const [editTarget,  setEditTarget]  = useState(null); // target_duration seconds
   const [noteKey,     setNoteKey]     = useState(null); // session currently showing note editor
 
   const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
@@ -2790,7 +2791,7 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
                       }}
                       title={notes[sessKey] ? "View/edit note" : "Add note"}
                     >📝</button>
-                    <button onClick={() => { setEditKey(sessKey); setEditHand(sess.hand); setEditGrip(sess.grip); setConfirmKey(null); setNoteKey(null); }} style={{
+                    <button onClick={() => { setEditKey(sessKey); setEditHand(sess.hand); setEditGrip(sess.grip); setEditTarget(sess.target_duration); setConfirmKey(null); setNoteKey(null); }} style={{
                       background: "none", border: "none", color: C.muted,
                       fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1,
                     }} title="Edit session">✏️</button>
@@ -2817,30 +2818,46 @@ function HistoryView({ history, onDownload, unit = "lbs", onDeleteSession, onUpd
 
             {/* Edit UI */}
             {isEditing && (
-              <div style={{ marginBottom: 10, padding: 10, background: C.bg, borderRadius: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <div style={{ display: "flex", gap: 4 }}>
-                  {["L","R","B"].map(h => (
-                    <button key={h} onClick={() => setEditHand(h)} style={{
-                      padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
-                      background: editHand === h ? C.purple : C.border,
-                      color: editHand === h ? "#fff" : C.muted,
-                    }}>{h === "L" ? "Left" : h === "R" ? "Right" : "Both"}</button>
+              <div style={{ marginBottom: 10, padding: 10, background: C.bg, borderRadius: 8 }}>
+                {/* Row 1: hand + grip */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {["L","R","B"].map(h => (
+                      <button key={h} onClick={() => setEditHand(h)} style={{
+                        padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                        background: editHand === h ? C.purple : C.border,
+                        color: editHand === h ? "#fff" : C.muted,
+                      }}>{h === "L" ? "Left" : h === "R" ? "Right" : "Both"}</button>
+                    ))}
+                  </div>
+                  <input
+                    value={editGrip}
+                    onChange={e => setEditGrip(e.target.value)}
+                    placeholder="Grip type"
+                    style={{ flex: 1, minWidth: 80, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 12 }}
+                  />
+                </div>
+                {/* Row 2: zone / target duration */}
+                <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+                  {TARGET_OPTIONS.map(o => (
+                    <button key={o.seconds} onClick={() => setEditTarget(o.seconds)} style={{
+                      padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                      background: editTarget === o.seconds ? C.blue : C.border,
+                      color: editTarget === o.seconds ? "#fff" : C.muted,
+                    }}>{o.label}</button>
                   ))}
                 </div>
-                <input
-                  value={editGrip}
-                  onChange={e => setEditGrip(e.target.value)}
-                  placeholder="Grip type"
-                  style={{ flex: 1, minWidth: 80, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 12 }}
-                />
-                <button onClick={() => { onUpdateSession(sessKey, { hand: editHand, grip: editGrip }); setEditKey(null); }} style={{
-                  background: C.green, border: "none", borderRadius: 6, color: "#000",
-                  fontSize: 11, fontWeight: 700, padding: "4px 10px", cursor: "pointer",
-                }}>Save</button>
-                <button onClick={() => setEditKey(null)} style={{
-                  background: C.border, border: "none", borderRadius: 6, color: C.muted,
-                  fontSize: 11, padding: "4px 8px", cursor: "pointer",
-                }}>Cancel</button>
+                {/* Row 3: save / cancel */}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => { onUpdateSession(sessKey, { hand: editHand, grip: editGrip, target_duration: editTarget }); setEditKey(null); }} style={{
+                    background: C.green, border: "none", borderRadius: 6, color: "#000",
+                    fontSize: 11, fontWeight: 700, padding: "4px 10px", cursor: "pointer",
+                  }}>Save</button>
+                  <button onClick={() => setEditKey(null)} style={{
+                    background: C.border, border: "none", borderRadius: 6, color: C.muted,
+                    fontSize: 11, padding: "4px 8px", cursor: "pointer",
+                  }}>Cancel</button>
+                </div>
               </div>
             )}
 
