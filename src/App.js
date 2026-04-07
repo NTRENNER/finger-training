@@ -4785,7 +4785,8 @@ const DEFAULT_WORKOUTS = {
     exercises: [
       { id: "micro_1rm",   name: "Micro 1RM",           type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "FDP recruitment — log in app" },
       { id: "crusher_1rm", name: "Crusher 1RM",         type: "F", sets: 1,    reps: "Max",    logWeight: false, note: "FDS recruitment — log in app" },
-      { id: "kb_press",    name: "KB / barbell press",  type: "S", sets: 3,    reps: "5",      logWeight: true,  note: "" },
+      { id: "kb_press",    name: "KB press",             type: "S", sets: 3,    reps: "5",      logWeight: true,  note: "Preferred for shoulder stability" },
+      { id: "barbell_press", name: "Barbell press",      type: "S", sets: 3,    reps: "5",      logWeight: true,  note: "Optional swap — heavier loads, less stability demand" },
       { id: "pull_ups",    name: "Weighted pull-ups",   type: "S", sets: 5,    reps: "5",      logWeight: true,  note: "" },
       { id: "nordic_curl", name: "Nordic curl",         type: "H", sets: 3,    reps: "3–5",    logWeight: false, note: "Slow lowering; add 1 rep/1–2 wks" },
       { id: "cph_plank",   name: "Copenhagen plank",    type: "C", sets: 3,    reps: "20–40s", logWeight: false, note: "Progress bent → straight leg" },
