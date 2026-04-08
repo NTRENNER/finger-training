@@ -1467,7 +1467,7 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
 const GOAL_CONFIG = {
   power: {
     label: "Power", emoji: "⚡", color: "#e05560",
-    refTime: 10, restDefault: 30, repsDefault: 5, setsDefault: 4, setRestDefault: 300,
+    refTime: 5, restDefault: 30, repsDefault: 5, setsDefault: 4, setRestDefault: 300,
     intensity: "Max effort · short hangs · short rest",
     setsRationale: "Short rests between reps are intentional — accumulated metabolic stress and occlusion IS the stimulus. Subsequent reps recruit whatever fibers survive the first, building density under fatigue. If you want full recovery between reps, just do 2–3 sets at 5-min intervals instead. Long rest between sets (5 min) lets you bring full effort to each new set.",
   },
