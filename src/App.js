@@ -5374,7 +5374,10 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
 
   const completeSession = () => {
     const session = { id: genId(), date: today(), completedAt: nowISO(), workout: rotKey, sessionNumber: sessionN, exercises: sessionData };
-    saveLog([...wLog, session]);
+    // Read fresh from localStorage rather than the React state snapshot, which may
+    // be stale if the migration effect rewrote the log after this component mounted.
+    const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    saveLog([...freshLog, session]);
     if (onSessionSaved) onSessionSaved(session);
     saveState({
       rotationIndex: (wState.rotationIndex + 1) % WK_ROTATION.length,
