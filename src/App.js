@@ -655,6 +655,17 @@ async function fetchWorkoutSessions() {
   }));
 }
 
+async function deleteWorkoutSession(id) {
+  try {
+    const { error } = await supabase.from("workout_sessions").delete().eq("id", id);
+    if (error) { console.warn("Supabase workout delete:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase workout delete exception:", e.message);
+    return false;
+  }
+}
+
 // The new schema uses a `reps` table. Create it with:
 //   CREATE TABLE reps (
 //     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -2756,12 +2767,18 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
   };
 
   const deleteSession = (sessionId) => {
-    const updated = log.filter(s => s.id !== sessionId);
-    saveLS(LS_WORKOUT_LOG_KEY, updated);
-    // Remove from synced set too so it won't be re-pushed
+    // Remove from localStorage
+    saveLS(LS_WORKOUT_LOG_KEY, log.filter(s => s.id !== sessionId));
+    // Remove from synced set
     const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
     synced.delete(sessionId);
     saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
+    // Add to tombstone set so the merge never re-adds it from Supabase
+    const deleted = new Set(loadLS(LS_WORKOUT_DELETED_KEY) || []);
+    deleted.add(sessionId);
+    saveLS(LS_WORKOUT_DELETED_KEY, [...deleted]);
+    // Best-effort delete from Supabase
+    deleteWorkoutSession(sessionId);
     setConfirmDeleteId(null);
     setTick(t => t + 1);
   };
@@ -4961,7 +4978,8 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
 const LS_WORKOUT_PLAN_KEY    = "ft_workout_plan";
 const LS_WORKOUT_STATE_KEY   = "ft_workout_state";
 const LS_WORKOUT_LOG_KEY     = "ft_workout_log";
-const LS_WORKOUT_SYNCED_KEY  = "ft_workout_synced"; // Set<id> of sessions confirmed in Supabase
+const LS_WORKOUT_SYNCED_KEY  = "ft_workout_synced";  // Set<id> of sessions confirmed in Supabase
+const LS_WORKOUT_DELETED_KEY = "ft_workout_deleted"; // Set<id> tombstones — never re-add from remote
 const LS_HISTORY_DOMAIN_KEY  = "ft_history_domain";
 const TRIP_DATE_STR        = "2026-08-22";
 const WK_ROTATION          = ["A", "B", "C"];
@@ -5746,9 +5764,10 @@ export default function App() {
       const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
       remoteIds.forEach(id => synced.add(id));
 
-      // Merge any remote sessions not yet in local
+      // Merge any remote sessions not yet in local, skipping tombstoned deletions
       const localIds = new Set(local.map(s => s.id).filter(Boolean));
-      const merged = [...local, ...(remote || []).filter(s => !localIds.has(s.id))];
+      const deletedIds = new Set(loadLS(LS_WORKOUT_DELETED_KEY) || []);
+      const merged = [...local, ...(remote || []).filter(s => !localIds.has(s.id) && !deletedIds.has(s.id))];
       if (merged.length > local.length) saveLS(LS_WORKOUT_LOG_KEY, merged);
 
       // ── One-time migration: push local sessions missing from Supabase ──
@@ -5762,7 +5781,7 @@ export default function App() {
       if (changed) saveLS(LS_WORKOUT_LOG_KEY, toMigrate);
 
       for (const s of toMigrate) {
-        if (!remoteIds.has(s.id)) {
+        if (!remoteIds.has(s.id) && !deletedIds.has(s.id)) {
           const ok = await pushWorkoutSession(s);
           if (ok) synced.add(s.id);
         }
