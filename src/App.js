@@ -2691,9 +2691,10 @@ function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = 
 function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
   // Always read fresh from localStorage — no useState wrapper so newly
   // completed sessions appear immediately without needing a remount.
-  const [tick,        setTick]        = useState(0); // increment to force re-read
-  const [editIdx,     setEditIdx]     = useState(null);
-  const [editWorkout, setEditWorkout] = useState(null);
+  const [tick,           setTick]           = useState(0); // increment to force re-read
+  const [editIdx,        setEditIdx]        = useState(null);
+  const [editWorkout,    setEditWorkout]    = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [filterEx,   setFilterEx]   = useState("");  // "" = all, or exercise id
   const [filterDays, setFilterDays] = useState(0);   // 0 = all time, else last N days
   const [relMode,    setRelMode]    = useState(false);
@@ -2749,9 +2750,20 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
   const saveEdit = (origIdx) => {
     const updated = log.map((s, i) => i === origIdx ? { ...s, workout: editWorkout } : s);
     saveLS(LS_WORKOUT_LOG_KEY, updated);
-    setTick(t => t + 1); // re-read localStorage
+    setTick(t => t + 1);
     setEditIdx(null);
     setEditWorkout(null);
+  };
+
+  const deleteSession = (sessionId) => {
+    const updated = log.filter(s => s.id !== sessionId);
+    saveLS(LS_WORKOUT_LOG_KEY, updated);
+    // Remove from synced set too so it won't be re-pushed
+    const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
+    synced.delete(sessionId);
+    saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
+    setConfirmDeleteId(null);
+    setTick(t => t + 1);
   };
 
   if (!log.length) return (
@@ -2826,12 +2838,32 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
                 >
                   {session.id && syncedIds.has(session.id) ? "☁️" : "📱"}
                 </span>
-                {!isEditing && (
+                {!isEditing && confirmDeleteId !== session.id && (
                   <button
                     onClick={() => { setEditIdx(origIdx); setEditWorkout(session.workout); }}
                     style={{ background: "none", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
                     title="Edit workout type"
                   >✏️</button>
+                )}
+                {!isEditing && confirmDeleteId !== session.id && (
+                  <button
+                    onClick={() => setConfirmDeleteId(session.id)}
+                    style={{ background: "none", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
+                    title="Delete session"
+                  >🗑</button>
+                )}
+                {confirmDeleteId === session.id && (
+                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: C.red }}>Delete?</span>
+                    <button onClick={() => deleteSession(session.id)} style={{
+                      background: C.red, border: "none", borderRadius: 6, color: "#fff",
+                      fontSize: 12, fontWeight: 700, padding: "3px 10px", cursor: "pointer",
+                    }}>Yes</button>
+                    <button onClick={() => setConfirmDeleteId(null)} style={{
+                      background: C.border, border: "none", borderRadius: 6, color: C.muted,
+                      fontSize: 12, padding: "3px 8px", cursor: "pointer",
+                    }}>No</button>
+                  </span>
                 )}
               </div>
             </div>
