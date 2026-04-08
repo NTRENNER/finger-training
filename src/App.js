@@ -1467,9 +1467,9 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
 const GOAL_CONFIG = {
   power: {
     label: "Power", emoji: "⚡", color: "#e05560",
-    refTime: 10, restDefault: 180, repsDefault: 5, setsDefault: 5, setRestDefault: 300,
-    intensity: "Max effort · short hangs",
-    setsRationale: "Multiple sets at full recovery maximise total quality reps. Quality degrades sharply past rep 3 — more sets, not more reps, is how you accumulate power volume. 5 min between sets lets PCr fully reload.",
+    refTime: 10, restDefault: 30, repsDefault: 5, setsDefault: 4, setRestDefault: 300,
+    intensity: "Max effort · short hangs · short rest",
+    setsRationale: "Short rests between reps are intentional — accumulated metabolic stress and occlusion IS the stimulus. Subsequent reps recruit whatever fibers survive the first, building density under fatigue. If you want full recovery between reps, just do 2–3 sets at 5-min intervals instead. Long rest between sets (5 min) lets you bring full effort to each new set.",
   },
   strength: {
     label: "Strength", emoji: "💪", color: "#e07a30",
@@ -1479,9 +1479,9 @@ const GOAL_CONFIG = {
   },
   endurance: {
     label: "Endurance", emoji: "🏔️", color: "#3b82f6",
-    refTime: 120, restDefault: 20, repsDefault: 8, setsDefault: 3, setRestDefault: 1200,
-    intensity: "Sub-max · short rest repeaters",
-    setsRationale: "The oxidative system takes 20+ min to fully reload between sets. Multiple sets train your ability to work in a partially recovered state — exactly what climbing cruxes demand. Don't rush set rest.",
+    refTime: 120, restDefault: 90, repsDefault: 6, setsDefault: 3, setRestDefault: 1200,
+    intensity: "Sub-max · long holds · quality recovery",
+    setsRationale: "120s holds are metabolically expensive — 20s rest produces severely degraded subsequent reps. Longer rep rest targets repeatable, quality endurance efforts rather than survival reps. The oxidative system takes 20+ min to fully reload between sets; multiple sets train your ability to sustain output in a partially recovered state.",
   },
 };
 
