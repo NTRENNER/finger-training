@@ -1490,7 +1490,7 @@ const GOAL_CONFIG = {
   },
   endurance: {
     label: "Endurance", emoji: "🏔️", color: "#3b82f6",
-    refTime: 120, restDefault: 90, repsDefault: 6, setsDefault: 3, setRestDefault: 1200,
+    refTime: 120, restDefault: 130, repsDefault: 6, setsDefault: 3, setRestDefault: 1200,
     intensity: "Sub-max · long holds · quality recovery",
     setsRationale: "120s holds are metabolically expensive — 20s rest produces severely degraded subsequent reps. Longer rep rest targets repeatable, quality endurance efforts rather than survival reps. The oxidative system takes 20+ min to fully reload between sets; multiple sets train your ability to sustain output in a partially recovered state.",
   },
@@ -1584,8 +1584,8 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null 
           { label: "First rep",  value: `${firstRepTime}s` },
           { label: "Reps",       value: numReps },
           { label: "Sets",       value: numSets },
-          { label: "Rep rest",   value: fmtTime(rest) },
-          { label: "Set rest",   value: fmtTime(setRestS) },
+          { label: "Rep rest",   value: `${rest}s` },
+          { label: "Set rest",   value: `${setRestS}s` },
         ].map(({ label, value }, i, arr) => (
           <React.Fragment key={label}>
             <div style={{ textAlign: "center", flex: 1 }}>
@@ -1611,7 +1611,7 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null 
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Rep rest</span><span style={{ fontWeight: 700, color: C.text }}>{fmtTime(rest)}</span>
+            <span>Rep rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
           </div>
           <input type="range" min={5} max={300} step={5} value={rest} onChange={e => setRest(Number(e.target.value))}
             style={{ width: "100%", accentColor: gc.color }} />
@@ -1632,7 +1632,7 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null 
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Set rest</span><span style={{ fontWeight: 700, color: C.text }}>{fmtTime(setRestS)}</span>
+            <span>Set rest</span><span style={{ fontWeight: 700, color: C.text }}>{setRestS}s</span>
           </div>
           <input type="range" min={60} max={1800} step={60} value={setRestS} onChange={e => setSetRestS(Number(e.target.value))}
             style={{ width: "100%", accentColor: gc.color }} />
@@ -2529,9 +2529,9 @@ function RestView({ lastRep, nextWeight, restSeconds, onRestDone, setNum, numSet
                 fontSize: 28, fontWeight: 700,
                 color: lastRep.actualTime >= lastRep.targetTime ? C.green : C.red,
               }}>
-                {fmtTime(lastRep.actualTime)}
+                {Math.round(lastRep.actualTime)}s
               </span>
-              <div style={{ fontSize: 11, color: C.muted }}>target {fmtTime(lastRep.targetTime)}</div>
+              <div style={{ fontSize: 11, color: C.muted }}>target {lastRep.targetTime}s</div>
             </div>
             {lastRep.peakForce > 0 && (
               <div>
@@ -2661,7 +2661,7 @@ function BetweenSetsView({ completedSet, totalSets, onNextSet, setRestTime = 180
       <h2 style={{ margin: "12px 0 4px" }}>Set {completedSet} of {totalSets} done!</h2>
       <p style={{ color: C.muted, marginBottom: 24 }}>Rest between sets</p>
       <div style={{ fontSize: 72, fontWeight: 900, color: pct > 0.3 ? C.green : C.orange, lineHeight: 1, marginBottom: 16 }}>
-        {fmtTime(remaining)}
+        {remaining}s
       </div>
       <div style={{ height: 8, background: C.border, borderRadius: 4, overflow: "hidden", marginBottom: 32, maxWidth: 300, margin: "0 auto 32px" }}>
         <div style={{ height: "100%", width: `${pct * 100}%`, background: pct > 0.3 ? C.green : C.orange, borderRadius: 4, transition: "width 1s linear" }} />
