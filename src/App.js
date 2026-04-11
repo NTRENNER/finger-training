@@ -2429,6 +2429,21 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
 // ─────────────────────────────────────────────────────────────
 // REST VIEW
 // ─────────────────────────────────────────────────────────────
+function playBeep(freq = 880, duration = 0.12, volume = 0.4) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(volume, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + duration);
+    osc.onended = () => ctx.close();
+  } catch (e) { /* audio not available */ }
+}
+
 function RestView({ lastRep, nextWeight, restSeconds, onRestDone, setNum, numSets, repNum, repsPerSet, unit = "lbs" }) {
   const [remaining, setRemaining] = useState(restSeconds);
   const intervalRef = useRef(null);
@@ -2438,7 +2453,9 @@ function RestView({ lastRep, nextWeight, restSeconds, onRestDone, setNum, numSet
     intervalRef.current = setInterval(() => {
       setRemaining(r => {
         if (r <= 1) { clearInterval(intervalRef.current); onRestDone(); return 0; }
-        return r - 1;
+        const next = r - 1;
+        if (next <= 3 && next >= 1) playBeep(next === 1 ? 1100 : 880);
+        return next;
       });
     }, 1000);
     return () => clearInterval(intervalRef.current);
@@ -2986,6 +3003,15 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
   const [addingRep,   setAddingRep]   = useState(null);        // sessKey being added to
   const [editRepLoad, setEditRepLoad] = useState("");          // display-unit load (edit or add)
   const [editRepTime, setEditRepTime] = useState("");          // seconds (edit or add)
+  // Manual session entry
+  const [addingSession,    setAddingSession]    = useState(false);
+  const [newSessDate,      setNewSessDate]      = useState(() => new Date().toISOString().slice(0, 10));
+  const [newSessHand,      setNewSessHand]      = useState("L");
+  const [newSessGrip,      setNewSessGrip]      = useState("");
+  const [newSessTarget,    setNewSessTarget]    = useState(TARGET_OPTIONS[0].seconds);
+  const [newSessReps,      setNewSessReps]      = useState([]);  // [{ load: "", time: "" }]
+  const [newRepLoad,       setNewRepLoad]       = useState("");
+  const [newRepTime,       setNewRepTime]       = useState("");
 
   const openRepEdit = (sessKey, repIdx, rep) => {
     setAddingRep(null);
@@ -3043,6 +3069,31 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
     closeRepEdit();
   };
 
+  const saveNewSession = () => {
+    if (!newSessGrip || newSessReps.length === 0) return;
+    const sessionId = (() => { try { return crypto.randomUUID(); } catch { return `ms_${Date.now()}_${Math.random().toString(36).slice(2,9)}`; } })();
+    const reps = newSessReps.map((r, i) => ({
+      date:            newSessDate,
+      grip:            newSessGrip,
+      hand:            newSessHand,
+      target_duration: newSessTarget,
+      actual_time_s:   parseFloat(r.time),
+      avg_force_kg:    fromDisp(parseFloat(r.load), unit),
+      weight_kg:       fromDisp(parseFloat(r.load), unit),
+      peak_force_kg:   0,
+      set_num:         1,
+      rep_num:         i + 1,
+      rest_s:          0,
+      session_id:      sessionId,
+      failed:          parseFloat(r.time) < newSessTarget,
+    }));
+    reps.forEach(r => onAddRep(r));
+    setAddingSession(false);
+    setNewSessReps([]);
+    setNewSessGrip("");
+    setNewRepLoad(""); setNewRepTime("");
+  };
+
   const bwLog = useMemo(() => loadLS(LS_BW_LOG_KEY) || [], []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
@@ -3068,8 +3119,110 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22 }}>History</h2>
-        {domain === "fingers" && <Btn small onClick={onDownload} color={C.muted}>↓ CSV</Btn>}
+        <div style={{ display: "flex", gap: 8 }}>
+          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
+          {domain === "fingers" && <Btn small onClick={onDownload} color={C.muted}>↓ CSV</Btn>}
+        </div>
       </div>
+
+      {/* ── Add Session form ── */}
+      {domain === "fingers" && addingSession && (
+        <Card style={{ marginBottom: 16, background: "#0d1f0d" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: C.green }}>New session</div>
+          {/* Date */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+            <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Date</span>
+            <input type="date" value={newSessDate} onChange={e => setNewSessDate(e.target.value)}
+              style={{ flex: 1, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 13 }} />
+          </div>
+          {/* Hand */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+            <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Hand</span>
+            <div style={{ display: "flex", gap: 4 }}>
+              {["L","R","B"].map(h => (
+                <button key={h} onClick={() => setNewSessHand(h)} style={{
+                  padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                  background: newSessHand === h ? C.purple : C.border,
+                  color: newSessHand === h ? "#fff" : C.muted,
+                }}>{h === "L" ? "Left" : h === "R" ? "Right" : "Both"}</button>
+              ))}
+            </div>
+          </div>
+          {/* Grip */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+            <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Grip</span>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: 1 }}>
+              {GRIP_PRESETS.map(g => (
+                <button key={g} onClick={() => setNewSessGrip(g)} style={{
+                  padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12,
+                  background: newSessGrip === g ? C.orange : C.border,
+                  color: newSessGrip === g ? "#fff" : C.muted,
+                }}>{g}</button>
+              ))}
+              <input value={newSessGrip} onChange={e => setNewSessGrip(e.target.value)}
+                placeholder="or type…"
+                style={{ flex: 1, minWidth: 70, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 12 }} />
+            </div>
+          </div>
+          {/* Zone */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Zone</span>
+            <div style={{ display: "flex", gap: 4 }}>
+              {TARGET_OPTIONS.map(o => (
+                <button key={o.seconds} onClick={() => setNewSessTarget(o.seconds)} style={{
+                  padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                  background: newSessTarget === o.seconds ? C.blue : C.border,
+                  color: newSessTarget === o.seconds ? "#fff" : C.muted,
+                }}>{o.label}</button>
+              ))}
+            </div>
+          </div>
+          {/* Reps list */}
+          {newSessReps.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Reps added</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {newSessReps.map((r, i) => (
+                  <span key={i} style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 7, fontSize: 12, background: "#1a2f1a", border: `1px solid ${C.green}`, color: C.text }}>
+                    {r.load}{unit} · {r.time}s
+                    <button onClick={() => setNewSessReps(rs => rs.filter((_, j) => j !== i))}
+                      style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1 }}>✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Add rep row */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 12 }}>
+            <input type="number" value={newRepLoad} onChange={e => setNewRepLoad(e.target.value)}
+              placeholder={`Load (${unit})`}
+              style={{ flex: 1, background: C.border, border: "none", borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13 }} />
+            <input type="number" value={newRepTime} onChange={e => setNewRepTime(e.target.value)}
+              placeholder="Time (s)"
+              style={{ flex: 1, background: C.border, border: "none", borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13 }} />
+            <button onClick={() => {
+              if (!newRepLoad || !newRepTime) return;
+              setNewSessReps(rs => [...rs, { load: newRepLoad, time: newRepTime }]);
+              setNewRepLoad(""); setNewRepTime("");
+            }} style={{
+              background: C.green, border: "none", borderRadius: 6, color: "#000",
+              fontWeight: 700, fontSize: 13, padding: "5px 12px", cursor: "pointer",
+            }}>＋ Rep</button>
+          </div>
+          {/* Save / Cancel */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={saveNewSession} disabled={!newSessGrip || newSessReps.length === 0} style={{
+              background: (!newSessGrip || newSessReps.length === 0) ? C.border : C.green,
+              border: "none", borderRadius: 6, color: (!newSessGrip || newSessReps.length === 0) ? C.muted : "#000",
+              fontSize: 13, fontWeight: 700, padding: "6px 16px", cursor: "pointer",
+            }}>Save session</button>
+            <button onClick={() => { setAddingSession(false); setNewSessReps([]); }} style={{
+              background: C.border, border: "none", borderRadius: 6, color: C.muted,
+              fontSize: 13, padding: "6px 12px", cursor: "pointer",
+            }}>Cancel</button>
+          </div>
+        </Card>
+      )}
 
       {/* Domain toggle */}
       <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
