@@ -3071,23 +3071,29 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
 
   const saveNewSession = () => {
     if (!newSessGrip || newSessReps.length === 0) return;
-    const sessionId = (() => { try { return crypto.randomUUID(); } catch { return `ms_${Date.now()}_${Math.random().toString(36).slice(2,9)}`; } })();
-    const reps = newSessReps.map((r, i) => ({
-      date:            newSessDate,
-      grip:            newSessGrip,
-      hand:            newSessHand,
-      target_duration: newSessTarget,
-      actual_time_s:   parseFloat(r.time),
-      avg_force_kg:    fromDisp(parseFloat(r.load), unit),
-      weight_kg:       fromDisp(parseFloat(r.load), unit),
-      peak_force_kg:   0,
-      set_num:         1,
-      rep_num:         i + 1,
-      rest_s:          0,
-      session_id:      sessionId,
-      failed:          parseFloat(r.time) < newSessTarget,
-    }));
-    reps.forEach(r => onAddRep(r));
+    const genId = () => { try { return crypto.randomUUID(); } catch { return `mr_${Date.now()}_${Math.random().toString(36).slice(2,9)}_${Math.random().toString(36).slice(2,5)}`; } };
+    const sessionId = genId();
+    const reps = newSessReps.map((r, i) => {
+      const loadKg = fromDisp(parseFloat(r.load), unit);
+      return {
+        id:              genId(),   // unique id so addReps dedup doesn't drop reps 2+
+        date:            newSessDate,
+        grip:            newSessGrip,
+        hand:            newSessHand,
+        target_duration: newSessTarget,
+        actual_time_s:   parseFloat(r.time),
+        avg_force_kg:    loadKg,
+        weight_kg:       loadKg,
+        peak_force_kg:   0,
+        set_num:         1,
+        rep_num:         i + 1,
+        rest_s:          0,
+        session_id:      sessionId,
+        failed:          parseFloat(r.time) < newSessTarget,
+      };
+    });
+    // Pass all reps at once so addReps dedupes against the original state, not incremental updates
+    onAddRep(reps);
     setAddingSession(false);
     setNewSessReps([]);
     setNewSessGrip("");
@@ -3100,7 +3106,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
 
   const filtered = useMemo(() => history.filter(r =>
     (!grip   || r.grip === grip) &&
-    (!hand   || r.hand === hand) &&
+    (!hand   || r.hand === hand || r.hand === "B") &&  // "Both" sessions visible under any hand filter
     (!target || r.target_duration === target)
   ), [history, grip, hand, target]);
 
@@ -3120,7 +3126,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22 }}>History</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
+          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessDate(new Date().toISOString().slice(0, 10)); setNewSessHand("L"); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
           {domain === "fingers" && <Btn small onClick={onDownload} color={C.muted}>↓ CSV</Btn>}
         </div>
       </div>
@@ -6484,7 +6490,7 @@ export default function App() {
       {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} />}
-      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps([rep])} notes={notes} onNoteChange={handleNoteChange} />}
+      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps(Array.isArray(rep) ? rep : [rep])} notes={notes} onNoteChange={handleNoteChange} />}
       {tab === 5 && <TrendsView history={history} unit={unit} />}
       {tab === 6 && (
         <SettingsView
