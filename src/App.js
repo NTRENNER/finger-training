@@ -2211,6 +2211,41 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
       })()}
 
       <BwPrompt unit={unit} onSave={onBwSave} />
+
+      {/* Alternating hands mode — only when Both + rest ≥ rep duration */}
+      {config.hand === "Both" && config.restTime >= config.targetTime && (
+        <div style={{
+          marginBottom: 16, padding: "12px 16px",
+          background: C.card,
+          border: `1px solid ${config.altMode ? C.green + "66" : C.border}`,
+          borderRadius: 12,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div style={{ flex: 1, paddingRight: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Alternating Hands Mode</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+              Left rep → switch → Right rep → rest · each hand fully recovers while the other works
+            </div>
+          </div>
+          <button
+            onClick={() => setConfig(c => ({ ...c, altMode: !c.altMode }))}
+            style={{
+              flexShrink: 0, width: 48, height: 26, borderRadius: 13,
+              border: "none", cursor: "pointer",
+              background: config.altMode ? C.green : C.border,
+              position: "relative", transition: "background 0.2s",
+            }}
+          >
+            <div style={{
+              position: "absolute", top: 3,
+              left: config.altMode ? 25 : 3,
+              width: 20, height: 20, borderRadius: 10,
+              background: "#fff", transition: "left 0.2s",
+            }} />
+          </button>
+        </div>
+      )}
+
       <Btn
         onClick={onStart}
         disabled={!config.grip}
@@ -2558,6 +2593,44 @@ function SwitchHandsView({ onReady }) {
       </div>
       <Btn onClick={() => { clearInterval(intervalRef.current); onReady(); }}
         style={{ padding: "14px 40px", fontSize: 16, borderRadius: 12 }}>
+        Ready →
+      </Btn>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// ALT-HAND SWITCH VIEW (alternating mode: quick hand swap prompt)
+// ─────────────────────────────────────────────────────────────
+function AltSwitchView({ toHand, onReady }) {
+  const handName  = toHand === "L" ? "Left" : "Right";
+  const handEmoji = toHand === "L" ? "🤚" : "✋";
+  const [remaining, setRemaining] = useState(3);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      setRemaining(r => {
+        if (r <= 1) { clearInterval(intervalRef.current); onReady(); return 0; }
+        return r - 1;
+      });
+    }, 1000);
+    return () => clearInterval(intervalRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "40px 16px", textAlign: "center" }}>
+      <div style={{ fontSize: 64 }}>{handEmoji}</div>
+      <h2 style={{ margin: "16px 0 8px" }}>Switch to {handName} Hand</h2>
+      <p style={{ color: C.muted, marginBottom: 24 }}>Get in position — rep starts in…</p>
+      <div style={{ fontSize: 80, fontWeight: 900, color: remaining > 1 ? C.green : C.orange, lineHeight: 1, marginBottom: 32 }}>
+        {remaining}
+      </div>
+      <Btn
+        onClick={() => { clearInterval(intervalRef.current); onReady(); }}
+        style={{ padding: "14px 40px", fontSize: 16, borderRadius: 12 }}
+      >
         Ready →
       </Btn>
     </div>
@@ -6109,10 +6182,11 @@ export default function App() {
     targetTime: 45,
     restTime:   20,
     setRestTime: 180,
+    altMode:    false, // interleave both hands when rest >= rep duration
   }));
 
   // ── Session State Machine ─────────────────────────────────
-  // phase: 'idle' | 'rep_ready' | 'rep_active' | 'resting' | 'between_sets' | 'switch_hands' | 'done'
+  // phase: 'idle' | 'rep_ready' | 'rep_active' | 'resting' | 'between_sets' | 'switch_hands' | 'alt_switch' | 'done'
   const [phase,       setPhase]       = useState("idle");
   const [currentSet,  setCurrentSet]  = useState(0);
   const [currentRep,  setCurrentRep]  = useState(0);
@@ -6125,6 +6199,8 @@ export default function App() {
   const [leveledUp,   setLeveledUp]   = useState(false);
   const [newLevel,    setNewLevel]    = useState(1);
   const [activeHand,  setActiveHand]  = useState("L"); // tracks current hand in Both mode
+  const [altHandRep,  setAltHandRep]  = useState(false); // true while doing the interleaved alt-hand rep
+  const [altRestTime, setAltRestTime] = useState(0);     // rest after alt rep = restTime − actual alt rep time
 
   // Max strength estimate (for fatigue dose calculation)
   // Use post-session-1 best; fall back to baseline (first session); then 20 kg if no data
@@ -6160,6 +6236,7 @@ export default function App() {
     setLeveledUp(false);
     setLastRepResult(null);
     setActiveHand(config.hand === "Both" ? "L" : config.hand);
+    setAltHandRep(false);
     setPhase("rep_ready");
     setTab(0); // stay on Train tab
   }, [history, config]);
@@ -6200,6 +6277,39 @@ export default function App() {
     const dose = fatigueDose(weight, actualTime, sMax);
     setFatigue(f => Math.min(f + dose, 0.95));
 
+    // ── Alternating mode: interleave both hands rep-by-rep ────
+    if (config.altMode && config.hand === "Both") {
+      if (!altHandRep) {
+        // Just finished primary hand — immediately switch to alt hand (no rest yet)
+        setAltHandRep(true);
+        setActiveHand(h => h === "L" ? "R" : "L");
+        setPhase("alt_switch");
+      } else {
+        // Just finished alt hand — rest for (restTime − actual alt rep time), then back to primary
+        setAltHandRep(false);
+        setActiveHand(h => h === "L" ? "R" : "L"); // back to primary
+        const rest = Math.max(5, config.restTime - Math.round(repRecord.actual_time_s));
+        setAltRestTime(rest);
+        const nextRep = currentRep + 1;
+        if (nextRep >= config.repsPerSet) {
+          const nextSet = currentSet + 1;
+          if (nextSet >= config.numSets) {
+            finishSession([...sessionReps, repRecord]);
+          } else {
+            setCurrentSet(nextSet);
+            setCurrentRep(0);
+            setFatigue(0);
+            setPhase("between_sets");
+          }
+        } else {
+          setCurrentRep(nextRep);
+          setPhase("resting");
+        }
+      }
+      return;
+    }
+
+    // ── Standard mode ─────────────────────────────────────────
     const nextRep = currentRep + 1;
     if (nextRep >= config.repsPerSet) {
       // Set complete
@@ -6246,12 +6356,13 @@ export default function App() {
   }, [config, history]);
 
   const handleRestDone = useCallback(() => {
-    setFatigue(f => fatigueAfterRest(f, config.restTime));
+    const restUsed = config.altMode && config.hand === "Both" ? altRestTime : config.restTime;
+    setFatigue(f => fatigueAfterRest(f, restUsed));
     // When Tindeq is connected, go to rep_ready so AutoRepSessionView can arm
     // auto-detection and wait for the next pull. When not connected, auto-start
     // the countdown so the user doesn't need to tap Start Rep.
     setPhase(tindeq.connected ? "rep_ready" : "rep_active");
-  }, [config.restTime, tindeq.connected]);
+  }, [config.altMode, config.hand, config.restTime, altRestTime, tindeq.connected]);
 
   const handleNextSet = useCallback(() => {
     setFatigue(0);
@@ -6444,12 +6555,23 @@ export default function App() {
           return <SwitchHandsView onReady={() => setPhase("rep_ready")} />;
         }
 
+        if (phase === "alt_switch") {
+          // Brief 3-second countdown before the interleaved alt-hand rep
+          return (
+            <AltSwitchView
+              toHand={activeHand}
+              onReady={() => setPhase(tindeq.connected ? "rep_ready" : "rep_active")}
+            />
+          );
+        }
+
         if (phase === "resting") {
+          const restSecs = config.altMode && config.hand === "Both" ? altRestTime : config.restTime;
           return (
             <RestView
               lastRep={lastRepResult}
               nextWeight={nextWeight}
-              restSeconds={config.restTime}
+              restSeconds={restSecs}
               onRestDone={handleRestDone}
               setNum={currentSet + 1}
               numSets={config.numSets}
