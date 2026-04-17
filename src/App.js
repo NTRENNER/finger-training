@@ -420,13 +420,17 @@ function parseTindeqPacket(dataView, onSample) {
 }
 
 function useTindeq() {
-  const [connected,  setConnected]  = useState(false);
-  const [force,      setForce]      = useState(0);
-  const [peak,       setPeak]       = useState(0);
-  const [avgForce,   setAvgForce]   = useState(0);
-  const [bleError,   setBleError]   = useState(null);
+  const [connected,     setConnected]     = useState(false);
+  const [reconnecting,  setReconnecting]  = useState(false);
+  const [force,         setForce]         = useState(0);
+  const [peak,          setPeak]          = useState(0);
+  const [avgForce,      setAvgForce]      = useState(0);
+  const [bleError,      setBleError]      = useState(null);
 
   const ctrlRef             = useRef(null);
+  const deviceRef           = useRef(null);   // kept for auto-reconnect
+  const reconnectingRef     = useRef(false);  // guard against concurrent reconnects
+  const keepaliveRef        = useRef(null);   // interval id for idle keepalive
   const peakRef             = useRef(0);
   const sumRef              = useRef(0);   // running sum for average
   const countRef            = useRef(0);   // sample count for average
@@ -453,6 +457,106 @@ function useTindeq() {
     autoFailCallbackRef.current = fn ?? null;
   }, []);
 
+  // ── Packet handler — defined once, reused across reconnects ──
+  const handlePacket = useCallback((evt) => {
+    parseTindeqPacket(evt.target.value, ({ kg }) => {
+      setForce(kg);
+      if (kg > peakRef.current) { peakRef.current = kg; setPeak(kg); }
+
+      if (measuringRef.current && kg > 0) {
+        sumRef.current   += kg;
+        countRef.current += 1;
+        setAvgForce(sumRef.current / countRef.current);
+      }
+
+      if (measuringRef.current) {
+        const tgt = targetKgRef.current;
+        if (tgt != null && tgt > 0) {
+          const threshold = tgt * 0.95;
+          if (kg < threshold) {
+            if (belowSinceRef.current === null) belowSinceRef.current = Date.now();
+            else if (Date.now() - belowSinceRef.current > 1500) {
+              belowSinceRef.current = null;
+              autoFailCallbackRef.current?.();
+            }
+          } else {
+            belowSinceRef.current = null;
+          }
+        }
+      }
+
+      if (adOnStartRef.current || adOnEndRef.current) {
+        const now = Date.now();
+        if (!adActiveRef.current) {
+          if (kg >= AD_START_KG) {
+            adActiveRef.current    = true;
+            adStartTimeRef.current = now;
+            adSumRef.current       = kg;
+            adCountRef.current     = 1;
+            adBelowRef.current     = null;
+            adOnStartRef.current?.();
+          }
+        } else {
+          adSumRef.current  += kg;
+          adCountRef.current += 1;
+          if (kg < AD_END_KG) {
+            if (adBelowRef.current === null) adBelowRef.current = now;
+            else if (now - adBelowRef.current >= AD_END_MS) {
+              const actualTime = (adBelowRef.current - adStartTimeRef.current) / 1000;
+              if (actualTime * 1000 >= AD_MIN_MS) {
+                const avg = adSumRef.current / adCountRef.current;
+                const cb  = adOnEndRef.current;
+                adActiveRef.current    = false;
+                adStartTimeRef.current = null;
+                adSumRef.current       = 0;
+                adCountRef.current     = 0;
+                adBelowRef.current     = null;
+                cb?.({ actualTime, avgForce: avg });
+              } else {
+                adActiveRef.current    = false;
+                adStartTimeRef.current = null;
+                adSumRef.current       = 0;
+                adCountRef.current     = 0;
+                adBelowRef.current     = null;
+              }
+            }
+          } else {
+            adBelowRef.current = null;
+          }
+        }
+      }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── GATT setup — called on initial connect and every reconnect ──
+  const setupGatt = useCallback(async (device) => {
+    const server = await device.gatt.connect();
+    const svc    = await server.getPrimaryService(TINDEQ_SERVICE);
+    const dataC  = await svc.getCharacteristic(TINDEQ_NOTIFY);
+    ctrlRef.current = await svc.getCharacteristic(TINDEQ_WRITE);
+    dataC.addEventListener("characteristicvaluechanged", handlePacket);
+    await dataC.startNotifications();
+    // If a rep was in progress when we dropped, restart the measurement stream
+    if (measuringRef.current) {
+      await ctrlRef.current.writeValue(CMD_START);
+    }
+  }, [handlePacket]);
+
+  // ── Keepalive — tare every 25 s while idle to prevent OS killing the connection ──
+  const startKeepalive = useCallback(() => {
+    clearInterval(keepaliveRef.current);
+    keepaliveRef.current = setInterval(async () => {
+      if (!measuringRef.current && ctrlRef.current) {
+        try { await ctrlRef.current.writeValue(CMD_TARE); } catch {}
+      }
+    }, 25000);
+  }, []);
+
+  const stopKeepalive = useCallback(() => {
+    clearInterval(keepaliveRef.current);
+    keepaliveRef.current = null;
+  }, []);
+
   const connect = useCallback(async () => {
     setBleError(null);
     if (!navigator?.bluetooth) {
@@ -464,101 +568,40 @@ function useTindeq() {
         filters: [{ namePrefix: "Progressor" }],
         optionalServices: [TINDEQ_SERVICE],
       });
-      const server = await device.gatt.connect();
-      const svc    = await server.getPrimaryService(TINDEQ_SERVICE);
-      const dataC  = await svc.getCharacteristic(TINDEQ_NOTIFY);
-      ctrlRef.current = await svc.getCharacteristic(TINDEQ_WRITE);
+      deviceRef.current = device;
 
-      dataC.addEventListener("characteristicvaluechanged", (evt) => {
-        parseTindeqPacket(evt.target.value, ({ kg, ts }) => {
-          setForce(kg);
-          if (kg > peakRef.current) { peakRef.current = kg; setPeak(kg); }
-
-          // Running average — only accumulate while measuring
-          if (measuringRef.current && kg > 0) {
-            sumRef.current   += kg;
-            countRef.current += 1;
-            setAvgForce(sumRef.current / countRef.current);
-          }
-
-          // Auto-failure: if force drops below 95% of target for >1.5 s, end the rep.
-          // Uses target weight (not peak) so the bar is fixed and honest.
-          // 1.5 s filters brief dips from grip shifts without letting a failed rep drag on.
-          if (measuringRef.current) {
-            const tgt = targetKgRef.current;
-            if (tgt != null && tgt > 0) {
-              const threshold = tgt * 0.95;
-              if (kg < threshold) {
-                if (belowSinceRef.current === null) belowSinceRef.current = Date.now();
-                else if (Date.now() - belowSinceRef.current > 1500) {
-                  belowSinceRef.current = null;
-                  autoFailCallbackRef.current?.();
-                }
-              } else {
-                belowSinceRef.current = null;
-              }
-            }
-          }
-
-          // ── Auto-detect (spring-strap mode) ───────────────────────────
-          // Runs independently of measuringRef — detects pull-start and pull-end
-          // purely from force thresholds, no target weight required.
-          if (adOnStartRef.current || adOnEndRef.current) {
-            const now = Date.now();
-            if (!adActiveRef.current) {
-              // Waiting for pull to start
-              if (kg >= AD_START_KG) {
-                adActiveRef.current  = true;
-                adStartTimeRef.current = now;
-                adSumRef.current     = kg;
-                adCountRef.current   = 1;
-                adBelowRef.current   = null;
-                adOnStartRef.current?.();
-              }
-            } else {
-              // Rep in progress — accumulate samples and watch for release
-              adSumRef.current  += kg;
-              adCountRef.current += 1;
-              if (kg < AD_END_KG) {
-                if (adBelowRef.current === null) adBelowRef.current = now;
-                else if (now - adBelowRef.current >= AD_END_MS) {
-                  const actualTime = (adBelowRef.current - adStartTimeRef.current) / 1000;
-                  if (actualTime * 1000 >= AD_MIN_MS) {
-                    const avgForce = adSumRef.current / adCountRef.current;
-                    const cb = adOnEndRef.current;
-                    // Reset before firing to prevent double-fire
-                    adActiveRef.current    = false;
-                    adStartTimeRef.current = null;
-                    adSumRef.current       = 0;
-                    adCountRef.current     = 0;
-                    adBelowRef.current     = null;
-                    cb?.({ actualTime, avgForce });
-                  } else {
-                    // Too short — treat as noise, reset
-                    adActiveRef.current    = false;
-                    adStartTimeRef.current = null;
-                    adSumRef.current       = 0;
-                    adCountRef.current     = 0;
-                    adBelowRef.current     = null;
-                  }
-                }
-              } else {
-                adBelowRef.current = null;
-              }
-            }
-          }
-        });
+      device.addEventListener("gattserverdisconnected", async () => {
+        setConnected(false);
+        stopKeepalive();
+        if (reconnectingRef.current) return;
+        reconnectingRef.current = true;
+        setReconnecting(true);
+        const delays = [1000, 2000, 4000, 8000, 10000, 10000];
+        for (let i = 0; i < delays.length; i++) {
+          await new Promise(r => setTimeout(r, delays[i]));
+          try {
+            await setupGatt(device);
+            setConnected(true);
+            setReconnecting(false);
+            reconnectingRef.current = false;
+            startKeepalive();
+            return;
+          } catch { /* try next */ }
+        }
+        reconnectingRef.current = false;
+        setReconnecting(false);
+        setBleError("Reconnection failed — tap Connect BLE to try again.");
       });
 
-      await dataC.startNotifications();
-      device.addEventListener("gattserverdisconnected", () => setConnected(false));
+      await setupGatt(device);
       setConnected(true);
+      startKeepalive();
       return true;
     } catch (err) {
       setBleError(err.message || "Connection failed");
       return false;
     }
-  }, []);
+  }, [setupGatt, startKeepalive, stopKeepalive]);
 
   const startMeasuring = useCallback(async () => {
     peakRef.current  = 0;  setPeak(0);
@@ -605,7 +648,7 @@ function useTindeq() {
     if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_STOP);
   }, []);
 
-  return { connected, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect };
+  return { connected, reconnecting, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -6487,7 +6530,7 @@ export default function App() {
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 600 }}>Tindeq Progressor</div>
                       <div style={{ fontSize: 12, color: C.muted }}>
-                        {tindeq.connected ? "Connected ✓" : tindeq.bleError || "Not connected"}
+                        {tindeq.connected ? "Connected ✓" : tindeq.reconnecting ? "Reconnecting…" : tindeq.bleError || "Not connected"}
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
@@ -6497,10 +6540,10 @@ export default function App() {
                       <Btn
                         small
                         onClick={tindeq.connect}
-                        disabled={tindeq.connected}
-                        color={tindeq.connected ? C.green : C.blue}
+                        disabled={tindeq.connected || tindeq.reconnecting}
+                        color={tindeq.connected ? C.green : tindeq.reconnecting ? C.orange : C.blue}
                       >
-                        {tindeq.connected ? "Connected" : "Connect BLE"}
+                        {tindeq.connected ? "Connected" : tindeq.reconnecting ? "Reconnecting…" : "Connect BLE"}
                       </Btn>
                     </div>
                   </div>
