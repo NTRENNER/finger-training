@@ -5274,6 +5274,72 @@ const WTYPE_META = {
   D: { label: "D", bg: "#1e1535", color: "#bc8cff" },
 };
 
+// Exercise substitution options — shown during a live session when equipment is unavailable.
+// Keys are exercise IDs from DEFAULT_WORKOUTS; values are arrays of alternatives.
+// Swaps are session-only and do not modify the plan template.
+const EXERCISE_SUBSTITUTES = {
+  bench_press:   [
+    { id: "ohp",           name: "Overhead press",         type: "S", reps: "5",       logWeight: true,  note: "KB or barbell" },
+    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  note: "Good shoulder stability option" },
+    { id: "push_ups",      name: "Push-ups",               type: "S", reps: "8–12",    logWeight: false, note: "Weighted vest if bodyweight is easy" },
+  ],
+  ohp:           [
+    { id: "bench_press",   name: "Bench press",            type: "S", reps: "5",       logWeight: true,  note: "" },
+    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  note: "" },
+    { id: "push_ups",      name: "Push-ups",               type: "S", reps: "8–12",    logWeight: false, note: "Weighted vest if bodyweight is easy" },
+  ],
+  pull_ups:      [
+    { id: "lat_pulldown",  name: "Lat pulldown",           type: "S", reps: "5",       logWeight: true,  note: "" },
+    { id: "ring_rows",     name: "Ring rows",              type: "S", reps: "8–10",    logWeight: false, note: "Elevate feet to increase difficulty" },
+    { id: "band_pullups",  name: "Band-assisted pull-ups", type: "S", reps: "5",       logWeight: false, note: "" },
+  ],
+  landmine_rows: [
+    { id: "db_rows",       name: "DB rows",                type: "S", reps: "5/side",  logWeight: true,  note: "" },
+    { id: "cable_rows",    name: "Cable rows",             type: "S", reps: "5",       logWeight: true,  note: "" },
+    { id: "trx_rows",      name: "TRX rows",               type: "S", reps: "8–10",    logWeight: false, note: "Feet elevated for more load" },
+  ],
+  dips:          [
+    { id: "close_bench",   name: "Close-grip bench",       type: "S", reps: "5",       logWeight: true,  note: "" },
+    { id: "tricep_ext",    name: "Tricep extension",       type: "S", reps: "8–10",    logWeight: true,  note: "Cable or DB" },
+    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  note: "" },
+  ],
+  rdl:           [
+    { id: "good_morning",  name: "Good mornings",          type: "H", reps: "5",       logWeight: true,  note: "" },
+    { id: "kb_deadlift",   name: "KB deadlift",            type: "H", reps: "5",       logWeight: true,  note: "" },
+    { id: "hip_hinge",     name: "Hip hinge (band)",       type: "H", reps: "8–10",    logWeight: false, note: "Band around hips, hinge toward wall" },
+  ],
+  trx_ham_curl:  [
+    { id: "nordic_curl",   name: "Nordic curl",            type: "H", reps: "3–5",     logWeight: false, note: "Slow lowering; add 1 rep/1–2 wks" },
+    { id: "sb_ham_curl",   name: "Stability ball curl",    type: "H", reps: "8–10",    logWeight: false, note: "" },
+    { id: "glute_bridge",  name: "Single-leg glute bridge",type: "H", reps: "10/side", logWeight: false, note: "" },
+  ],
+  goblet_squat:  [
+    { id: "step_up",       name: "Step-up",                type: "S", reps: "6–8/side",logWeight: true,  note: "Climbing & hiking strength" },
+    { id: "box_squat",     name: "Box squat",              type: "S", reps: "5",       logWeight: true,  note: "" },
+    { id: "split_squat",   name: "Bulgarian split squat",  type: "S", reps: "6/side",  logWeight: true,  note: "" },
+  ],
+  step_up:       [
+    { id: "goblet_squat",  name: "Goblet squat",           type: "S", reps: "8",       logWeight: true,  note: "Joint health — keep load moderate" },
+    { id: "split_squat",   name: "Bulgarian split squat",  type: "S", reps: "6/side",  logWeight: true,  note: "" },
+    { id: "lunge",         name: "Reverse lunge",          type: "S", reps: "8/side",  logWeight: true,  note: "" },
+  ],
+  bicep_curls:   [
+    { id: "hammer_curls",  name: "Hammer curls",           type: "S", reps: "8",       logWeight: true,  note: "Brachialis emphasis" },
+    { id: "band_curls",    name: "Band curls",             type: "S", reps: "10–12",   logWeight: false, note: "" },
+    { id: "chin_up",       name: "Chin-ups (supinated)",   type: "S", reps: "5",       logWeight: true,  note: "Direct bicep transfer" },
+  ],
+  slam_balls:    [
+    { id: "med_ball",      name: "Medicine ball throw",    type: "P", reps: "8–10",    logWeight: true,  note: "" },
+    { id: "broad_jump",    name: "Broad jump",             type: "P", reps: "6–8",     logWeight: false, note: "" },
+    { id: "box_jump",      name: "Box jump",               type: "P", reps: "6–8",     logWeight: false, note: "" },
+  ],
+  kb_snatch:     [
+    { id: "kb_swing",      name: "KB swing",               type: "P", reps: "10",      logWeight: true,  note: "" },
+    { id: "db_snatch",     name: "DB snatch",              type: "P", reps: "5/side",  logWeight: true,  note: "" },
+    { id: "power_clean",   name: "Power clean",            type: "P", reps: "5",       logWeight: true,  note: "" },
+  ],
+};
+
 const DEFAULT_WORKOUTS = {
   A: {
     name: "Lift Day 1 (Push + Pull)",
@@ -5614,9 +5680,11 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
   const [plan,   setPlan]           = useState(() => loadLS(LS_WORKOUT_PLAN_KEY)  || DEFAULT_WORKOUTS);
   const [wState, setWState]         = useState(() => loadLS(LS_WORKOUT_STATE_KEY) || { rotationIndex: 0, sessionCount: 0 });
   const [wLog,   setWLog]           = useState(() => loadLS(LS_WORKOUT_LOG_KEY)   || []);
-  const [sessionActive, setSessionActive] = useState(false);
-  const [sessionData,   setSessionData]   = useState({});  // exId → {weight, done}
-  const [editingKey, setEditingKey] = useState(null);      // "A"|"B"|"C"|"D"|null
+  const [sessionActive,  setSessionActive]  = useState(false);
+  const [sessionData,    setSessionData]    = useState({});    // exId → {sets, done}
+  const [swaps,          setSwaps]          = useState({});    // originalExId → substituteEx
+  const [swapPickerFor,  setSwapPickerFor]  = useState(null);  // originalExId showing picker
+  const [editingKey, setEditingKey] = useState(null);          // "A"|"B"|"C"|"D"|null
 
   const savePlan  = (p) => { setPlan(p);  saveLS(LS_WORKOUT_PLAN_KEY,  p); };
   const saveState = (s) => { setWState(s); saveLS(LS_WORKOUT_STATE_KEY, s); };
@@ -5657,7 +5725,39 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
       }
     });
     setSessionData(init);
+    setSwaps({});
+    setSwapPickerFor(null);
     setSessionActive(true);
+  };
+
+  // Swap an exercise for the current session only
+  const doSwap = (originalEx, substituteEx) => {
+    const numSets = originalEx.sets || 2;
+    setSessionData(prev => {
+      const next = { ...prev };
+      delete next[originalEx.id];
+      next[substituteEx.id] = substituteEx.logWeight
+        ? { sets: Array.from({ length: numSets }, () => ({ weight: "", reps: substituteEx.reps || "", done: false })) }
+        : { done: false };
+      return next;
+    });
+    setSwaps(prev => ({ ...prev, [originalEx.id]: { ...substituteEx, sets: numSets } }));
+    setSwapPickerFor(null);
+  };
+
+  const revertSwap = (originalEx) => {
+    const numSets = originalEx.sets || 2;
+    const swapped = swaps[originalEx.id];
+    setSessionData(prev => {
+      const next = { ...prev };
+      if (swapped) delete next[swapped.id];
+      next[originalEx.id] = originalEx.logWeight
+        ? { sets: Array.from({ length: numSets }, () => ({ weight: "", reps: originalEx.reps || "", done: false })) }
+        : { done: false };
+      return next;
+    });
+    setSwaps(prev => { const s = { ...prev }; delete s[originalEx.id]; return s; });
+    setSwapPickerFor(null);
   };
 
   const genId = () => {
@@ -5677,10 +5777,13 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
     });
     setSessionActive(false);
     setSessionData({});
+    setSwaps({});
+    setSwapPickerFor(null);
   };
 
   const allDone = workout && workout.exercises.every(ex => {
-    const d = sessionData[ex.id];
+    const activeId = swaps[ex.id]?.id ?? ex.id;
+    const d = sessionData[activeId];
     if (!d) return false;
     if (ex.logWeight && d.sets) return d.sets.every(s => s.done);
     return !!d.done;
@@ -5806,22 +5909,90 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
             <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{workout.name}</div>
           </div>
 
-          {workout.exercises.map((ex, i) => (
-            <SessionExRow
-              key={ex.id}
-              ex={ex}
-              unit={unit}
-              prevSets={prevBestSets(ex.id)}
-              setsData={sessionData[ex.id]}
-              onSetsChange={(val) => setSessionData(prev => ({ ...prev, [ex.id]: val }))}
-              done={!!sessionData[ex.id]?.done}
-              onToggle={() => setSessionData(prev => ({
-                ...prev,
-                [ex.id]: { ...prev[ex.id], done: !prev[ex.id]?.done },
-              }))}
-              last={i === workout.exercises.length - 1}
-            />
-          ))}
+          {workout.exercises.map((ex, i) => {
+            const isSwapped  = !!swaps[ex.id];
+            const activeEx   = isSwapped ? { ...swaps[ex.id] } : ex;
+            const sKey       = activeEx.id;
+            const subs       = EXERCISE_SUBSTITUTES[ex.id] || [];
+            const pickerOpen = swapPickerFor === ex.id;
+            const isLast     = i === workout.exercises.length - 1;
+
+            return (
+              <div key={ex.id}>
+                {/* Swap button row */}
+                {subs.length > 0 && (
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 2 }}>
+                    <button
+                      onClick={() => setSwapPickerFor(pickerOpen ? null : ex.id)}
+                      style={{
+                        fontSize: 11, padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+                        background: "none", border: `1px solid ${isSwapped ? C.orange : C.border}`,
+                        color: isSwapped ? C.orange : C.muted,
+                      }}
+                    >
+                      {isSwapped ? `⇄ ${activeEx.name} (swapped)` : "⇄ swap"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Inline swap picker */}
+                {pickerOpen && (
+                  <div style={{
+                    background: C.bg, border: `1px solid ${C.border}`,
+                    borderRadius: 8, padding: "10px 12px", marginBottom: 8,
+                  }}>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                      Substitute for <strong style={{ color: C.text }}>{ex.name}</strong>:
+                    </div>
+                    {isSwapped && (
+                      <button
+                        onClick={() => revertSwap(ex)}
+                        style={{
+                          display: "block", width: "100%", textAlign: "left",
+                          padding: "8px 10px", marginBottom: 4, borderRadius: 6,
+                          background: C.border, border: "none", cursor: "pointer",
+                          fontSize: 13, color: C.text, fontWeight: 600,
+                        }}
+                      >
+                        ↩ {ex.name} <span style={{ color: C.muted, fontWeight: 400 }}>(revert to original)</span>
+                      </button>
+                    )}
+                    {subs.map(sub => (
+                      <button
+                        key={sub.id}
+                        onClick={() => doSwap(ex, sub)}
+                        style={{
+                          display: "block", width: "100%", textAlign: "left",
+                          padding: "8px 10px", marginBottom: 4, borderRadius: 6,
+                          background: activeEx.id === sub.id ? C.orange + "22" : C.card,
+                          border: `1px solid ${activeEx.id === sub.id ? C.orange : C.border}`,
+                          cursor: "pointer", fontSize: 13, color: C.text,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>{sub.name}</span>
+                        <span style={{ color: C.muted }}> · {sub.reps}</span>
+                        {sub.note && <span style={{ color: C.muted, fontSize: 11 }}> — {sub.note}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <SessionExRow
+                  ex={activeEx}
+                  unit={unit}
+                  prevSets={prevBestSets(sKey)}
+                  setsData={sessionData[sKey]}
+                  onSetsChange={(val) => setSessionData(prev => ({ ...prev, [sKey]: val }))}
+                  done={!!sessionData[sKey]?.done}
+                  onToggle={() => setSessionData(prev => ({
+                    ...prev,
+                    [sKey]: { ...prev[sKey], done: !prev[sKey]?.done },
+                  }))}
+                  last={isLast && !pickerOpen}
+                />
+              </div>
+            );
+          })}
 
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button
@@ -5841,7 +6012,7 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
               }}
             >{allDone ? "Complete session ✓" : "Finish session →"}</button>
             <button
-              onClick={() => { setSessionActive(false); setSessionData({}); }}
+              onClick={() => { setSessionActive(false); setSessionData({}); setSwaps({}); setSwapPickerFor(null); }}
               style={{
                 padding: "13px 16px", background: "transparent",
                 border: `1px solid ${C.border}`, color: C.muted,
