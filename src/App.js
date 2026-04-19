@@ -1922,112 +1922,14 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 1RM WARM-UP WIDGET
-// Logs a pre-climb 1RM for Micro or Crusher grip.
-// Counts as Power credit in zone coverage. Tracked separately from
-// the Monod-Scherrer model — it's a different kind of metric.
+// 1RM legacy — the OneRMWidget has been removed from the UI now that
+// the Grip Gains power protocol (6 × 5–7s max hangs at 20s rest) is
+// used as the pre-climb warm-up and replaces a standalone 1RM test.
+// RM_GRIPS stays so the 1RM PR tracker on the Analysis tab can render
+// historical data; computeZoneCoverage still treats any existing
+// `type: "oneRM"` activity entries as Power credit.
 // ─────────────────────────────────────────────────────────────
 const RM_GRIPS = ["Micro", "Crusher"];
-
-function OneRMWidget({ activities = [], onLog = () => {}, unit = "lbs" }) {
-  const [open,   setOpen]   = useState(false);
-  const [weight, setWeight] = useState("");
-  const [grip,   setGrip]   = useState("Micro");
-  const [logged, setLogged] = useState(false);
-
-  // Today's best per grip
-  const todayBest = RM_GRIPS.reduce((acc, g) => {
-    acc[g] = activities
-      .filter(a => a.date === today() && a.type === "oneRM" && (a.grip === g || (!a.grip && g === "Micro")))
-      .reduce((max, a) => Math.max(max, a.weight_kg ?? 0), 0);
-    return acc;
-  }, {});
-  const anyLoggedToday = RM_GRIPS.some(g => todayBest[g] > 0);
-
-  const handleLog = () => {
-    const kg = fromDisp(Number(weight), unit);
-    if (!kg || kg <= 0) return;
-    onLog({ date: today(), type: "oneRM", weight_kg: kg, grip });
-    setLogged(true);
-    setOpen(false);
-    setWeight("");
-    setTimeout(() => setLogged(false), 3000);
-  };
-
-  const summaryText = anyLoggedToday
-    ? RM_GRIPS.filter(g => todayBest[g] > 0)
-        .map(g => `${g}: ${fmtW(todayBest[g], unit)}`)
-        .join(" · ")
-    : logged ? "✓ Logged!" : "Log 1RM warm-up";
-
-  return (
-    <div style={{ marginBottom: 16 }}>
-      {!open && (
-        <button onClick={() => setOpen(true)} style={{
-          width: "100%", padding: "10px 16px", borderRadius: 10, cursor: "pointer",
-          background: C.card, border: `1px solid ${C.border}`,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          color: C.text, fontSize: 13,
-        }}>
-          <span>🏋️ {summaryText}</span>
-          <span style={{ fontSize: 11, color: C.muted }}>⚡ Power credit +</span>
-        </button>
-      )}
-      {open && (
-        <Card style={{ border: `1px solid ${"#e05560"}40` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>🏋️ Log 1RM Warm-up</div>
-            <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
-          </div>
-
-          {/* Grip selector */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            {RM_GRIPS.map(g => (
-              <button key={g} onClick={() => { setGrip(g); setWeight(""); }} style={{
-                flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer",
-                fontWeight: 700, fontSize: 13, border: "none",
-                background: grip === g ? "#e05560" : C.border,
-                color: grip === g ? "#fff" : C.muted,
-              }}>{g}</button>
-            ))}
-          </div>
-
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-            {grip === "Micro" ? "Small edge · open-hand max effort" : "Full hand · max single effort"}
-            {todayBest[grip] > 0 && (
-              <span style={{ marginLeft: 8, color: C.green }}>
-                Today: {fmtW(todayBest[grip], unit)} {unit}
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
-            <input
-              type="number"
-              value={weight}
-              onChange={e => setWeight(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleLog()}
-              placeholder="0"
-              style={{
-                flex: 1, background: C.bg, border: `1px solid ${C.border}`,
-                borderRadius: 8, padding: "10px 12px", color: C.text, fontSize: 18,
-                fontWeight: 700,
-              }}
-            />
-            <div style={{ fontSize: 14, color: C.muted, fontWeight: 600, minWidth: 28 }}>{unit}</div>
-          </div>
-          <Btn
-            onClick={handleLog}
-            color={"#e05560"}
-            style={{ width: "100%", padding: "10px 0", borderRadius: 8 }}
-          >
-            Log {grip} 1RM
-          </Btn>
-        </Card>
-      )}
-    </div>
-  );
-}
 
 // Map climbing intensity to training zone (for zone coverage accounting)
 const CLIMB_ZONE = { easy: "endurance", moderate: "endurance", hard: "strength", bouldering: "power" };
@@ -2250,7 +2152,6 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
       {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
 
       {/* Activity Logs */}
-      <OneRMWidget activities={activities} onLog={onLogActivity} unit={unit} />
       <ClimbingLogWidget activities={activities} onLog={onLogActivity} />
 
       {/* Session Planner — always shown; defaults to undertrained zone */}
