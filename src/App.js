@@ -6,6 +6,7 @@ import React, {
 import { supabase } from "./lib/supabase";
 import {
   ResponsiveContainer, LineChart, Line, ComposedChart, Scatter,
+  BarChart, Bar,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   ReferenceLine, ReferenceArea,
 } from "recharts";
@@ -318,6 +319,93 @@ function suggestWeight(refWeight, fatigue) {
   if (refWeight == null) return null;
   return Math.round(refWeight * availFrac(fatigue) * 10) / 10;
 }
+
+// ─────────────────────────────────────────────────────────────
+// LOAD AUTO-PRESCRIPTION from fitted CF/W' (Monod-Scherrer)
+// ─────────────────────────────────────────────────────────────
+// Returns prescribed load (kg) for a target time-to-exhaustion on a given grip/hand.
+// Uses the hyperbolic form: F = CF + W'/T. Falls back to null if not enough failure data.
+// Typical targets: Power T=7, Strength T=45, Capacity T=120.
+// eslint-disable-next-line no-unused-vars
+function prescribedLoad(history, hand, grip, targetDuration) {
+  if (!history || !targetDuration) return null;
+  const failures = history.filter(r =>
+    r.failed &&
+    r.hand === hand &&
+    (!grip || r.grip === grip) &&
+    r.actual_time_s > 0 &&
+    effectiveLoad(r) > 0
+  );
+  if (failures.length < 2) return null;
+  const pts = failures.map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
+  const fit = fitCF(pts);
+  if (!fit) return null;
+  return Math.round((fit.CF + fit.W / targetDuration) * 10) / 10;
+}
+
+// ─────────────────────────────────────────────────────────────
+// PER-COMPARTMENT AUC (training dose delivered to each energy system)
+// ─────────────────────────────────────────────────────────────
+// Textbook PK-style integral: dose_i = load × A_i × τ_Di × (1 − e^(−t/τ_Di))
+// Short reps saturate compartment 1; long reps (>> τ_Di) saturate that compartment.
+// Rest between reps is ignored (rest delivers no dose; only clears for subsequent reps).
+//
+// Returns { fast, medium, slow, total } in kg·s units (force-time integrated dose).
+// Compartment 1 (fast/PCr), 2 (medium/glycolytic), 3 (slow/oxidative).
+function sessionCompartmentAUC(reps) {
+  const comps = [
+    { key: "fast",   A: 0.50, tauD: 10  },
+    { key: "medium", A: 0.30, tauD: 30  },
+    { key: "slow",   A: 0.20, tauD: 180 },
+  ];
+  const out = { fast: 0, medium: 0, slow: 0 };
+  for (const r of reps || []) {
+    const t = r.actual_time_s;
+    const L = effectiveLoad(r);
+    if (!t || !L || t <= 0 || L <= 0) continue;
+    for (const c of comps) {
+      out[c.key] += L * c.A * c.tauD * (1 - Math.exp(-t / c.tauD));
+    }
+  }
+  out.total = out.fast + out.medium + out.slow;
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Grip Gains 5-zone classifier: categorises a single hang by its
+// time-under-tension. The 45s boundaries come from 15 × 3s pulses
+// in Grip Gains' original framing; we treat them as TUT thresholds.
+// Boundaries: <45s power, 45–81s pwr-str, 84–129s str,
+//             132–177s str-end, 180s+ end.
+// Returns { key, label, short, color } or null for zero/invalid reps.
+// ─────────────────────────────────────────────────────────────
+const ZONE5 = [
+  { key: "power",              label: "Power",              short: "Pwr",   color: "#e05560", min:   0, max:  45 },
+  { key: "power_strength",     label: "Power-Strength",     short: "Pwr-Str", color: "#e68a48", min:  45, max:  82 },
+  { key: "strength",           label: "Strength",           short: "Str",   color: "#e07a30", min:  82, max: 130 },
+  { key: "strength_endurance", label: "Strength-Endurance", short: "Str-End", color: "#7aa0d8", min: 130, max: 178 },
+  { key: "endurance",          label: "Endurance",          short: "End",   color: "#3b82f6", min: 178, max: Infinity },
+];
+function classifyZone5(durationSec) {
+  if (!durationSec || durationSec <= 0) return null;
+  return ZONE5.find(z => durationSec >= z.min && durationSec < z.max) ?? ZONE5[ZONE5.length - 1];
+}
+// Majority-zone for a set of reps (by count). Returns a ZONE5 entry or null.
+function dominantZone5(reps) {
+  const counts = Object.fromEntries(ZONE5.map(z => [z.key, 0]));
+  for (const r of reps || []) {
+    const z = classifyZone5(r.actual_time_s);
+    if (z) counts[z.key] += 1;
+  }
+  const entries = Object.entries(counts).filter(([, n]) => n > 0);
+  if (!entries.length) return null;
+  entries.sort((a, b) => b[1] - a[1]);
+  return ZONE5.find(z => z.key === entries[0][0]);
+}
+// Convert the intended goal key from GOAL_CONFIG (power / strength / endurance)
+// into a ZONE5 key so we can compare intended vs. landed zone.
+// eslint-disable-next-line no-unused-vars
+const GOAL_TO_ZONE5 = { power: "power", strength: "strength", endurance: "endurance" };
 
 // ─────────────────────────────────────────────────────────────
 // GAMIFICATION
@@ -1518,24 +1606,30 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
 // ─────────────────────────────────────────────────────────────
 // Shows a goal picker + predicted per-rep fatigue curve + "Use this plan" button.
 // Requires a live CF/W′ estimate fitted from training history.
+// Grip Gains uniform protocol: 20s rest between every hang, 4–6 hangs per
+// session depending on zone. The set count is chosen so per-hang hold-time
+// converges to its asymptote (you've drained to compartment-3 steady state).
+// Power drains only the fast pool which refills ~75% in 20s, so it takes ~6
+// hangs to hit the tail. Capacity drains all three pools per hang, so the tail
+// is reached in ~4 hangs. Strength sits between.
 const GOAL_CONFIG = {
   power: {
     label: "Power", emoji: "⚡", color: "#e05560",
-    refTime: 5, restDefault: 30, repsDefault: 5, setsDefault: 4, setRestDefault: 300,
-    intensity: "Max effort · short hangs · short rest",
-    setsRationale: "Short rests between reps are intentional — accumulated metabolic stress and occlusion IS the stimulus. Subsequent reps recruit whatever fibers survive the first, building density under fatigue. If you want full recovery between reps, just do 2–3 sets at 5-min intervals instead. Long rest between sets (5 min) lets you bring full effort to each new set.",
+    refTime: 7, restDefault: 20, repsDefault: 6, setsDefault: 1, setRestDefault: 0,
+    intensity: "6 × 5–7s max · 20s rest",
+    setsRationale: "Grip Gains power protocol: 6 hangs of 5–7s at near-max load with 20s rest. 20s refills ~75% of PCr (τ₁≈15s) between hangs — enough to keep output high but not enough to fully recover. Six hangs reaches the asymptote where subsequent hangs would produce similar output; beyond that you're spinning your wheels. Use as a pre-climbing warm-up; primes neural drive without shredding you. Load auto-prescribed from CF + W'/7.",
   },
   strength: {
     label: "Strength", emoji: "💪", color: "#e07a30",
-    refTime: 45, restDefault: 90, repsDefault: 5, setsDefault: 4, setRestDefault: 180,
-    intensity: "Hard hangs · quality-focused rest",
-    setsRationale: "4 sets with near-full PCr recovery between reps lets you maintain force quality across the session. Glycolytic stress accumulates across sets even with 90s rep rest — endurance sessions cover the metabolic density work, so strength sessions can prioritise load.",
+    refTime: 45, restDefault: 20, repsDefault: 5, setsDefault: 1, setRestDefault: 0,
+    intensity: "45s + 4 to failure · 20s rest",
+    setsRationale: "Grip Gains strength protocol: hang 1 targets 45s, hangs 2–5 go to failure, 20s rest between. 20s refills PCr but barely touches the glycolytic pool (τ₂≈90s → ~20% recovery), so fatigue compounds and each subsequent hang falls short of the last. Stop at 5 hangs: you've reached the compartment-2 + 3 steady state. The rep-time decay curve is a personal τ₂ probe — watch it flatten over weeks as glycolytic recovery improves. Load auto-prescribed from CF + W'/45.",
   },
   endurance: {
-    label: "Endurance", emoji: "🏔️", color: "#3b82f6",
-    refTime: 120, restDefault: 130, repsDefault: 6, setsDefault: 3, setRestDefault: 1200,
-    intensity: "Sub-max · long holds · quality recovery",
-    setsRationale: "120s holds are metabolically expensive — 20s rest produces severely degraded subsequent reps. Longer rep rest targets repeatable, quality endurance efforts rather than survival reps. The oxidative system takes 20+ min to fully reload between sets; multiple sets train your ability to sustain output in a partially recovered state.",
+    label: "Capacity", emoji: "🏔️", color: "#3b82f6",
+    refTime: 120, restDefault: 20, repsDefault: 4, setsDefault: 1, setRestDefault: 0,
+    intensity: "120s + 3 to failure · 20s rest · just above CF",
+    setsRationale: "Grip Gains capacity protocol at load ≈ CF + W'/120 (a hair above Critical Force). Hang 1 targets 120s continuous; hangs 2–4 go to failure with 20s rest. Each hang drains all three pools; 20s rest refills the fast pool but leaves medium and slow heavily depleted, so hold-time drops fast toward the CF asymptote. Stop at 4 hangs — subsequent hangs would be nearly flat on the tail. Trains CF / capillarity / mitochondrial density. Load auto-prescribed from CF + W'/120.",
   },
 };
 
@@ -4719,6 +4813,123 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
           </Card>
         )}
 
+        {/* ── Per-compartment AUC (dose delivered per energy system, per session) ── */}
+        {(() => {
+          // Group selected reps by session_id; fall back to date
+          const bySession = new Map();
+          for (const r of reps) {
+            const key = r.session_id || r.date;
+            if (!bySession.has(key)) bySession.set(key, { key, date: r.date, reps: [] });
+            bySession.get(key).reps.push(r);
+          }
+          const sessions = [...bySession.values()]
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .slice(-10)
+            .map(s => {
+              const auc = sessionCompartmentAUC(s.reps);
+              const dom = dominantZone5(s.reps);
+              return {
+                label: s.date.slice(5), // "MM-DD"
+                Fast: Math.round(auc.fast),
+                Medium: Math.round(auc.medium),
+                Slow: Math.round(auc.slow),
+                total: Math.round(auc.total),
+                n: s.reps.length,
+                reps: s.reps,
+                dom,
+              };
+            });
+          if (sessions.length === 0) return null;
+          const last = sessions[sessions.length - 1];
+          const pct = (v) => last.total > 0 ? Math.round((v / last.total) * 100) : 0;
+          // Build the last-session zone distribution (count of reps per ZONE5 bucket)
+          const lastZoneCounts = ZONE5.map(z => ({
+            ...z,
+            count: last.reps.filter(r => classifyZone5(r.actual_time_s)?.key === z.key).length,
+          }));
+          const lastTotalReps = lastZoneCounts.reduce((s, z) => s + z.count, 0);
+          return (
+            <Card style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Compartment Dose (AUC)</div>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+                Training dose delivered to each energy system per session. Dose = load × A<sub>i</sub> × τ<sub>Di</sub> · (1 − e<sup>−t/τ<sub>Di</sub></sup>).
+                Units: kg·s.
+              </div>
+              <div style={{ height: 180 }}>
+                <ResponsiveContainer>
+                  <BarChart data={sessions} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                    <XAxis dataKey="label" stroke={C.muted} tick={{ fontSize: 10 }} />
+                    <YAxis stroke={C.muted} tick={{ fontSize: 10 }} />
+                    <Tooltip
+                      contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12 }}
+                      labelStyle={{ color: C.muted }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey="Fast"   stackId="a" fill="#e05560" />
+                    <Bar dataKey="Medium" stackId="a" fill="#e07a30" />
+                    <Bar dataKey="Slow"   stackId="a" fill="#3b82f6" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {/* Last-session breakdown */}
+              <div style={{
+                display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
+                gap: 8, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}`,
+              }}>
+                <div>
+                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>FAST · PCR</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#e05560" }}>{last.Fast}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Fast)}% · τ 15s</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>MEDIUM · GLYCO</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#e07a30" }}>{last.Medium}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Medium)}% · τ 90s</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>SLOW · OXID</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#3b82f6" }}>{last.Slow}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Slow)}% · τ 600s</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 8, fontStyle: "italic" }}>
+                Last session: {last.n} rep{last.n !== 1 ? "s" : ""}, {last.total} kg·s total dose.
+                {last.dom && <> · landed in <span style={{ color: last.dom.color, fontWeight: 700, fontStyle: "normal" }}>{last.dom.label}</span></>}
+              </div>
+
+              {/* ── Last-session zone distribution (Grip Gains 5-zone classifier) ── */}
+              {lastTotalReps > 0 && (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, marginBottom: 6, textTransform: "uppercase" }}>
+                    Landed Zones · last session
+                  </div>
+                  <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: 6 }}>
+                    {lastZoneCounts.map(z => z.count > 0 && (
+                      <div
+                        key={z.key}
+                        title={`${z.label}: ${z.count} rep${z.count !== 1 ? "s" : ""}`}
+                        style={{
+                          flex: z.count,
+                          background: z.color,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 10, color: C.muted }}>
+                    {lastZoneCounts.filter(z => z.count > 0).map(z => (
+                      <span key={z.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: z.color, display: "inline-block" }} />
+                        {z.short} · {z.count}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+          );
+        })()}
+
         {/* ── Energy system breakdown ── */}
         <Card style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Energy System Breakdown</div>
@@ -4815,7 +5026,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
 // ─────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────
-function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut, unit = "lbs", onUnitChange = () => {}, bodyWeight = null, onBWChange = () => {} }) {
+function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut, unit = "lbs", onUnitChange = () => {}, bodyWeight = null, onBWChange = () => {}, trip = DEFAULT_TRIP, onTripChange = () => {} }) {
   const [showSQL, setShowSQL] = useState(false);
   const sql = `-- Run this once in your Supabase SQL editor (fresh install):
 CREATE TABLE reps (
@@ -4882,6 +5093,59 @@ CREATE POLICY "auth_all" ON reps
               </span>
             )}
           </div>
+        </Sect>
+      </Card>
+
+      <Card>
+        <Sect title="Training Goal">
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+            Target trip or event. Drives the countdown + taper reminder on the Workout tab.
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input
+              type="text"
+              value={trip.name || ""}
+              onChange={e => onTripChange({ name: e.target.value })}
+              placeholder="Name (e.g. Tensleep)"
+              style={{
+                flex: "1 1 160px", minWidth: 140, background: C.bg,
+                border: `1px solid ${C.border}`, borderRadius: 8,
+                padding: "8px 12px", color: C.text, fontSize: 15,
+              }}
+            />
+            <input
+              type="date"
+              value={trip.date || ""}
+              onChange={e => onTripChange({ date: e.target.value })}
+              style={{
+                background: C.bg,
+                border: `1px solid ${C.border}`, borderRadius: 8,
+                padding: "8px 12px", color: C.text, fontSize: 15,
+              }}
+            />
+          </div>
+          {(() => {
+            const cd = tripCountdown(trip.date);
+            if (!cd) {
+              return (
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 8 }}>
+                  Pick a date to enable the countdown.
+                </div>
+              );
+            }
+            if (cd.past) {
+              return (
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 8 }}>
+                  Trip date is in the past — update it to a future date.
+                </div>
+              );
+            }
+            return (
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 8 }}>
+                {cd.weeks}wk · {cd.days}d until {trip.name || "trip"} ({cd.tripLabel}). Taper starts {cd.taperLabel}.
+              </div>
+            );
+          })()}
         </Sect>
       </Card>
 
@@ -5256,12 +5520,46 @@ const LS_WORKOUT_LOG_KEY     = "ft_workout_log";
 const LS_WORKOUT_SYNCED_KEY  = "ft_workout_synced";  // Set<id> of sessions confirmed in Supabase
 const LS_WORKOUT_DELETED_KEY = "ft_workout_deleted"; // Set<id> tombstones — never re-add from remote
 const LS_HISTORY_DOMAIN_KEY  = "ft_history_domain";
-const TRIP_DATE_STR        = "2026-08-22";
+const LS_TRIP_KEY            = "ft_trip";            // { date: "YYYY-MM-DD", name: "Tensleep" }
+
+const DEFAULT_TRIP         = { date: "2026-08-22", name: "Tensleep" };
 const WK_ROTATION          = ["A", "B", "C"];
 
-function weeksToTrip() {
-  const trip = new Date(TRIP_DATE_STR + "T00:00:00");
+// Parse a "YYYY-MM-DD" trip date string. Returns null for empty/invalid input.
+function parseTripDate(tripDateStr) {
+  if (!tripDateStr) return null;
+  const d = new Date(tripDateStr + "T00:00:00");
+  return isNaN(d) ? null : d;
+}
+
+function weeksToTrip(tripDateStr) {
+  const trip = parseTripDate(tripDateStr);
+  if (!trip) return 0;
   return Math.max(0, Math.ceil((trip - new Date()) / (7 * 24 * 60 * 60 * 1000)));
+}
+
+// Trip countdown info — model-agnostic (conjugate-friendly).
+// Does NOT impose linear Build/Push/Peak/Taper blocks. Reports weeks remaining
+// and a taper window starting 7 days out (universal across training models).
+function tripCountdown(tripDateStr) {
+  const trip = parseTripDate(tripDateStr);
+  if (!trip) return null;
+  const now = new Date();
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const days = Math.ceil((trip - now) / msPerDay);
+  const weeks = Math.max(0, Math.ceil(days / 7));
+  const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const fmt = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const taperStart = addDays(trip, -7);
+  return {
+    trip,
+    days,
+    weeks,
+    tripLabel: fmt(trip),
+    taperLabel: fmt(taperStart),
+    inTaper: days <= 7 && days >= 0,
+    past: days < 0,
+  };
 }
 
 const WTYPE_META = {
@@ -5675,7 +5973,7 @@ function WorkoutEditor({ wKey, workout, onSave, onClose, onReset }) {
 }
 
 // ── Main WorkoutTab ───────────────────────────────────────────
-function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
+function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_TRIP }) {
   const [subTab, setSubTab]         = useState("today");
   const [plan,   setPlan]           = useState(() => loadLS(LS_WORKOUT_PLAN_KEY)  || DEFAULT_WORKOUTS);
   const [wState, setWState]         = useState(() => loadLS(LS_WORKOUT_STATE_KEY) || { rotationIndex: 0, sessionCount: 0 });
@@ -5693,7 +5991,7 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
   const rotKey    = WK_ROTATION[wState.rotationIndex % WK_ROTATION.length];
   const workout   = plan[rotKey];
   const sessionN  = wState.sessionCount + 1;
-  const wtr       = weeksToTrip();
+  const wtr       = weeksToTrip(trip.date);
 
   // Previous best set weights for an exercise in this workout slot
   const prevBestSets = (exId) => {
@@ -6090,25 +6388,49 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {} }) {
                 );
               })}
 
-              {/* Tensleep timeline */}
-              <Card style={{ marginTop: 4 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 10, letterSpacing: 1 }}>TENSLEEP TIMELINE</div>
-                {[
-                  ["Now → June",      "Build base · All workout types · Establish loads"],
-                  ["July",            "Push loads · Increase Micro/Crusher targets · Steep terrain"],
-                  ["Aug 1–14",        "Peak — max loads, limit bouldering priority"],
-                  ["Aug 15–21",       "Taper — cut volume 40%, hold intensity"],
-                  ["Aug 22",          "🏔️ Tensleep"],
-                ].map(([period, focus]) => (
-                  <div key={period} style={{
-                    display: "flex", gap: 10, padding: "7px 0",
-                    borderBottom: period === "Aug 22" ? "none" : `1px solid ${C.border}`,
-                  }}>
-                    <div style={{ fontSize: 13, color: C.yellow, fontWeight: 600, minWidth: 90 }}>{period}</div>
-                    <div style={{ fontSize: 13, color: C.muted }}>{focus}</div>
-                  </div>
-                ))}
-              </Card>
+              {/* Trip countdown — conjugate-friendly: countdown + taper window only */}
+              {(() => {
+                const cd = tripCountdown(trip.date);
+                if (!cd) return null;
+                const tripName = trip.name || "Trip";
+                return (
+                  <Card style={{ marginTop: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 10, letterSpacing: 1 }}>
+                      {tripName.toUpperCase()} COUNTDOWN
+                    </div>
+                    {cd.past ? (
+                      <div style={{ fontSize: 13, color: C.muted }}>
+                        {cd.tripLabel} — trip date is in the past. Edit in Settings.
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: `1px solid ${C.border}` }}>
+                          <div style={{ fontSize: 13, color: C.yellow, fontWeight: 600, minWidth: 90 }}>
+                            {cd.weeks}wk · {cd.days}d
+                          </div>
+                          <div style={{ fontSize: 13, color: C.muted }}>
+                            Until {tripName} ({cd.tripLabel})
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 10, padding: "7px 0" }}>
+                          <div style={{
+                            fontSize: 13,
+                            color: cd.inTaper ? C.red : C.yellow,
+                            fontWeight: 600, minWidth: 90,
+                          }}>
+                            {cd.inTaper ? "TAPER" : cd.taperLabel}
+                          </div>
+                          <div style={{ fontSize: 13, color: C.muted }}>
+                            {cd.inTaper
+                              ? "Cut volume 40%, hold intensity"
+                              : "Taper window starts (T−7d)"}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </Card>
+                );
+              })()}
             </>
           )}
         </>
@@ -6140,6 +6462,17 @@ export default function App() {
       const updated = log.filter(e => e.date !== d);
       saveLS(LS_BW_LOG_KEY, [...updated, { date: d, kg }].sort((a, b) => a.date < b.date ? -1 : 1));
     }
+  };
+
+  // ── Trip (user-editable target trip) ──────────────────────
+  const [trip, setTrip] = useState(() => {
+    const stored = loadLS(LS_TRIP_KEY);
+    return (stored && typeof stored === "object" && stored.date) ? stored : DEFAULT_TRIP;
+  });
+  const saveTrip = (next) => {
+    const merged = { ...trip, ...next };
+    setTrip(merged);
+    saveLS(LS_TRIP_KEY, merged);
   };
 
   // ── Session notes ─────────────────────────────────────────
@@ -6824,7 +7157,7 @@ export default function App() {
 
       {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
-      {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} />}
+      {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps(Array.isArray(rep) ? rep : [rep])} notes={notes} onNoteChange={handleNoteChange} />}
       {tab === 5 && <TrendsView history={history} unit={unit} />}
       {tab === 6 && (
@@ -6838,6 +7171,8 @@ export default function App() {
           onUnitChange={saveUnit}
           bodyWeight={bodyWeight}
           onBWChange={saveBW}
+          trip={trip}
+          onTripChange={saveTrip}
         />
       )}
     </div>
