@@ -518,7 +518,6 @@ function useTindeq() {
   const ctrlRef             = useRef(null);
   const deviceRef           = useRef(null);   // kept for auto-reconnect
   const reconnectingRef     = useRef(false);  // guard against concurrent reconnects
-  const keepaliveRef        = useRef(null);   // interval id for idle keepalive
   const peakRef             = useRef(0);
   const sumRef              = useRef(0);   // running sum for average
   const countRef            = useRef(0);   // sample count for average
@@ -630,20 +629,9 @@ function useTindeq() {
     }
   }, [handlePacket]);
 
-  // ── Keepalive — tare every 25 s while idle to prevent OS killing the connection ──
-  const startKeepalive = useCallback(() => {
-    clearInterval(keepaliveRef.current);
-    keepaliveRef.current = setInterval(async () => {
-      if (!measuringRef.current && ctrlRef.current) {
-        try { await ctrlRef.current.writeValue(CMD_TARE); } catch {}
-      }
-    }, 25000);
-  }, []);
-
-  const stopKeepalive = useCallback(() => {
-    clearInterval(keepaliveRef.current);
-    keepaliveRef.current = null;
-  }, []);
+  // NOTE: No app-layer keepalive — the OS/link layer already keeps BLE alive.
+  // Writing CMD_TARE every 25 s used to race with user actions on Chrome/Android
+  // and actually caused drops rather than preventing them.
 
   const connect = useCallback(async () => {
     setBleError(null);
@@ -658,38 +646,34 @@ function useTindeq() {
       });
       deviceRef.current = device;
 
+      // Single-shot reconnect after 1.5 s to handle brief signal blips.
+      // Aggressive retry loops can poison the adapter state on Android —
+      // if this one try fails, surface a clean error and let the user reconnect.
       device.addEventListener("gattserverdisconnected", async () => {
         setConnected(false);
-        stopKeepalive();
         if (reconnectingRef.current) return;
         reconnectingRef.current = true;
         setReconnecting(true);
-        const delays = [1000, 2000, 4000, 8000, 10000, 10000];
-        for (let i = 0; i < delays.length; i++) {
-          await new Promise(r => setTimeout(r, delays[i]));
-          try {
-            await setupGatt(device);
-            setConnected(true);
-            setReconnecting(false);
-            reconnectingRef.current = false;
-            startKeepalive();
-            return;
-          } catch { /* try next */ }
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          await setupGatt(device);
+          setConnected(true);
+        } catch {
+          setBleError("Connection lost — tap Connect BLE to reconnect.");
+        } finally {
+          setReconnecting(false);
+          reconnectingRef.current = false;
         }
-        reconnectingRef.current = false;
-        setReconnecting(false);
-        setBleError("Reconnection failed — tap Connect BLE to try again.");
       });
 
       await setupGatt(device);
       setConnected(true);
-      startKeepalive();
       return true;
     } catch (err) {
       setBleError(err.message || "Connection failed");
       return false;
     }
-  }, [setupGatt, startKeepalive, stopKeepalive]);
+  }, [setupGatt]);
 
   const startMeasuring = useCallback(async () => {
     peakRef.current  = 0;  setPeak(0);
