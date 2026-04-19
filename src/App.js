@@ -1931,9 +1931,13 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
 // ─────────────────────────────────────────────────────────────
 const RM_GRIPS = ["Micro", "Crusher"];
 
-// Map climbing intensity to training zone (for zone coverage accounting)
-const CLIMB_ZONE = { easy: "endurance", moderate: "endurance", hard: "strength", bouldering: "power" };
-
+// Zone coverage counts only grip-training sessions (and legacy 1RM activities,
+// which were finger-specific max efforts). Climbing sessions are intentionally
+// NOT credited to any zone — the old heuristic (hard→strength, easy→endurance,
+// boulder→power) over-counted climbing toward training zones it didn't really
+// stimulate in a finger-specific way. ClimbingLogWidget still logs climbs so
+// the data is preserved for future fatigue-accounting work, but it no longer
+// inflates the Power / Strength / Endurance buckets on the coverage card.
 function computeZoneCoverage(history, activities = []) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 30);
@@ -1959,14 +1963,11 @@ function computeZoneCoverage(history, activities = []) {
     else                             endurance++;
   }
 
-  // Add climbing / activity sessions
+  // Legacy 1RM activities still credit Power — they are finger-specific max
+  // efforts from before the Grip Gains power protocol was introduced.
   for (const a of activities) {
     if ((a.date ?? "") < cutoffStr) continue;
-    if (a.type === "oneRM") { power++; continue; }         // 1RM = pure PCr = Power
-    const zone = CLIMB_ZONE[a.intensity] ?? "endurance";
-    if (zone === "power")         power++;
-    else if (zone === "strength") strength++;
-    else                          endurance++;
+    if (a.type === "oneRM") power++;
   }
 
   const total = power + strength + endurance;
