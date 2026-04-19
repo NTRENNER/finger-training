@@ -2140,38 +2140,20 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
   const refWeightL = estimateRefWeight(history, "L", config.grip, config.targetTime);
   const refWeightR = estimateRefWeight(history, "R", config.grip, config.targetTime);
 
-  // Level progress for current config
-  const displayHand = config.hand === "Both" ? "L" : config.hand;
-  const currentLevel = calcLevel(history, displayHand, config.grip, config.targetTime);
-  const bestLoad     = getBestLoad(history, displayHand, config.grip, config.targetTime);
-  const nextTarget   = nextLevelTarget(history, displayHand, config.grip, config.targetTime);
-  const hasLevelData = bestLoad != null && config.grip;
+  // Level progress for current config — always both hands now
+  const levelL      = calcLevel(history, "L", config.grip, config.targetTime);
+  const levelR      = calcLevel(history, "R", config.grip, config.targetTime);
+  const bestLoadL   = getBestLoad(history, "L", config.grip, config.targetTime);
+  const bestLoadR   = getBestLoad(history, "R", config.grip, config.targetTime);
+  const nextTargetL = nextLevelTarget(history, "L", config.grip, config.targetTime);
+  const nextTargetR = nextLevelTarget(history, "R", config.grip, config.targetTime);
+  const hasLevelData = (bestLoadL != null || bestLoadR != null) && config.grip;
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
 
       <Card>
-        <Sect title="Hand">
-          <div style={{ display: "flex", gap: 10 }}>
-            {["L", "R", "Both"].map(h => (
-              <button
-                key={h}
-                onClick={() => setConfig(c => ({ ...c, hand: h }))}
-                style={{
-                  flex: 1, padding: "10px 0", borderRadius: 8, fontWeight: 700,
-                  fontSize: 14, cursor: "pointer",
-                  background: config.hand === h ? C.purple : C.border,
-                  color: config.hand === h ? "#fff" : C.muted,
-                  border: "none",
-                }}
-              >
-                {h === "L" ? "Left" : h === "R" ? "Right" : "Both"}
-              </button>
-            ))}
-          </div>
-        </Sect>
-
         <Sect title="Grip Type">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
             {GRIP_PRESETS.map(g => (
@@ -2210,22 +2192,18 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
             Suggested first-rep weight (from history, {config.targetTime}s target)
           </div>
           <div style={{ display: "flex", gap: 24 }}>
-            {config.hand !== "R" && (
-              <div>
-                <Label>Left</Label>
-                <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
-                  {refWeightL != null ? `${fmtW(refWeightL, unit)} ${unit}` : "—"}
-                </span>
-              </div>
-            )}
-            {config.hand !== "L" && (
-              <div>
-                <Label>Right</Label>
-                <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
-                  {refWeightR != null ? `${fmtW(refWeightR, unit)} ${unit}` : "—"}
-                </span>
-              </div>
-            )}
+            <div>
+              <Label>Left</Label>
+              <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
+                {refWeightL != null ? `${fmtW(refWeightL, unit)} ${unit}` : "—"}
+              </span>
+            </div>
+            <div>
+              <Label>Right</Label>
+              <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
+                {refWeightR != null ? `${fmtW(refWeightR, unit)} ${unit}` : "—"}
+              </span>
+            </div>
           </div>
         </Card>
       )}
@@ -2234,30 +2212,37 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
       {/* Level progress for selected config */}
       {hasLevelData && (
         <Card style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: 13, color: C.muted, marginBottom: 2 }}>
-                {config.grip} · {displayHand === "L" ? "Left" : "Right"} · {config.targetTime}s
-              </div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>
-                {LEVEL_EMOJIS[Math.min(currentLevel - 1, LEVEL_EMOJIS.length - 1)]} Level {currentLevel}
-              </div>
-              <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-                Best {fmtW(bestLoad, unit)} {unit}
-                {nextTarget != null && <span> · next at {fmtW(nextTarget, unit)} {unit}</span>}
-              </div>
-            </div>
-            {nextTarget != null && (
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>to next level</div>
-                <div style={{ width: 80, height: 6, background: C.border, borderRadius: 3 }}>
-                  <div style={{
-                    height: "100%", borderRadius: 3, background: C.green,
-                    width: `${Math.min(100, (bestLoad / nextTarget) * 100)}%`,
-                  }} />
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
+            {config.grip} · {config.targetTime}s
+          </div>
+          <div style={{ display: "flex", gap: 12 }}>
+            {[
+              { key: "L", label: "Left",  level: levelL, best: bestLoadL, next: nextTargetL },
+              { key: "R", label: "Right", level: levelR, best: bestLoadR, next: nextTargetR },
+            ].map(row => (
+              <div key={row.key} style={{ flex: 1, padding: 10, background: C.bg, borderRadius: 8 }}>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>{row.label}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>
+                  {row.best != null
+                    ? <>{LEVEL_EMOJIS[Math.min(row.level - 1, LEVEL_EMOJIS.length - 1)]} L{row.level}</>
+                    : <span style={{ color: C.muted, fontWeight: 500 }}>—</span>}
                 </div>
+                {row.best != null && (
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                    {fmtW(row.best, unit)} {unit}
+                    {row.next != null && <> · next {fmtW(row.next, unit)}</>}
+                  </div>
+                )}
+                {row.next != null && row.best != null && (
+                  <div style={{ width: "100%", height: 4, background: C.border, borderRadius: 2, marginTop: 6 }}>
+                    <div style={{
+                      height: "100%", borderRadius: 2, background: C.green,
+                      width: `${Math.min(100, (row.best / row.next) * 100)}%`,
+                    }} />
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
         </Card>
       )}
@@ -6720,8 +6705,12 @@ export default function App() {
   }, [addReps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Session Config ────────────────────────────────────────
+  // hand is hard-coded to "Both": the user always trains both hands, either
+  // alternating per rep or doing all-L-then-all-R. There's no UI toggle for
+  // this anymore; it lives in config only so existing downstream code keeps
+  // working.
   const [config, setConfig] = useState(() => ({
-    hand:       "L",
+    hand:       "Both",
     grip:       "",
     repsPerSet: 5,
     numSets:    3,
