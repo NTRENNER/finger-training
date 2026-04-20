@@ -2020,7 +2020,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
   );
 }
 
-function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, activities = [], onLogActivity = () => {} }) {
+function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, activities = [], onLogActivity = () => {}, connectSlot = null }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -2254,6 +2254,9 @@ function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "l
         </div>
       )}
 
+      {/* Tindeq Connect slot — rendered just above the Start button */}
+      {connectSlot}
+
       <Btn
         onClick={onStart}
         disabled={!config.grip}
@@ -2353,8 +2356,9 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
 
   useEffect(() => () => clearInterval(timerRef.current), []);
 
-  const handList = config.hand === "Both" ? ["L", "R"] : [config.hand];
-  const sug = handList.length === 1 ? suggestions[handList[0]] : null;
+  // Active suggestion follows the active hand (or the only configured hand)
+  const activeSugHand = config.hand === "Both" ? activeHand : config.hand;
+  const sug = suggestions[activeSugHand] ?? null;
 
   // Effective target weight in kg for color-coding and auto-failure threshold
   const targetKg = manualWeight ?? sug?.suggested ?? null;
@@ -2411,26 +2415,28 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
       {/* Weight suggestion (shown when ready) */}
       {repPhase === "ready" && (
         <Card>
+          {/* Big active-hand indicator so it's obvious which hand to use */}
+          {config.hand === "Both" && (
+            <div style={{ textAlign: "center", marginBottom: 12 }}>
+              <div style={{
+                fontSize: 13, color: C.muted, letterSpacing: 1.2,
+                textTransform: "uppercase", marginBottom: 2,
+              }}>Use your</div>
+              <div style={{
+                fontSize: 26, fontWeight: 900,
+                color: activeHand === "R" ? C.orange : C.blue,
+              }}>
+                {activeHand === "R" ? "✋ Right Hand" : "🤚 Left Hand"}
+              </div>
+            </div>
+          )}
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
             Rep {currentRep + 1} suggested weight
             {fatigue > 0.05 && <span style={{ marginLeft: 8, color: C.orange }}>(fatigue {Math.round(fatigue * 100)}%)</span>}
           </div>
-          {config.hand === "Both" ? (
-            <div style={{ display: "flex", gap: 32 }}>
-              {handList.map(h => (
-                <div key={h}>
-                  <Label>{h === "L" ? "Left" : "Right"}</Label>
-                  <span style={{ fontSize: 28, fontWeight: 700, color: C.blue }}>
-                    {suggestions[h].suggested != null ? `${fmtW(suggestions[h].suggested, unit)} ${unit}` : "—"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
-              {sug?.suggested != null ? `${fmtW(sug.suggested, unit)} ${unit}` : "—"}
-            </div>
-          )}
+          <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
+            {sug?.suggested != null ? `${fmtW(sug.suggested, unit)} ${unit}` : "—"}
+          </div>
           <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
             <input
               type="number" min={0} step={0.5}
@@ -3191,13 +3197,21 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
     (!target || r.target_duration === target)
   ), [history, grip, hand, target]);
 
-  // Group by session_id then date
+  // Group by session_id then date. Derive `hand` from the union of rep hands,
+  // so a Both-mode session with L and R reps shows "Both" (not just the first rep's hand).
   const grouped = useMemo(() => {
     const map = {};
     for (const r of filtered) {
       const key = r.session_id || r.date;
       if (!map[key]) map[key] = { date: r.date, grip: r.grip, hand: r.hand, target_duration: r.target_duration, reps: [] };
       map[key].reps.push(r);
+    }
+    for (const sess of Object.values(map)) {
+      const hands = new Set(sess.reps.map(r => r.hand).filter(Boolean));
+      if (hands.has("L") && hands.has("R")) sess.hand = "B";
+      else if (hands.has("L")) sess.hand = "L";
+      else if (hands.has("R")) sess.hand = "R";
+      // else leave the original (covers legacy "B" and empty)
     }
     return Object.values(map).sort((a, b) => a.date < b.date ? 1 : -1);
   }, [filtered]);
@@ -3368,7 +3382,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
               <div>
                 <b>{sess.grip}</b>
                 <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>
-                  {sess.hand === "L" ? "Left" : sess.hand === "R" ? "Right" : "Both"}
+                  {sess.hand === "L" ? "Left" : sess.hand === "R" ? "Right" : "L + R"}
                   {" · "}{TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
                 </span>
               </div>
@@ -3477,6 +3491,8 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
               {sess.reps.sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num).map((r, j) => {
                 const isRepEditing = editingRep?.sessKey === sessKey && editingRep?.repIdx === j;
                 const passed = r.actual_time_s >= sess.target_duration;
+                // Show hand badge only on mixed (Both) sessions — single-hand sessions already say "Left"/"Right" in the header
+                const showHandBadge = sess.hand === "B" && (r.hand === "L" || r.hand === "R");
                 return (
                   <div key={j} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 0 }}>
                     <div
@@ -3489,6 +3505,15 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
                         paddingRight: repEditMode === sessKey ? 22 : 10,
                       }}
                     >
+                      {showHandBadge && (
+                        <span style={{
+                          display: "inline-block", marginRight: 6,
+                          padding: "1px 5px", borderRadius: 4,
+                          fontSize: 10, fontWeight: 700,
+                          background: r.hand === "R" ? C.orange + "33" : C.blue + "33",
+                          color:      r.hand === "R" ? C.orange : C.blue,
+                        }}>{r.hand}</span>
+                      )}
                       <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
                     </div>
                     {repEditMode === sessKey && (
@@ -5290,7 +5315,10 @@ function BadgesView({ history, liveEstimate, genesisSnap }) {
 // Tindeq detects pull start and release automatically — no button taps needed.
 // Each detected rep calls onRepDone with {actualTime, avgForce, failed:false}.
 function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" }) {
-  const { config, currentSet, currentRep } = session;
+  const { config, currentSet, currentRep, activeHand } = session;
+  const handLabel = config.hand === "Both"
+    ? (activeHand === "L" ? "Left Hand" : "Right Hand")
+    : config.hand === "L" ? "Left Hand" : "Right Hand";
 
   const [repActive, setRepActive] = useState(false);
   const [elapsed,   setElapsed]   = useState(0);
@@ -5331,7 +5359,7 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 13, color: C.muted }}>Set {currentSet + 1} of {config.numSets}</div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>{config.grip} · {config.hand === "L" ? "Left" : config.hand === "R" ? "Right" : "Both"}</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>{config.grip} · {handLabel}</div>
         </div>
         <Btn small color={C.red} onClick={onAbort}>End Session</Btn>
       </div>
@@ -5357,7 +5385,18 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
           </>
         ) : (
           <>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>⬇</div>
+            <div style={{
+              fontSize: 13, color: C.muted, letterSpacing: 1.2,
+              textTransform: "uppercase", marginBottom: 4,
+            }}>Use your</div>
+            <div style={{
+              fontSize: 32, fontWeight: 900,
+              color: activeHand === "R" ? C.orange : C.blue,
+              marginBottom: 14,
+            }}>
+              {activeHand === "R" ? "✋ Right Hand" : "🤚 Left Hand"}
+            </div>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>⬇</div>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>Pull to begin rep {currentRep + 1}</div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
               Target: <strong>{config.targetTime}s</strong> · Release when done
@@ -6884,62 +6923,62 @@ export default function App() {
         }
 
         if (phase === "idle") {
-          return (
-            <>
-              <SetupView
-                config={config}
-                setConfig={setConfig}
-                onStart={startSession}
-                onCalibrate={() => setCalMode(true)}
-                history={history}
-                unit={unit}
-                onBwSave={saveBW}
-                readiness={readiness}
-                todaySubj={todaySubj}
-                onSubjReadiness={handleSubjReadiness}
-                isEstimated={todaySubj == null}
-                liveEstimate={liveEstimate}
-                activities={activities}
-                onLogActivity={addActivity}
-              />
-              {/* Tindeq connect button */}
-              <div style={{ maxWidth: 480, margin: "0 auto", padding: "0 16px 32px" }}>
-                <Card>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>Tindeq Progressor</div>
-                      <div style={{ fontSize: 12, color: C.muted }}>
-                        {tindeq.connected ? "Connected ✓" : tindeq.reconnecting ? "Reconnecting…" : tindeq.bleError || "Not connected"}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      {tindeq.connected && (
-                        <Btn small onClick={tindeq.tare} color={C.muted}>Tare</Btn>
-                      )}
-                      <Btn
-                        small
-                        onClick={tindeq.connect}
-                        disabled={tindeq.connected || tindeq.reconnecting}
-                        color={tindeq.connected ? C.green : tindeq.reconnecting ? C.orange : C.blue}
-                      >
-                        {tindeq.connected ? "Connected" : tindeq.reconnecting ? "Reconnecting…" : "Connect BLE"}
-                      </Btn>
+          const tindeqConnectCard = (
+            <div style={{ marginBottom: 12 }}>
+              <Card>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>Tindeq Progressor</div>
+                    <div style={{ fontSize: 12, color: C.muted }}>
+                      {tindeq.connected ? "Connected ✓" : tindeq.reconnecting ? "Reconnecting…" : tindeq.bleError || "Not connected"}
                     </div>
                   </div>
-                  {tindeq.connected && (
-                    <div style={{ marginTop: 8, fontSize: 13, color: C.text }}>
-                      Live force: <b style={{ color: C.blue }}>{fmtW(tindeq.force, unit)} {unit}</b>
-                      <span style={{ marginLeft: 12, color: C.muted, fontSize: 12 }}>
-                        (tap Tare to zero before your session)
-                      </span>
-                    </div>
-                  )}
-                  {tindeq.bleError && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: C.red }}>{tindeq.bleError}</div>
-                  )}
-                </Card>
-              </div>
-            </>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {tindeq.connected && (
+                      <Btn small onClick={tindeq.tare} color={C.muted}>Tare</Btn>
+                    )}
+                    <Btn
+                      small
+                      onClick={tindeq.connect}
+                      disabled={tindeq.connected || tindeq.reconnecting}
+                      color={tindeq.connected ? C.green : tindeq.reconnecting ? C.orange : C.blue}
+                    >
+                      {tindeq.connected ? "Connected" : tindeq.reconnecting ? "Reconnecting…" : "Connect BLE"}
+                    </Btn>
+                  </div>
+                </div>
+                {tindeq.connected && (
+                  <div style={{ marginTop: 8, fontSize: 13, color: C.text }}>
+                    Live force: <b style={{ color: C.blue }}>{fmtW(tindeq.force, unit)} {unit}</b>
+                    <span style={{ marginLeft: 12, color: C.muted, fontSize: 12 }}>
+                      (tap Tare to zero before your session)
+                    </span>
+                  </div>
+                )}
+                {tindeq.bleError && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: C.red }}>{tindeq.bleError}</div>
+                )}
+              </Card>
+            </div>
+          );
+          return (
+            <SetupView
+              config={config}
+              setConfig={setConfig}
+              onStart={startSession}
+              onCalibrate={() => setCalMode(true)}
+              history={history}
+              unit={unit}
+              onBwSave={saveBW}
+              readiness={readiness}
+              todaySubj={todaySubj}
+              onSubjReadiness={handleSubjReadiness}
+              isEstimated={todaySubj == null}
+              liveEstimate={liveEstimate}
+              activities={activities}
+              onLogActivity={addActivity}
+              connectSlot={tindeqConnectCard}
+            />
           );
         }
 
