@@ -3801,11 +3801,12 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       },
     };
 
-    // Signal 1: physiological limiter (highest fail rate among zones with data)
-    const ranked = Object.entries(zones)
-      .filter(([, z]) => z.failRate !== null)
-      .sort(([, a], [, b]) => b.failRate - a.failRate);
-    const limiterKey = ranked.length > 0 ? ranked[0][0] : null;
+    // Signal 1: physiological limiter (highest fail rate among zones with
+    // data). Uses whole history — not the hand/grip filter — because the
+    // recommendation drives the next training session, which is Both hands
+    // by design. The filter still controls the chart and zone breakdown,
+    // just not this prescription.
+    const limiterKey = computeLimiterZone(history);
 
     // Signal 2: zone coverage gap (least-trained in last 30 days)
     const coverage = computeZoneCoverage(history, activities);
