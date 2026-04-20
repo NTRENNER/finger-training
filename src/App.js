@@ -372,9 +372,9 @@ function sessionCompartmentAUC(reps) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Grip Gains 5-zone classifier: categorises a single hang by its
-// time-under-tension. The 45s boundaries come from 15 × 3s pulses
-// in Grip Gains' original framing; we treat them as TUT thresholds.
+// 5-zone classifier: categorises a single hang by its
+// time-under-tension. The 45s boundaries come from 15 × 3s pulse
+// framing; we treat them as TUT thresholds.
 // Boundaries: <45s power, 45–81s pwr-str, 84–129s str,
 //             132–177s str-end, 180s+ end.
 // Returns { key, label, short, color } or null for zero/invalid reps.
@@ -1110,8 +1110,8 @@ function RepDots({ total, done, current }) {
 // ─────────────────────────────────────────────────────────────
 // Shows a goal picker + predicted per-rep fatigue curve + "Use this plan" button.
 // Requires a live CF/W′ estimate fitted from training history.
-// Grip Gains uniform protocol: 20s rest between every hang, 4–6 hangs per
-// session depending on zone. The set count is chosen so per-hang hold-time
+// Uniform protocol: 20s rest between every hang, 4–6 hangs per session
+// depending on zone. The set count is chosen so per-hang hold-time
 // converges to its asymptote (you've drained to compartment-3 steady state).
 // Power drains only the fast pool which refills ~75% in 20s, so it takes ~6
 // hangs to hit the tail. Capacity drains all three pools per hang, so the tail
@@ -1121,19 +1121,19 @@ const GOAL_CONFIG = {
     label: "Power", emoji: "⚡", color: "#e05560",
     refTime: 7, restDefault: 20, repsDefault: 6, setsDefault: 1, setRestDefault: 0,
     intensity: "6 × 5–7s max · 20s rest",
-    setsRationale: "Grip Gains power protocol: 6 hangs of 5–7s at near-max load with 20s rest. 20s refills ~75% of PCr (τ₁≈15s) between hangs — enough to keep output high but not enough to fully recover. Six hangs reaches the asymptote where subsequent hangs would produce similar output; beyond that you're spinning your wheels. Use as a pre-climbing warm-up; primes neural drive without shredding you. Load auto-prescribed from CF + W'/7.",
+    setsRationale: "Power protocol: 6 hangs of 5–7s at near-max load with 20s rest. 20s refills ~75% of PCr (τ₁≈15s) between hangs — enough to keep output high but not enough to fully recover. Six hangs reaches the asymptote where subsequent hangs would produce similar output; beyond that you're spinning your wheels. Use as a pre-climbing warm-up; primes neural drive without shredding you. Load auto-prescribed from CF + W'/7.",
   },
   strength: {
     label: "Strength", emoji: "💪", color: "#e07a30",
     refTime: 45, restDefault: 20, repsDefault: 5, setsDefault: 1, setRestDefault: 0,
     intensity: "45s + 4 to failure · 20s rest",
-    setsRationale: "Grip Gains strength protocol: hang 1 targets 45s, hangs 2–5 go to failure, 20s rest between. 20s refills PCr but barely touches the glycolytic pool (τ₂≈90s → ~20% recovery), so fatigue compounds and each subsequent hang falls short of the last. Stop at 5 hangs: you've reached the compartment-2 + 3 steady state. The rep-time decay curve is a personal τ₂ probe — watch it flatten over weeks as glycolytic recovery improves. Load auto-prescribed from CF + W'/45.",
+    setsRationale: "Strength protocol: hang 1 targets 45s, hangs 2–5 go to failure, 20s rest between. 20s refills PCr but barely touches the glycolytic pool (τ₂≈90s → ~20% recovery), so fatigue compounds and each subsequent hang falls short of the last. Stop at 5 hangs: you've reached the compartment-2 + 3 steady state. The rep-time decay curve is a personal τ₂ probe — watch it flatten over weeks as glycolytic recovery improves. Load auto-prescribed from CF + W'/45.",
   },
   endurance: {
     label: "Capacity", emoji: "🏔️", color: "#3b82f6",
     refTime: 120, restDefault: 20, repsDefault: 4, setsDefault: 1, setRestDefault: 0,
     intensity: "120s + 3 to failure · 20s rest · just above CF",
-    setsRationale: "Grip Gains capacity protocol at load ≈ CF + W'/120 (a hair above Critical Force). Hang 1 targets 120s continuous; hangs 2–4 go to failure with 20s rest. Each hang drains all three pools; 20s rest refills the fast pool but leaves medium and slow heavily depleted, so hold-time drops fast toward the CF asymptote. Stop at 4 hangs — subsequent hangs would be nearly flat on the tail. Trains CF / capillarity / mitochondrial density. Load auto-prescribed from CF + W'/120.",
+    setsRationale: "Capacity protocol at load ≈ CF + W'/120 (a hair above Critical Force). Hang 1 targets 120s continuous; hangs 2–4 go to failure with 20s rest. Each hang drains all three pools; 20s rest refills the fast pool but leaves medium and slow heavily depleted, so hold-time drops fast toward the CF asymptote. Stop at 4 hangs — subsequent hangs would be nearly flat on the tail. Trains CF / capillarity / mitochondrial density. Load auto-prescribed from CF + W'/120.",
   },
 };
 
@@ -1431,8 +1431,8 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
 
 // ─────────────────────────────────────────────────────────────
 // 1RM legacy — the OneRMWidget has been removed from the UI now that
-// the Grip Gains power protocol (6 × 5–7s max hangs at 20s rest) is
-// used as the pre-climb warm-up and replaces a standalone 1RM test.
+// the power protocol (6 × 5–7s max hangs at 20s rest) is used as the
+// pre-climb warm-up and replaces a standalone 1RM test.
 // RM_GRIPS stays so the 1RM PR tracker on the Analysis tab can render
 // historical data; computeZoneCoverage still treats any existing
 // `type: "oneRM"` activity entries as Power credit.
@@ -1475,7 +1475,7 @@ function computeZoneCoverage(history, activities = []) {
   }
 
   // Legacy 1RM activities still credit Power — they are finger-specific max
-  // efforts from before the Grip Gains power protocol was introduced.
+  // efforts from before the power protocol was introduced.
   for (const a of activities) {
     if ((a.date ?? "") < cutoffStr) continue;
     if (a.type === "oneRM") power++;
@@ -4396,7 +4396,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                 {last.dom && <> · landed in <span style={{ color: last.dom.color, fontWeight: 700, fontStyle: "normal" }}>{last.dom.label}</span></>}
               </div>
 
-              {/* ── Last-session zone distribution (Grip Gains 5-zone classifier) ── */}
+              {/* ── Last-session zone distribution (5-zone classifier) ── */}
               {lastTotalReps > 0 && (
                 <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
                   <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, marginBottom: 6, textTransform: "uppercase" }}>
