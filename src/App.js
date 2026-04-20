@@ -151,6 +151,44 @@ function fitCF(pts) {
   return { CF, W, n };
 }
 
+// Fit a Monod curve on a set of failure reps, with adaptive hand
+// selection: if both hands are present and their CFs agree within
+// tolerance, pool them for a tighter fit; if they diverge sharply,
+// trust the ceiling hand (the weaker hand is typically noise — sparse
+// data, fatigue, mis-logged failures — not a different underlying
+// curve). Falls back gracefully when only one hand has usable data or
+// the per-hand fits can't satisfy the minimum-durations requirement.
+//
+// `rows` should already be filtered to the set of failure reps you
+// care about (e.g. all grips, a single grip, a date window, etc.). The
+// helper handles hand-splitting internally so callers don't repeat
+// that logic.
+function fitAdaptiveHandCurve(rows) {
+  const CF_ASYMMETRY_TOL = 0.20;
+  if (!rows || rows.length < 2) return null;
+  const fitFor = (subset) => {
+    if (subset.length < 2) return null;
+    // Require 2+ distinct target durations — Monod linearization needs
+    // spread on the 1/T axis to be meaningful.
+    const durs = new Set(subset.map(r => r.target_duration));
+    if (durs.size < 2) return null;
+    return fitCF(subset.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
+  };
+  const fitL = fitFor(rows.filter(r => r.hand === "L"));
+  const fitR = fitFor(rows.filter(r => r.hand === "R"));
+  const fitPooled = fitFor(rows);
+  if (fitL && fitR) {
+    const cfHi = Math.max(fitL.CF, fitR.CF);
+    const cfLo = Math.min(fitL.CF, fitR.CF);
+    const asym = cfHi > 0 ? (cfHi - cfLo) / cfHi : 0;
+    if (asym <= CF_ASYMMETRY_TOL) return fitPooled ?? (fitL.CF >= fitR.CF ? fitL : fitR);
+    return fitL.CF >= fitR.CF ? fitL : fitR;
+  }
+  if (fitL) return fitL;
+  if (fitR) return fitR;
+  return fitPooled;
+}
+
 // Predicted force at a given duration (s) from a CF/W fit.
 function predForce(fit, t) { return fit.CF + fit.W / t; }
 
@@ -1186,7 +1224,7 @@ const BADGE_CONFIG = [
   { id: "realization", label: "Realization", emoji: "🏔️", threshold: 100, desc: "2× your Genesis capacity — the potential fulfilled" },
 ];
 
-function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null, recommendedGrip = null, recommendedLabel = "recommended" }) {
+function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null, recommendedGrip = null, recommendedLabel = "recommended", recommendedScope = null }) {
   // Default goal to the recommended zone when we know it; fall back to strength
   const initGoal = (recommendedZone && GOAL_CONFIG[recommendedZone]) ? recommendedZone : "strength";
   const [goal,    setGoal]    = useState(initGoal);
@@ -1220,7 +1258,14 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${gc.color}40` }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>🗓 Session Planner</div>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>🗓 Session Planner</div>
+          {recommendedScope && (
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+              Recommendation for <span style={{ color: C.text, fontWeight: 600 }}>{recommendedScope}</span>
+            </div>
+          )}
+        </div>
         {recommendedGrip && (
           <div style={{
             fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
@@ -2018,7 +2063,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
   );
 }
 
-function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, activities = [], onLogActivity = () => {}, connectSlot = null }) {
+function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -2145,17 +2190,26 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
       {(() => {
         const limiter = computeLimiterZone(history);
         const limiterGrip = limiter?.grip ?? null;
+        // Prefer a grip-specific Monod fit when the user has picked a
+        // grip — FDP (pinch / open-hand rollers) and FDS (crusher) are
+        // separate muscles with separate force-duration curves, and
+        // training one doesn't fully transfer to the other. Fall back
+        // to the overall pooled fit if no grip is selected yet or the
+        // selected grip doesn't have enough data for its own fit.
+        const gripFit = config.grip && gripEstimates[config.grip];
+        const fitForRec = gripFit ?? liveEstimate;
+        const scopeLabel = gripFit ? config.grip : (config.grip ? `${config.grip} (pooled)` : "overall");
         let zone = null;
         // Track WHICH signal picked the zone so we can label the badge
         // honestly: "biggest gain" for ΔAUC, "limiter" for curve-shape,
         // "least trained" for coverage fallback.
         let label = "recommended";
-        if (liveEstimate && liveEstimate.CF > 0) {
+        if (fitForRec && fitForRec.CF > 0) {
           // Rank protocols by projected ΔAUC using the PERSONAL response
           // (prior when data is thin; blended with observed rates as the
           // training log grows). Matches AnalysisView so the two views
           // prescribe the same zone.
-          const { CF, W } = liveEstimate;
+          const { CF, W } = fitForRec;
           const response = computePersonalResponse(history);
           let bestKey = null, bestGain = -Infinity;
           for (const [key, resp] of Object.entries(response)) {
@@ -2177,10 +2231,11 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
         }
         return (
           <SessionPlannerCard
-            liveEstimate={liveEstimate}
+            liveEstimate={fitForRec}
             recommendedZone={zone}
             recommendedGrip={limiterGrip}
             recommendedLabel={label}
+            recommendedScope={scopeLabel}
             onApplyPlan={({ goal, targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
               setConfig(c => ({ ...c, goal, targetTime, repsPerSet, restTime, numSets, setRestTime }))
             }
@@ -4345,7 +4400,7 @@ function TrendsView({ history, unit = "lbs", activities = [] }) {
 const POWER_MAX    = 20;
 const STRENGTH_MAX = 120;
 
-function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [], liveEstimate = null }) {
+function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [], liveEstimate = null, gripEstimates = {} }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selGrip,   setSelGrip]   = useState("");
   const [relMode,   setRelMode]   = useState(false); // relative strength toggle
@@ -4692,14 +4747,15 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     const coverage = computeZoneCoverage(history, activities);
     const coverageKey = coverage.total > 0 ? coverage.recommended : null;
 
-    // No curve fit → fall back to limiter or coverage, with a caveat
-    // that AUC ranking needs failure data. Use the SHARED liveEstimate
-    // so Setup and Analysis always rank protocols from the same curve
-    // regardless of which hand/grip the user has selected as the
-    // Analysis filter. liveEstimate is computed at App root and auto-
-    // selects the cleaner per-hand fit (higher CF, less corrupted by
-    // fatigue / sparse data).
-    const fitForRec = liveEstimate ?? cfEstimate;
+    // Prefer a grip-specific fit when the user has picked a grip in
+    // the Analysis filter: FDP (pinch / open-hand rollers) and FDS
+    // (crusher) are separate muscles with separate curves, so the
+    // recommendation should follow whichever muscle is in focus. Fall
+    // back to the pooled liveEstimate when no grip is selected, and
+    // finally to cfEstimate (the filter-dependent display fit) as a
+    // last resort. Either way the engine matches the Setup view.
+    const gripFit = selGrip ? gripEstimates[selGrip] : null;
+    const fitForRec = gripFit ?? liveEstimate ?? cfEstimate;
     if (!fitForRec) {
       const fallbackKey = limiterKey ?? coverageKey;
       if (!fallbackKey) return null;
@@ -4754,7 +4810,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       responseSource,
       coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
     };
-  }, [liveEstimate, history, activities, unit, personalResponse]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [liveEstimate, gripEstimates, selGrip, history, activities, unit, personalResponse]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unexplored = Object.entries(zones)
     .filter(([, z]) => z.total === 0)
@@ -7390,43 +7446,32 @@ export default function App() {
 
   // ── Live CF/W′ estimate (all failure reps, both hands, all grips) ─────────────
   // Used by SessionPlannerCard and AnalysisView. Updates as training data grows.
+  // All-grip adaptive fit — used as the overall curve when no single
+  // grip is in focus (e.g. Badges view, fallback when user hasn't yet
+  // picked a grip in Setup).
   const liveEstimate = useMemo(() => {
-    // Fit per-hand AND pooled, then pick adaptively:
-    //   • If the two hands' CFs agree within tolerance → use the pooled
-    //     fit (twice the data → tighter Monod estimate).
-    //   • If they diverge sharply → trust the ceiling hand. A weaker
-    //     hand at that level of divergence is almost always a data
-    //     artifact (sparse durations, climbing-induced fatigue,
-    //     occasional botched failures) rather than a different
-    //     underlying curve shape; pooling would just let that noise
-    //     drag CF down and flip the W'/CF ratio across the Power-vs-
-    //     Strength breakeven.
-    // Tolerance is set loose enough (20%) to keep the common case of
-    // few-pound asymmetries on the pooled path.
-    const CF_ASYMMETRY_TOL = 0.20;
     const allFails = history.filter(r => r.failed && r.avg_force_kg > 0 && r.actual_time_s > 0);
-    if (allFails.length < 2) return null;
-    const fitFor = (rows) => {
-      if (rows.length < 2) return null;
-      // Require at least 2 distinct target durations for the fit to be
-      // meaningful (otherwise the Monod linearization has no spread).
-      const durs = new Set(rows.map(r => r.target_duration));
-      if (durs.size < 2) return null;
-      return fitCF(rows.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
-    };
-    const fitL = fitFor(allFails.filter(r => r.hand === "L"));
-    const fitR = fitFor(allFails.filter(r => r.hand === "R"));
-    const fitPooled = fitFor(allFails);
-    if (fitL && fitR) {
-      const cfHi = Math.max(fitL.CF, fitR.CF);
-      const cfLo = Math.min(fitL.CF, fitR.CF);
-      const asym = cfHi > 0 ? (cfHi - cfLo) / cfHi : 0;
-      if (asym <= CF_ASYMMETRY_TOL) return fitPooled ?? (fitL.CF >= fitR.CF ? fitL : fitR);
-      return fitL.CF >= fitR.CF ? fitL : fitR;
+    return fitAdaptiveHandCurve(allFails);
+  }, [history]);
+
+  // Per-grip adaptive fits. FDP and FDS are different muscles (pinch /
+  // open-hand roller vs crush roller) with separate force-duration
+  // curves; pooling them hides per-muscle training decisions. Each
+  // grip gets its own Monod fit so the recommendation engine can pick
+  // the right zone for the specific muscle being trained.
+  const gripEstimates = useMemo(() => {
+    const fails = history.filter(r => r.failed && r.grip && r.avg_force_kg > 0 && r.actual_time_s > 0);
+    const byGrip = {};
+    for (const r of fails) {
+      if (!byGrip[r.grip]) byGrip[r.grip] = [];
+      byGrip[r.grip].push(r);
     }
-    if (fitL) return fitL;
-    if (fitR) return fitR;
-    return fitPooled;
+    const out = {};
+    for (const [grip, rows] of Object.entries(byGrip)) {
+      const fit = fitAdaptiveHandCurve(rows);
+      if (fit) out[grip] = fit;
+    }
+    return out;
   }, [history]);
 
   // Permanent baseline snapshot — set once from the earliest training data,
@@ -7841,6 +7886,7 @@ export default function App() {
               onSubjReadiness={handleSubjReadiness}
               isEstimated={todaySubj == null}
               liveEstimate={liveEstimate}
+              gripEstimates={gripEstimates}
               activities={activities}
               onLogActivity={addActivity}
               connectSlot={tindeqConnectCard}
@@ -7935,7 +7981,7 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} liveEstimate={liveEstimate} />}
+      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} liveEstimate={liveEstimate} gripEstimates={gripEstimates} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 4 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
