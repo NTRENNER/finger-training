@@ -1806,6 +1806,12 @@ function computeLimiterZone(history) {
   return null;
 }
 
+// Zone Workout Summary — neutral 30-day volume breakdown. Does NOT
+// prescribe training: the SessionPlanner owns the recommendation
+// (per-grip Monod cross-zone residual). This card is purely a log.
+// computeZoneCoverage still returns .recommended because the planner
+// uses it as a fallback when there's too little failure data for the
+// curve-residual signal; we just don't display that prescription here.
 function ZoneCoverageCard({ history, activities = [] }) {
   const coverage = useMemo(() => computeZoneCoverage(history, activities),
     [history, activities]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1817,49 +1823,32 @@ function ZoneCoverageCard({ history, activities = [] }) {
     { key: "strength",  label: "💪 Strength",  val: coverage.strength,  color: "#e07a30" },
     { key: "endurance", label: "🏔️ Capacity",  val: coverage.endurance, color: "#3b82f6" },
   ];
-  const recZone = zones.find(z => z.key === coverage.recommended);
-  const maxVal  = Math.max(coverage.power, coverage.strength, coverage.endurance, 1);
-  const advice  = {
-    power:     "Power is least-trained. Short max-effort hangs build your phosphocreatine system — quality over volume.",
-    strength:  "Strength is least-trained. Progressive hangs with partial recovery drive glycolytic adaptation.",
-    endurance: "Capacity is least-trained. Sub-max repeaters raise Critical Force and lift every other zone by default.",
-  };
+  const maxVal = Math.max(coverage.power, coverage.strength, coverage.endurance, 1);
 
   return (
-    <Card style={{ marginBottom: 16, border: `1px solid ${recZone?.color ?? C.border}30` }}>
+    <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Zone Coverage</div>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Zone Workout Summary</div>
         <div style={{ fontSize: 11, color: C.muted }}>last 30 days · {coverage.total} sessions</div>
       </div>
-      {zones.map(({ key, label, val, color }) => {
-        const isRec = key === coverage.recommended;
-        return (
-          <div key={key} style={{ marginBottom: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-              <div style={{ fontSize: 12, fontWeight: isRec ? 700 : 400, color: isRec ? color : C.muted, display: "flex", alignItems: "center", gap: 6 }}>
-                {label}
-                {isRec && (
-                  <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: color + "22", color }}>
-                    train next
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>{val}</div>
+      {zones.map(({ key, label, val, color }) => (
+        <div key={key} style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+            <div style={{ fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 6 }}>
+              {label}
             </div>
-            <div style={{ height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
-              <div style={{
-                height: "100%", borderRadius: 3,
-                width: `${(val / maxVal) * 100}%`,
-                background: color,
-                opacity: isRec ? 1 : 0.4,
-              }} />
-            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>{val}</div>
           </div>
-        );
-      })}
-      <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
-        {advice[coverage.recommended]}
-      </div>
+          <div style={{ height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+            <div style={{
+              height: "100%", borderRadius: 3,
+              width: `${(val / maxVal) * 100}%`,
+              background: color,
+              opacity: 0.85,
+            }} />
+          </div>
+        </div>
+      ))}
     </Card>
   );
 }
@@ -1941,7 +1930,7 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
         </Sect>
       </Card>
 
-      {/* Zone Coverage — rolling 30-day zone balance */}
+      {/* Zone Workout Summary — neutral 30-day volume breakdown (no prescription) */}
       {/* Level progress for selected config */}
       {hasLevelData && (
         <Card style={{ marginBottom: 12 }}>
