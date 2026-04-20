@@ -5523,7 +5523,6 @@ const WTYPE_META = {
   P: { label: "P", bg: "#2d1200", color: "#f0883e" },
   C: { label: "C", bg: "#002d10", color: "#3fb950" },
   X: { label: "↔", bg: "#1e1e2e", color: "#8b949e" },
-  D: { label: "D", bg: "#1e1535", color: "#bc8cff" },
 };
 
 // Exercise substitution options — shown during a live session when equipment is unavailable.
@@ -5627,15 +5626,6 @@ const DEFAULT_WORKOUTS = {
       { id: "slam_balls",  name: "Slam balls", type: "P", sets: 2,    reps: "8–10",   logWeight: true,  note: "Advance weight when 10 reps hold full speed" },
       { id: "kb_snatch",   name: "KB snatch",  type: "P", sets: 2,    reps: "5/side", logWeight: true,  note: "Full hip snap, crisp catch" },
       { id: "stretch",     name: "Stretching", type: "X", sets: null, reps: null,     logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
-    ],
-  },
-  D: {
-    name: "Outdoor / Gym Climbing",
-    exercises: [
-      { id: "micro_1rm",   name: "Micro 1RM",   type: "F", sets: 1,    reps: "Max",  logWeight: false, note: "" },
-      { id: "crusher_1rm", name: "Crusher 1RM", type: "F", sets: 1,    reps: "Max",  logWeight: false, note: "" },
-      { id: "climb",       name: "Climb",        type: "D", sets: null, reps: null,   logWeight: false, note: "Project focus" },
-      { id: "stretch",     name: "Stretching",   type: "X", sets: null, reps: null,   logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
     ],
   },
 };
@@ -5936,7 +5926,7 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_
   const [sessionData,    setSessionData]    = useState({});    // exId → {sets, done}
   const [swaps,          setSwaps]          = useState({});    // originalExId → substituteEx
   const [swapPickerFor,  setSwapPickerFor]  = useState(null);  // originalExId showing picker
-  const [editingKey, setEditingKey] = useState(null);          // "A"|"B"|"C"|"D"|null
+  const [editingKey, setEditingKey] = useState(null);          // "A"|"B"|"C"|null
 
   const savePlan  = (p) => { setPlan(p);  saveLS(LS_WORKOUT_PLAN_KEY,  p); };
   const saveState = (s) => { setWState(s); saveLS(LS_WORKOUT_STATE_KEY, s); };
@@ -6041,7 +6031,7 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_
     saveLog([...freshLog, session]);
     if (onSessionSaved) onSessionSaved(session);
     // Only advance the rotation when the recommended workout was actually done.
-    // Picking a different workout (or the side "D" outdoor/climb template) logs
+    // Picking a different workout (one that is not the recommended rotKey) logs
     // the session but leaves the rotation queue alone so nothing gets skipped.
     const didRecommended = displayKey === rotKey && WK_ROTATION.includes(displayKey);
     saveState({
@@ -6423,7 +6413,7 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_
               </div>
 
               {/* Workout cards */}
-              {["A", "B", "C", "D"].map(key => {
+              {["A", "B", "C"].map(key => {
                 const wk = plan[key];
                 const isNext = key === rotKey;
                 return (
