@@ -4487,15 +4487,16 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   // Reference durations for each domain (seconds)
   const REF = { power: 10, strength: 45, endurance: 180 };
 
-  // Reusable: compute {power, strength, endurance, total} Δ% for any fit
-  // against the current baseline snapshot. Same formula as the pooled
-  // `improvement` useMemo — extracted so the per-grip path below uses
-  // identical math.
-  const improvementForFit = (fit) => {
-    if (!baseline || !fit) return null;
+  // Reusable: compute {power, strength, endurance, total} Δ% for a
+  // current fit against a reference fit. The reference is injected so
+  // the pooled path and per-grip path can each compare apples-to-
+  // apples (pooled-current vs pooled-baseline; Micro-now vs Micro-
+  // then; Crusher-now vs Crusher-then).
+  const improvementForFit = (fit, ref) => {
+    if (!ref || !fit) return null;
     const pct = (t) => {
-      const cur  = predForce(fit,      t);
-      const base = predForce(baseline, t);
+      const cur  = predForce(fit, t);
+      const base = predForce(ref, t);
       if (base <= 0) return null;
       return Math.round((cur / base - 1) * 100);
     };
@@ -4507,25 +4508,59 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   };
 
   const improvement = useMemo(
-    () => improvementForFit(cfEstimate),
+    () => improvementForFit(cfEstimate, baseline),
     [baseline, cfEstimate] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // Per-grip capacity improvement — each grip's current fit compared
-  // to the shared baseline snapshot. Baseline is pooled (single
-  // historical reference point), but current fit is grip-specific, so
-  // the Δ% tells the user how that muscle has moved from the common
-  // starting point. Used to split the Capacity Improvement card when
-  // "All Grips" is selected.
-  const gripImprovement = useMemo(() => {
-    if (!baseline) return {};
+  // Per-grip baselines — for each grip, find the earliest window of
+  // failure reps (≥3 reps, ≥2 distinct target durations) and fit a
+  // Monod-Scherrer snapshot from just that grip's reps. This mirrors
+  // the global auto-baseline seeding logic (App-level useEffect) but
+  // scoped per grip, so "improvement" for Micro compares Micro-now
+  // against Micro-then (not against a pool-inflated baseline that
+  // mixed Crusher reps in, which was artificially dragging Micro
+  // deltas negative because Crusher CF is higher).
+  const gripBaselines = useMemo(() => {
     const out = {};
-    for (const [grip, fit] of Object.entries(gripEstimates)) {
-      const imp = improvementForFit(fit);
-      if (imp) out[grip] = imp;
+    const byGrip = {};
+    for (const r of history) {
+      if (!r.failed || !r.grip) continue;
+      if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+      if (!(r.actual_time_s > 0)) continue;
+      if (!byGrip[r.grip]) byGrip[r.grip] = [];
+      byGrip[r.grip].push(r);
+    }
+    for (const [grip, reps] of Object.entries(byGrip)) {
+      reps.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+      const acc = [];
+      const durs = new Set();
+      for (const r of reps) {
+        acc.push(r);
+        durs.add(r.target_duration);
+        if (acc.length >= 3 && durs.size >= 2) {
+          const fit = fitCF(acc.map(x => ({ x: 1 / x.actual_time_s, y: x.avg_force_kg })));
+          if (fit) out[grip] = { date: acc[0].date, CF: fit.CF, W: fit.W };
+          break;
+        }
+      }
     }
     return out;
-  }, [baseline, gripEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [history]);
+
+  // Per-grip capacity improvement — each grip's current fit vs its
+  // own per-grip baseline. Only emitted for grips that have both a
+  // per-grip baseline AND a per-grip current fit, so the card never
+  // shows a misleading cross-muscle comparison.
+  const gripImprovement = useMemo(() => {
+    const out = {};
+    for (const [grip, fit] of Object.entries(gripEstimates)) {
+      const ref = gripBaselines[grip];
+      if (!ref) continue;
+      const imp = improvementForFit(fit, ref);
+      if (imp) out[grip] = { ...imp, baselineDate: ref.date };
+    }
+    return out;
+  }, [gripBaselines, gripEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Per-hand / per-grip CF & W' breakdown ──
   // Groups failure reps by grip × hand, fits Monod (F = CF + W'/T) for
@@ -5044,7 +5079,9 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Capacity Improvement</div>
-              <div style={{ fontSize: 11, color: C.muted }}>since {baseline.date}</div>
+              {!perGripMode && (
+                <div style={{ fontSize: 11, color: C.muted }}>since {baseline.date}</div>
+              )}
             </div>
             {perGripMode ? (
               Object.entries(gripImprovement).map(([grip, imp], i, arr) => (
@@ -5053,7 +5090,11 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                   borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
                   marginBottom: i < arr.length - 1 ? 12 : 0,
                 }}>
-                  {renderRow(grip, imp)}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{grip}</div>
+                    <div style={{ fontSize: 10, color: C.muted }}>since {imp.baselineDate}</div>
+                  </div>
+                  {renderRow(null, imp)}
                 </div>
               ))
             ) : improvement ? (
