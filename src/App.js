@@ -4487,11 +4487,15 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   // Reference durations for each domain (seconds)
   const REF = { power: 10, strength: 45, endurance: 180 };
 
-  const improvement = useMemo(() => {
-    if (!baseline || !cfEstimate) return null;
+  // Reusable: compute {power, strength, endurance, total} Δ% for any fit
+  // against the current baseline snapshot. Same formula as the pooled
+  // `improvement` useMemo — extracted so the per-grip path below uses
+  // identical math.
+  const improvementForFit = (fit) => {
+    if (!baseline || !fit) return null;
     const pct = (t) => {
-      const cur  = predForce(cfEstimate, t);
-      const base = predForce(baseline,   t);
+      const cur  = predForce(fit,      t);
+      const base = predForce(baseline, t);
       if (base <= 0) return null;
       return Math.round((cur / base - 1) * 100);
     };
@@ -4499,13 +4503,29 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     const s = pct(REF.strength);
     const e = pct(REF.endurance);
     if (p == null || s == null || e == null) return null;
-    return {
-      power:     p,
-      strength:  s,
-      endurance: e,
-      total:     Math.round((p + s + e) / 3),
-    };
-  }, [baseline, cfEstimate]); // eslint-disable-line react-hooks/exhaustive-deps
+    return { power: p, strength: s, endurance: e, total: Math.round((p + s + e) / 3) };
+  };
+
+  const improvement = useMemo(
+    () => improvementForFit(cfEstimate),
+    [baseline, cfEstimate] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Per-grip capacity improvement — each grip's current fit compared
+  // to the shared baseline snapshot. Baseline is pooled (single
+  // historical reference point), but current fit is grip-specific, so
+  // the Δ% tells the user how that muscle has moved from the common
+  // starting point. Used to split the Capacity Improvement card when
+  // "All Grips" is selected.
+  const gripImprovement = useMemo(() => {
+    if (!baseline) return {};
+    const out = {};
+    for (const [grip, fit] of Object.entries(gripEstimates)) {
+      const imp = improvementForFit(fit);
+      if (imp) out[grip] = imp;
+    }
+    return out;
+  }, [baseline, gripEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Per-hand / per-grip CF & W' breakdown ──
   // Groups failure reps by grip × hand, fits Monod (F = CF + W'/T) for
@@ -4977,40 +4997,71 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         );
       })()}
 
-      {/* ── Capacity Improvement summary (shown whenever baseline + any data exist) ── */}
-      {baseline && improvement && (
-        <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>Capacity Improvement</div>
-            <div style={{ fontSize: 11, color: C.muted }}>since {baseline.date}</div>
-          </div>
-          {/* Total headline */}
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 14 }}>
-            <div style={{ fontSize: 40, fontWeight: 900, color: improvement.total >= 0 ? C.green : C.red, lineHeight: 1 }}>
-              {improvement.total >= 0 ? "+" : ""}{improvement.total}%
-            </div>
-            <div style={{ fontSize: 13, color: C.muted }}>Total Capacity</div>
-          </div>
-          {/* Three domains */}
-          <div style={{ display: "flex", gap: 8 }}>
-            {[
-              { label: "⚡ Power",     val: improvement.power,     color: C.red    },
-              { label: "💪 Strength",  val: improvement.strength,  color: C.orange },
-              { label: "🏔️ Capacity",  val: improvement.endurance, color: C.blue   },
-            ].map(({ label, val, color }) => (
-              <div key={label} style={{
-                flex: 1, background: C.bg, borderRadius: 10, padding: "10px 8px", textAlign: "center",
-                border: `1px solid ${color}30`,
-              }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>{label}</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: val >= 0 ? color : C.red }}>
-                  {val >= 0 ? "+" : ""}{val}%
+      {/* ── Capacity Improvement summary ──
+          When no grip filter is active AND ≥2 grips have fits, split
+          the card into per-grip sections so Micro (FDP) and Crusher
+          (FDS) each show their own Δ% against the shared baseline. */}
+      {baseline && (improvement || Object.keys(gripImprovement).length > 0) && (() => {
+        // Reusable row renderer — one header + one Power/Strength/Capacity
+        // row of three Δ% tiles.
+        const renderRow = (label, imp) => (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+              {label && (
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>
+                  {label}
                 </div>
+              )}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginLeft: "auto" }}>
+                <div style={{ fontSize: 26, fontWeight: 900, color: imp.total >= 0 ? C.green : C.red, lineHeight: 1 }}>
+                  {imp.total >= 0 ? "+" : ""}{imp.total}%
+                </div>
+                <div style={{ fontSize: 11, color: C.muted }}>total</div>
               </div>
-            ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[
+                { label: "⚡ Power",     val: imp.power,     color: C.red    },
+                { label: "💪 Strength",  val: imp.strength,  color: C.orange },
+                { label: "🏔️ Capacity",  val: imp.endurance, color: C.blue   },
+              ].map(({ label, val, color }) => (
+                <div key={label} style={{
+                  flex: 1, background: C.bg, borderRadius: 10, padding: "8px 6px", textAlign: "center",
+                  border: `1px solid ${color}30`,
+                }}>
+                  <div style={{ fontSize: 10, color: C.muted, marginBottom: 3 }}>{label}</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: val >= 0 ? color : C.red }}>
+                    {val >= 0 ? "+" : ""}{val}%
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </Card>
-      )}
+        );
+
+        const perGripMode = !selGrip && Object.keys(gripImprovement).length >= 2;
+        return (
+          <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Capacity Improvement</div>
+              <div style={{ fontSize: 11, color: C.muted }}>since {baseline.date}</div>
+            </div>
+            {perGripMode ? (
+              Object.entries(gripImprovement).map(([grip, imp], i, arr) => (
+                <div key={grip} style={{
+                  paddingBottom: i < arr.length - 1 ? 12 : 0,
+                  borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
+                  marginBottom: i < arr.length - 1 ? 12 : 0,
+                }}>
+                  {renderRow(grip, imp)}
+                </div>
+              ))
+            ) : improvement ? (
+              renderRow(null, improvement)
+            ) : null}
+          </Card>
+        );
+      })()}
 
       {/* ── Curve parameters over time ── */}
       {cumulativeData.length >= 2 && (
