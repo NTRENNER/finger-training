@@ -2068,31 +2068,12 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
 
-  // Model-prescribed first-rep load from Monod-Scherrer fit: F = CF + W'/T.
-  // Fallback chain:
+  // Note: model-prescribed first-rep loads are computed inline in the
+  // Prescribed Load card below, where we show all three zones at once
+  // (F = CF + W'/refTime(zone)). The fallback chain there is:
   //   1. per-hand × per-grip failure fit (most specific)
   //   2. per-hand, any-grip failure fit (more data, less specific)
   //   3. historical weighted-average weight at similar target time
-  // This way the user sees a model-derived load whenever CF/W' can be
-  // fit; the historical estimator only kicks in for grip/hand combos
-  // with too few failure points to fit.
-  const prescribedSource = (() => {
-    const perGripL = prescribedLoad(history, "L", config.grip, config.targetTime);
-    const perGripR = prescribedLoad(history, "R", config.grip, config.targetTime);
-    if (perGripL != null || perGripR != null) return "model";
-    const globalL  = prescribedLoad(history, "L", null, config.targetTime);
-    const globalR  = prescribedLoad(history, "R", null, config.targetTime);
-    if (globalL != null || globalR != null) return "model-global";
-    return "history";
-  })();
-  const refWeightL =
-    prescribedLoad(history, "L", config.grip, config.targetTime) ??
-    prescribedLoad(history, "L", null,        config.targetTime) ??
-    estimateRefWeight(history, "L", config.grip, config.targetTime);
-  const refWeightR =
-    prescribedLoad(history, "R", config.grip, config.targetTime) ??
-    prescribedLoad(history, "R", null,        config.targetTime) ??
-    estimateRefWeight(history, "R", config.grip, config.targetTime);
 
   // Level progress for current config — always both hands now
   const levelL      = calcLevel(history, "L", config.grip, config.targetTime);
@@ -2243,38 +2224,91 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
         );
       })()}
 
-      {/* Prescribed load — appears only after both grip AND workout type
-          (goal) are selected. The load is CONSTANT across all reps of a
-          set: rep 1 hits target, rep 2+ fall progressively short as the
-          three compartments drain and only partially refill in rest. */}
-      {config.grip && config.goal && (refWeightL != null || refWeightR != null) && (
-        <Card style={{ borderColor: C.blue }}>
-          <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
-            {prescribedSource === "model"
-              ? <>Prescribed load · CF + W&apos;/{config.targetTime}s (your fit)</>
-              : prescribedSource === "model-global"
-                ? <>Prescribed load · CF + W&apos;/{config.targetTime}s (cross-grip fit)</>
-                : <>Suggested load (from history, {config.targetTime}s target)</>}
-          </div>
-          <div style={{ fontSize: 11, color: C.muted, marginBottom: 10, fontStyle: "italic" }}>
-            Same load every rep. Rep 1 hits {config.targetTime}s; reps 2+ fall short as compartments deplete.
-          </div>
-          <div style={{ display: "flex", gap: 24 }}>
-            <div>
-              <Label>Left</Label>
-              <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
-                {refWeightL != null ? `${fmtW(refWeightL, unit)} ${unit}` : "—"}
-              </span>
+      {/* Prescribed load — appears once a grip is selected. Shows loads
+          for ALL THREE zones side-by-side so the user doesn't have to
+          guess which target time the card is reflecting. Load for each
+          zone = CF + W'/refTime(zone). Load is CONSTANT across all reps
+          of a set: rep 1 hits target, rep 2+ fall short as compartments
+          drain. Source label reflects whichever fit (per-grip / cross-
+          grip / history) backs the primary zone column. */}
+      {config.grip && (() => {
+        // Pick the source label off the applied zone (if any) or Strength
+        // as a neutral default — used for the one-line subtitle.
+        const subtitleTime = GOAL_CONFIG[config.goal]?.refTime ?? GOAL_CONFIG.strength.refTime;
+        const subtitleSource = (() => {
+          if (prescribedLoad(history, "L", config.grip, subtitleTime) != null ||
+              prescribedLoad(history, "R", config.grip, subtitleTime) != null) return "model";
+          if (prescribedLoad(history, "L", null, subtitleTime) != null ||
+              prescribedLoad(history, "R", null, subtitleTime) != null) return "model-global";
+          return "history";
+        })();
+        const zones = ["power", "strength", "endurance"].map(zoneKey => {
+          const t = GOAL_CONFIG[zoneKey].refTime;
+          const L = prescribedLoad(history, "L", config.grip, t)
+                 ?? prescribedLoad(history, "L", null,        t)
+                 ?? estimateRefWeight(history, "L", config.grip, t);
+          const R = prescribedLoad(history, "R", config.grip, t)
+                 ?? prescribedLoad(history, "R", null,        t)
+                 ?? estimateRefWeight(history, "R", config.grip, t);
+          return { key: zoneKey, cfg: GOAL_CONFIG[zoneKey], t, L, R };
+        });
+        const anyLoaded = zones.some(z => z.L != null || z.R != null);
+        if (!anyLoaded) return null;
+        return (
+          <Card style={{ borderColor: C.blue }}>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
+              {subtitleSource === "model"
+                ? <>Prescribed load · CF + W&apos;/T (your {config.grip} fit)</>
+                : subtitleSource === "model-global"
+                  ? <>Prescribed load · CF + W&apos;/T (cross-grip fit)</>
+                  : <>Suggested load (from history)</>}
             </div>
-            <div>
-              <Label>Right</Label>
-              <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
-                {refWeightR != null ? `${fmtW(refWeightR, unit)} ${unit}` : "—"}
-              </span>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 10, fontStyle: "italic" }}>
+              Same load every rep. Rep 1 hits the target; reps 2+ fall short as compartments deplete.
             </div>
-          </div>
-        </Card>
-      )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              {zones.map(({ key, cfg, t, L, R }) => {
+                const isActive = config.goal === key;
+                return (
+                  <div
+                    key={key}
+                    style={{
+                      padding: "10px 12px",
+                      background: isActive ? cfg.color + "22" : C.bg,
+                      border: `1px solid ${isActive ? cfg.color : C.border}`,
+                      borderRadius: 10,
+                    }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 700, color: cfg.color, marginBottom: 2 }}>
+                      {cfg.emoji} {cfg.label}
+                    </div>
+                    <div style={{ fontSize: 10, color: C.muted, marginBottom: 8 }}>
+                      target {t}s
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>L</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>
+                          {L != null ? `${fmtW(L, unit)}` : "—"}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>R</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>
+                          {R != null ? `${fmtW(R, unit)}` : "—"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 8, textAlign: "right" }}>
+              values in {unit}
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* Readiness / how-do-you-feel widget */}
       {(() => {
