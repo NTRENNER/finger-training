@@ -1483,6 +1483,28 @@ function computeZoneCoverage(history, activities = []) {
   return { power, strength, endurance, total, recommended };
 }
 
+// Physiological limiter: zone with the highest fail rate across the full
+// training history. Returns "power" | "strength" | "endurance" | null.
+// Null means no failure data at all — caller should fall back to coverage.
+function computeLimiterZone(history) {
+  const valid = history.filter(r =>
+    r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0
+  );
+  const zoneFailRate = (lo, hi) => {
+    const z = valid.filter(r => r.actual_time_s >= lo && r.actual_time_s < hi);
+    return z.length > 0 ? z.filter(r => r.failed).length / z.length : null;
+  };
+  const rates = {
+    power:     zoneFailRate(0, POWER_MAX),
+    strength:  zoneFailRate(POWER_MAX, STRENGTH_MAX),
+    endurance: zoneFailRate(STRENGTH_MAX, Infinity),
+  };
+  const ranked = Object.entries(rates)
+    .filter(([, r]) => r !== null)
+    .sort(([, a], [, b]) => b - a);
+  return ranked.length > 0 ? ranked[0][0] : null;
+}
+
 function ZoneCoverageCard({ history, activities = [] }) {
   const coverage = useMemo(() => computeZoneCoverage(history, activities),
     [history, activities]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1660,13 +1682,17 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
       {/* Activity Logs */}
       <ClimbingLogWidget activities={activities} onLog={onLogActivity} />
 
-      {/* Session Planner — always shown; defaults to undertrained zone */}
+      {/* Session Planner — always shown; defaults to the limiter zone
+          (highest fail rate), falling back to coverage gap when no
+          failures are logged yet. Matches the Analysis tab's precedence
+          so the two views never disagree. */}
       <SessionPlannerCard
         liveEstimate={liveEstimate}
         recommendedZone={(() => {
+          const limiter = computeLimiterZone(history);
+          if (limiter) return limiter;
           const cov = computeZoneCoverage(history, activities);
-          if (cov.total === 0) return null;
-          return cov.recommended;
+          return cov.total > 0 ? cov.recommended : null;
         })()}
         onApplyPlan={({ targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
           setConfig(c => ({ ...c, targetTime, repsPerSet, restTime, numSets, setRestTime }))
