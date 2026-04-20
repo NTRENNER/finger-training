@@ -327,7 +327,6 @@ function suggestWeight(refWeight, fatigue) {
 // Returns prescribed load (kg) for a target time-to-exhaustion on a given grip/hand.
 // Uses the hyperbolic form: F = CF + W'/T. Falls back to null if not enough failure data.
 // Typical targets: Power T=7, Strength T=45, Capacity T=120.
-// eslint-disable-next-line no-unused-vars
 function prescribedLoad(history, hand, grip, targetDuration) {
   if (!history || !targetDuration) return null;
   const failures = history.filter(r =>
@@ -1585,8 +1584,32 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
-  const refWeightL = estimateRefWeight(history, "L", config.grip, config.targetTime);
-  const refWeightR = estimateRefWeight(history, "R", config.grip, config.targetTime);
+
+  // Model-prescribed first-rep load from Monod-Scherrer fit: F = CF + W'/T.
+  // Fallback chain:
+  //   1. per-hand × per-grip failure fit (most specific)
+  //   2. per-hand, any-grip failure fit (more data, less specific)
+  //   3. historical weighted-average weight at similar target time
+  // This way the user sees a model-derived load whenever CF/W' can be
+  // fit; the historical estimator only kicks in for grip/hand combos
+  // with too few failure points to fit.
+  const prescribedSource = (() => {
+    const perGripL = prescribedLoad(history, "L", config.grip, config.targetTime);
+    const perGripR = prescribedLoad(history, "R", config.grip, config.targetTime);
+    if (perGripL != null || perGripR != null) return "model";
+    const globalL  = prescribedLoad(history, "L", null, config.targetTime);
+    const globalR  = prescribedLoad(history, "R", null, config.targetTime);
+    if (globalL != null || globalR != null) return "model-global";
+    return "history";
+  })();
+  const refWeightL =
+    prescribedLoad(history, "L", config.grip, config.targetTime) ??
+    prescribedLoad(history, "L", null,        config.targetTime) ??
+    estimateRefWeight(history, "L", config.grip, config.targetTime);
+  const refWeightR =
+    prescribedLoad(history, "R", config.grip, config.targetTime) ??
+    prescribedLoad(history, "R", null,        config.targetTime) ??
+    estimateRefWeight(history, "R", config.grip, config.targetTime);
 
   // Level progress for current config — always both hands now
   const levelL      = calcLevel(history, "L", config.grip, config.targetTime);
@@ -1637,7 +1660,11 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
       {(refWeightL != null || refWeightR != null) && (
         <Card style={{ borderColor: C.blue }}>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
-            Suggested first-rep weight (from history, {config.targetTime}s target)
+            {prescribedSource === "model"
+              ? <>Prescribed first-rep load · CF + W&apos;/{config.targetTime}s (your fit)</>
+              : prescribedSource === "model-global"
+                ? <>Prescribed first-rep load · CF + W&apos;/{config.targetTime}s (cross-grip fit)</>
+                : <>Suggested first-rep weight (from history, {config.targetTime}s target)</>}
           </div>
           <div style={{ display: "flex", gap: 24 }}>
             <div>
