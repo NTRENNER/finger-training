@@ -161,6 +161,27 @@ function computeAUC(CF, W, tMin = 10, tMax = 120) {
   return CF * (tMax - tMin) + W * Math.log(tMax / tMin);
 }
 
+// Per-session relative response of the two Monod parameters to each
+// training protocol. Values are fractional (% of current) rather than
+// absolute — ratios within a row (cf : w) and among rows matter; the
+// overall magnitude does not, since we only compare protocols. Power
+// hangs develop the anaerobic W′ reserve most strongly; capacity
+// hangs develop the aerobic CF asymptote; strength sits between.
+// Used to project marginal ΔAUC per protocol for the recommendation.
+const PROTOCOL_RESPONSE = {
+  power:     { cf: 0.01, w: 0.05 },  // short, high-force → W′-dominant response
+  strength:  { cf: 0.03, w: 0.02 },  // mid-duration → both
+  endurance: { cf: 0.05, w: 0.01 },  // sustained → CF-dominant response
+};
+
+// Integration window for the "climbing-relevant" AUC — covers power
+// through capacity durations. CF is weighted (tMax−tMin) = 110; W′ is
+// weighted ln(tMax/tMin) ≈ 2.485, so CF dominates AUC by ~44×. This
+// matches the climbing-grade literature: sustainable finger force
+// (CF) is a stronger predictor of grade than finite reserve (W′).
+const AUC_T_MIN = 10;
+const AUC_T_MAX = 120;
+
 // ─────────────────────────────────────────────────────────────
 // SESSION PLANNER — per-rep fatigue curve prediction
 // ─────────────────────────────────────────────────────────────
@@ -1979,15 +2000,30 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
           Analysis tab's precedence so the two views never disagree. */}
       {(() => {
         const limiter = computeLimiterZone(history);
-        const zone = limiter?.zone ?? (() => {
-          const cov = computeZoneCoverage(history, activities);
-          return cov.total > 0 ? cov.recommended : null;
-        })();
+        const limiterGrip = limiter?.grip ?? null;
+        let zone = null;
+        if (liveEstimate && liveEstimate.CF > 0) {
+          // Rank protocols by projected ΔAUC — matches AnalysisView's
+          // recommendation so the two views agree.
+          const { CF, W } = liveEstimate;
+          let bestKey = null, bestGain = -Infinity;
+          for (const [key, resp] of Object.entries(PROTOCOL_RESPONSE)) {
+            const gain = CF * resp.cf * (AUC_T_MAX - AUC_T_MIN)
+                       + W  * resp.w  * Math.log(AUC_T_MAX / AUC_T_MIN);
+            if (gain > bestGain) { bestGain = gain; bestKey = key; }
+          }
+          zone = bestKey;
+        } else {
+          zone = limiter?.zone ?? (() => {
+            const cov = computeZoneCoverage(history, activities);
+            return cov.total > 0 ? cov.recommended : null;
+          })();
+        }
         return (
           <SessionPlannerCard
             liveEstimate={liveEstimate}
             recommendedZone={zone}
-            recommendedGrip={limiter?.grip ?? null}
+            recommendedGrip={limiterGrip}
             onApplyPlan={({ goal, targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
               setConfig(c => ({ ...c, goal, targetTime, repsPerSet, restTime, numSets, setRestTime }))
             }
@@ -4268,6 +4304,32 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     }).filter(Boolean);
   }, [failures, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── AUC: the headline "climbing capacity" metric ──
+  // Integrates F = CF + W'/t over 10–120s (the climbing-relevant
+  // window). A single scalar that captures the full force-duration
+  // envelope: both the aerobic CF asymptote and the finite W′ reserve,
+  // weighted by how much each contributes over 10–120s. This is the
+  // real objective — "area under the curve" — replacing zone-balance
+  // heuristics that could prescribe trading absolute capacity for
+  // curve symmetry.
+  const aucEstimate = useMemo(() => {
+    if (!cfEstimate) return null;
+    return toDisp(computeAUC(cfEstimate.CF, cfEstimate.W, AUC_T_MIN, AUC_T_MAX), unit);
+  }, [cfEstimate, unit]);
+
+  const aucBaseline = useMemo(() => {
+    if (!baseline) return null;
+    return toDisp(computeAUC(baseline.CF, baseline.W, AUC_T_MIN, AUC_T_MAX), unit);
+  }, [baseline, unit]);
+
+  // AUC trajectory — one point per date with failure data.
+  // cumulativeData.{cf,w} are already in display units, and AUC is a
+  // linear combination, so the result is already in display units.
+  const aucHistory = useMemo(() => cumulativeData.map(d => ({
+    date: d.date,
+    auc:  d.cf * (AUC_T_MAX - AUC_T_MIN) + d.w * Math.log(AUC_T_MAX / AUC_T_MIN),
+  })), [cumulativeData]);
+
   // Fitted force-duration curve points for overlay.
   // Clipped at T≥5s — the Monod asymptote F = CF + W'/T diverges as
   // T→0, which exploded the Y-axis with ~6-figure forces. Below ~5s
@@ -4428,61 +4490,91 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   }, [reps]);
 
   // ── Unified training recommendation ──
-  // Primary signal: Monod cross-zone residual. For each zone, fit
-  // F = CF + W'/T on the other two zones' rep-1 failures and measure
-  // how far this zone falls below that prediction. Biggest shortfall =
-  // limiter. Falls back to failure-count when cross-zone fit isn't
-  // possible. Coverage is a session-granularity fallback.
+  // Primary signal: marginal AUC gain. For each protocol (power /
+  // strength / capacity), project the expected %-change in CF and W′
+  // (see PROTOCOL_RESPONSE), multiply by current parameter values to
+  // get absolute ΔCF and ΔW′, then integrate to a projected ΔAUC over
+  // the climbing-relevant 10–120s window. Pick the protocol with the
+  // largest projected ΔAUC — this is the "grow the area under the
+  // curve" objective, not "balance the curve shape". A high-CF but
+  // steep-curved user still gets Capacity if Capacity yields the
+  // largest AUC gain; a flat-but-underdeveloped user gets whichever
+  // protocol best grows absolute capacity.
+  //
+  // Secondary: Monod cross-zone residual (limiter) and zone coverage,
+  // both kept as diagnostics alongside the ΔAUC ranking so users can
+  // see where the curve is lopsided and which zones are under-trained.
   const recommendation = useMemo(() => {
     const ZONE_DETAILS = {
       power: {
         title: "Train Power", color: C.red,
-        insight: "Power falls farthest below your force-duration curve — short, high-force efforts would close the gap.",
+        caption: "short, high-force efforts that develop W′, the finite anaerobic reserve above your CF asymptote.",
       },
       strength: {
         title: "Train Strength", color: C.orange,
-        insight: "Strength falls farthest below your force-duration curve — mid-duration holds would close the gap.",
+        caption: "mid-duration holds that lift both CF and W′ moderately.",
       },
       endurance: {
         title: "Train Capacity", color: C.blue,
-        insight: "Capacity falls farthest below your force-duration curve — sustained holds would close the gap.",
+        caption: "sustained holds that raise your CF asymptote, the right-hand floor of the curve.",
       },
     };
 
-    // Signal 1: physiological limiter (Monod cross-zone residual —
-    // the zone that underperforms the curve fit on the other two
-    // zones' rep-1 failures over the last 30 days). Segmented by
-    // grip so Crusher's force scale isn't pooled with Micro's.
-    // Uses whole history — not the hand/grip chart filter — because
-    // the recommendation drives the next training session. The
-    // chart filter still controls the scatter/fit view.
+    // Limiter (curve shape) — kept as secondary diagnostic
     const limiter = computeLimiterZone(history);
     const limiterKey  = limiter?.zone ?? null;
     const limiterGrip = limiter?.grip ?? null;
 
-    // Signal 2: zone coverage gap (least-trained in last 30 days)
+    // Coverage (training distribution) — kept as tertiary diagnostic
     const coverage = computeZoneCoverage(history, activities);
     const coverageKey = coverage.total > 0 ? coverage.recommended : null;
 
-    if (!limiterKey && !coverageKey) return null;
+    // No curve fit → fall back to limiter or coverage, with a caveat
+    // that AUC ranking needs failure data.
+    if (!cfEstimate) {
+      const fallbackKey = limiterKey ?? coverageKey;
+      if (!fallbackKey) return null;
+      const d = ZONE_DETAILS[fallbackKey];
+      return {
+        key: fallbackKey,
+        title: d.title, color: d.color,
+        insight: `Need 2+ failures across different durations to rank protocols by projected AUC gain. For now: ${d.caption}`,
+        gains: null, aucGain: null,
+        limiterKey, limiterGrip,
+        coverageKey,
+        agree: true,
+        coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
+      };
+    }
 
-    // Primary: limiter. Fall back to coverage if no failure data.
-    const primaryKey = limiterKey ?? coverageKey;
-    const details    = ZONE_DETAILS[primaryKey];
+    // Primary: marginal ΔAUC per protocol (in display units).
+    const { CF, W } = cfEstimate;
+    const gains = {};
+    for (const [key, resp] of Object.entries(PROTOCOL_RESPONSE)) {
+      const dCF = CF * resp.cf;
+      const dW  = W  * resp.w;
+      const gainKg = dCF * (AUC_T_MAX - AUC_T_MIN) + dW * Math.log(AUC_T_MAX / AUC_T_MIN);
+      gains[key] = toDisp(gainKg, unit);
+    }
+    const bestKey = Object.entries(gains).reduce((a, b) => b[1] > a[1] ? b : a)[0];
+    const d       = ZONE_DETAILS[bestKey];
 
-    // Are the two signals aligned?
-    const agree = !limiterKey || !coverageKey || limiterKey === coverageKey;
+    // Does the Monod limiter agree with the ΔAUC winner?
+    const agree = !limiterKey || limiterKey === bestKey;
 
     return {
-      key: primaryKey,
-      ...details,
-      limiterKey,
-      limiterGrip,
+      key: bestKey,
+      title: d.title,
+      color: d.color,
+      insight: `Largest projected AUC gain from ${d.caption}`,
+      gains,
+      aucGain: gains[bestKey],
+      limiterKey, limiterGrip,
       coverageKey,
       agree,
       coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
     };
-  }, [zones, failures, history, activities]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cfEstimate, history, activities, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unexplored = Object.entries(zones)
     .filter(([, z]) => z.total === 0)
@@ -4919,6 +5011,64 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           </Card>
         )}
 
+        {/* ── AUC headline card (the single "climbing capacity" number) ── */}
+        {aucEstimate && (
+          <Card style={{ marginBottom: 16, border: `2px solid ${C.purple}60` }}>
+            <div style={{ fontSize: 11, color: C.purple, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+              Climbing Capacity · AUC
+            </div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 16, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 34, fontWeight: 800, color: C.purple, lineHeight: 1 }}>
+                  {Math.round(aucEstimate).toLocaleString()}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
+                  {unit}·s · 10–120s window
+                </div>
+              </div>
+              {aucBaseline && aucBaseline > 0 && (
+                <div style={{ paddingBottom: 4 }}>
+                  <div style={{
+                    fontSize: 14, fontWeight: 700,
+                    color: aucEstimate >= aucBaseline ? C.green : C.red,
+                  }}>
+                    {aucEstimate >= aucBaseline ? "+" : ""}
+                    {Math.round((aucEstimate / aucBaseline - 1) * 100)}%
+                  </div>
+                  <div style={{ fontSize: 10, color: C.muted }}>vs baseline</div>
+                </div>
+              )}
+            </div>
+
+            {aucHistory.length >= 2 && (
+              <div style={{ height: 70, marginBottom: 10 }}>
+                <ResponsiveContainer>
+                  <LineChart data={aucHistory} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                    <XAxis dataKey="date" hide />
+                    <YAxis hide domain={["dataMin", "dataMax"]} />
+                    <Tooltip
+                      contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11 }}
+                      labelStyle={{ color: C.muted }}
+                      formatter={(v) => [`${Math.round(v).toLocaleString()} ${unit}·s`, "AUC"]}
+                    />
+                    <Line
+                      type="monotone" dataKey="auc" stroke={C.purple}
+                      strokeWidth={2} dot={{ r: 2, fill: C.purple }} isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+              The integrated area under your force-duration curve over climbing-relevant durations.
+              <b> AUC = CF×{AUC_T_MAX - AUC_T_MIN} + W′×ln({AUC_T_MAX}/{AUC_T_MIN})</b> weights CF ~44× more than W′ —
+              matching research finding that sustainable finger force is the strongest predictor of grade.
+              Growing this number is the objective.
+            </div>
+          </Card>
+        )}
+
         {/* ── Per-compartment AUC (dose delivered per energy system, per session) ── */}
         {(() => {
           // Group selected reps by session_id; fall back to date
@@ -5076,31 +5226,63 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
             <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
               {recommendation.insight}
             </div>
-            {/* Signal explanation */}
+            {/* Projected ΔAUC ranking — primary signal */}
+            {recommendation.gains && (
+              <div style={{
+                background: C.bg, borderRadius: 8, padding: "8px 10px",
+                marginBottom: 10, fontSize: 11,
+              }}>
+                <div style={{ color: C.muted, letterSpacing: 0.4, textTransform: "uppercase", fontSize: 10, marginBottom: 6 }}>
+                  Projected ΔAUC · next session
+                </div>
+                {[
+                  { k: "power",     lbl: "Power",    col: C.red },
+                  { k: "strength",  lbl: "Strength", col: C.orange },
+                  { k: "endurance", lbl: "Capacity", col: C.blue },
+                ].map(r => {
+                  const v = recommendation.gains[r.k];
+                  const pct = recommendation.gains[recommendation.key] > 0
+                    ? (v / recommendation.gains[recommendation.key]) * 100 : 0;
+                  const isBest = r.k === recommendation.key;
+                  return (
+                    <div key={r.k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ width: 62, color: r.col, fontWeight: isBest ? 700 : 400 }}>{r.lbl}</span>
+                      <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${pct}%`, background: r.col, borderRadius: 3, transition: "width 0.3s" }} />
+                      </div>
+                      <span style={{ width: 56, textAlign: "right", color: isBest ? r.col : C.muted, fontWeight: isBest ? 700 : 400 }}>
+                        +{fmt1(v)} {unit}·s
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* Secondary diagnostics */}
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {recommendation.limiterKey && (
+              {recommendation.limiterKey && recommendation.agree && (
                 <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                  <span style={{ color: recommendation.color, fontWeight: 700, flexShrink: 0 }}>↑ Limiter:</span>
+                  <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Shape:</span>
                   <span>
-                    {recommendation.limiterGrip
-                      ? <>On <b>{recommendation.limiterGrip}</b>, this zone falls farthest below your force-duration curve — the other two zones predict higher force here than you delivered.</>
-                      : <>This zone falls farthest below your own force-duration curve — the other two zones predict higher force here than you delivered.</>}
+                    Curve-shape diagnostic agrees — this zone also falls farthest below its own Monod curve
+                    {recommendation.limiterGrip ? <> on <b>{recommendation.limiterGrip}</b></> : null}.
                   </span>
                 </div>
               )}
-              {recommendation.coverageKey && recommendation.agree && (
+              {recommendation.limiterKey && !recommendation.agree && (
+                <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <span style={{ color: C.yellow, fontWeight: 700, flexShrink: 0 }}>⚡ Shape:</span>
+                  <span>
+                    Curve-shape diagnostic points elsewhere
+                    {recommendation.limiterGrip ? <> (<b>{recommendation.limiterGrip}</b>)</> : null},
+                    but AUC ranks this protocol as the biggest capacity win. Growing area dominates balancing shape.
+                  </span>
+                </div>
+              )}
+              {recommendation.coverageKey && recommendation.coverageKey === recommendation.key && (
                 <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
                   <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Coverage:</span>
-                  <span>Session count agrees — both signals point to the same under-trained zone.</span>
-                </div>
-              )}
-              {recommendation.coverageKey && !recommendation.agree && (
-                <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                  <span style={{ color: C.yellow, fontWeight: 700, flexShrink: 0 }}>⚡ Note:</span>
-                  <span>
-                    Session coverage suggests {recommendation.coverageZoneLabel}, but rep-1 failure
-                    distribution points here. Rep-level signal takes priority.
-                  </span>
+                  <span>Session count agrees — this is also your least-trained zone in the last 30 days.</span>
                 </div>
               )}
             </div>
