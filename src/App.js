@@ -5325,10 +5325,23 @@ function BadgesView({ history, liveEstimate, genesisSnap }) {
 // Tindeq detects pull start and release automatically — no button taps needed.
 // Each detected rep calls onRepDone with {actualTime, avgForce, failed:false}.
 function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" }) {
-  const { config, currentSet, currentRep, activeHand } = session;
+  const { config, currentSet, currentRep, activeHand, fatigue, refWeights } = session;
   const handLabel = config.hand === "Both"
     ? (activeHand === "L" ? "Left Hand" : "Right Hand")
     : config.hand === "L" ? "Left Hand" : "Right Hand";
+
+  // Program-recommended target weight for the active hand (adjusted for fatigue)
+  const suggestedKg = useMemo(
+    () => suggestWeight(refWeights?.[activeHand] ?? null, fatigue ?? 0),
+    [refWeights, activeHand, fatigue]
+  );
+
+  // Keep Tindeq's target ref in sync so the force gauge & auto-fail threshold
+  // reflect the program recommendation during the rep.
+  useEffect(() => {
+    tindeq.targetKgRef.current = suggestedKg;
+    return () => { tindeq.targetKgRef.current = null; };
+  }, [tindeq, suggestedKg]);
 
   const [repActive, setRepActive] = useState(false);
   const [elapsed,   setElapsed]   = useState(0);
@@ -5406,6 +5419,27 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
             }}>
               {activeHand === "R" ? "✋ Right Hand" : "🤚 Left Hand"}
             </div>
+
+            {/* Program-recommended target weight */}
+            <div style={{
+              fontSize: 11, color: C.muted, letterSpacing: 1.2,
+              textTransform: "uppercase", marginBottom: 2,
+            }}>
+              Program target
+              {(fatigue ?? 0) > 0.05 && (
+                <span style={{ marginLeft: 6, color: C.orange, letterSpacing: 0 }}>
+                  (fatigue {Math.round((fatigue ?? 0) * 100)}%)
+                </span>
+              )}
+            </div>
+            <div style={{
+              fontSize: 44, fontWeight: 900, color: C.blue,
+              lineHeight: 1, marginBottom: 14,
+              fontVariantNumeric: "tabular-nums",
+            }}>
+              {suggestedKg != null ? `${fmtW(suggestedKg, unit)} ${unit}` : "—"}
+            </div>
+
             <div style={{ fontSize: 40, marginBottom: 8 }}>⬇</div>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>Pull to begin rep {currentRep + 1}</div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
@@ -5422,7 +5456,7 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
             force={tindeq.force}
             avg={0}
             peak={tindeq.peak}
-            targetKg={null}
+            targetKg={suggestedKg}
             unit={unit}
           />
         </Card>
