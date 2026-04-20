@@ -1152,7 +1152,7 @@ const BADGE_CONFIG = [
   { id: "realization", label: "Realization", emoji: "🏔️", threshold: 100, desc: "2× your Genesis capacity — the potential fulfilled" },
 ];
 
-function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null }) {
+function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null, recommendedGrip = null }) {
   // Default goal to the undertrained zone when we know it; fall back to strength
   const initGoal = (recommendedZone && GOAL_CONFIG[recommendedZone]) ? recommendedZone : "strength";
   const [goal,    setGoal]    = useState(initGoal);
@@ -1185,7 +1185,18 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null 
 
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${gc.color}40` }}>
-      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>🗓 Session Planner</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>🗓 Session Planner</div>
+        {recommendedGrip && (
+          <div style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+            padding: "2px 8px", borderRadius: 10,
+            background: gc.color + "22", color: gc.color,
+          }}>
+            {recommendedGrip}
+          </div>
+        )}
+      </div>
 
       {/* Goal picker */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
@@ -1658,16 +1669,24 @@ function computeZoneCoverage(history, activities = []) {
 
 // Physiological limiter: which compartment is the user's capacity
 // shortfall relative to their own force-duration curve?
-// Returns "power" | "strength" | "endurance" | null. Null means no/
-// ambiguous data — caller should fall back to coverage.
+// Returns { zone, grip } | null. Null means no/ambiguous data — caller
+// should fall back to coverage.
+//
+// WHY SEGMENT BY GRIP.
+// Absolute force on Crusher (~30 kg CF) and Micro (~10 kg CF) are not
+// on the same scale — different joint, different skin, different
+// tendon moment arm. Pooling them into one Monod fit produces a fit
+// pulled toward the average and residuals that reflect tool choice
+// rather than physiology. Each grip gets its own CF/W' fit, just as
+// prescribedLoad already does for load prescription.
 //
 // PRIMARY SIGNAL — Monod cross-zone residual.
-// For each zone Z, fit F = CF + W'/T on rep-1 failures from the OTHER
-// two zones, then predict force at each of Z's actual_time_s values.
-// The residual = predicted − actual is the user's capacity shortfall
-// in Z relative to the curve implied by the other two zones. The zone
-// with the biggest positive residual is the one that falls farthest
-// below the user's own curve — that's the limiter.
+// Within a single grip, for each zone Z, fit F = CF + W'/T on rep-1
+// failures from the OTHER two zones, then predict force at each of
+// Z's actual_time_s values. The residual = predicted − actual is the
+// capacity shortfall in Z relative to the curve implied by the other
+// two zones. The zone with the biggest positive residual is the one
+// that falls farthest below the user's own curve for that grip.
 //
 // Why Monod and not true three-compartment decay?
 // Three-compartment (F = F_max × Σ A_i·e^(-T/τ_i)) either (a) assumes
@@ -1677,12 +1696,18 @@ function computeZoneCoverage(history, activities = []) {
 // approximates the three-compartment shape over 5s–300s and is
 // numerically stable at the data volumes we actually see.
 //
-// FALLBACK — failure-count distribution.
-// If any zone has too few points for cross-zone CV (e.g. the user
-// has only trained two of three zones), fall back to the least-trained
-// zone by rep-1 failure count. Under RPE-10 every session ends in
+// FALLBACK — failure-count distribution within the same grip.
+// If a grip has data but not enough for cross-zone CV (e.g. only two
+// zones trained), fall back to the least-trained zone by rep-1
+// failure count within that grip. Under RPE-10 every session ends in
 // failure by design — fail RATE saturates near 1.0 so count is the
 // only usable summary statistic.
+//
+// GRIP SELECTION.
+// If the user trains multiple grips, we rank grips by recent rep-1
+// failure volume (most-trained grip = user's current focus) and
+// return the recommendation for the first grip whose data supports
+// one. A grip with a balanced curve is skipped — we try the next.
 //
 // Why only rep 1?  Reps 2+ in strength/capacity are to-failure by
 // protocol design — their failed flag is ~100% true regardless of
@@ -1693,7 +1718,7 @@ function computeZoneCoverage(history, activities = []) {
 // may drop to 10s (power by actual_time_s), but it's still strength-
 // protocol data. target_duration reflects intended zone.
 const LIMITER_WINDOW_DAYS      = 30;
-const LIMITER_MIN_FAILURES     = 3;    // total across all zones before we trust the signal
+const LIMITER_MIN_FAILURES     = 3;    // total within a grip before we trust the signal
 const LIMITER_MIN_PTS_TRAIN    = 2;    // each of the two "training" zones needs this many points
 const LIMITER_MIN_PTS_HELDOUT  = 1;    // the held-out zone needs at least this many
 const LIMITER_RESIDUAL_KG      = 0.5;  // smallest gap we'll call a limiter — below this the curve is balanced
@@ -1702,66 +1727,83 @@ function computeLimiterZone(history) {
   cutoff.setDate(cutoff.getDate() - LIMITER_WINDOW_DAYS);
   const cutoffStr = cutoff.toISOString().slice(0, 10);
 
-  const failures = history.filter(r =>
+  const allFailures = history.filter(r =>
     r.rep_num === 1 && r.failed &&
     r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
     r.actual_time_s > 0 && r.target_duration > 0 &&
-    (r.date || "") >= cutoffStr
+    (r.date || "") >= cutoffStr &&
+    r.grip   // require known grip — otherwise we can't attribute
   );
-  if (failures.length < LIMITER_MIN_FAILURES) return null;
+  if (allFailures.length < LIMITER_MIN_FAILURES) return null;
 
-  // Bucket by intended zone (target_duration), not actual duration.
+  // Segment by grip. Force scales aren't comparable across grips.
+  const byGrip = {};
+  for (const r of allFailures) (byGrip[r.grip] ||= []).push(r);
+
   const zoneOf = (td) =>
     td < POWER_MAX        ? "power"    :
     td < STRENGTH_MAX     ? "strength" :
                             "endurance";
-  const byZone = { power: [], strength: [], endurance: [] };
-  for (const r of failures) byZone[zoneOf(r.target_duration)].push(r);
 
-  // ─── Primary: Monod cross-zone residual ───
-  const zones = ["power", "strength", "endurance"];
-  const residuals = {};
-  let cvWorked = true;
+  // Try each grip, most-trained-in-30-days first. Return the first
+  // grip whose data supports a recommendation. Skipping a grip with
+  // a balanced curve is correct — it means that grip is on-curve,
+  // and the next-most-trained grip may still have a deficit.
+  const rankedGrips = Object.entries(byGrip)
+    .sort(([, a], [, b]) => b.length - a.length);
 
-  for (const Z of zones) {
-    const heldOut = byZone[Z];
-    const others  = zones.filter(z => z !== Z);
-    const bothTrainZonesOk = others.every(z => byZone[z].length >= LIMITER_MIN_PTS_TRAIN);
-    if (!bothTrainZonesOk || heldOut.length < LIMITER_MIN_PTS_HELDOUT) {
-      cvWorked = false;
-      break;
+  for (const [grip, failures] of rankedGrips) {
+    if (failures.length < LIMITER_MIN_FAILURES) continue;
+
+    const byZone = { power: [], strength: [], endurance: [] };
+    for (const r of failures) byZone[zoneOf(r.target_duration)].push(r);
+
+    // ── Primary: Monod cross-zone residual (per grip) ──
+    const zones = ["power", "strength", "endurance"];
+    const residuals = {};
+    let cvWorked = true;
+    for (const Z of zones) {
+      const heldOut = byZone[Z];
+      const others  = zones.filter(z => z !== Z);
+      const bothTrainZonesOk = others.every(z => byZone[z].length >= LIMITER_MIN_PTS_TRAIN);
+      if (!bothTrainZonesOk || heldOut.length < LIMITER_MIN_PTS_HELDOUT) {
+        cvWorked = false;
+        break;
+      }
+      const trainPts = others
+        .flatMap(z => byZone[z])
+        .map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
+      const fit = fitCF(trainPts);
+      if (!fit) { cvWorked = false; break; }
+
+      // Average predicted − actual across all held-out rep-1 failures.
+      // Positive = actual fell short of the cross-zone prediction.
+      const gaps = heldOut.map(r => predForce(fit, r.actual_time_s) - r.avg_force_kg);
+      residuals[Z] = gaps.reduce((a, b) => a + b, 0) / gaps.length;
     }
-    const trainPts = others
-      .flatMap(z => byZone[z])
-      .map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
-    const fit = fitCF(trainPts);
-    if (!fit) { cvWorked = false; break; }
 
-    // Average predicted − actual across all held-out rep-1 failures.
-    // Positive = actual fell short of the cross-zone prediction = limiter.
-    const gaps = heldOut.map(r => predForce(fit, r.actual_time_s) - r.avg_force_kg);
-    residuals[Z] = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    if (cvWorked) {
+      const ranked = Object.entries(residuals).sort(([, a], [, b]) => b - a);
+      // Only return a pick if the top gap is meaningfully positive.
+      // Below LIMITER_RESIDUAL_KG this grip's curve is balanced — try
+      // the next grip rather than falling through to counts (counts
+      // would disagree with a balanced curve and pick noise).
+      if (ranked[0][1] > LIMITER_RESIDUAL_KG) return { zone: ranked[0][0], grip };
+      continue;
+    }
+
+    // ── Fallback: failure-count within this grip ──
+    const counts = {
+      power:     byZone.power.length,
+      strength:  byZone.strength.length,
+      endurance: byZone.endurance.length,
+    };
+    const vals = Object.values(counts);
+    if (vals.every(v => v === vals[0])) continue;
+    const picked = Object.entries(counts).sort(([, a], [, b]) => a - b)[0][0];
+    return { zone: picked, grip };
   }
-
-  if (cvWorked) {
-    const ranked = Object.entries(residuals).sort(([, a], [, b]) => b - a);
-    // Only return a pick if the top gap is meaningfully positive.
-    // Below LIMITER_RESIDUAL_KG the three zones are effectively balanced.
-    if (ranked[0][1] > LIMITER_RESIDUAL_KG) return ranked[0][0];
-    // Balanced curve — no prescription. Don't fall through to counts:
-    // counts disagree with a balanced curve and would pick noise.
-    return null;
-  }
-
-  // ─── Fallback: failure-count (only when CV couldn't run) ───
-  const counts = {
-    power:     byZone.power.length,
-    strength:  byZone.strength.length,
-    endurance: byZone.endurance.length,
-  };
-  const vals = Object.values(counts);
-  if (vals.every(v => v === vals[0])) return null;
-  return Object.entries(counts).sort(([, a], [, b]) => a - b)[0][0];
+  return null;
 }
 
 function ZoneCoverageCard({ history, activities = [] }) {
@@ -1946,18 +1988,23 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
           in the last 30 days), falling back to coverage when failure
           data is too sparse for the cross-zone fit. Matches the
           Analysis tab's precedence so the two views never disagree. */}
-      <SessionPlannerCard
-        liveEstimate={liveEstimate}
-        recommendedZone={(() => {
-          const limiter = computeLimiterZone(history);
-          if (limiter) return limiter;
+      {(() => {
+        const limiter = computeLimiterZone(history);
+        const zone = limiter?.zone ?? (() => {
           const cov = computeZoneCoverage(history, activities);
           return cov.total > 0 ? cov.recommended : null;
-        })()}
-        onApplyPlan={({ goal, targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
-          setConfig(c => ({ ...c, goal, targetTime, repsPerSet, restTime, numSets, setRestTime }))
-        }
-      />
+        })();
+        return (
+          <SessionPlannerCard
+            liveEstimate={liveEstimate}
+            recommendedZone={zone}
+            recommendedGrip={limiter?.grip ?? null}
+            onApplyPlan={({ goal, targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
+              setConfig(c => ({ ...c, goal, targetTime, repsPerSet, restTime, numSets, setRestTime }))
+            }
+          />
+        );
+      })()}
 
       {/* Prescribed load — appears only after both grip AND workout type
           (goal) are selected. The load is CONSTANT across all reps of a
@@ -4307,12 +4354,14 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
 
     // Signal 1: physiological limiter (Monod cross-zone residual —
     // the zone that underperforms the curve fit on the other two
-    // zones' rep-1 failures over the last 30 days).
-    // Uses whole history — not the hand/grip filter — because the
-    // recommendation drives the next training session, which is Both
-    // hands by design. The filter still controls the chart and zone
-    // breakdown, just not this prescription.
-    const limiterKey = computeLimiterZone(history);
+    // zones' rep-1 failures over the last 30 days). Segmented by
+    // grip so Crusher's force scale isn't pooled with Micro's.
+    // Uses whole history — not the hand/grip chart filter — because
+    // the recommendation drives the next training session. The
+    // chart filter still controls the scatter/fit view.
+    const limiter = computeLimiterZone(history);
+    const limiterKey  = limiter?.zone ?? null;
+    const limiterGrip = limiter?.grip ?? null;
 
     // Signal 2: zone coverage gap (least-trained in last 30 days)
     const coverage = computeZoneCoverage(history, activities);
@@ -4331,6 +4380,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       key: primaryKey,
       ...details,
       limiterKey,
+      limiterGrip,
       coverageKey,
       agree,
       coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
@@ -4914,7 +4964,11 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               {recommendation.limiterKey && (
                 <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
                   <span style={{ color: recommendation.color, fontWeight: 700, flexShrink: 0 }}>↑ Limiter:</span>
-                  <span>This zone falls farthest below your own force-duration curve — the other two zones predict higher force here than you delivered.</span>
+                  <span>
+                    {recommendation.limiterGrip
+                      ? <>On <b>{recommendation.limiterGrip}</b>, this zone falls farthest below your force-duration curve — the other two zones predict higher force here than you delivered.</>
+                      : <>This zone falls farthest below your own force-duration curve — the other two zones predict higher force here than you delivered.</>}
+                  </span>
                 </div>
               )}
               {recommendation.coverageKey && recommendation.agree && (
