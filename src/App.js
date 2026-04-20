@@ -1656,32 +1656,47 @@ function computeZoneCoverage(history, activities = []) {
   return { power, strength, endurance, total, recommended };
 }
 
-// Physiological limiter: zone with the FEWEST rep-1 failures in the
-// rolling window — the least-trained compartment. Returns "power" |
-// "strength" | "endurance" | null. Null means no/ambiguous data —
-// caller should fall back to coverage.
+// Physiological limiter: which compartment is the user's capacity
+// shortfall relative to their own force-duration curve?
+// Returns "power" | "strength" | "endurance" | null. Null means no/
+// ambiguous data — caller should fall back to coverage.
 //
-// Why not fail RATE?  Under RPE-10 training every session ends in
-// failure by design. Fail rate saturates near 1.0 in every trained
-// zone, so ranking by rate is dominated by noise near 1.0 and flips
-// the recommendation around randomly.
+// PRIMARY SIGNAL — Monod cross-zone residual.
+// For each zone Z, fit F = CF + W'/T on rep-1 failures from the OTHER
+// two zones, then predict force at each of Z's actual_time_s values.
+// The residual = predicted − actual is the user's capacity shortfall
+// in Z relative to the curve implied by the other two zones. The zone
+// with the biggest positive residual is the one that falls farthest
+// below the user's own curve — that's the limiter.
 //
-// What we use instead: the DISTRIBUTION of failures. Count rep-1
-// failures per zone in the rolling window and return the zone with
-// the FEWEST — the least-trained compartment. Training it pulls the
-// force-duration curve back into balance.
+// Why Monod and not true three-compartment decay?
+// Three-compartment (F = F_max × Σ A_i·e^(-T/τ_i)) either (a) assumes
+// textbook A_i/τ_i and reintroduces the reference-athlete bias, or
+// (b) frees all 6+ parameters and needs far more data to fit stably.
+// Monod is a 2-parameter linear fit (via fitCF) that closely
+// approximates the three-compartment shape over 5s–300s and is
+// numerically stable at the data volumes we actually see.
 //
-// Why only rep 1?  By protocol design, rep 1 is the target-hitting
-// rep. Reps 2+ in strength/capacity are to-failure by design — their
-// failed flag is ~100% true and carries no physiological signal. Rep
-// 1 is the only clean probe of "did you meet the zone's demand".
+// FALLBACK — failure-count distribution.
+// If any zone has too few points for cross-zone CV (e.g. the user
+// has only trained two of three zones), fall back to the least-trained
+// zone by rep-1 failure count. Under RPE-10 every session ends in
+// failure by design — fail RATE saturates near 1.0 so count is the
+// only usable summary statistic.
 //
-// Why bucket by target_duration?  A failing rep 5 of a strength
-// session may drop to 10s (power zone by actual_time_s), but it's
-// still strength-protocol data. target_duration reflects the zone
-// the user intended to train.
-const LIMITER_WINDOW_DAYS   = 30;
-const LIMITER_MIN_FAILURES  = 3;   // total across all zones before we trust the signal
+// Why only rep 1?  Reps 2+ in strength/capacity are to-failure by
+// protocol design — their failed flag is ~100% true regardless of
+// physiology. Rep 1 is the clean probe of "did you meet the zone's
+// demand".
+//
+// Why bucket by target_duration?  A failing rep of a strength session
+// may drop to 10s (power by actual_time_s), but it's still strength-
+// protocol data. target_duration reflects intended zone.
+const LIMITER_WINDOW_DAYS      = 30;
+const LIMITER_MIN_FAILURES     = 3;    // total across all zones before we trust the signal
+const LIMITER_MIN_PTS_TRAIN    = 2;    // each of the two "training" zones needs this many points
+const LIMITER_MIN_PTS_HELDOUT  = 1;    // the held-out zone needs at least this many
+const LIMITER_RESIDUAL_KG      = 0.5;  // smallest gap we'll call a limiter — below this the curve is balanced
 function computeLimiterZone(history) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - LIMITER_WINDOW_DAYS);
@@ -1695,19 +1710,57 @@ function computeLimiterZone(history) {
   );
   if (failures.length < LIMITER_MIN_FAILURES) return null;
 
-  const counts = {
-    power:     failures.filter(r => r.target_duration < POWER_MAX).length,
-    strength:  failures.filter(r => r.target_duration >= POWER_MAX && r.target_duration < STRENGTH_MAX).length,
-    endurance: failures.filter(r => r.target_duration >= STRENGTH_MAX).length,
-  };
+  // Bucket by intended zone (target_duration), not actual duration.
+  const zoneOf = (td) =>
+    td < POWER_MAX        ? "power"    :
+    td < STRENGTH_MAX     ? "strength" :
+                            "endurance";
+  const byZone = { power: [], strength: [], endurance: [] };
+  for (const r of failures) byZone[zoneOf(r.target_duration)].push(r);
 
-  // If all three zones have identical counts we can't prefer one — the
-  // curve is already balanced. Caller's coverage fallback also returns
-  // nothing useful in that case, which is the correct behaviour.
+  // ─── Primary: Monod cross-zone residual ───
+  const zones = ["power", "strength", "endurance"];
+  const residuals = {};
+  let cvWorked = true;
+
+  for (const Z of zones) {
+    const heldOut = byZone[Z];
+    const others  = zones.filter(z => z !== Z);
+    const bothTrainZonesOk = others.every(z => byZone[z].length >= LIMITER_MIN_PTS_TRAIN);
+    if (!bothTrainZonesOk || heldOut.length < LIMITER_MIN_PTS_HELDOUT) {
+      cvWorked = false;
+      break;
+    }
+    const trainPts = others
+      .flatMap(z => byZone[z])
+      .map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
+    const fit = fitCF(trainPts);
+    if (!fit) { cvWorked = false; break; }
+
+    // Average predicted − actual across all held-out rep-1 failures.
+    // Positive = actual fell short of the cross-zone prediction = limiter.
+    const gaps = heldOut.map(r => predForce(fit, r.actual_time_s) - r.avg_force_kg);
+    residuals[Z] = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  }
+
+  if (cvWorked) {
+    const ranked = Object.entries(residuals).sort(([, a], [, b]) => b - a);
+    // Only return a pick if the top gap is meaningfully positive.
+    // Below LIMITER_RESIDUAL_KG the three zones are effectively balanced.
+    if (ranked[0][1] > LIMITER_RESIDUAL_KG) return ranked[0][0];
+    // Balanced curve — no prescription. Don't fall through to counts:
+    // counts disagree with a balanced curve and would pick noise.
+    return null;
+  }
+
+  // ─── Fallback: failure-count (only when CV couldn't run) ───
+  const counts = {
+    power:     byZone.power.length,
+    strength:  byZone.strength.length,
+    endurance: byZone.endurance.length,
+  };
   const vals = Object.values(counts);
   if (vals.every(v => v === vals[0])) return null;
-
-  // Lowest failure count = least-trained compartment = limiter.
   return Object.entries(counts).sort(([, a], [, b]) => a - b)[0][0];
 }
 
@@ -1888,10 +1941,11 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
       {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
 
       {/* Session Planner — always shown; defaults to the limiter zone
-          (zone with FEWEST rep-1 failures in last 30 days, i.e. the
-          least-trained compartment under RPE-10), falling back to
-          coverage when failures are sparse. Matches the Analysis tab's
-          precedence so the two views never disagree. */}
+          (Monod cross-zone residual: the zone that falls farthest
+          below the curve fit on the other two zones' rep-1 failures
+          in the last 30 days), falling back to coverage when failure
+          data is too sparse for the cross-zone fit. Matches the
+          Analysis tab's precedence so the two views never disagree. */}
       <SessionPlannerCard
         liveEstimate={liveEstimate}
         recommendedZone={(() => {
@@ -4230,31 +4284,30 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   }, [reps]);
 
   // ── Unified training recommendation ──
-  // Under RPE-10 every session ends in failure by design, so fail rate
-  // is useless. What's informative is the DISTRIBUTION of failures
-  // across zones: the zone with the fewest rep-1 failures is the
-  // least-trained compartment and the limiter for building a balanced
-  // force-duration curve. Coverage is a session-granularity fallback.
+  // Primary signal: Monod cross-zone residual. For each zone, fit
+  // F = CF + W'/T on the other two zones' rep-1 failures and measure
+  // how far this zone falls below that prediction. Biggest shortfall =
+  // limiter. Falls back to failure-count when cross-zone fit isn't
+  // possible. Coverage is a session-granularity fallback.
   const recommendation = useMemo(() => {
     const ZONE_DETAILS = {
       power: {
         title: "Train Power", color: C.red,
-        insight: "Power is the least-trained compartment — short, high-force efforts are what's missing from your curve.",
+        insight: "Power falls farthest below your force-duration curve — short, high-force efforts would close the gap.",
       },
       strength: {
         title: "Train Strength", color: C.orange,
-        insight: "Strength is the least-trained compartment — mid-duration holds are what's missing from your curve.",
+        insight: "Strength falls farthest below your force-duration curve — mid-duration holds would close the gap.",
       },
       endurance: {
         title: "Train Capacity", color: C.blue,
-        insight: "Capacity is the least-trained compartment — sustained holds are what's missing from your curve.",
+        insight: "Capacity falls farthest below your force-duration curve — sustained holds would close the gap.",
       },
     };
 
-    // Signal 1: physiological limiter (zone with FEWEST rep-1 failures
-    // in last 30 days — the least-trained compartment under RPE-10
-    // training, where every session ends in failure by design so fail
-    // rate is useless but failure distribution is informative).
+    // Signal 1: physiological limiter (Monod cross-zone residual —
+    // the zone that underperforms the curve fit on the other two
+    // zones' rep-1 failures over the last 30 days).
     // Uses whole history — not the hand/grip filter — because the
     // recommendation drives the next training session, which is Both
     // hands by design. The filter still controls the chart and zone
@@ -4861,7 +4914,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               {recommendation.limiterKey && (
                 <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
                   <span style={{ color: recommendation.color, fontWeight: 700, flexShrink: 0 }}>↑ Limiter:</span>
-                  <span>Fewest rep-1 failures in this zone over the last 30 days — training it rebalances the curve.</span>
+                  <span>This zone falls farthest below your own force-duration curve — the other two zones predict higher force here than you delivered.</span>
                 </div>
               )}
               {recommendation.coverageKey && recommendation.agree && (
