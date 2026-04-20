@@ -4268,15 +4268,90 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     }).filter(Boolean);
   }, [failures, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fitted force-duration curve points for overlay
+  // Fitted force-duration curve points for overlay.
+  // Clipped at T≥5s — the Monod asymptote F = CF + W'/T diverges as
+  // T→0, which exploded the Y-axis with ~6-figure forces. Below ~5s
+  // we're outside the Monod validity range anyway (MVC ceiling, neural
+  // rather than metabolic limitation), so nothing is lost by clipping.
+  const F_D_T_MIN = 5;
   const curveData = useMemo(() => {
     if (!cfEstimate) return [];
     const { CF, W } = cfEstimate;
+    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
     return Array.from({ length: 80 }, (_, i) => {
-      const t = 2 + ((maxDur - 2) / 79) * i;
+      const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
       return { x: t, y: toDisp(Math.max(CF + W / t, CF), unit) };
     });
   }, [cfEstimate, maxDur, unit]);
+
+  // Per-hand curves (L vs R overlay). Independent fits over the same
+  // selGrip scope — lets users see hand asymmetry directly. Only
+  // produced when both hands have enough failures to fit.
+  const perHandCurves = useMemo(() => {
+    const groups = { L: [], R: [] };
+    for (const r of history) {
+      if (!r.failed) continue;
+      if (selGrip && r.grip !== selGrip) continue;
+      if (r.avg_force_kg <= 0 || r.actual_time_s <= 0) continue;
+      if (!(r.hand in groups)) continue;
+      groups[r.hand].push({ x: 1 / r.actual_time_s, y: r.avg_force_kg });
+    }
+    const fitL = fitCF(groups.L);
+    const fitR = fitCF(groups.R);
+    if (!fitL || !fitR) return null;
+    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
+    const sample = (fit) => Array.from({ length: 80 }, (_, i) => {
+      const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
+      return { x: t, yKg: Math.max(fit.CF + fit.W / t, fit.CF) };
+    });
+    return { L: sample(fitL), R: sample(fitR) };
+  }, [history, selGrip, maxDur]);
+
+  // Bootstrap confidence band — resample failure points with
+  // replacement, refit each sample, take 5th/95th percentile of
+  // predicted force at each T. Band narrows as more data accumulates,
+  // so users can see when the fit is actually trustworthy. Deterministic
+  // RNG seeded from the data so the band is stable across renders.
+  const confidenceBand = useMemo(() => {
+    if (!failures || failures.length < 3) return null;
+    const pts = failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
+    const N = 150;
+    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
+    const nSamples = 60;
+    const ts = Array.from({ length: nSamples }, (_, i) =>
+      F_D_T_MIN + ((tMax - F_D_T_MIN) / (nSamples - 1)) * i
+    );
+    let seed = (pts.length * 1000 + Math.floor(pts[0].x * 1e6)) >>> 0;
+    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const curves = [];
+    for (let i = 0; i < N; i++) {
+      const sample = Array.from({ length: pts.length }, () => pts[Math.floor(rng() * pts.length)]);
+      const fit = fitCF(sample);
+      if (fit) curves.push(ts.map(t => Math.max(fit.CF + fit.W / t, fit.CF)));
+    }
+    if (curves.length < 20) return null;
+    return ts.map((t, j) => {
+      const vals = curves.map(c => c[j]).sort((a, b) => a - b);
+      const p5  = vals[Math.floor(vals.length * 0.05)];
+      const p95 = vals[Math.min(Math.floor(vals.length * 0.95), vals.length - 1)];
+      return { x: t, lowKg: p5, highKg: p95 };
+    });
+  }, [failures, maxDur]);
+
+  // Limiter zone (the zone that falls farthest below the F-D curve
+  // predicted by the other two zones). Drives the saturated background
+  // highlight on the F-D chart — visual echo of the SessionPlanner's
+  // recommendation, so the chart and the planner tell the same story.
+  const limiterZoneBounds = useMemo(() => {
+    const lim = computeLimiterZone(history);
+    if (!lim) return null;
+    const zoneMap = {
+      power:     { x1: 0,            x2: POWER_MAX,    color: C.red,    label: "Limiter: Power"    },
+      strength:  { x1: POWER_MAX,    x2: STRENGTH_MAX, color: C.orange, label: "Limiter: Strength" },
+      endurance: { x1: STRENGTH_MAX, x2: maxDur + 10,  color: C.blue,   label: "Limiter: Capacity" },
+    };
+    return zoneMap[lim.zone] || null;
+  }, [history, maxDur]);
 
   // ── Relative strength helpers ──
   const useRel = relMode && bodyWeight != null && bodyWeight > 0;
@@ -4303,6 +4378,16 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     x: d.x,
     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
   }));
+  // Unit-transform helper for memos that hold values in kg (perHandCurves,
+  // confidenceBand): converts to display unit or × BW depending on relMode.
+  const kgToDisp = (kg) => useRel && bodyWeight > 0 ? kg / bodyWeight : toDisp(kg, unit);
+  const perHandCurvesRel = perHandCurves ? {
+    L: perHandCurves.L.map(d => ({ x: d.x, y: kgToDisp(d.yKg) })),
+    R: perHandCurves.R.map(d => ({ x: d.x, y: kgToDisp(d.yKg) })),
+  } : null;
+  const confidenceBandRel = confidenceBand ? confidenceBand.map(d => ({
+    x: d.x, low: kgToDisp(d.lowKg), high: kgToDisp(d.highKg),
+  })) : null;
   const maxForceRel = Math.max(
     ...(useRel
       ? reps.map(r => r.avg_force_kg / bodyWeight)
@@ -4678,6 +4763,9 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
             <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
             {cfEstimate && <span><span style={{ color: C.purple }}>―</span> F-D curve</span>}
             {cfEstimate && <span><span style={{ color: C.purple }}>╌</span> Critical Force</span>}
+            {confidenceBandRel && <span><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
+            {perHandCurvesRel && <span><span style={{ color: C.blue }}>―</span> L &nbsp;<span style={{ color: C.orange }}>―</span> R</span>}
+            {limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
             {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
           </div>
           <ResponsiveContainer width="100%" height={260}>
@@ -4697,10 +4785,23 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                 width={42}
               />
               <Tooltip content={<ScatterTooltip unit={forceUnit} />} />
-              {/* Zone backgrounds */}
-              <ReferenceArea x1={0}            x2={POWER_MAX}    fill={C.red}    fillOpacity={0.07} />
-              <ReferenceArea x1={POWER_MAX}    x2={STRENGTH_MAX} fill={C.orange} fillOpacity={0.07} />
-              <ReferenceArea x1={STRENGTH_MAX} x2={maxDur + 10}  fill={C.blue}   fillOpacity={0.07} />
+              {/* Zone backgrounds — neutral tint for non-limiter zones,
+                  extra saturation on the limiter zone so the chart
+                  echoes the SessionPlanner recommendation. */}
+              <ReferenceArea x1={0}            x2={POWER_MAX}    fill={C.red}    fillOpacity={limiterZoneBounds?.x1 === 0            ? 0.22 : 0.07} />
+              <ReferenceArea x1={POWER_MAX}    x2={STRENGTH_MAX} fill={C.orange} fillOpacity={limiterZoneBounds?.x1 === POWER_MAX    ? 0.22 : 0.07} />
+              <ReferenceArea x1={STRENGTH_MAX} x2={maxDur + 10}  fill={C.blue}   fillOpacity={limiterZoneBounds?.x1 === STRENGTH_MAX ? 0.22 : 0.07} />
+              {/* Bootstrap confidence band — subtle dashed bounds
+                  showing 5th/95th percentile of resampled fits. Narrows
+                  as more failure data accumulates. */}
+              {confidenceBandRel && (
+                <Line data={confidenceBandRel} dataKey="low"  stroke={C.purple} strokeOpacity={0.35}
+                      strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
+              )}
+              {confidenceBandRel && (
+                <Line data={confidenceBandRel} dataKey="high" stroke={C.purple} strokeOpacity={0.35}
+                      strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
+              )}
               {/* Critical Force horizontal line */}
               {cfEstimate && (
                 <ReferenceLine
@@ -4709,9 +4810,18 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                   label={{ value: `CF ${fmtForce(cfEstimate.CF)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
                 />
               )}
-              {/* Fitted force-duration curve */}
+              {/* Per-hand L vs R overlay curves */}
+              {perHandCurvesRel && (
+                <Line data={perHandCurvesRel.L} dataKey="y" stroke={C.blue}   strokeWidth={1.5}
+                      strokeOpacity={0.75} dot={false} legendType="none" isAnimationActive={false} />
+              )}
+              {perHandCurvesRel && (
+                <Line data={perHandCurvesRel.R} dataKey="y" stroke={C.orange} strokeWidth={1.5}
+                      strokeOpacity={0.75} dot={false} legendType="none" isAnimationActive={false} />
+              )}
+              {/* Main fitted force-duration curve */}
               {curveDataRel.length > 0 && (
-                <Line data={curveDataRel} dataKey="y" stroke={C.purple} strokeWidth={2} dot={false} legendType="none" />
+                <Line data={curveDataRel} dataKey="y" stroke={C.purple} strokeWidth={2} dot={false} legendType="none" isAnimationActive={false} />
               )}
               {/* Completed reps */}
               <Scatter data={successDotsRel} fill={C.green} opacity={0.85} name="Completed" />
