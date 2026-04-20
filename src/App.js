@@ -1656,50 +1656,59 @@ function computeZoneCoverage(history, activities = []) {
   return { power, strength, endurance, total, recommended };
 }
 
-// Physiological limiter: zone with the highest rep-1 fail rate across
-// the full training history. Returns "power" | "strength" | "endurance"
-// | null. Null means no data — caller should fall back to coverage.
+// Physiological limiter: zone with the FEWEST rep-1 failures in the
+// rolling window — the least-trained compartment. Returns "power" |
+// "strength" | "endurance" | null. Null means no/ambiguous data —
+// caller should fall back to coverage.
 //
-// Why only rep 1?  By protocol design, rep 1 is the target-hitting rep
-// (strength: 45s rep 1 then to-failure; capacity: 120s rep 1 then to-
-// failure; power: every rep targets 5–7s). Reps 2+ in strength/capacity
-// are to-failure by design — their "failed" flag is ~100% true and
-// carries no physiological signal. Rep 1 is the only clean probe.
+// Why not fail RATE?  Under RPE-10 training every session ends in
+// failure by design. Fail rate saturates near 1.0 in every trained
+// zone, so ranking by rate is dominated by noise near 1.0 and flips
+// the recommendation around randomly.
 //
-// Why bucket by target_duration?  A failing rep 5 of a strength session
-// may drop to 10s (power zone by actual_time_s), but it's still
-// strength-protocol data. target_duration reflects the zone the user
-// intended to train.
+// What we use instead: the DISTRIBUTION of failures. Count rep-1
+// failures per zone in the rolling window and return the zone with
+// the FEWEST — the least-trained compartment. Training it pulls the
+// force-duration curve back into balance.
 //
-// Min-sample floor (LIMITER_MIN_SAMPLES): a zone must have at least
-// this many rep-1 data points before it's eligible for the ranking.
-// Without the floor, a single rep-1 shortfall in a sparsely-trained
-// zone (e.g. 1 of 1 = 100% fail rate) dominates the ranking. Below the
-// floor the zone is treated as null here; coverage-fallback in the
-// caller can still pull the user toward under-trained zones.
-const LIMITER_MIN_SAMPLES = 3;
+// Why only rep 1?  By protocol design, rep 1 is the target-hitting
+// rep. Reps 2+ in strength/capacity are to-failure by design — their
+// failed flag is ~100% true and carries no physiological signal. Rep
+// 1 is the only clean probe of "did you meet the zone's demand".
+//
+// Why bucket by target_duration?  A failing rep 5 of a strength
+// session may drop to 10s (power zone by actual_time_s), but it's
+// still strength-protocol data. target_duration reflects the zone
+// the user intended to train.
+const LIMITER_WINDOW_DAYS   = 30;
+const LIMITER_MIN_FAILURES  = 3;   // total across all zones before we trust the signal
 function computeLimiterZone(history) {
-  const valid = history.filter(r =>
-    r.rep_num === 1 &&
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - LIMITER_WINDOW_DAYS);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  const failures = history.filter(r =>
+    r.rep_num === 1 && r.failed &&
     r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
-    r.actual_time_s > 0 && r.target_duration > 0
+    r.actual_time_s > 0 && r.target_duration > 0 &&
+    (r.date || "") >= cutoffStr
   );
-  const zoneFailRate = (lo, hi) => {
-    const z = valid.filter(r =>
-      r.target_duration >= lo && r.target_duration < hi
-    );
-    if (z.length < LIMITER_MIN_SAMPLES) return null;
-    return z.filter(r => r.failed).length / z.length;
+  if (failures.length < LIMITER_MIN_FAILURES) return null;
+
+  const counts = {
+    power:     failures.filter(r => r.target_duration < POWER_MAX).length,
+    strength:  failures.filter(r => r.target_duration >= POWER_MAX && r.target_duration < STRENGTH_MAX).length,
+    endurance: failures.filter(r => r.target_duration >= STRENGTH_MAX).length,
   };
-  const rates = {
-    power:     zoneFailRate(0, POWER_MAX),
-    strength:  zoneFailRate(POWER_MAX, STRENGTH_MAX),
-    endurance: zoneFailRate(STRENGTH_MAX, Infinity),
-  };
-  const ranked = Object.entries(rates)
-    .filter(([, r]) => r !== null)
-    .sort(([, a], [, b]) => b - a);
-  return ranked.length > 0 ? ranked[0][0] : null;
+
+  // If all three zones have identical counts we can't prefer one — the
+  // curve is already balanced. Caller's coverage fallback also returns
+  // nothing useful in that case, which is the correct behaviour.
+  const vals = Object.values(counts);
+  if (vals.every(v => v === vals[0])) return null;
+
+  // Lowest failure count = least-trained compartment = limiter.
+  return Object.entries(counts).sort(([, a], [, b]) => a - b)[0][0];
 }
 
 function ZoneCoverageCard({ history, activities = [] }) {
@@ -1879,9 +1888,10 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
       {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
 
       {/* Session Planner — always shown; defaults to the limiter zone
-          (highest fail rate), falling back to coverage gap when no
-          failures are logged yet. Matches the Analysis tab's precedence
-          so the two views never disagree. */}
+          (zone with FEWEST rep-1 failures in last 30 days, i.e. the
+          least-trained compartment under RPE-10), falling back to
+          coverage when failures are sparse. Matches the Analysis tab's
+          precedence so the two views never disagree. */}
       <SessionPlannerCard
         liveEstimate={liveEstimate}
         recommendedZone={(() => {
@@ -4220,30 +4230,35 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   }, [reps]);
 
   // ── Unified training recommendation ──
-  // Combines two signals: physiological limiter (fail rate) and zone coverage gap.
-  // Limiter is primary — what your body is struggling with RIGHT NOW.
-  // Coverage gap is secondary — what you've been neglecting recently.
+  // Under RPE-10 every session ends in failure by design, so fail rate
+  // is useless. What's informative is the DISTRIBUTION of failures
+  // across zones: the zone with the fewest rep-1 failures is the
+  // least-trained compartment and the limiter for building a balanced
+  // force-duration curve. Coverage is a session-granularity fallback.
   const recommendation = useMemo(() => {
     const ZONE_DETAILS = {
       power: {
         title: "Train Power", color: C.red,
-        insight: "Your phosphocreatine system is the rate-limiter — short, high-force efforts are where you're failing first.",
+        insight: "Power is the least-trained compartment — short, high-force efforts are what's missing from your curve.",
       },
       strength: {
         title: "Train Strength", color: C.orange,
-        insight: "Your glycolytic system is the rate-limiter — mid-duration holds are where you're breaking down first.",
+        insight: "Strength is the least-trained compartment — mid-duration holds are what's missing from your curve.",
       },
       endurance: {
         title: "Train Capacity", color: C.blue,
-        insight: "Your oxidative system is the rate-limiter — sustained holds are where the ceiling sits.",
+        insight: "Capacity is the least-trained compartment — sustained holds are what's missing from your curve.",
       },
     };
 
-    // Signal 1: physiological limiter (highest fail rate among zones with
-    // data). Uses whole history — not the hand/grip filter — because the
-    // recommendation drives the next training session, which is Both hands
-    // by design. The filter still controls the chart and zone breakdown,
-    // just not this prescription.
+    // Signal 1: physiological limiter (zone with FEWEST rep-1 failures
+    // in last 30 days — the least-trained compartment under RPE-10
+    // training, where every session ends in failure by design so fail
+    // rate is useless but failure distribution is informative).
+    // Uses whole history — not the hand/grip filter — because the
+    // recommendation drives the next training session, which is Both
+    // hands by design. The filter still controls the chart and zone
+    // breakdown, just not this prescription.
     const limiterKey = computeLimiterZone(history);
 
     // Signal 2: zone coverage gap (least-trained in last 30 days)
@@ -4846,21 +4861,21 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               {recommendation.limiterKey && (
                 <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
                   <span style={{ color: recommendation.color, fontWeight: 700, flexShrink: 0 }}>↑ Limiter:</span>
-                  <span>Highest fail rate in this zone — your body is telling you this is the weak link.</span>
+                  <span>Fewest rep-1 failures in this zone over the last 30 days — training it rebalances the curve.</span>
                 </div>
               )}
               {recommendation.coverageKey && recommendation.agree && (
                 <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
                   <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Coverage:</span>
-                  <span>Also least-trained in the last 30 days — both signals agree.</span>
+                  <span>Session count agrees — both signals point to the same under-trained zone.</span>
                 </div>
               )}
               {recommendation.coverageKey && !recommendation.agree && (
                 <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
                   <span style={{ color: C.yellow, fontWeight: 700, flexShrink: 0 }}>⚡ Note:</span>
                   <span>
-                    Zone coverage suggests {recommendation.coverageZoneLabel} (least-trained recently),
-                    but your fail rate points here as the physiological bottleneck. Limiter takes priority.
+                    Session coverage suggests {recommendation.coverageZoneLabel}, but rep-1 failure
+                    distribution points here. Rep-level signal takes priority.
                   </span>
                 </div>
               )}
