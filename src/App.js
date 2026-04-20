@@ -4557,36 +4557,28 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       {/* ── Curve parameters over time ── */}
       {cumulativeData.length >= 2 && (
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>CF &amp; W′ Over Time</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>CF Over Time</div>
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-            The two parameters of your force-duration fit, recomputed after every failure.
-            CF is the slow aerobic asymptote; W′ is the faster anaerobic capacity.
-          </div>
-          <div style={{ display: "flex", gap: 14, fontSize: 11, color: C.muted, marginBottom: 8, flexWrap: "wrap" }}>
-            <span><span style={{ color: C.blue }}>―</span> CF ({unit})</span>
-            <span><span style={{ color: C.purple }}>―</span> W′ ({unit}·s)</span>
+            Your critical force — the sustainable aerobic asymptote of the force-duration fit — recomputed after every failure.
           </div>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={cumulativeData} margin={{ top: 6, right: 42, bottom: 28, left: 0 }}>
+            <LineChart data={cumulativeData} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
                 label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-              <YAxis yAxisId="cf" orientation="left"  tick={{ fill: C.blue,   fontSize: 11 }} width={46}
+              <YAxis tick={{ fill: C.blue, fontSize: 11 }} width={46}
                 label={{ value: `CF (${unit})`, angle: -90, position: "insideLeft", fill: C.blue, fontSize: 11 }} />
-              <YAxis yAxisId="w"  orientation="right" tick={{ fill: C.purple, fontSize: 11 }} width={46}
-                label={{ value: `W′ (${unit}·s)`, angle: 90, position: "insideRight", fill: C.purple, fontSize: 11 }} />
               <Tooltip
                 contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
                 formatter={(val, name) => [fmt1(val), name]}
               />
-              <Line yAxisId="cf" dataKey="cf" stroke={C.blue}   strokeWidth={2} dot={false} name={`CF (${unit})`}     />
-              <Line yAxisId="w"  dataKey="w"  stroke={C.purple} strokeWidth={2} dot={false} name={`W′ (${unit}·s)`}  />
+              <Line dataKey="cf" stroke={C.blue} strokeWidth={2} dot={false} name={`CF (${unit})`} />
             </LineChart>
           </ResponsiveContainer>
         </Card>
       )}
 
-      {/* ── Per-hand / per-grip CF & W' breakdown ── */}
+      {/* ── Per-hand / per-grip CF breakdown ── */}
       {perHandImprovement && (() => {
         // Group rows by grip
         const byGrip = {};
@@ -4599,10 +4591,10 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         const deltaColour = (pct) => pct > 2 ? C.green : pct < -2 ? C.red : C.muted;
         return (
           <Card style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Hand Curve Fit</div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Hand Critical Force</div>
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-              CF (critical force, asymptotic sustainable load) and W′ (anaerobic work capacity, finite above-CF reserve)
-              fit to your rep-1 failures per grip × hand. Δ% is change vs. your baseline snapshot.
+              Critical force (asymptotic sustainable load) fit to your rep-1 failures per grip × hand.
+              Δ% is change vs. your baseline snapshot.
             </div>
             {Object.entries(byGrip).map(([grip, hands]) => (
               <div key={grip} style={{ marginBottom: 14 }}>
@@ -4614,23 +4606,18 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                       <div style={{ width: 28, fontSize: 12, fontWeight: 700, color: C.muted, flexShrink: 0 }}>
                         {h === "L" ? "←L" : "R→"}
                       </div>
-                      {[
-                        { label: "CF",  val: row.cf, pct: row.cfPct, suffix: unit,      color: C.blue   },
-                        { label: "W′", val: row.w,  pct: row.wPct,  suffix: `${unit}·s`, color: C.purple },
-                      ].map(({ label, val, pct, suffix, color }) => (
-                        <div key={label} style={{
-                          flex: 1, background: C.bg, borderRadius: 8, padding: "6px 8px", textAlign: "center",
-                          border: `1px solid ${color}25`,
-                        }}>
-                          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.3 }}>{label}</div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color }}>
-                            {fmtW(val, unit)} <span style={{ fontSize: 10, color: C.muted, fontWeight: 500 }}>{suffix}</span>
-                          </div>
-                          <div style={{ fontSize: 10, fontWeight: 600, color: deltaColour(pct) }}>
-                            {pct > 0 ? "+" : ""}{pct}%
-                          </div>
+                      <div style={{
+                        flex: 1, background: C.bg, borderRadius: 8, padding: "6px 8px", textAlign: "center",
+                        border: `1px solid ${C.blue}25`,
+                      }}>
+                        <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.3 }}>CF</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: C.blue }}>
+                          {fmtW(row.cf, unit)} <span style={{ fontSize: 10, color: C.muted, fontWeight: 500 }}>{unit}</span>
                         </div>
-                      ))}
+                        <div style={{ fontSize: 10, fontWeight: 600, color: deltaColour(row.cfPct) }}>
+                          {row.cfPct > 0 ? "+" : ""}{row.cfPct}%
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
