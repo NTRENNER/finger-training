@@ -3763,18 +3763,15 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     const ZONE_DETAILS = {
       power: {
         title: "Train Power", color: C.red,
-        insight: "Your phosphocreatine system is the rate-limiter. Heavy, short maximal efforts with full recovery are the prescription — quality over volume.",
-        protocol: "5–10s hang · 90–100% max load · 3–5 min rest · 4–6 reps",
+        insight: "Your phosphocreatine system is the rate-limiter — short, high-force efforts are where you're failing first.",
       },
       strength: {
         title: "Train Strength", color: C.orange,
-        insight: "Your glycolytic system is the rate-limiter. Progressive overload in the medium time domain, or 7s-on/3s-off repeaters, drives the most adaptation.",
-        protocol: "45s hang · 75–85% max · 3 min rest · 3–5 sets",
+        insight: "Your glycolytic system is the rate-limiter — mid-duration holds are where you're breaking down first.",
       },
       endurance: {
         title: "Train Capacity", color: C.blue,
-        insight: "Your oxidative system is the rate-limiter. Raising Critical Force is the highest-leverage move — it lifts the aerobic ceiling and improves every other zone.",
-        protocol: "2–5 min hang · 40–60% max · 2 min rest · 3–4 sets",
+        insight: "Your oxidative system is the rate-limiter — sustained holds are where the ceiling sits.",
       },
     };
 
@@ -4378,9 +4375,6 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
             </div>
             <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
               {recommendation.insight}
-            </div>
-            <div style={{ background: C.bg, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: C.muted, fontFamily: "monospace", letterSpacing: "0.02em", marginBottom: 12 }}>
-              {recommendation.protocol}
             </div>
             {/* Signal explanation */}
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
