@@ -132,7 +132,7 @@ function downloadWorkoutCSV(log) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// MONOD-SCHERRER CURVE FIT  (standalone — used by CalibrationView & AnalysisView)
+// MONOD-SCHERRER CURVE FIT  (standalone — used by AnalysisView & auto-baseline)
 // ─────────────────────────────────────────────────────────────
 // pts: array of { x: 1/duration_s, y: avg_force_kg }
 // Returns { CF, W, n } or null if not enough data / degenerate.
@@ -524,7 +524,7 @@ function useTindeq() {
   const countRef            = useRef(0);   // sample count for average
   const belowSinceRef       = useRef(null);
   const measuringRef        = useRef(false);
-  const autoFailCallbackRef = useRef(null); // set by ActiveSessionView / CalibrationView
+  const autoFailCallbackRef = useRef(null); // set by ActiveSessionView
   const targetKgRef         = useRef(null); // set by ActiveSessionView each rep
 
   // ── Auto-detect mode (spring-strap / no-hands-needed workflow) ───────────
@@ -1105,492 +1105,7 @@ function RepDots({ total, done, current }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// CALIBRATION VIEW
-// ─────────────────────────────────────────────────────────────
-const CAL_STEPS = [
-  {
-    id: "power", label: "Power", emoji: "⚡",
-    duration: 10, color: C.red,
-    desc: "10-second max-effort hang. Go all out from the start.",
-    tip:  "Use your strongest grip. This anchors your W′ (anaerobic work capacity).",
-  },
-  {
-    id: "strength", label: "Strength", emoji: "💪",
-    duration: 45, color: C.orange,
-    desc: "45-second hard hang. Challenging but sustained.",
-    tip:  "Aim for ~85% effort. Pace yourself to last the full 45 s.",
-  },
-  {
-    id: "endurance", label: "Capacity", emoji: "🏔️",
-    duration: null, color: C.blue,
-    desc: "Hang to complete failure. Hold as long as possible.",
-    tip:  "Target ~50% of your Power test force. The hang ends when you can't hold.",
-  },
-];
-const CAL_REST = 300; // 5 min between steps
 
-function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
-  const [calPhase,      setCalPhase]      = useState("intro");
-  const [stepIdx,       setStepIdx]       = useState(0);
-  const [countdown,     setCountdown]     = useState(3);
-  const [elapsed,       setElapsed]       = useState(0);
-  const [restRemaining, setRestRemaining] = useState(CAL_REST);
-  const [results,       setResults]       = useState([]); // { actualTime, avgForce, peakForce, failed }
-
-  const startTimeRef  = useRef(null);
-  const timerRef      = useRef(null);
-  const restTimerRef  = useRef(null);
-  const autoFailedRef = useRef(false);
-  const endHangRef    = useRef(null);
-
-  const step = CAL_STEPS[stepIdx];
-
-  // For capacity step: suggest ~50% of power step avg force
-  const capacitySuggestKg = results[0]?.avgForce > 0 ? results[0].avgForce * 0.5 : null;
-  const targetKg = step.id === "endurance" ? capacitySuggestKg : null;
-
-  // Keep Tindeq auto-failure target in sync (capacity step only)
-  useEffect(() => {
-    tindeq.targetKgRef.current = (calPhase === "active" && step.id === "endurance")
-      ? targetKg
-      : null;
-  }, [calPhase, step, targetKg, tindeq]);
-
-  // Wire auto-failure → endHang for the capacity step only.
-  useEffect(() => {
-    if (calPhase !== "active" || step.id !== "endurance") {
-      tindeq.setAutoFailCallback(null);
-      return;
-    }
-    tindeq.setAutoFailCallback(() => {
-      autoFailedRef.current = true;
-      endHangRef.current?.();
-    });
-    return () => tindeq.setAutoFailCallback(null);
-  }, [calPhase, step, tindeq]);
-
-  const endHang = useCallback(async () => {
-    if (!startTimeRef.current) return;
-    autoFailedRef.current = false;
-    clearInterval(timerRef.current);
-    const actualTime = (Date.now() - startTimeRef.current) / 1000;
-    startTimeRef.current = null;
-    // Capacity step is always a failure rep by design; others are not
-    const failed = step.id === "endurance";
-    if (tindeq.connected) await tindeq.stopMeasuring();
-    const result = {
-      actualTime,
-      avgForce:  tindeq.avgForce,
-      peakForce: tindeq.peak,
-      failed,
-    };
-    setResults(prev => [...prev, result]);
-    setCalPhase("result");
-  }, [tindeq, step]);
-
-  // Keep endHang ref current so setInterval closure is always fresh
-  endHangRef.current = endHang;
-
-  const startHang = useCallback(async () => {
-    setElapsed(0);
-    startTimeRef.current = Date.now();
-    setCalPhase("active");
-    if (tindeq.connected) {
-      await tindeq.tare();
-      await tindeq.startMeasuring();
-    }
-    timerRef.current = setInterval(() => {
-      if (!startTimeRef.current) return;
-      const t = (Date.now() - startTimeRef.current) / 1000;
-      setElapsed(Math.floor(t));
-      // Auto-complete timed steps when duration is reached
-      if (step.duration && t >= step.duration) {
-        clearInterval(timerRef.current);
-        endHangRef.current?.();
-      }
-    }, 100);
-  }, [tindeq, step]);
-
-  // 3-2-1 countdown
-  useEffect(() => {
-    if (calPhase !== "countdown") return;
-    if (countdown <= 0) { startHang(); return; }
-    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [calPhase, countdown, startHang]);
-
-  // Rest timer
-  useEffect(() => {
-    if (calPhase !== "resting") return;
-    setRestRemaining(CAL_REST);
-    restTimerRef.current = setInterval(() => {
-      setRestRemaining(r => {
-        if (r <= 1) { clearInterval(restTimerRef.current); advanceStep(); return 0; }
-        return r - 1;
-      });
-    }, 1000);
-    return () => clearInterval(restTimerRef.current);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calPhase]);
-
-  // Cleanup on unmount
-  useEffect(() => () => {
-    clearInterval(timerRef.current);
-    clearInterval(restTimerRef.current);
-  }, []);
-
-  const advanceStep = () => {
-    const next = stepIdx + 1;
-    if (next >= CAL_STEPS.length) {
-      setCalPhase("complete");
-    } else {
-      setStepIdx(next);
-      setCountdown(3);
-      setCalPhase("countdown");
-    }
-  };
-
-  const handleResultNext = () => {
-    if (stepIdx >= CAL_STEPS.length - 1) setCalPhase("complete");
-    else setCalPhase("resting");
-  };
-
-  const handleComplete = () => {
-    const sessionId = uid();
-    const reps = results.map((r, i) => {
-      const s = CAL_STEPS[i];
-      return {
-        id:              uid(),
-        date:            today(),
-        grip:            "Calibration",
-        hand:            "Both",
-        target_duration: s.duration ?? Math.round(r.actualTime),
-        weight_kg:       0,
-        actual_time_s:   Math.round(r.actualTime * 10) / 10,
-        avg_force_kg:    (isFinite(r.avgForce) && r.avgForce > 0 && r.avgForce < 500)
-                           ? Math.round(r.avgForce * 10) / 10
-                           : 0,
-        peak_force_kg:   (isFinite(r.peakForce) && r.peakForce > 0)
-                           ? Math.round(r.peakForce * 10) / 10
-                           : 0,
-        set_num:         1,
-        rep_num:         i + 1,
-        rest_s:          CAL_REST,
-        session_id:      sessionId,
-        failed:          r.failed,
-      };
-    });
-    onComplete(reps);
-  };
-
-  return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
-
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <div>
-          <div style={{ fontSize: 13, color: C.muted }}>Calibration</div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>Force-Duration Profile</div>
-        </div>
-        {calPhase === "intro" && (
-          <Btn small color={C.muted} onClick={onCancel}>Cancel</Btn>
-        )}
-      </div>
-
-      {/* Step progress dots */}
-      {calPhase !== "intro" && (
-        <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
-          {CAL_STEPS.map((s, i) => (
-            <div key={s.id} style={{
-              flex: 1, height: 6, borderRadius: 3,
-              background: i < results.length ? s.color : C.border,
-              opacity: i > stepIdx && calPhase !== "complete" ? 0.3 : 1,
-              transition: "background 0.4s",
-            }} />
-          ))}
-        </div>
-      )}
-
-      {/* ── INTRO ── */}
-      {calPhase === "intro" && (
-        <>
-          <Card>
-            <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
-              <div style={{ fontSize: 48, marginBottom: 8 }}>📊</div>
-              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 10 }}>
-                Calibrate Your Strength
-              </div>
-              <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.65 }}>
-                3 quick tests across different time domains. Seeds your force-duration
-                curve and powers accurate training recommendations from day one.
-              </div>
-            </div>
-          </Card>
-
-          {CAL_STEPS.map((s, i) => (
-            <Card key={s.id} style={{ marginTop: 10 }}>
-              <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-                <div style={{
-                  fontSize: 24, width: 44, height: 44, borderRadius: 22, flexShrink: 0,
-                  background: s.color + "22",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  {s.emoji}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: s.color }}>
-                    Step {i + 1}: {s.label}
-                    <span style={{ fontWeight: 400, color: C.muted, marginLeft: 6, fontSize: 13 }}>
-                      {s.duration ? `${s.duration}s` : "to failure"}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 13, color: C.text, marginTop: 3 }}>{s.desc}</div>
-                  <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{s.tip}</div>
-                </div>
-              </div>
-            </Card>
-          ))}
-
-          <div style={{
-            marginTop: 12, padding: "12px 16px",
-            background: "#1a1f2e", borderRadius: 10,
-            fontSize: 12, color: C.muted,
-          }}>
-            ⏱ Plan ~20 min total — 5-minute rest between each test.
-          </div>
-
-          <Btn
-            onClick={() => { setStepIdx(0); setCountdown(3); setCalPhase("countdown"); }}
-            style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12, marginTop: 14 }}
-            color={C.blue}
-          >
-            Begin Calibration →
-          </Btn>
-        </>
-      )}
-
-      {/* ── COUNTDOWN ── */}
-      {calPhase === "countdown" && (
-        <Card style={{ textAlign: "center", padding: "40px 24px" }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: step.color, marginBottom: 6 }}>
-            {step.emoji} Step {stepIdx + 1} of {CAL_STEPS.length}: {step.label}
-          </div>
-          <div style={{ fontSize: 14, color: C.muted, marginBottom: 28 }}>{step.desc}</div>
-          <div style={{ fontSize: 96, fontWeight: 900, color: C.yellow, lineHeight: 1 }}>
-            {countdown === 0 ? "GO" : countdown}
-          </div>
-          {step.id === "endurance" && capacitySuggestKg != null && (
-            <div style={{ fontSize: 14, color: C.muted, marginTop: 20 }}>
-              Target force: <b style={{ color: C.blue }}>{fmtW(capacitySuggestKg, unit)} {unit}</b>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {/* ── ACTIVE ── */}
-      {calPhase === "active" && (
-        <>
-          <Card>
-            <div style={{ textAlign: "center", marginBottom: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: step.color }}>
-                {step.emoji} {step.label}
-              </span>
-              {step.duration && (
-                <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>
-                  — target {step.duration}s
-                </span>
-              )}
-              {step.id === "endurance" && capacitySuggestKg != null && (
-                <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>
-                  — target {fmtW(capacitySuggestKg, unit)} {unit}
-                </span>
-              )}
-            </div>
-            <BigTimer
-              seconds={elapsed}
-              targetSeconds={step.duration ?? null}
-              running={true}
-            />
-            {tindeq.connected ? (
-              <ForceGauge
-                force={tindeq.force}
-                avg={tindeq.avgForce}
-                peak={tindeq.peak}
-                targetKg={targetKg}
-                unit={unit}
-              />
-            ) : (
-              <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
-                No Tindeq — tap the button below when you let go.
-              </div>
-            )}
-          </Card>
-          <Btn
-            onClick={endHang}
-            style={{ width: "100%", padding: "18px 0", fontSize: 18, borderRadius: 12, marginTop: 8 }}
-            color={step.id === "endurance" ? C.red : C.muted}
-          >
-            {step.id === "endurance" ? "✕ I Failed" : "✓ Done"}
-          </Btn>
-        </>
-      )}
-
-      {/* ── RESULT ── */}
-      {calPhase === "result" && (() => {
-        const r = results[results.length - 1];
-        const isLast = stepIdx >= CAL_STEPS.length - 1;
-        return (
-          <>
-            <Card style={{ borderColor: step.color }}>
-              <div style={{ textAlign: "center", padding: "8px 0 12px" }}>
-                <div style={{ fontSize: 36 }}>{step.emoji}</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: step.color, marginTop: 6 }}>
-                  {step.label} Complete
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap", marginTop: 8 }}>
-                <div style={{ textAlign: "center" }}>
-                  <Label>Time</Label>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: C.text }}>
-                    {fmtTime(r.actualTime)}
-                  </div>
-                </div>
-                {r.avgForce > 0 && (
-                  <div style={{ textAlign: "center" }}>
-                    <Label>Avg Force</Label>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: step.color }}>
-                      {fmtW(r.avgForce, unit)} {unit}
-                    </div>
-                  </div>
-                )}
-                {r.peakForce > 0 && (
-                  <div style={{ textAlign: "center" }}>
-                    <Label>Peak</Label>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: C.purple }}>
-                      {fmtW(r.peakForce, unit)} {unit}
-                    </div>
-                  </div>
-                )}
-              </div>
-              {step.id === "power" && r.avgForce > 0 && (
-                <div style={{
-                  marginTop: 14, padding: "10px 14px",
-                  background: C.bg, borderRadius: 8,
-                  fontSize: 12, color: C.muted,
-                }}>
-                  💡 Capacity target will be{" "}
-                  <b style={{ color: C.blue }}>
-                    {fmtW(r.avgForce * 0.5, unit)} {unit}
-                  </b>{" "}
-                  (~50% of your Power test)
-                </div>
-              )}
-            </Card>
-            <Btn
-              onClick={handleResultNext}
-              style={{ width: "100%", padding: "16px 0", fontSize: 16, borderRadius: 12, marginTop: 12 }}
-              color={isLast ? C.green : C.blue}
-            >
-              {isLast ? "✓ View My Results" : `Rest 5 min → Step ${stepIdx + 2}: ${CAL_STEPS[stepIdx + 1].label}`}
-            </Btn>
-          </>
-        );
-      })()}
-
-      {/* ── RESTING ── */}
-      {calPhase === "resting" && (
-        <>
-          <Card>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
-                Rest before Step {stepIdx + 2}: {CAL_STEPS[stepIdx + 1]?.label}
-              </div>
-              <div style={{
-                fontSize: 72, fontWeight: 900, lineHeight: 1,
-                color: restRemaining > 60 ? C.green : C.orange,
-              }}>
-                {fmtTime(restRemaining)}
-              </div>
-              <div style={{ marginTop: 14, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
-                <div style={{
-                  height: "100%",
-                  width: `${(restRemaining / CAL_REST) * 100}%`,
-                  background: restRemaining > 60 ? C.green : C.orange,
-                  borderRadius: 3, transition: "width 1s linear",
-                }} />
-              </div>
-            </div>
-          </Card>
-          <div style={{
-            marginTop: 12, padding: "12px 16px",
-            background: "#1a1f2e", borderRadius: 10,
-            fontSize: 13, color: C.muted,
-          }}>
-            🧘 <b style={{ color: C.text }}>Up next:</b> {CAL_STEPS[stepIdx + 1]?.desc}
-          </div>
-          <Btn
-            onClick={() => { clearInterval(restTimerRef.current); advanceStep(); }}
-            style={{ width: "100%", padding: "14px 0", fontSize: 15, borderRadius: 12, marginTop: 12 }}
-            color={C.muted}
-          >
-            Skip rest — I'm ready →
-          </Btn>
-        </>
-      )}
-
-      {/* ── COMPLETE ── */}
-      {calPhase === "complete" && (
-        <>
-          <Card style={{ borderColor: C.green }}>
-            <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
-              <div style={{ fontSize: 48 }}>🎯</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: C.green, marginTop: 8 }}>
-                Calibration Complete!
-              </div>
-              <div style={{ fontSize: 13, color: C.muted, marginTop: 8, lineHeight: 1.6 }}>
-                Your force-duration curve is seeded. Head to the Analysis tab
-                for your Critical Force estimate and training recommendations.
-              </div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-              {results.map((r, i) => (
-                <div key={i} style={{
-                  display: "flex", alignItems: "center", gap: 12,
-                  padding: "10px 14px", background: C.bg, borderRadius: 8,
-                }}>
-                  <span style={{ fontSize: 22 }}>{CAL_STEPS[i].emoji}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: CAL_STEPS[i].color }}>
-                      {CAL_STEPS[i].label}
-                    </div>
-                    <div style={{ fontSize: 12, color: C.muted }}>
-                      {fmtTime(r.actualTime)}
-                      {r.avgForce > 0 && ` · ${fmtW(r.avgForce, unit)} ${unit} avg`}
-                    </div>
-                  </div>
-                  <span style={{ color: C.green, fontSize: 16 }}>✓</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-          <Btn
-            onClick={handleComplete}
-            style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12, marginTop: 16 }}
-            color={C.green}
-          >
-            View My Analysis →
-          </Btn>
-        </>
-      )}
-
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// SETUP VIEW
-// ─────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
 // SESSION PLANNER CARD
 // ─────────────────────────────────────────────────────────────
@@ -2026,7 +1541,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
   );
 }
 
-function SetupView({ config, setConfig, onStart, onCalibrate, history, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, activities = [], onLogActivity = () => {}, connectSlot = null }) {
+function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, activities = [], onLogActivity = () => {}, connectSlot = null }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -4073,7 +3588,7 @@ function TrendsView({ history, unit = "lbs" }) {
 const POWER_MAX    = 20;
 const STRENGTH_MAX = 120;
 
-function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = null, baseline = null, activities = [] }) {
+function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [] }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selGrip,   setSelGrip]   = useState("");
   const [relMode,   setRelMode]   = useState(false); // relative strength toggle
@@ -4097,7 +3612,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
   // ── Critical Force estimation via Monod-Scherrer linearization ──
-  // Delegates to the standalone fitCF() helper so CalibrationView & App can share the logic.
+  // Delegates to the standalone fitCF() helper.
   const cfEstimate = useMemo(() => {
     if (failures.length < 2) return null;
     const pts = failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
@@ -4312,36 +3827,10 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 4, gap: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 22 }}>Force-Duration Analysis</h2>
-        {onCalibrate && (
-          <Btn small onClick={onCalibrate} color={C.blue} style={{ flexShrink: 0, marginTop: 4 }}>
-            📊 Calibrate
-          </Btn>
-        )}
-      </div>
+      <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Force-Duration Analysis</h2>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
         Where failures fall on the fatigue curve reveals which energy system is your limiter — and what to train next.
       </p>
-
-      {/* Calibration nudge for new users — only when no baseline set yet */}
-      {!baseline && onCalibrate && (
-        <div style={{
-          marginBottom: 16, padding: "14px 16px",
-          background: "#0d1f3c", border: `1px solid ${C.blue}40`, borderRadius: 12,
-        }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.blue, marginBottom: 6 }}>
-            📊 No baseline yet
-          </div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.6 }}>
-            A quick 3-step calibration seeds your force-duration curve and unlocks improvement tracking.
-            Takes about 15 minutes — do it fresh, before any hard training.
-          </div>
-          <Btn onClick={onCalibrate} color={C.blue} style={{ padding: "10px 0", width: "100%", borderRadius: 8 }}>
-            Run Calibration →
-          </Btn>
-        </div>
-      )}
 
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
@@ -4572,7 +4061,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
               </div>
             ))}
             <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
-              Compared to your initial calibration baseline · {baseline?.date}
+              Compared to your starting baseline · {baseline?.date}
             </div>
           </Card>
         );
@@ -6736,12 +6225,44 @@ export default function App() {
     return fitCF(failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
   }, [history]);
 
-  // ── Calibration mode ──────────────────────────────────────
-  const [calMode, setCalMode] = useState(false);
-
-  // Permanent baseline snapshot — set once from first calibration, never overwritten.
+  // Permanent baseline snapshot — set once from the earliest training data,
+  // never overwritten. Seeded automatically (below) from the first few
+  // failure reps spanning ≥2 zones.
   const [baseline, setBaseline] = useState(() => loadLS(LS_BASELINE_KEY));
   const [activities, setActivities] = useState(() => loadLS(LS_ACTIVITY_KEY) || []);
+
+  // ── Auto-baseline ─────────────────────────────────────────
+  // Seed the CF/W′ reference point from real training data instead of
+  // requiring a formal calibration session. Fires once we have ≥3 failure
+  // reps spanning ≥2 distinct target durations (so the Monod-Scherrer fit
+  // has some spread to work with). The snapshot is dated to the earliest
+  // rep in the seed set so "improvement" counts from when you started.
+  useEffect(() => {
+    if (baseline) return;
+    const failures = history
+      .filter(r =>
+        r.failed &&
+        r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
+        r.actual_time_s > 0
+      )
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const acc = [];
+    const durs = new Set();
+    for (const r of failures) {
+      acc.push(r);
+      durs.add(r.target_duration);
+      if (acc.length >= 3 && durs.size >= 2) {
+        const pts = acc.map(x => ({ x: 1 / x.actual_time_s, y: x.avg_force_kg }));
+        const fit = fitCF(pts);
+        if (fit) {
+          const snap = { date: acc[0].date, CF: fit.CF, W: fit.W };
+          saveLS(LS_BASELINE_KEY, snap);
+          setBaseline(snap);
+        }
+        return;
+      }
+    }
+  }, [history, baseline]);
 
   // Genesis badge snapshot — saved the first time all 3 zones have a session.
   // Must be declared BEFORE the detection useEffect below.
@@ -6772,26 +6293,6 @@ export default function App() {
       return next;
     });
   }, []);
-
-  const handleCalibrationComplete = useCallback((calReps) => {
-    addReps(calReps);
-
-    // Snapshot CF/W′ baseline from the 3 calibration reps if we don't have one yet.
-    if (!loadLS(LS_BASELINE_KEY)) {
-      const pts = calReps
-        .filter(r => r.avg_force_kg > 0 && r.actual_time_s > 0)
-        .map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
-      const fit = fitCF(pts);
-      if (fit) {
-        const snap = { date: today(), CF: fit.CF, W: fit.W };
-        saveLS(LS_BASELINE_KEY, snap);
-        setBaseline(snap);
-      }
-    }
-
-    setCalMode(false);
-    setTab(1); // navigate to Analysis tab
-  }, [addReps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Session Config ────────────────────────────────────────
   // hand is hard-coded to "Both": the user always trains both hands, either
@@ -7075,17 +6576,6 @@ export default function App() {
 
       {/* Train tab */}
       {tab === 0 && (() => {
-        if (phase === "idle" && calMode) {
-          return (
-            <CalibrationView
-              tindeq={tindeq}
-              unit={unit}
-              onComplete={handleCalibrationComplete}
-              onCancel={() => setCalMode(false)}
-            />
-          );
-        }
-
         if (phase === "idle") {
           const tindeqConnectCard = (
             <div style={{ marginBottom: 12 }}>
@@ -7130,7 +6620,6 @@ export default function App() {
               config={config}
               setConfig={setConfig}
               onStart={startSession}
-              onCalibrate={() => setCalMode(true)}
               history={history}
               unit={unit}
               onBwSave={saveBW}
@@ -7233,7 +6722,7 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} onCalibrate={() => { setCalMode(true); setTab(0); }} />}
+      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps(Array.isArray(rep) ? rep : [rep])} notes={notes} onNoteChange={handleNoteChange} />}
