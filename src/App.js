@@ -1335,11 +1335,14 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null 
 // CLIMBING LOG WIDGET
 // Quick-log a climbing session so zone coverage accounts for it.
 // ─────────────────────────────────────────────────────────────
+// Climbing sessions are logged for readiness / fatigue accounting but
+// are intentionally NOT credited to zone coverage (see computeZoneCoverage
+// note). Zone tags were removed from intensities on purpose.
 const CLIMB_INTENSITIES = [
-  { key: "easy",       label: "Easy",       emoji: "🟢", desc: "Cruisy / warm-up",   zone: "Capacity"  },
-  { key: "moderate",   label: "Moderate",   emoji: "🟡", desc: "Pumpy / sustained",   zone: "Capacity"  },
-  { key: "hard",       label: "Hard",       emoji: "🔴", desc: "Limit / crux-heavy",  zone: "Strength"  },
-  { key: "bouldering", label: "Bouldering", emoji: "⚡", desc: "Power / explosive",   zone: "Power"     },
+  { key: "easy",       label: "Easy",       emoji: "🟢", desc: "Cruisy / warm-up"    },
+  { key: "moderate",   label: "Moderate",   emoji: "🟡", desc: "Pumpy / sustained"   },
+  { key: "hard",       label: "Hard",       emoji: "🔴", desc: "Limit / crux-heavy"  },
+  { key: "bouldering", label: "Bouldering", emoji: "⚡", desc: "Power / explosive"   },
 ];
 
 function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
@@ -1376,7 +1379,7 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
               ? `Climbing logged today (${todayActivities.length}×)`
               : logged ? "✓ Climbing session logged!" : "Log a climbing session"}
           </span>
-          <span style={{ fontSize: 11, color: C.muted }}>counts toward zone coverage +</span>
+          <span style={{ fontSize: 11, color: C.muted }}>logged for readiness +</span>
         </button>
       )}
 
@@ -1391,7 +1394,7 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
           {/* Intensity picker */}
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>Climbing style</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-            {CLIMB_INTENSITIES.map(({ key, label, emoji, desc, zone }) => (
+            {CLIMB_INTENSITIES.map(({ key, label, emoji, desc }) => (
               <button key={key} onClick={() => setIntensity(key)} style={{
                 flex: "1 1 40%", padding: "8px 6px", borderRadius: 8, cursor: "pointer",
                 border: intensity === key ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
@@ -1399,7 +1402,7 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
                 color: C.text, textAlign: "left",
               }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{emoji} {label}</div>
-                <div style={{ fontSize: 10, color: C.muted }}>{desc} · {zone}</div>
+                <div style={{ fontSize: 10, color: C.muted }}>{desc}</div>
               </button>
             ))}
           </div>
