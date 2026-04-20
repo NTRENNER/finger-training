@@ -70,6 +70,7 @@ const bwOnDate = (bwLog, date) => {
 };
 const clamp  = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const fmt1   = (n) => (typeof n === "number" && isFinite(n)) ? n.toFixed(1) : "—";
+const fmt0   = (n) => (typeof n === "number" && isFinite(n)) ? String(Math.round(n)) : "—";
 
 const KG_TO_LBS = 2.20462;
 // Convert stored kg → display unit
@@ -952,14 +953,15 @@ function BwPrompt({ unit = "lbs", onSave }) {
 
   const [editing,  setEditing]  = useState(false);
   const [inputVal, setInputVal] = useState(() =>
-    latest ? String(fmt1(toDisp(latest.kg, unit))) : ""
+    latest ? fmt0(toDisp(latest.kg, unit)) : ""
   );
 
   // Only show if stale or never set
   if (daysSince < 3) return null;
 
   const save = () => {
-    const kg = fromDisp(parseFloat(inputVal), unit);
+    // Integer precision — body weight doesn't need decimal accuracy
+    const kg = fromDisp(Math.round(parseFloat(inputVal)), unit);
     if (!isNaN(kg) && kg > 0) { onSave(kg); setEditing(false); }
   };
 
@@ -974,7 +976,7 @@ function BwPrompt({ unit = "lbs", onSave }) {
         <>
           <span style={{ flex: 1, fontSize: 13, color: C.muted }}>
             {latest
-              ? <>Still <b style={{ color: C.text }}>{fmt1(toDisp(latest.kg, unit))} {unit}</b>?</>
+              ? <>Still <b style={{ color: C.text }}>{fmt0(toDisp(latest.kg, unit))} {unit}</b>?</>
               : <span>Body weight not set</span>}
           </span>
           <button onClick={() => setEditing(true)} style={{
@@ -992,6 +994,10 @@ function BwPrompt({ unit = "lbs", onSave }) {
         <>
           <input
             type="number"
+            inputMode="numeric"
+            step={1}
+            min={30}
+            max={500}
             value={inputVal}
             onChange={e => setInputVal(e.target.value)}
             onKeyDown={e => e.key === "Enter" && save()}
@@ -4969,10 +4975,10 @@ CREATE POLICY "auth_all" ON reps
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input
-              type="number" min={30} max={200} step={0.5}
-              value={bodyWeight != null ? fmtW(bodyWeight, unit) : ""}
+              type="number" inputMode="numeric" min={30} max={500} step={1}
+              value={bodyWeight != null ? fmt0(toDisp(bodyWeight, unit)) : ""}
               onChange={e => {
-                const v = e.target.value === "" ? null : fromDisp(Number(e.target.value), unit);
+                const v = e.target.value === "" ? null : fromDisp(Math.round(Number(e.target.value)), unit);
                 onBWChange(v);
               }}
               placeholder={`Weight in ${unit}`}
@@ -4985,7 +4991,7 @@ CREATE POLICY "auth_all" ON reps
             <span style={{ fontSize: 14, color: C.muted }}>{unit}</span>
             {bodyWeight != null && (
               <span style={{ fontSize: 12, color: C.muted, marginLeft: 4 }}>
-                ({unit === "lbs" ? `${fmt1(bodyWeight)} kg` : `${fmt1(bodyWeight * KG_TO_LBS)} lbs`})
+                ({unit === "lbs" ? `${fmt0(bodyWeight)} kg` : `${fmt0(bodyWeight * KG_TO_LBS)} lbs`})
               </span>
             )}
           </div>
