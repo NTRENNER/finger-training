@@ -4602,16 +4602,51 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     return out;
   }, [gripBaselines, gripEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Per-hand × per-grip baselines ──
+  // Same seeding logic as gripBaselines but scoped to a single hand on
+  // a single grip. Needed because Monod W' has high variance at small
+  // N — if we compared each (grip,hand) fit against the POOLED global
+  // baseline, cross-muscle (FDP vs FDS) and cross-hand asymmetries
+  // contaminated the reference and produced phantom regressions on
+  // whichever hand/grip combo started above the pooled mean. With a
+  // per-(grip,hand) baseline, Δ% is an apples-to-apples comparison.
+  // Threshold: ≥5 failures across ≥3 distinct durations per combo.
+  const perHandGripBaselines = useMemo(() => {
+    const out = {};
+    const byKey = {};
+    for (const r of history) {
+      if (!r.failed || !r.grip || !r.hand || r.hand === "Both") continue;
+      if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+      if (!(r.actual_time_s > 0)) continue;
+      const key = `${r.grip}|${r.hand}`;
+      if (!byKey[key]) byKey[key] = [];
+      byKey[key].push(r);
+    }
+    for (const [key, reps] of Object.entries(byKey)) {
+      reps.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+      const acc = [];
+      const durs = new Set();
+      for (const r of reps) {
+        acc.push(r);
+        durs.add(r.target_duration);
+        if (acc.length >= 5 && durs.size >= 3) {
+          const fit = fitCF(acc.map(x => ({ x: 1 / x.actual_time_s, y: x.avg_force_kg })));
+          if (fit) out[key] = { date: acc[0].date, CF: fit.CF, W: fit.W };
+          break;
+        }
+      }
+    }
+    return out;
+  }, [history]);
+
   // ── Per-hand / per-grip CF & W' breakdown ──
   // Groups failure reps by grip × hand, fits Monod (F = CF + W'/T) for
-  // each group, and reports CF and W' alongside their delta vs the
-  // global baseline snapshot. Showing CF and W' directly (not derived
-  // %s per zone) keeps the surface principle-based: CF is the slow
-  // aerobic asymptote, W' is the noisier anaerobic capacity, and the
-  // Power/Strength/Capacity %s are just predictions of these two
-  // numbers at three sample durations.
+  // each group, and reports CF and W' alongside their delta vs that
+  // same (grip,hand)'s own baseline snapshot (see perHandGripBaselines
+  // above for why per-hand-per-grip, not pooled). When a combo doesn't
+  // yet qualify for a stable baseline, we still emit the row but with
+  // cfPct=null so the UI can show current CF without a misleading Δ%.
   const perHandImprovement = useMemo(() => {
-    if (!baseline) return null;
     const groups = {};
     for (const r of history) {
       if (!r.failed || !r.grip || !r.hand || r.hand === "Both") continue;
@@ -4627,18 +4662,19 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       const cur    = fitCF(curPts);
       if (!cur) continue;
       const [grip, hand] = key.split("|");
-      const cfPct = baseline.CF > 0 ? Math.round((cur.CF / baseline.CF - 1) * 100) : 0;
-      const wPct  = baseline.W  > 0 ? Math.round((cur.W  / baseline.W  - 1) * 100) : 0;
+      const ref = perHandGripBaselines[key];
+      const cfPct = ref && ref.CF > 0 ? Math.round((cur.CF / ref.CF - 1) * 100) : null;
+      const wPct  = ref && ref.W  > 0 ? Math.round((cur.W  / ref.W  - 1) * 100) : null;
       result[key] = {
         grip, hand, n: reps.length,
         cf: cur.CF, w: cur.W,
-        cfDelta: cur.CF - baseline.CF,
-        wDelta:  cur.W  - baseline.W,
         cfPct, wPct,
+        baselineDate: ref?.date ?? null,
+        hasBaseline: !!ref,
       };
     }
     return Object.keys(result).length > 0 ? result : null;
-  }, [history, baseline]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [history, perHandGripBaselines]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Curve parameters over time ──
   // For each date with failure data, refit Monod (F = CF + W'/T) using
@@ -5207,12 +5243,13 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         // Small helper — colour deltas green/red with a neutral muted
         // band for near-zero noise (|delta| < ~2% reads as "flat").
         const deltaColour = (pct) => pct > 2 ? C.green : pct < -2 ? C.red : C.muted;
+        const anyBaselined = Object.values(perHandImprovement).some(r => r.hasBaseline);
         return (
           <Card style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Hand Critical Force</div>
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
               Critical force (asymptotic sustainable load) fit to your rep-1 failures per grip × hand.
-              Δ% is change vs. your baseline snapshot.
+              Δ% compares each hand to <i>its own</i> earliest qualifying snapshot (≥5 failures across ≥3 target durations) — avoids mixing FDP/FDS or L/R baselines.
             </div>
             {Object.entries(byGrip).map(([grip, hands]) => (
               <div key={grip} style={{ marginBottom: 14 }}>
@@ -5232,18 +5269,27 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                         <div style={{ fontSize: 14, fontWeight: 700, color: C.blue }}>
                           {fmtW(row.cf, unit)} <span style={{ fontSize: 10, color: C.muted, fontWeight: 500 }}>{unit}</span>
                         </div>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: deltaColour(row.cfPct) }}>
-                          {row.cfPct > 0 ? "+" : ""}{row.cfPct}%
-                        </div>
+                        {row.cfPct != null ? (
+                          <div style={{ fontSize: 10, fontWeight: 600, color: deltaColour(row.cfPct) }}>
+                            {row.cfPct > 0 ? "+" : ""}{row.cfPct}%
+                            <span style={{ color: C.muted, fontWeight: 500 }}> · since {row.baselineDate}</span>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 10, fontWeight: 500, color: C.muted, fontStyle: "italic" }}>
+                            early days — need ≥5 failures across ≥3 durations
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
                 })}
               </div>
             ))}
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
-              Baseline snapshot · {baseline?.date}
-            </div>
+            {!anyBaselined && (
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
+                No hand has enough data yet for a stable per-hand baseline — showing current CF without Δ%.
+              </div>
+            )}
           </Card>
         );
       })()}
