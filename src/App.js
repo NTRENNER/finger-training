@@ -1463,9 +1463,12 @@ function computeZoneCoverage(history, activities = []) {
     if (!s.durations.length) continue;
     const sorted = [...s.durations].sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)];
-    if (median <= POWER_MAX)         power++;
-    else if (median <= STRENGTH_MAX) strength++;
-    else                             endurance++;
+    // Half-open intervals [lo, hi) so boundary values land consistently
+    // with computeLimiterZone. A capacity protocol (target 120s) goes to
+    // endurance, not strength.
+    if (median < POWER_MAX)         power++;     // [0, 20)
+    else if (median < STRENGTH_MAX) strength++;  // [20, 120)
+    else                            endurance++; // [120, ∞)
   }
 
   // Legacy 1RM activities still credit Power — they are finger-specific max
@@ -1483,15 +1486,30 @@ function computeZoneCoverage(history, activities = []) {
   return { power, strength, endurance, total, recommended };
 }
 
-// Physiological limiter: zone with the highest fail rate across the full
-// training history. Returns "power" | "strength" | "endurance" | null.
-// Null means no failure data at all — caller should fall back to coverage.
+// Physiological limiter: zone with the highest rep-1 fail rate across
+// the full training history. Returns "power" | "strength" | "endurance"
+// | null. Null means no data — caller should fall back to coverage.
+//
+// Why only rep 1?  By protocol design, rep 1 is the target-hitting rep
+// (strength: 45s rep 1 then to-failure; capacity: 120s rep 1 then to-
+// failure; power: every rep targets 5–7s). Reps 2+ in strength/capacity
+// are to-failure by design — their "failed" flag is ~100% true and
+// carries no physiological signal. Rep 1 is the only clean probe.
+//
+// Why bucket by target_duration?  A failing rep 5 of a strength session
+// may drop to 10s (power zone by actual_time_s), but it's still
+// strength-protocol data. target_duration reflects the zone the user
+// intended to train.
 function computeLimiterZone(history) {
   const valid = history.filter(r =>
-    r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0
+    r.rep_num === 1 &&
+    r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
+    r.actual_time_s > 0 && r.target_duration > 0
   );
   const zoneFailRate = (lo, hi) => {
-    const z = valid.filter(r => r.actual_time_s >= lo && r.actual_time_s < hi);
+    const z = valid.filter(r =>
+      r.target_duration >= lo && r.target_duration < hi
+    );
     return z.length > 0 ? z.filter(r => r.failed).length / z.length : null;
   };
   const rates = {
