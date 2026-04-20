@@ -4311,9 +4311,18 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   );
 
   // ── Zone breakdown (power / strength / capacity) ──
+  // Buckets each rep by target_duration (what zone it was *training*),
+  // not actual_time_s, so a failed Capacity-target hang that broke at
+  // 60s still counts as a Capacity failure. Without this, Capacity
+  // failures are structurally impossible when the target sits exactly
+  // on the zone boundary (120s). Falls back to actual_time_s when a
+  // rep has no target_duration (legacy data).
   const zones = useMemo(() => {
     const zoneStats = (lo, hi) => {
-      const z = reps.filter(r => r.actual_time_s >= lo && r.actual_time_s < hi);
+      const z = reps.filter(r => {
+        const t = r.target_duration > 0 ? r.target_duration : r.actual_time_s;
+        return t >= lo && t < hi;
+      });
       const f = z.filter(r => r.failed).length;
       return { total: z.length, failures: f, successes: z.length - f,
                failRate: z.length > 0 ? f / z.length : null };
