@@ -4602,6 +4602,67 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     return out;
   }, [gripBaselines, gripEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Per-grip AUC improvement trajectory ──
+  // For each grip with a qualifying baseline (see gripBaselines), walk
+  // forward through each session date and refit Monod using that grip's
+  // failures up to that date, compute AUC, and express it as % above
+  // the grip's baseline AUC. First qualifying point is 0% (baseline by
+  // construction); subsequent points trace improvement. Emitted as a
+  // list per grip so the chart can draw one line per grip, starting
+  // together at 0 and diverging as each grip's fit evolves.
+  const gripAUCImprovement = useMemo(() => {
+    const out = {};
+    const byGrip = {};
+    for (const r of history) {
+      if (!r.failed || !r.grip) continue;
+      if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+      if (!(r.actual_time_s > 0)) continue;
+      if (!byGrip[r.grip]) byGrip[r.grip] = [];
+      byGrip[r.grip].push(r);
+    }
+    for (const [grip, reps] of Object.entries(byGrip)) {
+      const ref = gripBaselines[grip];
+      if (!ref) continue;
+      const baselineAUC = computeAUC(ref.CF, ref.W, AUC_T_MIN, AUC_T_MAX);
+      if (!(baselineAUC > 0)) continue;
+      const sorted = [...reps].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+      const dates = [...new Set(sorted.map(r => r.date))];
+      const traj = [];
+      for (const date of dates) {
+        if (date < ref.date) continue;
+        const upTo = sorted.filter(r => r.date <= date);
+        if (upTo.length < 2) continue;
+        const fit = fitCF(upTo.map(x => ({ x: 1 / x.actual_time_s, y: x.avg_force_kg })));
+        if (!fit) continue;
+        const auc = computeAUC(fit.CF, fit.W, AUC_T_MIN, AUC_T_MAX);
+        traj.push({
+          date,
+          pct: Math.round((auc / baselineAUC - 1) * 1000) / 10,
+        });
+      }
+      if (traj.length > 0) out[grip] = traj;
+    }
+    return out;
+  }, [history, gripBaselines]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Combined chart rows: one row per date, with one field per grip
+  // holding that grip's % improvement on that date (null if that grip
+  // didn't have a fit on that date). Recharts draws a line per field.
+  const capacityChartData = useMemo(() => {
+    const allDates = new Set();
+    for (const traj of Object.values(gripAUCImprovement)) {
+      for (const p of traj) allDates.add(p.date);
+    }
+    return [...allDates].sort().map(date => {
+      const row = { date };
+      for (const [grip, traj] of Object.entries(gripAUCImprovement)) {
+        const match = traj.find(p => p.date === date);
+        if (match) row[grip] = match.pct;
+      }
+      return row;
+    });
+  }, [gripAUCImprovement]);
+
   // ── Per-hand × per-grip baselines ──
   // Same seeding logic as gripBaselines but scoped to a single hand on
   // a single grip. Needed because Monod W' has high variance at small
@@ -4707,23 +4768,13 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   // real objective — "area under the curve" — replacing zone-balance
   // heuristics that could prescribe trading absolute capacity for
   // curve symmetry.
-  const aucEstimate = useMemo(() => {
-    if (!cfEstimate) return null;
-    return toDisp(computeAUC(cfEstimate.CF, cfEstimate.W, AUC_T_MIN, AUC_T_MAX), unit);
-  }, [cfEstimate, unit]);
-
-  const aucBaseline = useMemo(() => {
-    if (!baseline) return null;
-    return toDisp(computeAUC(baseline.CF, baseline.W, AUC_T_MIN, AUC_T_MAX), unit);
-  }, [baseline, unit]);
-
-  // AUC trajectory — one point per date with failure data.
-  // cumulativeData.{cf,w} are already in display units, and AUC is a
-  // linear combination, so the result is already in display units.
-  const aucHistory = useMemo(() => cumulativeData.map(d => ({
-    date: d.date,
-    auc:  d.cf * (AUC_T_MAX - AUC_T_MIN) + d.w * Math.log(AUC_T_MAX / AUC_T_MIN),
-  })), [cumulativeData]);
+  // Note: pooled aucEstimate / aucBaseline / aucHistory were dropped
+  // when the Climbing Capacity card was rewritten as a per-grip
+  // improvement chart (see gripAUCImprovement / capacityChartData
+  // above). Pooling AUC across grips mixes FDP and FDS into a single
+  // curve fit that isn't the sum of the parts, which made the pooled
+  // headline feel random. The chart now shows each grip's own gain
+  // trajectory against its own baseline.
 
   // Fitted force-duration curve points for overlay.
   // Clipped at T≥5s — the Monod asymptote F = CF + W'/T diverges as
@@ -5505,96 +5556,103 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           );
         })()}
 
-        {/* ── AUC headline card (the single "climbing capacity" number) ──
-            When no grip filter is active AND ≥2 grips have fits, also
-            show per-grip AUC split so Micro (FDP) and Crusher (FDS)
-            can be read independently — pooling an FDP-dominant and
-            FDS-dominant history into one AUC hides which muscle is
-            actually driving capacity. */}
-        {aucEstimate && (
+        {/* ── Climbing Capacity chart ──
+            Per-grip % improvement in AUC over time. Each grip starts
+            at 0 on the date it first qualifies for a stable Monod
+            baseline (≥5 failures / ≥3 durations) and traces its
+            cumulative-fit AUC as a % gain vs that baseline. Dropping
+            the pooled headline because it mixes FDP (Micro) and FDS
+            (Crusher) into a single curve fit that isn't the sum of
+            the parts and obscures which muscle is actually moving. */}
+        {(Object.keys(gripAUCImprovement).length > 0 || Object.keys(gripEstimates).length > 0) && (
           <Card style={{ marginBottom: 16, border: `2px solid ${C.purple}60` }}>
-            <div style={{ fontSize: 11, color: C.purple, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
-              Climbing Capacity · AUC {selGrip ? <span style={{ color: C.muted, fontWeight: 600 }}>· {selGrip}</span> : null}
+            <div style={{ fontSize: 11, color: C.purple, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+              Climbing Capacity
             </div>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 16, marginBottom: 14 }}>
-              <div>
-                <div style={{ fontSize: 34, fontWeight: 800, color: C.purple, lineHeight: 1 }}>
-                  {Math.round(aucEstimate).toLocaleString()}
-                </div>
-                <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
-                  {unit}·s · 10–120s window{!selGrip && Object.keys(gripEstimates).length >= 2 ? " · pooled" : ""}
-                </div>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+              % gain in AUC vs each grip&apos;s baseline fit. Starts at 0 once a grip has ≥5 failures across ≥3 target durations; rises as your force-duration curve grows.
+            </div>
+            {capacityChartData.length >= 1 ? (
+              <div style={{ height: 200, marginBottom: 10 }}>
+                <ResponsiveContainer>
+                  <LineChart data={capacityChartData} margin={{ top: 10, right: 16, left: 0, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fill: C.muted, fontSize: 11 }}
+                      tickFormatter={(d) => (d || "").slice(5)}
+                    />
+                    <YAxis
+                      tick={{ fill: C.muted, fontSize: 11 }}
+                      domain={[0, (max) => Math.max(10, Math.ceil(max * 1.1))]}
+                      tickFormatter={(v) => `${v}%`}
+                      width={44}
+                    />
+                    <ReferenceLine y={0} stroke={C.border} />
+                    <Tooltip
+                      contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12 }}
+                      labelStyle={{ color: C.muted }}
+                      formatter={(v, name) => [v != null ? `${v > 0 ? "+" : ""}${v}%` : "—", name]}
+                    />
+                    {Object.keys(gripAUCImprovement).map((grip, i) => {
+                      // Color assignment: Micro gets blue (consistent with FDP references), Crusher gets orange (FDS), others rotate.
+                      const palette = [C.blue, C.orange, C.green, C.red];
+                      const color = grip.toLowerCase() === "micro" ? C.blue
+                                  : grip.toLowerCase() === "crusher" ? C.orange
+                                  : palette[i % palette.length];
+                      return (
+                        <Line
+                          key={grip}
+                          type="monotone"
+                          dataKey={grip}
+                          stroke={color}
+                          strokeWidth={2.5}
+                          dot={{ r: 3, fill: color }}
+                          connectNulls
+                          isAnimationActive={false}
+                          name={grip}
+                        />
+                      );
+                    })}
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
-              {aucBaseline && aucBaseline > 0 && (
-                <div style={{ paddingBottom: 4 }}>
-                  <div style={{
-                    fontSize: 14, fontWeight: 700,
-                    color: aucEstimate >= aucBaseline ? C.green : C.red,
-                  }}>
-                    {aucEstimate >= aucBaseline ? "+" : ""}
-                    {Math.round((aucEstimate / aucBaseline - 1) * 100)}%
-                  </div>
-                  <div style={{ fontSize: 10, color: C.muted }}>vs baseline</div>
-                </div>
-              )}
-            </div>
-
-            {/* Per-grip split — shown only when "All Grips" is selected
-                and we have fits for 2+ grips. */}
-            {!selGrip && Object.keys(gripEstimates).length >= 2 && (
+            ) : (
               <div style={{
-                display: "flex", gap: 8, marginBottom: 14,
-                paddingTop: 10, borderTop: `1px solid ${C.border}`,
+                padding: "24px 16px", background: C.bg, borderRadius: 10,
+                border: `1px dashed ${C.border}`, fontSize: 12, color: C.muted, lineHeight: 1.6,
               }}>
-                {Object.entries(gripEstimates).map(([grip, fit]) => {
-                  const aucKg = computeAUC(fit.CF, fit.W, AUC_T_MIN, AUC_T_MAX);
-                  const aucG  = toDisp(aucKg, unit);
+                No grip has a qualifying baseline yet. Once a grip accumulates ≥5 failures across ≥3 target durations, its first point lands at 0% and the line starts tracking improvement from there.
+              </div>
+            )}
+            {/* Legend with current % for each grip */}
+            {Object.keys(gripAUCImprovement).length > 0 && (
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 4 }}>
+                {Object.entries(gripAUCImprovement).map(([grip, traj]) => {
+                  const latest = traj[traj.length - 1];
+                  const color = grip.toLowerCase() === "micro" ? C.blue
+                              : grip.toLowerCase() === "crusher" ? C.orange
+                              : C.muted;
+                  const deltaColor = latest.pct > 2 ? C.green : latest.pct < -2 ? C.red : C.muted;
                   return (
-                    <div key={grip} style={{
-                      flex: 1, background: C.bg, borderRadius: 10,
-                      padding: "10px 8px", border: `1px solid ${C.purple}25`,
-                    }}>
-                      <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 2 }}>
-                        {grip}
-                      </div>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: C.purple, lineHeight: 1.1 }}>
-                        {Math.round(aucG).toLocaleString()}
-                      </div>
-                      <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
-                        CF {fmtW(fit.CF, unit)} · W′ {fmtW(fit.W, unit)}
-                      </div>
+                    <div key={grip} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                      <span style={{ width: 12, height: 2, background: color, display: "inline-block" }} />
+                      <span style={{ color: C.text, fontWeight: 600 }}>{grip}</span>
+                      <span style={{ color: deltaColor, fontWeight: 700 }}>
+                        {latest.pct > 0 ? "+" : ""}{latest.pct}%
+                      </span>
+                      <span style={{ color: C.muted }}>since {traj[0].date}</span>
                     </div>
                   );
                 })}
               </div>
             )}
-
-            {aucHistory.length >= 2 && (
-              <div style={{ height: 70, marginBottom: 10 }}>
-                <ResponsiveContainer>
-                  <LineChart data={aucHistory} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
-                    <XAxis dataKey="date" hide />
-                    <YAxis hide domain={["dataMin", "dataMax"]} />
-                    <Tooltip
-                      contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11 }}
-                      labelStyle={{ color: C.muted }}
-                      formatter={(v) => [`${Math.round(v).toLocaleString()} ${unit}·s`, "AUC"]}
-                    />
-                    <Line
-                      type="monotone" dataKey="auc" stroke={C.purple}
-                      strokeWidth={2} dot={{ r: 2, fill: C.purple }} isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+            {/* Grips with a fit but no qualifying baseline yet */}
+            {Object.keys(gripEstimates).filter(g => !gripAUCImprovement[g]).length > 0 && (
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 8, fontStyle: "italic" }}>
+                {Object.keys(gripEstimates).filter(g => !gripAUCImprovement[g]).join(", ")} — early days, need more varied failures to seed a baseline.
               </div>
             )}
-
-            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
-              The integrated area under your force-duration curve over climbing-relevant durations.
-              <b> AUC = CF×{AUC_T_MAX - AUC_T_MIN} + W′×ln({AUC_T_MAX}/{AUC_T_MIN})</b> weights CF ~44× more than W′ —
-              matching research finding that sustainable finger force is the strongest predictor of grade.
-              Growing this number is the objective.
-            </div>
           </Card>
         )}
 
