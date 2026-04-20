@@ -1397,6 +1397,93 @@ function describeClimb(a) {
   return parts.join(" · ") || "Climbing session";
 }
 
+// Numeric ordering for mixed V / YDS grades. Returns a rank that is
+// comparable within a discipline family; -1 for anything we don't
+// recognize so legacy entries don't skew max/min computations.
+function gradeRank(grade) {
+  if (!grade) return -1;
+  const vMatch = /^V(\d+)$/.exec(grade);
+  if (vMatch) return parseInt(vMatch[1], 10);
+  const ydsMatch = /^5\.(\d+)([abcd])?$/.exec(grade);
+  if (ydsMatch) {
+    const n = parseInt(ydsMatch[1], 10);
+    const s = ydsMatch[2] ? "abcd".indexOf(ydsMatch[2]) / 4 : 0;
+    return n + s;
+  }
+  return -1;
+}
+
+// Shared date-grouped climb list. Used in the Climbing tab, the
+// History tab's climbing domain, and anywhere else we want to show
+// per-climb rows.
+function ClimbingHistoryList({ climbs, onDeleteActivity = null }) {
+  const byDate = useMemo(() => {
+    const m = new Map();
+    for (const c of climbs) {
+      const d = c.date || "—";
+      if (!m.has(d)) m.set(d, []);
+      m.get(d).push(c);
+    }
+    return [...m.entries()];
+  }, [climbs]);
+
+  if (climbs.length === 0) {
+    return (
+      <Card>
+        <div style={{ color: C.muted, fontSize: 13 }}>
+          No climbs logged yet. Use the Climbing tab to log your first climb.
+        </div>
+      </Card>
+    );
+  }
+
+  return byDate.map(([date, list]) => (
+    <Card key={date}>
+      <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+        {date} · {list.length} climb{list.length === 1 ? "" : "s"}
+      </div>
+      {list.map(c => {
+        const isSend = c.ascent && c.ascent !== "attempt";
+        const disc   = disciplineMeta(c.discipline);
+        return (
+          <div key={c.id || `${c.date}-${c.grade}-${c.ascent}`} style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "8px 0",
+            borderTop: `1px solid ${C.border}`,
+          }}>
+            <div style={{ fontSize: 18 }}>{disc.emoji}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {c.grade || "—"}{" "}
+                <span style={{ color: C.muted, fontWeight: 400 }}>
+                  {disc.label}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: isSend ? C.green : C.muted }}>
+                {c.ascent ? ascentMeta(c.ascent).label : describeClimb(c)}
+              </div>
+            </div>
+            {onDeleteActivity && c.id && (
+              <button
+                onClick={() => {
+                  if (window.confirm("Delete this climb?")) onDeleteActivity(c.id);
+                }}
+                style={{
+                  background: "none", border: "none", color: C.muted,
+                  cursor: "pointer", fontSize: 16, padding: "4px 6px",
+                }}
+                title="Delete climb"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </Card>
+  ));
+}
+
 function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
   const [open,       setOpen]       = useState(false);
   const [discipline, setDiscipline] = useState("boulder");
@@ -2761,7 +2848,7 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
   );
 }
 
-function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onDeleteSession, onUpdateSession, onDeleteRep, onUpdateRep, onAddRep, notes = {}, onNoteChange }) {
+function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onDeleteSession, onUpdateSession, onDeleteRep, onUpdateRep, onAddRep, notes = {}, onNoteChange, activities = [], onDeleteActivity = () => {} }) {
   const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
   const switchDomain = (d) => { setDomain(d); saveLS(LS_HISTORY_DOMAIN_KEY, d); };
   const [grip,        setGrip]        = useState("");
@@ -3020,7 +3107,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
 
       {/* Domain toggle */}
       <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
-        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"]].map(([key, label]) => (
+        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["climbing", "🧗 Climbing"]].map(([key, label]) => (
           <button key={key} onClick={() => switchDomain(key)} style={{
             flex: 1, padding: "8px 0", borderRadius: 20, border: "none", cursor: "pointer",
             fontWeight: 700, fontSize: 13,
@@ -3031,7 +3118,16 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
         ))}
       </div>
 
-      {domain === "workout" && <WorkoutHistoryView unit={unit} bodyWeight={bodyWeight} />}
+      {domain === "workout"  && <WorkoutHistoryView unit={unit} bodyWeight={bodyWeight} />}
+      {domain === "climbing" && (
+        <ClimbingHistoryList
+          climbs={activities
+            .filter(a => a.type === "climbing")
+            .slice()
+            .sort((a, b) => (b.date || "").localeCompare(a.date || ""))}
+          onDeleteActivity={onDeleteActivity}
+        />
+      )}
       {domain === "fingers" && <>
 
       {/* Filters */}
@@ -3562,8 +3658,207 @@ function BodyWeightTrendsView({ unit = "lbs" }) {
   );
 }
 
-function TrendsView({ history, unit = "lbs" }) {
-  const [domain, setDomain] = useState("fingers"); // "fingers" | "workout"
+// ─────────────────────────────────────────────────────────────
+// CLIMBING TRENDS
+// Weekly volume (stacked by discipline) + hardest-send line for
+// boulder (V-scale) and rope (YDS). Attempts drop off the
+// hardest-send line because they aren't sends.
+// ─────────────────────────────────────────────────────────────
+function weekKey(isoDate) {
+  // Returns the ISO date of the Monday of the week this date falls in.
+  // Used as the x-axis key for weekly aggregates.
+  const d = new Date(isoDate + "T00:00:00Z");
+  if (isNaN(d.getTime())) return isoDate;
+  const day = d.getUTCDay(); // 0=Sun..6=Sat
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + mondayOffset);
+  return d.toISOString().slice(0, 10);
+}
+
+function ClimbingTrendsView({ activities = [] }) {
+  const climbs = useMemo(
+    () => activities.filter(a => a.type === "climbing" && a.date),
+    [activities]
+  );
+
+  // Weekly aggregate: volume by discipline + hardest send per family.
+  const weekly = useMemo(() => {
+    const weeks = new Map(); // weekKey -> { week, boulder, top_rope, lead, hardestV, hardestYDS, sends, total }
+    for (const c of climbs) {
+      const wk = weekKey(c.date);
+      if (!weeks.has(wk)) {
+        weeks.set(wk, {
+          week: wk,
+          boulder: 0, top_rope: 0, lead: 0,
+          hardestV: null, hardestYDS: null,
+          sends: 0, total: 0,
+        });
+      }
+      const w = weeks.get(wk);
+      w.total += 1;
+      const isSend = c.ascent && c.ascent !== "attempt";
+      if (isSend) w.sends += 1;
+      if (c.discipline === "boulder")  w.boulder  += 1;
+      if (c.discipline === "top_rope") w.top_rope += 1;
+      if (c.discipline === "lead")     w.lead     += 1;
+
+      // Only sends count toward the hardest-grade line.
+      if (isSend) {
+        const rank = gradeRank(c.grade);
+        if (c.discipline === "boulder" && rank >= 0) {
+          if (w.hardestV == null || rank > w.hardestV.rank) {
+            w.hardestV = { rank, label: c.grade };
+          }
+        } else if ((c.discipline === "top_rope" || c.discipline === "lead") && rank >= 0) {
+          if (w.hardestYDS == null || rank > w.hardestYDS.rank) {
+            w.hardestYDS = { rank, label: c.grade };
+          }
+        }
+      }
+    }
+    return [...weeks.values()].sort((a, b) => (a.week < b.week ? -1 : 1));
+  }, [climbs]);
+
+  // Flatten hardest-grade into chart-friendly numeric series.
+  const chart = useMemo(() => weekly.map(w => ({
+    week:         w.week,
+    boulder:      w.boulder,
+    top_rope:     w.top_rope,
+    lead:         w.lead,
+    hardestV:     w.hardestV?.rank ?? null,
+    hardestVLbl:  w.hardestV?.label ?? "",
+    hardestYDS:   w.hardestYDS?.rank ?? null,
+    hardestYDSLbl: w.hardestYDS?.label ?? "",
+    sendRate:     w.total > 0 ? Math.round((w.sends / w.total) * 100) : 0,
+  })), [weekly]);
+
+  const totals = useMemo(() => {
+    const sends = climbs.filter(c => c.ascent && c.ascent !== "attempt");
+    const maxV   = sends
+      .filter(c => c.discipline === "boulder")
+      .map(c => ({ rank: gradeRank(c.grade), label: c.grade }))
+      .filter(x => x.rank >= 0)
+      .sort((a, b) => b.rank - a.rank)[0];
+    const maxYDS = sends
+      .filter(c => c.discipline === "top_rope" || c.discipline === "lead")
+      .map(c => ({ rank: gradeRank(c.grade), label: c.grade }))
+      .filter(x => x.rank >= 0)
+      .sort((a, b) => b.rank - a.rank)[0];
+    return { total: climbs.length, sends: sends.length, maxV, maxYDS };
+  }, [climbs]);
+
+  if (climbs.length === 0) {
+    return (
+      <div style={{ textAlign: "center", color: C.muted, marginTop: 60, fontSize: 14 }}>
+        Log a climb in the Climbing tab to start tracking climbing trends.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <Card style={{ flex: "1 1 120px" }}>
+          <Label>Total climbs</Label>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>{totals.total}</div>
+          <div style={{ fontSize: 11, color: C.muted }}>{totals.sends} sends</div>
+        </Card>
+        {totals.maxV && (
+          <Card style={{ flex: "1 1 120px" }}>
+            <Label>Hardest boulder</Label>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.orange }}>{totals.maxV.label}</div>
+            <div style={{ fontSize: 11, color: C.muted }}>send PR</div>
+          </Card>
+        )}
+        {totals.maxYDS && (
+          <Card style={{ flex: "1 1 120px" }}>
+            <Label>Hardest rope</Label>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.blue }}>{totals.maxYDS.label}</div>
+            <div style={{ fontSize: 11, color: C.muted }}>send PR</div>
+          </Card>
+        )}
+      </div>
+
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>Weekly volume by discipline</div>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={chart}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+            <XAxis dataKey="week" tick={{ fill: C.muted, fontSize: 10 }} />
+            <YAxis tick={{ fill: C.muted, fontSize: 11 }} allowDecimals={false} />
+            <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: C.muted }} />
+            <Bar dataKey="boulder"  stackId="v" name="Boulder"  fill={C.orange} />
+            <Bar dataKey="lead"     stackId="v" name="Lead"     fill={C.purple} />
+            <Bar dataKey="top_rope" stackId="v" name="Top rope" fill={C.blue}   />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>Hardest send per week</div>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={chart}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+            <XAxis dataKey="week" tick={{ fill: C.muted, fontSize: 10 }} />
+            <YAxis
+              yAxisId="v"
+              orientation="left"
+              tick={{ fill: C.orange, fontSize: 11 }}
+              tickFormatter={(v) => v == null ? "" : `V${v}`}
+              domain={["auto", "auto"]}
+            />
+            <YAxis
+              yAxisId="yds"
+              orientation="right"
+              tick={{ fill: C.blue, fontSize: 11 }}
+              tickFormatter={(v) => {
+                if (v == null) return "";
+                const n    = Math.floor(v);
+                const frac = v - n;
+                const sub  = ["a", "b", "c", "d"][Math.round(frac * 4)] || "";
+                return `5.${n}${sub}`;
+              }}
+              domain={["auto", "auto"]}
+            />
+            <Tooltip
+              contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }}
+              formatter={(val, name, entry) => {
+                if (name === "Boulder") return [entry.payload.hardestVLbl || "—", name];
+                if (name === "Rope")    return [entry.payload.hardestYDSLbl || "—", name];
+                return [val, name];
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11, color: C.muted }} />
+            <Line
+              yAxisId="v"
+              type="monotone"
+              dataKey="hardestV"
+              stroke={C.orange}
+              strokeWidth={2}
+              name="Boulder"
+              connectNulls
+              dot={{ r: 4, fill: C.orange }}
+            />
+            <Line
+              yAxisId="yds"
+              type="monotone"
+              dataKey="hardestYDS"
+              stroke={C.blue}
+              strokeWidth={2}
+              name="Rope"
+              connectNulls
+              dot={{ r: 4, fill: C.blue }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </Card>
+    </div>
+  );
+}
+
+function TrendsView({ history, unit = "lbs", activities = [] }) {
+  const [domain, setDomain] = useState("fingers"); // "fingers" | "workout" | "body" | "climbing"
   const [sel,     setSel]     = useState(45);
   const [selHand, setSelHand] = useState("");   // "" = both
   const [selGrip, setSelGrip] = useState("");   // "" = all grips
@@ -3613,9 +3908,9 @@ function TrendsView({ history, unit = "lbs" }) {
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Trends</h2>
 
-      {/* Domain toggle: Fingers / Workout / Body */}
+      {/* Domain toggle: Fingers / Workout / Body / Climbing */}
       <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
-        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["body", "⚖️ Body"]].map(([key, label]) => (
+        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["body", "⚖️ Body"], ["climbing", "🧗 Climbing"]].map(([key, label]) => (
           <button key={key} onClick={() => setDomain(key)} style={{
             flex: 1, padding: "8px 0", borderRadius: 20, border: "none", cursor: "pointer",
             fontWeight: 700, fontSize: 12,
@@ -3626,9 +3921,10 @@ function TrendsView({ history, unit = "lbs" }) {
         ))}
       </div>
 
-      {domain === "workout" && <WorkoutTrendsView unit={unit} />}
-      {domain === "body"    && <BodyWeightTrendsView unit={unit} />}
-      {domain === "fingers" && <>
+      {domain === "workout"  && <WorkoutTrendsView unit={unit} />}
+      {domain === "body"     && <BodyWeightTrendsView unit={unit} />}
+      {domain === "climbing" && <ClimbingTrendsView activities={activities} />}
+      {domain === "fingers"  && <>
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
@@ -6181,17 +6477,6 @@ function ClimbingTab({ activities = [], onLogActivity = () => {}, onDeleteActivi
     [activities]
   );
 
-  // Group by date for the history view.
-  const byDate = useMemo(() => {
-    const m = new Map();
-    for (const c of climbs) {
-      const d = c.date || "—";
-      if (!m.has(d)) m.set(d, []);
-      m.get(d).push(c);
-    }
-    return [...m.entries()];
-  }, [climbs]);
-
   // Quick stats (last 30 days)
   const stats = useMemo(() => {
     const cutoff = new Date();
@@ -6250,59 +6535,7 @@ function ClimbingTab({ activities = [], onLogActivity = () => {}, onDeleteActivi
       )}
 
       <Sect title="History">
-        {climbs.length === 0 ? (
-          <Card>
-            <div style={{ color: C.muted, fontSize: 13 }}>
-              No climbs logged yet. Use the form above to log your first climb.
-            </div>
-          </Card>
-        ) : (
-          byDate.map(([date, list]) => (
-            <Card key={date}>
-              <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-                {date} · {list.length} climb{list.length === 1 ? "" : "s"}
-              </div>
-              {list.map(c => {
-                const isSend = c.ascent && c.ascent !== "attempt";
-                const disc   = disciplineMeta(c.discipline);
-                return (
-                  <div key={c.id || `${c.date}-${c.grade}-${c.ascent}`} style={{
-                    display: "flex", alignItems: "center", gap: 10,
-                    padding: "8px 0",
-                    borderTop: `1px solid ${C.border}`,
-                  }}>
-                    <div style={{ fontSize: 18 }}>{disc.emoji}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>
-                        {c.grade || "—"}{" "}
-                        <span style={{ color: C.muted, fontWeight: 400 }}>
-                          {disc.label}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 11, color: isSend ? C.green : C.muted }}>
-                        {c.ascent ? ascentMeta(c.ascent).label : describeClimb(c)}
-                      </div>
-                    </div>
-                    {c.id && (
-                      <button
-                        onClick={() => {
-                          if (window.confirm("Delete this climb?")) onDeleteActivity(c.id);
-                        }}
-                        style={{
-                          background: "none", border: "none", color: C.muted,
-                          cursor: "pointer", fontSize: 16, padding: "4px 6px",
-                        }}
-                        title="Delete climb"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </Card>
-          ))
-        )}
+        <ClimbingHistoryList climbs={climbs} onDeleteActivity={onDeleteActivity} />
       </Sect>
     </div>
   );
@@ -7041,8 +7274,8 @@ export default function App() {
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 4 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
-      {tab === 5 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps(Array.isArray(rep) ? rep : [rep])} notes={notes} onNoteChange={handleNoteChange} />}
-      {tab === 6 && <TrendsView history={history} unit={unit} />}
+      {tab === 5 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps(Array.isArray(rep) ? rep : [rep])} notes={notes} onNoteChange={handleNoteChange} activities={activities} onDeleteActivity={deleteActivity} />}
+      {tab === 6 && <TrendsView history={history} unit={unit} activities={activities} />}
       {tab === 7 && (
         <SettingsView
           user={user}
