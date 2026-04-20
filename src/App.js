@@ -4513,13 +4513,19 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   );
 
   // Per-grip baselines — for each grip, find the earliest window of
-  // failure reps (≥3 reps, ≥2 distinct target durations) and fit a
+  // failure reps (≥5 reps, ≥3 distinct target durations) and fit a
   // Monod-Scherrer snapshot from just that grip's reps. This mirrors
   // the global auto-baseline seeding logic (App-level useEffect) but
-  // scoped per grip, so "improvement" for Micro compares Micro-now
-  // against Micro-then (not against a pool-inflated baseline that
-  // mixed Crusher reps in, which was artificially dragging Micro
-  // deltas negative because Crusher CF is higher).
+  // scoped per grip, with a tighter threshold:
+  //   - ≥5 reps (vs 3 globally) to damp W' estimate variance
+  //   - ≥3 distinct durations (vs 2 globally) so the Monod fit has
+  //     real spread along the 1/T axis instead of a 2-point line
+  // Small-N Monod fits have high variance in W' — the anaerobic
+  // numerator — and that noise is amplified at short T by the 1/T
+  // factor. A 3-rep baseline across 2 durations was producing
+  // optimistic W' values that later fits naturally pulled down,
+  // showing up as phantom "Power regression" of -50% or so. 5 reps
+  // across 3 durations gives a far more stable intercept+slope.
   const gripBaselines = useMemo(() => {
     const out = {};
     const byGrip = {};
@@ -4537,7 +4543,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       for (const r of reps) {
         acc.push(r);
         durs.add(r.target_duration);
-        if (acc.length >= 3 && durs.size >= 2) {
+        if (acc.length >= 5 && durs.size >= 3) {
           const fit = fitCF(acc.map(x => ({ x: 1 / x.actual_time_s, y: x.avg_force_kg })));
           if (fit) out[grip] = { date: acc[0].date, CF: fit.CF, W: fit.W };
           break;
@@ -5074,7 +5080,15 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           </div>
         );
 
-        const perGripMode = !selGrip && Object.keys(gripImprovement).length >= 2;
+        // perGripMode is keyed off having multiple per-grip CURRENT fits,
+        // not improvements — so users mid-data-collection see an honest
+        // "early days" message instead of falling back to the pooled
+        // improvement number, which would re-introduce the same cross-
+        // muscle artifact (Crusher's high-CF reps inflating Micro's
+        // baseline) that motivated the per-grip split in the first
+        // place.
+        const perGripMode = !selGrip && Object.keys(gripEstimates).length >= 2;
+        const gripImpEntries = Object.entries(gripImprovement);
         return (
           <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
@@ -5084,19 +5098,39 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               )}
             </div>
             {perGripMode ? (
-              Object.entries(gripImprovement).map(([grip, imp], i, arr) => (
-                <div key={grip} style={{
-                  paddingBottom: i < arr.length - 1 ? 12 : 0,
-                  borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
-                  marginBottom: i < arr.length - 1 ? 12 : 0,
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{grip}</div>
-                    <div style={{ fontSize: 10, color: C.muted }}>since {imp.baselineDate}</div>
-                  </div>
-                  {renderRow(null, imp)}
+              gripImpEntries.length > 0 ? (
+                <>
+                  {gripImpEntries.map(([grip, imp], i, arr) => (
+                    <div key={grip} style={{
+                      paddingBottom: i < arr.length - 1 ? 12 : 0,
+                      borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
+                      marginBottom: i < arr.length - 1 ? 12 : 0,
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{grip}</div>
+                        <div style={{ fontSize: 10, color: C.muted }}>since {imp.baselineDate}</div>
+                      </div>
+                      {renderRow(null, imp)}
+                    </div>
+                  ))}
+                  {/* Show an "early days" placeholder for any grip with a
+                      current fit but no qualifying per-grip baseline yet,
+                      so the user knows we're aware of it and waiting on
+                      more data rather than silently dropping it. */}
+                  {Object.keys(gripEstimates).filter(g => !gripImprovement[g]).map(grip => (
+                    <div key={grip} style={{
+                      paddingTop: 12, marginTop: 12, borderTop: `1px solid ${C.border}`,
+                      fontSize: 11, color: C.muted, lineHeight: 1.5,
+                    }}>
+                      <b style={{ color: C.text }}>{grip}</b> · need ≥5 failures across ≥3 target durations to seed a stable baseline.
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+                  Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the comparison is too noisy to be useful (small-sample Monod fits have high W′ variance, which inflates predicted force at short durations).
                 </div>
-              ))
+              )
             ) : improvement ? (
               renderRow(null, improvement)
             ) : null}
