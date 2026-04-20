@@ -1844,25 +1844,36 @@ function computeLimiterZone(history) {
 // Fits per-zone CF/W′ response rates from the user's own training log
 // and shrinks them toward the PROTOCOL_RESPONSE prior with Bayesian
 // shrinkage. Early on (thin data) the returned coefficients equal the
-// prior; as zone-specific sessions accumulate, the fit pulls toward
-// the observed personal rates. A zone needs at least MIN_SESSIONS
-// observations before any personal signal is blended in.
+// prior; as training-under-tension accumulates in a given zone, the
+// fit pulls toward the observed personal rate. A zone needs at least
+// MIN_SESSIONS effective session-equivalents before any personal
+// signal is blended in.
 //
-// Per-session attribution: for each calendar day with failures, refit
-// Monod on all data up to that day and compare against the fit through
-// the previous day. Fractional ΔCF and ΔW′ are attributed to the zone
-// most reps on that day targeted. Individual deltas are noisy — the
-// signal comes from averaging across many sessions in the same zone.
+// Attribution: proportional by time-under-tension (TUT), not by rep
+// count or dominant zone. A day with 15s of power warm-up + 180s of
+// strength work gets 8% / 92% attribution, not all-or-nothing to the
+// dominant zone. This correctly handles the common case where a user
+// does a short max-effort warm-up (power) before their main training
+// block — the warm-up gets its proportional share, the main block
+// gets most of it. No user-facing toggle required: if power always
+// comes in small TUT doses, its effective-n stays small and its
+// personal calibration stays near prior.
+//
+// Per-day loop: for each calendar day with failures, refit Monod on
+// all data up to that day vs. through the previous day. Fractional
+// ΔCF and ΔW′ are split across zones proportional to that day's TUT
+// per zone, then accumulated as weighted observations. Noise in
+// single-day deltas averages out over many weighted observations.
 // Negative observed rates are floored at zero (likely confounds:
-// illness, taper, bad mount) rather than propagated as "training hurt
-// me" into a negative coefficient.
+// illness, taper, bad mount) rather than propagated as "training
+// hurt me" into a negative coefficient.
 //
-// Shrinkage: posterior = (k₀·prior + n·observed) / (k₀ + n). With
-// k₀ = PERSONAL_RESPONSE_PRIOR_WEIGHT, early sessions are dominated
-// by the prior and the engine only trusts personal rates once there
-// are roughly k₀ sessions of that zone to pull signal from noise.
+// Shrinkage: posterior = (k₀·prior + n_eff·weighted_mean) / (k₀ + n_eff).
+// With k₀ = PERSONAL_RESPONSE_PRIOR_WEIGHT, a zone needs roughly k₀
+// session-equivalents of evidence before personal rates dominate. n_eff
+// is fractional: a warm-up contributing 8% TUT counts as 0.08 sessions.
 const PERSONAL_RESPONSE_PRIOR_WEIGHT = 10;  // pseudo-sessions
-const PERSONAL_RESPONSE_MIN_SESSIONS = 5;    // hard gate per zone
+const PERSONAL_RESPONSE_MIN_SESSIONS = 5;    // hard gate per zone (effective-n)
 
 function computePersonalResponse(history) {
   const zoneOf = (td) =>
@@ -1893,12 +1904,9 @@ function computePersonalResponse(history) {
   const dates = Object.keys(byDate).sort();
 
   // Walk dates; at each date with enough prior data, refit before/after
-  // and attribute the fractional delta to the day's dominant zone.
-  const obs = {
-    power:     { cf: [], w: [] },
-    strength:  { cf: [], w: [] },
-    endurance: { cf: [], w: [] },
-  };
+  // and split the fractional delta across zones by TUT proportion.
+  // obs[zone] is an array of { weight, dCF, dW } — weight = TUT fraction.
+  const obs = { power: [], strength: [], endurance: [] };
 
   for (const date of dates) {
     const before = sorted.filter(r => r.date < date);
@@ -1913,40 +1921,49 @@ function computePersonalResponse(history) {
     const dCF = (fitAfter.CF - fitBefore.CF) / fitBefore.CF;
     const dW  = fitBefore.W > 0 ? (fitAfter.W - fitBefore.W) / fitBefore.W : 0;
 
-    // Dominant zone for the day = zone with the most reps targeting it.
-    const counts = { power: 0, strength: 0, endurance: 0 };
-    for (const r of byDate[date]) counts[zoneOf(r.target_duration)]++;
-    const dominant = Object.entries(counts).reduce((a, b) => b[1] > a[1] ? b : a)[0];
+    // TUT per zone for the day — sum actual_time_s bucketed by the zone
+    // each rep was *targeting* (target_duration), not the zone the rep
+    // fell into. A failed capacity-target rep at 60s still attributes
+    // to capacity training. Matches the zone-bucketing convention used
+    // everywhere else in the app.
+    const tut = { power: 0, strength: 0, endurance: 0 };
+    for (const r of byDate[date]) tut[zoneOf(r.target_duration)] += r.actual_time_s;
+    const totalTUT = tut.power + tut.strength + tut.endurance;
+    if (totalTUT <= 0) continue;
 
-    obs[dominant].cf.push(dCF);
-    obs[dominant].w.push(dW);
+    for (const zone of Object.keys(tut)) {
+      const w = tut[zone] / totalTUT;
+      if (w > 0) obs[zone].push({ weight: w, dCF, dW });
+    }
   }
 
-  // Shrink each zone's observed rate toward the prior.
+  // Weighted shrinkage. Effective-n = Σ weights (can be fractional).
   const k0 = PERSONAL_RESPONSE_PRIOR_WEIGHT;
   for (const zone of Object.keys(PROTOCOL_RESPONSE)) {
-    const cfObs = obs[zone].cf;
-    const wObs  = obs[zone].w;
-    const n = cfObs.length;
+    const zoneObs = obs[zone];
+    const nEff = zoneObs.reduce((s, o) => s + o.weight, 0);
 
-    if (n < PERSONAL_RESPONSE_MIN_SESSIONS) {
-      result[zone] = { ...PROTOCOL_RESPONSE[zone], n, source: "prior" };
+    if (nEff < PERSONAL_RESPONSE_MIN_SESSIONS) {
+      result[zone] = { ...PROTOCOL_RESPONSE[zone], n: nEff, source: "prior" };
       continue;
     }
 
-    const meanCF = cfObs.reduce((s, v) => s + v, 0) / n;
-    const meanW  = wObs.reduce((s, v) => s + v, 0) / n;
-    const prior  = PROTOCOL_RESPONSE[zone];
+    // Weighted mean of observed fractional deltas. Divides by Σweights
+    // so each day's total contribution (across all zones) is 1 unit of
+    // evidence, split proportionally by that day's TUT distribution.
+    const wMeanCF = zoneObs.reduce((s, o) => s + o.weight * o.dCF, 0) / nEff;
+    const wMeanW  = zoneObs.reduce((s, o) => s + o.weight * o.dW,  0) / nEff;
+    const prior   = PROTOCOL_RESPONSE[zone];
 
     // Floor at zero: negative observed rate is almost always confounded
     // (illness, injury, mount variance) rather than true anti-response.
-    const cfBlended = Math.max(0, (k0 * prior.cf + n * meanCF) / (k0 + n));
-    const wBlended  = Math.max(0, (k0 * prior.w  + n * meanW)  / (k0 + n));
+    const cfBlended = Math.max(0, (k0 * prior.cf + nEff * wMeanCF) / (k0 + nEff));
+    const wBlended  = Math.max(0, (k0 * prior.w  + nEff * wMeanW)  / (k0 + nEff));
 
     result[zone] = {
       cf: cfBlended,
       w:  wBlended,
-      n,
+      n:  nEff,
       source: "blended",
     };
   }
@@ -5399,7 +5416,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                         {r.lbl}
                         {calibrated && (
                           <span
-                            title={`Calibrated from ${rs.n} sessions in this zone`}
+                            title={`Calibrated from ${Math.round(rs.n)} session-equivalents (TUT-weighted)`}
                             style={{ marginLeft: 3, fontSize: 8, color: C.green, verticalAlign: "super" }}
                           >●</span>
                         )}
@@ -5425,7 +5442,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                   }
                   const labels = { power: "Power", strength: "Strength", endurance: "Capacity" };
                   const parts = calibrated
-                    .map(([k, s]) => `${labels[k]} (${s.n})`)
+                    .map(([k, s]) => `${labels[k]} (${Math.round(s.n)})`)
                     .join(", ");
                   return (
                     <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
