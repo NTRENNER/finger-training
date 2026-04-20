@@ -31,7 +31,7 @@ const RESPONSE_WEIGHT = 0x01;
 const TARGET_OPTIONS = [
   { label: "Power",     seconds: 10  },
   { label: "Strength",  seconds: 45  },
-  { label: "Endurance", seconds: 120 },
+  { label: "Capacity",  seconds: 120 },
 ];
 
 const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
@@ -156,7 +156,7 @@ function predForce(fit, t) { return fit.CF + fit.W / t; }
 
 // Area under F = CF + W/t from tMin to tMax (analytical integral).
 // = CF*(tMax-tMin) + W*ln(tMax/tMin)
-// Units: kg·s — captures total capacity across the full power→endurance range.
+// Units: kg·s — captures total capacity across the full power→capacity range.
 function computeAUC(CF, W, tMin = 10, tMax = 120) {
   return CF * (tMax - tMin) + W * Math.log(tMax / tMin);
 }
@@ -384,8 +384,8 @@ const ZONE5 = [
   { key: "power",              label: "Power",              short: "Pwr",   color: "#e05560", min:   0, max:  45 },
   { key: "power_strength",     label: "Power-Strength",     short: "Pwr-Str", color: "#e68a48", min:  45, max:  82 },
   { key: "strength",           label: "Strength",           short: "Str",   color: "#e07a30", min:  82, max: 130 },
-  { key: "strength_endurance", label: "Strength-Endurance", short: "Str-End", color: "#7aa0d8", min: 130, max: 178 },
-  { key: "endurance",          label: "Endurance",          short: "End",   color: "#3b82f6", min: 178, max: Infinity },
+  { key: "strength_endurance", label: "Strength-Capacity",  short: "Str-Cap", color: "#7aa0d8", min: 130, max: 178 },
+  { key: "endurance",          label: "Capacity",           short: "Cap",   color: "#3b82f6", min: 178, max: Infinity },
 ];
 function classifyZone5(durationSec) {
   if (!durationSec || durationSec <= 0) return null;
@@ -1122,9 +1122,9 @@ const CAL_STEPS = [
     tip:  "Aim for ~85% effort. Pace yourself to last the full 45 s.",
   },
   {
-    id: "endurance", label: "Endurance", emoji: "🏔️",
+    id: "endurance", label: "Capacity", emoji: "🏔️",
     duration: null, color: C.blue,
-    desc: "Hang to complete failure. Endure as long as possible.",
+    desc: "Hang to complete failure. Hold as long as possible.",
     tip:  "Target ~50% of your Power test force. The hang ends when you can't hold.",
   },
 ];
@@ -1146,18 +1146,18 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
 
   const step = CAL_STEPS[stepIdx];
 
-  // For endurance step: suggest ~50% of power step avg force
-  const enduranceSuggestKg = results[0]?.avgForce > 0 ? results[0].avgForce * 0.5 : null;
-  const targetKg = step.id === "endurance" ? enduranceSuggestKg : null;
+  // For capacity step: suggest ~50% of power step avg force
+  const capacitySuggestKg = results[0]?.avgForce > 0 ? results[0].avgForce * 0.5 : null;
+  const targetKg = step.id === "endurance" ? capacitySuggestKg : null;
 
-  // Keep Tindeq auto-failure target in sync (endurance step only)
+  // Keep Tindeq auto-failure target in sync (capacity step only)
   useEffect(() => {
     tindeq.targetKgRef.current = (calPhase === "active" && step.id === "endurance")
       ? targetKg
       : null;
   }, [calPhase, step, targetKg, tindeq]);
 
-  // Wire auto-failure → endHang for the endurance step only.
+  // Wire auto-failure → endHang for the capacity step only.
   useEffect(() => {
     if (calPhase !== "active" || step.id !== "endurance") {
       tindeq.setAutoFailCallback(null);
@@ -1176,7 +1176,7 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
     clearInterval(timerRef.current);
     const actualTime = (Date.now() - startTimeRef.current) / 1000;
     startTimeRef.current = null;
-    // Endurance is always a failure rep by design; others are not
+    // Capacity step is always a failure rep by design; others are not
     const failed = step.id === "endurance";
     if (tindeq.connected) await tindeq.stopMeasuring();
     const result = {
@@ -1380,9 +1380,9 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
           <div style={{ fontSize: 96, fontWeight: 900, color: C.yellow, lineHeight: 1 }}>
             {countdown === 0 ? "GO" : countdown}
           </div>
-          {step.id === "endurance" && enduranceSuggestKg != null && (
+          {step.id === "endurance" && capacitySuggestKg != null && (
             <div style={{ fontSize: 14, color: C.muted, marginTop: 20 }}>
-              Target force: <b style={{ color: C.blue }}>{fmtW(enduranceSuggestKg, unit)} {unit}</b>
+              Target force: <b style={{ color: C.blue }}>{fmtW(capacitySuggestKg, unit)} {unit}</b>
             </div>
           )}
         </Card>
@@ -1401,9 +1401,9 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
                   — target {step.duration}s
                 </span>
               )}
-              {step.id === "endurance" && enduranceSuggestKg != null && (
+              {step.id === "endurance" && capacitySuggestKg != null && (
                 <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>
-                  — target {fmtW(enduranceSuggestKg, unit)} {unit}
+                  — target {fmtW(capacitySuggestKg, unit)} {unit}
                 </span>
               )}
             </div>
@@ -1479,7 +1479,7 @@ function CalibrationView({ tindeq, unit = "lbs", onComplete, onCancel }) {
                   background: C.bg, borderRadius: 8,
                   fontSize: 12, color: C.muted,
                 }}>
-                  💡 Endurance target will be{" "}
+                  💡 Capacity target will be{" "}
                   <b style={{ color: C.blue }}>
                     {fmtW(r.avgForce * 0.5, unit)} {unit}
                   </b>{" "}
@@ -1813,7 +1813,7 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null 
 
 // ─────────────────────────────────────────────────────────────
 // ZONE COVERAGE CARD
-// Rolling 30-day count of Power / Strength / Endurance sessions.
+// Rolling 30-day count of Power / Strength / Capacity sessions.
 // Shows which zone is undertrained and should be trained next.
 // ─────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
@@ -1821,8 +1821,8 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null 
 // Quick-log a climbing session so zone coverage accounts for it.
 // ─────────────────────────────────────────────────────────────
 const CLIMB_INTENSITIES = [
-  { key: "easy",       label: "Easy",       emoji: "🟢", desc: "Cruisy / warm-up",   zone: "Endurance" },
-  { key: "moderate",   label: "Moderate",   emoji: "🟡", desc: "Pumpy / sustained",   zone: "Endurance" },
+  { key: "easy",       label: "Easy",       emoji: "🟢", desc: "Cruisy / warm-up",   zone: "Capacity"  },
+  { key: "moderate",   label: "Moderate",   emoji: "🟡", desc: "Pumpy / sustained",   zone: "Capacity"  },
   { key: "hard",       label: "Hard",       emoji: "🔴", desc: "Limit / crux-heavy",  zone: "Strength"  },
   { key: "bouldering", label: "Bouldering", emoji: "⚡", desc: "Power / explosive",   zone: "Power"     },
 ];
@@ -1923,11 +1923,11 @@ const RM_GRIPS = ["Micro", "Crusher"];
 
 // Zone coverage counts only grip-training sessions (and legacy 1RM activities,
 // which were finger-specific max efforts). Climbing sessions are intentionally
-// NOT credited to any zone — the old heuristic (hard→strength, easy→endurance,
+// NOT credited to any zone — the old heuristic (hard→strength, easy→capacity,
 // boulder→power) over-counted climbing toward training zones it didn't really
 // stimulate in a finger-specific way. ClimbingLogWidget still logs climbs so
 // the data is preserved for future fatigue-accounting work, but it no longer
-// inflates the Power / Strength / Endurance buckets on the coverage card.
+// inflates the Power / Strength / Capacity buckets on the coverage card.
 function computeZoneCoverage(history, activities = []) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 30);
@@ -1977,14 +1977,14 @@ function ZoneCoverageCard({ history, activities = [] }) {
   const zones = [
     { key: "power",     label: "⚡ Power",     val: coverage.power,     color: "#e05560" },
     { key: "strength",  label: "💪 Strength",  val: coverage.strength,  color: "#e07a30" },
-    { key: "endurance", label: "🏔️ Endurance", val: coverage.endurance, color: "#3b82f6" },
+    { key: "endurance", label: "🏔️ Capacity",  val: coverage.endurance, color: "#3b82f6" },
   ];
   const recZone = zones.find(z => z.key === coverage.recommended);
   const maxVal  = Math.max(coverage.power, coverage.strength, coverage.endurance, 1);
   const advice  = {
     power:     "Power is least-trained. Short max-effort hangs build your phosphocreatine system — quality over volume.",
     strength:  "Strength is least-trained. Progressive hangs with partial recovery drive glycolytic adaptation.",
-    endurance: "Endurance is least-trained. Sub-max repeaters raise Critical Force and lift every other zone by default.",
+    endurance: "Capacity is least-trained. Sub-max repeaters raise Critical Force and lift every other zone by default.",
   };
 
   return (
@@ -4211,7 +4211,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
     useRel ? 0.5 : 40
   );
 
-  // ── Zone breakdown (power / strength / endurance) ──
+  // ── Zone breakdown (power / strength / capacity) ──
   const zones = useMemo(() => {
     const zoneStats = (lo, hi) => {
       const z = reps.filter(r => r.actual_time_s >= lo && r.actual_time_s < hi);
@@ -4222,7 +4222,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
     return {
       power:     { ...zoneStats(0, POWER_MAX),                label: "Power",     color: C.red,    desc: "0–20s",    system: "Phosphocreatine",  tau: "τ₁ ≈ 15s"  },
       strength:  { ...zoneStats(POWER_MAX, STRENGTH_MAX),     label: "Strength",  color: C.orange, desc: "20–120s",  system: "Glycolytic",       tau: "τ₂ ≈ 90s"  },
-      endurance: { ...zoneStats(STRENGTH_MAX, Infinity),      label: "Endurance", color: C.blue,   desc: "120s+",    system: "Oxidative",        tau: "τ₃ ≈ 600s" },
+      endurance: { ...zoneStats(STRENGTH_MAX, Infinity),      label: "Capacity",  color: C.blue,   desc: "120s+",    system: "Oxidative",        tau: "τ₃ ≈ 600s" },
     };
   }, [reps]);
 
@@ -4243,7 +4243,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
         protocol: "45s hang · 75–85% max · 3 min rest · 3–5 sets",
       },
       endurance: {
-        title: "Train Endurance", color: C.blue,
+        title: "Train Capacity", color: C.blue,
         insight: "Your oxidative system is the rate-limiter. Raising Critical Force is the highest-leverage move — it lifts the aerobic ceiling and improves every other zone.",
         protocol: "2–5 min hang · 40–60% max · 2 min rest · 3–4 sets",
       },
@@ -4460,7 +4460,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
             {[
               { label: "⚡ Power",     val: improvement.power,     color: C.red    },
               { label: "💪 Strength",  val: improvement.strength,  color: C.orange },
-              { label: "🏔️ Endurance", val: improvement.endurance, color: C.blue   },
+              { label: "🏔️ Capacity",  val: improvement.endurance, color: C.blue   },
             ].map(({ label, val, color }) => (
               <div key={label} style={{
                 flex: 1, background: C.bg, borderRadius: 10, padding: "10px 8px", textAlign: "center",
@@ -4486,7 +4486,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
           <div style={{ display: "flex", gap: 14, fontSize: 11, color: C.muted, marginBottom: 8, flexWrap: "wrap" }}>
             <span><span style={{ color: C.red }}>―</span> ⚡ Power</span>
             <span><span style={{ color: C.orange }}>―</span> 💪 Strength</span>
-            <span><span style={{ color: C.blue }}>―</span> 🏔️ Endurance</span>
+            <span><span style={{ color: C.blue }}>―</span> 🏔️ Capacity</span>
           </div>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={cumulativeData} margin={{ top: 6, right: 16, bottom: 28, left: 0 }}>
@@ -4501,7 +4501,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
               />
               <Line dataKey="power"     stroke={C.red}    strokeWidth={2} dot={false} name="Power"     />
               <Line dataKey="strength"  stroke={C.orange} strokeWidth={2} dot={false} name="Strength"  />
-              <Line dataKey="endurance" stroke={C.blue}   strokeWidth={2} dot={false} name="Endurance" />
+              <Line dataKey="endurance" stroke={C.blue}   strokeWidth={2} dot={false} name="Capacity"  />
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -4640,7 +4640,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
           <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
             <span style={{ color: C.red }}>⚡ Power &lt;20s</span>
             <span style={{ color: C.orange }}>💪 Strength 20–120s</span>
-            <span style={{ color: C.blue }}>🔄 Endurance 120s+</span>
+            <span style={{ color: C.blue }}>🔄 Capacity 120s+</span>
           </div>
         </Card>
 
@@ -4674,8 +4674,8 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
               const pct   = Math.min(100, Math.max(0, (ratio / 120) * 100));
               const { shape, color: sc, advice } =
                 ratio < 30  ? { shape: "CF-dominant (Flat)",    color: C.blue,   advice: "Strong aerobic base. Power training will give you the biggest gains — short maximal hangs build W′." } :
-                ratio < 80  ? { shape: "Balanced",              color: C.green,  advice: "Good balance of CF and W′. Cycle power and endurance sessions to keep both systems growing." } :
-                              { shape: "W′-dominant (Steep)",   color: C.orange, advice: "Strong short burst capacity. Endurance training (sub-max hangs, long efforts) will raise your CF ceiling and benefit all zones." };
+                ratio < 80  ? { shape: "Balanced",              color: C.green,  advice: "Good balance of CF and W′. Cycle power and capacity sessions to keep both systems growing." } :
+                              { shape: "W′-dominant (Steep)",   color: C.orange, advice: "Strong short burst capacity. Capacity training (sub-max hangs, long efforts) will raise your CF ceiling and benefit all zones." };
               return (
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 5 }}>
@@ -4703,7 +4703,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, onCalibrate = 
               );
             })()}
             <div style={{ fontSize: 12, color: C.muted, borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
-              Estimated from {cfEstimate.n} failure point{cfEstimate.n !== 1 ? "s" : ""}. Accuracy improves as failures span multiple time domains — try power hangs (5–10s) and endurance hangs (2+ min) to sharpen the curve.
+              Estimated from {cfEstimate.n} failure point{cfEstimate.n !== 1 ? "s" : ""}. Accuracy improves as failures span multiple time domains — try power hangs (5–10s) and capacity hangs (2+ min) to sharpen the curve.
             </div>
           </Card>
         ) : (
@@ -5151,8 +5151,8 @@ function BadgesView({ history, liveEstimate, genesisSnap }) {
   // Zone coverage for Genesis unlock
   const hasPower    = history.some(r => r.target_duration === 10);
   const hasStrength = history.some(r => r.target_duration === 45);
-  const hasEndurance= history.some(r => r.target_duration === 120);
-  const genesisEarned = hasPower && hasStrength && hasEndurance;
+  const hasCapacity = history.some(r => r.target_duration === 120);
+  const genesisEarned = hasPower && hasStrength && hasCapacity;
 
   // AUC progress
   const genesisAUC  = genesisSnap ? computeAUC(genesisSnap.CF, genesisSnap.W) : null;
@@ -5178,7 +5178,7 @@ function BadgesView({ history, liveEstimate, genesisSnap }) {
     ? Math.min(100, Math.max(0, (pctImprove - prevThr) / (nextThr - prevThr) * 100))
     : 100;
 
-  const zonesHave = [hasPower, hasStrength, hasEndurance].filter(Boolean).length;
+  const zonesHave = [hasPower, hasStrength, hasCapacity].filter(Boolean).length;
 
   return (
     <div style={{ padding: "20px 16px", maxWidth: 480, margin: "0 auto" }}>
@@ -5211,7 +5211,7 @@ function BadgesView({ history, liveEstimate, genesisSnap }) {
           {[
             { label: "Power — 10s hang",     done: hasPower },
             { label: "Strength — 45s hang",   done: hasStrength },
-            { label: "Endurance — 120s hang", done: hasEndurance },
+            { label: "Capacity — 120s hang",  done: hasCapacity },
           ].map(z => (
             <div key={z.label} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
               <span style={{ fontSize: 17 }}>{z.done ? "✅" : "⬜"}</span>
@@ -6629,15 +6629,15 @@ export default function App() {
 
   // ── Genesis badge detection ───────────────────────────────
   // Snapshot CF/W′ the first time the user has logged at least one session
-  // in each zone (Power 10s, Strength 45s, Endurance 120s). This becomes
+  // in each zone (Power 10s, Strength 45s, Capacity 120s). This becomes
   // the immutable baseline for all subsequent badge progress calculations.
   useEffect(() => {
     if (genesisSnap) return;           // already earned
     if (!liveEstimate) return;         // no curve yet
     const hasPower    = history.some(r => r.target_duration === 10);
     const hasStrength = history.some(r => r.target_duration === 45);
-    const hasEndurance= history.some(r => r.target_duration === 120);
-    if (hasPower && hasStrength && hasEndurance) {
+    const hasCapacity = history.some(r => r.target_duration === 120);
+    if (hasPower && hasStrength && hasCapacity) {
       const auc  = computeAUC(liveEstimate.CF, liveEstimate.W);
       const snap = { date: today(), CF: liveEstimate.CF, W: liveEstimate.W, auc };
       saveLS(LS_GENESIS_KEY, snap);
