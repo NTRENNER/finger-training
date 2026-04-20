@@ -1313,6 +1313,7 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null 
       {/* CTA */}
       <Btn
         onClick={() => onApplyPlan({
+          goal,
           targetTime: firstRepTime, repsPerSet: numReps, restTime: rest,
           numSets, setRestTime: setRestS,
         })}
@@ -1657,32 +1658,6 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
         </Sect>
       </Card>
 
-      {(refWeightL != null || refWeightR != null) && (
-        <Card style={{ borderColor: C.blue }}>
-          <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
-            {prescribedSource === "model"
-              ? <>Prescribed first-rep load · CF + W&apos;/{config.targetTime}s (your fit)</>
-              : prescribedSource === "model-global"
-                ? <>Prescribed first-rep load · CF + W&apos;/{config.targetTime}s (cross-grip fit)</>
-                : <>Suggested first-rep weight (from history, {config.targetTime}s target)</>}
-          </div>
-          <div style={{ display: "flex", gap: 24 }}>
-            <div>
-              <Label>Left</Label>
-              <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
-                {refWeightL != null ? `${fmtW(refWeightL, unit)} ${unit}` : "—"}
-              </span>
-            </div>
-            <div>
-              <Label>Right</Label>
-              <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
-                {refWeightR != null ? `${fmtW(refWeightR, unit)} ${unit}` : "—"}
-              </span>
-            </div>
-          </div>
-        </Card>
-      )}
-
       {/* Zone Coverage — rolling 30-day zone balance */}
       {/* Level progress for selected config */}
       {hasLevelData && (
@@ -1739,10 +1714,43 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
           const cov = computeZoneCoverage(history, activities);
           return cov.total > 0 ? cov.recommended : null;
         })()}
-        onApplyPlan={({ targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
-          setConfig(c => ({ ...c, targetTime, repsPerSet, restTime, numSets, setRestTime }))
+        onApplyPlan={({ goal, targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
+          setConfig(c => ({ ...c, goal, targetTime, repsPerSet, restTime, numSets, setRestTime }))
         }
       />
+
+      {/* Prescribed load — appears only after both grip AND workout type
+          (goal) are selected. The load is CONSTANT across all reps of a
+          set: rep 1 hits target, rep 2+ fall progressively short as the
+          three compartments drain and only partially refill in rest. */}
+      {config.grip && config.goal && (refWeightL != null || refWeightR != null) && (
+        <Card style={{ borderColor: C.blue }}>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
+            {prescribedSource === "model"
+              ? <>Prescribed load · CF + W&apos;/{config.targetTime}s (your fit)</>
+              : prescribedSource === "model-global"
+                ? <>Prescribed load · CF + W&apos;/{config.targetTime}s (cross-grip fit)</>
+                : <>Suggested load (from history, {config.targetTime}s target)</>}
+          </div>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 10, fontStyle: "italic" }}>
+            Same load every rep. Rep 1 hits {config.targetTime}s; reps 2+ fall short as compartments deplete.
+          </div>
+          <div style={{ display: "flex", gap: 24 }}>
+            <div>
+              <Label>Left</Label>
+              <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
+                {refWeightL != null ? `${fmtW(refWeightL, unit)} ${unit}` : "—"}
+              </span>
+            </div>
+            <div>
+              <Label>Right</Label>
+              <span style={{ fontSize: 24, fontWeight: 700, color: C.blue }}>
+                {refWeightR != null ? `${fmtW(refWeightR, unit)} ${unit}` : "—"}
+              </span>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Readiness / how-do-you-feel widget */}
       {(() => {
@@ -6368,6 +6376,7 @@ export default function App() {
   const [config, setConfig] = useState(() => ({
     hand:       "Both",
     grip:       "",
+    goal:       "",  // "power" | "strength" | "endurance" — set when SessionPlanner plan is applied
     repsPerSet: 5,
     numSets:    3,
     targetTime: 45,
