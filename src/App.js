@@ -3099,10 +3099,9 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
   // Manual session entry
   const [addingSession,    setAddingSession]    = useState(false);
   const [newSessDate,      setNewSessDate]      = useState(() => new Date().toISOString().slice(0, 10));
-  const [newSessHand,      setNewSessHand]      = useState("L");
   const [newSessGrip,      setNewSessGrip]      = useState("");
   const [newSessTarget,    setNewSessTarget]    = useState(TARGET_OPTIONS[0].seconds);
-  const [newSessReps,      setNewSessReps]      = useState([]);  // [{ load: "", time: "" }]
+  const [newSessReps,      setNewSessReps]      = useState([]);  // [{ load, time, hand }]
   const [newRepLoad,       setNewRepLoad]       = useState("");
   const [newRepTime,       setNewRepTime]       = useState("");
 
@@ -3143,10 +3142,18 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
       ? Math.max(...existingReps.map(r => r.set_num || 1))
       : 1;
     const sessionId = existingReps[0]?.session_id || null;
+    // Derive hand for the new rep:
+    //  - Single-hand session: use sess.hand
+    //  - Mixed/Both session: alternate from last rep's hand (fallback L)
+    let newHand = sess.hand;
+    if (sess.hand === "B") {
+      const lastHand = existingReps.length ? existingReps[existingReps.length - 1].hand : null;
+      newHand = lastHand === "L" ? "R" : "L";
+    }
     const newRep = {
       date:            sess.date,
       grip:            sess.grip,
-      hand:            sess.hand,
+      hand:            newHand,
       target_duration: sess.target_duration,
       actual_time_s:   time,
       avg_force_kg:    loadKg,
@@ -3172,7 +3179,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
         id:              genId(),   // unique id so addReps dedup doesn't drop reps 2+
         date:            newSessDate,
         grip:            newSessGrip,
-        hand:            newSessHand,
+        hand:            r.hand || (i % 2 === 0 ? "L" : "R"),
         target_duration: newSessTarget,
         actual_time_s:   parseFloat(r.time),
         avg_force_kg:    loadKg,
@@ -3227,7 +3234,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22 }}>History</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessDate(new Date().toISOString().slice(0, 10)); setNewSessHand("L"); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
+          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessDate(new Date().toISOString().slice(0, 10)); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
           {domain === "fingers" && <Btn small onClick={onDownload} color={C.muted}>↓ CSV</Btn>}
         </div>
       </div>
@@ -3241,19 +3248,6 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
             <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Date</span>
             <input type="date" value={newSessDate} onChange={e => setNewSessDate(e.target.value)}
               style={{ flex: 1, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 13 }} />
-          </div>
-          {/* Hand */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
-            <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Hand</span>
-            <div style={{ display: "flex", gap: 4 }}>
-              {["L","R","B"].map(h => (
-                <button key={h} onClick={() => setNewSessHand(h)} style={{
-                  padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
-                  background: newSessHand === h ? C.purple : C.border,
-                  color: newSessHand === h ? "#fff" : C.muted,
-                }}>{h === "L" ? "Left" : h === "R" ? "Right" : "Both"}</button>
-              ))}
-            </div>
           </div>
           {/* Grip */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
@@ -3287,10 +3281,17 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
           {/* Reps list */}
           {newSessReps.length > 0 && (
             <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Reps added</div>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Reps added — tap L/R to flip</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                 {newSessReps.map((r, i) => (
                   <span key={i} style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 7, fontSize: 12, background: "#1a2f1a", border: `1px solid ${C.green}`, color: C.text }}>
+                    <button onClick={() => setNewSessReps(rs => rs.map((x, j) => j === i ? { ...x, hand: x.hand === "L" ? "R" : "L" } : x))}
+                      style={{
+                        background: r.hand === "L" ? C.purple : C.orange,
+                        border: "none", borderRadius: 4,
+                        color: "#fff", fontWeight: 700, fontSize: 10,
+                        padding: "1px 5px", cursor: "pointer", lineHeight: 1.2,
+                      }}>{r.hand}</button>
                     {r.load}{unit} · {r.time}s
                     <button onClick={() => setNewSessReps(rs => rs.filter((_, j) => j !== i))}
                       style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1 }}>✕</button>
@@ -3309,7 +3310,10 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
               style={{ flex: 1, background: C.border, border: "none", borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13 }} />
             <button onClick={() => {
               if (!newRepLoad || !newRepTime) return;
-              setNewSessReps(rs => [...rs, { load: newRepLoad, time: newRepTime }]);
+              // Alternate L/R default: first rep L, then flip from last rep's hand
+              const lastHand = newSessReps.length ? newSessReps[newSessReps.length - 1].hand : null;
+              const nextHand = lastHand === "L" ? "R" : "L";
+              setNewSessReps(rs => [...rs, { load: newRepLoad, time: newRepTime, hand: nextHand }]);
               setNewRepLoad(""); setNewRepTime("");
             }} style={{
               background: C.green, border: "none", borderRadius: 6, color: "#000",
