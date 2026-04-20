@@ -1500,6 +1500,14 @@ function computeZoneCoverage(history, activities = []) {
 // may drop to 10s (power zone by actual_time_s), but it's still
 // strength-protocol data. target_duration reflects the zone the user
 // intended to train.
+//
+// Min-sample floor (LIMITER_MIN_SAMPLES): a zone must have at least
+// this many rep-1 data points before it's eligible for the ranking.
+// Without the floor, a single rep-1 shortfall in a sparsely-trained
+// zone (e.g. 1 of 1 = 100% fail rate) dominates the ranking. Below the
+// floor the zone is treated as null here; coverage-fallback in the
+// caller can still pull the user toward under-trained zones.
+const LIMITER_MIN_SAMPLES = 3;
 function computeLimiterZone(history) {
   const valid = history.filter(r =>
     r.rep_num === 1 &&
@@ -1510,7 +1518,8 @@ function computeLimiterZone(history) {
     const z = valid.filter(r =>
       r.target_duration >= lo && r.target_duration < hi
     );
-    return z.length > 0 ? z.filter(r => r.failed).length / z.length : null;
+    if (z.length < LIMITER_MIN_SAMPLES) return null;
+    return z.filter(r => r.failed).length / z.length;
   };
   const rates = {
     power:     zoneFailRate(0, POWER_MAX),
