@@ -1186,8 +1186,8 @@ const BADGE_CONFIG = [
   { id: "realization", label: "Realization", emoji: "🏔️", threshold: 100, desc: "2× your Genesis capacity — the potential fulfilled" },
 ];
 
-function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null, recommendedGrip = null }) {
-  // Default goal to the undertrained zone when we know it; fall back to strength
+function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null, recommendedGrip = null, recommendedLabel = "recommended" }) {
+  // Default goal to the recommended zone when we know it; fall back to strength
   const initGoal = (recommendedZone && GOAL_CONFIG[recommendedZone]) ? recommendedZone : "strength";
   const [goal,    setGoal]    = useState(initGoal);
   const [numReps, setNumReps] = useState(GOAL_CONFIG[initGoal].repsDefault);
@@ -1251,7 +1251,7 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
                   fontSize: 9, fontWeight: 700, background: g.color, color: "#fff",
                   padding: "1px 5px", borderRadius: 6, whiteSpace: "nowrap",
                 }}>
-                  undertrained
+                  {recommendedLabel}
                 </div>
               )}
               <div style={{ fontSize: 16 }}>{g.emoji}</div>
@@ -2146,6 +2146,10 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
         const limiter = computeLimiterZone(history);
         const limiterGrip = limiter?.grip ?? null;
         let zone = null;
+        // Track WHICH signal picked the zone so we can label the badge
+        // honestly: "biggest gain" for ΔAUC, "limiter" for curve-shape,
+        // "least trained" for coverage fallback.
+        let label = "recommended";
         if (liveEstimate && liveEstimate.CF > 0) {
           // Rank protocols by projected ΔAUC using the PERSONAL response
           // (prior when data is thin; blended with observed rates as the
@@ -2160,17 +2164,23 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
             if (gain > bestGain) { bestGain = gain; bestKey = key; }
           }
           zone = bestKey;
+          label = "biggest gain";
+        } else if (limiter?.zone) {
+          zone = limiter.zone;
+          label = "limiter";
         } else {
-          zone = limiter?.zone ?? (() => {
-            const cov = computeZoneCoverage(history, activities);
-            return cov.total > 0 ? cov.recommended : null;
-          })();
+          const cov = computeZoneCoverage(history, activities);
+          if (cov.total > 0) {
+            zone = cov.recommended;
+            label = "least trained";
+          }
         }
         return (
           <SessionPlannerCard
             liveEstimate={liveEstimate}
             recommendedZone={zone}
             recommendedGrip={limiterGrip}
+            recommendedLabel={label}
             onApplyPlan={({ goal, targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
               setConfig(c => ({ ...c, goal, targetTime, repsPerSet, restTime, numSets, setRestTime }))
             }
