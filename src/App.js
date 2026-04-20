@@ -48,7 +48,7 @@ const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
 const LS_BW_LOG_KEY    = "ft_bw_log";    // [{ date, kg }] body weight history
 const LS_READINESS_KEY = "ft_readiness"; // { [date]: 1-5 } subjective daily rating
 const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-calibration snapshot
-const LS_ACTIVITY_KEY  = "ft_activity";  // [{ date, type, duration_min, intensity }] climbing / other sessions
+const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }] — legacy entries may carry { duration_min, intensity } instead
 const LS_GENESIS_KEY   = "ft_genesis";   // { date, CF, W, auc } — snapshot when first all-zone coverage earned
 
 const LEVEL_STEP = 1.05; // 5% improvement per level
@@ -1332,32 +1332,92 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null 
 // Shows which zone is undertrained and should be trained next.
 // ─────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
-// CLIMBING LOG WIDGET
-// Quick-log a climbing session so zone coverage accounts for it.
+// CLIMBING LOG
+// Each logged entry = one climb (discipline, grade, ascent style).
+// Climbing is tracked for readiness / context but is intentionally
+// NOT credited to zone coverage (see computeZoneCoverage note).
 // ─────────────────────────────────────────────────────────────
-// Climbing sessions are logged for readiness / fatigue accounting but
-// are intentionally NOT credited to zone coverage (see computeZoneCoverage
-// note). Zone tags were removed from intensities on purpose.
-const CLIMB_INTENSITIES = [
-  { key: "easy",       label: "Easy",       emoji: "🟢", desc: "Cruisy / warm-up"    },
-  { key: "moderate",   label: "Moderate",   emoji: "🟡", desc: "Pumpy / sustained"   },
-  { key: "hard",       label: "Hard",       emoji: "🔴", desc: "Limit / crux-heavy"  },
-  { key: "bouldering", label: "Bouldering", emoji: "⚡", desc: "Power / explosive"   },
+const CLIMB_DISCIPLINES = [
+  { key: "boulder",  label: "Boulder",  emoji: "⚡", desc: "Power / max moves"     },
+  { key: "top_rope", label: "Top rope", emoji: "🧗", desc: "Roped, top-anchor"     },
+  { key: "lead",     label: "Lead",     emoji: "🪢", desc: "Roped, clip as you go" },
 ];
 
+const ASCENT_STYLES = [
+  { key: "onsight",  label: "Onsight",  desc: "1st try, no beta"      },
+  { key: "flash",    label: "Flash",    desc: "1st try, with beta"    },
+  { key: "redpoint", label: "Redpoint", desc: "Sent after working"    },
+  { key: "attempt",  label: "Attempt",  desc: "Worked but didn't send"},
+];
+
+// V0..V13 covers the vast majority of recreational to advanced boulder grades.
+const V_GRADES   = Array.from({ length: 14 }, (_, i) => `V${i}`);
+// YDS 5.6..5.14d with a-d subgrades above 5.10.
+const YDS_GRADES = (() => {
+  const base = ["5.6", "5.7", "5.8", "5.9"];
+  const suffix = ["a", "b", "c", "d"];
+  const sub    = [];
+  for (const n of [10, 11, 12, 13, 14]) {
+    for (const s of suffix) sub.push(`5.${n}${s}`);
+  }
+  return [...base, ...sub];
+})();
+
+function gradesFor(discipline) {
+  return discipline === "boulder" ? V_GRADES : YDS_GRADES;
+}
+
+function defaultGradeFor(discipline) {
+  return discipline === "boulder" ? "V3" : "5.10a";
+}
+
+function disciplineMeta(key) {
+  return CLIMB_DISCIPLINES.find(d => d.key === key)
+      || { key, label: key, emoji: "🧗", desc: "" };
+}
+
+function ascentMeta(key) {
+  return ASCENT_STYLES.find(a => a.key === key)
+      || { key, label: key, desc: "" };
+}
+
+// Pretty one-liner for a single climb entry. Handles legacy
+// intensity/duration entries so old data still renders.
+function describeClimb(a) {
+  if (a.discipline || a.grade || a.ascent) {
+    const d = disciplineMeta(a.discipline).label;
+    const g = a.grade || "—";
+    const s = a.ascent ? ascentMeta(a.ascent).label : "";
+    return s ? `${d} · ${g} · ${s}` : `${d} · ${g}`;
+  }
+  // Legacy (pre-grade) entries
+  const parts = [];
+  if (a.intensity)    parts.push(a.intensity);
+  if (a.duration_min) parts.push(`${a.duration_min}m`);
+  return parts.join(" · ") || "Climbing session";
+}
+
 function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
-  const [open,      setOpen]      = useState(false);
-  const [intensity, setIntensity] = useState("moderate");
-  const [duration,  setDuration]  = useState(90);
-  const [logged,    setLogged]    = useState(false);
+  const [open,       setOpen]       = useState(false);
+  const [discipline, setDiscipline] = useState("boulder");
+  const [grade,      setGrade]      = useState(defaultGradeFor("boulder"));
+  const [ascent,     setAscent]     = useState("flash");
+  const [logged,     setLogged]     = useState(false);
 
   const todayActivities = activities.filter(a => a.date === today() && a.type === "climbing");
   const hasToday        = todayActivities.length > 0;
 
+  const handleDiscipline = (key) => {
+    setDiscipline(key);
+    // If switching grading systems, reset grade to the new default so
+    // we never end up with a V-grade on a lead route or vice versa.
+    const valid = gradesFor(key);
+    if (!valid.includes(grade)) setGrade(defaultGradeFor(key));
+  };
+
   const handleLog = () => {
-    onLog({ date: today(), type: "climbing", duration_min: duration, intensity });
+    onLog({ date: today(), type: "climbing", discipline, grade, ascent });
     setLogged(true);
-    setOpen(false);
     setTimeout(() => setLogged(false), 3000);
   };
 
@@ -1376,10 +1436,10 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
         >
           <span>
             🧗 {hasToday
-              ? `Climbing logged today (${todayActivities.length}×)`
-              : logged ? "✓ Climbing session logged!" : "Log a climbing session"}
+              ? `${todayActivities.length} climb${todayActivities.length === 1 ? "" : "s"} logged today`
+              : logged ? "✓ Climb logged!" : "Log a climb"}
           </span>
-          <span style={{ fontSize: 11, color: C.muted }}>logged for readiness +</span>
+          <span style={{ fontSize: 11, color: C.muted }}>discipline · grade · style</span>
         </button>
       )}
 
@@ -1387,18 +1447,18 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
       {open && (
         <Card style={{ border: `1px solid ${C.blue}40` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>🧗 Log Climbing Session</div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>🧗 Log Climb</div>
             <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
           </div>
 
-          {/* Intensity picker */}
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>Climbing style</div>
+          {/* Discipline picker */}
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>Discipline</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-            {CLIMB_INTENSITIES.map(({ key, label, emoji, desc }) => (
-              <button key={key} onClick={() => setIntensity(key)} style={{
-                flex: "1 1 40%", padding: "8px 6px", borderRadius: 8, cursor: "pointer",
-                border: intensity === key ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
-                background: intensity === key ? C.blue + "22" : C.bg,
+            {CLIMB_DISCIPLINES.map(({ key, label, emoji, desc }) => (
+              <button key={key} onClick={() => handleDiscipline(key)} style={{
+                flex: "1 1 30%", padding: "8px 6px", borderRadius: 8, cursor: "pointer",
+                border: discipline === key ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
+                background: discipline === key ? C.blue + "22" : C.bg,
                 color: C.text, textAlign: "left",
               }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{emoji} {label}</div>
@@ -1407,21 +1467,42 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
             ))}
           </div>
 
-          {/* Duration */}
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>Duration</div>
-          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-            {[60, 90, 120, 180].map(d => (
-              <button key={d} onClick={() => setDuration(d)} style={{
-                flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer",
-                background: duration === d ? C.blue : C.border,
-                color: duration === d ? "#fff" : C.muted,
-                fontSize: 12, fontWeight: 600,
-              }}>{d >= 60 ? `${d / 60}h` : `${d}m`}</button>
+          {/* Grade picker (V for boulder, YDS for TR/lead) */}
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>
+            Grade ({discipline === "boulder" ? "V-scale" : "YDS"})
+          </div>
+          <select
+            value={grade}
+            onChange={(e) => setGrade(e.target.value)}
+            style={{
+              width: "100%", padding: "8px 10px", marginBottom: 14, borderRadius: 8,
+              background: C.bg, color: C.text, border: `1px solid ${C.border}`,
+              fontSize: 13,
+            }}
+          >
+            {gradesFor(discipline).map(g => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
+
+          {/* Ascent style */}
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>Ascent</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+            {ASCENT_STYLES.map(({ key, label, desc }) => (
+              <button key={key} onClick={() => setAscent(key)} style={{
+                flex: "1 1 40%", padding: "8px 6px", borderRadius: 8, cursor: "pointer",
+                border: ascent === key ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
+                background: ascent === key ? C.blue + "22" : C.bg,
+                color: C.text, textAlign: "left",
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+                <div style={{ fontSize: 10, color: C.muted }}>{desc}</div>
+              </button>
             ))}
           </div>
 
           <Btn onClick={handleLog} color={C.blue} style={{ width: "100%", padding: "10px 0", borderRadius: 8 }}>
-            Log Climbing Session
+            Log Climb
           </Btn>
         </Card>
       )}
@@ -1710,9 +1791,6 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
       )}
 
       {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
-
-      {/* Activity Logs */}
-      <ClimbingLogWidget activities={activities} onLog={onLogActivity} />
 
       {/* Session Planner — always shown; defaults to the limiter zone
           (highest fail rate), falling back to coverage gap when no
@@ -6088,7 +6166,150 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_
   );
 }
 
-const TABS = ["Fingers", "Analysis", "Journey", "Workout", "History", "Trends", "Settings"];
+// ─────────────────────────────────────────────────────────────
+// CLIMBING TAB
+// Dedicated home for logging individual climbs and reviewing
+// climbing history (discipline / grade / ascent style). Separate
+// from finger-training zone coverage by design — climbing is not
+// credited to Power / Strength / Capacity buckets.
+// ─────────────────────────────────────────────────────────────
+function ClimbingTab({ activities = [], onLogActivity = () => {}, onDeleteActivity = () => {} }) {
+  const climbs = useMemo(
+    () => activities
+      .filter(a => a.type === "climbing")
+      .slice()
+      .sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+    [activities]
+  );
+
+  // Group by date for the history view.
+  const byDate = useMemo(() => {
+    const m = new Map();
+    for (const c of climbs) {
+      const d = c.date || "—";
+      if (!m.has(d)) m.set(d, []);
+      m.get(d).push(c);
+    }
+    return [...m.entries()];
+  }, [climbs]);
+
+  // Quick stats (last 30 days)
+  const stats = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const recent = climbs.filter(c => (c.date || "") >= cutoffStr);
+    const sends  = recent.filter(c => c.ascent && c.ascent !== "attempt");
+    return {
+      total:  recent.length,
+      sends:  sends.length,
+      byDisc: CLIMB_DISCIPLINES.map(d => ({
+        ...d,
+        count: recent.filter(c => c.discipline === d.key).length,
+      })),
+    };
+  }, [climbs]);
+
+  return (
+    <div style={{ padding: "16px 20px", maxWidth: 640, margin: "0 auto" }}>
+      <Sect title="Log a climb">
+        <ClimbingLogWidget activities={activities} onLog={onLogActivity} />
+      </Sect>
+
+      {climbs.length > 0 && (
+        <Sect title="Last 30 days">
+          <Card>
+            <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: C.muted }}>Climbs</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.total}</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: C.muted }}>Sends</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: C.green }}>{stats.sends}</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: C.muted }}>Attempts</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: C.muted }}>
+                  {stats.total - stats.sends}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {stats.byDisc.filter(d => d.count > 0).map(d => (
+                <div key={d.key} style={{
+                  padding: "4px 10px", borderRadius: 999,
+                  background: C.bg, border: `1px solid ${C.border}`,
+                  fontSize: 12, color: C.muted,
+                }}>
+                  {d.emoji} {d.label} · {d.count}
+                </div>
+              ))}
+            </div>
+          </Card>
+        </Sect>
+      )}
+
+      <Sect title="History">
+        {climbs.length === 0 ? (
+          <Card>
+            <div style={{ color: C.muted, fontSize: 13 }}>
+              No climbs logged yet. Use the form above to log your first climb.
+            </div>
+          </Card>
+        ) : (
+          byDate.map(([date, list]) => (
+            <Card key={date}>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+                {date} · {list.length} climb{list.length === 1 ? "" : "s"}
+              </div>
+              {list.map(c => {
+                const isSend = c.ascent && c.ascent !== "attempt";
+                const disc   = disciplineMeta(c.discipline);
+                return (
+                  <div key={c.id || `${c.date}-${c.grade}-${c.ascent}`} style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 0",
+                    borderTop: `1px solid ${C.border}`,
+                  }}>
+                    <div style={{ fontSize: 18 }}>{disc.emoji}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        {c.grade || "—"}{" "}
+                        <span style={{ color: C.muted, fontWeight: 400 }}>
+                          {disc.label}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: isSend ? C.green : C.muted }}>
+                        {c.ascent ? ascentMeta(c.ascent).label : describeClimb(c)}
+                      </div>
+                    </div>
+                    {c.id && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm("Delete this climb?")) onDeleteActivity(c.id);
+                        }}
+                        style={{
+                          background: "none", border: "none", color: C.muted,
+                          cursor: "pointer", fontSize: 16, padding: "4px 6px",
+                        }}
+                        title="Delete climb"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+          ))
+        )}
+      </Sect>
+    </div>
+  );
+}
+
+const TABS = ["Fingers", "Analysis", "Journey", "Workout", "Climbing", "History", "Trends", "Settings"];
 
 export default function App() {
   // ── Auth ──────────────────────────────────────────────────
@@ -6375,6 +6596,14 @@ export default function App() {
   const addActivity = useCallback((act) => {
     setActivities(prev => {
       const next = [...prev, { ...act, id: uid() }];
+      saveLS(LS_ACTIVITY_KEY, next);
+      return next;
+    });
+  }, []);
+
+  const deleteActivity = useCallback((id) => {
+    setActivities(prev => {
+      const next = prev.filter(a => a.id !== id);
       saveLS(LS_ACTIVITY_KEY, next);
       return next;
     });
@@ -6812,9 +7041,10 @@ export default function App() {
       {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
-      {tab === 4 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps(Array.isArray(rep) ? rep : [rep])} notes={notes} onNoteChange={handleNoteChange} />}
-      {tab === 5 && <TrendsView history={history} unit={unit} />}
-      {tab === 6 && (
+      {tab === 4 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
+      {tab === 5 && <HistoryView history={history} onDownload={() => downloadCSV(history)} unit={unit} bodyWeight={bodyWeight} onDeleteSession={deleteSession} onUpdateSession={updateSession} onDeleteRep={deleteRep} onUpdateRep={updateRep} onAddRep={(rep) => addReps(Array.isArray(rep) ? rep : [rep])} notes={notes} onNoteChange={handleNoteChange} />}
+      {tab === 6 && <TrendsView history={history} unit={unit} />}
+      {tab === 7 && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}
