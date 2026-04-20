@@ -1454,15 +1454,14 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
           {/* Discipline picker */}
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>Discipline</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-            {CLIMB_DISCIPLINES.map(({ key, label, emoji, desc }) => (
+            {CLIMB_DISCIPLINES.map(({ key, label, emoji }) => (
               <button key={key} onClick={() => handleDiscipline(key)} style={{
                 flex: "1 1 30%", padding: "8px 6px", borderRadius: 8, cursor: "pointer",
                 border: discipline === key ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
                 background: discipline === key ? C.blue + "22" : C.bg,
-                color: C.text, textAlign: "left",
+                color: C.text, textAlign: "center",
               }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{emoji} {label}</div>
-                <div style={{ fontSize: 10, color: C.muted }}>{desc}</div>
               </button>
             ))}
           </div>
