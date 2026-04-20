@@ -4400,6 +4400,58 @@ function TrendsView({ history, unit = "lbs", activities = [] }) {
 const POWER_MAX    = 20;
 const STRENGTH_MAX = 120;
 
+// Shared recommendation metadata — used by both the pooled/selGrip-scoped
+// `recommendation` useMemo and the per-grip `gripRecs` useMemo so the
+// title/color/caption shown for "Train Power / Strength / Capacity" stay
+// consistent between scopes.
+const ZONE_DETAILS = {
+  power: {
+    title: "Train Power", color: C.red,
+    caption: "short, high-force efforts that develop W′, the finite anaerobic reserve above your CF asymptote.",
+  },
+  strength: {
+    title: "Train Strength", color: C.orange,
+    caption: "mid-duration max hangs that lift the force ceiling — and with it, CF.",
+  },
+  endurance: {
+    title: "Train Capacity", color: C.blue,
+    caption: "sustained threshold holds that raise CF as a fraction of your existing ceiling.",
+  },
+};
+
+// Pure helper: given a {CF, W} fit and personalResponse map, compute the
+// projected ΔAUC for each protocol and return the rec payload. Separate
+// from the React memos so it can be called once per grip.
+function buildRecFromFit(fit, personalResponse, unit) {
+  if (!fit) return null;
+  const { CF, W } = fit;
+  const gains = {};
+  for (const [key, resp] of Object.entries(personalResponse)) {
+    const dCF = CF * resp.cf;
+    const dW  = W  * resp.w;
+    const gainKg = dCF * (AUC_T_MAX - AUC_T_MIN) + dW * Math.log(AUC_T_MAX / AUC_T_MIN);
+    gains[key] = toDisp(gainKg, unit);
+  }
+  const bestKey = Object.entries(gains).reduce((a, b) => b[1] > a[1] ? b : a)[0];
+  const d = ZONE_DETAILS[bestKey];
+  const responseSource = {};
+  for (const key of Object.keys(personalResponse)) {
+    responseSource[key] = {
+      source: personalResponse[key].source,
+      n:      personalResponse[key].n,
+    };
+  }
+  return {
+    key:     bestKey,
+    title:   d.title,
+    color:   d.color,
+    insight: `Largest projected AUC gain from ${d.caption}`,
+    gains,
+    aucGain: gains[bestKey],
+    responseSource,
+  };
+}
+
 function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [], liveEstimate = null, gripEstimates = {} }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selGrip,   setSelGrip]   = useState("");
@@ -4723,21 +4775,6 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   // kept as diagnostics alongside the ΔAUC ranking so users can see
   // where the curve is lopsided and which zones are under-trained.
   const recommendation = useMemo(() => {
-    const ZONE_DETAILS = {
-      power: {
-        title: "Train Power", color: C.red,
-        caption: "short, high-force efforts that develop W′, the finite anaerobic reserve above your CF asymptote.",
-      },
-      strength: {
-        title: "Train Strength", color: C.orange,
-        caption: "mid-duration max hangs that lift the force ceiling — and with it, CF.",
-      },
-      endurance: {
-        title: "Train Capacity", color: C.blue,
-        caption: "sustained threshold holds that raise CF as a fraction of your existing ceiling.",
-      },
-    };
-
     // Limiter (curve shape) — kept as secondary diagnostic
     const limiter = computeLimiterZone(history);
     const limiterKey  = limiter?.zone ?? null;
@@ -4773,44 +4810,35 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       };
     }
 
-    // Primary: marginal ΔAUC per protocol using PERSONAL response rates.
-    const { CF, W } = fitForRec;
-    const gains = {};
-    for (const [key, resp] of Object.entries(personalResponse)) {
-      const dCF = CF * resp.cf;
-      const dW  = W  * resp.w;
-      const gainKg = dCF * (AUC_T_MAX - AUC_T_MIN) + dW * Math.log(AUC_T_MAX / AUC_T_MIN);
-      gains[key] = toDisp(gainKg, unit);
-    }
-    const bestKey = Object.entries(gains).reduce((a, b) => b[1] > a[1] ? b : a)[0];
-    const d       = ZONE_DETAILS[bestKey];
+    // Primary ΔAUC ranking — delegated to the shared helper so per-grip
+    // recs (gripRecs below) compute the same way.
+    const base = buildRecFromFit(fitForRec, personalResponse, unit);
 
     // Does the Monod limiter agree with the ΔAUC winner?
-    const agree = !limiterKey || limiterKey === bestKey;
-
-    // Per-zone { source: 'prior'|'blended', n } for the UI.
-    const responseSource = {};
-    for (const key of Object.keys(personalResponse)) {
-      responseSource[key] = {
-        source: personalResponse[key].source,
-        n:      personalResponse[key].n,
-      };
-    }
+    const agree = !limiterKey || limiterKey === base.key;
 
     return {
-      key: bestKey,
-      title: d.title,
-      color: d.color,
-      insight: `Largest projected AUC gain from ${d.caption}`,
-      gains,
-      aucGain: gains[bestKey],
+      ...base,
       limiterKey, limiterGrip,
       coverageKey,
       agree,
-      responseSource,
       coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
     };
   }, [liveEstimate, gripEstimates, selGrip, history, activities, unit, personalResponse]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-grip recommendations — one rec per grip with a fit in
+  // `gripEstimates`. Used to render side-by-side Micro/Crusher cards
+  // in "Next Session Focus" when no single grip is selected, so the
+  // user can see the separate verdicts for the two different muscles
+  // (FDP for Micro, FDS for Crusher).
+  const gripRecs = useMemo(() => {
+    const out = {};
+    for (const [grip, fit] of Object.entries(gripEstimates)) {
+      const rec = buildRecFromFit(fit, personalResponse, unit);
+      if (rec) out[grip] = { ...rec, grip, CF: fit.CF, W: fit.W, n: fit.n };
+    }
+    return out;
+  }, [gripEstimates, personalResponse, unit]);
 
   const unexplored = Object.entries(zones)
     .filter(([, z]) => z.total === 0)
@@ -5165,52 +5193,43 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           </div>
         </Card>
 
-        {/* ── Critical Force card ── */}
-        {cfEstimate ? (
-          <Card style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Critical Force Estimate</div>
-            <div style={{ display: "flex", gap: 0, marginBottom: 12 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Critical Force (CF)</div>
-                <div style={{ fontSize: 32, fontWeight: 800, color: C.purple, lineHeight: 1 }}>
-                  {fmtW(cfEstimate.CF, unit)}
+        {/* ── Critical Force card ──
+            When no grip filter is active AND ≥2 grips have fits, render
+            one card per grip (Micro, Crusher) so each muscle's CF / W′
+            and curve shape are read independently. Otherwise fall back
+            to the pooled / selGrip-scoped single card. */}
+        {(() => {
+          // Shared renderer for the CF/W′/curve-shape body of the card.
+          const renderCFBody = (fit) => {
+            const ratio = fit.CF > 0 ? fit.W / fit.CF : 0;
+            const pct   = Math.min(100, Math.max(0, (ratio / 120) * 100));
+            const { shape, color: sc, caption } =
+              ratio < 30  ? { shape: "CF-dominant (Flat)",    color: C.blue,   caption: "Your curve is flat — CF is high relative to W′. Your sustainable force is well developed; your finite anaerobic reserve is small." } :
+              ratio < 80  ? { shape: "Balanced",              color: C.green,  caption: "CF and W′ are roughly proportional — neither the aerobic asymptote nor the anaerobic reserve dominates the curve." } :
+                            { shape: "W′-dominant (Steep)",   color: C.orange, caption: "Your curve is steep — W′ is large relative to CF. Your short-burst capacity is well developed; your sustainable asymptote is lower." };
+            return (
+              <>
+                <div style={{ display: "flex", gap: 0, marginBottom: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Critical Force (CF)</div>
+                    <div style={{ fontSize: 32, fontWeight: 800, color: C.purple, lineHeight: 1 }}>
+                      {fmtW(fit.CF, unit)}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit} · max sustainable</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Anaerobic Capacity (W′)</div>
+                    <div style={{ fontSize: 32, fontWeight: 800, color: C.orange, lineHeight: 1 }}>
+                      {fmtW(fit.W, unit)}·s
+                    </div>
+                    <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit}·s · finite reserve above CF</div>
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit} · max sustainable</div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Anaerobic Capacity (W′)</div>
-                <div style={{ fontSize: 32, fontWeight: 800, color: C.orange, lineHeight: 1 }}>
-                  {fmtW(cfEstimate.W, unit)}·s
-                </div>
-                <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit}·s · finite reserve above CF</div>
-              </div>
-            </div>
-            {/* ── Curve Shape Indicator ──
-                Purely descriptive — tells the user the balance between
-                their aerobic (CF) and anaerobic (W′) parameters. Does
-                NOT prescribe what to train next; that is the
-                SessionPlanner's job, and having two cards prescribing
-                different things (curve-shape heuristic vs. Monod
-                cross-zone residual) was giving contradictory advice
-                for the same state. */}
-            {(() => {
-              // W′/CF in seconds = how many seconds of W′ reserve per unit of CF.
-              // Low  (<30s)  → flat curve  = CF-dominant (strong aerobic base)
-              // Med  (30-80s)→ balanced
-              // High (>80s)  → steep curve = W′-dominant (strong short-term, lower base)
-              const ratio = cfEstimate.CF > 0 ? cfEstimate.W / cfEstimate.CF : 0;
-              const pct   = Math.min(100, Math.max(0, (ratio / 120) * 100));
-              const { shape, color: sc, caption } =
-                ratio < 30  ? { shape: "CF-dominant (Flat)",    color: C.blue,   caption: "Your curve is flat — CF is high relative to W′. Your sustainable force is well developed; your finite anaerobic reserve is small." } :
-                ratio < 80  ? { shape: "Balanced",              color: C.green,  caption: "CF and W′ are roughly proportional — neither the aerobic asymptote nor the anaerobic reserve dominates the curve." } :
-                              { shape: "W′-dominant (Steep)",   color: C.orange, caption: "Your curve is steep — W′ is large relative to CF. Your short-burst capacity is well developed; your sustainable asymptote is lower." };
-              return (
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 5 }}>
                     <span>Curve Shape</span>
                     <span style={{ color: sc, fontWeight: 700 }}>{shape}</span>
                   </div>
-                  {/* Gradient bar: flat (blue) → balanced (green) → steep (orange) */}
                   <div style={{ position: "relative", height: 8, borderRadius: 4, overflow: "hidden",
                     background: "linear-gradient(to right, #3b82f6, #22c55e, #e07a30)" }}>
                     <div style={{
@@ -5228,30 +5247,68 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                     {caption} See <b>Next Session Focus</b> above for what to train next.
                   </div>
                 </div>
-              );
-            })()}
-            <div style={{ fontSize: 12, color: C.muted, borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
-              Estimated from {cfEstimate.n} failure point{cfEstimate.n !== 1 ? "s" : ""}. Accuracy improves as failures span multiple time domains — try power hangs (5–10s) and capacity hangs (2+ min) to sharpen the curve.
-            </div>
-          </Card>
-        ) : (
-          <Card style={{ marginBottom: 16, border: `1px solid ${C.yellow}30` }}>
-            <div style={{ fontSize: 13, color: C.yellow, marginBottom: 6 }}>
-              {failures.length === 0 ? "⚠ Critical Force requires failure data" : "⚠ Need 2+ failures at different durations to fit the curve"}
-            </div>
-            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-              {failures.length === 0
-                ? "The shape of your force-duration curve is defined by reps that end in auto-failure. Completed reps set the floor; failed reps define the curve."
-                : "You have failure data in one time domain. Add failures at a shorter or longer duration to fit the Monod-Scherrer curve and estimate Critical Force."}
-            </div>
-          </Card>
-        )}
+                <div style={{ fontSize: 12, color: C.muted, borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+                  Estimated from {fit.n} failure point{fit.n !== 1 ? "s" : ""}. Accuracy improves as failures span multiple time domains — try power hangs (5–10s) and capacity hangs (2+ min) to sharpen the curve.
+                </div>
+              </>
+            );
+          };
 
-        {/* ── AUC headline card (the single "climbing capacity" number) ── */}
+          const perGripMode = !selGrip && Object.keys(gripEstimates).length >= 2;
+          if (perGripMode) {
+            return (
+              <>
+                {Object.entries(gripEstimates).map(([grip, fit]) => (
+                  <Card key={grip} style={{ marginBottom: 16 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>Critical Force Estimate</div>
+                      <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{grip}</div>
+                    </div>
+                    {renderCFBody(fit)}
+                  </Card>
+                ))}
+              </>
+            );
+          }
+
+          if (cfEstimate) {
+            return (
+              <Card style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>Critical Force Estimate</div>
+                  {selGrip && (
+                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{selGrip}</div>
+                  )}
+                </div>
+                {renderCFBody(cfEstimate)}
+              </Card>
+            );
+          }
+
+          return (
+            <Card style={{ marginBottom: 16, border: `1px solid ${C.yellow}30` }}>
+              <div style={{ fontSize: 13, color: C.yellow, marginBottom: 6 }}>
+                {failures.length === 0 ? "⚠ Critical Force requires failure data" : "⚠ Need 2+ failures at different durations to fit the curve"}
+              </div>
+              <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+                {failures.length === 0
+                  ? "The shape of your force-duration curve is defined by reps that end in auto-failure. Completed reps set the floor; failed reps define the curve."
+                  : "You have failure data in one time domain. Add failures at a shorter or longer duration to fit the Monod-Scherrer curve and estimate Critical Force."}
+              </div>
+            </Card>
+          );
+        })()}
+
+        {/* ── AUC headline card (the single "climbing capacity" number) ──
+            When no grip filter is active AND ≥2 grips have fits, also
+            show per-grip AUC split so Micro (FDP) and Crusher (FDS)
+            can be read independently — pooling an FDP-dominant and
+            FDS-dominant history into one AUC hides which muscle is
+            actually driving capacity. */}
         {aucEstimate && (
           <Card style={{ marginBottom: 16, border: `2px solid ${C.purple}60` }}>
             <div style={{ fontSize: 11, color: C.purple, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
-              Climbing Capacity · AUC
+              Climbing Capacity · AUC {selGrip ? <span style={{ color: C.muted, fontWeight: 600 }}>· {selGrip}</span> : null}
             </div>
             <div style={{ display: "flex", alignItems: "flex-end", gap: 16, marginBottom: 14 }}>
               <div>
@@ -5259,7 +5316,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                   {Math.round(aucEstimate).toLocaleString()}
                 </div>
                 <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
-                  {unit}·s · 10–120s window
+                  {unit}·s · 10–120s window{!selGrip && Object.keys(gripEstimates).length >= 2 ? " · pooled" : ""}
                 </div>
               </div>
               {aucBaseline && aucBaseline > 0 && (
@@ -5275,6 +5332,36 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                 </div>
               )}
             </div>
+
+            {/* Per-grip split — shown only when "All Grips" is selected
+                and we have fits for 2+ grips. */}
+            {!selGrip && Object.keys(gripEstimates).length >= 2 && (
+              <div style={{
+                display: "flex", gap: 8, marginBottom: 14,
+                paddingTop: 10, borderTop: `1px solid ${C.border}`,
+              }}>
+                {Object.entries(gripEstimates).map(([grip, fit]) => {
+                  const aucKg = computeAUC(fit.CF, fit.W, AUC_T_MIN, AUC_T_MAX);
+                  const aucG  = toDisp(aucKg, unit);
+                  return (
+                    <div key={grip} style={{
+                      flex: 1, background: C.bg, borderRadius: 10,
+                      padding: "10px 8px", border: `1px solid ${C.purple}25`,
+                    }}>
+                      <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 2 }}>
+                        {grip}
+                      </div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: C.purple, lineHeight: 1.1 }}>
+                        {Math.round(aucG).toLocaleString()}
+                      </div>
+                      <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+                        CF {fmtW(fit.CF, unit)} · W′ {fmtW(fit.W, unit)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {aucHistory.length >= 2 && (
               <div style={{ height: 70, marginBottom: 10 }}>
@@ -5450,117 +5537,164 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           ))}
         </Card>
 
-        {/* ── Unified training recommendation ── */}
-        {recommendation ? (
-          <Card style={{ marginBottom: 16, border: `1px solid ${recommendation.color}40` }}>
-            <div style={{ fontSize: 11, color: recommendation.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
-              Next Session Focus
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: recommendation.color, marginBottom: 10 }}>
-              {recommendation.title}
-            </div>
-            <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
-              {recommendation.insight}
-            </div>
-            {/* Projected ΔAUC ranking — primary signal */}
-            {recommendation.gains && (
-              <div style={{
-                background: C.bg, borderRadius: 8, padding: "8px 10px",
-                marginBottom: 10, fontSize: 11,
-              }}>
-                <div style={{ color: C.muted, letterSpacing: 0.4, textTransform: "uppercase", fontSize: 10, marginBottom: 6 }}>
-                  Projected ΔAUC · next session
-                </div>
-                {[
-                  { k: "power",     lbl: "Power",    col: C.red },
-                  { k: "strength",  lbl: "Strength", col: C.orange },
-                  { k: "endurance", lbl: "Capacity", col: C.blue },
-                ].map(r => {
-                  const v = recommendation.gains[r.k];
-                  const pct = recommendation.gains[recommendation.key] > 0
-                    ? (v / recommendation.gains[recommendation.key]) * 100 : 0;
-                  const isBest = r.k === recommendation.key;
-                  const rs = recommendation.responseSource?.[r.k];
-                  const calibrated = rs?.source === "blended";
-                  return (
-                    <div key={r.k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <span style={{ width: 62, color: r.col, fontWeight: isBest ? 700 : 400 }}>
-                        {r.lbl}
-                        {calibrated && (
-                          <span
-                            title={`Calibrated from ${Math.round(rs.n)} session-equivalents (TUT-weighted)`}
-                            style={{ marginLeft: 3, fontSize: 8, color: C.green, verticalAlign: "super" }}
-                          >●</span>
-                        )}
-                      </span>
-                      <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${pct}%`, background: r.col, borderRadius: 3, transition: "width 0.3s" }} />
-                      </div>
-                      <span style={{ width: 56, textAlign: "right", color: isBest ? r.col : C.muted, fontWeight: isBest ? 700 : 400 }}>
-                        +{fmt1(v)} {unit}·s
-                      </span>
-                    </div>
-                  );
-                })}
-                {recommendation.responseSource && (() => {
-                  const calibrated = Object.entries(recommendation.responseSource)
-                    .filter(([, s]) => s.source === "blended");
-                  if (calibrated.length === 0) {
-                    return (
-                      <div style={{ fontSize: 10, color: C.muted, marginTop: 6, fontStyle: "italic" }}>
-                        Using population prior. Response rates will calibrate to your own data after {PERSONAL_RESPONSE_MIN_SESSIONS}+ sessions per zone.
-                      </div>
-                    );
-                  }
-                  const labels = { power: "Power", strength: "Strength", endurance: "Capacity" };
-                  const parts = calibrated
-                    .map(([k, s]) => `${labels[k]} (${Math.round(s.n)})`)
-                    .join(", ");
-                  return (
-                    <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
-                      <span style={{ color: C.green }}>●</span> Calibrated from your history: {parts}.
-                      {calibrated.length < 3 && " Others still on prior."}
-                    </div>
-                  );
-                })()}
+        {/* ── Unified training recommendation ──
+            When no grip filter is active AND ≥2 grips have fits, render
+            a separate card per grip so Micro (FDP) and Crusher (FDS)
+            each get their own verdict — they are independent muscles
+            with independent force-duration curves, so pooling hides
+            the real story. Otherwise fall back to the single pooled /
+            selGrip-scoped card with the limiter/coverage diagnostics. */}
+        {(() => {
+          // Helper — render one projected-ΔAUC bars block for a rec.
+          const renderGainsBars = (rec) => rec.gains && (
+            <div style={{
+              background: C.bg, borderRadius: 8, padding: "8px 10px",
+              marginBottom: 10, fontSize: 11,
+            }}>
+              <div style={{ color: C.muted, letterSpacing: 0.4, textTransform: "uppercase", fontSize: 10, marginBottom: 6 }}>
+                Projected ΔAUC · next session
               </div>
-            )}
-            {/* Secondary diagnostics */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {recommendation.limiterKey && recommendation.agree && (
-                <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                  <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Shape:</span>
-                  <span>
-                    Curve-shape diagnostic agrees — this zone also falls farthest below its own Monod curve
-                    {recommendation.limiterGrip ? <> on <b>{recommendation.limiterGrip}</b></> : null}.
-                  </span>
-                </div>
-              )}
-              {recommendation.limiterKey && !recommendation.agree && (
-                <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                  <span style={{ color: C.yellow, fontWeight: 700, flexShrink: 0 }}>⚡ Shape:</span>
-                  <span>
-                    Curve-shape diagnostic points elsewhere
-                    {recommendation.limiterGrip ? <> (<b>{recommendation.limiterGrip}</b>)</> : null},
-                    but AUC ranks this protocol as the biggest capacity win. Growing area dominates balancing shape.
-                  </span>
-                </div>
-              )}
-              {recommendation.coverageKey && recommendation.coverageKey === recommendation.key && (
-                <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                  <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Coverage:</span>
-                  <span>Session count agrees — this is also your least-trained zone in the last 30 days.</span>
-                </div>
-              )}
+              {[
+                { k: "power",     lbl: "Power",    col: C.red },
+                { k: "strength",  lbl: "Strength", col: C.orange },
+                { k: "endurance", lbl: "Capacity", col: C.blue },
+              ].map(r => {
+                const v = rec.gains[r.k];
+                const pct = rec.gains[rec.key] > 0 ? (v / rec.gains[rec.key]) * 100 : 0;
+                const isBest = r.k === rec.key;
+                const rs = rec.responseSource?.[r.k];
+                const calibrated = rs?.source === "blended";
+                return (
+                  <div key={r.k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <span style={{ width: 62, color: r.col, fontWeight: isBest ? 700 : 400 }}>
+                      {r.lbl}
+                      {calibrated && (
+                        <span
+                          title={`Calibrated from ${Math.round(rs.n)} session-equivalents (TUT-weighted)`}
+                          style={{ marginLeft: 3, fontSize: 8, color: C.green, verticalAlign: "super" }}
+                        >●</span>
+                      )}
+                    </span>
+                    <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${pct}%`, background: r.col, borderRadius: 3, transition: "width 0.3s" }} />
+                    </div>
+                    <span style={{ width: 56, textAlign: "right", color: isBest ? r.col : C.muted, fontWeight: isBest ? 700 : 400 }}>
+                      +{fmt1(v)} {unit}·s
+                    </span>
+                  </div>
+                );
+              })}
+              {rec.responseSource && (() => {
+                const calibrated = Object.entries(rec.responseSource).filter(([, s]) => s.source === "blended");
+                if (calibrated.length === 0) {
+                  return (
+                    <div style={{ fontSize: 10, color: C.muted, marginTop: 6, fontStyle: "italic" }}>
+                      Using population prior. Response rates will calibrate to your own data after {PERSONAL_RESPONSE_MIN_SESSIONS}+ sessions per zone.
+                    </div>
+                  );
+                }
+                const labels = { power: "Power", strength: "Strength", endurance: "Capacity" };
+                const parts = calibrated.map(([k, s]) => `${labels[k]} (${Math.round(s.n)})`).join(", ");
+                return (
+                  <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
+                    <span style={{ color: C.green }}>●</span> Calibrated from your history: {parts}.
+                    {calibrated.length < 3 && " Others still on prior."}
+                  </div>
+                );
+              })()}
             </div>
-          </Card>
-        ) : (
-          <Card style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-              🔬 Train close to your limit in at least one time domain so the auto-failure system can record a failure point. That unlocks personalized training recommendations.
-            </div>
-          </Card>
-        )}
+          );
+
+          // Per-grip split mode: one card per grip with its own verdict.
+          const perGripMode = !selGrip && Object.keys(gripRecs).length >= 2;
+          if (perGripMode) {
+            return (
+              <>
+                {Object.values(gripRecs).map(rec => (
+                  <Card key={rec.grip} style={{ marginBottom: 16, border: `1px solid ${rec.color}40` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                      <div style={{ fontSize: 11, color: rec.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                        Next Session Focus
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>
+                        {rec.grip}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: rec.color, marginBottom: 10 }}>
+                      {rec.title}
+                    </div>
+                    <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
+                      {rec.insight}
+                    </div>
+                    {renderGainsBars(rec)}
+                    <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
+                      CF {fmtW(rec.CF, unit)} {unit} · W′ {fmtW(rec.W, unit)} {unit}·s · {rec.n} failure{rec.n !== 1 ? "s" : ""}
+                    </div>
+                  </Card>
+                ))}
+              </>
+            );
+          }
+
+          // Single-card mode — pooled fit, or user has picked a specific
+          // grip. Shows the full limiter/coverage diagnostics panel.
+          if (!recommendation) {
+            return (
+              <Card style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+                  🔬 Train close to your limit in at least one time domain so the auto-failure system can record a failure point. That unlocks personalized training recommendations.
+                </div>
+              </Card>
+            );
+          }
+          return (
+            <Card style={{ marginBottom: 16, border: `1px solid ${recommendation.color}40` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <div style={{ fontSize: 11, color: recommendation.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                  Next Session Focus
+                </div>
+                {selGrip && (
+                  <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{selGrip}</div>
+                )}
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: recommendation.color, marginBottom: 10 }}>
+                {recommendation.title}
+              </div>
+              <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
+                {recommendation.insight}
+              </div>
+              {renderGainsBars(recommendation)}
+              {/* Secondary diagnostics */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {recommendation.limiterKey && recommendation.agree && (
+                  <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Shape:</span>
+                    <span>
+                      Curve-shape diagnostic agrees — this zone also falls farthest below its own Monod curve
+                      {recommendation.limiterGrip ? <> on <b>{recommendation.limiterGrip}</b></> : null}.
+                    </span>
+                  </div>
+                )}
+                {recommendation.limiterKey && !recommendation.agree && (
+                  <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <span style={{ color: C.yellow, fontWeight: 700, flexShrink: 0 }}>⚡ Shape:</span>
+                    <span>
+                      Curve-shape diagnostic points elsewhere
+                      {recommendation.limiterGrip ? <> (<b>{recommendation.limiterGrip}</b>)</> : null},
+                      but AUC ranks this protocol as the biggest capacity win. Growing area dominates balancing shape.
+                    </span>
+                  </div>
+                )}
+                {recommendation.coverageKey && recommendation.coverageKey === recommendation.key && (
+                  <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Coverage:</span>
+                    <span>Session count agrees — this is also your least-trained zone in the last 30 days.</span>
+                  </div>
+                )}
+              </div>
+            </Card>
+          );
+        })()}
 
         {/* Unexplored zones notice */}
         {unexplored.length > 0 && (
