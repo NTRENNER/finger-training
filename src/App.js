@@ -3497,12 +3497,11 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
             )}
 
             {/* Rep chips */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {sess.reps.sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num).map((r, j) => {
+            {(() => {
+              const sortedReps = sess.reps.slice().sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num);
+              const renderChip = (r, j) => {
                 const isRepEditing = editingRep?.sessKey === sessKey && editingRep?.repIdx === j;
                 const passed = r.actual_time_s >= sess.target_duration;
-                // Show hand badge only on mixed (Both) sessions — single-hand sessions already say "Left"/"Right" in the header
-                const showHandBadge = sess.hand === "B" && (r.hand === "L" || r.hand === "R");
                 return (
                   <div key={j} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 0 }}>
                     <div
@@ -3515,15 +3514,6 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
                         paddingRight: repEditMode === sessKey ? 22 : 10,
                       }}
                     >
-                      {showHandBadge && (
-                        <span style={{
-                          display: "inline-block", marginRight: 6,
-                          padding: "1px 5px", borderRadius: 4,
-                          fontSize: 10, fontWeight: 700,
-                          background: r.hand === "R" ? C.orange + "33" : C.blue + "33",
-                          color:      r.hand === "R" ? C.orange : C.blue,
-                        }}>{r.hand}</span>
-                      )}
                       <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
                     </div>
                     {repEditMode === sessKey && (
@@ -3540,8 +3530,32 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
                     )}
                   </div>
                 );
-              })}
-            </div>
+              };
+              // Both-mode session → two-column layout (Left | Right).
+              // Single-hand session → existing flex-wrap row.
+              if (sess.hand === "B") {
+                return (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {["L", "R"].map(handKey => (
+                      <div key={handKey}>
+                        <div style={{
+                          fontSize: 10, fontWeight: 700, letterSpacing: 1,
+                          color: handKey === "L" ? C.blue : C.orange, marginBottom: 6,
+                        }}>{handKey === "L" ? "LEFT" : "RIGHT"}</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                          {sortedReps.map((r, j) => r.hand === handKey ? renderChip(r, j) : null)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }
+              return (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {sortedReps.map((r, j) => renderChip(r, j))}
+                </div>
+              );
+            })()}
 
             {/* + Add rep button */}
             {repEditMode === sessKey && !editingRep && addingRep !== sessKey && (
