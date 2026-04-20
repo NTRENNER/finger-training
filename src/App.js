@@ -4857,7 +4857,14 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                 <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit}·s · finite reserve above CF</div>
               </div>
             </div>
-            {/* ── Curve Shape Indicator ── */}
+            {/* ── Curve Shape Indicator ──
+                Purely descriptive — tells the user the balance between
+                their aerobic (CF) and anaerobic (W′) parameters. Does
+                NOT prescribe what to train next; that is the
+                SessionPlanner's job, and having two cards prescribing
+                different things (curve-shape heuristic vs. Monod
+                cross-zone residual) was giving contradictory advice
+                for the same state. */}
             {(() => {
               // W′/CF in seconds = how many seconds of W′ reserve per unit of CF.
               // Low  (<30s)  → flat curve  = CF-dominant (strong aerobic base)
@@ -4865,10 +4872,10 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               // High (>80s)  → steep curve = W′-dominant (strong short-term, lower base)
               const ratio = cfEstimate.CF > 0 ? cfEstimate.W / cfEstimate.CF : 0;
               const pct   = Math.min(100, Math.max(0, (ratio / 120) * 100));
-              const { shape, color: sc, advice } =
-                ratio < 30  ? { shape: "CF-dominant (Flat)",    color: C.blue,   advice: "Strong aerobic base. Power training will give you the biggest gains — short maximal hangs build W′." } :
-                ratio < 80  ? { shape: "Balanced",              color: C.green,  advice: "Good balance of CF and W′. Cycle power and capacity sessions to keep both systems growing." } :
-                              { shape: "W′-dominant (Steep)",   color: C.orange, advice: "Strong short burst capacity. Capacity training (sub-max hangs, long efforts) will raise your CF ceiling and benefit all zones." };
+              const { shape, color: sc, caption } =
+                ratio < 30  ? { shape: "CF-dominant (Flat)",    color: C.blue,   caption: "Your curve is flat — CF is high relative to W′. Your sustainable force is well developed; your finite anaerobic reserve is small." } :
+                ratio < 80  ? { shape: "Balanced",              color: C.green,  caption: "CF and W′ are roughly proportional — neither the aerobic asymptote nor the anaerobic reserve dominates the curve." } :
+                              { shape: "W′-dominant (Steep)",   color: C.orange, caption: "Your curve is steep — W′ is large relative to CF. Your short-burst capacity is well developed; your sustainable asymptote is lower." };
               return (
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 5 }}>
@@ -4889,8 +4896,8 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.muted, marginTop: 3 }}>
                     <span>Flat (CF dominant)</span><span>Steep (W′ dominant)</span>
                   </div>
-                  <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.5, fontStyle: "italic" }}>
-                    {advice}
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
+                    {caption} See <b>Next Session Focus</b> above for what to train next.
                   </div>
                 </div>
               );
