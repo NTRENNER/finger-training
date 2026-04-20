@@ -5943,15 +5943,32 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_
   const saveLog   = (l) => { setWLog(l);  saveLS(LS_WORKOUT_LOG_KEY,   l); };
 
   const rotKey    = WK_ROTATION[wState.rotationIndex % WK_ROTATION.length];
-  const workout   = plan[rotKey];
+  // displayKey: the workout currently being previewed / logged. Defaults to the
+  // recommendation (rotKey) but the user can override via the picker below.
+  // If the user picks something other than rotKey and completes it, we log the
+  // session but do NOT advance the rotation — so the "next up" queue persists.
+  const [displayKey, setDisplayKey] = useState(rotKey);
+  // If the recommendation changes (after a normal completion), reset the
+  // displayed workout back to the new recommendation.
+  useEffect(() => { setDisplayKey(rotKey); }, [rotKey]);
+  const workout   = plan[displayKey] || plan[rotKey];
   const sessionN  = wState.sessionCount + 1;
   const wtr       = weeksToTrip(trip.date);
+
+  // Switch the previewed workout. Clear any in-flight swaps since they
+  // reference exercise IDs from the previous workout.
+  const pickWorkout = (k) => {
+    if (k === displayKey) return;
+    setDisplayKey(k);
+    setSwaps({});
+    setSwapPickerFor(null);
+  };
 
   // Previous best set weights for an exercise in this workout slot
   const prevBestSets = (exId) => {
     for (let i = wLog.length - 1; i >= 0; i--) {
       const e = wLog[i];
-      if (e.workout === rotKey && e.exercises?.[exId]?.sets) {
+      if (e.workout === displayKey && e.exercises?.[exId]?.sets) {
         return e.exercises[exId].sets.map(s => s.weight).filter(Boolean);
       }
     }
@@ -5960,7 +5977,7 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_
 
   const startSession = () => {
     // Pre-populate weights and reps from last session for this workout
-    const prevLog = [...wLog].reverse().find(e => e.workout === rotKey);
+    const prevLog = [...wLog].reverse().find(e => e.workout === displayKey);
     const init = {};
     workout.exercises.forEach(ex => {
       const prevEx = prevLog?.exercises?.[ex.id];
@@ -6017,14 +6034,20 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_
   };
 
   const completeSession = () => {
-    const session = { id: genId(), date: today(), completedAt: nowISO(), workout: rotKey, sessionNumber: sessionN, exercises: sessionData };
+    const session = { id: genId(), date: today(), completedAt: nowISO(), workout: displayKey, sessionNumber: sessionN, exercises: sessionData };
     // Read fresh from localStorage rather than the React state snapshot, which may
     // be stale if the migration effect rewrote the log after this component mounted.
     const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
     saveLog([...freshLog, session]);
     if (onSessionSaved) onSessionSaved(session);
+    // Only advance the rotation when the recommended workout was actually done.
+    // Picking a different workout (or the side "D" outdoor/climb template) logs
+    // the session but leaves the rotation queue alone so nothing gets skipped.
+    const didRecommended = displayKey === rotKey && WK_ROTATION.includes(displayKey);
     saveState({
-      rotationIndex: (wState.rotationIndex + 1) % WK_ROTATION.length,
+      rotationIndex: didRecommended
+        ? (wState.rotationIndex + 1) % WK_ROTATION.length
+        : wState.rotationIndex,
       sessionCount: wState.sessionCount + 1,
     });
     setSessionActive(false);
@@ -6075,16 +6098,45 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_
         <>
           {/* Workout card */}
           <Card style={{ marginBottom: 12 }}>
+            {/* Workout picker — recommended is highlighted; pick any for this session */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+              {Object.keys(plan).map(k => {
+                const isPicked = k === displayKey;
+                const isRec    = k === rotKey;
+                return (
+                  <button key={k} onClick={() => pickWorkout(k)} style={{
+                    flex: 1, padding: "10px 4px", borderRadius: 10, cursor: "pointer",
+                    background: isPicked ? C.blue : C.border,
+                    color:      isPicked ? "#000" : C.muted,
+                    fontWeight: 700, fontSize: 14,
+                    border: isRec ? `2px solid ${C.blue}` : "2px solid transparent",
+                    position: "relative", transition: "all 0.15s",
+                  }}>
+                    {isRec && (
+                      <div style={{
+                        position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)",
+                        fontSize: 9, fontWeight: 700, background: C.blue, color: "#000",
+                        padding: "1px 6px", borderRadius: 6, whiteSpace: "nowrap",
+                        letterSpacing: "0.06em",
+                      }}>
+                        NEXT UP
+                      </div>
+                    )}
+                    {k}
+                  </button>
+                );
+              })}
+            </div>
+
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
-              {/* Letter badge */}
-              <div style={{
-                width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-                background: WTYPE_META.S.bg, border: `1px solid ${C.border}`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 18, fontWeight: 800, color: C.blue,
-              }}>{rotKey}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>WORKOUT {rotKey}  ·  NEXT UP</div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>
+                  WORKOUT {displayKey}
+                  {displayKey === rotKey
+                    ? "  ·  NEXT UP"
+                    : <span style={{ color: C.orange }}>  ·  OUT OF ORDER — queue still starts with {rotKey}</span>
+                  }
+                </div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{workout.name}</div>
                 <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>
                   {workout.exercises.filter(e => e.type !== "X").map(e => e.name).join(" · ")}
@@ -6105,11 +6157,75 @@ function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_
               ))}
             </div>
 
-            {/* Exercise list */}
+            {/* Exercise list — with swap UI on the preview card, so equipment
+                substitutions can be set before starting the session. */}
             <div>
-              {workout.exercises.map((ex, i) => (
-                <ExerciseRow key={ex.id} ex={ex} last={i === workout.exercises.length - 1} />
-              ))}
+              {workout.exercises.map((ex, i) => {
+                const isSwapped  = !!swaps[ex.id];
+                const activeEx   = isSwapped ? { ...swaps[ex.id] } : ex;
+                const subs       = EXERCISE_SUBSTITUTES[ex.id] || [];
+                const pickerOpen = swapPickerFor === ex.id;
+                const isLast     = i === workout.exercises.length - 1;
+                return (
+                  <div key={ex.id}>
+                    {subs.length > 0 && (
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 2 }}>
+                        <button
+                          onClick={() => setSwapPickerFor(pickerOpen ? null : ex.id)}
+                          style={{
+                            fontSize: 11, padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+                            background: "none", border: `1px solid ${isSwapped ? C.orange : C.border}`,
+                            color: isSwapped ? C.orange : C.muted,
+                          }}
+                        >
+                          {isSwapped ? `⇄ ${activeEx.name} (swapped)` : "⇄ swap"}
+                        </button>
+                      </div>
+                    )}
+                    {pickerOpen && (
+                      <div style={{
+                        background: C.bg, border: `1px solid ${C.border}`,
+                        borderRadius: 8, padding: "10px 12px", marginBottom: 8,
+                      }}>
+                        <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                          Substitute for <strong style={{ color: C.text }}>{ex.name}</strong>:
+                        </div>
+                        {isSwapped && (
+                          <button
+                            onClick={() => revertSwap(ex)}
+                            style={{
+                              display: "block", width: "100%", textAlign: "left",
+                              padding: "8px 10px", marginBottom: 4, borderRadius: 6,
+                              background: C.border, border: "none", cursor: "pointer",
+                              fontSize: 13, color: C.text, fontWeight: 600,
+                            }}
+                          >
+                            ↩ {ex.name} <span style={{ color: C.muted, fontWeight: 400 }}>(revert to original)</span>
+                          </button>
+                        )}
+                        {subs.map(sub => (
+                          <button
+                            key={sub.id}
+                            onClick={() => doSwap(ex, sub)}
+                            style={{
+                              display: "block", width: "100%", textAlign: "left",
+                              padding: "8px 10px", marginBottom: 4, borderRadius: 6,
+                              background: activeEx.id === sub.id ? C.orange + "22" : C.card,
+                              border: `1px solid ${activeEx.id === sub.id ? C.orange : C.border}`,
+                              cursor: "pointer", fontSize: 13, color: C.text,
+                            }}
+                          >
+                            <span style={{ fontWeight: 600 }}>{sub.name}</span>
+                            <span style={{ color: C.muted }}> · {sub.reps}</span>
+                            {sub.note && <span style={{ color: C.muted, fontSize: 11 }}> — {sub.note}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <ExerciseRow ex={activeEx} last={isLast} />
+                  </div>
+                );
+              })}
             </div>
 
             <div style={{ marginTop: 16 }}>
