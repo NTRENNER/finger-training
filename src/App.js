@@ -4317,13 +4317,21 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   // failures are structurally impossible when the target sits exactly
   // on the zone boundary (120s). Falls back to actual_time_s when a
   // rep has no target_duration (legacy data).
+  //
+  // Failure detection is computed live from actual_time_s < target_duration
+  // to match the red/green rendering in History. The stored r.failed flag
+  // only flips on auto-failure (Tindeq force-drop); manually-ended short
+  // hangs leave r.failed=false even though the rep clearly failed.
   const zones = useMemo(() => {
     const zoneStats = (lo, hi) => {
       const z = reps.filter(r => {
         const t = r.target_duration > 0 ? r.target_duration : r.actual_time_s;
         return t >= lo && t < hi;
       });
-      const f = z.filter(r => r.failed).length;
+      const f = z.filter(r => {
+        if (r.target_duration > 0) return r.actual_time_s < r.target_duration;
+        return r.failed;
+      }).length;
       return { total: z.length, failures: f, successes: z.length - f,
                failRate: z.length > 0 ? f / z.length : null };
     };
