@@ -4345,7 +4345,7 @@ function TrendsView({ history, unit = "lbs", activities = [] }) {
 const POWER_MAX    = 20;
 const STRENGTH_MAX = 120;
 
-function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [] }) {
+function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [], liveEstimate = null }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selGrip,   setSelGrip]   = useState("");
   const [relMode,   setRelMode]   = useState(false); // relative strength toggle
@@ -4693,8 +4693,14 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     const coverageKey = coverage.total > 0 ? coverage.recommended : null;
 
     // No curve fit → fall back to limiter or coverage, with a caveat
-    // that AUC ranking needs failure data.
-    if (!cfEstimate) {
+    // that AUC ranking needs failure data. Use the SHARED liveEstimate
+    // so Setup and Analysis always rank protocols from the same curve
+    // regardless of which hand/grip the user has selected as the
+    // Analysis filter. liveEstimate is computed at App root and auto-
+    // selects the cleaner per-hand fit (higher CF, less corrupted by
+    // fatigue / sparse data).
+    const fitForRec = liveEstimate ?? cfEstimate;
+    if (!fitForRec) {
       const fallbackKey = limiterKey ?? coverageKey;
       if (!fallbackKey) return null;
       const d = ZONE_DETAILS[fallbackKey];
@@ -4712,7 +4718,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     }
 
     // Primary: marginal ΔAUC per protocol using PERSONAL response rates.
-    const { CF, W } = cfEstimate;
+    const { CF, W } = fitForRec;
     const gains = {};
     for (const [key, resp] of Object.entries(personalResponse)) {
       const dCF = CF * resp.cf;
@@ -4748,7 +4754,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       responseSource,
       coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
     };
-  }, [cfEstimate, history, activities, unit, personalResponse]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [liveEstimate, history, activities, unit, personalResponse]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unexplored = Object.entries(zones)
     .filter(([, z]) => z.total === 0)
@@ -7385,9 +7391,42 @@ export default function App() {
   // ── Live CF/W′ estimate (all failure reps, both hands, all grips) ─────────────
   // Used by SessionPlannerCard and AnalysisView. Updates as training data grows.
   const liveEstimate = useMemo(() => {
-    const failures = history.filter(r => r.failed && r.avg_force_kg > 0 && r.actual_time_s > 0);
-    if (failures.length < 2) return null;
-    return fitCF(failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
+    // Fit per-hand AND pooled, then pick adaptively:
+    //   • If the two hands' CFs agree within tolerance → use the pooled
+    //     fit (twice the data → tighter Monod estimate).
+    //   • If they diverge sharply → trust the ceiling hand. A weaker
+    //     hand at that level of divergence is almost always a data
+    //     artifact (sparse durations, climbing-induced fatigue,
+    //     occasional botched failures) rather than a different
+    //     underlying curve shape; pooling would just let that noise
+    //     drag CF down and flip the W'/CF ratio across the Power-vs-
+    //     Strength breakeven.
+    // Tolerance is set loose enough (20%) to keep the common case of
+    // few-pound asymmetries on the pooled path.
+    const CF_ASYMMETRY_TOL = 0.20;
+    const allFails = history.filter(r => r.failed && r.avg_force_kg > 0 && r.actual_time_s > 0);
+    if (allFails.length < 2) return null;
+    const fitFor = (rows) => {
+      if (rows.length < 2) return null;
+      // Require at least 2 distinct target durations for the fit to be
+      // meaningful (otherwise the Monod linearization has no spread).
+      const durs = new Set(rows.map(r => r.target_duration));
+      if (durs.size < 2) return null;
+      return fitCF(rows.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
+    };
+    const fitL = fitFor(allFails.filter(r => r.hand === "L"));
+    const fitR = fitFor(allFails.filter(r => r.hand === "R"));
+    const fitPooled = fitFor(allFails);
+    if (fitL && fitR) {
+      const cfHi = Math.max(fitL.CF, fitR.CF);
+      const cfLo = Math.min(fitL.CF, fitR.CF);
+      const asym = cfHi > 0 ? (cfHi - cfLo) / cfHi : 0;
+      if (asym <= CF_ASYMMETRY_TOL) return fitPooled ?? (fitL.CF >= fitR.CF ? fitL : fitR);
+      return fitL.CF >= fitR.CF ? fitL : fitR;
+    }
+    if (fitL) return fitL;
+    if (fitR) return fitR;
+    return fitPooled;
   }, [history]);
 
   // Permanent baseline snapshot — set once from the earliest training data,
@@ -7896,7 +7935,7 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} />}
+      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} liveEstimate={liveEstimate} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 4 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
