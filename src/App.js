@@ -162,16 +162,29 @@ function computeAUC(CF, W, tMin = 10, tMax = 120) {
 }
 
 // Per-session relative response of the two Monod parameters to each
-// training protocol. Values are fractional (% of current) rather than
-// absolute — ratios within a row (cf : w) and among rows matter; the
-// overall magnitude does not, since we only compare protocols. Power
-// hangs develop the anaerobic W′ reserve most strongly; capacity
-// hangs develop the aerobic CF asymptote; strength sits between.
-// Used to project marginal ΔAUC per protocol for the recommendation.
+// training protocol — the POPULATION PRIOR. Values are fractional
+// (% of current); ratios within a row and among rows matter, not the
+// overall magnitude, since we only compare protocols.
+//
+// Physiological story (CF = F-D asymptote, W′ = finite reserve above it):
+//   • Power (short max efforts) primarily builds W′ — the anaerobic
+//     reserve — with minor CF carry-over via MVC neural gains.
+//   • Strength (mid-duration max hangs, 1RM work) raises the absolute
+//     force ceiling. Since CF typically sits ~60–70% of max, lifting
+//     the ceiling lifts CF proportionally — the "ceiling effect."
+//     Largest CF-response of the three.
+//   • Capacity (sustained threshold work) raises CF as a fraction of
+//     the existing ceiling — the "ratio effect." Real but bounded;
+//     once you're near the trainable CF:max ratio ceiling, further
+//     gains require lifting max itself (i.e., strength work).
+//
+// These are priors, not truths. computePersonalResponse() fits them to
+// the user's own CF/W' trajectory and shrinks the prior toward the
+// observed rate as evidence accumulates.
 const PROTOCOL_RESPONSE = {
-  power:     { cf: 0.01, w: 0.05 },  // short, high-force → W′-dominant response
-  strength:  { cf: 0.03, w: 0.02 },  // mid-duration → both
-  endurance: { cf: 0.05, w: 0.01 },  // sustained → CF-dominant response
+  power:     { cf: 0.010, w: 0.060 },  // W′-dominant, tiny CF via MVC
+  strength:  { cf: 0.045, w: 0.015 },  // CF-dominant via ceiling effect
+  endurance: { cf: 0.030, w: 0.008 },  // CF via ratio effect, small W′
 };
 
 // Integration window for the "climbing-relevant" AUC — covers power
@@ -1827,6 +1840,120 @@ function computeLimiterZone(history) {
   return null;
 }
 
+// ── Personalized response calibration ───────────────────────────────
+// Fits per-zone CF/W′ response rates from the user's own training log
+// and shrinks them toward the PROTOCOL_RESPONSE prior with Bayesian
+// shrinkage. Early on (thin data) the returned coefficients equal the
+// prior; as zone-specific sessions accumulate, the fit pulls toward
+// the observed personal rates. A zone needs at least MIN_SESSIONS
+// observations before any personal signal is blended in.
+//
+// Per-session attribution: for each calendar day with failures, refit
+// Monod on all data up to that day and compare against the fit through
+// the previous day. Fractional ΔCF and ΔW′ are attributed to the zone
+// most reps on that day targeted. Individual deltas are noisy — the
+// signal comes from averaging across many sessions in the same zone.
+// Negative observed rates are floored at zero (likely confounds:
+// illness, taper, bad mount) rather than propagated as "training hurt
+// me" into a negative coefficient.
+//
+// Shrinkage: posterior = (k₀·prior + n·observed) / (k₀ + n). With
+// k₀ = PERSONAL_RESPONSE_PRIOR_WEIGHT, early sessions are dominated
+// by the prior and the engine only trusts personal rates once there
+// are roughly k₀ sessions of that zone to pull signal from noise.
+const PERSONAL_RESPONSE_PRIOR_WEIGHT = 10;  // pseudo-sessions
+const PERSONAL_RESPONSE_MIN_SESSIONS = 5;    // hard gate per zone
+
+function computePersonalResponse(history) {
+  const zoneOf = (td) =>
+    td < POWER_MAX    ? "power"    :
+    td < STRENGTH_MAX ? "strength" :
+                        "endurance";
+
+  // Default: everyone starts at the prior with source='prior', n=0.
+  const result = {
+    power:     { ...PROTOCOL_RESPONSE.power,     n: 0, source: "prior" },
+    strength:  { ...PROTOCOL_RESPONSE.strength,  n: 0, source: "prior" },
+    endurance: { ...PROTOCOL_RESPONSE.endurance, n: 0, source: "prior" },
+  };
+
+  if (!history || history.length < 4) return result;
+
+  const failures = history.filter(r =>
+    r.failed &&
+    r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
+    r.actual_time_s > 0 && r.target_duration > 0 && r.date
+  );
+  if (failures.length < 4) return result;
+
+  // Sort and bucket by date.
+  const sorted = [...failures].sort((a, b) => a.date.localeCompare(b.date));
+  const byDate = {};
+  for (const r of sorted) (byDate[r.date] ||= []).push(r);
+  const dates = Object.keys(byDate).sort();
+
+  // Walk dates; at each date with enough prior data, refit before/after
+  // and attribute the fractional delta to the day's dominant zone.
+  const obs = {
+    power:     { cf: [], w: [] },
+    strength:  { cf: [], w: [] },
+    endurance: { cf: [], w: [] },
+  };
+
+  for (const date of dates) {
+    const before = sorted.filter(r => r.date < date);
+    const after  = sorted.filter(r => r.date <= date);
+    if (before.length < 2) continue;
+
+    const fitBefore = fitCF(before.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
+    const fitAfter  = fitCF(after.map(r  => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
+    if (!fitBefore || !fitAfter) continue;
+    if (fitBefore.CF <= 0) continue;
+
+    const dCF = (fitAfter.CF - fitBefore.CF) / fitBefore.CF;
+    const dW  = fitBefore.W > 0 ? (fitAfter.W - fitBefore.W) / fitBefore.W : 0;
+
+    // Dominant zone for the day = zone with the most reps targeting it.
+    const counts = { power: 0, strength: 0, endurance: 0 };
+    for (const r of byDate[date]) counts[zoneOf(r.target_duration)]++;
+    const dominant = Object.entries(counts).reduce((a, b) => b[1] > a[1] ? b : a)[0];
+
+    obs[dominant].cf.push(dCF);
+    obs[dominant].w.push(dW);
+  }
+
+  // Shrink each zone's observed rate toward the prior.
+  const k0 = PERSONAL_RESPONSE_PRIOR_WEIGHT;
+  for (const zone of Object.keys(PROTOCOL_RESPONSE)) {
+    const cfObs = obs[zone].cf;
+    const wObs  = obs[zone].w;
+    const n = cfObs.length;
+
+    if (n < PERSONAL_RESPONSE_MIN_SESSIONS) {
+      result[zone] = { ...PROTOCOL_RESPONSE[zone], n, source: "prior" };
+      continue;
+    }
+
+    const meanCF = cfObs.reduce((s, v) => s + v, 0) / n;
+    const meanW  = wObs.reduce((s, v) => s + v, 0) / n;
+    const prior  = PROTOCOL_RESPONSE[zone];
+
+    // Floor at zero: negative observed rate is almost always confounded
+    // (illness, injury, mount variance) rather than true anti-response.
+    const cfBlended = Math.max(0, (k0 * prior.cf + n * meanCF) / (k0 + n));
+    const wBlended  = Math.max(0, (k0 * prior.w  + n * meanW)  / (k0 + n));
+
+    result[zone] = {
+      cf: cfBlended,
+      w:  wBlended,
+      n,
+      source: "blended",
+    };
+  }
+
+  return result;
+}
+
 // Zone Workout Summary — neutral 30-day volume breakdown. Does NOT
 // prescribe training: the SessionPlanner owns the recommendation
 // (per-grip Monod cross-zone residual). This card is purely a log.
@@ -2003,11 +2130,14 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
         const limiterGrip = limiter?.grip ?? null;
         let zone = null;
         if (liveEstimate && liveEstimate.CF > 0) {
-          // Rank protocols by projected ΔAUC — matches AnalysisView's
-          // recommendation so the two views agree.
+          // Rank protocols by projected ΔAUC using the PERSONAL response
+          // (prior when data is thin; blended with observed rates as the
+          // training log grows). Matches AnalysisView so the two views
+          // prescribe the same zone.
           const { CF, W } = liveEstimate;
+          const response = computePersonalResponse(history);
           let bestKey = null, bestGain = -Infinity;
-          for (const [key, resp] of Object.entries(PROTOCOL_RESPONSE)) {
+          for (const [key, resp] of Object.entries(response)) {
             const gain = CF * resp.cf * (AUC_T_MAX - AUC_T_MIN)
                        + W  * resp.w  * Math.log(AUC_T_MAX / AUC_T_MIN);
             if (gain > bestGain) { bestGain = gain; bestKey = key; }
@@ -4489,21 +4619,27 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     };
   }, [reps]);
 
+  // ── Personal response calibration ──
+  // Fits CF/W′ response rates per zone from the user's own history and
+  // shrinks toward PROTOCOL_RESPONSE. Used by the recommendation engine
+  // instead of the raw prior so the engine's "what grows AUC fastest"
+  // adapts to this climber's actual measured response.
+  const personalResponse = useMemo(
+    () => computePersonalResponse(history),
+    [history]
+  );
+
   // ── Unified training recommendation ──
   // Primary signal: marginal AUC gain. For each protocol (power /
-  // strength / capacity), project the expected %-change in CF and W′
-  // (see PROTOCOL_RESPONSE), multiply by current parameter values to
-  // get absolute ΔCF and ΔW′, then integrate to a projected ΔAUC over
-  // the climbing-relevant 10–120s window. Pick the protocol with the
-  // largest projected ΔAUC — this is the "grow the area under the
-  // curve" objective, not "balance the curve shape". A high-CF but
-  // steep-curved user still gets Capacity if Capacity yields the
-  // largest AUC gain; a flat-but-underdeveloped user gets whichever
-  // protocol best grows absolute capacity.
+  // strength / capacity), take the PERSONAL response rates (prior if
+  // thin data, blended with observed otherwise), project ΔCF and ΔW′
+  // at current parameter values, and integrate to a projected ΔAUC
+  // over the climbing-relevant 10–120s window. Pick the protocol with
+  // the largest projected ΔAUC.
   //
   // Secondary: Monod cross-zone residual (limiter) and zone coverage,
-  // both kept as diagnostics alongside the ΔAUC ranking so users can
-  // see where the curve is lopsided and which zones are under-trained.
+  // kept as diagnostics alongside the ΔAUC ranking so users can see
+  // where the curve is lopsided and which zones are under-trained.
   const recommendation = useMemo(() => {
     const ZONE_DETAILS = {
       power: {
@@ -4512,11 +4648,11 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       },
       strength: {
         title: "Train Strength", color: C.orange,
-        caption: "mid-duration holds that lift both CF and W′ moderately.",
+        caption: "mid-duration max hangs that lift the force ceiling — and with it, CF.",
       },
       endurance: {
         title: "Train Capacity", color: C.blue,
-        caption: "sustained holds that raise your CF asymptote, the right-hand floor of the curve.",
+        caption: "sustained threshold holds that raise CF as a fraction of your existing ceiling.",
       },
     };
 
@@ -4543,14 +4679,15 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         limiterKey, limiterGrip,
         coverageKey,
         agree: true,
+        responseSource: null,
         coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
       };
     }
 
-    // Primary: marginal ΔAUC per protocol (in display units).
+    // Primary: marginal ΔAUC per protocol using PERSONAL response rates.
     const { CF, W } = cfEstimate;
     const gains = {};
-    for (const [key, resp] of Object.entries(PROTOCOL_RESPONSE)) {
+    for (const [key, resp] of Object.entries(personalResponse)) {
       const dCF = CF * resp.cf;
       const dW  = W  * resp.w;
       const gainKg = dCF * (AUC_T_MAX - AUC_T_MIN) + dW * Math.log(AUC_T_MAX / AUC_T_MIN);
@@ -4562,6 +4699,15 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     // Does the Monod limiter agree with the ΔAUC winner?
     const agree = !limiterKey || limiterKey === bestKey;
 
+    // Per-zone { source: 'prior'|'blended', n } for the UI.
+    const responseSource = {};
+    for (const key of Object.keys(personalResponse)) {
+      responseSource[key] = {
+        source: personalResponse[key].source,
+        n:      personalResponse[key].n,
+      };
+    }
+
     return {
       key: bestKey,
       title: d.title,
@@ -4572,9 +4718,10 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       limiterKey, limiterGrip,
       coverageKey,
       agree,
+      responseSource,
       coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
     };
-  }, [cfEstimate, history, activities, unit]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cfEstimate, history, activities, unit, personalResponse]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unexplored = Object.entries(zones)
     .filter(([, z]) => z.total === 0)
@@ -5244,9 +5391,19 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                   const pct = recommendation.gains[recommendation.key] > 0
                     ? (v / recommendation.gains[recommendation.key]) * 100 : 0;
                   const isBest = r.k === recommendation.key;
+                  const rs = recommendation.responseSource?.[r.k];
+                  const calibrated = rs?.source === "blended";
                   return (
                     <div key={r.k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <span style={{ width: 62, color: r.col, fontWeight: isBest ? 700 : 400 }}>{r.lbl}</span>
+                      <span style={{ width: 62, color: r.col, fontWeight: isBest ? 700 : 400 }}>
+                        {r.lbl}
+                        {calibrated && (
+                          <span
+                            title={`Calibrated from ${rs.n} sessions in this zone`}
+                            style={{ marginLeft: 3, fontSize: 8, color: C.green, verticalAlign: "super" }}
+                          >●</span>
+                        )}
+                      </span>
                       <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
                         <div style={{ height: "100%", width: `${pct}%`, background: r.col, borderRadius: 3, transition: "width 0.3s" }} />
                       </div>
@@ -5256,6 +5413,27 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                     </div>
                   );
                 })}
+                {recommendation.responseSource && (() => {
+                  const calibrated = Object.entries(recommendation.responseSource)
+                    .filter(([, s]) => s.source === "blended");
+                  if (calibrated.length === 0) {
+                    return (
+                      <div style={{ fontSize: 10, color: C.muted, marginTop: 6, fontStyle: "italic" }}>
+                        Using population prior. Response rates will calibrate to your own data after {PERSONAL_RESPONSE_MIN_SESSIONS}+ sessions per zone.
+                      </div>
+                    );
+                  }
+                  const labels = { power: "Power", strength: "Strength", endurance: "Capacity" };
+                  const parts = calibrated
+                    .map(([k, s]) => `${labels[k]} (${s.n})`)
+                    .join(", ");
+                  return (
+                    <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
+                      <span style={{ color: C.green }}>●</span> Calibrated from your history: {parts}.
+                      {calibrated.length < 3 && " Others still on prior."}
+                    </div>
+                  );
+                })()}
               </div>
             )}
             {/* Secondary diagnostics */}
