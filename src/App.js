@@ -4207,9 +4207,14 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     };
   }, [baseline, cfEstimate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Per-hand / per-grip improvement breakdown ──
-  // Groups ALL failure reps (including calibration) by grip × hand,
-  // splits each group into first-2 (baseline) vs all (current), fits CF/W′ for each.
+  // ── Per-hand / per-grip CF & W' breakdown ──
+  // Groups failure reps by grip × hand, fits Monod (F = CF + W'/T) for
+  // each group, and reports CF and W' alongside their delta vs the
+  // global baseline snapshot. Showing CF and W' directly (not derived
+  // %s per zone) keeps the surface principle-based: CF is the slow
+  // aerobic asymptote, W' is the noisier anaerobic capacity, and the
+  // Power/Strength/Capacity %s are just predictions of these two
+  // numbers at three sample durations.
   const perHandImprovement = useMemo(() => {
     if (!baseline) return null;
     const groups = {};
@@ -4223,29 +4228,31 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     const result = {};
     for (const [key, reps] of Object.entries(groups)) {
       if (reps.length < 2) continue;
-      const sorted = [...reps].sort((a, b) => a.date.localeCompare(b.date));
-      // Use calibration snapshot as baseline; current = fitCF over all failures for this key
-      const curPts = sorted.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
+      const curPts = reps.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
       const cur    = fitCF(curPts);
       if (!cur) continue;
       const [grip, hand] = key.split("|");
-      const pct = (t) => Math.round((predForce(cur, t) / predForce(baseline, t) - 1) * 100);
+      const cfPct = baseline.CF > 0 ? Math.round((cur.CF / baseline.CF - 1) * 100) : 0;
+      const wPct  = baseline.W  > 0 ? Math.round((cur.W  / baseline.W  - 1) * 100) : 0;
       result[key] = {
         grip, hand, n: reps.length,
-        power:     pct(REF.power),
-        strength:  pct(REF.strength),
-        endurance: pct(REF.endurance),
-        total:     Math.round((pct(REF.power) + pct(REF.strength) + pct(REF.endurance)) / 3),
+        cf: cur.CF, w: cur.W,
+        cfDelta: cur.CF - baseline.CF,
+        wDelta:  cur.W  - baseline.W,
+        cfPct, wPct,
       };
     }
     return Object.keys(result).length > 0 ? result : null;
   }, [history, baseline]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Cumulative improvement time-series ──
-  // For each unique date with failure data, compute CF/W′ from all failures up to that date
-  // and compute % improvement vs baseline.
+  // ── Curve parameters over time ──
+  // For each date with failure data, refit Monod (F = CF + W'/T) using
+  // all failures up to that date and record CF and W' directly. Plotted
+  // on dual axes: CF (force units) tracks the slow aerobic asymptote,
+  // W' (force·s) tracks the faster anaerobic capacity. Showing the two
+  // raw fit parameters is more legible than the three derived zone %s.
   const cumulativeData = useMemo(() => {
-    if (!baseline || failures.length < 2) return [];
+    if (failures.length < 2) return [];
     const sorted = [...failures].sort((a, b) => a.date.localeCompare(b.date));
     const dates  = [...new Set(sorted.map(r => r.date))];
     return dates.map(date => {
@@ -4255,12 +4262,11 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       if (!fit) return null;
       return {
         date,
-        power:     Math.round((predForce(fit, REF.power)     / predForce(baseline, REF.power)     - 1) * 100),
-        strength:  Math.round((predForce(fit, REF.strength)   / predForce(baseline, REF.strength)   - 1) * 100),
-        endurance: Math.round((predForce(fit, REF.endurance)  / predForce(baseline, REF.endurance)  - 1) * 100),
+        cf: toDisp(fit.CF, unit),
+        w:  toDisp(fit.W,  unit),  // W' has units of force·s; same linear conversion as force
       };
     }).filter(Boolean);
-  }, [baseline, failures]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [failures, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fitted force-duration curve points for overlay
   const curveData = useMemo(() => {
@@ -4548,38 +4554,39 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         </Card>
       )}
 
-      {/* ── Cumulative improvement time-series ── */}
+      {/* ── Curve parameters over time ── */}
       {cumulativeData.length >= 2 && (
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Improvement Over Time</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>CF &amp; W′ Over Time</div>
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-            % change vs. baseline as more failure data accumulates.
+            The two parameters of your force-duration fit, recomputed after every failure.
+            CF is the slow aerobic asymptote; W′ is the faster anaerobic capacity.
           </div>
           <div style={{ display: "flex", gap: 14, fontSize: 11, color: C.muted, marginBottom: 8, flexWrap: "wrap" }}>
-            <span><span style={{ color: C.red }}>―</span> ⚡ Power</span>
-            <span><span style={{ color: C.orange }}>―</span> 💪 Strength</span>
-            <span><span style={{ color: C.blue }}>―</span> 🏔️ Capacity</span>
+            <span><span style={{ color: C.blue }}>―</span> CF ({unit})</span>
+            <span><span style={{ color: C.purple }}>―</span> W′ ({unit}·s)</span>
           </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={cumulativeData} margin={{ top: 6, right: 16, bottom: 28, left: 0 }}>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={cumulativeData} margin={{ top: 6, right: 42, bottom: 28, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
                 label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit="%" width={40} />
-              <ReferenceLine y={0} stroke={C.border} strokeDasharray="3 3" />
+              <YAxis yAxisId="cf" orientation="left"  tick={{ fill: C.blue,   fontSize: 11 }} width={46}
+                label={{ value: `CF (${unit})`, angle: -90, position: "insideLeft", fill: C.blue, fontSize: 11 }} />
+              <YAxis yAxisId="w"  orientation="right" tick={{ fill: C.purple, fontSize: 11 }} width={46}
+                label={{ value: `W′ (${unit}·s)`, angle: 90, position: "insideRight", fill: C.purple, fontSize: 11 }} />
               <Tooltip
                 contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                formatter={(val, name) => [`${val >= 0 ? "+" : ""}${val}%`, name]}
+                formatter={(val, name) => [fmt1(val), name]}
               />
-              <Line dataKey="power"     stroke={C.red}    strokeWidth={2} dot={false} name="Power"     />
-              <Line dataKey="strength"  stroke={C.orange} strokeWidth={2} dot={false} name="Strength"  />
-              <Line dataKey="endurance" stroke={C.blue}   strokeWidth={2} dot={false} name="Capacity"  />
+              <Line yAxisId="cf" dataKey="cf" stroke={C.blue}   strokeWidth={2} dot={false} name={`CF (${unit})`}     />
+              <Line yAxisId="w"  dataKey="w"  stroke={C.purple} strokeWidth={2} dot={false} name={`W′ (${unit}·s)`}  />
             </LineChart>
           </ResponsiveContainer>
         </Card>
       )}
 
-      {/* ── Per-hand / per-grip breakdown ── */}
+      {/* ── Per-hand / per-grip CF & W' breakdown ── */}
       {perHandImprovement && (() => {
         // Group rows by grip
         const byGrip = {};
@@ -4587,9 +4594,16 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           if (!byGrip[row.grip]) byGrip[row.grip] = {};
           byGrip[row.grip][row.hand] = row;
         }
+        // Small helper — colour deltas green/red with a neutral muted
+        // band for near-zero noise (|delta| < ~2% reads as "flat").
+        const deltaColour = (pct) => pct > 2 ? C.green : pct < -2 ? C.red : C.muted;
         return (
           <Card style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Per-Hand Improvement</div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Hand Curve Fit</div>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+              CF (critical force, asymptotic sustainable load) and W′ (anaerobic work capacity, finite above-CF reserve)
+              fit to your rep-1 failures per grip × hand. Δ% is change vs. your baseline snapshot.
+            </div>
             {Object.entries(byGrip).map(([grip, hands]) => (
               <div key={grip} style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 8 }}>{grip}</div>
@@ -4601,36 +4615,29 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                         {h === "L" ? "←L" : "R→"}
                       </div>
                       {[
-                        { label: "⚡", val: row.power,     color: C.red    },
-                        { label: "💪", val: row.strength,  color: C.orange },
-                        { label: "🏔️", val: row.endurance, color: C.blue   },
-                      ].map(({ label, val, color }) => (
+                        { label: "CF",  val: row.cf, pct: row.cfPct, suffix: unit,      color: C.blue   },
+                        { label: "W′", val: row.w,  pct: row.wPct,  suffix: `${unit}·s`, color: C.purple },
+                      ].map(({ label, val, pct, suffix, color }) => (
                         <div key={label} style={{
-                          flex: 1, background: C.bg, borderRadius: 8, padding: "5px 6px", textAlign: "center",
+                          flex: 1, background: C.bg, borderRadius: 8, padding: "6px 8px", textAlign: "center",
                           border: `1px solid ${color}25`,
                         }}>
-                          <div style={{ fontSize: 9, color: C.muted }}>{label}</div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: val >= 0 ? color : C.red }}>
-                            {val >= 0 ? "+" : ""}{val}%
+                          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.3 }}>{label}</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color }}>
+                            {fmtW(val, unit)} <span style={{ fontSize: 10, color: C.muted, fontWeight: 500 }}>{suffix}</span>
+                          </div>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: deltaColour(pct) }}>
+                            {pct > 0 ? "+" : ""}{pct}%
                           </div>
                         </div>
                       ))}
-                      <div style={{
-                        width: 50, background: C.bg, borderRadius: 8, padding: "5px 6px", textAlign: "center",
-                        border: `1px solid ${C.purple}25`, flexShrink: 0,
-                      }}>
-                        <div style={{ fontSize: 9, color: C.muted }}>Total</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: row.total >= 0 ? C.purple : C.red }}>
-                          {row.total >= 0 ? "+" : ""}{row.total}%
-                        </div>
-                      </div>
                     </div>
                   );
                 })}
               </div>
             ))}
             <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
-              Compared to your starting baseline · {baseline?.date}
+              Baseline snapshot · {baseline?.date}
             </div>
           </Card>
         );
