@@ -3248,6 +3248,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
   const [addingRep,   setAddingRep]   = useState(null);        // sessKey being added to
   const [editRepLoad, setEditRepLoad] = useState("");          // display-unit load (edit or add)
   const [editRepTime, setEditRepTime] = useState("");          // seconds (edit or add)
+  const [editRepHand, setEditRepHand] = useState(null);        // "L" | "R" — null in add-mode means "auto-derive at save"
   // Manual session entry
   const [addingSession,    setAddingSession]    = useState(false);
   const [newSessDate,      setNewSessDate]      = useState(() => new Date().toISOString().slice(0, 10));
@@ -3262,8 +3263,9 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
     setEditingRep({ sessKey, repIdx, rep });
     setEditRepLoad(String(fmt1(toDisp(effectiveLoad(rep), unit))));
     setEditRepTime(String(rep.actual_time_s));
+    setEditRepHand(rep.hand === "L" || rep.hand === "R" ? rep.hand : null);
   };
-  const closeRepEdit = () => { setEditingRep(null); setAddingRep(null); };
+  const closeRepEdit = () => { setEditingRep(null); setAddingRep(null); setEditRepHand(null); };
 
   const saveRepEdit = () => {
     if (!editingRep) return;
@@ -3271,6 +3273,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
     const updates = { actual_time_s: parseFloat(editRepTime) };
     if (editingRep.rep.avg_force_kg > 0) updates.avg_force_kg = loadKg;
     else updates.weight_kg = loadKg;
+    if (editRepHand === "L" || editRepHand === "R") updates.hand = editRepHand;
     onUpdateRep(editingRep.rep, updates);
     closeRepEdit();
   };
@@ -3280,6 +3283,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
     setAddingRep(sessKey);
     setEditRepLoad("");
     setEditRepTime("");
+    setEditRepHand(null); // null = auto-derive from session in saveRepAdd
   };
 
   const saveRepAdd = (sess) => {
@@ -3295,12 +3299,18 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
       : 1;
     const sessionId = existingReps[0]?.session_id || null;
     // Derive hand for the new rep:
-    //  - Single-hand session: use sess.hand
-    //  - Mixed/Both session: alternate from last rep's hand (fallback L)
-    let newHand = sess.hand;
-    if (sess.hand === "B") {
-      const lastHand = existingReps.length ? existingReps[existingReps.length - 1].hand : null;
-      newHand = lastHand === "L" ? "R" : "L";
+    //  - If the user explicitly picked L or R in the editor, honor it.
+    //  - Otherwise single-hand session: use sess.hand
+    //  - Otherwise mixed/Both session: alternate from last rep's hand (fallback L)
+    let newHand;
+    if (editRepHand === "L" || editRepHand === "R") {
+      newHand = editRepHand;
+    } else {
+      newHand = sess.hand;
+      if (sess.hand === "B") {
+        const lastHand = existingReps.length ? existingReps[existingReps.length - 1].hand : null;
+        newHand = lastHand === "L" ? "R" : "L";
+      }
     }
     const newRep = {
       date:            sess.date,
@@ -3755,6 +3765,28 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
                       onChange={e => setEditRepTime(e.target.value)}
                       style={{ width: 60, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 13 }}
                     />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    <label style={{ fontSize: 10, color: C.muted }}>Hand</label>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {["L", "R"].map(h => {
+                        const selected = editRepHand === h;
+                        return (
+                          <button
+                            key={h}
+                            type="button"
+                            onClick={() => setEditRepHand(h)}
+                            style={{
+                              width: 32, padding: "4px 0",
+                              background: selected ? C.blue : C.border,
+                              color: selected ? "#000" : C.muted,
+                              border: "none", borderRadius: 6,
+                              fontSize: 12, fontWeight: 700, cursor: "pointer",
+                            }}
+                          >{h}</button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
