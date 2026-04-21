@@ -5858,7 +5858,17 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
 // ─────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────
-function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut, unit = "lbs", onUnitChange = () => {}, bodyWeight = null, onBWChange = () => {}, trip = DEFAULT_TRIP, onTripChange = () => {}, onPullFromCloud = () => {}, pullStatus = "idle", lastPulledAt = null }) {
+function SettingsView({
+  user, loginEmail, setLoginEmail,
+  onSendOtp = () => {}, onVerifyOtp = () => {}, onCancelOtp = () => {},
+  otpSent = false, otpCode = "", setOtpCode = () => {},
+  otpBusy = false, otpError = null,
+  onSignOut,
+  unit = "lbs", onUnitChange = () => {},
+  bodyWeight = null, onBWChange = () => {},
+  trip = DEFAULT_TRIP, onTripChange = () => {},
+  onPullFromCloud = () => {}, pullStatus = "idle", lastPulledAt = null,
+}) {
   const [showSQL, setShowSQL] = useState(false);
   const sql = `-- Run this once in your Supabase SQL editor (fresh install):
 CREATE TABLE reps (
@@ -6010,20 +6020,76 @@ CREATE POLICY "auth_all" ON reps
                 device isn't showing here yet.
               </div>
             </div>
-          ) : (
+          ) : !otpSent ? (
             <div>
               <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>
-                Sign in to sync data across devices.
+                Sign in to sync data across devices. We'll email you a 6-digit code.
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <form
+                onSubmit={e => { e.preventDefault(); onSendOtp(); }}
+                style={{ display: "flex", gap: 8 }}
+              >
                 <input
                   type="email" value={loginEmail}
                   onChange={e => setLoginEmail(e.target.value)}
                   placeholder="your@email.com"
+                  autoComplete="email"
                   style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 14 }}
                 />
-                <Btn small onClick={onMagicLink}>Send Link</Btn>
+                <Btn small type="submit" onClick={onSendOtp} disabled={otpBusy || !loginEmail}>
+                  {otpBusy ? "Sending…" : "Send Code"}
+                </Btn>
+              </form>
+              {otpError && (
+                <div style={{ fontSize: 12, color: C.red, marginTop: 8 }}>{otpError}</div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>
+                Code sent to <b style={{ color: C.text }}>{loginEmail}</b>. Enter it below.
               </div>
+              <form
+                onSubmit={e => { e.preventDefault(); onVerifyOtp(); }}
+                style={{ display: "flex", gap: 8 }}
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="one-time-code"
+                  value={otpCode}
+                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="123456"
+                  autoFocus
+                  maxLength={6}
+                  style={{
+                    flex: 1, background: C.bg, border: `1px solid ${C.border}`,
+                    borderRadius: 8, padding: "8px 12px", color: C.text,
+                    fontSize: 18, letterSpacing: 4, fontVariantNumeric: "tabular-nums",
+                    textAlign: "center",
+                  }}
+                />
+                <Btn small type="submit" onClick={onVerifyOtp} disabled={otpBusy || otpCode.length < 6}>
+                  {otpBusy ? "Verifying…" : "Verify"}
+                </Btn>
+              </form>
+              <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={onSendOtp}
+                  disabled={otpBusy}
+                  style={{ background: "none", border: "none", color: C.blue, fontSize: 12, cursor: "pointer", padding: 0 }}
+                >Resend code</button>
+                <button
+                  type="button"
+                  onClick={onCancelOtp}
+                  style={{ background: "none", border: "none", color: C.muted, fontSize: 12, cursor: "pointer", padding: 0 }}
+                >Use a different email</button>
+              </div>
+              {otpError && (
+                <div style={{ fontSize: 12, color: C.red, marginTop: 8 }}>{otpError}</div>
+              )}
             </div>
           )}
         </Sect>
@@ -8117,14 +8183,55 @@ export default function App() {
     }
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Auth helpers ──────────────────────────────────────────
-  const sendMagicLink = async () => {
-    if (!loginEmail) return;
+  // ── Auth helpers (6-digit OTP) ────────────────────────────
+  // We intentionally don't pass emailRedirectTo: users type the 6-digit
+  // code into the app instead of clicking a magic link. This avoids the
+  // Android "link opens in Gmail's in-app browser, session never reaches
+  // Chrome" class of failures.
+  //
+  // IMPORTANT: Requires the Supabase "Magic Link" email template to
+  // include {{ .Token }} so users actually see the code in their email.
+  // Update at: Supabase dashboard -> Authentication -> Email Templates.
+  const [otpSent,  setOtpSent]  = useState(false);
+  const [otpCode,  setOtpCode]  = useState("");
+  const [otpBusy,  setOtpBusy]  = useState(false);
+  const [otpError, setOtpError] = useState(null);
+
+  const sendOtp = async () => {
+    if (!loginEmail || otpBusy) return;
+    setOtpBusy(true);
+    setOtpError(null);
     const { error } = await supabase.auth.signInWithOtp({
       email: loginEmail,
-      options: { emailRedirectTo: window.location.origin },
+      options: { shouldCreateUser: true },
     });
-    alert(error ? error.message : "Check your email for the sign-in link!");
+    setOtpBusy(false);
+    if (error) { setOtpError(error.message); return; }
+    setOtpSent(true);
+    setOtpCode("");
+  };
+
+  const verifyOtp = async () => {
+    const token = (otpCode || "").replace(/\s+/g, "");
+    if (!loginEmail || !token || otpBusy) return;
+    setOtpBusy(true);
+    setOtpError(null);
+    const { error } = await supabase.auth.verifyOtp({
+      email: loginEmail,
+      token,
+      type: "email",
+    });
+    setOtpBusy(false);
+    if (error) { setOtpError(error.message); return; }
+    // Success: onAuthStateChange will set `user` and trigger the history fetch.
+    setOtpSent(false);
+    setOtpCode("");
+  };
+
+  const cancelOtp = () => {
+    setOtpSent(false);
+    setOtpCode("");
+    setOtpError(null);
   };
 
   const signOut = async () => { await supabase.auth.signOut(); };
@@ -8344,7 +8451,14 @@ export default function App() {
           user={user}
           loginEmail={loginEmail}
           setLoginEmail={setLoginEmail}
-          onMagicLink={sendMagicLink}
+          onSendOtp={sendOtp}
+          onVerifyOtp={verifyOtp}
+          onCancelOtp={cancelOtp}
+          otpSent={otpSent}
+          otpCode={otpCode}
+          setOtpCode={setOtpCode}
+          otpBusy={otpBusy}
+          otpError={otpError}
           onSignOut={signOut}
           unit={unit}
           onUnitChange={saveUnit}
