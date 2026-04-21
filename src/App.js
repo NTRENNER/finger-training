@@ -7652,20 +7652,55 @@ export default function App() {
   const [pendingCount, setPendingCount] = useState(() => (loadLS(LS_QUEUE_KEY) || []).length);
   const refreshPending = () => setPendingCount((loadLS(LS_QUEUE_KEY) || []).length);
 
-  // Load from Supabase when signed in; also flush any queued reps.
+  // Load from Supabase when signed in; reconcile any offline reps first.
+  //
+  // Flow:
+  //   1. flushQueue() — retry reps that failed a previous authenticated push.
+  //   2. fetchReps() — grab the current remote state.
+  //   3. Reconcile — find local reps not present remotely (identified by
+  //      session_id + set_num + rep_num + hand) and push those. This is
+  //      the critical step: reps added while logged out live only in LS,
+  //      and without this step they'd be overwritten by setHistory(remote).
+  //   4. Re-fetch after pushes so state reflects the full merged set.
+  //
   // Only replace local history if Supabase actually returned rows — an empty
   // response (expired JWT silently blocked by RLS, network hiccup, etc.) must
   // never wipe out a good local cache.
   useEffect(() => {
     if (!user) return;
-    // Flush queued reps first, then reload full history.
-    flushQueue().then(flushed => {
-      if (flushed > 0) refreshPending();
-      fetchReps().then(reps => {
-        if (reps && reps.length > 0) setHistory(reps);
-        refreshPending();
-      });
-    });
+    let cancelled = false;
+    (async () => {
+      const flushed = await flushQueue();
+      if (!cancelled && flushed > 0) refreshPending();
+
+      const remote = await fetchReps();
+      if (cancelled) return;
+
+      if (remote) {
+        // Reconcile local-only reps (offline sessions) up to the cloud.
+        const localReps = loadLS(LS_KEY) || [];
+        const keyFor = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
+        const remoteKeys = new Set(remote.map(keyFor));
+        const toSync = localReps.filter(r => !remoteKeys.has(keyFor(r)));
+
+        let pushedAny = false;
+        for (const rep of toSync) {
+          const ok = await pushRep(rep);
+          if (ok) pushedAny = true;
+          else enqueueReps([rep]);
+        }
+        if (cancelled) return;
+
+        // If we pushed offline reps, refetch so state includes them with
+        // proper server-assigned ids. Otherwise use the first fetch.
+        const finalReps = pushedAny ? (await fetchReps()) : remote;
+        if (cancelled) return;
+        if (finalReps && finalReps.length > 0) setHistory(finalReps);
+      }
+
+      if (!cancelled) refreshPending();
+    })();
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -8143,9 +8178,22 @@ export default function App() {
       const flushed = await flushQueue();
       if (flushed > 0) refreshPending();
 
-      // Reps
-      const reps = await fetchReps();
-      if (reps && reps.length > 0) setHistory(reps);
+      // Reps — reconcile any local-only reps before overwriting state.
+      const remoteReps = await fetchReps();
+      if (remoteReps) {
+        const localReps = loadLS(LS_KEY) || [];
+        const keyFor = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
+        const remoteKeys = new Set(remoteReps.map(keyFor));
+        const toSync = localReps.filter(r => !remoteKeys.has(keyFor(r)));
+        let pushedAny = false;
+        for (const rep of toSync) {
+          const ok = await pushRep(rep);
+          if (ok) pushedAny = true;
+          else enqueueReps([rep]);
+        }
+        const finalReps = pushedAny ? (await fetchReps()) : remoteReps;
+        if (finalReps && finalReps.length > 0) setHistory(finalReps);
+      }
 
       // Workout sessions — merge into localStorage (skipping tombstoned ids).
       // WorkoutView re-reads LS on mount, so new workouts appear once the
