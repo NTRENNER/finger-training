@@ -2430,7 +2430,7 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
 // ACTIVE SESSION VIEW
 // ─────────────────────────────────────────────────────────────
 function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, unit = "lbs" }) {
-  const { config, currentSet, currentRep, fatigue, activeHand } = session;
+  const { config, currentSet, currentRep, activeHand } = session;
 
   // repPhase: 'ready' (show Start button, first rep only)
   //           'countdown' (3-2-1)
@@ -2442,15 +2442,18 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
   const startTimeRef = useRef(null);
   const timerRef     = useRef(null);
 
-  // Suggested weight per hand
+  // Suggested weight per hand — held CONSTANT within a set. We don't
+  // fatigue-discount the displayed weight; the user holds the same load
+  // each rep and we track how actual_time_s decays. See also AutoRepSessionView.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const suggestions = useMemo(() => {
     const handList = config.hand === "Both" ? ["L", "R"] : [config.hand];
     return Object.fromEntries(
       handList.map(h => [h, {
-        suggested: suggestWeight(session.refWeights?.[h] ?? null, fatigue),
+        suggested: suggestWeight(session.refWeights?.[h] ?? null, 0),
       }])
     );
-  }, [config.hand, session.refWeights, fatigue]);
+  }, [config.hand, session.refWeights]);
 
   // Actually start recording the rep
   const startRep = useCallback(async () => {
@@ -2590,7 +2593,6 @@ function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = fa
           )}
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
             Rep {currentRep + 1} suggested weight
-            {fatigue > 0.05 && <span style={{ marginLeft: 8, color: C.orange }}>(fatigue {Math.round(fatigue * 100)}%)</span>}
           </div>
           <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
             {sug?.suggested != null ? `${fmtW(sug.suggested, unit)} ${unit}` : "—"}
@@ -6242,15 +6244,19 @@ function BadgesView({ history, liveEstimate, genesisSnap }) {
 // Tindeq detects pull start and release automatically — no button taps needed.
 // Each detected rep calls onRepDone with {actualTime, avgForce, failed:false}.
 function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" }) {
-  const { config, currentSet, currentRep, activeHand, fatigue, refWeights } = session;
+  const { config, currentSet, currentRep, activeHand, refWeights } = session;
   const handLabel = config.hand === "Both"
     ? (activeHand === "L" ? "Left Hand" : "Right Hand")
     : config.hand === "L" ? "Left Hand" : "Right Hand";
 
-  // Program-recommended target weight for the active hand (adjusted for fatigue)
+  // Program-recommended target weight for the active hand.
+  // Held CONSTANT within a set — the user hangs the same load each rep and
+  // we record how actual_time_s changes. Those rep-time curves then feed
+  // the next session's prescription via the Monod fit. We intentionally do
+  // NOT discount the suggested weight by within-set fatigue.
   const suggestedKg = useMemo(
-    () => suggestWeight(refWeights?.[activeHand] ?? null, fatigue ?? 0),
-    [refWeights, activeHand, fatigue]
+    () => suggestWeight(refWeights?.[activeHand] ?? null, 0),
+    [refWeights, activeHand]
   );
 
   // Keep Tindeq's target ref in sync so the force gauge & auto-fail threshold
@@ -6343,11 +6349,6 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
               textTransform: "uppercase", marginBottom: 2,
             }}>
               Program target
-              {(fatigue ?? 0) > 0.05 && (
-                <span style={{ marginLeft: 6, color: C.orange, letterSpacing: 0 }}>
-                  (fatigue {Math.round((fatigue ?? 0) * 100)}%)
-                </span>
-              )}
             </div>
             <div style={{
               fontSize: 44, fontWeight: 900, color: C.blue,
@@ -7894,8 +7895,11 @@ export default function App() {
   // ── Handle rep completion ─────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, failed = false }) => {
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
+    // Weight is constant across the set — no within-set fatigue discount.
+    // The rep-time curve (actual_time_s) is what reflects fatigue and feeds
+    // the next session's prescription via Monod.
     const weight = (() => {
-      const ws = [suggestWeight(refWeights[effectiveHand], fatigue)].filter(Boolean);
+      const ws = [suggestWeight(refWeights[effectiveHand], 0)].filter(Boolean);
       return ws.length > 0 ? ws[0] : 0;
     })();
 
@@ -8024,13 +8028,13 @@ export default function App() {
     else setPhase("idle");
   }, [sessionReps, finishSession]);
 
-  // Compute next rep suggestion for rest screen
+  // Compute next rep suggestion for rest screen — same constant set weight.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const nextWeight = useMemo(() => {
     if (phase !== "resting") return null;
-    const restFatigue = fatigueAfterRest(fatigue, config.restTime);
     const hand = config.hand === "Both" ? activeHand : config.hand;
-    return suggestWeight(refWeights[hand], restFatigue);
-  }, [phase, fatigue, config.restTime, config.hand, refWeights, activeHand]);
+    return suggestWeight(refWeights[hand], 0);
+  }, [phase, config.hand, refWeights, activeHand]);
 
   // ── Auth helpers ──────────────────────────────────────────
   const sendMagicLink = async () => {
