@@ -3585,10 +3585,19 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
                       }}
                       title={notes[sessKey] ? "View/edit note" : "Add note"}
                     >📝</button>
-                    <button onClick={() => { setEditKey(sessKey); setEditHand(sess.hand); setEditGrip(sess.grip); setEditTarget(sess.target_duration); setConfirmKey(null); setNoteKey(null); }} style={{
+                    <button onClick={() => {
+                      setEditKey(sessKey);
+                      setEditHand(sess.hand);
+                      setEditGrip(sess.grip);
+                      setEditTarget(sess.target_duration);
+                      setRepEditMode(sessKey);   // also enable per-rep editing
+                      setConfirmKey(null);
+                      setNoteKey(null);
+                      closeRepEdit();
+                    }} style={{
                       background: "none", border: "none", color: C.muted,
                       fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1,
-                    }} title="Edit session">✏️</button>
+                    }} title="Edit session & reps">✏️</button>
                     <button onClick={() => { setConfirmKey(sessKey); setEditKey(null); setNoteKey(null); }} style={{
                       background: "none", border: "none", color: C.muted,
                       fontSize: 14, cursor: "pointer", padding: "0 2px", lineHeight: 1,
@@ -3643,29 +3652,27 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
                 </div>
                 {/* Row 3: save / cancel */}
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => { onUpdateSession(sessKey, { hand: editHand, grip: editGrip, target_duration: editTarget }); setEditKey(null); }} style={{
+                  <button onClick={() => {
+                    onUpdateSession(sessKey, { hand: editHand, grip: editGrip, target_duration: editTarget });
+                    setEditKey(null);
+                    setRepEditMode(null);
+                    closeRepEdit();
+                  }} style={{
                     background: C.green, border: "none", borderRadius: 6, color: "#000",
                     fontSize: 11, fontWeight: 700, padding: "4px 10px", cursor: "pointer",
-                  }}>Save</button>
-                  <button onClick={() => setEditKey(null)} style={{
+                  }}>Done</button>
+                  <button onClick={() => {
+                    setEditKey(null);
+                    setRepEditMode(null);
+                    closeRepEdit();
+                  }} style={{
                     background: C.border, border: "none", borderRadius: 6, color: C.muted,
                     fontSize: 11, padding: "4px 8px", cursor: "pointer",
                   }}>Cancel</button>
                 </div>
-              </div>
-            )}
-
-            {/* Edit-reps toggle */}
-            {!isEditing && !isConfirming && (
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
-                <button
-                  onClick={() => { setRepEditMode(repEditMode === sessKey ? null : sessKey); closeRepEdit(); }}
-                  style={{
-                    background: "none", border: `1px solid ${repEditMode === sessKey ? C.red : C.border}`,
-                    color: repEditMode === sessKey ? C.red : C.muted,
-                    borderRadius: 12, padding: "2px 10px", fontSize: 11, cursor: "pointer",
-                  }}
-                >{repEditMode === sessKey ? "Done" : "Edit reps"}</button>
+                <div style={{ marginTop: 8, fontSize: 11, color: C.muted, fontStyle: "italic" }}>
+                  Tap a rep chip below to edit its load, time, or hand · use + to add a rep · × to delete.
+                </div>
               </div>
             )}
 
