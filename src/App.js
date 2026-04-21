@@ -5858,7 +5858,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
 // ─────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────
-function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut, unit = "lbs", onUnitChange = () => {}, bodyWeight = null, onBWChange = () => {}, trip = DEFAULT_TRIP, onTripChange = () => {} }) {
+function SettingsView({ user, loginEmail, setLoginEmail, onMagicLink, onSignOut, unit = "lbs", onUnitChange = () => {}, bodyWeight = null, onBWChange = () => {}, trip = DEFAULT_TRIP, onTripChange = () => {}, onPullFromCloud = () => {}, pullStatus = "idle", lastPulledAt = null }) {
   const [showSQL, setShowSQL] = useState(false);
   const sql = `-- Run this once in your Supabase SQL editor (fresh install):
 CREATE TABLE reps (
@@ -5988,7 +5988,27 @@ CREATE POLICY "auth_all" ON reps
               <div style={{ fontSize: 14, marginBottom: 12 }}>
                 Signed in as <b>{user.email}</b>
               </div>
-              <Btn small color={C.red} onClick={onSignOut}>Sign Out</Btn>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <Btn
+                  small
+                  color={pullStatus === "pulling" ? C.muted : C.blue}
+                  onClick={onPullFromCloud}
+                  disabled={pullStatus === "pulling"}
+                >
+                  {pullStatus === "pulling" ? "Pulling…" : "⟳ Pull from Cloud"}
+                </Btn>
+                <Btn small color={C.red} onClick={onSignOut}>Sign Out</Btn>
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
+                {pullStatus === "ok" && lastPulledAt && (
+                  <>Pulled at {new Date(lastPulledAt).toLocaleTimeString()} · </>
+                )}
+                {pullStatus === "err" && (
+                  <span style={{ color: C.red }}>Pull failed — check network. </span>
+                )}
+                Auto-sync happens on sign-in. Use this if a workout saved on another
+                device isn't showing here yet.
+              </div>
             </div>
           ) : (
             <div>
@@ -8043,6 +8063,60 @@ export default function App() {
     return suggestWeight(refWeights[hand], 0);
   }, [phase, config.hand, refWeights, activeHand]);
 
+  // ── Manual cloud pull ─────────────────────────────────────
+  // User-triggered refresh. Flushes any queued local reps first, then
+  // refetches reps + workout_sessions from Supabase and merges into state.
+  // Without this, devices only fetch once at auth; a workout pushed from
+  // device A is invisible on device B until B is reloaded.
+  const [pullStatus, setPullStatus] = useState("idle"); // 'idle' | 'pulling' | 'ok' | 'err'
+  const [lastPulledAt, setLastPulledAt] = useState(null);
+  const pullFromCloud = useCallback(async () => {
+    if (!user) return;
+    setPullStatus("pulling");
+    try {
+      const flushed = await flushQueue();
+      if (flushed > 0) refreshPending();
+
+      // Reps
+      const reps = await fetchReps();
+      if (reps && reps.length > 0) setHistory(reps);
+
+      // Workout sessions — merge into localStorage (skipping tombstoned ids).
+      // WorkoutView re-reads LS on mount, so new workouts appear once the
+      // user next navigates there; we trigger a reload below to make them
+      // visible immediately across all tabs that use those memos.
+      let workoutChanged = false;
+      const remote = await fetchWorkoutSessions();
+      if (remote) {
+        const local      = loadLS(LS_WORKOUT_LOG_KEY) || [];
+        const localIds   = new Set(local.map(s => s.id).filter(Boolean));
+        const deletedIds = new Set(loadLS(LS_WORKOUT_DELETED_KEY) || []);
+        const additions  = remote.filter(s => !localIds.has(s.id) && !deletedIds.has(s.id));
+        if (additions.length > 0) {
+          saveLS(LS_WORKOUT_LOG_KEY, [...local, ...additions]);
+          workoutChanged = true;
+        }
+        const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
+        remote.forEach(s => s.id && synced.add(s.id));
+        saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
+      }
+
+      refreshPending();
+      setLastPulledAt(Date.now());
+      setPullStatus("ok");
+
+      // If we merged in new workout_sessions from the cloud, reload so the
+      // WorkoutView (which reads LS on mount) picks them up immediately.
+      // Reps/history live in App state so they appear without reload.
+      if (workoutChanged) {
+        setTimeout(() => window.location.reload(), 400);
+      }
+    } catch (e) {
+      console.warn("pullFromCloud failed:", e?.message);
+      setPullStatus("err");
+    }
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Auth helpers ──────────────────────────────────────────
   const sendMagicLink = async () => {
     if (!loginEmail) return;
@@ -8278,6 +8352,9 @@ export default function App() {
           onBWChange={saveBW}
           trip={trip}
           onTripChange={saveTrip}
+          onPullFromCloud={pullFromCloud}
+          pullStatus={pullStatus}
+          lastPulledAt={lastPulledAt}
         />
       )}
     </div>
