@@ -4984,6 +4984,18 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     });
   }, [threeExpFit, maxDur, unit]);
 
+  // Three-exp doesn't have a true asymptote (decays to 0), so there is
+  // no direct analog to Monod's CF. The closest physiologically meaningful
+  // "long-duration sustainable force" reference is F(180s) — well past
+  // the glycolytic dominance window (τ₂=30s drained 6× over) where the
+  // slow oxidative compartment carries essentially the whole load. Used
+  // as the dashed horizontal reference on the F-D chart, replacing the
+  // CF line that came from Monod.
+  const threeExpRef180 = useMemo(() => {
+    if (!threeExpFit) return null;
+    return predForceThreeExp(threeExpFit.amps, 180);
+  }, [threeExpFit]);
+
   // Train RMSE on the failure points for both models — directional
   // signal of fit quality. NOTE: this is training RMSE not holdout, so
   // it's biased optimistic for both; the relative comparison between
@@ -5011,27 +5023,33 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   // hand asymmetry is surfaced more clearly on the Per-Hand CF card
   // below the chart.)
 
-  // Bootstrap confidence band — resample failure points with
-  // replacement, refit each sample, take 5th/95th percentile of
-  // predicted force at each T. Band narrows as more data accumulates,
-  // so users can see when the fit is actually trustworthy. Deterministic
-  // RNG seeded from the data so the band is stable across renders.
+  // Bootstrap confidence band around the three-exp F-D curve — resample
+  // failure points with replacement, refit each sample, take 5th/95th
+  // percentile of predicted force at each T. Band narrows as more data
+  // accumulates, so users can see when the fit is actually trustworthy.
+  // Deterministic RNG seeded from the data so the band is stable across
+  // renders. Bootstrapped against three-exp (now the primary curve) so
+  // the band represents uncertainty in the curve we're actually showing.
   const confidenceBand = useMemo(() => {
     if (!failures || failures.length < 3) return null;
-    const pts = failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
+    const tePts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+    const prior = selGrip ? (threeExpPriors.get(selGrip) || [0,0,0]) : [0,0,0];
+    const lambda = selGrip ? THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1) : 0;
     const N = 150;
     const tMax = Math.max(maxDur, F_D_T_MIN + 10);
     const nSamples = 60;
     const ts = Array.from({ length: nSamples }, (_, i) =>
       F_D_T_MIN + ((tMax - F_D_T_MIN) / (nSamples - 1)) * i
     );
-    let seed = (pts.length * 1000 + Math.floor(pts[0].x * 1e6)) >>> 0;
+    let seed = (failures.length * 1000 + Math.floor((failures[0].actual_time_s || 1) * 1e6)) >>> 0;
     const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
     const curves = [];
     for (let i = 0; i < N; i++) {
-      const sample = Array.from({ length: pts.length }, () => pts[Math.floor(rng() * pts.length)]);
-      const fit = fitCF(sample);
-      if (fit) curves.push(ts.map(t => Math.max(fit.CF + fit.W / t, fit.CF)));
+      const sample = Array.from({ length: tePts.length }, () => tePts[Math.floor(rng() * tePts.length)]);
+      const amps = fitThreeExpAmps(sample, { prior, lambda });
+      if (amps[0] + amps[1] + amps[2] > 0) {
+        curves.push(ts.map(t => Math.max(predForceThreeExp(amps, t), 0)));
+      }
     }
     if (curves.length < 20) return null;
     return ts.map((t, j) => {
@@ -5040,7 +5058,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       const p95 = vals[Math.min(Math.floor(vals.length * 0.95), vals.length - 1)];
       return { x: t, lowKg: p5, highKg: p95 };
     });
-  }, [failures, maxDur]);
+  }, [failures, maxDur, selGrip, threeExpPriors]);
 
   // Limiter zone (the zone that falls farthest below the F-D curve
   // predicted by the other two zones). Drives the saturated background
@@ -5792,14 +5810,13 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
                 <span><span style={{ color: C.green }}>●</span> Completed</span>
                 <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
-                {!splitMode && cfEstimate && <span><span style={{ color: C.purple }}>―</span> F-D curve (your data)</span>}
-                {!splitMode && cfEstimate && <span><span style={{ color: C.purple }}>╌</span> Critical Force</span>}
-                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: physiological target curve. Training aims to move your actual data toward this shape."><span style={{ color: C.yellow }}>╌</span> 3-exp target</span>}
-                {!splitMode && confidenceBandRel && <span><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
+                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Sum of three exponentials with depletion-tau basis (PCr/glycolytic/oxidative)."><span style={{ color: C.purple }}>―</span> F-D curve (3-exp)</span>}
+                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow/oxidative compartment dominates here. The closest analog to a 'sustainable force' reference."><span style={{ color: C.purple }}>╌</span> 3-min sustainable</span>}
+                {!splitMode && cfEstimate && <span title="Monod-Scherrer (CF + W'/T) curve, kept as a second-opinion overlay. Three-exp drives prescriptions; Monod is for diagnostic comparison."><span style={{ color: C.muted, opacity: 0.7 }}>╌</span> Monod (2nd opinion)</span>}
+                {!splitMode && confidenceBandRel && <span title="Bootstrap 90% band around the three-exp curve."><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
                 {splitMode && Object.keys(fdSplitData).map(g => (
                   <span key={g}>
-                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue }}>―</span> {g}
-                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue, opacity: 0.7 }}> ╌</span> 3-exp
+                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue }}>―</span> {g} (3-exp)
                   </span>
                 ))}
                 {!splitMode && limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
@@ -5841,19 +5858,32 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                 <Line data={confidenceBandRel} dataKey="high" stroke={C.purple} strokeOpacity={0.35}
                       strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
               )}
-              {!fdSplitData && cfEstimate && (
+              {/* 3-min sustainable reference from three-exp at T=180s
+                  (replaces the Monod CF asymptote, since three-exp has
+                  no true asymptote — it decays to 0). At 180s the slow
+                  oxidative compartment dominates; this is the closest
+                  physiological analog to "what you can sustain". */}
+              {!fdSplitData && threeExpRef180 != null && (
                 <ReferenceLine
-                  y={useRel ? cfEstimate.CF / bodyWeight : toDisp(cfEstimate.CF, unit)}
+                  y={useRel ? threeExpRef180 / bodyWeight : toDisp(threeExpRef180, unit)}
                   stroke={C.purple} strokeDasharray="6 3" strokeWidth={1.5}
-                  label={{ value: `CF ${fmtForce(cfEstimate.CF)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
+                  label={{ value: `3-min ${fmtForce(threeExpRef180)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
                 />
               )}
+              {/* Monod overlay — kept as a thin desaturated dashed line
+                  for diagnostic comparison ("second opinion"). Not used
+                  in any prescription path; just visible context for
+                  where the hyperbolic fit would land vs three-exp. */}
               {!fdSplitData && curveDataRel.length > 0 && (
-                <Line data={curveDataRel} dataKey="y" stroke={C.purple} strokeWidth={2} dot={false} legendType="none" isAnimationActive={false} />
+                <Line data={curveDataRel} dataKey="y" stroke={C.muted}
+                      strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.7}
+                      dot={false} legendType="none" isAnimationActive={false} />
               )}
+              {/* Primary curve — three-exp F-D. Bold purple solid; this
+                  is the curve the rest of the engine optimizes against. */}
               {!fdSplitData && threeExpCurveDataRel.length > 0 && (
-                <Line data={threeExpCurveDataRel} dataKey="y" stroke={C.yellow}
-                      strokeWidth={1.5} strokeDasharray="5 4" dot={false}
+                <Line data={threeExpCurveDataRel} dataKey="y" stroke={C.purple}
+                      strokeWidth={2} dot={false}
                       legendType="none" isAnimationActive={false} />
               )}
               {!fdSplitData && (
@@ -5875,21 +5905,22 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                 for (const grip of grips) {
                   const color = FD_GRIP_COLORS[grip] || C.blue;
                   const data = fdSplitData[grip];
-                  // Solid grip-colored curve — failure-only Monod (your data).
-                  const curveRel = data.curve.map(d => ({
+                  // Monod overlay — thin desaturated dashed line for
+                  // diagnostic comparison ("second opinion"). Drawn first
+                  // so the three-exp primary sits on top.
+                  const monodRel = data.curve.map(d => ({
                     x: d.x,
                     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
                   }));
                   elements.push(
-                    <Line key={`${grip}-curve`} data={curveRel} dataKey="y"
-                      stroke={color} strokeWidth={2} dot={false}
+                    <Line key={`${grip}-monod`} data={monodRel} dataKey="y"
+                      stroke={color} strokeWidth={1} strokeDasharray="4 3"
+                      strokeOpacity={0.45} dot={false}
                       legendType="none" isAnimationActive={false} />
                   );
-                  // Three-exp TARGET curve — same grip color, dashed, slightly
-                  // dimmer. Shows where three-exp says this grip's curve
-                  // SHOULD be if your physiology were balanced. Training
-                  // closes the gap between solid (your data) and dashed
-                  // (your physiological target).
+                  // Three-exp PRIMARY curve — bold solid grip color. This
+                  // is the curve the engine optimizes against; Monod
+                  // (above) is just for visual comparison.
                   if (threeExpPriors && threeExpPriors.get) {
                     const prior = threeExpPriors.get(grip);
                     const failures = (history || []).filter(r =>
@@ -5913,8 +5944,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                         });
                         elements.push(
                           <Line key={`${grip}-tee`} data={teeCurve} dataKey="y"
-                            stroke={color} strokeWidth={1.5} strokeDasharray="5 4"
-                            strokeOpacity={0.7} dot={false}
+                            stroke={color} strokeWidth={2} dot={false}
                             legendType="none" isAnimationActive={false} />
                         );
                       }
@@ -5952,26 +5982,24 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
             <span style={{ color: C.orange }}>💪 Strength 20–120s</span>
             <span style={{ color: C.blue }}>🔄 Capacity 120s+</span>
           </div>
-          {/* Three-exp shadow-model diagnostic — running comparison of
-              fit quality. Training RMSE on the displayed failures, so
-              biased optimistic for both models, but the relative
-              comparison on the SAME data is meaningful. Holdout
-              validation lives in the offline sim. The model is in
-              shadow mode: visible in the chart and here, but
-              prescribedLoad still uses Monod. */}
+          {/* Model-fit diagnostic — training RMSE comparison of three-exp
+              (the primary curve) against Monod (the second-opinion overlay).
+              Training RMSE is biased optimistic for both, but the relative
+              comparison on the SAME data is meaningful. Holdout LOO-CV
+              validation lives in scripts/validate_taur_vs_taud.js. */}
           {modelRMSE && (
             <div style={{ marginTop: 8, padding: "6px 8px", background: C.bg, borderRadius: 6, fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
-              <span style={{ color: C.yellow, fontWeight: 600 }}>3-exp shadow</span>
-              {" · Monod RMSE "}
-              <span style={{ color: C.text }}>{modelRMSE.monod.toFixed(2)} {unit === "lbs" ? "kg" : "kg"}</span>
+              <span style={{ color: C.purple, fontWeight: 600 }}>Fit diagnostic</span>
               {" · 3-exp RMSE "}
-              <span style={{ color: modelRMSE.threeExp < modelRMSE.monod ? C.green : C.text }}>
+              <span style={{ color: modelRMSE.threeExp < modelRMSE.monod ? C.green : C.text, fontWeight: 600 }}>
                 {modelRMSE.threeExp.toFixed(2)} kg
               </span>
+              {" · Monod RMSE "}
+              <span style={{ color: C.text }}>{modelRMSE.monod.toFixed(2)} kg</span>
               {" · N="}{modelRMSE.n}
               {" · "}
               <span style={{ fontStyle: "italic" }}>
-                training fit, not holdout — prescriptions still use Monod
+                training fit, not holdout
               </span>
             </div>
           )}
