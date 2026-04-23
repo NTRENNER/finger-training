@@ -1340,48 +1340,106 @@ function externalLoadModifier(zone, activities) {
 
 // Main coaching recommendation. Returns the highest-scoring (zone, hand)
 // with all component factors so the UI can explain the rationale.
+// For (hand, grip, target T), compute mean residual between the failure-
+// only Monod curve and the actual achieved force on failures in the same
+// zone. Positive mean residual = curve over-predicts (your reps fall
+// BELOW the curve in that zone) = limiter signal. Negative = you're
+// outperforming the curve in that zone.
+//
+// Returns a multiplier for the coaching score:
+//   factor > 1: limiter zone — boost score (train this)
+//   factor = 1: at curve — neutral
+//   factor < 1: above curve — depress score (other zones have more room)
+//
+// Uses `fit` (failure-only Monod) passed in by caller so we don't refit
+// per-zone. `fit` may be null when the (hand, grip) doesn't have ≥2
+// failures, in which case we return 1.0 (neutral — no signal).
+function zoneResidualFactor(history, hand, grip, targetT, fit) {
+  if (!fit) return 1.0;
+  // Same zone classification as computeLimiterZone, by target_duration
+  // (intent), not actual_time_s (outcome).
+  const zoneOf = (td) =>
+    td < POWER_MAX        ? "power"    :
+    td < STRENGTH_MAX     ? "strength" :
+                            "endurance";
+  const targetZone = zoneOf(targetT);
+  const fails = (history || []).filter(r =>
+    r.failed && r.hand === hand && r.grip === grip
+    && r.target_duration > 0
+    && zoneOf(r.target_duration) === targetZone
+    && r.actual_time_s > 0 && effectiveLoad(r) > 0
+  );
+  if (fails.length === 0) return 1.0;
+  let sumRes = 0, sumActual = 0;
+  for (const r of fails) {
+    const pred = fit.CF + fit.W / r.actual_time_s;
+    sumRes += pred - effectiveLoad(r);
+    sumActual += effectiveLoad(r);
+  }
+  const meanActual = sumActual / fails.length;
+  if (meanActual <= 0) return 1.0;
+  const meanResPct = (sumRes / fails.length) / meanActual;
+  // Map mean residual % to a 0.5x–~3x multiplier. 10% under-curve → 2x;
+  // at curve → 1.0x; 5% over-curve → 0.5x. Clamped to keep extreme
+  // outliers from dominating the score.
+  return Math.max(0.5, Math.min(3.0, 1 + meanResPct * 10));
+}
+
 function coachingRecommendation(history, grip, opts = {}) {
   const { freshMap = null, threeExpPriors = null, readiness = 5, activities = [] } = opts;
   if (!grip) return null;
+  // Pre-compute per-hand failure-only Monod fits so zoneResidualFactor
+  // doesn't refit on every (zone, hand) loop iteration. This is the SAME
+  // fit the F-D chart displays, so the residual factor matches what the
+  // user sees visually ("dots below the curve in this zone").
+  const failureFitByHand = {};
+  for (const h of ["L", "R"]) {
+    const failPts = (history || []).filter(r =>
+      r.failed && r.hand === h && r.grip === grip
+      && r.actual_time_s > 0 && effectiveLoad(r) > 0
+    ).map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
+    failureFitByHand[h] = failPts.length >= 2 ? fitCF(failPts) : null;
+  }
+
   const zones = ["power", "strength", "endurance"];
   const candidates = [];
   for (const zoneKey of zones) {
     const t = GOAL_CONFIG[zoneKey]?.refTime;
     if (!t) continue;
-    // Compute gap per hand, take the largest (most positive). Negative
-    // gaps are kept as candidates because they're informative — they
-    // mean the user is at or above the model's view of potential, which
-    // is its own coaching signal ("maintain, model is conservative").
-    // Initialize to -Infinity so we record SOME candidate per zone even
-    // when all gaps are negative.
-    let bestGap = -Infinity;
+    const iMatch  = intensityMatch(zoneKey, readiness);
+    const recency = recencyPenalty(zoneKey, history, grip);
+    const ext     = externalLoadModifier(zoneKey, activities);
+
+    // Score per (zone, hand) so the residual factor (which is hand-
+    // specific) gets included properly. Pick the highest-scoring hand
+    // for this zone. Negative gaps still produce candidates so the
+    // engine never falls through; the "shifted gap" gives positive-gap
+    // zones priority but doesn't zero out negatives.
+    let bestScore = -Infinity;
     let bestHand = null;
+    let bestGap = null;
     let bestPotential = null;
     let bestTrainAt = null;
+    let bestResFactor = null;
     for (const hand of ["L", "R"]) {
       const trainAt = empiricalPrescription(history, hand, grip, t)
                     ?? prescribedLoad(history, hand, grip, t, freshMap);
       const pot = prescriptionPotential(history, hand, grip, t, { freshMap, threeExpPriors });
       if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
       const gap = (pot.value - trainAt) / trainAt;
-      if (gap > bestGap) {
-        bestGap = gap;
+      const resFactor = zoneResidualFactor(history, hand, grip, t, failureFitByHand[hand]);
+      const gapForScore = Math.max(gap, -0.30); // clamp at -30%
+      const handScore = (gapForScore + 0.30) * iMatch * recency * ext * resFactor;
+      if (handScore > bestScore) {
+        bestScore = handScore;
         bestHand = hand;
+        bestGap = gap;
         bestPotential = pot;
         bestTrainAt = trainAt;
+        bestResFactor = resFactor;
       }
     }
     if (!bestHand) continue;
-    const iMatch  = intensityMatch(zoneKey, readiness);
-    const recency = recencyPenalty(zoneKey, history, grip);
-    const ext     = externalLoadModifier(zoneKey, activities);
-    // Score uses a floor on gap so negative gaps still produce a
-    // ranking (just with smaller magnitude). The score sign follows
-    // the gap, so a positive-gap zone always outranks a negative-gap
-    // zone — but among all-negative-gap zones, the least-negative
-    // (closest to potential) still wins.
-    const gapForScore = Math.max(bestGap, -0.30); // clamp at -30% to bound
-    const score = (gapForScore + 0.30) * iMatch * recency * ext;
     candidates.push({
       zone: zoneKey,
       hand: bestHand,
@@ -1389,7 +1447,8 @@ function coachingRecommendation(history, grip, opts = {}) {
       potential: bestPotential.value,
       trainAt: bestTrainAt,
       iMatch, recency, ext,
-      score,
+      resFactor: bestResFactor,
+      score: bestScore,
     });
   }
   if (candidates.length === 0) return null;
@@ -1418,6 +1477,19 @@ function coachingRationale(rec) {
     // The model is running behind your real fitness here.
     const pct = Math.round(-rec.gap * 100);
     reasons.push(`exceeding modeled potential by ${pct}% on ${handLabel} (the model is conservative here — pick this zone to maintain or push the ceiling further)`);
+  }
+  // Residual signal — visible on the F-D chart as dots-vs-curve. Strong
+  // limiter signal when the user's actuals fall systematically below the
+  // failure-only Monod curve in this zone.
+  if (rec.resFactor != null) {
+    if (rec.resFactor >= 1.5) {
+      const pct = Math.round((rec.resFactor - 1) * 10); // approx mean residual %
+      reasons.push(`reps fall ~${pct}% below the curve here — limiter signal from the F-D chart`);
+    } else if (rec.resFactor >= 1.15) {
+      reasons.push("reps fall slightly below the curve here — mild limiter signal");
+    } else if (rec.resFactor < 0.85) {
+      reasons.push("reps sit above the curve here — strong-zone signal (consistent with the conservative-model reading above)");
+    }
   }
   if (rec.iMatch >= 0.85) {
     reasons.push("intensity matches your current readiness");
