@@ -239,7 +239,7 @@ function fitCFWeighted(pts) {
 //
 // failurePts/successPts: arrays of { x: 1/T, y: load }
 function fitCFWithSuccessFloor(failurePts, successPts, opts = {}) {
-  const { maxIter = 24, tol = 0.1, weightStep = 1.0 } = opts;
+  const { maxIter = 60, tol = 0.1, weightStep = 4.0 } = opts;
   const failures = (failurePts || []).map(p => ({ x: p.x, y: p.y, w: 1 }));
   const successes = successPts || [];
   if (failures.length + successes.length < 2) return null;
@@ -276,11 +276,47 @@ function fitCFWithSuccessFloor(failurePts, successPts, opts = {}) {
         augmented.push({ x: successes[i].x, y: successes[i].y, w: succWeights[i] });
       }
     }
-    const newFit = fitCFWeighted(augmented);
+    // Use the raw weighted-LS solver (without negative-value rejection)
+    // and clamp at the end. The protective rejection in fitCFWeighted is
+    // useful at the call boundary, but inside this iteration it's
+    // counterproductive: when many successes are pulling the curve up
+    // hard, intermediate iterates can have negative CF or W' before
+    // converging to a physical fit. Rejecting them aborts the iteration
+    // early and leaves us with a curve that still violates the success
+    // floor. Clamping keeps the iteration alive.
+    const newFit = fitCFWeightedRaw(augmented);
     if (!newFit) break;
-    fit = newFit;
+    fit = {
+      CF: Math.max(0, newFit.CF),
+      W:  Math.max(0, newFit.W),
+      n:  newFit.n,
+    };
   }
   return fit;
+}
+
+// Like fitCFWeighted but doesn't reject negative CF or W. Exists for
+// fitCFWithSuccessFloor's iteration where intermediate iterates may go
+// negative on the way to a valid clamped fit.
+function fitCFWeightedRaw(pts) {
+  if (!pts || pts.length < 2) return null;
+  let sw = 0, swx = 0, swy = 0, swxx = 0, swxy = 0, n = 0;
+  for (const p of pts) {
+    const w = p.w == null ? 1 : p.w;
+    if (!(w > 0)) continue;
+    sw  += w;
+    swx += w * p.x;
+    swy += w * p.y;
+    swxx += w * p.x * p.x;
+    swxy += w * p.x * p.y;
+    n++;
+  }
+  if (n < 2 || sw <= 0) return null;
+  const den = sw * swxx - swx * swx;
+  if (Math.abs(den) < 1e-12) return null;
+  const W  = (sw * swxy - swx * swy) / den;
+  const CF = (swy - W * swx) / sw;
+  return { CF, W, n };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -5622,7 +5658,7 @@ function buildRecFromFit(fit, personalResponse, unit) {
   };
 }
 
-function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [], liveEstimate = null, gripEstimates = {} }) {
+function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [], liveEstimate = null, gripEstimates = {}, freshMap = null }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selGrip,   setSelGrip]   = useState("");
   const [relMode,   setRelMode]   = useState(false); // relative strength toggle
@@ -5646,7 +5682,25 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
   // ── Critical Force estimation via Monod-Scherrer linearization ──
-  // Delegates to the standalone fitCF() helper.
+  // Failure-only fit on RAW force (no freshMap, no success-floor). This
+  // is intentionally the "what your failures actually show" curve, not
+  // the "what your prescription engine wants to push you to" curve.
+  //
+  // Why not use the prescription fit (with success-floor + freshMap)?
+  // We tried it. Hard success-floor constraints + Monod's hyperbolic
+  // shape can't satisfy both "your high-force short-duration successes"
+  // AND "your moderate-force middle-duration failures" because Monod
+  // doesn't have enough flexibility — the success-floor wins and the
+  // resulting curve overshoots the failure cluster by 5-30 kg in the
+  // middle, making the chart misleading. The failure-only fit shows
+  // the data honestly; the prescription engine separately uses the
+  // empirical-first path (anchored to recent rep 1) which produces
+  // the right next-session loads without forcing the chart to lie.
+  //
+  // The dots above the curve = above-curve performance (strong zone).
+  // Dots below the curve = below-curve performance (limiter zone).
+  // That's the visual diagnosis Nathan called out as "where the magic
+  // happens" — and it only works if the curve is honest about the data.
   const cfEstimate = useMemo(() => {
     if (failures.length < 2) return null;
     const pts = failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
@@ -9968,7 +10022,7 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} liveEstimate={liveEstimate} gripEstimates={gripEstimates} />}
+      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} liveEstimate={liveEstimate} gripEstimates={gripEstimates} freshMap={freshMap} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 4 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
