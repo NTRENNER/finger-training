@@ -5483,12 +5483,43 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         // place.
         const perGripMode = !selGrip && Object.keys(gripEstimates).length >= 2;
         const gripImpEntries = Object.entries(gripImprovement);
+
+        // When a grip filter is active, cfEstimate is scoped to that
+        // grip (and selHand). Comparing it against the global pooled
+        // baseline produces the same cross-muscle artifact perGripMode
+        // was designed to prevent — e.g. Left × Micro current force
+        // (CF ~6 kg, FDP pinch) shown as -63% vs a baseline anchored
+        // by Crusher reps (CF ~28 kg, FDS crush). Use the most-
+        // specific matching baseline available:
+        //   1. perHandGripBaselines[grip|hand]  — exact scope match
+        //   2. gripBaselines[grip]               — pools hands, still per-grip
+        //   3. early-days placeholder            — neither qualifies yet
+        let scopedImp = null;
+        let scopedBaselineDate = null;
+        let scopedScopeLabel = null;
+        if (selGrip) {
+          const phgKey = selHand && selHand !== "Both" ? `${selGrip}|${selHand}` : null;
+          const phgRef = phgKey ? perHandGripBaselines[phgKey] : null;
+          const gRef   = gripBaselines[selGrip];
+          const ref    = phgRef || gRef;
+          if (ref) {
+            scopedImp = improvementForFit(cfEstimate, ref);
+            scopedBaselineDate = ref.date;
+            scopedScopeLabel = phgRef
+              ? `${selGrip} · ${selHand === "L" ? "Left" : "Right"}`
+              : selGrip;
+          }
+        }
+
         return (
           <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Capacity Improvement</div>
-              {!perGripMode && (
+              {!perGripMode && !selGrip && (
                 <div style={{ fontSize: 11, color: C.muted }}>since {baseline.date}</div>
+              )}
+              {selGrip && scopedImp && (
+                <div style={{ fontSize: 11, color: C.muted }}>since {scopedBaselineDate}</div>
               )}
             </div>
             {perGripMode ? (
@@ -5523,6 +5554,19 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               ) : (
                 <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
                   Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the comparison is too noisy to be useful (small-sample Monod fits have high W′ variance, which inflates predicted force at short durations).
+                </div>
+              )
+            ) : selGrip ? (
+              scopedImp ? (
+                <>
+                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                    {scopedScopeLabel} vs {scopedScopeLabel} baseline
+                  </div>
+                  {renderRow(null, scopedImp)}
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+                  Need ≥5 failures across ≥3 target durations on <b>{selGrip}</b>{selHand && selHand !== "Both" ? <> ({selHand === "L" ? "Left" : "Right"})</> : null} to seed a baseline that's a fair apples-to-apples comparison. Pooled global baseline isn't shown here because it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
                 </div>
               )
             ) : improvement ? (
