@@ -5668,7 +5668,7 @@ function buildRecFromFit(fit, personalResponse, unit) {
   };
 }
 
-function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [], liveEstimate = null, gripEstimates = {}, freshMap = null }) {
+function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [], liveEstimate = null, gripEstimates = {}, freshMap = null, readiness = 5 }) {
   const [selHand,   setSelHand]   = useState("L");
   const [selGrip,   setSelGrip]   = useState("");
   const [relMode,   setRelMode]   = useState(false); // relative strength toggle
@@ -6305,13 +6305,47 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     const coverage = computeZoneCoverage(history, activities);
     const coverageKey = coverage.total > 0 ? coverage.recommended : null;
 
-    // Prefer a grip-specific fit when the user has picked a grip in
-    // the Analysis filter: FDP (pinch / open-hand rollers) and FDS
-    // (crusher) are separate muscles with separate curves, so the
-    // recommendation should follow whichever muscle is in focus. Fall
-    // back to the pooled liveEstimate when no grip is selected, and
-    // finally to cfEstimate (the filter-dependent display fit) as a
-    // last resort. Either way the engine matches the Setup view.
+    // Primary path: coaching engine v2 (gap × intensity × recency ×
+    // external) when a grip is selected. For the no-grip-selected case
+    // there's no meaningful single recommendation (gap requires a grip
+    // scope), so we fall back to the legacy ΔAUC ranking on liveEstimate.
+    if (selGrip) {
+      const coach = coachingRecommendation(history, selGrip, {
+        freshMap, threeExpPriors, readiness, activities,
+      });
+      if (coach) {
+        const d = ZONE_DETAILS[coach.zone];
+        // Compute per-zone gap landscape for the bars
+        const zones = ["power", "strength", "endurance"];
+        const zoneGaps = {};
+        for (const zoneKey of zones) {
+          const t = GOAL_CONFIG[zoneKey].refTime;
+          let bestGap = null;
+          for (const h of ["L", "R"]) {
+            const trainAt = empiricalPrescription(history, h, selGrip, t)
+                         ?? prescribedLoad(history, h, selGrip, t, freshMap);
+            const pot = prescriptionPotential(history, h, selGrip, t, { freshMap, threeExpPriors });
+            if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
+            const gap = (pot.value - trainAt) / trainAt;
+            if (bestGap == null || gap > bestGap) bestGap = gap;
+          }
+          zoneGaps[zoneKey] = bestGap;
+        }
+        return {
+          key: coach.zone, title: d.title, color: d.color,
+          rationale: coachingRationale(coach),
+          coach, zoneGaps,
+          limiterKey, limiterGrip, coverageKey,
+          agree: !limiterKey || limiterKey === coach.zone,
+          coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
+        };
+      }
+    }
+
+    // Fallback path: legacy ΔAUC ranking on the pooled / available fit.
+    // Used when no grip is selected (pooled recommendation across grips)
+    // or when the coaching engine has no scoreable zones for the picked
+    // grip yet (cold start with no recent reps at this scope).
     const gripFit = selGrip ? gripEstimates[selGrip] : null;
     const fitForRec = gripFit ?? liveEstimate ?? cfEstimate;
     if (!fitForRec) {
@@ -6322,44 +6356,63 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         key: fallbackKey,
         title: d.title, color: d.color,
         insight: `Need 2+ failures across different durations to rank protocols by projected AUC gain. For now: ${d.caption}`,
-        gains: null, aucGain: null,
-        limiterKey, limiterGrip,
-        coverageKey,
-        agree: true,
-        responseSource: null,
+        gains: null, aucGain: null, zoneGaps: null,
+        limiterKey, limiterGrip, coverageKey,
+        agree: true, responseSource: null,
         coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
       };
     }
-
-    // Primary ΔAUC ranking — delegated to the shared helper so per-grip
-    // recs (gripRecs below) compute the same way.
     const base = buildRecFromFit(fitForRec, personalResponse, unit);
-
-    // Does the Monod limiter agree with the ΔAUC winner?
     const agree = !limiterKey || limiterKey === base.key;
-
     return {
-      ...base,
-      limiterKey, limiterGrip,
-      coverageKey,
-      agree,
+      ...base, zoneGaps: null,
+      limiterKey, limiterGrip, coverageKey, agree,
       coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
     };
-  }, [liveEstimate, gripEstimates, selGrip, history, activities, unit, personalResponse]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [liveEstimate, gripEstimates, selGrip, history, activities, unit, personalResponse, freshMap, threeExpPriors, readiness]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Per-grip recommendations — one rec per grip with a fit in
-  // `gripEstimates`. Used to render side-by-side Micro/Crusher cards
-  // in "Next Session Focus" when no single grip is selected, so the
-  // user can see the separate verdicts for the two different muscles
-  // (FDP for Micro, FDS for Crusher).
+  // Per-grip recommendations — one rec per grip with enough data for
+  // a coaching call. Uses the v2 coaching engine: gap × intensity ×
+  // recency × external_load. The card shows the recommended zone, the
+  // coaching rationale, and per-zone gap bars (so the user sees the
+  // full landscape of opportunities, not just the winner).
   const gripRecs = useMemo(() => {
+    const zones = ["power", "strength", "endurance"];
     const out = {};
     for (const [grip, fit] of Object.entries(gripEstimates)) {
-      const rec = buildRecFromFit(fit, personalResponse, unit);
-      if (rec) out[grip] = { ...rec, grip, CF: fit.CF, W: fit.W, n: fit.n };
+      const coach = coachingRecommendation(history, grip, {
+        freshMap, threeExpPriors, readiness, activities,
+      });
+      if (!coach) continue;
+      // Compute per-zone gaps so the bars can show the whole landscape.
+      const zoneGaps = {};
+      for (const zoneKey of zones) {
+        const t = GOAL_CONFIG[zoneKey].refTime;
+        let bestGap = null;
+        for (const h of ["L", "R"]) {
+          const trainAt = empiricalPrescription(history, h, grip, t)
+                       ?? prescribedLoad(history, h, grip, t, freshMap);
+          const pot = prescriptionPotential(history, h, grip, t, { freshMap, threeExpPriors });
+          if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
+          const gap = (pot.value - trainAt) / trainAt;
+          if (bestGap == null || gap > bestGap) bestGap = gap;
+        }
+        zoneGaps[zoneKey] = bestGap;
+      }
+      const d = ZONE_DETAILS[coach.zone];
+      out[grip] = {
+        grip,
+        key:       coach.zone,
+        title:     d.title,
+        color:     d.color,
+        rationale: coachingRationale(coach),
+        coach,
+        zoneGaps,
+        CF: fit.CF, W: fit.W, n: fit.n,
+      };
     }
     return out;
-  }, [gripEstimates, personalResponse, unit]);
+  }, [gripEstimates, history, freshMap, threeExpPriors, readiness, activities]);
 
   const unexplored = Object.entries(zones)
     .filter(([, z]) => z.total === 0)
@@ -7268,45 +7321,45 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
             the real story. Otherwise fall back to the single pooled /
             selGrip-scoped card with the limiter/coverage diagnostics. */}
         {(() => {
-          // Helper — render one projected-ΔAUC bars block for a rec.
-          const renderGainsBars = (rec) => rec.gains && (
+          // Helper — render per-zone gap bars. Replaces the old projected-ΔAUC
+          // bars to match the gap-driven coaching engine: the recommended zone
+          // is the one with the largest gap × intensity × recency × external,
+          // and the bars show each zone's gap so the user sees the full
+          // landscape of training opportunities, not just the winner.
+          const renderGainsBars = (rec) => rec.zoneGaps && (
             <div style={{
               background: C.bg, borderRadius: 8, padding: "8px 10px",
               marginBottom: 10, fontSize: 11,
             }}>
               <div style={{ color: C.muted, letterSpacing: 0.4, textTransform: "uppercase", fontSize: 10, marginBottom: 6 }}>
-                Projected ΔAUC · next session
+                Gap to potential · per zone
               </div>
-              {[
-                { k: "power",     lbl: "Power",    col: C.red },
-                { k: "strength",  lbl: "Strength", col: C.orange },
-                { k: "endurance", lbl: "Capacity", col: C.blue },
-              ].map(r => {
-                const v = rec.gains[r.k];
-                const pct = rec.gains[rec.key] > 0 ? (v / rec.gains[rec.key]) * 100 : 0;
-                const isBest = r.k === rec.key;
-                const rs = rec.responseSource?.[r.k];
-                const calibrated = rs?.source === "blended";
-                return (
-                  <div key={r.k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <span style={{ width: 62, color: r.col, fontWeight: isBest ? 700 : 400 }}>
-                      {r.lbl}
-                      {calibrated && (
-                        <span
-                          title={`Calibrated from ${Math.round(rs.n)} session-equivalents (TUT-weighted)`}
-                          style={{ marginLeft: 3, fontSize: 8, color: C.green, verticalAlign: "super" }}
-                        >●</span>
-                      )}
-                    </span>
-                    <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${pct}%`, background: r.col, borderRadius: 3, transition: "width 0.3s" }} />
+              {(() => {
+                // Find max absolute gap for bar scaling
+                const maxAbs = Math.max(0.05, ...Object.values(rec.zoneGaps).filter(v => v != null).map(v => Math.abs(v)));
+                return [
+                  { k: "power",     lbl: "Power",    col: C.red },
+                  { k: "strength",  lbl: "Strength", col: C.orange },
+                  { k: "endurance", lbl: "Capacity", col: C.blue },
+                ].map(r => {
+                  const v = rec.zoneGaps[r.k];
+                  const pct = v == null ? 0 : Math.min(100, Math.max(0, (v / maxAbs) * 100));
+                  const isBest = r.k === rec.key;
+                  return (
+                    <div key={r.k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ width: 62, color: r.col, fontWeight: isBest ? 700 : 400 }}>
+                        {r.lbl}
+                      </span>
+                      <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${pct}%`, background: v == null ? C.muted : r.col, borderRadius: 3, transition: "width 0.3s", opacity: v == null ? 0.4 : 1 }} />
+                      </div>
+                      <span style={{ width: 56, textAlign: "right", color: isBest ? r.col : C.muted, fontWeight: isBest ? 700 : 400 }}>
+                        {v == null ? "—" : `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`}
+                      </span>
                     </div>
-                    <span style={{ width: 56, textAlign: "right", color: isBest ? r.col : C.muted, fontWeight: isBest ? 700 : 400 }}>
-                      +{fmt1(v)} {unit}·s
-                    </span>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
               {rec.responseSource && (() => {
                 const calibrated = Object.entries(rec.responseSource).filter(([, s]) => s.source === "blended");
                 if (calibrated.length === 0) {
@@ -7347,7 +7400,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                       {rec.title}
                     </div>
                     <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
-                      {rec.insight}
+                      {rec.rationale || `Largest gap to potential at ${GOAL_CONFIG[rec.key]?.label || rec.key} for ${rec.grip}.`}
                     </div>
                     {renderGainsBars(rec)}
                     <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
@@ -7384,7 +7437,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                 {recommendation.title}
               </div>
               <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
-                {recommendation.insight}
+                {recommendation.rationale || recommendation.insight}
               </div>
               {renderGainsBars(recommendation)}
               {/* Secondary diagnostics */}
@@ -10127,7 +10180,7 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} liveEstimate={liveEstimate} gripEstimates={gripEstimates} freshMap={freshMap} />}
+      {tab === 1 && <AnalysisView history={history} unit={unit} bodyWeight={bodyWeight} baseline={baseline} activities={activities} liveEstimate={liveEstimate} gripEstimates={gripEstimates} freshMap={freshMap} readiness={readiness} />}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 4 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
