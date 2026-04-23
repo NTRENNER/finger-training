@@ -380,6 +380,7 @@ function levelTitle(level) {
 }
 
 // Next badge threshold = baseline × LEVEL_STEP^(currentLevel)
+// eslint-disable-next-line no-unused-vars -- kept for future Journey-tab use; was used by the now-removed Setup-page level card.
 function nextLevelTarget(history, hand, grip, targetDuration) {
   const baseline = getBaseline(history, hand, grip, targetDuration);
   if (!baseline) return null;
@@ -1940,14 +1941,9 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
   //   2. per-hand, any-grip failure fit (more data, less specific)
   //   3. historical weighted-average weight at similar target time
 
-  // Level progress for current config — always both hands now
-  const levelL      = calcLevel(history, "L", config.grip, config.targetTime);
-  const levelR      = calcLevel(history, "R", config.grip, config.targetTime);
-  const bestLoadL   = getBestLoad(history, "L", config.grip, config.targetTime);
-  const bestLoadR   = getBestLoad(history, "R", config.grip, config.targetTime);
-  const nextTargetL = nextLevelTarget(history, "L", config.grip, config.targetTime);
-  const nextTargetR = nextLevelTarget(history, "R", config.grip, config.targetTime);
-  const hasLevelData = (bestLoadL != null || bestLoadR != null) && config.grip;
+  // (Level/journey progress vars removed — the Setup-page summary card
+  // that consumed these now lives on the Journey tab. nextLevelTarget,
+  // calcLevel, getBestLoad are still used elsewhere in the app.)
 
   // Fatigue-adjusted load index for the prescribed-load card (computed once
   // per history change, then reused across the multiple prescribedLoad calls
@@ -2008,43 +2004,7 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
       </Card>
 
       {/* Zone Workout Summary — neutral 30-day volume breakdown (no prescription) */}
-      {/* Level progress for selected config */}
-      {hasLevelData && (
-        <Card style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
-            {config.grip} · {config.targetTime}s
-          </div>
-          <div style={{ display: "flex", gap: 12 }}>
-            {[
-              { key: "L", label: "Left",  level: levelL, best: bestLoadL, next: nextTargetL },
-              { key: "R", label: "Right", level: levelR, best: bestLoadR, next: nextTargetR },
-            ].map(row => (
-              <div key={row.key} style={{ flex: 1, padding: 10, background: C.bg, borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>{row.label}</div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>
-                  {row.best != null
-                    ? <>{LEVEL_EMOJIS[Math.min(row.level - 1, LEVEL_EMOJIS.length - 1)]} L{row.level}</>
-                    : <span style={{ color: C.muted, fontWeight: 500 }}>—</span>}
-                </div>
-                {row.best != null && (
-                  <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-                    {fmtW(row.best, unit)} {unit}
-                    {row.next != null && <> · next {fmtW(row.next, unit)}</>}
-                  </div>
-                )}
-                {row.next != null && row.best != null && (
-                  <div style={{ width: "100%", height: 4, background: C.border, borderRadius: 2, marginTop: 6 }}>
-                    <div style={{
-                      height: "100%", borderRadius: 2, background: C.green,
-                      width: `${Math.min(100, (row.best / row.next) * 100)}%`,
-                    }} />
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
+      {/* (Level / journey card removed from setup — lives on the Journey tab now.) */}
 
       {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
 
@@ -4716,6 +4676,10 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
   // above for why per-hand-per-grip, not pooled). When a combo doesn't
   // yet qualify for a stable baseline, we still emit the row but with
   // cfPct=null so the UI can show current CF without a misleading Δ%.
+  // Kept for future per-hand diagnostic use; the Per-Hand CF card that
+  // consumed this was removed because it duplicated the Critical Force
+  // Estimate cards' per-grip view.
+  // eslint-disable-next-line no-unused-vars
   const perHandImprovement = useMemo(() => {
     const groups = {};
     for (const r of history) {
@@ -5703,70 +5667,8 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         </Card>
       )}
 
-      {/* ── Per-hand / per-grip CF breakdown ── */}
-      {perHandImprovement && (() => {
-        // Group rows by grip
-        const byGrip = {};
-        for (const row of Object.values(perHandImprovement)) {
-          if (!byGrip[row.grip]) byGrip[row.grip] = {};
-          byGrip[row.grip][row.hand] = row;
-        }
-        // Small helper — colour deltas green/red with a neutral muted
-        // band for near-zero noise (|delta| < ~2% reads as "flat").
-        const deltaColour = (pct) => pct > 2 ? C.green : pct < -2 ? C.red : C.muted;
-        const anyBaselined = Object.values(perHandImprovement).some(r => r.hasBaseline);
-        return (
-          <Card style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Hand Critical Force</div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-              Critical force (asymptotic sustainable load) fit to your rep-1 failures per grip × hand.
-              Δ% compares each hand to <i>its own</i> earliest qualifying snapshot (≥5 failures across ≥3 target durations) — avoids mixing FDP/FDS or L/R baselines.
-            </div>
-            {Object.entries(byGrip).map(([grip, hands]) => (
-              <div key={grip} style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 8 }}>{grip}</div>
-                {["L", "R"].filter(h => hands[h]).map(h => {
-                  const row = hands[h];
-                  return (
-                    <div key={h} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                      <div style={{ width: 28, fontSize: 12, fontWeight: 700, color: C.muted, flexShrink: 0 }}>
-                        {h === "L" ? "←L" : "R→"}
-                      </div>
-                      <div style={{
-                        flex: 1, background: C.bg, borderRadius: 8, padding: "6px 8px", textAlign: "center",
-                        border: `1px solid ${C.blue}25`,
-                      }}>
-                        <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.3 }}>CF</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: C.blue }}>
-                          {fmtW(row.cf, unit)} <span style={{ fontSize: 10, color: C.muted, fontWeight: 500 }}>{unit}</span>
-                        </div>
-                        {row.cfPct != null ? (
-                          <div style={{ fontSize: 10, fontWeight: 600, color: deltaColour(row.cfPct) }}>
-                            {row.cfPct > 0 ? "+" : ""}{row.cfPct}%
-                            <span style={{ color: C.muted, fontWeight: 500 }}> · since {row.baselineDate}</span>
-                          </div>
-                        ) : (() => {
-                          const p = baselineProgress(grip, h);
-                          return (
-                            <div style={{ fontSize: 10, fontWeight: 500, color: C.muted, fontStyle: "italic" }}>
-                              early days · {Math.min(p.failures, FAIL_THRESHOLD)}/{FAIL_THRESHOLD} fails · {Math.min(p.distinctDurations, DUR_THRESHOLD)}/{DUR_THRESHOLD} durs
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-            {!anyBaselined && (
-              <div style={{ fontSize: 11, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
-                No hand has enough data yet for a stable per-hand baseline — showing current CF without Δ%.
-              </div>
-            )}
-          </Card>
-        );
-      })()}
+      {/* Per-Hand Critical Force card removed — duplicated info from
+          the Critical Force Estimate cards below. */}
 
       {reps.length === 0 ? (
         <Card>
