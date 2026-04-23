@@ -29,7 +29,8 @@ import {
   fitCF, fitCFWithSuccessFloor,
 } from "./monod.js";
 import {
-  THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
+  THREE_EXP_LAMBDA_DEFAULT,
+  fitThreeExpAmps, fitThreeExpAmpsWithSuccessFloor, predForceThreeExp,
 } from "./threeExp.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -300,14 +301,26 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// LOAD AUTO-PRESCRIPTION from fitted CF/W' (Monod-Scherrer)
+// LOAD AUTO-PRESCRIPTION from fitted three-exp curve
 // ─────────────────────────────────────────────────────────────
 // FALLBACK path: when no recent rep 1 exists at this exact scope (so
 // empiricalPrescription returns null), this gives a curve-derived
-// prescription using fitCFWithSuccessFloor on freshMap-adjusted loads,
-// then applies the RPE 10 bump.
-export function prescribedLoad(history, hand, grip, targetDuration, freshMap = null) {
+// prescription using fitThreeExpAmpsWithSuccessFloor on freshMap-adjusted
+// loads, then applies the RPE 10 bump.
+//
+// Three-exp is the governing model (post tauD-fix LOO-CV: ~7% RMSE
+// improvement over Monod). Successes act as lower bounds via the
+// success-floor iteration so the curve respects "you held F for T
+// without failing" the same way the Monod success-floor does.
+//
+// Per-grip prior is required for the three-exp shrinkage to mean anything.
+// If opts.threeExpPriors is not provided OR no prior exists for this grip,
+// we fall back to the Monod success-floor fit (still fatigue-adjusted)
+// — this preserves the cold-start / first-grip case where the prior
+// hasn't been built yet.
+export function prescribedLoad(history, hand, grip, targetDuration, freshMap = null, opts = {}) {
   if (!history || !targetDuration) return null;
+  const { threeExpPriors = null } = opts;
   const handMatch = r =>
     r.hand === hand &&
     (!grip || r.grip === grip) &&
@@ -323,13 +336,31 @@ export function prescribedLoad(history, hand, grip, targetDuration, freshMap = n
   if (failures.length < 2 && successes.length < 2) return null;
 
   const fmap = freshMap || buildFreshLoadMap(history);
+  const bump = rpeProgressionMultiplier(history, hand, grip, targetDuration);
+
+  // Try three-exp first (the governing model). Requires a per-grip prior
+  // for the shrinkage to be meaningful; without one the fit is unstable
+  // at small N.
+  const prior = (grip && threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
+  if (prior && (prior[0] + prior[1] + prior[2]) > 0 && failures.length >= 1) {
+    const tePts = failures.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
+    const teSucc = successes.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
+    const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1);
+    const amps = fitThreeExpAmpsWithSuccessFloor(tePts, teSucc, { prior, lambda });
+    if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
+      const baseLoad = predForceThreeExp(amps, targetDuration);
+      if (baseLoad > 0) return Math.round(baseLoad * bump * 10) / 10;
+    }
+  }
+
+  // Cold-start fallback: Monod success-floor on freshMap-adjusted loads.
+  // Used when no per-grip three-exp prior exists yet (early data) or
+  // when the three-exp fit collapsed to all-zero amps.
   const failurePts = failures.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
   const successPts = successes.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
-
   const fit = fitCFWithSuccessFloor(failurePts, successPts);
   if (!fit) return null;
   const baseLoad = fit.CF + fit.W / targetDuration;
-  const bump = rpeProgressionMultiplier(history, hand, grip, targetDuration);
   return Math.round(baseLoad * bump * 10) / 10;
 }
 
@@ -349,8 +380,9 @@ export function prescribedLoad(history, hand, grip, targetDuration, freshMap = n
 // prescribedLoad() in that case (cold start).
 export const EMPIRICAL_LOOKBACK_DAYS = 30;
 
-export function empiricalPrescription(history, hand, grip, targetDuration) {
+export function empiricalPrescription(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
+  const { threeExpPriors = null } = opts;
   const cutoffMs = Date.now() - EMPIRICAL_LOOKBACK_DAYS * 86400 * 1000;
   const cutoff = ymdLocal(new Date(cutoffMs));
 
@@ -385,17 +417,59 @@ export function empiricalPrescription(history, hand, grip, targetDuration) {
     const bump = Math.min(MAX_BUMP_MULT, Math.pow(1 + BUMP_PER_SUCCESS, streak));
     return Math.round(F_actual * bump * 10) / 10;
   } else {
-    // W'-update math anchored to a stable CF.
-    const failurePts = history
-      .filter(r => r.failed && r.hand === hand && r.grip === grip
-        && r.actual_time_s > 0 && effectiveLoad(r) > 0)
-      .map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
-    const fit = failurePts.length >= 2 ? fitCF(failurePts) : null;
-    if (fit && F_actual > fit.CF) {
-      const newWprime = (F_actual - fit.CF) * T_actual;
-      const next = fit.CF + newWprime / T_target;
-      return Math.round(Math.max(next, fit.CF) * 10) / 10;
+    // Failure case: three-exp scale-by-residual.
+    // Fit three-exp to all of this (hand, grip)'s failures with the
+    // per-grip prior + shrinkage. The fit gives us the curve SHAPE the
+    // user's physiology is likely to follow. We then anchor the
+    // amplitude to the most recent failure: scale = F_actual / F_pred(T_actual).
+    // Prescription = F_pred(T_target) × scale. If T_target < T_actual,
+    // scale > 1 follows naturally; if T_target > T_actual, scale captures
+    // how much the curve drops over that extra duration.
+    //
+    // Falls back to Monod CF/W' update if no three-exp prior exists for
+    // this grip yet (cold start), then to a linear scale as last resort.
+    const failurePts = history.filter(r =>
+      r.failed && r.hand === hand && r.grip === grip
+      && r.actual_time_s > 0 && effectiveLoad(r) > 0
+    );
+
+    // Path 1: three-exp scale-by-residual
+    const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
+    if (prior && (prior[0] + prior[1] + prior[2]) > 0 && failurePts.length >= 1) {
+      const tePts = failurePts.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
+      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failurePts.length, 1);
+      const amps = fitThreeExpAmps(tePts, { prior, lambda });
+      if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
+        const F_pred_actual = predForceThreeExp(amps, T_actual);
+        if (F_pred_actual > 0) {
+          const scale = F_actual / F_pred_actual;
+          // Sanity bound: if the recent failure is more than 50% off
+          // the curve in either direction, the curve is likely a poor
+          // anchor — fall through to the linear scale instead.
+          if (scale >= 0.5 && scale <= 2.0) {
+            const F_pred_target = predForceThreeExp(amps, T_target);
+            const next = F_pred_target * scale;
+            if (next > 0) return Math.round(next * 10) / 10;
+          }
+        }
+      }
     }
+
+    // Path 2 (cold start): Monod CF/W' update — kept as the fallback
+    // when no three-exp prior exists yet for this grip. Same math as
+    // before the three-exp migration: assume CF stable, solve for new
+    // W' from the failure point, prescribe at T_target.
+    const monodPts = failurePts.map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
+    if (monodPts.length >= 2) {
+      const fit = fitCF(monodPts);
+      if (fit && F_actual > fit.CF) {
+        const newWprime = (F_actual - fit.CF) * T_actual;
+        const next = fit.CF + newWprime / T_target;
+        return Math.round(Math.max(next, fit.CF) * 10) / 10;
+      }
+    }
+
+    // Path 3 (no fit at all): linear scale by duration ratio.
     const scale = Math.max(0.7, T_actual / T_target);
     return Math.round(F_actual * scale * 10) / 10;
   }

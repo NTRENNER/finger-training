@@ -182,8 +182,8 @@ export function coachingRecommendation(history, grip, opts = {}) {
     let bestTrainAt = null;
     let bestResFactor = null;
     for (const hand of ["L", "R"]) {
-      const trainAt = empiricalPrescription(history, hand, grip, t)
-                    ?? prescribedLoad(history, hand, grip, t, freshMap);
+      const trainAt = empiricalPrescription(history, hand, grip, t, { threeExpPriors })
+                    ?? prescribedLoad(history, hand, grip, t, freshMap, { threeExpPriors });
       const pot = prescriptionPotential(history, hand, grip, t, { freshMap, threeExpPriors });
       if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
       const gap = (pot.value - trainAt) / trainAt;

@@ -63,10 +63,10 @@ function _solve2(A, b) {
 // with non-negativity constraints and a Gaussian shrinkage prior.
 //
 //   minimize over (a,b,c) ≥ 0 of:
-//     Σᵢ (a·exp(-Tᵢ/τ₁) + b·exp(-Tᵢ/τ₂) + c·exp(-Tᵢ/τ₃) − Fᵢ)²
+//     Σᵢ wᵢ · (a·exp(-Tᵢ/τ₁) + b·exp(-Tᵢ/τ₂) + c·exp(-Tᵢ/τ₃) − Fᵢ)²
 //     + λ · ((a − a₀)² + (b − b₀)² + (c − c₀)²)
 //
-// pts:    [{T: duration_s, F: avg_force_kg}]
+// pts:    [{T: duration_s, F: avg_force_kg, w?: weight}]   w defaults to 1
 // taus:   [τ₁, τ₂, τ₃] in seconds (defaults to PHYS_MODEL_DEFAULT.tauD —
 //         the DEPLETION time constants, since this is a hold-duration
 //         decay model, not a rest-period recovery model).
@@ -81,12 +81,14 @@ export function fitThreeExpAmps(pts, opts = {}) {
   if (!pts || pts.length === 0) return prior.slice();
   const X = pts.map(p => taus.map(t => Math.exp(-p.T / t)));
   const y = pts.map(p => p.F);
+  const w = pts.map(p => p.w == null ? 1 : p.w);
   const XtX = [[0,0,0],[0,0,0],[0,0,0]];
   const Xty = [0, 0, 0];
   for (let i = 0; i < pts.length; i++) {
+    if (!(w[i] > 0)) continue;
     for (let j = 0; j < 3; j++) {
-      Xty[j] += X[i][j] * y[i];
-      for (let k = 0; k < 3; k++) XtX[j][k] += X[i][j] * X[i][k];
+      Xty[j] += w[i] * X[i][j] * y[i];
+      for (let k = 0; k < 3; k++) XtX[j][k] += w[i] * X[i][j] * X[i][k];
     }
   }
   const A = XtX.map((row, j) => row.map((v, k) => v + (j === k ? lambda : 0)));
@@ -119,8 +121,9 @@ export function fitThreeExpAmps(pts, opts = {}) {
   const objective = (beta) => {
     let r = 0;
     for (let i = 0; i < pts.length; i++) {
+      if (!(w[i] > 0)) continue;
       const pred = X[i][0]*beta[0] + X[i][1]*beta[1] + X[i][2]*beta[2];
-      r += (pred - y[i]) ** 2;
+      r += w[i] * (pred - y[i]) ** 2;
     }
     for (let j = 0; j < 3; j++) r += lambda * (beta[j] - prior[j]) ** 2;
     return r;
@@ -132,6 +135,63 @@ export function fitThreeExpAmps(pts, opts = {}) {
     if (o < bestObj) { best = candidates[c]; bestObj = o; }
   }
   return best;
+}
+
+// Three-exp fit with success-floor enforcement — the three-exp analog
+// of fitCFWithSuccessFloor in monod.js. Failures anchor the curve;
+// successes act as LOWER BOUNDS (you held F for T without failing →
+// the curve at T must be ≥ F). Without this, prescriptions lag actual
+// capacity whenever the user clears a target instead of pushing to true
+// failure.
+//
+// Algorithm: start with a failure-only fit, iteratively bump weights of
+// any success points that violate the lower bound, refit until no more
+// violations or maxIter reached. Same shape as the Monod success-floor
+// iteration, just operating on three-exp amps instead of (CF, W').
+//
+// failurePts: [{T, F}]
+// successPts: [{T, F}]
+// opts: { taus?, prior?, lambda?, maxIter?, tol?, weightStep? }
+//
+// Returns [a, b, c] all ≥ 0, or null if not enough data.
+export function fitThreeExpAmpsWithSuccessFloor(failurePts, successPts, opts = {}) {
+  const { maxIter = 60, tol = 0.1, weightStep = 4.0, ...fitOpts } = opts;
+  const failures = (failurePts || []).map(p => ({ T: p.T, F: p.F, w: 1 }));
+  const successes = successPts || [];
+  if (failures.length + successes.length < 2) return null;
+
+  let amps = failures.length >= 1 ? fitThreeExpAmps(failures, fitOpts) : null;
+  if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) {
+    // Seed with successes too if failures alone produced nothing
+    const seed = [...failures, ...successes.map(p => ({ T: p.T, F: p.F, w: 1 }))];
+    amps = fitThreeExpAmps(seed, fitOpts);
+  }
+  if (!amps) return null;
+  if (successes.length === 0) return amps;
+
+  const succWeights = successes.map(() => 0);
+  for (let iter = 0; iter < maxIter; iter++) {
+    let anyViolation = false;
+    for (let i = 0; i < successes.length; i++) {
+      const s = successes[i];
+      const pred = predForceThreeExp(amps, s.T, fitOpts.taus);
+      if (pred < s.F - tol) {
+        succWeights[i] += weightStep;
+        anyViolation = true;
+      }
+    }
+    if (!anyViolation) break;
+    const augmented = [...failures];
+    for (let i = 0; i < successes.length; i++) {
+      if (succWeights[i] > 0) {
+        augmented.push({ T: successes[i].T, F: successes[i].F, w: succWeights[i] });
+      }
+    }
+    const next = fitThreeExpAmps(augmented, fitOpts);
+    if (!next) break;
+    amps = next;
+  }
+  return amps;
 }
 
 // Predict force at duration T given fitted amplitudes [a, b, c].

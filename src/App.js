@@ -2112,7 +2112,7 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
 
         const cellFor = (hand, t) => {
           // Empirical-first: anchored to user's most recent rep 1
-          const emp = empiricalPrescription(history, hand, config.grip, t);
+          const emp = empiricalPrescription(history, hand, config.grip, t, { threeExpPriors });
           let trainAt, source;
           if (emp != null) {
             trainAt = emp;
@@ -2120,10 +2120,10 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
           } else {
             // Cold start: fall back to the curve. Try per-grip first,
             // then cross-grip, then historical average.
-            const v1 = prescribedLoad(history, hand, config.grip, t, freshMap);
+            const v1 = prescribedLoad(history, hand, config.grip, t, freshMap, { threeExpPriors });
             if (v1 != null) { trainAt = v1; source = "curve-grip"; }
             else {
-              const v2 = prescribedLoad(history, hand, null, t, freshMap);
+              const v2 = prescribedLoad(history, hand, null, t, freshMap, { threeExpPriors });
               if (v2 != null) { trainAt = v2; source = "curve-global"; }
               else {
                 const v3 = estimateRefWeight(history, hand, config.grip, t);
@@ -4903,7 +4903,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         let bestGap = null;
         const handsToCheck = selHand ? [selHand] : ["L", "R"];
         for (const h of handsToCheck) {
-          const trainAt = empiricalPrescription(upTo, h, selGrip, T);
+          const trainAt = empiricalPrescription(upTo, h, selGrip, T, { threeExpPriors });
           const pot = prescriptionPotential(upTo, h, selGrip, T, { threeExpPriors });
           if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
           const gap = (pot.value - trainAt) / trainAt;
@@ -5161,8 +5161,8 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           const t = GOAL_CONFIG[zoneKey].refTime;
           let bestGap = null;
           for (const h of ["L", "R"]) {
-            const trainAt = empiricalPrescription(history, h, selGrip, t)
-                         ?? prescribedLoad(history, h, selGrip, t, freshMap);
+            const trainAt = empiricalPrescription(history, h, selGrip, t, { threeExpPriors })
+                         ?? prescribedLoad(history, h, selGrip, t, freshMap, { threeExpPriors });
             const pot = prescriptionPotential(history, h, selGrip, t, { freshMap, threeExpPriors });
             if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
             const gap = (pot.value - trainAt) / trainAt;
@@ -5229,8 +5229,8 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         const t = GOAL_CONFIG[zoneKey].refTime;
         let bestGap = null;
         for (const h of ["L", "R"]) {
-          const trainAt = empiricalPrescription(history, h, grip, t)
-                       ?? prescribedLoad(history, h, grip, t, freshMap);
+          const trainAt = empiricalPrescription(history, h, grip, t, { threeExpPriors })
+                       ?? prescribedLoad(history, h, grip, t, freshMap, { threeExpPriors });
           const pot = prescriptionPotential(history, h, grip, t, { freshMap, threeExpPriors });
           if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
           const gap = (pot.value - trainAt) / trainAt;
@@ -8154,6 +8154,15 @@ export default function App() {
     return buildFreshLoadMap(history, { doseK: k });
   }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // App-level three-exp per-grip priors. Hoisted out of SetupView /
+  // AnalysisView so all three callers (Setup card, Analysis chart,
+  // in-workout startSession) share one memo and pass the same priors
+  // into prescribedLoad/empiricalPrescription/prescriptionPotential.
+  // Without this, startSession was falling through to the Monod cold-
+  // start fallback even when SetupView already had a usable prior,
+  // producing different prescriptions between the two views.
+  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Track how many reps are waiting to be synced to Supabase.
   const [pendingCount, setPendingCount] = useState(() => (loadLS(LS_QUEUE_KEY) || []).length);
   const refreshPending = () => setPendingCount((loadLS(LS_QUEUE_KEY) || []).length);
@@ -8544,9 +8553,9 @@ export default function App() {
     // Setup card uses, so the in-workout suggested weight matches
     // the Setup card to the kg.
     ["L", "R"].forEach(h => {
-      rw[h] = empiricalPrescription(history, h, config.grip, config.targetTime)
-           ?? prescribedLoad(history, h, config.grip, config.targetTime, freshMap)
-           ?? prescribedLoad(history, h, null,        config.targetTime, freshMap)
+      rw[h] = empiricalPrescription(history, h, config.grip, config.targetTime, { threeExpPriors })
+           ?? prescribedLoad(history, h, config.grip, config.targetTime, freshMap, { threeExpPriors })
+           ?? prescribedLoad(history, h, null,        config.targetTime, freshMap, { threeExpPriors })
            ?? estimateRefWeight(history, h, config.grip, config.targetTime);
     });
     const startedAt = nowISO();
@@ -8563,7 +8572,7 @@ export default function App() {
     setAltHandRep(false);
     setPhase("rep_ready");
     setTab(0); // stay on Train tab
-  }, [history, config, freshMap]);
+  }, [history, config, freshMap, threeExpPriors]);
 
   // ── Handle rep completion ─────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, failed = false }) => {
