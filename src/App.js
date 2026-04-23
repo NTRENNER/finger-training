@@ -1200,6 +1200,177 @@ function prescriptionPotential(history, hand, grip, targetDuration, opts = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// COACHING RECOMMENDATION ENGINE v2
+// ─────────────────────────────────────────────────────────────
+// Picks the next training zone using a multi-factor score:
+//
+//   score = gap × intensity_match × recency_penalty × external_load
+//
+// where:
+//   gap            — potential − current, normalized. Largest gap =
+//                    biggest training leverage (the physiological
+//                    weak compartment).
+//   intensity_match — how well the zone's neural/metabolic intensity
+//                    fits the user's current readiness. Power needs
+//                    high readiness; Capacity tolerates lower.
+//   recency_penalty — exponential recovery curve since last session
+//                    on this zone. Power recovers fast (~1.5d),
+//                    Capacity slow (~3.5d).
+//   external_load   — recent climbing reduces stimulus tolerance,
+//                    especially Power. No-climbing baseline = 1.0.
+//
+// Returns the zone (and hand) with the highest score, plus the
+// component scores so the UI can explain WHY this was picked.
+// Returns null if no zone has a meaningful gap (everything's already
+// at potential — congratulations, time to recalibrate).
+
+const COACH_INTENSITY = {
+  power:     1.0,   // Highest neural + PCr demand
+  strength:  0.7,   // Middle (glycolytic dominant)
+  endurance: 0.4,   // Lower per-rep intensity (sub-max sustained)
+};
+const COACH_RECOVERY_TAU_DAYS = {
+  power:     1.5,   // PCr/neural recovery is fast
+  strength:  2.5,   // Glycolytic recovers middle
+  endurance: 3.5,   // Oxidative adaptations need more time
+};
+
+// Map readiness (1-10) and zone intensity to a 0.1-1.0 multiplier.
+// Match curve: peak when zone-intensity matches readiness-normalized;
+// gentle dropoff for mismatch (so the system isn't too punishing for
+// near-miss readiness scores).
+function intensityMatch(zone, readiness) {
+  const zoneI = COACH_INTENSITY[zone] ?? 0.5;
+  const readinessNorm = Math.max(0, Math.min(1, (readiness - 1) / 9));
+  const mismatch = Math.abs(zoneI - readinessNorm);
+  return Math.max(0.1, 1 - Math.pow(mismatch, 1.2));
+}
+
+// Recovery curve: returns 0 immediately after training the zone, rising
+// asymptotically to 1.0 as days_ago grows. Zone-specific tau means
+// Power recovers faster than Capacity. Returns 1.0 if zone never trained.
+function recencyPenalty(zone, history, grip) {
+  if (!grip || !history || history.length === 0) return 1.0;
+  const tau = COACH_RECOVERY_TAU_DAYS[zone] ?? 2;
+  const targetT = GOAL_CONFIG[zone]?.refTime;
+  if (!targetT) return 1.0;
+  const matchingDates = history
+    .filter(r => r.grip === grip && r.target_duration === targetT)
+    .map(r => r.date)
+    .filter(Boolean);
+  if (matchingDates.length === 0) return 1.0;
+  const mostRecent = matchingDates.sort().reverse()[0];
+  const today = ymdLocal();
+  const daysAgo = Math.max(0, Math.floor(
+    (new Date(today).getTime() - new Date(mostRecent).getTime()) / 86400000
+  ));
+  return 1 - Math.exp(-daysAgo / tau);
+}
+
+// External load (climbing) adds systemic fatigue that the per-rep
+// readiness signal doesn't fully capture. Recent climbing biases
+// against Power most heavily, Capacity least.
+function externalLoadModifier(zone, activities) {
+  if (!activities || activities.length === 0) return 1.0;
+  const today = ymdLocal();
+  const todayMs = new Date(today).getTime();
+  let mostRecentClimbHoursAgo = Infinity;
+  for (const a of activities) {
+    if (a.type !== "climbing") continue;
+    if (!a.date) continue;
+    const aMs = new Date(a.date).getTime();
+    const hoursAgo = (todayMs - aMs) / 3600000;
+    if (hoursAgo >= 0 && hoursAgo < mostRecentClimbHoursAgo) {
+      mostRecentClimbHoursAgo = hoursAgo;
+    }
+  }
+  if (mostRecentClimbHoursAgo > 48) return 1.0;
+  const baseReduction = zone === "power"     ? 0.4
+                      : zone === "strength"  ? 0.7
+                      : 0.9;
+  const recoveryFraction = mostRecentClimbHoursAgo / 48;
+  return baseReduction + (1 - baseReduction) * recoveryFraction;
+}
+
+// Main coaching recommendation. Returns the highest-scoring (zone, hand)
+// with all component factors so the UI can explain the rationale.
+function coachingRecommendation(history, grip, opts = {}) {
+  const { freshMap = null, threeExpPriors = null, readiness = 5, activities = [] } = opts;
+  if (!grip) return null;
+  const zones = ["power", "strength", "endurance"];
+  const candidates = [];
+  for (const zoneKey of zones) {
+    const t = GOAL_CONFIG[zoneKey]?.refTime;
+    if (!t) continue;
+    // Compute gap per hand, take the larger (biggest leverage)
+    let bestGap = 0;
+    let bestHand = null;
+    let bestPotential = null;
+    let bestTrainAt = null;
+    for (const hand of ["L", "R"]) {
+      const trainAt = empiricalPrescription(history, hand, grip, t)
+                    ?? prescribedLoad(history, hand, grip, t, freshMap);
+      const pot = prescriptionPotential(history, hand, grip, t, { freshMap, threeExpPriors });
+      if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
+      const gap = (pot.value - trainAt) / trainAt;
+      if (gap > bestGap) {
+        bestGap = gap;
+        bestHand = hand;
+        bestPotential = pot;
+        bestTrainAt = trainAt;
+      }
+    }
+    if (bestGap <= 0 || !bestHand) continue;
+    const iMatch  = intensityMatch(zoneKey, readiness);
+    const recency = recencyPenalty(zoneKey, history, grip);
+    const ext     = externalLoadModifier(zoneKey, activities);
+    const score = bestGap * iMatch * recency * ext;
+    candidates.push({
+      zone: zoneKey,
+      hand: bestHand,
+      gap: bestGap,
+      potential: bestPotential.value,
+      trainAt: bestTrainAt,
+      iMatch, recency, ext,
+      score,
+    });
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0];
+}
+
+// Build a human-readable rationale string from a coachingRecommendation
+// result. Used by SessionPlannerCard so the user sees WHY this zone was
+// picked, not just THAT it was picked.
+function coachingRationale(rec) {
+  if (!rec) return "";
+  const compName = rec.zone === "power" ? "fast (PCr)"
+                 : rec.zone === "strength" ? "middle (glycolytic)"
+                 : "slow (oxidative)";
+  const handLabel = rec.hand === "L" ? "Left" : "Right";
+  const reasons = [];
+  if (rec.gap > 0.10) {
+    const pct = Math.round(rec.gap * 100);
+    reasons.push(`+${pct}% gap on ${handLabel} (your ${compName} compartment is your widest opportunity)`);
+  }
+  if (rec.iMatch >= 0.85) {
+    reasons.push("intensity matches your current readiness");
+  } else if (rec.iMatch < 0.5) {
+    reasons.push("intensity may not match your current readiness — proceed with feel");
+  }
+  if (rec.recency >= 0.85) {
+    reasons.push("zone fully recovered since last session");
+  } else if (rec.recency < 0.5) {
+    reasons.push("zone is partially recovered, lighter dose is fine");
+  }
+  if (rec.ext < 0.7) {
+    reasons.push("recent climbing biased away from harder zones");
+  }
+  return reasons.join("; ");
+}
+
+// ─────────────────────────────────────────────────────────────
 // PER-COMPARTMENT AUC (training dose delivered to each energy system)
 // ─────────────────────────────────────────────────────────────
 // Textbook PK-style integral: dose_i = load × A_i × τ_Di × (1 − e^(−t/τ_Di))
@@ -2008,7 +2179,7 @@ const BADGE_CONFIG = [
   { id: "realization", label: "Realization", emoji: "🏔️", threshold: 100, desc: "2× your Genesis capacity — the potential fulfilled" },
 ];
 
-function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null, recommendedGrip = null, recommendedLabel = "recommended", recommendedScope = null }) {
+function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null, recommendedGrip = null, recommendedLabel = "recommended", recommendedScope = null, recommendedRationale = "" }) {
   // Default goal to the recommended zone when we know it; fall back to strength
   const initGoal = (recommendedZone && GOAL_CONFIG[recommendedZone]) ? recommendedZone : "strength";
   const [goal,    setGoal]    = useState(initGoal);
@@ -2089,6 +2260,21 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
           );
         })}
       </div>
+
+      {/* Coaching rationale — explains WHY this zone was recommended,
+          combining the gap diagnostic with readiness/recency/external-load
+          context. Only shown when there's something meaningful to say
+          (rationale string non-empty). */}
+      {recommendedRationale && (
+        <div style={{
+          fontSize: 11, color: C.muted, marginBottom: 12,
+          padding: "8px 10px", background: C.bg, borderRadius: 8,
+          border: `1px solid ${gc.color}33`, lineHeight: 1.5,
+        }}>
+          <span style={{ color: gc.color, fontWeight: 700 }}>Why {gc.label}: </span>
+          {recommendedRationale}
+        </div>
+      )}
 
       {/* Prescription summary strip */}
       <div style={{
@@ -2974,54 +3160,69 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
           data is too sparse for the cross-zone fit. Matches the
           Analysis tab's precedence so the two views never disagree. */}
       {(() => {
-        const limiter = computeLimiterZone(history);
-        const limiterGrip = limiter?.grip ?? null;
-        // Prefer a grip-specific Monod fit when the user has picked a
-        // grip — FDP (pinch / open-hand rollers) and FDS (crusher) are
-        // separate muscles with separate force-duration curves, and
-        // training one doesn't fully transfer to the other. Fall back
-        // to the overall pooled fit if no grip is selected yet or the
-        // selected grip doesn't have enough data for its own fit.
+        // Coaching engine v2: pick the next zone based on
+        //   gap × intensity_match × recency × external_load
+        // Falls back to the legacy heuristic chain when there's no grip
+        // selected or no scoreable zones (cold start with no data).
         const gripFit = config.grip && gripEstimates[config.grip];
         const fitForRec = gripFit ?? liveEstimate;
         const scopeLabel = gripFit ? config.grip : (config.grip ? `${config.grip} (pooled)` : "overall");
+
         let zone = null;
-        // Track WHICH signal picked the zone so we can label the badge
-        // honestly: "biggest gain" for ΔAUC, "limiter" for curve-shape,
-        // "least trained" for coverage fallback.
         let label = "recommended";
-        if (fitForRec && fitForRec.CF > 0) {
-          // Rank protocols by projected ΔAUC using the PERSONAL response
-          // (prior when data is thin; blended with observed rates as the
-          // training log grows). Matches AnalysisView so the two views
-          // prescribe the same zone.
-          const { CF, W } = fitForRec;
-          const response = computePersonalResponse(history);
-          let bestKey = null, bestGain = -Infinity;
-          for (const [key, resp] of Object.entries(response)) {
-            const gain = CF * resp.cf * (AUC_T_MAX - AUC_T_MIN)
-                       + W  * resp.w  * Math.log(AUC_T_MAX / AUC_T_MIN);
-            if (gain > bestGain) { bestGain = gain; bestKey = key; }
-          }
-          zone = bestKey;
-          label = "biggest gain";
-        } else if (limiter?.zone) {
-          zone = limiter.zone;
-          label = "limiter";
+        let rationale = "";
+        let recommendedGrip = null;
+
+        const coachRec = config.grip
+          ? coachingRecommendation(history, config.grip, {
+              freshMap, threeExpPriors,
+              readiness: readiness ?? 5,
+              activities,
+            })
+          : null;
+
+        if (coachRec) {
+          zone = coachRec.zone;
+          recommendedGrip = config.grip;
+          // Label captures the dominant reason (gap > 10% → "biggest gap",
+          // else fall through to "recommended" as a neutral default).
+          label = coachRec.gap > 0.10 ? "biggest gap" : "recommended";
+          rationale = coachingRationale(coachRec);
         } else {
-          const cov = computeZoneCoverage(history, activities);
-          if (cov.total > 0) {
-            zone = cov.recommended;
-            label = "least trained";
+          // Legacy fallback: limiter → coverage → ΔAUC.
+          const limiter = computeLimiterZone(history);
+          recommendedGrip = limiter?.grip ?? null;
+          if (fitForRec && fitForRec.CF > 0) {
+            const { CF, W } = fitForRec;
+            const response = computePersonalResponse(history);
+            let bestKey = null, bestGain = -Infinity;
+            for (const [key, resp] of Object.entries(response)) {
+              const gain = CF * resp.cf * (AUC_T_MAX - AUC_T_MIN)
+                         + W  * resp.w  * Math.log(AUC_T_MAX / AUC_T_MIN);
+              if (gain > bestGain) { bestGain = gain; bestKey = key; }
+            }
+            zone = bestKey;
+            label = "biggest gain (cold start)";
+          } else if (limiter?.zone) {
+            zone = limiter.zone;
+            label = "limiter";
+          } else {
+            const cov = computeZoneCoverage(history, activities);
+            if (cov.total > 0) {
+              zone = cov.recommended;
+              label = "least trained";
+            }
           }
         }
+
         return (
           <SessionPlannerCard
             liveEstimate={fitForRec}
             recommendedZone={zone}
-            recommendedGrip={limiterGrip}
+            recommendedGrip={recommendedGrip}
             recommendedLabel={label}
             recommendedScope={scopeLabel}
+            recommendedRationale={rationale}
             onApplyPlan={({ goal, targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
               setConfig(c => ({ ...c, goal, targetTime, repsPerSet, restTime, numSets, setRestTime }))
             }
