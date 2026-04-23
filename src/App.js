@@ -8773,11 +8773,20 @@ export default function App() {
   const tindeq = useTindeq();
 
   // ── Start session ─────────────────────────────────────────
+  // refWeights drives the in-workout "Rep 1 suggested weight" display
+  // and the weight that gets recorded against each rep. Prescribed via
+  // the same model-based path as the Setup card (prescribedLoad,
+  // i.e. Monod CF + W'/T) so the two views agree. Falls back to the
+  // older empirical historical-average estimate when there isn't
+  // enough data to fit Monod, then to whatever the user configured
+  // as a last resort.
   const startSession = useCallback(() => {
     const sid = uid();
     const rw = {};
     ["L", "R"].forEach(h => {
-      rw[h] = estimateRefWeight(history, h, config.grip, config.targetTime);
+      rw[h] = prescribedLoad(history, h, config.grip, config.targetTime)
+           ?? prescribedLoad(history, h, null,        config.targetTime)
+           ?? estimateRefWeight(history, h, config.grip, config.targetTime);
     });
     const startedAt = nowISO();
     setSessionId(sid);
