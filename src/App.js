@@ -879,10 +879,60 @@ function suggestWeight(refWeight, fatigue) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// RPE 10 PROGRESSION BUMP
+// ─────────────────────────────────────────────────────────────
+// In RPE 10 (rep-to-failure) training, the goal is for rep 1 to fail
+// at the prescribed target time. A SUCCESS at rep 1 (held to or
+// beyond target) is evidence the load was too light — the user has
+// capacity beyond what we prescribed. The Monod fit only weakly
+// updates on success-only data (success is just a lower bound on
+// the curve, not a point on it), so the prescription can stall
+// instead of progressing. This explicit per-session bump closes
+// that loop: count consecutive recent rep-1 successes at the same
+// (hand, grip, targetTime) and multiply the prescription by
+// (1 + BUMP_PER_SUCCESS)^streak. As soon as a real failure happens,
+// the streak resets and the curve takes over (failure points DO
+// directly anchor the curve, so the curve-driven path naturally
+// produces the right next prescription with diminishing returns
+// built in).
+const BUMP_PER_SUCCESS = 0.05;   // +5% per success-session at this scope
+const MAX_BUMP_MULT = 1.30;       // cap at +30% (≈5-6 successes); beyond
+                                  // that, calibration has drifted enough
+                                  // that the user should manually re-anchor
+
+function rpeProgressionMultiplier(history, hand, grip, targetDuration) {
+  if (!hand || !grip || !targetDuration || !history || history.length === 0) return 1;
+  // Find rep 1 of each session matching this (hand, grip, targetTime).
+  // Group by session_id (or date as fallback) so multiple-rep sessions
+  // collapse to their leading rep.
+  const rep1ByScope = new Map();
+  for (const r of history) {
+    if (r.hand !== hand || r.grip !== grip) continue;
+    if (r.target_duration !== targetDuration) continue;
+    if ((r.rep_num || 1) !== 1) continue;
+    const sid = r.session_id || r.date || "unknown";
+    rep1ByScope.set(sid, r);
+  }
+  // Sort by date descending (most recent first), then count how many
+  // consecutive rep 1s were "successes" (not flagged failed AND held to
+  // ≥95% of target — covers the case where shortfalls weren't tagged).
+  const rep1s = [...rep1ByScope.values()]
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  let streak = 0;
+  for (const r of rep1s) {
+    if (r.failed) break;
+    if (!(r.actual_time_s >= targetDuration * 0.95)) break;
+    streak += 1;
+  }
+  return Math.min(MAX_BUMP_MULT, Math.pow(1 + BUMP_PER_SUCCESS, streak));
+}
+
+// ─────────────────────────────────────────────────────────────
 // LOAD AUTO-PRESCRIPTION from fitted CF/W' (Monod-Scherrer)
 // ─────────────────────────────────────────────────────────────
 // Returns prescribed load (kg) for a target time-to-exhaustion on a given grip/hand.
-// Uses the hyperbolic form: F = CF + W'/T.
+// Uses the hyperbolic form: F = CF + W'/T, then applies the RPE 10
+// progression bump (above) so success-only sessions still progress.
 //
 // Failures anchor the curve directly (you failed at load L after T seconds
 // → F(T) = L). Successful reps that hit or exceeded their target act as
@@ -925,7 +975,14 @@ function prescribedLoad(history, hand, grip, targetDuration, freshMap = null) {
 
   const fit = fitCFWithSuccessFloor(failurePts, successPts);
   if (!fit) return null;
-  return Math.round((fit.CF + fit.W / targetDuration) * 10) / 10;
+  // RPE 10 progression bump: scales the curve-evaluated prescription up
+  // when recent rep-1 outcomes have all been successes at this scope.
+  // Curve-derived prescription naturally produces the right next value
+  // when there's been a failure (the failure point anchors the curve);
+  // this bump compensates for the success-only stall.
+  const baseLoad = fit.CF + fit.W / targetDuration;
+  const bump = rpeProgressionMultiplier(history, hand, grip, targetDuration);
+  return Math.round(baseLoad * bump * 10) / 10;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2774,13 +2831,19 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
         // grip fallback (e.g., "your Micro fit" subtitle while a Power
         // value secretly came from cross-grip data).
         const prescribedWithSource = (hand, t) => {
+          // Compute the RPE 10 progression bump separately so we can surface
+          // it in the UI (small ↑Xx badge) — otherwise a sudden +10% jump
+          // would look mysterious. Only meaningful for the per-grip path
+          // since the streak is scoped to (hand, grip, targetTime).
+          const bump = rpeProgressionMultiplier(history, hand, config.grip, t);
+          const streak = bump > 1 ? Math.round(Math.log(bump) / Math.log(1 + BUMP_PER_SUCCESS)) : 0;
           const v1 = prescribedLoad(history, hand, config.grip, t, freshMap);
-          if (v1 != null) return { value: v1, source: "grip" };
+          if (v1 != null) return { value: v1, source: "grip", streak };
           const v2 = prescribedLoad(history, hand, null, t, freshMap);
-          if (v2 != null) return { value: v2, source: "global" };
+          if (v2 != null) return { value: v2, source: "global", streak: 0 };
           const v3 = estimateRefWeight(history, hand, config.grip, t);
-          if (v3 != null) return { value: v3, source: "history" };
-          return { value: null, source: null };
+          if (v3 != null) return { value: v3, source: "history", streak: 0 };
+          return { value: null, source: null, streak: 0 };
         };
         // Three-exp shadow prescription for a (hand, grip, T) combo.
         // Returns null when there's no prior for the grip OR no failures
@@ -2801,7 +2864,11 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
           const amps = fitThreeExpAmps(pts, { prior, lambda });
           if (amps[0] + amps[1] + amps[2] <= 0) return null;
           const f = predForceThreeExp(amps, t);
-          return f > 0 ? f : null;
+          if (!(f > 0)) return null;
+          // Apply the same RPE 10 progression bump as Monod so the
+          // shadow comparison stays apples-to-apples.
+          const bump = rpeProgressionMultiplier(history, hand, grip, t);
+          return f * bump;
         };
         const zones = ["power", "strength", "endurance"].map(zoneKey => {
           const t = GOAL_CONFIG[zoneKey].refTime;
@@ -2860,6 +2927,10 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
                         const sourceTitle = cell.source === "global" ? `Cross-grip fallback — not enough ${config.grip}-specific data on ${handLabel} for ${cfg.label} (${t}s) yet`
                                           : cell.source === "history" ? `Historical-average fallback — not enough failures for any model fit on ${handLabel} ${config.grip} at ${t}s`
                                           : "";
+                        const bumpPct = cell.streak > 0 ? Math.round((Math.pow(1 + BUMP_PER_SUCCESS, cell.streak) - 1) * 100) : 0;
+                        const streakTitle = cell.streak > 0
+                          ? `RPE 10 progression: rep 1 has been a success ${cell.streak} session${cell.streak > 1 ? "s" : ""} in a row at this target — bumping +${bumpPct}% to find your edge. Will reset on the first rep-1 failure.`
+                          : "";
                         return (
                           <div key={handLabel}>
                             <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>{handLabel}</div>
@@ -2871,6 +2942,11 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
                                 </span>
                               )}
                             </div>
+                            {cell.streak > 0 && (
+                              <div style={{ fontSize: 9, color: C.green, fontWeight: 600, marginTop: 2 }} title={streakTitle}>
+                                ↑{bumpPct}% · {cell.streak}× streak
+                              </div>
+                            )}
                             {e3 != null && (
                               <div style={{ fontSize: 9, color: C.yellow, fontWeight: 500, marginTop: 2 }} title="Three-exp shadow prescription — not driving the workout, just for comparison">
                                 3e: {fmtW(e3, unit)}
