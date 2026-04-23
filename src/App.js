@@ -5919,18 +5919,38 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     if (failures.length < 2) return [];
     const sorted = [...failures].sort((a, b) => a.date.localeCompare(b.date));
     const dates  = [...new Set(sorted.map(r => r.date))];
+    // Reuse selGrip if set so the three-exp prior is well-scoped.
     return dates.map(date => {
       const upTo = sorted.filter(r => r.date <= date);
       if (upTo.length < 2) return null;
       const fit = fitCF(upTo.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
       if (!fit) return null;
+      // Three-exp predicted force at T=120s on the same cumulative
+      // dataset. Useful as a parallel "long-duration capacity" track
+      // since three-exp captures the steeper drop-off Monod's hyperbolic
+      // shape misses at the extremes. Only computed when selGrip is set
+      // so we have a sensible per-grip prior.
+      let teePot120 = null;
+      if (selGrip && threeExpPriors && threeExpPriors.get) {
+        const prior = threeExpPriors.get(selGrip);
+        if (prior && upTo.length >= 2) {
+          const pts = upTo.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+          const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(upTo.length, 1);
+          const amps = fitThreeExpAmps(pts, { prior, lambda });
+          if (amps[0] + amps[1] + amps[2] > 0) {
+            const f = predForceThreeExp(amps, 120);
+            if (f > 0) teePot120 = toDisp(f, unit);
+          }
+        }
+      }
       return {
         date,
         cf: toDisp(fit.CF, unit),
         w:  toDisp(fit.W,  unit),  // W' has units of force·s; same linear conversion as force
+        teePot120,
       };
     }).filter(Boolean);
-  }, [failures, unit]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [failures, unit, selGrip, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Per-grip cumulative CF, used by CF Over Time when no grip filter
   // is active. Without this split, a Micro-heavy session pulls the
@@ -6768,8 +6788,23 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                         strokeWidth={2} dot={false} name={`${g} CF (${unit})`} connectNulls />
                     ))
                   : <Line dataKey="cf" stroke={C.blue} strokeWidth={2} dot={false} name={`CF (${unit})`} />}
+                {/* Three-exp predicted-at-120s overlay — single-grip only.
+                    Shows what three-exp says about your long-duration
+                    capacity at each historical date. When this line
+                    diverges meaningfully from Monod CF, three-exp's
+                    extra flexibility is doing real work. */}
+                {!splitMode && selGrip && cumulativeData.some(d => d.teePot120 != null) && (
+                  <Line dataKey="teePot120" stroke={C.yellow} strokeWidth={1.5}
+                        strokeDasharray="5 4" dot={false}
+                        name={`3e at 120s (${unit})`} connectNulls />
+                )}
               </LineChart>
             </ResponsiveContainer>
+            {!splitMode && selGrip && cumulativeData.some(d => d.teePot120 != null) && (
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textAlign: "center" }}>
+                <span style={{ color: C.blue }}>━ Monod CF</span> · <span style={{ color: C.yellow }}>╌ 3-exp at 120s</span> · divergence indicates Monod's hyperbolic shape is missing the steeper drop-off three-exp captures
+              </div>
+            )}
           </Card>
         );
       })()}
@@ -6890,19 +6925,28 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
 
         {/* ── Force-Duration scatter ── */}
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 6 }}>
             <div style={{ fontSize: 14, fontWeight: 700 }}>Force vs. Duration</div>
-            {bodyWeight != null && (
-              <div style={{ display: "flex", gap: 4 }}>
-                {["Absolute", "Relative"].map(mode => (
-                  <button key={mode} onClick={() => setRelMode(mode === "Relative")} style={{
-                    padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
-                    background: (mode === "Relative") === relMode ? C.purple : C.border,
-                    color: (mode === "Relative") === relMode ? "#fff" : C.muted,
-                  }}>{mode}</button>
-                ))}
-              </div>
-            )}
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {/* Grip toggle — Micro vs Crusher. Drives the global selGrip,
+                  so picking here also affects the rest of AnalysisView's
+                  per-grip cards. Avoids the cross-muscle confusion of
+                  having both Micro and Crusher on the same chart. */}
+              {["Micro", "Crusher"].map(g => (
+                <button key={g} onClick={() => setSelGrip(selGrip === g ? "" : g)} style={{
+                  padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  background: selGrip === g ? (g === "Micro" ? "#e05560" : C.orange) : C.border,
+                  color: selGrip === g ? "#fff" : C.muted,
+                }}>{g}</button>
+              ))}
+              {bodyWeight != null && ["Absolute", "Relative"].map(mode => (
+                <button key={mode} onClick={() => setRelMode(mode === "Relative")} style={{
+                  padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  background: (mode === "Relative") === relMode ? C.purple : C.border,
+                  color: (mode === "Relative") === relMode ? "#fff" : C.muted,
+                }}>{mode}</button>
+              ))}
+            </div>
           </div>
           {(() => {
             const splitMode = !!fdSplitData;
@@ -7382,7 +7426,13 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           );
 
           // Per-grip split mode: one card per grip with its own verdict.
-          const perGripMode = !selGrip && Object.keys(gripRecs).length >= 2;
+          // perGripMode triggers as soon as any grip has coaching data —
+          // even a single grip gets its own coaching card rather than
+          // falling through to the legacy ΔAUC engine in `recommendation`.
+          // Eliminates the inconsistency where a user with only one grip
+          // worth of data saw a Monod-driven recommendation while
+          // multi-grip users saw the gap-driven coaching engine.
+          const perGripMode = !selGrip && Object.keys(gripRecs).length >= 1;
           if (perGripMode) {
             return (
               <>
