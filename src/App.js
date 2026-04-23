@@ -5925,6 +5925,54 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     });
   }, [cfEstimate, maxDur, unit]);
 
+  // Per-grip Monod curves + dots, used in the F-D chart when no grip
+  // filter is active. Pooling Micro and Crusher onto one chart conflates
+  // two different muscles (FDP pinch vs FDS crush) — the cross-muscle
+  // amplitude difference dominates and the user can't see what's
+  // happening to each grip individually. When ≥2 grips have ≥2
+  // failures (and no selGrip), splitMode renders both.
+  const fdSplitData = useMemo(() => {
+    if (selGrip) return null;
+    const byGrip = {};
+    for (const r of history) {
+      if (!r.grip) continue;
+      if (selHand && r.hand !== selHand) continue;
+      if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+      if (!(r.actual_time_s > 0)) continue;
+      if (!byGrip[r.grip]) byGrip[r.grip] = { failures: [], successes: [] };
+      const bucket = r.failed ? "failures" : "successes";
+      // Successes only count toward the chart when they hit target —
+      // partial holds without a fail flag are ambiguous (matches the
+      // existing prescribedLoad scope).
+      if (bucket === "successes" && !(r.target_duration > 0 && r.actual_time_s >= r.target_duration)) continue;
+      byGrip[r.grip][bucket].push(r);
+    }
+    const grips = Object.keys(byGrip).filter(g => byGrip[g].failures.length >= 2);
+    if (grips.length < 2) return null;
+    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
+    const out = {};
+    for (const grip of grips) {
+      const fail = byGrip[grip].failures;
+      const succ = byGrip[grip].successes;
+      const fit = fitCFWithSuccessFloor(
+        fail.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })),
+        succ.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })),
+      );
+      if (!fit) continue;
+      const curve = Array.from({ length: 80 }, (_, i) => {
+        const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
+        return { x: t, y: toDisp(Math.max(fit.CF + fit.W / t, fit.CF), unit) };
+      });
+      out[grip] = {
+        fit,
+        curve,
+        failures: fail.map(r => ({ x: r.actual_time_s, y: toDisp(r.avg_force_kg, unit), date: r.date, grip: r.grip })),
+        successes: succ.map(r => ({ x: r.actual_time_s, y: toDisp(r.avg_force_kg, unit), date: r.date, grip: r.grip })),
+      };
+    }
+    return Object.keys(out).length >= 2 ? out : null;
+  }, [history, selHand, selGrip, maxDur, unit]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Three-exp shadow model ──
   // Per-grip prior pooled across hands (avoids cross-muscle scale
   // contamination — Crusher and Micro have wildly different absolute
@@ -6644,16 +6692,25 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               </div>
             )}
           </div>
-          <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
-            <span><span style={{ color: C.green }}>●</span> Completed</span>
-            <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
-            {cfEstimate && <span><span style={{ color: C.purple }}>―</span> F-D curve</span>}
-            {cfEstimate && <span><span style={{ color: C.purple }}>╌</span> Critical Force</span>}
-            {threeExpCurveDataRel.length > 0 && <span title="Experimental shadow model — not driving prescriptions"><span style={{ color: C.yellow }}>╌</span> 3-exp (shadow)</span>}
-            {confidenceBandRel && <span><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
-            {limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
-            {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
-          </div>
+          {(() => {
+            const splitMode = !!fdSplitData;
+            const FD_GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+            return (
+              <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
+                <span><span style={{ color: C.green }}>●</span> Completed</span>
+                <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
+                {!splitMode && cfEstimate && <span><span style={{ color: C.purple }}>―</span> F-D curve</span>}
+                {!splitMode && cfEstimate && <span><span style={{ color: C.purple }}>╌</span> Critical Force</span>}
+                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Experimental shadow model — not driving prescriptions"><span style={{ color: C.yellow }}>╌</span> 3-exp (shadow)</span>}
+                {!splitMode && confidenceBandRel && <span><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
+                {splitMode && Object.keys(fdSplitData).map(g => (
+                  <span key={g}><span style={{ color: FD_GRIP_COLORS[g] || C.blue }}>―</span> {g}</span>
+                ))}
+                {!splitMode && limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
+                {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
+              </div>
+            );
+          })()}
           <ResponsiveContainer width="100%" height={260}>
             <ComposedChart margin={{ top: 10, right: 16, bottom: 28, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
@@ -6677,47 +6734,84 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               <ReferenceArea x1={0}            x2={POWER_MAX}    fill={C.red}    fillOpacity={limiterZoneBounds?.x1 === 0            ? 0.22 : 0.07} />
               <ReferenceArea x1={POWER_MAX}    x2={STRENGTH_MAX} fill={C.orange} fillOpacity={limiterZoneBounds?.x1 === POWER_MAX    ? 0.22 : 0.07} />
               <ReferenceArea x1={STRENGTH_MAX} x2={maxDur + 10}  fill={C.blue}   fillOpacity={limiterZoneBounds?.x1 === STRENGTH_MAX ? 0.22 : 0.07} />
-              {/* Bootstrap confidence band — subtle dashed bounds
-                  showing 5th/95th percentile of resampled fits. Narrows
-                  as more failure data accumulates. */}
-              {confidenceBandRel && (
+              {/* Single-fit overlays only when NOT in per-grip split mode.
+                  In split mode they'd be ambiguous (which grip's CF? which
+                  3-exp? which 90% band?). Per-grip rendering takes over. */}
+              {!fdSplitData && confidenceBandRel && (
                 <Line data={confidenceBandRel} dataKey="low"  stroke={C.purple} strokeOpacity={0.35}
                       strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
               )}
-              {confidenceBandRel && (
+              {!fdSplitData && confidenceBandRel && (
                 <Line data={confidenceBandRel} dataKey="high" stroke={C.purple} strokeOpacity={0.35}
                       strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
               )}
-              {/* Critical Force horizontal line */}
-              {cfEstimate && (
+              {!fdSplitData && cfEstimate && (
                 <ReferenceLine
                   y={useRel ? cfEstimate.CF / bodyWeight : toDisp(cfEstimate.CF, unit)}
                   stroke={C.purple} strokeDasharray="6 3" strokeWidth={1.5}
                   label={{ value: `CF ${fmtForce(cfEstimate.CF)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
                 />
               )}
-              {/* Per-hand L vs R overlay curves removed — added visual
-                  noise without much insight. The per-grip combined curve
-                  is what drives prescriptions; per-hand asymmetry is
-                  better surfaced on the Per-Hand CF card below. */}
-              {/* Main fitted force-duration curve */}
-              {curveDataRel.length > 0 && (
+              {!fdSplitData && curveDataRel.length > 0 && (
                 <Line data={curveDataRel} dataKey="y" stroke={C.purple} strokeWidth={2} dot={false} legendType="none" isAnimationActive={false} />
               )}
-              {/* Three-exp shadow model overlay — dashed yellow.
-                  Validated offline to beat Monod by ~4% RMSE at λ=100;
-                  not yet driving prescriptions. */}
-              {threeExpCurveDataRel.length > 0 && (
+              {!fdSplitData && threeExpCurveDataRel.length > 0 && (
                 <Line data={threeExpCurveDataRel} dataKey="y" stroke={C.yellow}
                       strokeWidth={1.5} strokeDasharray="5 4" dot={false}
                       legendType="none" isAnimationActive={false} />
               )}
-              {/* Completed reps. Explicit dataKey="y" because Recharts
-                  Scatter doesn't infer it reliably when the chart also
-                  contains <Line> components with their own data prop. */}
-              <Scatter data={successDotsRel} dataKey="y" fill={C.green} opacity={0.85} name="Completed" />
-              {/* Failed reps */}
-              <Scatter data={failureDotsRel} dataKey="y" fill={C.red} opacity={0.95} name="Auto-failed" />
+              {!fdSplitData && (
+                <Scatter data={successDotsRel} dataKey="y" fill={C.green} opacity={0.85} name="Completed" />
+              )}
+              {!fdSplitData && (
+                <Scatter data={failureDotsRel} dataKey="y" fill={C.red} opacity={0.95} name="Auto-failed" />
+              )}
+              {/* Per-grip split mode: one curve + one set of dots per grip.
+                  Avoids the cross-muscle mudding (Micro FDP pinch ~5-10kg vs
+                  Crusher FDS crush ~15-30kg on a single curve). Failure dots
+                  retain their red/green meaning, but get a colored OUTLINE
+                  matching the grip so you can tell which is which. */}
+              {fdSplitData && (() => {
+                const FD_GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+                const grips = Object.keys(fdSplitData);
+                const elements = [];
+                for (const grip of grips) {
+                  const color = FD_GRIP_COLORS[grip] || C.blue;
+                  const data = fdSplitData[grip];
+                  // Convert curve to relative units if needed
+                  const curveRel = data.curve.map(d => ({
+                    x: d.x,
+                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
+                  }));
+                  elements.push(
+                    <Line key={`${grip}-curve`} data={curveRel} dataKey="y"
+                      stroke={color} strokeWidth={2} dot={false}
+                      legendType="none" isAnimationActive={false} />
+                  );
+                  // Dots: red fill for failures, green for completes — same
+                  // semantic as single-fit mode. The grip identity is read
+                  // from position relative to its own colored curve.
+                  const failRel = data.failures.map(d => ({
+                    x: d.x,
+                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
+                    grip, date: d.date,
+                  }));
+                  const succRel = data.successes.map(d => ({
+                    x: d.x,
+                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
+                    grip, date: d.date,
+                  }));
+                  elements.push(
+                    <Scatter key={`${grip}-fail`} data={failRel} dataKey="y"
+                      fill={C.red} stroke={color} strokeWidth={1.5} opacity={0.95} />
+                  );
+                  elements.push(
+                    <Scatter key={`${grip}-succ`} data={succRel} dataKey="y"
+                      fill={C.green} stroke={color} strokeWidth={1.5} opacity={0.85} />
+                  );
+                }
+                return elements;
+              })()}
             </ComposedChart>
           </ResponsiveContainer>
           {/* Zone labels */}
