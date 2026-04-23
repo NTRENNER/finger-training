@@ -2944,40 +2944,6 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
 
       <BwPrompt unit={unit} onSave={onBwSave} />
 
-      {/* Alternating hands mode — only when Both + rest ≥ rep duration */}
-      {config.hand === "Both" && config.restTime >= config.targetTime && (
-        <div style={{
-          marginBottom: 16, padding: "12px 16px",
-          background: C.card,
-          border: `1px solid ${config.altMode ? C.green + "66" : C.border}`,
-          borderRadius: 12,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-        }}>
-          <div style={{ flex: 1, paddingRight: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Alternating Hands Mode</div>
-            <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-              Left rep → switch → Right rep → rest · each hand fully recovers while the other works
-            </div>
-          </div>
-          <button
-            onClick={() => setConfig(c => ({ ...c, altMode: !c.altMode }))}
-            style={{
-              flexShrink: 0, width: 48, height: 26, borderRadius: 13,
-              border: "none", cursor: "pointer",
-              background: config.altMode ? C.green : C.border,
-              position: "relative", transition: "background 0.2s",
-            }}
-          >
-            <div style={{
-              position: "absolute", top: 3,
-              left: config.altMode ? 25 : 3,
-              width: 20, height: 20, borderRadius: 10,
-              background: "#fff", transition: "left 0.2s",
-            }} />
-          </button>
-        </div>
-      )}
-
       {/* Tindeq Connect slot — rendered just above the Start button */}
       {connectSlot}
 
@@ -8768,6 +8734,13 @@ export default function App() {
   // alternating per rep or doing all-L-then-all-R. There's no UI toggle for
   // this anymore; it lives in config only so existing downstream code keeps
   // working.
+  //
+  // altMode is now derived automatically (see effect below) — it's always a
+  // pure time-efficiency win when rest >= rep duration (the other hand's rep
+  // counts as recovery for the working hand, no per-hand rest is sacrificed),
+  // so there's no reason for the user to choose. The initial value is set
+  // here for the typical strength config (rest=20, rep=45) which gives false;
+  // the effect re-derives the moment the user picks a plan.
   const [config, setConfig] = useState(() => ({
     hand:       "Both",
     grip:       "",
@@ -8777,8 +8750,22 @@ export default function App() {
     targetTime: 45,
     restTime:   20,
     setRestTime: 180,
-    altMode:    false, // interleave both hands when rest >= rep duration
+    altMode:    false, // auto-derived from restTime >= targetTime; see effect below
   }));
+
+  // Auto-derive altMode whenever restTime or targetTime changes. Alt mode is
+  // only worth doing when restTime >= targetTime: in that regime the other
+  // hand's rep (= targetTime) plus a small altRestTime adds up to the
+  // configured rest, so per-hand recovery is preserved while total session
+  // time drops by ~30-50%. When restTime < targetTime, alt would shortchange
+  // recovery (other hand's rep alone exceeds the requested rest), so we stay
+  // sequential.
+  useEffect(() => {
+    setConfig(c => {
+      const should = c.restTime >= c.targetTime;
+      return c.altMode === should ? c : { ...c, altMode: should };
+    });
+  }, [config.restTime, config.targetTime]);
 
   // ── Session State Machine ─────────────────────────────────
   // phase: 'idle' | 'rep_ready' | 'rep_active' | 'resting' | 'between_sets' | 'switch_hands' | 'alt_switch' | 'done'
