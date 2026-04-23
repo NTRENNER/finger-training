@@ -1608,11 +1608,18 @@ function useTindeq() {
             adSumRef.current       = kg;
             adCountRef.current     = 1;
             adBelowRef.current     = null;
+            // Reset peak and live average when a new auto-rep begins
+            // so the gauge shows this-rep stats rather than carryover
+            // from the previous one.
+            peakRef.current = kg; setPeak(kg);
+            setAvgForce(kg);
             adOnStartRef.current?.();
           }
         } else {
           adSumRef.current  += kg;
           adCountRef.current += 1;
+          // Live running average so the in-rep ForceGauge can show it.
+          setAvgForce(adSumRef.current / adCountRef.current);
           if (kg < AD_END_KG) {
             if (adBelowRef.current === null) adBelowRef.current = now;
             else if (now - adBelowRef.current >= AD_END_MS) {
@@ -2092,12 +2099,15 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
         {fmtW(force, unit)}
       </div>
       <div style={{ textAlign: "center", fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 10 }}>
-        {unit}{targetKg != null ? ` · target ${fmtW(targetKg, unit)} ${unit}` : ""}
+        live {unit}{targetKg != null ? ` · target ${fmtW(targetKg, unit)} ${unit}` : ""}
       </div>
-      {/* Stats row */}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 6 }}>
-        <span>Avg: <b style={{ color: C.green }}>{fmtW(avg, unit)} {unit}</b></span>
-        <span>Peak: <b style={{ color: C.orange }}>{fmtW(peak, unit)} {unit}</b></span>
+      {/* Stats row — running averages over the active rep so user can
+          see at a glance how steady their pull has been (avg) and
+          where they peaked (max). Labels are explicit about which is
+          which since the big number above is "live current force." */}
+      <div style={{ display: "flex", justifyContent: "space-around", fontSize: 12, color: C.muted, marginBottom: 6 }}>
+        <span>Avg: <b style={{ color: C.green, fontVariantNumeric: "tabular-nums" }}>{fmtW(avg, unit)}</b></span>
+        <span>Max: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(peak, unit)}</b></span>
       </div>
       {/* Bar */}
       <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
@@ -7809,7 +7819,7 @@ function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" 
         <Card style={{ marginTop: 12 }}>
           <ForceGauge
             force={tindeq.force}
-            avg={0}
+            avg={tindeq.avgForce}
             peak={tindeq.peak}
             targetKg={suggestedKg}
             unit={unit}
