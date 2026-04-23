@@ -1226,11 +1226,21 @@ function prescriptionPotential(history, hand, grip, targetDuration, opts = {}) {
     reliability = "extrapolation";
   }
 
+  // Three-exp is now the primary value when it's available, with Monod as
+  // fallback. Promotion rationale: Monod's hyperbolic shape provably can't
+  // fit user data at the extremes (e.g. it can't satisfy both high-force
+  // short-T successes AND moderate-force middle-T failures simultaneously
+  // — see fitCFWithSuccessFloor). Three-exp's sum-of-exponentials handles
+  // the steeper extremes that Monod can't. Empirical-first prescription
+  // path means actual training loads aren't affected by this promotion;
+  // only the "potential" ceiling and gap diagnostic shift.
+  const primary = threeExpValue != null ? threeExpValue : monodValue;
   return {
-    value: Math.round(monodValue * 10) / 10,
+    value: Math.round(primary * 10) / 10,
     lower: Math.round(lower * 10) / 10,
     upper: Math.round(upper * 10) / 10,
     reliability,
+    monodValue:    Math.round(monodValue * 10) / 10,
     threeExpValue: threeExpValue != null ? Math.round(threeExpValue * 10) / 10 : null,
   };
 }
@@ -5681,6 +5691,12 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
 
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
+  // Per-grip three-exp priors. Used by the gap-narrowing tracker and
+  // the prescription-potential calculation (since three-exp is now the
+  // primary potential value when well-supported). Same memo as in
+  // SetupView; could be lifted to App if it becomes hot.
+  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
+
   // ── Critical Force estimation via Monod-Scherrer linearization ──
   // Failure-only fit on RAW force (no freshMap, no success-floor). This
   // is intentionally the "what your failures actually show" curve, not
@@ -6027,12 +6043,62 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     return Object.keys(out).length >= 2 ? out : null;
   }, [history, selHand, selGrip, maxDur, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Gap-narrowing tracker over time ──
+  // For each session date, compute the gap between empirical (what user
+  // actually trained at) and potential (curve-derived ceiling) per zone,
+  // using only data UP TO that date. Series shows whether the user is
+  // closing the gap in each compartment over time — the real "am I
+  // building toward potential" progress signal, much more actionable
+  // than absolute CF over time.
+  //
+  // Scope: requires a grip filter (cross-grip gap is meaningless).
+  // When selHand is set, computes per-hand. When unset, pools both hands
+  // (the curve fit is grip-scoped, the empirical anchor is most-recent
+  // rep 1 across both hands).
+  const gapHistory = useMemo(() => {
+    if (!selGrip) return null;
+    const targets = [
+      { key: "power",     T: GOAL_CONFIG.power.refTime,     color: GOAL_CONFIG.power.color },
+      { key: "strength",  T: GOAL_CONFIG.strength.refTime,  color: GOAL_CONFIG.strength.color },
+      { key: "endurance", T: GOAL_CONFIG.endurance.refTime, color: GOAL_CONFIG.endurance.color },
+    ];
+    // Snapshot dates: every distinct date the user trained this grip
+    // (with the active hand filter applied if any). Keeps the chart
+    // sparse but representative.
+    const handFn = (r) => !selHand || r.hand === selHand;
+    const datesSet = new Set();
+    for (const r of history) {
+      if (r.grip !== selGrip || !handFn(r) || !r.date) continue;
+      if (!(r.actual_time_s > 0)) continue;
+      datesSet.add(r.date);
+    }
+    const dates = [...datesSet].sort();
+    if (dates.length < 2) return null;
+    const rows = [];
+    for (const date of dates) {
+      const upTo = history.filter(r => (r.date || "") <= date);
+      const row = { date };
+      for (const { key, T } of targets) {
+        let bestGap = null;
+        const handsToCheck = selHand ? [selHand] : ["L", "R"];
+        for (const h of handsToCheck) {
+          const trainAt = empiricalPrescription(upTo, h, selGrip, T);
+          const pot = prescriptionPotential(upTo, h, selGrip, T, { threeExpPriors });
+          if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
+          const gap = (pot.value - trainAt) / trainAt;
+          if (bestGap == null || gap > bestGap) bestGap = gap;
+        }
+        row[`${key}_gap`] = bestGap != null ? Math.round(bestGap * 100) : null;
+      }
+      // Only include rows where at least one zone had a computable gap
+      if (targets.some(({key}) => row[`${key}_gap`] != null)) rows.push(row);
+    }
+    return rows.length >= 2 ? rows : null;
+  }, [history, selHand, selGrip, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Three-exp shadow model ──
-  // Per-grip prior pooled across hands (avoids cross-muscle scale
-  // contamination — Crusher and Micro have wildly different absolute
-  // forces). Fit once per history change; reused for any (hand, grip)
-  // scope the user selects.
-  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
+  // (threeExpPriors memoized earlier, near top of AnalysisView, so
+  // gapHistory and prescriptionPotential can both consume it.)
 
   // Three-exp fit for the current (selHand, selGrip) scope. Uses the
   // same `failures` array that backs cfEstimate, so the fits are
@@ -6654,6 +6720,45 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           </Card>
         );
       })()}
+
+      {/* ── Gap to Potential, over time ──
+          The "am I closing the gap toward my modeled potential" tracker.
+          Per-zone line shows how the gap (potential − empirical, as %) has
+          evolved over training history. Narrowing trends = adaptation
+          delivering. Widening = the model thinks you have more headroom
+          than your training is unlocking; widen the focus on that zone.
+
+          Only renders when a grip filter is set (cross-grip gap doesn't
+          mean anything physiologically). */}
+      {gapHistory && gapHistory.length >= 2 && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Gap to Potential — {selGrip}{selHand ? ` · ${selHand === "L" ? "Left" : "Right"}` : ""}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+            % headroom between what you're training at and what the curve says you could hit. Narrowing lines mean adaptation is delivering. Widening lines mean the model sees more potential than you're unlocking — focus there.
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={gapHistory} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
+                label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={42} unit="%"
+                label={{ value: "Gap %", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
+              />
+              <Line dataKey="power_gap"     stroke={GOAL_CONFIG.power.color}     strokeWidth={2} dot={{ r: 3 }} connectNulls name="⚡ Power" />
+              <Line dataKey="strength_gap"  stroke={GOAL_CONFIG.strength.color}  strokeWidth={2} dot={{ r: 3 }} connectNulls name="💪 Strength" />
+              <Line dataKey="endurance_gap" stroke={GOAL_CONFIG.endurance.color} strokeWidth={2} dot={{ r: 3 }} connectNulls name="🏔️ Capacity" />
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+            <span style={{ color: GOAL_CONFIG.power.color }}>⚡ Power</span>
+            <span style={{ color: GOAL_CONFIG.strength.color }}>💪 Strength</span>
+            <span style={{ color: GOAL_CONFIG.endurance.color }}>🏔️ Capacity</span>
+          </div>
+        </Card>
+      )}
 
       {/* ── Per-hand / per-grip CF breakdown ── */}
       {perHandImprovement && (() => {
