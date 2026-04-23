@@ -36,11 +36,48 @@ const TARGET_OPTIONS = [
 
 const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
 
-// Three-compartment fatigue decay parameters (defaults; fitted from history over time)
+// ─────────────────────────────────────────────────────────────
+// CANONICAL THREE-COMPARTMENT PHYSIOLOGICAL MODEL
+// ─────────────────────────────────────────────────────────────
+// A single source of truth for the three-compartment model used by
+// every downstream calculation: fatigue accumulation, rep-time
+// prediction, AUC dose attribution, capacity-zone labels, and (in
+// the next migration step) the force-duration curve itself.
+//
+// Compartments map to the bioenergetic systems:
+//   fast   → phosphocreatine (PCr)
+//   medium → glycolytic
+//   slow   → oxidative
+//
+// Two distinct tau triples per compartment:
+//   tauD — depletion time constant during a hang (faster systems
+//          deplete faster as load draws down their substrate)
+//   tauR — recovery time constant during rest between hangs
+//          (slower systems recover slower)
+//
+// Weights sum to 1.0 and represent each compartment's contribution
+// to fresh maximal force. They are population priors for now; the
+// follow-up commit (fitThreeExpModel) will personalize them per
+// (hand, grip) from history with shrinkage to these defaults.
+//
+// sMax is per-(hand, grip) and gets filled in by getPhysModel() from
+// the user's actual history; it isn't a population constant.
+const PHYS_MODEL_DEFAULT = {
+  tauD:    { fast: 10,   medium: 30,   slow: 180 },
+  tauR:    { fast: 15,   medium: 90,   slow: 600 },
+  weights: { fast: 0.50, medium: 0.30, slow: 0.20 },
+  doseK:   0.010,  // population-prior fatigue dose constant; back-fit per user via fitDoseK
+  sMax:    null,   // per-(hand,grip), filled in from history
+};
+
+// Three-compartment fatigue decay parameters (defaults; derived from
+// PHYS_MODEL_DEFAULT for backwards compat with fatigueAfterRest's
+// {A1,tau1,...} call shape). Migrate fresh code to read PHYS_MODEL_DEFAULT
+// directly instead of DEF_FAT.
 const DEF_FAT = {
-  A1: 0.50, tau1: 15,   // fast   — phosphocreatine (s)
-  A2: 0.30, tau2: 90,   // medium — glycolytic       (s)
-  A3: 0.20, tau3: 600,  // slow   — metabolic byproducts (s)
+  A1: PHYS_MODEL_DEFAULT.weights.fast,   tau1: PHYS_MODEL_DEFAULT.tauR.fast,
+  A2: PHYS_MODEL_DEFAULT.weights.medium, tau2: PHYS_MODEL_DEFAULT.tauR.medium,
+  A3: PHYS_MODEL_DEFAULT.weights.slow,   tau3: PHYS_MODEL_DEFAULT.tauR.slow,
 };
 
 const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
@@ -321,15 +358,17 @@ const AUC_T_MAX = 120;
 // ─────────────────────────────────────────────────────────────
 // SESSION PLANNER — per-rep fatigue curve prediction
 // ─────────────────────────────────────────────────────────────
-// Uses a three-compartment depletion/recovery model (same time constants as DEF_FAT).
-// Each compartment depletes during a hang and recovers during rest.
-// Returns an array of predicted hold times (seconds) for each rep.
-function predictRepTimes({ numReps, firstRepTime, restSeconds }) {
+// Uses the canonical three-compartment depletion/recovery model
+// (PHYS_MODEL_DEFAULT). Each compartment depletes during a hang and
+// recovers during rest. Returns an array of predicted hold times
+// (seconds) for each rep. Pass an explicit physModel to use a fitted
+// (hand, grip)-specific model; otherwise falls back to defaults.
+function predictRepTimes({ numReps, firstRepTime, restSeconds, physModel = PHYS_MODEL_DEFAULT }) {
   // Compartments: [amplitude, depletion_tau, recovery_tau]
   const comps = [
-    { A: 0.50, tauD: 10,  tauR: 15  },  // PCr  — fast
-    { A: 0.30, tauD: 30,  tauR: 90  },  // Glycolytic — medium
-    { A: 0.20, tauD: 180, tauR: 600 },  // Oxidative  — slow
+    { A: physModel.weights.fast,   tauD: physModel.tauD.fast,   tauR: physModel.tauR.fast   },  // PCr  — fast
+    { A: physModel.weights.medium, tauD: physModel.tauD.medium, tauR: physModel.tauR.medium },  // Glycolytic — medium
+    { A: physModel.weights.slow,   tauD: physModel.tauD.slow,   tauR: physModel.tauR.slow   },  // Oxidative  — slow
   ];
 
   // State: available fraction (0–1) for each compartment, starting fresh
@@ -482,6 +521,27 @@ function buildSMaxIndex(history) {
   }
   for (const k of out.keys()) out.set(k, out.get(k) * 1.2);
   return out;
+}
+
+// Returns the canonical three-compartment physModel for a (hand, grip)
+// pair, with sMax filled in from the user's history. Taus and weights
+// are still population priors (PHYS_MODEL_DEFAULT) at this stage; the
+// follow-up commit will personalize weights and sMax via fitThreeExpModel
+// with shrinkage to these defaults. doseK can also be overridden per-user
+// via fitDoseK output.
+//
+// Pass an optional opts.sMaxIndex to share a precomputed index across
+// multiple lookups in the same render pass.
+// eslint-disable-next-line no-unused-vars -- exposed as the future single source of truth for the migration to fitThreeExpModel-driven prescriptions; not yet consumed but committed now so the API is ready when the fitter lands.
+function getPhysModel(history, hand, grip, opts = {}) {
+  const { sMaxIndex = null, doseK = null } = opts;
+  const idx = sMaxIndex || buildSMaxIndex(history);
+  const sMax = (hand && grip) ? (idx.get(`${hand}|${grip}`) ?? null) : null;
+  return {
+    ...PHYS_MODEL_DEFAULT,
+    sMax,
+    doseK: doseK ?? PHYS_MODEL_DEFAULT.doseK,
+  };
 }
 
 function buildFreshLoadMap(history, opts = {}) {
@@ -711,11 +771,11 @@ function prescribedLoad(history, hand, grip, targetDuration, freshMap = null) {
 //
 // Returns { fast, medium, slow, total } in kg·s units (force-time integrated dose).
 // Compartment 1 (fast/PCr), 2 (medium/glycolytic), 3 (slow/oxidative).
-function sessionCompartmentAUC(reps) {
+function sessionCompartmentAUC(reps, physModel = PHYS_MODEL_DEFAULT) {
   const comps = [
-    { key: "fast",   A: 0.50, tauD: 10  },
-    { key: "medium", A: 0.30, tauD: 30  },
-    { key: "slow",   A: 0.20, tauD: 180 },
+    { key: "fast",   A: physModel.weights.fast,   tauD: physModel.tauD.fast   },
+    { key: "medium", A: physModel.weights.medium, tauD: physModel.tauD.medium },
+    { key: "slow",   A: physModel.weights.slow,   tauD: physModel.tauD.slow   },
   ];
   const out = { fast: 0, medium: 0, slow: 0 };
   for (const r of reps || []) {
@@ -5279,9 +5339,9 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                failRate: z.length > 0 ? f / z.length : null };
     };
     return {
-      power:     { ...zoneStats(0, POWER_MAX),                label: "Power",     color: C.red,    desc: "0–20s",    system: "Phosphocreatine",  tau: "τ₁ ≈ 15s"  },
-      strength:  { ...zoneStats(POWER_MAX, STRENGTH_MAX),     label: "Strength",  color: C.orange, desc: "20–120s",  system: "Glycolytic",       tau: "τ₂ ≈ 90s"  },
-      endurance: { ...zoneStats(STRENGTH_MAX, Infinity),      label: "Capacity",  color: C.blue,   desc: "120s+",    system: "Oxidative",        tau: "τ₃ ≈ 600s" },
+      power:     { ...zoneStats(0, POWER_MAX),                label: "Power",     color: C.red,    desc: "0–20s",    system: "Phosphocreatine",  tau: `τ₁ ≈ ${PHYS_MODEL_DEFAULT.tauR.fast}s`   },
+      strength:  { ...zoneStats(POWER_MAX, STRENGTH_MAX),     label: "Strength",  color: C.orange, desc: "20–120s",  system: "Glycolytic",       tau: `τ₂ ≈ ${PHYS_MODEL_DEFAULT.tauR.medium}s` },
+      endurance: { ...zoneStats(STRENGTH_MAX, Infinity),      label: "Capacity",  color: C.blue,   desc: "120s+",    system: "Oxidative",        tau: `τ₃ ≈ ${PHYS_MODEL_DEFAULT.tauR.slow}s`   },
     };
   }, [reps]);
 
