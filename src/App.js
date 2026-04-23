@@ -151,6 +151,91 @@ function fitCF(pts) {
   return { CF, W, n };
 }
 
+// Weighted Monod-Scherrer fit. pts: array of { x, y, w? }, default w = 1.
+// Same model as fitCF (F = CF + W'/T) but allows per-point weighting.
+function fitCFWeighted(pts) {
+  if (!pts || pts.length < 2) return null;
+  let sw = 0, swx = 0, swy = 0, swxx = 0, swxy = 0, n = 0;
+  for (const p of pts) {
+    const w = p.w == null ? 1 : p.w;
+    if (!(w > 0)) continue;
+    sw  += w;
+    swx += w * p.x;
+    swy += w * p.y;
+    swxx += w * p.x * p.x;
+    swxy += w * p.x * p.y;
+    n++;
+  }
+  if (n < 2 || sw <= 0) return null;
+  const den = sw * swxx - swx * swx;
+  if (Math.abs(den) < 1e-12) return null;
+  const W  = (sw * swxy - swx * swy) / den;
+  const CF = (swy - W * swx) / sw;
+  if (CF < 0 || W < 0) return null;
+  return { CF, W, n };
+}
+
+// Monod-Scherrer fit treating successful holds as lower-bound constraints
+// on the F-D curve. The classic Monod fit (fitCF) only learns from FAILURE
+// points: it knows "you failed at load L after T seconds" → F(T) = L. But
+// successful reps also carry information: "you held L for T seconds without
+// failing" → F(T) ≥ L. The plain fit ignores them entirely, which causes
+// the prescription to lag actual capacity any time you hit a target without
+// pushing to true failure.
+//
+// Algorithm: start with the failure-only fit, then iteratively augment with
+// any success points that fall ABOVE the current curve (constraint
+// violations). Each violator gets added as a synthetic failure point with
+// growing weight until the curve clears it (or maxIter is reached). The
+// result satisfies success constraints in a soft, least-squares sense
+// without needing a full QP solver.
+//
+// failurePts/successPts: arrays of { x: 1/T, y: load }
+function fitCFWithSuccessFloor(failurePts, successPts, opts = {}) {
+  const { maxIter = 24, tol = 0.1, weightStep = 1.0 } = opts;
+  const failures = (failurePts || []).map(p => ({ x: p.x, y: p.y, w: 1 }));
+  const successes = successPts || [];
+  if (failures.length + successes.length < 2) return null;
+
+  // Initial fit: failures alone if we have ≥ 2 of them. If failures are
+  // sparse OR produce a degenerate fit (W′ < 0, common when within-session
+  // fatigue noise drags the slope the wrong way), seed with successes too
+  // so we at least get a valid fit to iterate from.
+  let fit = failures.length >= 2 ? fitCFWeighted(failures) : null;
+  if (!fit && successes.length >= 1) {
+    const seed = [...failures, ...successes.map(p => ({ x: p.x, y: p.y, w: 1 }))];
+    fit = fitCFWeighted(seed);
+  }
+  if (!fit) return null;
+
+  if (successes.length === 0) return fit;
+
+  const succWeights = successes.map(() => 0);
+  for (let iter = 0; iter < maxIter; iter++) {
+    let anyViolation = false;
+    for (let i = 0; i < successes.length; i++) {
+      const s = successes[i];
+      const pred = fit.CF + fit.W * s.x;
+      if (pred < s.y - tol) {
+        succWeights[i] += weightStep;
+        anyViolation = true;
+      }
+    }
+    if (!anyViolation) break;
+
+    const augmented = [...failures];
+    for (let i = 0; i < successes.length; i++) {
+      if (succWeights[i] > 0) {
+        augmented.push({ x: successes[i].x, y: successes[i].y, w: succWeights[i] });
+      }
+    }
+    const newFit = fitCFWeighted(augmented);
+    if (!newFit) break;
+    fit = newFit;
+  }
+  return fit;
+}
+
 // Fit a Monod curve on a set of failure reps, with adaptive hand
 // selection: if both hands are present and their CFs agree within
 // tolerance, pool them for a tighter fit; if they diverge sharply,
@@ -397,20 +482,41 @@ function suggestWeight(refWeight, fatigue) {
 // LOAD AUTO-PRESCRIPTION from fitted CF/W' (Monod-Scherrer)
 // ─────────────────────────────────────────────────────────────
 // Returns prescribed load (kg) for a target time-to-exhaustion on a given grip/hand.
-// Uses the hyperbolic form: F = CF + W'/T. Falls back to null if not enough failure data.
+// Uses the hyperbolic form: F = CF + W'/T.
+//
+// Failures anchor the curve directly (you failed at load L after T seconds
+// → F(T) = L). Successful reps that hit or exceeded their target act as
+// LOWER BOUNDS on the curve (you held L for T seconds without failing →
+// F(T) ≥ L). Without the success-floor pass, the prescription would lag
+// actual capacity whenever you cleared a target instead of pushing to true
+// failure. See fitCFWithSuccessFloor for the constraint-handling logic.
+//
 // Typical targets: Power T=7, Strength T=45, Capacity T=120.
 function prescribedLoad(history, hand, grip, targetDuration) {
   if (!history || !targetDuration) return null;
-  const failures = history.filter(r =>
-    r.failed &&
+  const handMatch = r =>
     r.hand === hand &&
     (!grip || r.grip === grip) &&
     r.actual_time_s > 0 &&
-    effectiveLoad(r) > 0
+    effectiveLoad(r) > 0;
+
+  const failures = history.filter(r => r.failed && handMatch(r));
+  // Conservative success set: only include reps that actually hit or
+  // exceeded their target duration. Reps that fell short but weren't
+  // tagged as failures are ambiguous — including them would falsely
+  // constrain the curve below where the user really is.
+  const successes = history.filter(r =>
+    !r.failed && handMatch(r) &&
+    r.target_duration > 0 &&
+    r.actual_time_s >= r.target_duration
   );
-  if (failures.length < 2) return null;
-  const pts = failures.map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
-  const fit = fitCF(pts);
+
+  if (failures.length < 2 && successes.length < 2) return null;
+
+  const failurePts = failures.map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
+  const successPts = successes.map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
+
+  const fit = fitCFWithSuccessFloor(failurePts, successPts);
   if (!fit) return null;
   return Math.round((fit.CF + fit.W / targetDuration) * 10) / 10;
 }
