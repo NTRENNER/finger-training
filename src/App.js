@@ -2567,7 +2567,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
   );
 }
 
-function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null }) {
+function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -2600,21 +2600,14 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
   // stale k until the next session, which is fine since k varies
   // gently with sample size and the fatigue model isn't sensitive to
   // small k shifts (CV² minimum is broad — see fitDoseK).
-  const freshMapFp = useMemo(() => {
-    const last = history[history.length - 1];
-    return `${history.length}|${last?.id ?? ""}|${last?.date ?? ""}`;
-  }, [history]);
-  const freshMap = useMemo(() => {
-    const k = fitDoseK(history) ?? DEF_DOSE_K;
-    return buildFreshLoadMap(history, { doseK: k });
-  }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Three-exp shadow prior — same per-grip-pooled prior used in the
-  // Analysis tab's F-D chart. Lets us compute "what 3-exp would
-  // prescribe" alongside the actual Monod prescription so the user
-  // can see how much the alternative model would shift loads before
-  // we commit to promoting it.
-  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
+  // freshMap is now provided by App via prop so the in-workout
+  // startSession path uses the SAME memoized fatigue map (with the
+  // user-fitted doseK) — without that sharing, the Setup-card
+  // prescription and the in-workout "Rep 1 suggested weight" disagreed
+  // by 1-2 lbs because startSession was falling back to DEF_DOSE_K.
+  // Three-exp prior memo stays local to SetupView since it isn't
+  // currently consumed elsewhere.
+  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -8430,6 +8423,22 @@ export default function App() {
   const [history, setHistory] = useState(() => loadLS(LS_KEY) || []);
   useEffect(() => saveLS(LS_KEY, history), [history]);
 
+  // App-level freshMap (fatigue-adjusted load lookup per rep). Lifted out
+  // of SetupView so the in-workout startSession path uses the SAME memo
+  // — without this, SetupView's prescription would compute with the
+  // user-fitted doseK while startSession would fall back to DEF_DOSE_K
+  // and produce a 1-2 lb discrepancy between Setup's "Prescribed load"
+  // card and the in-workout "Rep 1 suggested weight." Sharing the memo
+  // makes the two views byte-identical.
+  const freshMapFp = useMemo(() => {
+    const last = history[history.length - 1];
+    return `${history.length}|${last?.id ?? ""}|${last?.date ?? ""}`;
+  }, [history]);
+  const freshMap = useMemo(() => {
+    const k = fitDoseK(history) ?? DEF_DOSE_K;
+    return buildFreshLoadMap(history, { doseK: k });
+  }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Track how many reps are waiting to be synced to Supabase.
   const [pendingCount, setPendingCount] = useState(() => (loadLS(LS_QUEUE_KEY) || []).length);
   const refreshPending = () => setPendingCount((loadLS(LS_QUEUE_KEY) || []).length);
@@ -8812,8 +8821,8 @@ export default function App() {
     const sid = uid();
     const rw = {};
     ["L", "R"].forEach(h => {
-      rw[h] = prescribedLoad(history, h, config.grip, config.targetTime)
-           ?? prescribedLoad(history, h, null,        config.targetTime)
+      rw[h] = prescribedLoad(history, h, config.grip, config.targetTime, freshMap)
+           ?? prescribedLoad(history, h, null,        config.targetTime, freshMap)
            ?? estimateRefWeight(history, h, config.grip, config.targetTime);
     });
     const startedAt = nowISO();
@@ -8830,7 +8839,7 @@ export default function App() {
     setAltHandRep(false);
     setPhase("rep_ready");
     setTab(0); // stay on Train tab
-  }, [history, config]);
+  }, [history, config, freshMap]);
 
   // ── Handle rep completion ─────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, failed = false }) => {
@@ -9200,6 +9209,7 @@ export default function App() {
               setConfig={setConfig}
               onStart={startSession}
               history={history}
+              freshMap={freshMap}
               unit={unit}
               onBwSave={saveBW}
               readiness={readiness}
