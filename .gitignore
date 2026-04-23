@@ -10,13 +10,24 @@
 
 # production
 /build
+# Sandbox-session artifacts: the FUSE-mounted dev environment can't always
+# delete these reliably, so we generated build_old_* / _trash_* folders
+# during automated rebuilds. Ignored so they don't pollute git.
+build_old_*
+_trash_*
+
+# Local backup / session-scratch source files
+*.bak
+*.bak_*
+*.orig
+src/*.bak
+src/*.bak_*
 
 # misc
 .DS_Store
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env
+.env.*
+!.env.example
 
 npm-debug.log*
 yarn-debug.log*
