@@ -1348,8 +1348,13 @@ function coachingRecommendation(history, grip, opts = {}) {
   for (const zoneKey of zones) {
     const t = GOAL_CONFIG[zoneKey]?.refTime;
     if (!t) continue;
-    // Compute gap per hand, take the larger (biggest leverage)
-    let bestGap = 0;
+    // Compute gap per hand, take the largest (most positive). Negative
+    // gaps are kept as candidates because they're informative — they
+    // mean the user is at or above the model's view of potential, which
+    // is its own coaching signal ("maintain, model is conservative").
+    // Initialize to -Infinity so we record SOME candidate per zone even
+    // when all gaps are negative.
+    let bestGap = -Infinity;
     let bestHand = null;
     let bestPotential = null;
     let bestTrainAt = null;
@@ -1366,11 +1371,17 @@ function coachingRecommendation(history, grip, opts = {}) {
         bestTrainAt = trainAt;
       }
     }
-    if (bestGap <= 0 || !bestHand) continue;
+    if (!bestHand) continue;
     const iMatch  = intensityMatch(zoneKey, readiness);
     const recency = recencyPenalty(zoneKey, history, grip);
     const ext     = externalLoadModifier(zoneKey, activities);
-    const score = bestGap * iMatch * recency * ext;
+    // Score uses a floor on gap so negative gaps still produce a
+    // ranking (just with smaller magnitude). The score sign follows
+    // the gap, so a positive-gap zone always outranks a negative-gap
+    // zone — but among all-negative-gap zones, the least-negative
+    // (closest to potential) still wins.
+    const gapForScore = Math.max(bestGap, -0.30); // clamp at -30% to bound
+    const score = (gapForScore + 0.30) * iMatch * recency * ext;
     candidates.push({
       zone: zoneKey,
       hand: bestHand,
@@ -1399,6 +1410,14 @@ function coachingRationale(rec) {
   if (rec.gap > 0.10) {
     const pct = Math.round(rec.gap * 100);
     reasons.push(`+${pct}% gap on ${handLabel} (your ${compName} compartment is your widest opportunity)`);
+  } else if (rec.gap > -0.05) {
+    // Near-zero gap: user is essentially AT potential here. Maintain.
+    reasons.push(`at potential on ${handLabel} (your ${compName} compartment is balanced — best zone among balanced options)`);
+  } else {
+    // Negative gap: user is exceeding the model's view of potential.
+    // The model is running behind your real fitness here.
+    const pct = Math.round(-rec.gap * 100);
+    reasons.push(`exceeding modeled potential by ${pct}% on ${handLabel} (the model is conservative here — pick this zone to maintain or push the ceiling further)`);
   }
   if (rec.iMatch >= 0.85) {
     reasons.push("intensity matches your current readiness");
