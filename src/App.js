@@ -7046,12 +7046,15 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
                 <span><span style={{ color: C.green }}>●</span> Completed</span>
                 <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
-                {!splitMode && cfEstimate && <span><span style={{ color: C.purple }}>―</span> F-D curve</span>}
+                {!splitMode && cfEstimate && <span><span style={{ color: C.purple }}>―</span> F-D curve (your data)</span>}
                 {!splitMode && cfEstimate && <span><span style={{ color: C.purple }}>╌</span> Critical Force</span>}
-                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Experimental shadow model — not driving prescriptions"><span style={{ color: C.yellow }}>╌</span> 3-exp (shadow)</span>}
+                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: physiological target curve. Training aims to move your actual data toward this shape."><span style={{ color: C.yellow }}>╌</span> 3-exp target</span>}
                 {!splitMode && confidenceBandRel && <span><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
                 {splitMode && Object.keys(fdSplitData).map(g => (
-                  <span key={g}><span style={{ color: FD_GRIP_COLORS[g] || C.blue }}>―</span> {g}</span>
+                  <span key={g}>
+                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue }}>―</span> {g}
+                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue, opacity: 0.7 }}> ╌</span> 3-exp
+                  </span>
                 ))}
                 {!splitMode && limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
                 {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
@@ -7122,10 +7125,11 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                 const FD_GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
                 const grips = Object.keys(fdSplitData);
                 const elements = [];
+                const tMax = Math.max(maxDur, F_D_T_MIN + 10);
                 for (const grip of grips) {
                   const color = FD_GRIP_COLORS[grip] || C.blue;
                   const data = fdSplitData[grip];
-                  // Convert curve to relative units if needed
+                  // Solid grip-colored curve — failure-only Monod (your data).
                   const curveRel = data.curve.map(d => ({
                     x: d.x,
                     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
@@ -7135,6 +7139,41 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                       stroke={color} strokeWidth={2} dot={false}
                       legendType="none" isAnimationActive={false} />
                   );
+                  // Three-exp TARGET curve — same grip color, dashed, slightly
+                  // dimmer. Shows where three-exp says this grip's curve
+                  // SHOULD be if your physiology were balanced. Training
+                  // closes the gap between solid (your data) and dashed
+                  // (your physiological target).
+                  if (threeExpPriors && threeExpPriors.get) {
+                    const prior = threeExpPriors.get(grip);
+                    const failures = (history || []).filter(r =>
+                      r.failed && r.grip === grip
+                      && r.actual_time_s > 0 && r.avg_force_kg > 0 && r.avg_force_kg < 500
+                    );
+                    if (prior && failures.length >= 2) {
+                      const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+                      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1);
+                      const amps = fitThreeExpAmps(pts, { prior, lambda });
+                      if (amps[0] + amps[1] + amps[2] > 0) {
+                        const teeCurve = Array.from({ length: 80 }, (_, i) => {
+                          const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
+                          const f = predForceThreeExp(amps, t);
+                          return {
+                            x: t,
+                            y: useRel && bodyWeight > 0
+                              ? toDisp(Math.max(f, 0), unit) / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1))
+                              : toDisp(Math.max(f, 0), unit),
+                          };
+                        });
+                        elements.push(
+                          <Line key={`${grip}-tee`} data={teeCurve} dataKey="y"
+                            stroke={color} strokeWidth={1.5} strokeDasharray="5 4"
+                            strokeOpacity={0.7} dot={false}
+                            legendType="none" isAnimationActive={false} />
+                        );
+                      }
+                    }
+                  }
                   // Dots: red fill for failures, green for completes — same
                   // semantic as single-fit mode. The grip identity is read
                   // from position relative to its own colored curve.
