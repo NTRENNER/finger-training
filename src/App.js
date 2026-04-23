@@ -856,17 +856,24 @@ function effectiveLoad(r) {
   return 0;
 }
 
-// Loaded weight for a rep — prefer the actual weight on the pin, fall back
-// to Tindeq's measured force (for isometric/no-load reps). Used for
-// PRESCRIPTION display so the user sees the LOAD they should put on the
-// pin next session, not the after-the-fact force gauge reading. These two
-// can diverge meaningfully for weighted reps where the user partially
-// supports the load (loaded 64 kg but Tindeq sees only 41 kg average).
+// Prescribable load for a rep — what the user should aim to produce
+// next session. For Tindeq-isometric setups (spring/anchor, no pin),
+// avg_force_kg IS the actual load delivered, AND it's what the
+// prescription should be in (the user can't "load" anything externally;
+// they pull until the gauge reads X). The weight_kg field in those
+// reps is just the system's prescribed target stored alongside, not
+// an actual external load.
+//
+// For future weighted-rep setups (hangboard with pulley + weight pin
+// + inline Tindeq), this would prefer weight_kg. Right now everyone
+// is on Tindeq-isometric, so this matches effectiveLoad. Kept as a
+// distinct function so the semantic is named — when we add weighted-
+// rep support, only this function changes.
 function loadedWeight(r) {
-  const w = Number(r.weight_kg);
-  if (w > 0) return w;
   const f = Number(r.avg_force_kg);
   if (f > 0 && f < 500) return f;
+  const w = Number(r.weight_kg);
+  if (w > 0) return w;
   return 0;
 }
 
