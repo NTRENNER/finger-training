@@ -5981,28 +5981,10 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     };
   }, [failures, cfEstimate, threeExpFit]);
 
-  // Per-hand curves (L vs R overlay). Independent fits over the same
-  // selGrip scope — lets users see hand asymmetry directly. Only
-  // produced when both hands have enough failures to fit.
-  const perHandCurves = useMemo(() => {
-    const groups = { L: [], R: [] };
-    for (const r of history) {
-      if (!r.failed) continue;
-      if (selGrip && r.grip !== selGrip) continue;
-      if (r.avg_force_kg <= 0 || r.actual_time_s <= 0) continue;
-      if (!(r.hand in groups)) continue;
-      groups[r.hand].push({ x: 1 / r.actual_time_s, y: r.avg_force_kg });
-    }
-    const fitL = fitCF(groups.L);
-    const fitR = fitCF(groups.R);
-    if (!fitL || !fitR) return null;
-    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
-    const sample = (fit) => Array.from({ length: 80 }, (_, i) => {
-      const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
-      return { x: t, yKg: Math.max(fit.CF + fit.W / t, fit.CF) };
-    });
-    return { L: sample(fitL), R: sample(fitR) };
-  }, [history, selGrip, maxDur]);
+  // (Per-hand L vs R overlay curves were here. Removed — added visual
+  // noise to the F-D chart without enough insight to justify it. Per-
+  // hand asymmetry is surfaced more clearly on the Per-Hand CF card
+  // below the chart.)
 
   // Bootstrap confidence band — resample failure points with
   // replacement, refit each sample, take 5th/95th percentile of
@@ -6079,13 +6061,9 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     x: d.x,
     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
   }));
-  // Unit-transform helper for memos that hold values in kg (perHandCurves,
-  // confidenceBand): converts to display unit or × BW depending on relMode.
+  // Unit-transform helper for memos that hold values in kg (confidenceBand):
+  // converts to display unit or × BW depending on relMode.
   const kgToDisp = (kg) => useRel && bodyWeight > 0 ? kg / bodyWeight : toDisp(kg, unit);
-  const perHandCurvesRel = perHandCurves ? {
-    L: perHandCurves.L.map(d => ({ x: d.x, y: kgToDisp(d.yKg) })),
-    R: perHandCurves.R.map(d => ({ x: d.x, y: kgToDisp(d.yKg) })),
-  } : null;
   const confidenceBandRel = confidenceBand ? confidenceBand.map(d => ({
     x: d.x, low: kgToDisp(d.lowKg), high: kgToDisp(d.highKg),
   })) : null;
@@ -6673,7 +6651,6 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
             {cfEstimate && <span><span style={{ color: C.purple }}>╌</span> Critical Force</span>}
             {threeExpCurveDataRel.length > 0 && <span title="Experimental shadow model — not driving prescriptions"><span style={{ color: C.yellow }}>╌</span> 3-exp (shadow)</span>}
             {confidenceBandRel && <span><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
-            {perHandCurvesRel && <span><span style={{ color: C.blue }}>―</span> L &nbsp;<span style={{ color: C.orange }}>―</span> R</span>}
             {limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
             {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
           </div>
@@ -6719,15 +6696,10 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                   label={{ value: `CF ${fmtForce(cfEstimate.CF)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
                 />
               )}
-              {/* Per-hand L vs R overlay curves */}
-              {perHandCurvesRel && (
-                <Line data={perHandCurvesRel.L} dataKey="y" stroke={C.blue}   strokeWidth={1.5}
-                      strokeOpacity={0.75} dot={false} legendType="none" isAnimationActive={false} />
-              )}
-              {perHandCurvesRel && (
-                <Line data={perHandCurvesRel.R} dataKey="y" stroke={C.orange} strokeWidth={1.5}
-                      strokeOpacity={0.75} dot={false} legendType="none" isAnimationActive={false} />
-              )}
+              {/* Per-hand L vs R overlay curves removed — added visual
+                  noise without much insight. The per-grip combined curve
+                  is what drives prescriptions; per-hand asymmetry is
+                  better surfaced on the Per-Hand CF card below. */}
               {/* Main fitted force-duration curve */}
               {curveDataRel.length > 0 && (
                 <Line data={curveDataRel} dataKey="y" stroke={C.purple} strokeWidth={2} dot={false} legendType="none" isAnimationActive={false} />
@@ -6740,10 +6712,12 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                       strokeWidth={1.5} strokeDasharray="5 4" dot={false}
                       legendType="none" isAnimationActive={false} />
               )}
-              {/* Completed reps */}
-              <Scatter data={successDotsRel} fill={C.green} opacity={0.85} name="Completed" />
+              {/* Completed reps. Explicit dataKey="y" because Recharts
+                  Scatter doesn't infer it reliably when the chart also
+                  contains <Line> components with their own data prop. */}
+              <Scatter data={successDotsRel} dataKey="y" fill={C.green} opacity={0.85} name="Completed" />
               {/* Failed reps */}
-              <Scatter data={failureDotsRel} fill={C.red} opacity={0.95} name="Auto-failed" />
+              <Scatter data={failureDotsRel} dataKey="y" fill={C.red} opacity={0.95} name="Auto-failed" />
             </ComposedChart>
           </ResponsiveContainer>
           {/* Zone labels */}
