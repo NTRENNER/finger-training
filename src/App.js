@@ -2375,10 +2375,22 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
   // per history change, then reused across the multiple prescribedLoad calls
   // in the card below). Uses the user's back-fit dose constant when there's
   // enough within-set data; otherwise falls back to the population prior.
+  // Stable fingerprint so the 60-step grid search inside fitDoseK
+  // doesn't re-run on every history reference change (Supabase syncs,
+  // unrelated state updates that touch the App-level history array).
+  // Keyed on length + last rep's id + last rep's date — captures the
+  // dominant "new rep added" case. Edits to old reps will use the
+  // stale k until the next session, which is fine since k varies
+  // gently with sample size and the fatigue model isn't sensitive to
+  // small k shifts (CV² minimum is broad — see fitDoseK).
+  const freshMapFp = useMemo(() => {
+    const last = history[history.length - 1];
+    return `${history.length}|${last?.id ?? ""}|${last?.date ?? ""}`;
+  }, [history]);
   const freshMap = useMemo(() => {
     const k = fitDoseK(history) ?? DEF_DOSE_K;
     return buildFreshLoadMap(history, { doseK: k });
-  }, [history]);
+  }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -4981,6 +4993,32 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     return out;
   }, [history]);
 
+  // Progress toward unlocking a per-grip (or per-grip × hand) baseline.
+  // Returns {failures, distinctDurations, ready} so UI placeholders can
+  // show "3 of 5 failures · 2 of 3 durations" instead of the static
+  // "need ≥5 failures across ≥3 target durations" — the user can see
+  // exactly how close they are to a stable comparison being unlocked.
+  // Hand is optional; pass null/undefined to count across both hands.
+  const FAIL_THRESHOLD = 5;
+  const DUR_THRESHOLD  = 3;
+  const baselineProgress = (grip, hand = null) => {
+    let failures = 0;
+    const durs = new Set();
+    for (const r of history) {
+      if (!r.failed || r.grip !== grip) continue;
+      if (hand && r.hand !== hand) continue;
+      if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+      if (!(r.actual_time_s > 0)) continue;
+      failures += 1;
+      if (r.target_duration) durs.add(r.target_duration);
+    }
+    return {
+      failures,
+      distinctDurations: durs.size,
+      ready: failures >= FAIL_THRESHOLD && durs.size >= DUR_THRESHOLD,
+    };
+  };
+
   // ── Per-hand / per-grip CF & W' breakdown ──
   // Groups failure reps by grip × hand, fits Monod (F = CF + W'/T) for
   // each group, and reports CF and W' alongside their delta vs that
@@ -5040,6 +5078,45 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       };
     }).filter(Boolean);
   }, [failures, unit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-grip cumulative CF, used by CF Over Time when no grip filter
+  // is active. Without this split, a Micro-heavy session pulls the
+  // pooled CF curve down (FDP CF ~6 kg vs FDS CF ~25 kg) and looks
+  // like a regression even though both grips might be improving in
+  // isolation. Same scope rules as the pooled version: respects
+  // selHand, requires ≥2 failures per grip up to each cumulative
+  // date, returns one merged Recharts dataset keyed by date with
+  // per-grip CF columns (e.g. {date, "Micro_cf": 6.1, "Crusher_cf": 24.3}).
+  const cumulativeDataByGrip = useMemo(() => {
+    if (selGrip) return null; // pooled chart already correct when scoped
+    const byGrip = {};
+    for (const r of history) {
+      if (!r.failed || !r.grip) continue;
+      if (selHand && r.hand !== selHand) continue;
+      if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+      if (!(r.actual_time_s > 0)) continue;
+      if (!byGrip[r.grip]) byGrip[r.grip] = [];
+      byGrip[r.grip].push(r);
+    }
+    const grips = Object.keys(byGrip).filter(g => byGrip[g].length >= 2);
+    if (grips.length < 2) return null; // single-grip user — pooled is fine
+    const allDates = [...new Set(history.filter(r => r.failed).map(r => r.date))].sort();
+    const rows = [];
+    for (const date of allDates) {
+      const row = { date };
+      let any = false;
+      for (const grip of grips) {
+        const upTo = byGrip[grip].filter(r => r.date <= date);
+        if (upTo.length < 2) continue;
+        const fit = fitCF(upTo.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
+        if (!fit) continue;
+        row[`${grip}_cf`] = toDisp(fit.CF, unit);
+        any = true;
+      }
+      if (any) rows.push(row);
+    }
+    return { rows, grips };
+  }, [history, selHand, selGrip, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Note: AUC values used to live here (aucEstimate / aucBaseline /
   // aucHistory) backing a dedicated "Climbing Capacity · AUC" card.
@@ -5542,14 +5619,24 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                       current fit but no qualifying per-grip baseline yet,
                       so the user knows we're aware of it and waiting on
                       more data rather than silently dropping it. */}
-                  {Object.keys(gripEstimates).filter(g => !gripImprovement[g]).map(grip => (
-                    <div key={grip} style={{
-                      paddingTop: 12, marginTop: 12, borderTop: `1px solid ${C.border}`,
-                      fontSize: 11, color: C.muted, lineHeight: 1.5,
-                    }}>
-                      <b style={{ color: C.text }}>{grip}</b> · need ≥5 failures across ≥3 target durations to seed a stable baseline.
-                    </div>
-                  ))}
+                  {Object.keys(gripEstimates).filter(g => !gripImprovement[g]).map(grip => {
+                    const p = baselineProgress(grip);
+                    return (
+                      <div key={grip} style={{
+                        paddingTop: 12, marginTop: 12, borderTop: `1px solid ${C.border}`,
+                        fontSize: 11, color: C.muted, lineHeight: 1.5,
+                      }}>
+                        <b style={{ color: C.text }}>{grip}</b>{" · "}
+                        <span style={{ color: p.failures >= FAIL_THRESHOLD ? C.green : C.text }}>
+                          {Math.min(p.failures, FAIL_THRESHOLD)} of {FAIL_THRESHOLD} failures
+                        </span>
+                        {" · "}
+                        <span style={{ color: p.distinctDurations >= DUR_THRESHOLD ? C.green : C.text }}>
+                          {Math.min(p.distinctDurations, DUR_THRESHOLD)} of {DUR_THRESHOLD} durations
+                        </span>
+                      </div>
+                    );
+                  })}
                 </>
               ) : (
                 <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
@@ -5564,11 +5651,26 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                   </div>
                   {renderRow(null, scopedImp)}
                 </>
-              ) : (
-                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-                  Need ≥5 failures across ≥3 target durations on <b>{selGrip}</b>{selHand && selHand !== "Both" ? <> ({selHand === "L" ? "Left" : "Right"})</> : null} to seed a baseline that's a fair apples-to-apples comparison. Pooled global baseline isn't shown here because it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
-                </div>
-              )
+              ) : (() => {
+                const handForProg = selHand && selHand !== "Both" ? selHand : null;
+                const p = baselineProgress(selGrip, handForProg);
+                const handLabel = handForProg ? (handForProg === "L" ? "Left" : "Right") : null;
+                return (
+                  <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+                    Need ≥{FAIL_THRESHOLD} failures across ≥{DUR_THRESHOLD} target durations on <b>{selGrip}</b>{handLabel ? ` (${handLabel})` : ""} for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
+                    <div style={{ marginTop: 6, fontSize: 11 }}>
+                      Progress:{" "}
+                      <span style={{ color: p.failures >= FAIL_THRESHOLD ? C.green : C.text, fontWeight: 600 }}>
+                        {Math.min(p.failures, FAIL_THRESHOLD)} of {FAIL_THRESHOLD} failures
+                      </span>
+                      {" · "}
+                      <span style={{ color: p.distinctDurations >= DUR_THRESHOLD ? C.green : C.text, fontWeight: 600 }}>
+                        {Math.min(p.distinctDurations, DUR_THRESHOLD)} of {DUR_THRESHOLD} durations
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()
             ) : improvement ? (
               renderRow(null, improvement)
             ) : null}
@@ -5577,28 +5679,45 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       })()}
 
       {/* ── Curve parameters over time ── */}
-      {cumulativeData.length >= 2 && (
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>CF Over Time</div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-            Your critical force — the sustainable aerobic asymptote of the force-duration fit — recomputed after every failure.
-          </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={cumulativeData} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-                label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-              <YAxis tick={{ fill: C.blue, fontSize: 11 }} width={46}
-                label={{ value: `CF (${unit})`, angle: -90, position: "insideLeft", fill: C.blue, fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                formatter={(val, name) => [fmt1(val), name]}
-              />
-              <Line dataKey="cf" stroke={C.blue} strokeWidth={2} dot={false} name={`CF (${unit})`} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
-      )}
+      {cumulativeData.length >= 2 && (() => {
+        // When no grip filter is active and ≥2 grips have data, split
+        // into per-grip lines. The pooled CF can otherwise drift down
+        // on Micro-heavy sessions (FDP CF ~6 kg dragging the average
+        // away from FDS CF ~25 kg) and read as a regression even when
+        // both grips are individually improving — same cross-muscle
+        // artifact the Capacity Improvement card was fixed for.
+        const splitMode = cumulativeDataByGrip && cumulativeDataByGrip.rows.length >= 2;
+        const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+        return (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>CF Over Time</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+              {splitMode
+                ? <>Critical force per grip — recomputed after every failure. Split avoids mixing FDP (Micro) and FDS (Crusher) CF on the same line.</>
+                : <>Your critical force — the sustainable aerobic asymptote of the force-duration fit — recomputed after every failure.</>}
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={splitMode ? cumulativeDataByGrip.rows : cumulativeData} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
+                  label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+                <YAxis tick={{ fill: C.blue, fontSize: 11 }} width={46}
+                  label={{ value: `CF (${unit})`, angle: -90, position: "insideLeft", fill: C.blue, fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                  formatter={(val, name) => [fmt1(val), name]}
+                />
+                {splitMode
+                  ? cumulativeDataByGrip.grips.map(g => (
+                      <Line key={g} dataKey={`${g}_cf`} stroke={GRIP_COLORS[g] || C.blue}
+                        strokeWidth={2} dot={false} name={`${g} CF (${unit})`} connectNulls />
+                    ))
+                  : <Line dataKey="cf" stroke={C.blue} strokeWidth={2} dot={false} name={`CF (${unit})`} />}
+              </LineChart>
+            </ResponsiveContainer>
+          </Card>
+        );
+      })()}
 
       {/* ── Per-hand / per-grip CF breakdown ── */}
       {perHandImprovement && (() => {
@@ -5642,11 +5761,14 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
                             {row.cfPct > 0 ? "+" : ""}{row.cfPct}%
                             <span style={{ color: C.muted, fontWeight: 500 }}> · since {row.baselineDate}</span>
                           </div>
-                        ) : (
-                          <div style={{ fontSize: 10, fontWeight: 500, color: C.muted, fontStyle: "italic" }}>
-                            early days — need ≥5 failures across ≥3 durations
-                          </div>
-                        )}
+                        ) : (() => {
+                          const p = baselineProgress(grip, h);
+                          return (
+                            <div style={{ fontSize: 10, fontWeight: 500, color: C.muted, fontStyle: "italic" }}>
+                              early days · {Math.min(p.failures, FAIL_THRESHOLD)}/{FAIL_THRESHOLD} fails · {Math.min(p.distinctDurations, DUR_THRESHOLD)}/{DUR_THRESHOLD} durs
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   );
