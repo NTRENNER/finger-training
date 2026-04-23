@@ -97,7 +97,17 @@ const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","�
 // UTILITIES
 // ─────────────────────────────────────────────────────────────
 const uid     = () => Math.random().toString(36).slice(2, 10);
-const today   = () => new Date().toISOString().slice(0, 10);
+// Local-date YYYY-MM-DD. toISOString() converts to UTC, which dated
+// evening reps to "tomorrow" for users west of UTC (e.g. a 22:00
+// Pacific rep would land on the next day's row, breaking the
+// "this session was today" check in computeReadiness and friends).
+const ymdLocal = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const today   = () => ymdLocal();
 const nowISO      = () => new Date().toISOString();
 const fmtClock    = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 // Return the most recent BW log entry on or before `date` (YYYY-MM-DD), or null.
@@ -2209,7 +2219,7 @@ const RM_GRIPS = ["Micro", "Crusher"];
 function computeZoneCoverage(history, activities = []) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 30);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const cutoffStr = ymdLocal(cutoff);
 
   // Grip-training sessions
   const sessions = {};
@@ -2307,7 +2317,7 @@ const LIMITER_RESIDUAL_KG      = 0.5;  // smallest gap we'll call a limiter — 
 function computeLimiterZone(history) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - LIMITER_WINDOW_DAYS);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const cutoffStr = ymdLocal(cutoff);
 
   const allFailures = history.filter(r =>
     r.rep_num === 1 && r.failed &&
@@ -2756,16 +2766,22 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
           drain. Source label reflects whichever fit (per-grip / cross-
           grip / history) backs the primary zone column. */}
       {config.grip && (() => {
-        // Pick the source label off the applied zone (if any) or Strength
-        // as a neutral default — used for the one-line subtitle.
-        const subtitleTime = GOAL_CONFIG[config.goal]?.refTime ?? GOAL_CONFIG.strength.refTime;
-        const subtitleSource = (() => {
-          if (prescribedLoad(history, "L", config.grip, subtitleTime, freshMap) != null ||
-              prescribedLoad(history, "R", config.grip, subtitleTime, freshMap) != null) return "model";
-          if (prescribedLoad(history, "L", null, subtitleTime, freshMap) != null ||
-              prescribedLoad(history, "R", null, subtitleTime, freshMap) != null) return "model-global";
-          return "history";
-        })();
+        // Per-cell prescription with explicit source tracking. Each
+        // (zone, hand) cell tries per-grip Monod first → cross-grip
+        // Monod → empirical history average. The previous version
+        // computed only one global subtitleSource, which lied when
+        // some zones used per-grip and others fell through to cross-
+        // grip fallback (e.g., "your Micro fit" subtitle while a Power
+        // value secretly came from cross-grip data).
+        const prescribedWithSource = (hand, t) => {
+          const v1 = prescribedLoad(history, hand, config.grip, t, freshMap);
+          if (v1 != null) return { value: v1, source: "grip" };
+          const v2 = prescribedLoad(history, hand, null, t, freshMap);
+          if (v2 != null) return { value: v2, source: "global" };
+          const v3 = estimateRefWeight(history, hand, config.grip, t);
+          if (v3 != null) return { value: v3, source: "history" };
+          return { value: null, source: null };
+        };
         // Three-exp shadow prescription for a (hand, grip, T) combo.
         // Returns null when there's no prior for the grip OR no failures
         // yet to fit. Per-grip pooled prior + same lambda the F-D chart
@@ -2789,26 +2805,30 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
         };
         const zones = ["power", "strength", "endurance"].map(zoneKey => {
           const t = GOAL_CONFIG[zoneKey].refTime;
-          const L = prescribedLoad(history, "L", config.grip, t, freshMap)
-                 ?? prescribedLoad(history, "L", null,        t, freshMap)
-                 ?? estimateRefWeight(history, "L", config.grip, t);
-          const R = prescribedLoad(history, "R", config.grip, t, freshMap)
-                 ?? prescribedLoad(history, "R", null,        t, freshMap)
-                 ?? estimateRefWeight(history, "R", config.grip, t);
+          const L = prescribedWithSource("L", t);
+          const R = prescribedWithSource("R", t);
           const L3e = threeExpPrescribed("L", config.grip, t);
           const R3e = threeExpPrescribed("R", config.grip, t);
           return { key: zoneKey, cfg: GOAL_CONFIG[zoneKey], t, L, R, L3e, R3e };
         });
-        const anyLoaded = zones.some(z => z.L != null || z.R != null);
+        const anyLoaded = zones.some(z => z.L.value != null || z.R.value != null);
         if (!anyLoaded) return null;
+        // Subtitle reflects the dominant source across all displayed
+        // cells so the user gets a one-line summary of "what model is
+        // backing these numbers." Per-cell sources still get a small
+        // inline marker (* for cross-grip, h for history) below.
+        const allSources = zones.flatMap(z => [z.L.source, z.R.source]).filter(Boolean);
+        const sourceCount = allSources.reduce((a, s) => { a[s] = (a[s] || 0) + 1; return a; }, {});
+        const dominant = Object.entries(sourceCount).sort((a, b) => b[1] - a[1])[0]?.[0] || "history";
+        const hasMixed = Object.keys(sourceCount).length > 1;
         return (
           <Card style={{ borderColor: C.blue }}>
             <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
-              {subtitleSource === "model"
-                ? <>Prescribed load · CF + W&apos;/T (your {config.grip} fit)</>
-                : subtitleSource === "model-global"
-                  ? <>Prescribed load · CF + W&apos;/T (cross-grip fit)</>
-                  : <>Suggested load (from history)</>}
+              {dominant === "grip"
+                ? <>Prescribed load · CF + W&apos;/T (your {config.grip} fit{hasMixed ? <span style={{ color: C.yellow }}>; some cells fall back — see ° / ʰ markers</span> : null})</>
+                : dominant === "global"
+                  ? <>Prescribed load · CF + W&apos;/T (cross-grip fit — not enough {config.grip}-specific data yet)</>
+                  : <>Suggested load (from history; not enough failures for a model fit yet)</>}
             </div>
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 10, fontStyle: "italic" }}>
               Same load every rep. Rep 1 hits the target; reps 2+ fall short as compartments deplete.
@@ -2833,35 +2853,42 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
                       target {t}s
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>L</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>
-                          {L != null ? `${fmtW(L, unit)}` : "—"}
-                        </div>
-                        {L3e != null && (
-                          <div style={{ fontSize: 9, color: C.yellow, fontWeight: 500, marginTop: 2 }} title="Three-exp shadow prescription — not driving the workout, just for comparison">
-                            3e: {fmtW(L3e, unit)}
+                      {[["L", L, L3e], ["R", R, R3e]].map(([handLabel, cell, e3]) => {
+                        const sourceMark = cell.source === "global" ? "°"
+                                         : cell.source === "history" ? "ʰ"
+                                         : "";
+                        const sourceTitle = cell.source === "global" ? `Cross-grip fallback — not enough ${config.grip}-specific data on ${handLabel} for ${cfg.label} (${t}s) yet`
+                                          : cell.source === "history" ? `Historical-average fallback — not enough failures for any model fit on ${handLabel} ${config.grip} at ${t}s`
+                                          : "";
+                        return (
+                          <div key={handLabel}>
+                            <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>{handLabel}</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>
+                              {cell.value != null ? `${fmtW(cell.value, unit)}` : "—"}
+                              {sourceMark && (
+                                <span style={{ fontSize: 11, color: C.yellow, marginLeft: 2 }} title={sourceTitle}>
+                                  {sourceMark}
+                                </span>
+                              )}
+                            </div>
+                            {e3 != null && (
+                              <div style={{ fontSize: 9, color: C.yellow, fontWeight: 500, marginTop: 2 }} title="Three-exp shadow prescription — not driving the workout, just for comparison">
+                                3e: {fmtW(e3, unit)}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>R</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>
-                          {R != null ? `${fmtW(R, unit)}` : "—"}
-                        </div>
-                        {R3e != null && (
-                          <div style={{ fontSize: 9, color: C.yellow, fontWeight: 500, marginTop: 2 }} title="Three-exp shadow prescription — not driving the workout, just for comparison">
-                            3e: {fmtW(R3e, unit)}
-                          </div>
-                        )}
-                      </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 8, display: "flex", justifyContent: "space-between" }}>
-              <span style={{ color: C.yellow }}>3e = three-exp shadow (not driving)</span>
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+              <span>
+                <span style={{ color: C.yellow }}>3e = three-exp shadow (not driving)</span>
+                {hasMixed && <span style={{ color: C.muted }}> · ° = cross-grip fallback · ʰ = history fallback</span>}
+              </span>
               <span>values in {unit}</span>
             </div>
           </Card>
@@ -3527,7 +3554,7 @@ function WorkoutHistoryView({ unit = "lbs", bodyWeight = null }) {
   // Apply filters — a session matches if it contains the selected exercise with sets
   const filtered = useMemo(() => {
     const cutoff = filterDays > 0
-      ? new Date(Date.now() - filterDays * 864e5).toISOString().slice(0, 10)
+      ? ymdLocal(new Date(Date.now() - filterDays * 864e5))
       : null;
     return log.filter(s => {
       if (cutoff && s.date < cutoff) return false;
@@ -3777,7 +3804,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
   const [editRepHand, setEditRepHand] = useState(null);        // "L" | "R" — null in add-mode means "auto-derive at save"
   // Manual session entry
   const [addingSession,    setAddingSession]    = useState(false);
-  const [newSessDate,      setNewSessDate]      = useState(() => new Date().toISOString().slice(0, 10));
+  const [newSessDate,      setNewSessDate]      = useState(() => ymdLocal());
   const [newSessGrip,      setNewSessGrip]      = useState("");
   const [newSessTarget,    setNewSessTarget]    = useState(TARGET_OPTIONS[0].seconds);
   const [newSessReps,      setNewSessReps]      = useState([]);  // [{ load, time, hand }]
@@ -3926,7 +3953,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22 }}>History</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessDate(new Date().toISOString().slice(0, 10)); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
+          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessDate(ymdLocal()); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
           {domain === "fingers" && <Btn small onClick={onDownload} color={C.muted}>↓ CSV</Btn>}
         </div>
       </div>
@@ -5838,15 +5865,21 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         const gripImpEntries = Object.entries(gripImprovement);
 
         // When a grip filter is active, cfEstimate is scoped to that
-        // grip (and selHand). Comparing it against the global pooled
-        // baseline produces the same cross-muscle artifact perGripMode
-        // was designed to prevent — e.g. Left × Micro current force
-        // (CF ~6 kg, FDP pinch) shown as -63% vs a baseline anchored
-        // by Crusher reps (CF ~28 kg, FDS crush). Use the most-
-        // specific matching baseline available:
+        // grip AND to selHand (via the `failures` filter). Comparing
+        // it against a baseline of a different scope produces an
+        // apples-to-oranges comparison. We have three baselines to
+        // pick from, listed by tightness:
         //   1. perHandGripBaselines[grip|hand]  — exact scope match
-        //   2. gripBaselines[grip]               — pools hands, still per-grip
-        //   3. early-days placeholder            — neither qualifies yet
+        //   2. gripBaselines[grip]               — pools hands, per-grip
+        //   3. (fall through to early-days)
+        //
+        // To keep the comparison apples-to-apples, the LHS (current
+        // fit) is recomputed at the SAME scope as whichever baseline
+        // we end up using, instead of always using the hand-scoped
+        // cfEstimate. Without this, a (Micro, Left) current vs
+        // (Micro pooled-hands) baseline still mixes hand asymmetry
+        // into the Δ% — same flavor as the cross-muscle artifact,
+        // just smaller.
         let scopedImp = null;
         let scopedBaselineDate = null;
         let scopedScopeLabel = null;
@@ -5854,13 +5887,20 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
           const phgKey = selHand && selHand !== "Both" ? `${selGrip}|${selHand}` : null;
           const phgRef = phgKey ? perHandGripBaselines[phgKey] : null;
           const gRef   = gripBaselines[selGrip];
-          const ref    = phgRef || gRef;
-          if (ref) {
-            scopedImp = improvementForFit(cfEstimate, ref);
-            scopedBaselineDate = ref.date;
-            scopedScopeLabel = phgRef
-              ? `${selGrip} · ${selHand === "L" ? "Left" : "Right"}`
-              : selGrip;
+          if (phgRef) {
+            // Tightest match: use cfEstimate (already hand+grip scoped) vs
+            // per-hand-grip baseline.
+            scopedImp = improvementForFit(cfEstimate, phgRef);
+            scopedBaselineDate = phgRef.date;
+            scopedScopeLabel = `${selGrip} · ${selHand === "L" ? "Left" : "Right"}`;
+          } else if (gRef && gripEstimates[selGrip]) {
+            // Fallback: per-hand-grip baseline doesn't exist yet, but the
+            // grip-pooled baseline does. Use the grip-pooled CURRENT fit
+            // (gripEstimates[selGrip], which pools both hands) so both
+            // sides of the comparison live in the same scope.
+            scopedImp = improvementForFit(gripEstimates[selGrip], gRef);
+            scopedBaselineDate = gRef.date;
+            scopedScopeLabel = `${selGrip} (both hands)`;
           }
         }
 
@@ -8304,7 +8344,7 @@ function ClimbingTab({ activities = [], onLogActivity = () => {}, onDeleteActivi
   const stats = useMemo(() => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const cutoffStr = ymdLocal(cutoff);
     const recent = climbs.filter(c => (c.date || "") >= cutoffStr);
     const sends  = recent.filter(c => c.ascent && c.ascent !== "attempt");
     return {
