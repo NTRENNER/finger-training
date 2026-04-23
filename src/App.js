@@ -632,10 +632,9 @@ function fatigueAfterRest(F, restSeconds, p = DEF_FAT) {
 
 // Default dose-strength constant. Sets how much fatigue accumulates per kg·s of
 // effort relative to that hand/grip's sMax. Empirical population prior; can be
-// back-fit from a user's own history (see fitDoseK).
-const DEF_DOSE_K = 0.010;
-
-function fatigueDose(weightKg, durationS, sMaxKg, k = DEF_DOSE_K) {
+// back-fit from a user's own history (see fitDoseK). Pulled from the canonical
+// PHYS_MODEL_DEFAULT so model-tuning is a single-knob job.
+function fatigueDose(weightKg, durationS, sMaxKg, k = PHYS_MODEL_DEFAULT.doseK) {
   if (!sMaxKg || sMaxKg <= 0) return 0;
   return clamp((weightKg / sMaxKg) * durationS * k, 0, 0.90);
 }
@@ -702,7 +701,7 @@ function getPhysModel(history, hand, grip, opts = {}) {
 }
 
 function buildFreshLoadMap(history, opts = {}) {
-  const { fatParams = DEF_FAT, doseK = DEF_DOSE_K, sMaxIndex = null } = opts;
+  const { fatParams = DEF_FAT, doseK = PHYS_MODEL_DEFAULT.doseK, sMaxIndex = null } = opts;
   const out = new Map();
   if (!history || history.length === 0) return out;
 
@@ -8435,7 +8434,7 @@ export default function App() {
     return `${history.length}|${last?.id ?? ""}|${last?.date ?? ""}`;
   }, [history]);
   const freshMap = useMemo(() => {
-    const k = fitDoseK(history) ?? DEF_DOSE_K;
+    const k = fitDoseK(history) ?? PHYS_MODEL_DEFAULT.doseK;
     return buildFreshLoadMap(history, { doseK: k });
   }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -8636,16 +8635,22 @@ export default function App() {
   // All-grip adaptive fit — used as the overall curve when no single
   // grip is in focus (e.g. Badges view, fallback when user hasn't yet
   // picked a grip in Setup).
+  //
+  // Depends on freshMapFp (length+lastId+lastDate) instead of [history]
+  // directly, same as freshMap, so unrelated state churn (cloud syncs
+  // that touch the array reference without changing data) doesn't
+  // re-fire the O(N) fit.
   const liveEstimate = useMemo(() => {
     const allFails = history.filter(r => r.failed && r.avg_force_kg > 0 && r.actual_time_s > 0);
     return fitAdaptiveHandCurve(allFails);
-  }, [history]);
+  }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Per-grip adaptive fits. FDP and FDS are different muscles (pinch /
   // open-hand roller vs crush roller) with separate force-duration
   // curves; pooling them hides per-muscle training decisions. Each
   // grip gets its own Monod fit so the recommendation engine can pick
-  // the right zone for the specific muscle being trained.
+  // the right zone for the specific muscle being trained. Same
+  // freshMapFp memoization rationale as liveEstimate above.
   const gripEstimates = useMemo(() => {
     const fails = history.filter(r => r.failed && r.grip && r.avg_force_kg > 0 && r.actual_time_s > 0);
     const byGrip = {};
@@ -8659,7 +8664,7 @@ export default function App() {
       if (fit) out[grip] = fit;
     }
     return out;
-  }, [history]);
+  }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Permanent baseline snapshot — set once from the earliest training data,
   // never overwritten. Seeded automatically (below) from the first few
@@ -8744,13 +8749,12 @@ export default function App() {
   // this anymore; it lives in config only so existing downstream code keeps
   // working.
   //
-  // altMode is now derived automatically (see effect below) — it's always a
-  // pure time-efficiency win when rest >= rep duration (the other hand's rep
-  // counts as recovery for the working hand, no per-hand rest is sacrificed),
-  // so there's no reason for the user to choose. The initial value is set
-  // here for the typical strength config (rest=20, rep=45) which gives false;
-  // the effect re-derives the moment the user picks a plan.
-  const [config, setConfig] = useState(() => ({
+  // altMode is NOT stored here anymore — it's derived from restTime and
+  // targetTime via configWithDerived below. Storing it as state was a bug
+  // surface: any callsite doing setConfig({...altMode: true}) would have
+  // its value silently overwritten on the next render, hiding the change.
+  // Compute-on-read removes that footgun entirely.
+  const [rawConfig, setConfig] = useState(() => ({
     hand:       "Both",
     grip:       "",
     goal:       "",  // "power" | "strength" | "endurance" — set when SessionPlanner plan is applied
@@ -8759,22 +8763,20 @@ export default function App() {
     targetTime: 45,
     restTime:   20,
     setRestTime: 180,
-    altMode:    false, // auto-derived from restTime >= targetTime; see effect below
   }));
 
-  // Auto-derive altMode whenever restTime or targetTime changes. Alt mode is
-  // only worth doing when restTime >= targetTime: in that regime the other
-  // hand's rep (= targetTime) plus a small altRestTime adds up to the
-  // configured rest, so per-hand recovery is preserved while total session
-  // time drops by ~30-50%. When restTime < targetTime, alt would shortchange
-  // recovery (other hand's rep alone exceeds the requested rest), so we stay
-  // sequential.
-  useEffect(() => {
-    setConfig(c => {
-      const should = c.restTime >= c.targetTime;
-      return c.altMode === should ? c : { ...c, altMode: should };
-    });
-  }, [config.restTime, config.targetTime]);
+  // Augment rawConfig with derived altMode so every downstream reader
+  // (handleRepDone, handleRestDone, SessionPlanner ETA, SetupView, etc.)
+  // sees the right value without anyone having to remember to derive it.
+  // setConfig still operates on rawConfig — any caller that tries to
+  // setConfig({altMode: ...}) will be silently no-oped on the altMode
+  // key, which is the desired behavior since altMode is fully derived
+  // from restTime/targetTime. Worth doing this rather than a useEffect
+  // that overwrites altMode in state, which had a stale-write race.
+  const config = useMemo(() => ({
+    ...rawConfig,
+    altMode: rawConfig.restTime >= rawConfig.targetTime,
+  }), [rawConfig]);
 
   // ── Session State Machine ─────────────────────────────────
   // phase: 'idle' | 'rep_ready' | 'rep_active' | 'resting' | 'between_sets' | 'switch_hands' | 'alt_switch' | 'done'
