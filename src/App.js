@@ -845,12 +845,28 @@ function isShortfall(actualTime, targetDuration) {
 // ─────────────────────────────────────────────────────────────
 // HISTORICAL ESTIMATION
 // ─────────────────────────────────────────────────────────────
-// Effective load for a rep — prefer Tindeq avg_force_kg, fall back to weight_kg
+// Effective load for a rep — prefer Tindeq avg_force_kg, fall back to weight_kg.
+// Used for CURVE FITTING (the actual force delivered during the hang is what
+// shapes the F-D curve, regardless of whether there was load on a pin or not).
 function effectiveLoad(r) {
   const f = Number(r.avg_force_kg);
   const w = Number(r.weight_kg);
   if (f > 0 && f < 500) return f;
   if (w > 0) return w;
+  return 0;
+}
+
+// Loaded weight for a rep — prefer the actual weight on the pin, fall back
+// to Tindeq's measured force (for isometric/no-load reps). Used for
+// PRESCRIPTION display so the user sees the LOAD they should put on the
+// pin next session, not the after-the-fact force gauge reading. These two
+// can diverge meaningfully for weighted reps where the user partially
+// supports the load (loaded 64 kg but Tindeq sees only 41 kg average).
+function loadedWeight(r) {
+  const w = Number(r.weight_kg);
+  if (w > 0) return w;
+  const f = Number(r.avg_force_kg);
+  if (f > 0 && f < 500) return f;
   return 0;
 }
 
@@ -983,6 +999,197 @@ function prescribedLoad(history, hand, grip, targetDuration, freshMap = null) {
   const baseLoad = fit.CF + fit.W / targetDuration;
   const bump = rpeProgressionMultiplier(history, hand, grip, targetDuration);
   return Math.round(baseLoad * bump * 10) / 10;
+}
+
+// ─────────────────────────────────────────────────────────────
+// EMPIRICAL PRESCRIPTION  (the coaching "next-session" rule)
+// ─────────────────────────────────────────────────────────────
+// Returns the load to ACTUALLY TRAIN at next session for a given
+// (hand, grip, target_duration), grounded in the user's most recent
+// rep 1 outcome at this exact scope rather than in a global curve
+// extrapolation. This is the prescription a thoughtful coach would
+// give: "you held 26 kg for 30s on a 45s target last session — try
+// 24 kg next time" (failure case) or "you held 26 kg for 45s — try
+// 27 kg next time" (success case).
+//
+// Why empirical instead of curve-extrapolated:
+//   - The curve fit is a global model. At extreme zones (short Power,
+//     long Capacity) it can extrapolate aggressively, prescribing 2x
+//     what the user has actually proven they can do.
+//   - The user's last rep 1 at this exact scope is a real data point
+//     that requires no extrapolation.
+//   - Coaching should bound risk: prescribing 30% above what you've
+//     ever done is bad RPE 10 practice.
+//
+// Returns null if no recent rep 1 exists at this scope; caller is
+// expected to fall back to prescribedLoad() in that case (cold start).
+//
+// recentDays bounds the lookback to avoid stale data after detraining
+// or long breaks.
+const EMPIRICAL_LOOKBACK_DAYS = 30;
+
+function empiricalPrescription(history, hand, grip, targetDuration) {
+  if (!history || !hand || !grip || !targetDuration) return null;
+  // Lookback cutoff (local time, matching ymdLocal/today)
+  const cutoffMs = Date.now() - EMPIRICAL_LOOKBACK_DAYS * 86400 * 1000;
+  const cutoff = ymdLocal(new Date(cutoffMs));
+
+  // Collect rep 1 of each session matching this exact scope
+  const sessionRep1 = new Map();
+  for (const r of history) {
+    if (r.hand !== hand || r.grip !== grip) continue;
+    if (r.target_duration !== targetDuration) continue;
+    if ((r.rep_num || 1) !== 1) continue;
+    if (!(r.actual_time_s > 0)) continue;
+    if (!(loadedWeight(r) > 0)) continue;
+    if ((r.date || "") < cutoff) continue;
+    const sid = r.session_id || r.date || "unknown";
+    sessionRep1.set(sid, r);
+  }
+  if (sessionRep1.size === 0) return null;
+
+  // Sort by date desc, take most recent
+  const rep1s = [...sessionRep1.values()]
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const last = rep1s[0];
+  // Use LOADED weight for the prescription (what the user actually put
+  // on the pin / pulled against), not the avg_force gauge reading. They
+  // can differ meaningfully on weighted reps; the prescription should
+  // tell the user what to LOAD, not what their measured force was.
+  const F_actual = loadedWeight(last);
+  const T_actual = last.actual_time_s;
+  const T_target = targetDuration;
+  const wasSuccess = !last.failed && T_actual >= T_target * 0.95;
+
+  if (wasSuccess) {
+    // Success case: count consecutive recent successes for the streak
+    // bump. Same +5%/streak rule as rpeProgressionMultiplier, capped.
+    let streak = 0;
+    for (const r of rep1s) {
+      if (r.failed) break;
+      if (!(r.actual_time_s >= targetDuration * 0.95)) break;
+      streak += 1;
+    }
+    const bump = Math.min(MAX_BUMP_MULT, Math.pow(1 + BUMP_PER_SUCCESS, streak));
+    return Math.round(F_actual * bump * 10) / 10;
+  } else {
+    // Failure case: use the W'-update math anchored to a stable CF.
+    // Assumption: CF (sustainable aerobic asymptote) doesn't shift
+    // session-to-session, so we can solve for new W' given the new
+    // failure point, then prescribe at T_target. Falls back to a
+    // simple linear scale if no Monod fit is available.
+    const failurePts = history
+      .filter(r => r.failed && r.hand === hand && r.grip === grip
+        && r.actual_time_s > 0 && effectiveLoad(r) > 0)
+      .map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
+    const fit = failurePts.length >= 2 ? fitCF(failurePts) : null;
+    if (fit && F_actual > fit.CF) {
+      const newWprime = (F_actual - fit.CF) * T_actual;
+      const next = fit.CF + newWprime / T_target;
+      return Math.round(Math.max(next, fit.CF) * 10) / 10;
+    }
+    // No fit available: scale linearly. If you held F for T and
+    // target is longer (T_target > T_actual), prescribe lighter.
+    // Bounded so we don't drop more than 30% in one session.
+    const scale = Math.max(0.7, T_actual / T_target);
+    return Math.round(F_actual * scale * 10) / 10;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// PRESCRIPTION POTENTIAL  (the coaching "what's possible" view)
+// ─────────────────────────────────────────────────────────────
+// Returns the curve-derived ceiling at a given (hand, grip, target T):
+// what the model thinks the user's physiology could support if balanced.
+// Used as the diagnostic "ceiling" alongside the empirical prescription —
+// the GAP between the two is the training opportunity.
+//
+// Returns { value, lower, upper, reliability } or null:
+//   value       — point estimate (Monod-derived, with bump removed)
+//   lower/upper — bracket from Monod and three-exp fits
+//   reliability — "well-supported" | "marginal" | "extrapolation"
+//
+// Reliability tiers gate how the UI presents the potential:
+//   - well-supported: failure data exists within ±20% of target T,
+//     AND |Monod − three-exp| / Monod < 0.15
+//   - marginal: failures exist within ±50% but models disagree, OR
+//     no failures within ±20% but some within ±50%
+//   - extrapolation: no failures within ±50% of target T → don't
+//     show numeric potential; suggest training the zone instead
+function prescriptionPotential(history, hand, grip, targetDuration, opts = {}) {
+  if (!history || !hand || !grip || !targetDuration) return null;
+  const { freshMap = null, threeExpPriors = null } = opts;
+
+  // Filter failures matching scope
+  const failures = history.filter(r =>
+    r.failed && r.hand === hand && r.grip === grip
+    && r.actual_time_s > 0 && effectiveLoad(r) > 0
+  );
+
+  // Reliability classification — how close are failures to target T?
+  const within20 = failures.filter(r =>
+    Math.abs(r.actual_time_s - targetDuration) / targetDuration <= 0.20
+  ).length;
+  const within50 = failures.filter(r =>
+    Math.abs(r.actual_time_s - targetDuration) / targetDuration <= 0.50
+  ).length;
+
+  // Monod potential (no streak bump applied — that's a separate signal
+  // for empirical, not for the curve ceiling).
+  const fmap = freshMap || buildFreshLoadMap(history);
+  const failurePts = failures.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
+  const successes = history.filter(r =>
+    !r.failed && r.hand === hand && r.grip === grip
+    && r.target_duration > 0 && r.actual_time_s >= r.target_duration
+    && r.actual_time_s > 0 && effectiveLoad(r) > 0
+  );
+  const successPts = successes.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
+  const monodFit = (failurePts.length + successPts.length >= 2)
+    ? fitCFWithSuccessFloor(failurePts, successPts)
+    : null;
+  const monodValue = monodFit ? monodFit.CF + monodFit.W / targetDuration : null;
+
+  // Three-exp potential (if priors available and enough data)
+  let threeExpValue = null;
+  if (threeExpPriors && threeExpPriors.get && failures.length >= 2) {
+    const prior = threeExpPriors.get(grip);
+    if (prior) {
+      const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1);
+      const amps = fitThreeExpAmps(pts, { prior, lambda });
+      if (amps[0] + amps[1] + amps[2] > 0) {
+        const v = predForceThreeExp(amps, targetDuration);
+        if (v > 0) threeExpValue = v;
+      }
+    }
+  }
+
+  // Need at least Monod to return anything
+  if (monodValue == null) return null;
+
+  // Bracket: lower/upper from Monod and three-exp where both exist
+  const values = [monodValue, threeExpValue].filter(v => v != null);
+  const lower = Math.min(...values);
+  const upper = Math.max(...values);
+
+  // Reliability classification
+  let reliability;
+  if (within20 >= 1 && threeExpValue != null
+      && Math.abs(monodValue - threeExpValue) / monodValue < 0.15) {
+    reliability = "well-supported";
+  } else if (within50 >= 1) {
+    reliability = "marginal";
+  } else {
+    reliability = "extrapolation";
+  }
+
+  return {
+    value: Math.round(monodValue * 10) / 10,
+    lower: Math.round(lower * 10) / 10,
+    upper: Math.round(upper * 10) / 10,
+    reliability,
+    threeExpValue: threeExpValue != null ? Math.round(threeExpValue * 10) / 10 : null,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2823,85 +3030,108 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
           drain. Source label reflects whichever fit (per-grip / cross-
           grip / history) backs the primary zone column. */}
       {config.grip && (() => {
-        // Per-cell prescription with explicit source tracking. Each
-        // (zone, hand) cell tries per-grip Monod first → cross-grip
-        // Monod → empirical history average. The previous version
-        // computed only one global subtitleSource, which lied when
-        // some zones used per-grip and others fell through to cross-
-        // grip fallback (e.g., "your Micro fit" subtitle while a Power
-        // value secretly came from cross-grip data).
-        const prescribedWithSource = (hand, t) => {
-          // Compute the RPE 10 progression bump separately so we can surface
-          // it in the UI (small ↑Xx badge) — otherwise a sudden +10% jump
-          // would look mysterious. Only meaningful for the per-grip path
-          // since the streak is scoped to (hand, grip, targetTime).
-          const bump = rpeProgressionMultiplier(history, hand, config.grip, t);
-          const streak = bump > 1 ? Math.round(Math.log(bump) / Math.log(1 + BUMP_PER_SUCCESS)) : 0;
-          const v1 = prescribedLoad(history, hand, config.grip, t, freshMap);
-          if (v1 != null) return { value: v1, source: "grip", streak };
-          const v2 = prescribedLoad(history, hand, null, t, freshMap);
-          if (v2 != null) return { value: v2, source: "global", streak: 0 };
-          const v3 = estimateRefWeight(history, hand, config.grip, t);
-          if (v3 != null) return { value: v3, source: "history", streak: 0 };
-          return { value: null, source: null, streak: 0 };
+        // Coaching prescription: empirical-first (anchored to user's
+        // most recent rep 1 outcome at this exact scope), with the
+        // curve-derived "potential" shown alongside as a diagnostic
+        // ceiling. The GAP between train-at and potential is the
+        // training opportunity — biggest gap = weakest compartment
+        // relative to the rest of the user's physiology.
+        //
+        // Three sources of truth per cell:
+        //   - TRAIN AT: empirical or curve-fallback (the load to use)
+        //   - POTENTIAL: curve ceiling (Monod or three-exp consensus)
+        //   - GAP: (potential − train_at) / train_at as percentage
+        //
+        // Reliability tiers gate the potential display:
+        //   well-supported → show numeric potential confidently
+        //   marginal → show potential with "models disagree" caveat
+        //   extrapolation → don't show numeric, suggest training the zone
+
+        const cellFor = (hand, t) => {
+          // Empirical-first: anchored to user's most recent rep 1
+          const emp = empiricalPrescription(history, hand, config.grip, t);
+          let trainAt, source;
+          if (emp != null) {
+            trainAt = emp;
+            source = "empirical";
+          } else {
+            // Cold start: fall back to the curve. Try per-grip first,
+            // then cross-grip, then historical average.
+            const v1 = prescribedLoad(history, hand, config.grip, t, freshMap);
+            if (v1 != null) { trainAt = v1; source = "curve-grip"; }
+            else {
+              const v2 = prescribedLoad(history, hand, null, t, freshMap);
+              if (v2 != null) { trainAt = v2; source = "curve-global"; }
+              else {
+                const v3 = estimateRefWeight(history, hand, config.grip, t);
+                if (v3 != null) { trainAt = v3; source = "history"; }
+                else return { trainAt: null, source: null, potential: null };
+              }
+            }
+          }
+          // Potential ceiling — curve-derived, with reliability tier.
+          const potential = prescriptionPotential(history, hand, config.grip, t, {
+            freshMap, threeExpPriors,
+          });
+          return { trainAt, source, potential };
         };
-        // Three-exp shadow prescription for a (hand, grip, T) combo.
-        // Returns null when there's no prior for the grip OR no failures
-        // yet to fit. Per-grip pooled prior + same lambda the F-D chart
-        // diagnostic uses, so the in-Setup shadow numbers match the
-        // shadow curve in Analysis.
-        const threeExpPrescribed = (hand, grip, t) => {
-          if (!grip) return null;
-          const prior = threeExpPriors.get(grip);
-          if (!prior) return null;
-          const failures = history.filter(r =>
-            r.failed && r.hand === hand && r.grip === grip
-            && r.actual_time_s > 0 && r.avg_force_kg > 0 && r.avg_force_kg < 500
-          );
-          if (failures.length < 2) return null;
-          const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
-          const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1);
-          const amps = fitThreeExpAmps(pts, { prior, lambda });
-          if (amps[0] + amps[1] + amps[2] <= 0) return null;
-          const f = predForceThreeExp(amps, t);
-          if (!(f > 0)) return null;
-          // Apply the same RPE 10 progression bump as Monod so the
-          // shadow comparison stays apples-to-apples.
-          const bump = rpeProgressionMultiplier(history, hand, grip, t);
-          return f * bump;
-        };
+
         const zones = ["power", "strength", "endurance"].map(zoneKey => {
           const t = GOAL_CONFIG[zoneKey].refTime;
-          const L = prescribedWithSource("L", t);
-          const R = prescribedWithSource("R", t);
-          const L3e = threeExpPrescribed("L", config.grip, t);
-          const R3e = threeExpPrescribed("R", config.grip, t);
-          return { key: zoneKey, cfg: GOAL_CONFIG[zoneKey], t, L, R, L3e, R3e };
+          const L = cellFor("L", t);
+          const R = cellFor("R", t);
+          return { key: zoneKey, cfg: GOAL_CONFIG[zoneKey], t, L, R };
         });
-        const anyLoaded = zones.some(z => z.L.value != null || z.R.value != null);
+        const anyLoaded = zones.some(z => z.L.trainAt != null || z.R.trainAt != null);
         if (!anyLoaded) return null;
-        // Subtitle reflects the dominant source across all displayed
-        // cells so the user gets a one-line summary of "what model is
-        // backing these numbers." Per-cell sources still get a small
-        // inline marker (* for cross-grip, h for history) below.
-        const allSources = zones.flatMap(z => [z.L.source, z.R.source]).filter(Boolean);
-        const sourceCount = allSources.reduce((a, s) => { a[s] = (a[s] || 0) + 1; return a; }, {});
-        const dominant = Object.entries(sourceCount).sort((a, b) => b[1] - a[1])[0]?.[0] || "history";
-        const hasMixed = Object.keys(sourceCount).length > 1;
+
+        // Find the widest reliable gap across all (zone, hand) cells —
+        // that's the recommendation engine's "biggest leverage" pointer.
+        let widestGap = null;
+        for (const z of zones) {
+          for (const [handLabel, cell] of [["L", z.L], ["R", z.R]]) {
+            if (!cell.potential || !cell.trainAt) continue;
+            if (cell.potential.reliability === "extrapolation") continue;
+            const gap = (cell.potential.value - cell.trainAt) / cell.trainAt;
+            if (widestGap == null || gap > widestGap.gap) {
+              widestGap = { zoneKey: z.key, zoneLabel: z.cfg.label, hand: handLabel, gap, cell };
+            }
+          }
+        }
+
+        // Format helpers
+        const fmtPct = (g) => `${g >= 0 ? "+" : ""}${Math.round(g * 100)}%`;
+        const gapColor = (g) => Math.abs(g) < 0.05 ? C.muted
+                              : g > 0.20 ? C.red
+                              : g > 0.10 ? C.orange
+                              : C.green;
+
         return (
           <Card style={{ borderColor: C.blue }}>
             <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
-              {dominant === "grip"
-                ? <>Prescribed load · CF + W&apos;/T (your {config.grip} fit{hasMixed ? <span style={{ color: C.yellow }}>; some cells fall back — see ° / ʰ markers</span> : null})</>
-                : dominant === "global"
-                  ? <>Prescribed load · CF + W&apos;/T (cross-grip fit — not enough {config.grip}-specific data yet)</>
-                  : <>Suggested load (from history; not enough failures for a model fit yet)</>}
+              Coaching prescription · {config.grip}
             </div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 10, fontStyle: "italic" }}>
-              Same load every rep. Rep 1 hits the target; reps 2+ fall short as compartments deplete.
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontStyle: "italic" }}>
+              <b style={{ color: C.text, fontStyle: "normal" }}>Train at</b> = what to lift today (anchored to your most recent rep 1 + RPE 10 push).{" "}
+              <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.{" "}
+              <b style={{ color: C.text, fontStyle: "normal" }}>Gap</b> = the training opportunity in that zone.
             </div>
+            {widestGap && widestGap.gap > 0.10 && (
+              <div style={{ fontSize: 12, color: C.text, background: widestGap.cell.cfg?.color + "20" || C.bg,
+                            border: `1px solid ${gapColor(widestGap.gap)}66`, borderRadius: 8,
+                            padding: "8px 10px", marginBottom: 10 }}>
+                <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Biggest gap: {widestGap.zoneLabel}</span>
+                {" — your "}
+                {widestGap.zoneKey === "power" ? "fast (PCr)" : widestGap.zoneKey === "strength" ? "middle (glycolytic)" : "slow (oxidative)"}
+                {" compartment is your widest opportunity ("}
+                <b>{fmtPct(widestGap.gap)}</b>
+                {" headroom on "}
+                {widestGap.hand === "L" ? "Left" : "Right"}
+                {"). Training there has the most leverage."}
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-              {zones.map(({ key, cfg, t, L, R, L3e, R3e }) => {
+              {zones.map(({ key, cfg, t, L, R }) => {
                 const isActive = config.goal === key;
                 return (
                   <div
@@ -2920,36 +3150,53 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
                       target {t}s
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      {[["L", L, L3e], ["R", R, R3e]].map(([handLabel, cell, e3]) => {
-                        const sourceMark = cell.source === "global" ? "°"
+                      {[["L", L], ["R", R]].map(([handLabel, cell]) => {
+                        const sourceMark = cell.source === "curve-global" ? "°"
                                          : cell.source === "history" ? "ʰ"
+                                         : cell.source === "curve-grip" ? "*"
                                          : "";
-                        const sourceTitle = cell.source === "global" ? `Cross-grip fallback — not enough ${config.grip}-specific data on ${handLabel} for ${cfg.label} (${t}s) yet`
-                                          : cell.source === "history" ? `Historical-average fallback — not enough failures for any model fit on ${handLabel} ${config.grip} at ${t}s`
-                                          : "";
-                        const bumpPct = cell.streak > 0 ? Math.round((Math.pow(1 + BUMP_PER_SUCCESS, cell.streak) - 1) * 100) : 0;
-                        const streakTitle = cell.streak > 0
-                          ? `RPE 10 progression: rep 1 has been a success ${cell.streak} session${cell.streak > 1 ? "s" : ""} in a row at this target — bumping +${bumpPct}% to find your edge. Will reset on the first rep-1 failure.`
-                          : "";
+                        const sourceTitle = cell.source === "curve-global"
+                            ? `Cold start: not enough recent ${config.grip} data on ${handLabel} at ${t}s, falling back to cross-grip curve.`
+                          : cell.source === "history"
+                            ? `Cold start: no model fit available, using historical average on ${handLabel} ${config.grip} at ${t}s.`
+                          : cell.source === "curve-grip"
+                            ? `Cold start: no recent rep 1 at this target, using ${config.grip} curve fit on ${handLabel}.`
+                            : `Empirical: anchored to your most recent rep 1 on ${handLabel} ${config.grip} at ${t}s, with RPE 10 progression.`;
+                        const pot = cell.potential;
+                        const gap = (pot && cell.trainAt && pot.reliability !== "extrapolation")
+                          ? (pot.value - cell.trainAt) / cell.trainAt : null;
                         return (
-                          <div key={handLabel}>
+                          <div key={handLabel} style={{ flex: 1 }}>
                             <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>{handLabel}</div>
-                            <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>
-                              {cell.value != null ? `${fmtW(cell.value, unit)}` : "—"}
+                            <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }} title={sourceTitle}>
+                              {cell.trainAt != null ? `${fmtW(cell.trainAt, unit)}` : "—"}
                               {sourceMark && (
-                                <span style={{ fontSize: 11, color: C.yellow, marginLeft: 2 }} title={sourceTitle}>
+                                <span style={{ fontSize: 11, color: C.yellow, marginLeft: 2 }}>
                                   {sourceMark}
                                 </span>
                               )}
                             </div>
-                            {cell.streak > 0 && (
-                              <div style={{ fontSize: 9, color: C.green, fontWeight: 600, marginTop: 2 }} title={streakTitle}>
-                                ↑{bumpPct}% · {cell.streak}× streak
+                            {pot && pot.reliability !== "extrapolation" && (
+                              <div style={{ fontSize: 9, color: C.muted, marginTop: 3 }}>
+                                pot {pot.reliability === "marginal"
+                                  ? `${fmtW(pot.lower, unit)}–${fmtW(pot.upper, unit)}`
+                                  : fmtW(pot.value, unit)}
+                                {pot.reliability === "marginal" && (
+                                  <span title="Monod and three-exp models disagree at this duration — treat the range as the credible band, not a precise number." style={{ color: C.yellow, marginLeft: 2 }}>
+                                    ?
+                                  </span>
+                                )}
                               </div>
                             )}
-                            {e3 != null && (
-                              <div style={{ fontSize: 9, color: C.yellow, fontWeight: 500, marginTop: 2 }} title="Three-exp shadow prescription — not driving the workout, just for comparison">
-                                3e: {fmtW(e3, unit)}
+                            {pot && pot.reliability === "extrapolation" && (
+                              <div style={{ fontSize: 9, color: C.muted, marginTop: 3, fontStyle: "italic" }} title={`No failure data within ±50% of ${t}s — the curve is extrapolating. Train this zone to anchor it.`}>
+                                pot ?
+                              </div>
+                            )}
+                            {gap != null && (
+                              <div style={{ fontSize: 9, fontWeight: 600, color: gapColor(gap), marginTop: 2 }}
+                                   title={`Gap: train-at ${fmtW(cell.trainAt, unit)} → potential ${fmtW(pot.value, unit)} = ${fmtPct(gap)} headroom. ${gap > 0.10 ? "Worth training this zone." : "Already close to your modeled potential here."}`}>
+                                gap {fmtPct(gap)}
                               </div>
                             )}
                           </div>
@@ -2962,8 +3209,7 @@ function SetupView({ config, setConfig, onStart, history, freshMap = null, unit 
             </div>
             <div style={{ fontSize: 10, color: C.muted, marginTop: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
               <span>
-                <span style={{ color: C.yellow }}>3e = three-exp shadow (not driving)</span>
-                {hasMixed && <span style={{ color: C.muted }}> · ° = cross-grip fallback · ʰ = history fallback</span>}
+                <span style={{ color: C.muted }}>* = curve fallback (no recent rep 1) · ° = cross-grip · ʰ = historical avg · ? = uncertain potential</span>
               </span>
               <span>values in {unit}</span>
             </div>
@@ -8938,8 +9184,14 @@ export default function App() {
   const startSession = useCallback(() => {
     const sid = uid();
     const rw = {};
+    // Empirical-first prescription path (matches the Setup card's
+    // "Train at" cell). Cold-start fallbacks: per-grip Monod, then
+    // cross-grip Monod, then historical average. Same chain the
+    // Setup card uses, so the in-workout suggested weight matches
+    // the Setup card to the kg.
     ["L", "R"].forEach(h => {
-      rw[h] = prescribedLoad(history, h, config.grip, config.targetTime, freshMap)
+      rw[h] = empiricalPrescription(history, h, config.grip, config.targetTime)
+           ?? prescribedLoad(history, h, config.grip, config.targetTime, freshMap)
            ?? prescribedLoad(history, h, null,        config.targetTime, freshMap)
            ?? estimateRefWeight(history, h, config.grip, config.targetTime);
     });
