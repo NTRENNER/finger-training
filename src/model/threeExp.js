@@ -3,6 +3,19 @@
 // ─────────────────────────────────────────────────────────────
 // F(T) = a·exp(-T/τ₁) + b·exp(-T/τ₂) + c·exp(-T/τ₃)
 //
+// τ₁, τ₂, τ₃ are the DEPLETION time constants (PHYS_MODEL_DEFAULT.tauD)
+// of the three energy compartments — fast (PCr ≈10s), medium (glycolytic
+// ≈30s), slow (oxidative ≈180s). The model describes how max sustainable
+// force decays during a sustained hold, which is depletion physics, so
+// the basis is the depletion taus, not the recovery taus.
+//
+// (Earlier versions of this model used tauR as the basis by accident —
+// inherited from the rest-period fatigue decay model where tauR is the
+// correct choice. Switching to tauD is both conceptually correct and
+// empirically better: leak-free LOO-CV on pooled history shows tauD
+// reduces RMSE by an additional ~3-4% over tauR at λ=100, doubling the
+// improvement over Monod from ~4% to ~7%. See validate_taur_vs_taud.js.)
+//
 // Amplitude parameterization (a, b, c ≥ 0 in kg) — equivalent to the
 // Smax × {weights} form but easier to fit because the constraint is
 // just non-negativity instead of "weights sum to 1." Smax = a+b+c
@@ -12,8 +25,8 @@
 //   - PRIMARY potential model — drives prescriptionPotential.value
 //     when well-supported, surfaces as the "target" curve on the
 //     F-D chart.
-//   - Validated offline (LOO-CV on pooled history) to beat Monod by
-//     ~4% RMSE at λ=100 with per-grip prior + shrinkage.
+//   - Validated offline (leak-free LOO-CV on pooled history) to beat
+//     Monod by ~7% RMSE at λ=100 with per-grip prior + shrinkage.
 //   - Especially valuable at the extremes (Power, Capacity) where
 //     Monod's hyperbolic shape is provably too rigid to fit both
 //     short-T successes and middle-T failures simultaneously.
@@ -54,13 +67,15 @@ function _solve2(A, b) {
 //     + λ · ((a − a₀)² + (b − b₀)² + (c − c₀)²)
 //
 // pts:    [{T: duration_s, F: avg_force_kg}]
-// taus:   [τ₁, τ₂, τ₃] in seconds (defaults to PHYS_MODEL_DEFAULT.tauR)
+// taus:   [τ₁, τ₂, τ₃] in seconds (defaults to PHYS_MODEL_DEFAULT.tauD —
+//         the DEPLETION time constants, since this is a hold-duration
+//         decay model, not a rest-period recovery model).
 // prior:  [a₀, b₀, c₀] target amplitudes for shrinkage
 // lambda: shrinkage strength (0 = no shrinkage; large = ignore data)
 //
 // Returns [a, b, c] all ≥ 0. Falls back to prior if no points.
 export function fitThreeExpAmps(pts, opts = {}) {
-  const taus  = opts.taus  || [PHYS_MODEL_DEFAULT.tauR.fast, PHYS_MODEL_DEFAULT.tauR.medium, PHYS_MODEL_DEFAULT.tauR.slow];
+  const taus  = opts.taus  || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
   const prior = opts.prior || [0, 0, 0];
   const lambda = opts.lambda == null ? 0 : opts.lambda;
   if (!pts || pts.length === 0) return prior.slice();
@@ -120,8 +135,10 @@ export function fitThreeExpAmps(pts, opts = {}) {
 }
 
 // Predict force at duration T given fitted amplitudes [a, b, c].
+// Uses PHYS_MODEL_DEFAULT.tauD by default — see header for why this is
+// the depletion basis, not the recovery basis.
 export function predForceThreeExp(amps, T, taus = null) {
-  const tau = taus || [PHYS_MODEL_DEFAULT.tauR.fast, PHYS_MODEL_DEFAULT.tauR.medium, PHYS_MODEL_DEFAULT.tauR.slow];
+  const tau = taus || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
   return amps[0]*Math.exp(-T/tau[0]) + amps[1]*Math.exp(-T/tau[1]) + amps[2]*Math.exp(-T/tau[2]);
 }
 
