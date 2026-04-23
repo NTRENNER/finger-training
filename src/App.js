@@ -273,6 +273,163 @@ function fitCFWithSuccessFloor(failurePts, successPts, opts = {}) {
   return fit;
 }
 
+// ─────────────────────────────────────────────────────────────
+// THREE-EXPONENTIAL FORCE-DURATION MODEL  (shadow / experimental)
+// ─────────────────────────────────────────────────────────────
+// F(T) = a·exp(-T/τ₁) + b·exp(-T/τ₂) + c·exp(-T/τ₃)
+//
+// Amplitude parameterization (a, b, c ≥ 0 in kg) — equivalent to the
+// Smax × {weights} form but easier to fit because the constraint is
+// just non-negativity instead of "weights sum to 1." Smax = a+b+c falls
+// out as the model's prediction at T=0 (i.e. MVC / fresh max).
+//
+// Currently used as a SHADOW model only — its prediction is rendered
+// alongside Monod in the F-D chart so the two can be compared visually,
+// but Monod still drives prescribedLoad. Validated offline (LOO-CV on
+// pooled history) to beat Monod by ~4% RMSE at λ=100 with per-grip
+// prior + shrinkage, with the win growing as more data accumulates.
+// See Step 2a in the migration toward a three-exp-primary architecture.
+const THREE_EXP_LAMBDA_DEFAULT = 100;
+
+// Solve a 3x3 linear system A x = b via Cramer's rule. Returns null if
+// singular. Used internally by fitThreeExpAmps.
+function _solve3(A, b) {
+  const det = (
+    A[0][0]*(A[1][1]*A[2][2] - A[1][2]*A[2][1])
+  - A[0][1]*(A[1][0]*A[2][2] - A[1][2]*A[2][0])
+  + A[0][2]*(A[1][0]*A[2][1] - A[1][1]*A[2][0])
+  );
+  if (Math.abs(det) < 1e-12) return null;
+  const replaceCol = (col) => A.map((row, ri) => row.map((v, ci) => ci === col ? b[ri] : v));
+  const det3 = (m) => (
+      m[0][0]*(m[1][1]*m[2][2] - m[1][2]*m[2][1])
+    - m[0][1]*(m[1][0]*m[2][2] - m[1][2]*m[2][0])
+    + m[0][2]*(m[1][0]*m[2][1] - m[1][1]*m[2][0])
+  );
+  return [det3(replaceCol(0))/det, det3(replaceCol(1))/det, det3(replaceCol(2))/det];
+}
+// Solve a 2x2 linear system A x = b. Returns null if singular.
+function _solve2(A, b) {
+  const det = A[0][0]*A[1][1] - A[0][1]*A[1][0];
+  if (Math.abs(det) < 1e-12) return null;
+  return [(b[0]*A[1][1] - b[1]*A[0][1]) / det,
+          (A[0][0]*b[1] - A[1][0]*b[0]) / det];
+}
+
+// Fit three-compartment amplitudes (a, b, c) to failure observations
+// with non-negativity constraints and a Gaussian shrinkage prior.
+//
+//   minimize over (a,b,c) ≥ 0 of:
+//     Σᵢ (a·exp(-Tᵢ/τ₁) + b·exp(-Tᵢ/τ₂) + c·exp(-Tᵢ/τ₃) − Fᵢ)²
+//     + λ · ((a − a₀)² + (b − b₀)² + (c − c₀)²)
+//
+// pts:    [{T: duration_s, F: avg_force_kg}]
+// taus:   [τ₁, τ₂, τ₃] in seconds (use PHYS_MODEL_DEFAULT.tauR by default)
+// prior:  [a₀, b₀, c₀] target amplitudes for shrinkage
+// lambda: shrinkage strength (0 = no shrinkage; large = ignore data)
+//
+// Returns [a, b, c] all ≥ 0. Falls back to prior if no points.
+//
+// Algorithm: closed-form normal-equations solve, then enumerate active
+// sets if any component goes negative. With only 3 free parameters the
+// active-set enumeration is bounded (8 cases) so the whole thing is
+// O(1) per call modulo the O(N) normal-equation accumulation.
+function fitThreeExpAmps(pts, opts = {}) {
+  const taus  = opts.taus  || [PHYS_MODEL_DEFAULT.tauR.fast, PHYS_MODEL_DEFAULT.tauR.medium, PHYS_MODEL_DEFAULT.tauR.slow];
+  const prior = opts.prior || [0, 0, 0];
+  const lambda = opts.lambda == null ? 0 : opts.lambda;
+  if (!pts || pts.length === 0) return prior.slice();
+  // Design matrix X (n×3), targets y (n)
+  const X = pts.map(p => taus.map(t => Math.exp(-p.T / t)));
+  const y = pts.map(p => p.F);
+  // Normal equations: (XᵀX + λI) β = Xᵀy + λ·prior
+  const XtX = [[0,0,0],[0,0,0],[0,0,0]];
+  const Xty = [0, 0, 0];
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = 0; j < 3; j++) {
+      Xty[j] += X[i][j] * y[i];
+      for (let k = 0; k < 3; k++) XtX[j][k] += X[i][j] * X[i][k];
+    }
+  }
+  const A = XtX.map((row, j) => row.map((v, k) => v + (j === k ? lambda : 0)));
+  const rhs = Xty.map((v, j) => v + lambda * prior[j]);
+  // Enumerate active sets (which components are forced to 0)
+  const candidates = [];
+  // 1. All free — try the unconstrained 3-DOF solve
+  const sol3 = _solve3(A, rhs);
+  if (sol3 && sol3.every(v => v >= -1e-9)) candidates.push(sol3.map(v => Math.max(0, v)));
+  // 2. One forced to 0 — solve the remaining 2x2
+  for (let zero = 0; zero < 3; zero++) {
+    const free = [0,1,2].filter(i => i !== zero);
+    const A2 = [[A[free[0]][free[0]], A[free[0]][free[1]]],
+                [A[free[1]][free[0]], A[free[1]][free[1]]]];
+    const sol2 = _solve2(A2, [rhs[free[0]], rhs[free[1]]]);
+    if (sol2 && sol2.every(v => v >= -1e-9)) {
+      const sol = [0, 0, 0];
+      sol[free[0]] = Math.max(0, sol2[0]);
+      sol[free[1]] = Math.max(0, sol2[1]);
+      candidates.push(sol);
+    }
+  }
+  // 3. Two forced to 0 — solve the remaining 1x1
+  for (let nz = 0; nz < 3; nz++) {
+    if (A[nz][nz] < 1e-12) continue;
+    const v = rhs[nz] / A[nz][nz];
+    if (v >= -1e-9) {
+      const sol = [0, 0, 0];
+      sol[nz] = Math.max(0, v);
+      candidates.push(sol);
+    }
+  }
+  // 4. All zero (prior-only fallback)
+  candidates.push([0, 0, 0]);
+  // Pick the candidate with lowest objective value
+  const objective = (beta) => {
+    let r = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const pred = X[i][0]*beta[0] + X[i][1]*beta[1] + X[i][2]*beta[2];
+      r += (pred - y[i]) ** 2;
+    }
+    for (let j = 0; j < 3; j++) r += lambda * (beta[j] - prior[j]) ** 2;
+    return r;
+  };
+  let best = candidates[0];
+  let bestObj = objective(best);
+  for (let c = 1; c < candidates.length; c++) {
+    const o = objective(candidates[c]);
+    if (o < bestObj) { best = candidates[c]; bestObj = o; }
+  }
+  return best;
+}
+
+// Predict force at duration T given fitted amplitudes [a, b, c].
+function predForceThreeExp(amps, T, taus = null) {
+  const tau = taus || [PHYS_MODEL_DEFAULT.tauR.fast, PHYS_MODEL_DEFAULT.tauR.medium, PHYS_MODEL_DEFAULT.tauR.slow];
+  return amps[0]*Math.exp(-T/tau[0]) + amps[1]*Math.exp(-T/tau[1]) + amps[2]*Math.exp(-T/tau[2]);
+}
+
+// Build per-grip three-exp prior by pooling all that grip's failures
+// across hands. Used as the shrinkage target for per-(hand, grip) fits.
+// Returns Map<grip, [a, b, c]>. Pooling within-grip avoids the cross-
+// muscle (FDP vs FDS) amplitude contamination that broke the global
+// pooled prior in offline validation.
+function buildThreeExpPriors(history) {
+  const byGrip = {};
+  for (const r of history || []) {
+    if (!r.failed || !r.grip) continue;
+    if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+    if (!(r.actual_time_s > 0)) continue;
+    if (!byGrip[r.grip]) byGrip[r.grip] = [];
+    byGrip[r.grip].push({ T: r.actual_time_s, F: r.avg_force_kg });
+  }
+  const out = new Map();
+  for (const [grip, pts] of Object.entries(byGrip)) {
+    if (pts.length < 2) continue; // need at least 2 points to fit anything
+    out.set(grip, fitThreeExpAmps(pts, { lambda: 0 }));
+  }
+  return out;
+}
+
 // Fit a Monod curve on a set of failure reps, with adaptive hand
 // selection: if both hands are present and their CFs agree within
 // tolerance, pool them for a tighter fit; if they diverge sharply,
@@ -5202,6 +5359,62 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     });
   }, [cfEstimate, maxDur, unit]);
 
+  // ── Three-exp shadow model ──
+  // Per-grip prior pooled across hands (avoids cross-muscle scale
+  // contamination — Crusher and Micro have wildly different absolute
+  // forces). Fit once per history change; reused for any (hand, grip)
+  // scope the user selects.
+  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
+
+  // Three-exp fit for the current (selHand, selGrip) scope. Uses the
+  // same `failures` array that backs cfEstimate, so the fits are
+  // directly comparable. When no grip is selected, we can't pick a
+  // prior — fall back to no-shrinkage fit (which validation showed
+  // loses to Monod by ~3% on aggregate, fine as a degenerate case).
+  const threeExpFit = useMemo(() => {
+    if (failures.length < 2) return null;
+    const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+    const prior = selGrip ? (threeExpPriors.get(selGrip) || [0,0,0]) : [0,0,0];
+    const lambda = selGrip ? THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1) : 0;
+    const amps = fitThreeExpAmps(pts, { prior, lambda });
+    if (amps[0] + amps[1] + amps[2] <= 0) return null;
+    return { amps, prior, lambda };
+  }, [failures, selGrip, threeExpPriors]);
+
+  // Predicted curve for chart overlay — same T grid as curveData so the
+  // two lines align visually.
+  const threeExpCurveData = useMemo(() => {
+    if (!threeExpFit) return [];
+    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
+    return Array.from({ length: 80 }, (_, i) => {
+      const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
+      const f = predForceThreeExp(threeExpFit.amps, t);
+      return { x: t, y: toDisp(Math.max(f, 0), unit) };
+    });
+  }, [threeExpFit, maxDur, unit]);
+
+  // Train RMSE on the failure points for both models — directional
+  // signal of fit quality. NOTE: this is training RMSE not holdout, so
+  // it's biased optimistic for both; the relative comparison between
+  // the two models on the SAME data is still meaningful. Holdout
+  // validation lives in the offline sim (validate_three_exp_v3.js).
+  const modelRMSE = useMemo(() => {
+    if (failures.length < 2 || !cfEstimate || !threeExpFit) return null;
+    let mErr = 0, eErr = 0;
+    for (const r of failures) {
+      const T = r.actual_time_s, F = r.avg_force_kg;
+      const mPred = cfEstimate.CF + cfEstimate.W / T;
+      const ePred = predForceThreeExp(threeExpFit.amps, T);
+      mErr += (mPred - F) ** 2;
+      eErr += (ePred - F) ** 2;
+    }
+    return {
+      monod:    Math.sqrt(mErr / failures.length),
+      threeExp: Math.sqrt(eErr / failures.length),
+      n:        failures.length,
+    };
+  }, [failures, cfEstimate, threeExpFit]);
+
   // Per-hand curves (L vs R overlay). Independent fits over the same
   // selGrip scope — lets users see hand asymmetry directly. Only
   // produced when both hands have enough failures to fit.
@@ -5293,6 +5506,10 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     date: r.date, grip: r.grip,
   }));
   const curveDataRel = curveData.map(d => ({
+    x: d.x,
+    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
+  }));
+  const threeExpCurveDataRel = threeExpCurveData.map(d => ({
     x: d.x,
     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
   }));
@@ -5875,6 +6092,7 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
             <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
             {cfEstimate && <span><span style={{ color: C.purple }}>―</span> F-D curve</span>}
             {cfEstimate && <span><span style={{ color: C.purple }}>╌</span> Critical Force</span>}
+            {threeExpCurveDataRel.length > 0 && <span title="Experimental shadow model — not driving prescriptions"><span style={{ color: C.yellow }}>╌</span> 3-exp (shadow)</span>}
             {confidenceBandRel && <span><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
             {perHandCurvesRel && <span><span style={{ color: C.blue }}>―</span> L &nbsp;<span style={{ color: C.orange }}>―</span> R</span>}
             {limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
@@ -5935,6 +6153,14 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
               {curveDataRel.length > 0 && (
                 <Line data={curveDataRel} dataKey="y" stroke={C.purple} strokeWidth={2} dot={false} legendType="none" isAnimationActive={false} />
               )}
+              {/* Three-exp shadow model overlay — dashed yellow.
+                  Validated offline to beat Monod by ~4% RMSE at λ=100;
+                  not yet driving prescriptions. */}
+              {threeExpCurveDataRel.length > 0 && (
+                <Line data={threeExpCurveDataRel} dataKey="y" stroke={C.yellow}
+                      strokeWidth={1.5} strokeDasharray="5 4" dot={false}
+                      legendType="none" isAnimationActive={false} />
+              )}
               {/* Completed reps */}
               <Scatter data={successDotsRel} fill={C.green} opacity={0.85} name="Completed" />
               {/* Failed reps */}
@@ -5947,6 +6173,29 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
             <span style={{ color: C.orange }}>💪 Strength 20–120s</span>
             <span style={{ color: C.blue }}>🔄 Capacity 120s+</span>
           </div>
+          {/* Three-exp shadow-model diagnostic — running comparison of
+              fit quality. Training RMSE on the displayed failures, so
+              biased optimistic for both models, but the relative
+              comparison on the SAME data is meaningful. Holdout
+              validation lives in the offline sim. The model is in
+              shadow mode: visible in the chart and here, but
+              prescribedLoad still uses Monod. */}
+          {modelRMSE && (
+            <div style={{ marginTop: 8, padding: "6px 8px", background: C.bg, borderRadius: 6, fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
+              <span style={{ color: C.yellow, fontWeight: 600 }}>3-exp shadow</span>
+              {" · Monod RMSE "}
+              <span style={{ color: C.text }}>{modelRMSE.monod.toFixed(2)} {unit === "lbs" ? "kg" : "kg"}</span>
+              {" · 3-exp RMSE "}
+              <span style={{ color: modelRMSE.threeExp < modelRMSE.monod ? C.green : C.text }}>
+                {modelRMSE.threeExp.toFixed(2)} kg
+              </span>
+              {" · N="}{modelRMSE.n}
+              {" · "}
+              <span style={{ fontStyle: "italic" }}>
+                training fit, not holdout — prescriptions still use Monod
+              </span>
+            </div>
+          )}
         </Card>
 
         {/* ── Critical Force card ──
