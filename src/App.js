@@ -442,6 +442,17 @@ function fatigueDose(weightKg, durationS, sMaxKg) {
 
 const availFrac = (F) => clamp(1 - F, 0.05, 1.0);
 
+// Shortfall threshold: a rep that finishes meaningfully before its target
+// duration is treated as a failure for fitting purposes, even if the user
+// didn't tap "fail". Without this, holding 26 kg for 33s on a 45s target
+// gets logged as a success and the F-D fit thinks you're stronger than
+// you actually are. 95% gives a small buffer for clock drift / late taps.
+const SHORTFALL_TOL = 0.95;
+function isShortfall(actualTime, targetDuration) {
+  if (!(actualTime > 0) || !(targetDuration > 0)) return false;
+  return actualTime < targetDuration * SHORTFALL_TOL;
+}
+
 // ─────────────────────────────────────────────────────────────
 // HISTORICAL ESTIMATION
 // ─────────────────────────────────────────────────────────────
@@ -3378,10 +3389,14 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
   const saveRepEdit = () => {
     if (!editingRep) return;
     const loadKg = fromDisp(parseFloat(editRepLoad), unit);
-    const updates = { actual_time_s: parseFloat(editRepTime) };
+    const newTime = parseFloat(editRepTime);
+    const updates = { actual_time_s: newTime };
     if (editingRep.rep.avg_force_kg > 0) updates.avg_force_kg = loadKg;
     else updates.weight_kg = loadKg;
     if (editRepHand === "L" || editRepHand === "R") updates.hand = editRepHand;
+    // Re-derive failed from the new time so edits keep the flag honest.
+    const tgt = editingRep.rep.target_duration;
+    if (tgt > 0 && newTime > 0) updates.failed = isShortfall(newTime, tgt);
     onUpdateRep(editingRep.rep, updates);
     closeRepEdit();
   };
@@ -3433,7 +3448,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
       rep_num:         maxRepNum + 1,
       rest_s:          0,
       session_id:      sessionId,
-      failed:          time < sess.target_duration,
+      failed:          isShortfall(time, sess.target_duration),
     };
     onAddRep(newRep);
     closeRepEdit();
@@ -3459,7 +3474,7 @@ function HistoryView({ history, onDownload, unit = "lbs", bodyWeight = null, onD
         rep_num:         i + 1,
         rest_s:          0,
         session_id:      sessionId,
-        failed:          parseFloat(r.time) < newSessTarget,
+        failed:          isShortfall(parseFloat(r.time), newSessTarget),
       };
     });
     // Pass all reps at once so addReps dedupes against the original state, not incremental updates
@@ -8137,6 +8152,8 @@ export default function App() {
       return ws.length > 0 ? ws[0] : 0;
     })();
 
+    const roundedActual = Math.round(actualTime * 10) / 10;
+    const derivedFailed = failed || isShortfall(roundedActual, config.targetTime);
     const repRecord = {
       id:              uid(),
       date:            today(),
@@ -8144,7 +8161,7 @@ export default function App() {
       hand:            effectiveHand,
       target_duration: config.targetTime,
       weight_kg:       Math.round(weight * 10) / 10,
-      actual_time_s:   Math.round(actualTime * 10) / 10,
+      actual_time_s:   roundedActual,
       avg_force_kg:    (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
                          ? Math.round(avgForce * 10) / 10
                          : null,
@@ -8152,7 +8169,7 @@ export default function App() {
       rep_num:         currentRep + 1,
       rest_s:             config.restTime,
       session_id:         sessionId,
-      failed:             failed,
+      failed:             derivedFailed,
       session_started_at: sessionStartedAt || null,
     };
 
