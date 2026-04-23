@@ -11,6 +11,26 @@ import {
   ReferenceLine, ReferenceArea,
 } from "recharts";
 
+// Model layer — pure JS, testable in isolation. See src/model/*.js.
+import { clamp, ymdLocal, today } from "./util.js";
+import { POWER_MAX, STRENGTH_MAX } from "./model/zones.js";
+import {
+  PHYS_MODEL_DEFAULT, DEF_FAT,
+  fatigueDose, fatigueAfterRest, availFrac,
+  predictRepTimes,
+} from "./model/fatigue.js";
+// sessionCompartmentAUC stays in App.js for now — it depends on the
+// local `effectiveLoad` helper (which lives in App.js until prescription.js
+// is extracted in a future commit).
+import {
+  fitCF, fitCFWithSuccessFloor,
+  predForce, computeAUC, fitAdaptiveHandCurve,
+} from "./model/monod.js";
+import {
+  THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
+  buildThreeExpPriors,
+} from "./model/threeExp.js";
+
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────
@@ -36,49 +56,7 @@ const TARGET_OPTIONS = [
 
 const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
 
-// ─────────────────────────────────────────────────────────────
-// CANONICAL THREE-COMPARTMENT PHYSIOLOGICAL MODEL
-// ─────────────────────────────────────────────────────────────
-// A single source of truth for the three-compartment model used by
-// every downstream calculation: fatigue accumulation, rep-time
-// prediction, AUC dose attribution, capacity-zone labels, and (in
-// the next migration step) the force-duration curve itself.
-//
-// Compartments map to the bioenergetic systems:
-//   fast   → phosphocreatine (PCr)
-//   medium → glycolytic
-//   slow   → oxidative
-//
-// Two distinct tau triples per compartment:
-//   tauD — depletion time constant during a hang (faster systems
-//          deplete faster as load draws down their substrate)
-//   tauR — recovery time constant during rest between hangs
-//          (slower systems recover slower)
-//
-// Weights sum to 1.0 and represent each compartment's contribution
-// to fresh maximal force. They are population priors for now; the
-// follow-up commit (fitThreeExpModel) will personalize them per
-// (hand, grip) from history with shrinkage to these defaults.
-//
-// sMax is per-(hand, grip) and gets filled in by getPhysModel() from
-// the user's actual history; it isn't a population constant.
-const PHYS_MODEL_DEFAULT = {
-  tauD:    { fast: 10,   medium: 30,   slow: 180 },
-  tauR:    { fast: 15,   medium: 90,   slow: 600 },
-  weights: { fast: 0.50, medium: 0.30, slow: 0.20 },
-  doseK:   0.010,  // population-prior fatigue dose constant; back-fit per user via fitDoseK
-  sMax:    null,   // per-(hand,grip), filled in from history
-};
-
-// Three-compartment fatigue decay parameters (defaults; derived from
-// PHYS_MODEL_DEFAULT for backwards compat with fatigueAfterRest's
-// {A1,tau1,...} call shape). Migrate fresh code to read PHYS_MODEL_DEFAULT
-// directly instead of DEF_FAT.
-const DEF_FAT = {
-  A1: PHYS_MODEL_DEFAULT.weights.fast,   tau1: PHYS_MODEL_DEFAULT.tauR.fast,
-  A2: PHYS_MODEL_DEFAULT.weights.medium, tau2: PHYS_MODEL_DEFAULT.tauR.medium,
-  A3: PHYS_MODEL_DEFAULT.weights.slow,   tau3: PHYS_MODEL_DEFAULT.tauR.slow,
-};
+// PHYS_MODEL_DEFAULT and DEF_FAT now live in src/model/fatigue.js (imported above).
 
 const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
@@ -97,17 +75,7 @@ const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","�
 // UTILITIES
 // ─────────────────────────────────────────────────────────────
 const uid     = () => Math.random().toString(36).slice(2, 10);
-// Local-date YYYY-MM-DD. toISOString() converts to UTC, which dated
-// evening reps to "tomorrow" for users west of UTC (e.g. a 22:00
-// Pacific rep would land on the next day's row, breaking the
-// "this session was today" check in computeReadiness and friends).
-const ymdLocal = (d = new Date()) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
-const today   = () => ymdLocal();
+// ymdLocal and today now live in src/util.js (imported above).
 const nowISO      = () => new Date().toISOString();
 const fmtClock    = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 // Return the most recent BW log entry on or before `date` (YYYY-MM-DD), or null.
@@ -115,7 +83,7 @@ const bwOnDate = (bwLog, date) => {
   const candidates = (bwLog || []).filter(e => e.date <= date);
   return candidates.length ? candidates[candidates.length - 1] : null;
 };
-const clamp  = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// clamp now lives in src/util.js (imported above).
 const fmt1   = (n) => (typeof n === "number" && isFinite(n)) ? n.toFixed(1) : "—";
 const fmt0   = (n) => (typeof n === "number" && isFinite(n)) ? String(Math.round(n)) : "—";
 
@@ -178,351 +146,16 @@ function downloadWorkoutCSV(log) {
   a.click();
 }
 
-// ─────────────────────────────────────────────────────────────
-// MONOD-SCHERRER CURVE FIT  (standalone — used by AnalysisView & auto-baseline)
-// ─────────────────────────────────────────────────────────────
-// pts: array of { x: 1/duration_s, y: avg_force_kg }
-// Returns { CF, W, n } or null if not enough data / degenerate.
-function fitCF(pts) {
-  if (!pts || pts.length < 2) return null;
-  const n   = pts.length;
-  const sx  = pts.reduce((a, p) => a + p.x, 0);
-  const sy  = pts.reduce((a, p) => a + p.y, 0);
-  const sxx = pts.reduce((a, p) => a + p.x * p.x, 0);
-  const sxy = pts.reduce((a, p) => a + p.x * p.y, 0);
-  const den = n * sxx - sx * sx;
-  if (Math.abs(den) < 1e-12) return null;
-  const W  = (n * sxy - sx * sy) / den;   // slope  = W′  (kg·s)
-  const CF = (sy - W * sx) / n;           // intercept = CF (kg)
-  if (CF < 0 || W < 0) return null;
-  return { CF, W, n };
-}
+// fitCF, fitCFWeighted now live in src/model/monod.js (imported above).
 
-// Weighted Monod-Scherrer fit. pts: array of { x, y, w? }, default w = 1.
-// Same model as fitCF (F = CF + W'/T) but allows per-point weighting.
-function fitCFWeighted(pts) {
-  if (!pts || pts.length < 2) return null;
-  let sw = 0, swx = 0, swy = 0, swxx = 0, swxy = 0, n = 0;
-  for (const p of pts) {
-    const w = p.w == null ? 1 : p.w;
-    if (!(w > 0)) continue;
-    sw  += w;
-    swx += w * p.x;
-    swy += w * p.y;
-    swxx += w * p.x * p.x;
-    swxy += w * p.x * p.y;
-    n++;
-  }
-  if (n < 2 || sw <= 0) return null;
-  const den = sw * swxx - swx * swx;
-  if (Math.abs(den) < 1e-12) return null;
-  const W  = (sw * swxy - swx * swy) / den;
-  const CF = (swy - W * swx) / sw;
-  if (CF < 0 || W < 0) return null;
-  return { CF, W, n };
-}
+// fitCFWithSuccessFloor, fitCFWeightedRaw now live in src/model/monod.js (imported above).
 
-// Monod-Scherrer fit treating successful holds as lower-bound constraints
-// on the F-D curve. The classic Monod fit (fitCF) only learns from FAILURE
-// points: it knows "you failed at load L after T seconds" → F(T) = L. But
-// successful reps also carry information: "you held L for T seconds without
-// failing" → F(T) ≥ L. The plain fit ignores them entirely, which causes
-// the prescription to lag actual capacity any time you hit a target without
-// pushing to true failure.
-//
-// Algorithm: start with the failure-only fit, then iteratively augment with
-// any success points that fall ABOVE the current curve (constraint
-// violations). Each violator gets added as a synthetic failure point with
-// growing weight until the curve clears it (or maxIter is reached). The
-// result satisfies success constraints in a soft, least-squares sense
-// without needing a full QP solver.
-//
-// failurePts/successPts: arrays of { x: 1/T, y: load }
-function fitCFWithSuccessFloor(failurePts, successPts, opts = {}) {
-  const { maxIter = 60, tol = 0.1, weightStep = 4.0 } = opts;
-  const failures = (failurePts || []).map(p => ({ x: p.x, y: p.y, w: 1 }));
-  const successes = successPts || [];
-  if (failures.length + successes.length < 2) return null;
+// THREE_EXP_LAMBDA_DEFAULT now lives in src/model/threeExp.js (imported above).
 
-  // Initial fit: failures alone if we have ≥ 2 of them. If failures are
-  // sparse OR produce a degenerate fit (W′ < 0, common when within-session
-  // fatigue noise drags the slope the wrong way), seed with successes too
-  // so we at least get a valid fit to iterate from.
-  let fit = failures.length >= 2 ? fitCFWeighted(failures) : null;
-  if (!fit && successes.length >= 1) {
-    const seed = [...failures, ...successes.map(p => ({ x: p.x, y: p.y, w: 1 }))];
-    fit = fitCFWeighted(seed);
-  }
-  if (!fit) return null;
+// _solve3, _solve2, fitThreeExpAmps, predForceThreeExp, buildThreeExpPriors
+// now live in src/model/threeExp.js (imported above).
 
-  if (successes.length === 0) return fit;
-
-  const succWeights = successes.map(() => 0);
-  for (let iter = 0; iter < maxIter; iter++) {
-    let anyViolation = false;
-    for (let i = 0; i < successes.length; i++) {
-      const s = successes[i];
-      const pred = fit.CF + fit.W * s.x;
-      if (pred < s.y - tol) {
-        succWeights[i] += weightStep;
-        anyViolation = true;
-      }
-    }
-    if (!anyViolation) break;
-
-    const augmented = [...failures];
-    for (let i = 0; i < successes.length; i++) {
-      if (succWeights[i] > 0) {
-        augmented.push({ x: successes[i].x, y: successes[i].y, w: succWeights[i] });
-      }
-    }
-    // Use the raw weighted-LS solver (without negative-value rejection)
-    // and clamp at the end. The protective rejection in fitCFWeighted is
-    // useful at the call boundary, but inside this iteration it's
-    // counterproductive: when many successes are pulling the curve up
-    // hard, intermediate iterates can have negative CF or W' before
-    // converging to a physical fit. Rejecting them aborts the iteration
-    // early and leaves us with a curve that still violates the success
-    // floor. Clamping keeps the iteration alive.
-    const newFit = fitCFWeightedRaw(augmented);
-    if (!newFit) break;
-    fit = {
-      CF: Math.max(0, newFit.CF),
-      W:  Math.max(0, newFit.W),
-      n:  newFit.n,
-    };
-  }
-  return fit;
-}
-
-// Like fitCFWeighted but doesn't reject negative CF or W. Exists for
-// fitCFWithSuccessFloor's iteration where intermediate iterates may go
-// negative on the way to a valid clamped fit.
-function fitCFWeightedRaw(pts) {
-  if (!pts || pts.length < 2) return null;
-  let sw = 0, swx = 0, swy = 0, swxx = 0, swxy = 0, n = 0;
-  for (const p of pts) {
-    const w = p.w == null ? 1 : p.w;
-    if (!(w > 0)) continue;
-    sw  += w;
-    swx += w * p.x;
-    swy += w * p.y;
-    swxx += w * p.x * p.x;
-    swxy += w * p.x * p.y;
-    n++;
-  }
-  if (n < 2 || sw <= 0) return null;
-  const den = sw * swxx - swx * swx;
-  if (Math.abs(den) < 1e-12) return null;
-  const W  = (sw * swxy - swx * swy) / den;
-  const CF = (swy - W * swx) / sw;
-  return { CF, W, n };
-}
-
-// ─────────────────────────────────────────────────────────────
-// THREE-EXPONENTIAL FORCE-DURATION MODEL  (shadow / experimental)
-// ─────────────────────────────────────────────────────────────
-// F(T) = a·exp(-T/τ₁) + b·exp(-T/τ₂) + c·exp(-T/τ₃)
-//
-// Amplitude parameterization (a, b, c ≥ 0 in kg) — equivalent to the
-// Smax × {weights} form but easier to fit because the constraint is
-// just non-negativity instead of "weights sum to 1." Smax = a+b+c falls
-// out as the model's prediction at T=0 (i.e. MVC / fresh max).
-//
-// Currently used as a SHADOW model only — its prediction is rendered
-// alongside Monod in the F-D chart so the two can be compared visually,
-// but Monod still drives prescribedLoad. Validated offline (LOO-CV on
-// pooled history) to beat Monod by ~4% RMSE at λ=100 with per-grip
-// prior + shrinkage, with the win growing as more data accumulates.
-// See Step 2a in the migration toward a three-exp-primary architecture.
-const THREE_EXP_LAMBDA_DEFAULT = 100;
-
-// Solve a 3x3 linear system A x = b via Cramer's rule. Returns null if
-// singular. Used internally by fitThreeExpAmps.
-function _solve3(A, b) {
-  const det = (
-    A[0][0]*(A[1][1]*A[2][2] - A[1][2]*A[2][1])
-  - A[0][1]*(A[1][0]*A[2][2] - A[1][2]*A[2][0])
-  + A[0][2]*(A[1][0]*A[2][1] - A[1][1]*A[2][0])
-  );
-  if (Math.abs(det) < 1e-12) return null;
-  const replaceCol = (col) => A.map((row, ri) => row.map((v, ci) => ci === col ? b[ri] : v));
-  const det3 = (m) => (
-      m[0][0]*(m[1][1]*m[2][2] - m[1][2]*m[2][1])
-    - m[0][1]*(m[1][0]*m[2][2] - m[1][2]*m[2][0])
-    + m[0][2]*(m[1][0]*m[2][1] - m[1][1]*m[2][0])
-  );
-  return [det3(replaceCol(0))/det, det3(replaceCol(1))/det, det3(replaceCol(2))/det];
-}
-// Solve a 2x2 linear system A x = b. Returns null if singular.
-function _solve2(A, b) {
-  const det = A[0][0]*A[1][1] - A[0][1]*A[1][0];
-  if (Math.abs(det) < 1e-12) return null;
-  return [(b[0]*A[1][1] - b[1]*A[0][1]) / det,
-          (A[0][0]*b[1] - A[1][0]*b[0]) / det];
-}
-
-// Fit three-compartment amplitudes (a, b, c) to failure observations
-// with non-negativity constraints and a Gaussian shrinkage prior.
-//
-//   minimize over (a,b,c) ≥ 0 of:
-//     Σᵢ (a·exp(-Tᵢ/τ₁) + b·exp(-Tᵢ/τ₂) + c·exp(-Tᵢ/τ₃) − Fᵢ)²
-//     + λ · ((a − a₀)² + (b − b₀)² + (c − c₀)²)
-//
-// pts:    [{T: duration_s, F: avg_force_kg}]
-// taus:   [τ₁, τ₂, τ₃] in seconds (use PHYS_MODEL_DEFAULT.tauR by default)
-// prior:  [a₀, b₀, c₀] target amplitudes for shrinkage
-// lambda: shrinkage strength (0 = no shrinkage; large = ignore data)
-//
-// Returns [a, b, c] all ≥ 0. Falls back to prior if no points.
-//
-// Algorithm: closed-form normal-equations solve, then enumerate active
-// sets if any component goes negative. With only 3 free parameters the
-// active-set enumeration is bounded (8 cases) so the whole thing is
-// O(1) per call modulo the O(N) normal-equation accumulation.
-function fitThreeExpAmps(pts, opts = {}) {
-  const taus  = opts.taus  || [PHYS_MODEL_DEFAULT.tauR.fast, PHYS_MODEL_DEFAULT.tauR.medium, PHYS_MODEL_DEFAULT.tauR.slow];
-  const prior = opts.prior || [0, 0, 0];
-  const lambda = opts.lambda == null ? 0 : opts.lambda;
-  if (!pts || pts.length === 0) return prior.slice();
-  // Design matrix X (n×3), targets y (n)
-  const X = pts.map(p => taus.map(t => Math.exp(-p.T / t)));
-  const y = pts.map(p => p.F);
-  // Normal equations: (XᵀX + λI) β = Xᵀy + λ·prior
-  const XtX = [[0,0,0],[0,0,0],[0,0,0]];
-  const Xty = [0, 0, 0];
-  for (let i = 0; i < pts.length; i++) {
-    for (let j = 0; j < 3; j++) {
-      Xty[j] += X[i][j] * y[i];
-      for (let k = 0; k < 3; k++) XtX[j][k] += X[i][j] * X[i][k];
-    }
-  }
-  const A = XtX.map((row, j) => row.map((v, k) => v + (j === k ? lambda : 0)));
-  const rhs = Xty.map((v, j) => v + lambda * prior[j]);
-  // Enumerate active sets (which components are forced to 0)
-  const candidates = [];
-  // 1. All free — try the unconstrained 3-DOF solve
-  const sol3 = _solve3(A, rhs);
-  if (sol3 && sol3.every(v => v >= -1e-9)) candidates.push(sol3.map(v => Math.max(0, v)));
-  // 2. One forced to 0 — solve the remaining 2x2
-  for (let zero = 0; zero < 3; zero++) {
-    const free = [0,1,2].filter(i => i !== zero);
-    const A2 = [[A[free[0]][free[0]], A[free[0]][free[1]]],
-                [A[free[1]][free[0]], A[free[1]][free[1]]]];
-    const sol2 = _solve2(A2, [rhs[free[0]], rhs[free[1]]]);
-    if (sol2 && sol2.every(v => v >= -1e-9)) {
-      const sol = [0, 0, 0];
-      sol[free[0]] = Math.max(0, sol2[0]);
-      sol[free[1]] = Math.max(0, sol2[1]);
-      candidates.push(sol);
-    }
-  }
-  // 3. Two forced to 0 — solve the remaining 1x1
-  for (let nz = 0; nz < 3; nz++) {
-    if (A[nz][nz] < 1e-12) continue;
-    const v = rhs[nz] / A[nz][nz];
-    if (v >= -1e-9) {
-      const sol = [0, 0, 0];
-      sol[nz] = Math.max(0, v);
-      candidates.push(sol);
-    }
-  }
-  // 4. All zero (prior-only fallback)
-  candidates.push([0, 0, 0]);
-  // Pick the candidate with lowest objective value
-  const objective = (beta) => {
-    let r = 0;
-    for (let i = 0; i < pts.length; i++) {
-      const pred = X[i][0]*beta[0] + X[i][1]*beta[1] + X[i][2]*beta[2];
-      r += (pred - y[i]) ** 2;
-    }
-    for (let j = 0; j < 3; j++) r += lambda * (beta[j] - prior[j]) ** 2;
-    return r;
-  };
-  let best = candidates[0];
-  let bestObj = objective(best);
-  for (let c = 1; c < candidates.length; c++) {
-    const o = objective(candidates[c]);
-    if (o < bestObj) { best = candidates[c]; bestObj = o; }
-  }
-  return best;
-}
-
-// Predict force at duration T given fitted amplitudes [a, b, c].
-function predForceThreeExp(amps, T, taus = null) {
-  const tau = taus || [PHYS_MODEL_DEFAULT.tauR.fast, PHYS_MODEL_DEFAULT.tauR.medium, PHYS_MODEL_DEFAULT.tauR.slow];
-  return amps[0]*Math.exp(-T/tau[0]) + amps[1]*Math.exp(-T/tau[1]) + amps[2]*Math.exp(-T/tau[2]);
-}
-
-// Build per-grip three-exp prior by pooling all that grip's failures
-// across hands. Used as the shrinkage target for per-(hand, grip) fits.
-// Returns Map<grip, [a, b, c]>. Pooling within-grip avoids the cross-
-// muscle (FDP vs FDS) amplitude contamination that broke the global
-// pooled prior in offline validation.
-function buildThreeExpPriors(history) {
-  const byGrip = {};
-  for (const r of history || []) {
-    if (!r.failed || !r.grip) continue;
-    if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
-    if (!(r.actual_time_s > 0)) continue;
-    if (!byGrip[r.grip]) byGrip[r.grip] = [];
-    byGrip[r.grip].push({ T: r.actual_time_s, F: r.avg_force_kg });
-  }
-  const out = new Map();
-  for (const [grip, pts] of Object.entries(byGrip)) {
-    if (pts.length < 2) continue; // need at least 2 points to fit anything
-    out.set(grip, fitThreeExpAmps(pts, { lambda: 0 }));
-  }
-  return out;
-}
-
-// Fit a Monod curve on a set of failure reps, with adaptive hand
-// selection: if both hands are present and their CFs agree within
-// tolerance, pool them for a tighter fit; if they diverge sharply,
-// trust the ceiling hand (the weaker hand is typically noise — sparse
-// data, fatigue, mis-logged failures — not a different underlying
-// curve). Falls back gracefully when only one hand has usable data or
-// the per-hand fits can't satisfy the minimum-durations requirement.
-//
-// `rows` should already be filtered to the set of failure reps you
-// care about (e.g. all grips, a single grip, a date window, etc.). The
-// helper handles hand-splitting internally so callers don't repeat
-// that logic.
-function fitAdaptiveHandCurve(rows) {
-  const CF_ASYMMETRY_TOL = 0.20;
-  if (!rows || rows.length < 2) return null;
-  const fitFor = (subset) => {
-    if (subset.length < 2) return null;
-    // Require 2+ distinct target durations — Monod linearization needs
-    // spread on the 1/T axis to be meaningful.
-    const durs = new Set(subset.map(r => r.target_duration));
-    if (durs.size < 2) return null;
-    return fitCF(subset.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
-  };
-  const fitL = fitFor(rows.filter(r => r.hand === "L"));
-  const fitR = fitFor(rows.filter(r => r.hand === "R"));
-  const fitPooled = fitFor(rows);
-  if (fitL && fitR) {
-    const cfHi = Math.max(fitL.CF, fitR.CF);
-    const cfLo = Math.min(fitL.CF, fitR.CF);
-    const asym = cfHi > 0 ? (cfHi - cfLo) / cfHi : 0;
-    if (asym <= CF_ASYMMETRY_TOL) return fitPooled ?? (fitL.CF >= fitR.CF ? fitL : fitR);
-    return fitL.CF >= fitR.CF ? fitL : fitR;
-  }
-  if (fitL) return fitL;
-  if (fitR) return fitR;
-  return fitPooled;
-}
-
-// Predicted force at a given duration (s) from a CF/W fit.
-function predForce(fit, t) { return fit.CF + fit.W / t; }
-
-// Area under F = CF + W/t from tMin to tMax (analytical integral).
-// = CF*(tMax-tMin) + W*ln(tMax/tMin)
-// Units: kg·s — captures total capacity across the full power→capacity range.
-function computeAUC(CF, W, tMin = 10, tMax = 120) {
-  return CF * (tMax - tMin) + W * Math.log(tMax / tMin);
-}
+// fitAdaptiveHandCurve, predForce, computeAUC now live in src/model/monod.js (imported above).
 
 // Per-session relative response of the two Monod parameters to each
 // training protocol — the POPULATION PRIOR. Values are fractional
@@ -561,45 +194,7 @@ const AUC_T_MAX = 120;
 // ─────────────────────────────────────────────────────────────
 // SESSION PLANNER — per-rep fatigue curve prediction
 // ─────────────────────────────────────────────────────────────
-// Uses the canonical three-compartment depletion/recovery model
-// (PHYS_MODEL_DEFAULT). Each compartment depletes during a hang and
-// recovers during rest. Returns an array of predicted hold times
-// (seconds) for each rep. Pass an explicit physModel to use a fitted
-// (hand, grip)-specific model; otherwise falls back to defaults.
-function predictRepTimes({ numReps, firstRepTime, restSeconds, physModel = PHYS_MODEL_DEFAULT }) {
-  // Compartments: [amplitude, depletion_tau, recovery_tau]
-  const comps = [
-    { A: physModel.weights.fast,   tauD: physModel.tauD.fast,   tauR: physModel.tauR.fast   },  // PCr  — fast
-    { A: physModel.weights.medium, tauD: physModel.tauD.medium, tauR: physModel.tauR.medium },  // Glycolytic — medium
-    { A: physModel.weights.slow,   tauD: physModel.tauD.slow,   tauR: physModel.tauR.slow   },  // Oxidative  — slow
-  ];
-
-  // State: available fraction (0–1) for each compartment, starting fresh
-  const state = comps.map(c => ({ ...c, avail: 1.0 }));
-
-  const times = [];
-  for (let i = 0; i < numReps; i++) {
-    // Capacity this rep = weighted sum of available fractions
-    const capacity = state.reduce((s, c) => s + c.A * c.avail, 0); // sum(Ai) = 1
-    const t = Math.max(0, Math.round(firstRepTime * capacity * 10) / 10);
-    times.push(t);
-
-    // Deplete each compartment over this rep's duration
-    for (const c of state) {
-      const dep = 1 - Math.exp(-t / c.tauD);
-      c.avail = Math.max(0, c.avail * (1 - dep));
-    }
-
-    // Recover during rest (if not the last rep)
-    if (i < numReps - 1) {
-      for (const c of state) {
-        const rec = 1 - Math.exp(-restSeconds / c.tauR);
-        c.avail = Math.min(1, c.avail + (1 - c.avail) * rec);
-      }
-    }
-  }
-  return times;
-}
+// predictRepTimes now lives in src/model/fatigue.js (imported above).
 
 // ─────────────────────────────────────────────────────────────
 // READINESS / RECOVERY HELPERS
@@ -667,25 +262,7 @@ const subjToScore = (v) => v * 2;
 //
 // Dose from one rep adds fatigue proportional to relative load × duration.
 
-function fatigueAfterRest(F, restSeconds, p = DEF_FAT) {
-  const { A1, tau1, A2, tau2, A3, tau3 } = p;
-  return F * (
-    A1 * Math.exp(-restSeconds / tau1) +
-    A2 * Math.exp(-restSeconds / tau2) +
-    A3 * Math.exp(-restSeconds / tau3)
-  );
-}
-
-// Default dose-strength constant. Sets how much fatigue accumulates per kg·s of
-// effort relative to that hand/grip's sMax. Empirical population prior; can be
-// back-fit from a user's own history (see fitDoseK). Pulled from the canonical
-// PHYS_MODEL_DEFAULT so model-tuning is a single-knob job.
-function fatigueDose(weightKg, durationS, sMaxKg, k = PHYS_MODEL_DEFAULT.doseK) {
-  if (!sMaxKg || sMaxKg <= 0) return 0;
-  return clamp((weightKg / sMaxKg) * durationS * k, 0, 0.90);
-}
-
-const availFrac = (F) => clamp(1 - F, 0.05, 1.0);
+// fatigueAfterRest, fatigueDose, availFrac now live in src/model/fatigue.js (imported above).
 
 // ─────────────────────────────────────────────────────────────
 // FATIGUE-ADJUSTED LOAD INDEX
@@ -5703,9 +5280,7 @@ function TrendsView({ history, unit = "lbs", activities = [] }) {
 // ─────────────────────────────────────────────────────────────
 // ANALYSIS VIEW  — Force-Duration Curve + Training Recommendations
 // ─────────────────────────────────────────────────────────────
-// Zone boundaries (seconds)
-const POWER_MAX    = 20;
-const STRENGTH_MAX = 120;
+// POWER_MAX, STRENGTH_MAX now live in src/model/zones.js (imported above).
 
 // Shared recommendation metadata — used by both the pooled/selGrip-scoped
 // `recommendation` useMemo and the per-grip `gripRecs` useMemo so the
