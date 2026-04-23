@@ -2609,6 +2609,13 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
     return buildFreshLoadMap(history, { doseK: k });
   }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Three-exp shadow prior — same per-grip-pooled prior used in the
+  // Analysis tab's F-D chart. Lets us compute "what 3-exp would
+  // prescribe" alongside the actual Monod prescription so the user
+  // can see how much the alternative model would shift loads before
+  // we commit to promoting it.
+  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
@@ -2767,6 +2774,27 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
               prescribedLoad(history, "R", null, subtitleTime, freshMap) != null) return "model-global";
           return "history";
         })();
+        // Three-exp shadow prescription for a (hand, grip, T) combo.
+        // Returns null when there's no prior for the grip OR no failures
+        // yet to fit. Per-grip pooled prior + same lambda the F-D chart
+        // diagnostic uses, so the in-Setup shadow numbers match the
+        // shadow curve in Analysis.
+        const threeExpPrescribed = (hand, grip, t) => {
+          if (!grip) return null;
+          const prior = threeExpPriors.get(grip);
+          if (!prior) return null;
+          const failures = history.filter(r =>
+            r.failed && r.hand === hand && r.grip === grip
+            && r.actual_time_s > 0 && r.avg_force_kg > 0 && r.avg_force_kg < 500
+          );
+          if (failures.length < 2) return null;
+          const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+          const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1);
+          const amps = fitThreeExpAmps(pts, { prior, lambda });
+          if (amps[0] + amps[1] + amps[2] <= 0) return null;
+          const f = predForceThreeExp(amps, t);
+          return f > 0 ? f : null;
+        };
         const zones = ["power", "strength", "endurance"].map(zoneKey => {
           const t = GOAL_CONFIG[zoneKey].refTime;
           const L = prescribedLoad(history, "L", config.grip, t, freshMap)
@@ -2775,7 +2803,9 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
           const R = prescribedLoad(history, "R", config.grip, t, freshMap)
                  ?? prescribedLoad(history, "R", null,        t, freshMap)
                  ?? estimateRefWeight(history, "R", config.grip, t);
-          return { key: zoneKey, cfg: GOAL_CONFIG[zoneKey], t, L, R };
+          const L3e = threeExpPrescribed("L", config.grip, t);
+          const R3e = threeExpPrescribed("R", config.grip, t);
+          return { key: zoneKey, cfg: GOAL_CONFIG[zoneKey], t, L, R, L3e, R3e };
         });
         const anyLoaded = zones.some(z => z.L != null || z.R != null);
         if (!anyLoaded) return null;
@@ -2792,7 +2822,7 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
               Same load every rep. Rep 1 hits the target; reps 2+ fall short as compartments deplete.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-              {zones.map(({ key, cfg, t, L, R }) => {
+              {zones.map(({ key, cfg, t, L, R, L3e, R3e }) => {
                 const isActive = config.goal === key;
                 return (
                   <div
@@ -2816,20 +2846,31 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
                         <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>
                           {L != null ? `${fmtW(L, unit)}` : "—"}
                         </div>
+                        {L3e != null && (
+                          <div style={{ fontSize: 9, color: C.yellow, fontWeight: 500, marginTop: 2 }} title="Three-exp shadow prescription — not driving the workout, just for comparison">
+                            3e: {fmtW(L3e, unit)}
+                          </div>
+                        )}
                       </div>
                       <div>
                         <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>R</div>
                         <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>
                           {R != null ? `${fmtW(R, unit)}` : "—"}
                         </div>
+                        {R3e != null && (
+                          <div style={{ fontSize: 9, color: C.yellow, fontWeight: 500, marginTop: 2 }} title="Three-exp shadow prescription — not driving the workout, just for comparison">
+                            3e: {fmtW(R3e, unit)}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 8, textAlign: "right" }}>
-              values in {unit}
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 8, display: "flex", justifyContent: "space-between" }}>
+              <span style={{ color: C.yellow }}>3e = three-exp shadow (not driving)</span>
+              <span>values in {unit}</span>
             </div>
           </Card>
         );
