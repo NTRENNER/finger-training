@@ -434,13 +434,176 @@ function fatigueAfterRest(F, restSeconds, p = DEF_FAT) {
   );
 }
 
-function fatigueDose(weightKg, durationS, sMaxKg) {
+// Default dose-strength constant. Sets how much fatigue accumulates per kg·s of
+// effort relative to that hand/grip's sMax. Empirical population prior; can be
+// back-fit from a user's own history (see fitDoseK).
+const DEF_DOSE_K = 0.010;
+
+function fatigueDose(weightKg, durationS, sMaxKg, k = DEF_DOSE_K) {
   if (!sMaxKg || sMaxKg <= 0) return 0;
-  const k = 0.010; // empirical; could be fitted from history
   return clamp((weightKg / sMaxKg) * durationS * k, 0, 0.90);
 }
 
 const availFrac = (F) => clamp(1 - F, 0.05, 1.0);
+
+// ─────────────────────────────────────────────────────────────
+// FATIGUE-ADJUSTED LOAD INDEX
+// ─────────────────────────────────────────────────────────────
+// Within a set, the same posted load gets HARDER each rep as the muscle
+// fatigues. Plain Monod fits (1/T_actual, load_actual) will then misread
+// later reps in a set as "you were weaker than this" and pull CF/W' down.
+//
+// The fix: walk each session/hand/set chronologically, accumulating fatigue
+// via the same model the live workout uses (fatigueDose + fatigueAfterRest),
+// and divide each rep's load by availFrac to get its FRESH-EQUIVALENT load —
+// the load a rested muscle would need to be given to replicate that effort.
+// Monod then fits on (1/T_actual, fresh_equivalent_load), which removes the
+// within-set droop and gives an honest CF/W' for the underlying physiology.
+//
+// Returns Map<repKey, { fresh, availFrac, load }>. Use freshLoadFor(rep, map)
+// to look up. Falls back to actual load if a rep isn't in the map.
+function repKey(r) {
+  if (r.id) return `id:${r.id}`;
+  return `${r.session_id || r.date}|${r.set_num || 1}|${r.rep_num || 1}|${r.hand}`;
+}
+
+function buildSMaxIndex(history) {
+  // sMax per (hand, grip) = max observed effective load × 1.2 (matches the
+  // sMaxL / sMaxR computation used at runtime). Falls back to 20 kg if a
+  // hand/grip pair has no usable data — same default used in workout state.
+  const out = new Map();
+  for (const r of history || []) {
+    if (!r.hand || !r.grip) continue;
+    const load = effectiveLoad(r);
+    if (!(load > 0)) continue;
+    const k = `${r.hand}|${r.grip}`;
+    const cur = out.get(k) || 0;
+    if (load > cur) out.set(k, load);
+  }
+  for (const k of out.keys()) out.set(k, out.get(k) * 1.2);
+  return out;
+}
+
+function buildFreshLoadMap(history, opts = {}) {
+  const { fatParams = DEF_FAT, doseK = DEF_DOSE_K, sMaxIndex = null } = opts;
+  const out = new Map();
+  if (!history || history.length === 0) return out;
+
+  const sMaxByKey = sMaxIndex || buildSMaxIndex(history);
+
+  // Group by session + hand (fatigue state is per-hand at runtime, except in
+  // alt-mode — which we can't reliably detect from rep records, so we use
+  // per-hand grouping as a clean approximation).
+  const groups = new Map();
+  for (const r of history) {
+    const sid = r.session_id || `nosid|${r.date}`;
+    const k = `${sid}|${r.hand}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+
+  for (const reps of groups.values()) {
+    const sorted = [...reps].sort((a, b) => {
+      const sn = (a.set_num || 1) - (b.set_num || 1);
+      if (sn !== 0) return sn;
+      return (a.rep_num || 1) - (b.rep_num || 1);
+    });
+
+    let F = 0;
+    let prevSetNum = null;
+    let prevRest = 0;
+
+    for (const r of sorted) {
+      const setNum = r.set_num || 1;
+      // Match runtime: fatigue resets at set boundary.
+      if (prevSetNum !== null && setNum !== prevSetNum) {
+        F = 0;
+      } else if (prevSetNum !== null) {
+        F = fatigueAfterRest(F, prevRest, fatParams);
+      }
+
+      const af = availFrac(F);
+      const load = effectiveLoad(r);
+      const fresh = af > 0 && load > 0 ? load / af : load;
+      out.set(repKey(r), { fresh, availFrac: af, load });
+
+      const sMax = sMaxByKey.get(`${r.hand}|${r.grip}`) || 20;
+      const dose = fatigueDose(load, r.actual_time_s || 0, sMax, doseK);
+      F = Math.min(F + dose, 0.95);
+
+      prevSetNum = setNum;
+      prevRest = r.rest_s || 0;
+    }
+  }
+
+  return out;
+}
+
+function freshLoadFor(rep, freshMap) {
+  if (!freshMap) return effectiveLoad(rep);
+  const entry = freshMap.get(repKey(rep));
+  return entry ? entry.fresh : effectiveLoad(rep);
+}
+
+// Back-fit the dose-strength constant k from a user's history. The signal is
+// within-set decay: at constant posted load, actual_time_s should drop rep
+// after rep. Under correct k, dividing each rep's posted load by availFrac
+// yields a roughly constant fresh-equivalent load within the set. The wrong
+// k leaves a systematic trend (decay → k too low; rise → k too high).
+//
+// Strategy: grid search k ∈ [0.003, 0.030] minimising the mean within-set
+// variance in fresh-equivalent load, weighted by set length. Only sets with
+// 3+ reps at constant target_duration contribute (we need spread to detect
+// the trend). Returns the best k or null if too little data.
+function fitDoseK(history, opts = {}) {
+  const { kMin = 0.0005, kMax = 0.030, steps = 60, fatParams = DEF_FAT } = opts;
+  if (!history || history.length < 6) return null;
+
+  // Group reps by (session, hand, set) to find valid within-set sequences.
+  const sets = new Map();
+  for (const r of history) {
+    if (!(r.actual_time_s > 0) || effectiveLoad(r) <= 0) continue;
+    const sid = r.session_id || `nosid|${r.date}`;
+    const k = `${sid}|${r.hand}|${r.set_num || 1}`;
+    if (!sets.has(k)) sets.set(k, []);
+    sets.get(k).push(r);
+  }
+  const validSets = [];
+  for (const reps of sets.values()) {
+    if (reps.length < 3) continue;
+    const tdSet = new Set(reps.map(r => r.target_duration || 0));
+    if (tdSet.size > 1) continue; // mixed-target sets aren't comparable
+    validSets.push(reps);
+  }
+  if (validSets.length < 2) return null;
+
+  const sMaxIndex = buildSMaxIndex(history);
+
+  let bestK = null, bestScore = Infinity;
+  for (let i = 0; i < steps; i++) {
+    const k = kMin + (kMax - kMin) * (i / (steps - 1));
+    const freshMap = buildFreshLoadMap(history, { fatParams, doseK: k, sMaxIndex });
+    let weightedVar = 0, totalW = 0;
+    for (const reps of validSets) {
+      const sorted = [...reps].sort((a, b) => (a.rep_num || 1) - (b.rep_num || 1));
+      const xs = sorted.map(r => freshLoadFor(r, freshMap)).filter(v => v > 0);
+      if (xs.length < 3) continue;
+      const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+      if (!(mean > 0)) continue;
+      const variance = xs.reduce((a, v) => a + (v - mean) ** 2, 0) / xs.length;
+      // Coefficient of variation makes sets with different absolute loads
+      // (Crusher 30+ kg vs Micro 10 kg) comparable.
+      const cv = Math.sqrt(variance) / mean;
+      const w = xs.length;
+      weightedVar += cv * cv * w;
+      totalW += w;
+    }
+    if (totalW <= 0) continue;
+    const score = weightedVar / totalW;
+    if (score < bestScore) { bestScore = score; bestK = k; }
+  }
+  return bestK;
+}
 
 // Shortfall threshold: a rep that finishes meaningfully before its target
 // duration is treated as a failure for fitting purposes, even if the user
@@ -503,7 +666,7 @@ function suggestWeight(refWeight, fatigue) {
 // failure. See fitCFWithSuccessFloor for the constraint-handling logic.
 //
 // Typical targets: Power T=7, Strength T=45, Capacity T=120.
-function prescribedLoad(history, hand, grip, targetDuration) {
+function prescribedLoad(history, hand, grip, targetDuration, freshMap = null) {
   if (!history || !targetDuration) return null;
   const handMatch = r =>
     r.hand === hand &&
@@ -524,8 +687,15 @@ function prescribedLoad(history, hand, grip, targetDuration) {
 
   if (failures.length < 2 && successes.length < 2) return null;
 
-  const failurePts = failures.map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
-  const successPts = successes.map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
+  // Fatigue-adjust loads BEFORE feeding to Monod. Within-set fatigue makes
+  // later reps appear "weaker than fresh" when read at face value, dragging
+  // CF/W' down. We replace each rep's posted load with its fresh-equivalent
+  // (load / availFrac at the start of the rep) so the curve fits the
+  // underlying physiology rather than the within-set droop. If no map is
+  // passed, build one on the fly.
+  const fmap = freshMap || buildFreshLoadMap(history);
+  const failurePts = failures.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
+  const successPts = successes.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
 
   const fit = fitCFWithSuccessFloor(failurePts, successPts);
   if (!fit) return null;
@@ -2201,6 +2371,15 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
   const nextTargetR = nextLevelTarget(history, "R", config.grip, config.targetTime);
   const hasLevelData = (bestLoadL != null || bestLoadR != null) && config.grip;
 
+  // Fatigue-adjusted load index for the prescribed-load card (computed once
+  // per history change, then reused across the multiple prescribedLoad calls
+  // in the card below). Uses the user's back-fit dose constant when there's
+  // enough within-set data; otherwise falls back to the population prior.
+  const freshMap = useMemo(() => {
+    const k = fitDoseK(history) ?? DEF_DOSE_K;
+    return buildFreshLoadMap(history, { doseK: k });
+  }, [history]);
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
@@ -2353,19 +2532,19 @@ function SetupView({ config, setConfig, onStart, history, unit = "lbs", onBwSave
         // as a neutral default — used for the one-line subtitle.
         const subtitleTime = GOAL_CONFIG[config.goal]?.refTime ?? GOAL_CONFIG.strength.refTime;
         const subtitleSource = (() => {
-          if (prescribedLoad(history, "L", config.grip, subtitleTime) != null ||
-              prescribedLoad(history, "R", config.grip, subtitleTime) != null) return "model";
-          if (prescribedLoad(history, "L", null, subtitleTime) != null ||
-              prescribedLoad(history, "R", null, subtitleTime) != null) return "model-global";
+          if (prescribedLoad(history, "L", config.grip, subtitleTime, freshMap) != null ||
+              prescribedLoad(history, "R", config.grip, subtitleTime, freshMap) != null) return "model";
+          if (prescribedLoad(history, "L", null, subtitleTime, freshMap) != null ||
+              prescribedLoad(history, "R", null, subtitleTime, freshMap) != null) return "model-global";
           return "history";
         })();
         const zones = ["power", "strength", "endurance"].map(zoneKey => {
           const t = GOAL_CONFIG[zoneKey].refTime;
-          const L = prescribedLoad(history, "L", config.grip, t)
-                 ?? prescribedLoad(history, "L", null,        t)
+          const L = prescribedLoad(history, "L", config.grip, t, freshMap)
+                 ?? prescribedLoad(history, "L", null,        t, freshMap)
                  ?? estimateRefWeight(history, "L", config.grip, t);
-          const R = prescribedLoad(history, "R", config.grip, t)
-                 ?? prescribedLoad(history, "R", null,        t)
+          const R = prescribedLoad(history, "R", config.grip, t, freshMap)
+                 ?? prescribedLoad(history, "R", null,        t, freshMap)
                  ?? estimateRefWeight(history, "R", config.grip, t);
           return { key: zoneKey, cfg: GOAL_CONFIG[zoneKey], t, L, R };
         });
