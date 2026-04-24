@@ -10,9 +10,10 @@
 // liveEstimate, gripEstimates, readiness, etc. No localStorage
 // access, no BLE, no live session state — pure read-and-render.
 //
-// Cross-cutting App config (GOAL_CONFIG, ZONE5, RM_GRIPS) is also
-// passed in as props so this module stays decoupled from App.js's
-// constant block.
+// Cross-cutting App config (GOAL_CONFIG, RM_GRIPS) is passed in as
+// props so this module stays decoupled from App.js's constant block;
+// pure model helpers (ZONE5, classifyZone5, dominantZone5,
+// computeZoneCoverage) are imported directly from the model layer.
 
 import React, { useMemo, useState } from "react";
 import {
@@ -23,6 +24,10 @@ import {
 } from "recharts";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
+import {
+  ZONE5, classifyZone5, dominantZone5,
+  computeZoneCoverage,
+} from "../model/zones.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
 import { POWER_MAX, STRENGTH_MAX } from "../model/zones.js";
 import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
@@ -107,12 +112,7 @@ export function AnalysisView({
   // Cross-cutting App config — passed in rather than imported so this
   // module doesn't reach back into App.js for view-level constants.
   GOAL_CONFIG = {},
-  ZONE5 = [],
   RM_GRIPS = [],
-  // Helpers that App.js still owns (also used in SetupView etc.).
-  computeZoneCoverage = () => ({ items: [], unexplored: [] }),
-  classifyZone5 = () => null,
-  dominantZone5 = () => null,
 }) {
   const [selHand,   setSelHand]   = useState("");   // "" = Both (pool L+R for the F-D chart)
   const [selGrip,   setSelGrip]   = useState("");

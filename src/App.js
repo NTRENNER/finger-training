@@ -36,8 +36,8 @@ import {
 } from "./lib/trip.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
-import { clamp, ymdLocal, today } from "./util.js";
-import { POWER_MAX, STRENGTH_MAX } from "./model/zones.js";
+import { clamp, today } from "./util.js";
+import { computeZoneCoverage } from "./model/zones.js";
 import {
   PHYS_MODEL_DEFAULT,
   fatigueDose, fatigueAfterRest,
@@ -244,41 +244,8 @@ const FEEL_OPTIONS = [
 // Map 1-5 subjective → 1-10 display score
 const subjToScore = (v) => v * 2;
 
-// ─────────────────────────────────────────────────────────────
-// 5-zone classifier: categorises a single hang by its
-// time-under-tension. The 45s boundaries come from 15 × 3s pulse
-// framing; we treat them as TUT thresholds.
-// Boundaries: <45s power, 45–81s pwr-str, 84–129s str,
-//             132–177s str-end, 180s+ end.
-// Returns { key, label, short, color } or null for zero/invalid reps.
-// ─────────────────────────────────────────────────────────────
-const ZONE5 = [
-  { key: "power",              label: "Power",              short: "Pwr",   color: "#e05560", min:   0, max:  45 },
-  { key: "power_strength",     label: "Power-Strength",     short: "Pwr-Str", color: "#e68a48", min:  45, max:  82 },
-  { key: "strength",           label: "Strength",           short: "Str",   color: "#e07a30", min:  82, max: 130 },
-  { key: "strength_endurance", label: "Strength-Capacity",  short: "Str-Cap", color: "#7aa0d8", min: 130, max: 178 },
-  { key: "endurance",          label: "Capacity",           short: "Cap",   color: "#3b82f6", min: 178, max: Infinity },
-];
-function classifyZone5(durationSec) {
-  if (!durationSec || durationSec <= 0) return null;
-  return ZONE5.find(z => durationSec >= z.min && durationSec < z.max) ?? ZONE5[ZONE5.length - 1];
-}
-// Majority-zone for a set of reps (by count). Returns a ZONE5 entry or null.
-function dominantZone5(reps) {
-  const counts = Object.fromEntries(ZONE5.map(z => [z.key, 0]));
-  for (const r of reps || []) {
-    const z = classifyZone5(r.actual_time_s);
-    if (z) counts[z.key] += 1;
-  }
-  const entries = Object.entries(counts).filter(([, n]) => n > 0);
-  if (!entries.length) return null;
-  entries.sort((a, b) => b[1] - a[1]);
-  return ZONE5.find(z => z.key === entries[0][0]);
-}
-// Convert the intended goal key from GOAL_CONFIG (power / strength / endurance)
-// into a ZONE5 key so we can compare intended vs. landed zone.
-// eslint-disable-next-line no-unused-vars
-const GOAL_TO_ZONE5 = { power: "power", strength: "strength", endurance: "endurance" };
+// ZONE5, classifyZone5, dominantZone5, GOAL_TO_ZONE5 now live in
+// src/model/zones.js (imported above).
 
 // ─────────────────────────────────────────────────────────────
 // GAMIFICATION
@@ -1185,55 +1152,11 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
 // ─────────────────────────────────────────────────────────────
 const RM_GRIPS = ["Micro", "Crusher"];
 
-// Zone coverage counts only grip-training sessions (and legacy 1RM activities,
-// which were finger-specific max efforts). Climbing sessions are intentionally
-// NOT credited to any zone — the old heuristic (hard→strength, easy→capacity,
-// boulder→power) over-counted climbing toward training zones it didn't really
-// stimulate in a finger-specific way. ClimbingLogWidget still logs climbs so
-// the data is preserved for future fatigue-accounting work, but it no longer
-// inflates the Power / Strength / Capacity buckets on the coverage card.
-function computeZoneCoverage(history, activities = []) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 30);
-  const cutoffStr = ymdLocal(cutoff);
-
-  // Grip-training sessions
-  const sessions = {};
-  for (const r of history) {
-    if ((r.date ?? "") < cutoffStr) continue;
-    const sid = r.session_id || r.date;
-    if (!sessions[sid]) sessions[sid] = { date: r.date, durations: [] };
-    const d = r.target_duration || r.actual_time_s;
-    if (d > 0) sessions[sid].durations.push(d);
-  }
-
-  let power = 0, strength = 0, endurance = 0;
-  for (const s of Object.values(sessions)) {
-    if (!s.durations.length) continue;
-    const sorted = [...s.durations].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    // Half-open intervals [lo, hi) so boundary values land consistently
-    // with computeLimiterZone. A capacity protocol (target 120s) goes to
-    // endurance, not strength.
-    if (median < POWER_MAX)         power++;     // [0, 20)
-    else if (median < STRENGTH_MAX) strength++;  // [20, 120)
-    else                            endurance++; // [120, ∞)
-  }
-
-  // Legacy 1RM activities still credit Power — they are finger-specific max
-  // efforts from before the power protocol was introduced.
-  for (const a of activities) {
-    if ((a.date ?? "") < cutoffStr) continue;
-    if (a.type === "oneRM") power++;
-  }
-
-  const total = power + strength + endurance;
-  const recommended =
-    power <= strength && power <= endurance ? "power" :
-    strength <= endurance                    ? "strength" : "endurance";
-
-  return { power, strength, endurance, total, recommended };
-}
+// computeZoneCoverage now lives in src/model/zones.js (imported above).
+// Climbing sessions are intentionally NOT credited to any zone — the
+// old heuristic (hard→strength, easy→capacity, boulder→power) over-
+// counted climbing toward finger-specific zones it didn't really
+// stimulate. Legacy 1RM activities still credit Power.
 
 // Physiological limiter: which compartment is the user's capacity
 // shortfall relative to their own force-duration curve?
@@ -4489,11 +4412,7 @@ export default function App() {
           freshMap={freshMap}
           readiness={readiness}
           GOAL_CONFIG={GOAL_CONFIG}
-          ZONE5={ZONE5}
           RM_GRIPS={RM_GRIPS}
-          computeZoneCoverage={computeZoneCoverage}
-          classifyZone5={classifyZone5}
-          dominantZone5={dominantZone5}
         />
       )}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
