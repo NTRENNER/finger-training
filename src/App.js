@@ -94,7 +94,9 @@ const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
 // trip keys live in their respective view modules (WorkoutTab, etc.).
 const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
-const LS_READINESS_KEY = "ft_readiness"; // { [date]: 1-5 } subjective daily rating
+// LS_READINESS_KEY ("ft_readiness") was the subjective daily check-in.
+// Removed in favor of the computed-from-history readiness model. Old
+// stored ratings are orphaned but harmless; nothing reads them.
 const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-calibration snapshot
 const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }]
 const LS_GENESIS_KEY   = "ft_genesis";   // { date, CF, W, auc } — snapshot when first all-zone coverage earned
@@ -227,23 +229,15 @@ export default function App() {
   const [tab, setTab] = useState(0);
 
   // ── Readiness score ───────────────────────────────────────
-  const computedReadiness = useMemo(() => computeReadiness(history), [history]);
-
-  // Subjective daily check-in: { [date]: 1-5 }
-  const [subjReadiness, setSubjReadiness] = useState(() => loadLS(LS_READINESS_KEY) || {});
-  const todaySubj = subjReadiness[today()] ?? null; // null = not rated yet today
-
-  const handleSubjReadiness = useCallback((val) => {
-    setSubjReadiness(prev => {
-      const updated = { ...prev, [today()]: val };
-      saveLS(LS_READINESS_KEY, updated);
-      return updated;
-    });
-  }, []);
-
-  // Displayed readiness: subjective (1-5 scale → 1-10) if rated today,
-  // otherwise the computed estimate from training history.
-  const readiness = todaySubj != null ? todaySubj * 2 : computedReadiness;
+  // Computed entirely from training history via a 24h-decay model
+  // (see src/model/readiness.js). The earlier subjective check-in
+  // widget — emoji picker on the Setup tab — was removed: the
+  // override added daily friction without enough signal to justify
+  // it (effect on the coaching score was a single multiplier in
+  // [0.5, 1.0], compared to the much larger gap/residual/focus
+  // factors). Old subjective ratings under LS_READINESS_KEY are
+  // now orphaned but harmless; they aren't read anywhere.
+  const readiness = useMemo(() => computeReadiness(history), [history]);
 
   // ── Live CF/W′ estimate (all failure reps, both hands, all grips) ─────────────
   // Used by SessionPlannerCard and AnalysisView. Updates as training data grows.
@@ -561,9 +555,6 @@ export default function App() {
               unit={unit}
               onBwSave={saveBW}
               readiness={readiness}
-              todaySubj={todaySubj}
-              onSubjReadiness={handleSubjReadiness}
-              isEstimated={todaySubj == null}
               liveEstimate={liveEstimate}
               gripEstimates={gripEstimates}
               activities={activities}

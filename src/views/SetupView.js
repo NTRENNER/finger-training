@@ -12,8 +12,6 @@
 //                        as a prop so it doesn't reach back into App.js.
 //   ZoneCoverageCard   — rolling 30-day session count by zone.
 //
-// Plus the small readiness-UI helpers (recoveryLabel, FEEL_OPTIONS,
-// subjToScore) that are only consumed by the readiness widget here.
 // Cross-cutting App config (GOAL_CONFIG, GRIP_PRESETS) is passed in
 // as props so this module stays decoupled from App.js's constant block.
 
@@ -45,29 +43,6 @@ import {
   coachingRecommendation, coachingRationale,
 } from "../model/coaching.js";
 import { TRAINING_FOCUS } from "../model/training-focus.js";
-
-// ─────────────────────────────────────────────────────────────
-// READINESS UI HELPERS
-// ─────────────────────────────────────────────────────────────
-// Theme-coupled labels for the readiness widget — kept here rather
-// than in model/readiness.js because they carry colors and emoji.
-
-function recoveryLabel(score) {
-  if (score >= 8) return { text: "Good day to push",            color: C.green,  emoji: "🟢" };
-  if (score >= 5) return { text: "Quality volume day",          color: C.yellow, emoji: "🟡" };
-  return              { text: "Consider light work or rest",   color: C.red,    emoji: "🔴" };
-}
-
-// 5-point subjective feeling scale → 1-10 score + label
-const FEEL_OPTIONS = [
-  { val: 1, emoji: "😴", label: "Wrecked"    },
-  { val: 2, emoji: "😓", label: "Tired"      },
-  { val: 3, emoji: "😐", label: "OK"         },
-  { val: 4, emoji: "💪", label: "Good"       },
-  { val: 5, emoji: "🔥", label: "Fired up"   },
-];
-// Map 1-5 subjective → 1-10 display score
-const subjToScore = (v) => v * 2;
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
@@ -436,7 +411,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 
-export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced" }) {
+export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, readiness = null, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced" }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -838,72 +813,6 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               <span>values in {unit}</span>
             </div>
           </Card>
-        );
-      })()}
-
-      {/* Readiness / how-do-you-feel widget */}
-      {(() => {
-        const rl = readiness != null ? recoveryLabel(readiness) : null;
-        const selectedFeel = FEEL_OPTIONS.find(f => f.val === todaySubj);
-        return (
-          <div style={{
-            marginBottom: 16, padding: "14px 16px",
-            background: C.card, border: `1px solid ${rl ? rl.color + "44" : C.border}`,
-            borderRadius: 12,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
-                How do you feel today?
-              </div>
-              {readiness != null && rl && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: 18,
-                    background: rl.color + "22",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 18, fontWeight: 900, color: rl.color,
-                  }}>
-                    {readiness}
-                  </div>
-                  <div style={{ fontSize: 12, color: rl.color, fontWeight: 600 }}>{rl.text}</div>
-                </div>
-              )}
-            </div>
-
-            {/* 5-emoji picker */}
-            <div style={{ display: "flex", gap: 8 }}>
-              {FEEL_OPTIONS.map(f => {
-                const selected = todaySubj === f.val;
-                return (
-                  <button
-                    key={f.val}
-                    onClick={() => onSubjReadiness(f.val)}
-                    title={f.label}
-                    style={{
-                      flex: 1, padding: "10px 0", borderRadius: 10, cursor: "pointer",
-                      border: selected ? `2px solid ${recoveryLabel(subjToScore(f.val)).color}` : `2px solid ${C.border}`,
-                      background: selected ? recoveryLabel(subjToScore(f.val)).color + "22" : C.bg,
-                      fontSize: 22, lineHeight: 1, transition: "all 0.15s",
-                    }}
-                  >
-                    {f.emoji}
-                    <div style={{ fontSize: 9, color: selected ? recoveryLabel(subjToScore(f.val)).color : C.muted, marginTop: 3, fontWeight: selected ? 700 : 400 }}>
-                      {f.label}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Source label */}
-            <div style={{ marginTop: 9, fontSize: 11, color: C.muted, textAlign: "right" }}>
-              {todaySubj != null
-                ? `You rated today ${selectedFeel?.emoji} ${selectedFeel?.label} — tap to update`
-                : isEstimated
-                  ? "Estimated from logged training only — doesn't include climbing or other activity"
-                  : ""}
-            </div>
-          </div>
         );
       })()}
 
