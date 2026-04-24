@@ -12,7 +12,7 @@
 //   3. History — full date-grouped list via ClimbingHistoryList.
 //
 // Climbing is tracked for readiness/context but is intentionally NOT
-// credited to Power/Strength/Capacity zone coverage — the climbing
+// credited to Power/Strength/Endurance zone coverage — the climbing
 // signal lives in `external_load` in the coaching engine, separate
 // from the grip-training zones it stimulates in a finger-specific way.
 

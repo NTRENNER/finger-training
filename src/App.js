@@ -83,7 +83,7 @@ import {
 const TARGET_OPTIONS = [
   { label: "Power",     seconds: 7   },
   { label: "Strength",  seconds: 45  },
-  { label: "Capacity",  seconds: 120 },
+  { label: "Endurance",  seconds: 120 },
 ];
 
 const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
@@ -125,10 +125,10 @@ const GOAL_CONFIG = {
     setsRationale: "Strength protocol: hang 1 targets 45s, hangs 2–5 go to failure, 20s rest between. 20s refills PCr but barely touches the glycolytic pool (τ₂≈90s → ~20% recovery), so fatigue compounds and each subsequent hang falls short of the last. Stop at 5 hangs: you've reached the compartment-2 + 3 steady state. The rep-time decay curve is a personal τ₂ probe — watch it flatten over weeks as glycolytic recovery improves. Load auto-prescribed from CF + W'/45.",
   },
   endurance: {
-    label: "Capacity", emoji: "🏔️", color: "#3b82f6",
+    label: "Endurance", emoji: "🏔️", color: "#3b82f6",
     refTime: 120, restDefault: 20, repsDefault: 4, setsDefault: 1, setRestDefault: 0,
     intensity: "120s + 3 to failure · 20s rest · just above CF",
-    setsRationale: "Capacity protocol at load ≈ CF + W'/120 (a hair above Critical Force). Hang 1 targets 120s continuous; hangs 2–4 go to failure with 20s rest. Each hang drains all three pools; 20s rest refills the fast pool but leaves medium and slow heavily depleted, so hold-time drops fast toward the CF asymptote. Stop at 4 hangs — subsequent hangs would be nearly flat on the tail. Trains CF / capillarity / mitochondrial density. Load auto-prescribed from CF + W'/120.",
+    setsRationale: "Endurance protocol at load ≈ CF + W'/120 (a hair above Critical Force). Hang 1 targets 120s continuous; hangs 2–4 go to failure with 20s rest. Each hang drains all three pools; 20s rest refills the fast pool but leaves medium and slow heavily depleted, so hold-time drops fast toward the CF asymptote. Stop at 4 hangs — subsequent hangs would be nearly flat on the tail. Trains CF / capillarity / mitochondrial density. Load auto-prescribed from CF + W'/120.",
   },
 };
 
@@ -311,7 +311,7 @@ export default function App() {
 
   // ── Genesis badge detection ───────────────────────────────
   // Snapshot CF/W′ the first time the user has logged at least one session
-  // in each zone (Power, Strength, Capacity). This becomes the immutable
+  // in each zone (Power, Strength, Endurance). This becomes the immutable
   // baseline for all subsequent badge progress calculations.
   //
   // Bucketed by zoneOf rather than exact target_duration matches so any

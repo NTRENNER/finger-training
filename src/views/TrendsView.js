@@ -43,7 +43,7 @@ import { gradeRank, weekKey } from "../lib/climbing-grades.js";
 const TARGET_OPTIONS = [
   { label: "Power",    seconds: 7   },
   { label: "Strength", seconds: 45  },
-  { label: "Capacity", seconds: 120 },
+  { label: "Endurance", seconds: 120 },
 ];
 
 // ─────────────────────────────────────────────────────────────

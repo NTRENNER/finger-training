@@ -44,7 +44,7 @@ import { fitCF } from "./monod.js";
 //
 // Power → tiny CF (W' is the proximal target), large W'.
 // Strength → CF-dominant via ceiling effect (force ceiling lifts CF).
-// Capacity → CF via ratio effect (sub-CF training drags CF up over time),
+// Endurance → CF via ratio effect (sub-CF training drags CF up over time),
 //            small W' since W' is barely loaded.
 //
 // These are priors, not truths. computePersonalResponse() fits them

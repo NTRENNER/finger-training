@@ -13,10 +13,10 @@
 //                    never falls through on all-negative-gap zones.
 //   intensity_match — how well the zone's neural/metabolic intensity
 //                    fits the user's current readiness. Power needs
-//                    high readiness; Capacity tolerates lower.
+//                    high readiness; Endurance tolerates lower.
 //   recency_penalty — exponential recovery curve since last session
 //                    on this zone. Power recovers fast (~1.5d),
-//                    Capacity slow (~3.5d).
+//                    Endurance slow (~3.5d).
 //   external_load   — recent climbing reduces stimulus tolerance,
 //                    especially Power. No-climbing baseline = 1.0.
 //   residual_factor — F-D chart "dots vs three-exp curve" alignment
@@ -69,7 +69,7 @@ export function intensityMatch(zone, readiness) {
 
 // Recovery curve: returns 0 immediately after training the zone, rising
 // asymptotically to 1.0 as days_ago grows. Zone-specific tau means
-// Power recovers faster than Capacity. Returns 1.0 if zone never trained.
+// Power recovers faster than Endurance. Returns 1.0 if zone never trained.
 export function recencyPenalty(zone, history, grip) {
   if (!grip || !history || history.length === 0) return 1.0;
   const tau = COACH_RECOVERY_TAU_DAYS[zone] ?? 2;
@@ -90,7 +90,7 @@ export function recencyPenalty(zone, history, grip) {
 
 // External load (climbing) adds systemic fatigue that the per-rep
 // readiness signal doesn't fully capture. Recent climbing biases
-// against Power most heavily, Capacity least.
+// against Power most heavily, Endurance least.
 export function externalLoadModifier(zone, activities) {
   if (!activities || activities.length === 0) return 1.0;
   const today = ymdLocal();

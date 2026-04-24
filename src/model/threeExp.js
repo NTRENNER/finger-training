@@ -37,7 +37,7 @@
 //
 //   Validated offline (leak-free LOO-CV on pooled history) to beat
 //   Monod by ~7% RMSE at λ=100 with per-grip prior + shrinkage.
-//   Especially valuable at the extremes (Power, Capacity) where
+//   Especially valuable at the extremes (Power, Endurance) where
 //   Monod's hyperbolic shape is provably too rigid to fit both
 //   short-T successes and middle-T failures simultaneously.
 

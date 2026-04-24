@@ -98,7 +98,7 @@ export function BadgesView({ history, liveEstimate, genesisSnap }) {
           {[
             { label: "Power — 10s hang",     done: hasPower },
             { label: "Strength — 45s hang",   done: hasStrength },
-            { label: "Capacity — 120s hang",  done: hasCapacity },
+            { label: "Endurance — 120s hang",  done: hasCapacity },
           ].map(z => (
             <div key={z.label} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
               <span style={{ fontSize: 17 }}>{z.done ? "✅" : "⬜"}</span>

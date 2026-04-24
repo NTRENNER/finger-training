@@ -2,7 +2,7 @@
 // ANALYSIS VIEW
 // ─────────────────────────────────────────────────────────────
 // The "Analysis" tab — Force-Duration chart, Critical Force estimate
-// cards, Capacity Improvement % vs baseline, gap-narrowing tracker,
+// cards, Endurance Improvement % vs baseline, gap-narrowing tracker,
 // CF Over Time chart, and the per-grip Next Session Focus
 // recommendations driven by the v2 coaching engine.
 //
@@ -55,7 +55,7 @@ import { computeLimiterZone } from "../model/limiter.js";
 // ZONE_DETAILS — shared recommendation metadata used by both the
 // pooled/selGrip-scoped `recommendation` useMemo and the per-grip
 // `gripRecs` useMemo so the title/color/caption shown for "Train
-// Power / Strength / Capacity" stay consistent between scopes.
+// Power / Strength / Endurance" stay consistent between scopes.
 // ─────────────────────────────────────────────────────────────
 const ZONE_DETAILS = {
   power: {
@@ -67,7 +67,7 @@ const ZONE_DETAILS = {
     caption: "mid-duration max hangs that lift the force ceiling — and with it, CF.",
   },
   endurance: {
-    title: "Train Capacity", color: C.blue,
+    title: "Train Endurance", color: C.blue,
     caption: "sustained threshold holds that raise CF as a fraction of your existing ceiling.",
   },
 };
@@ -170,7 +170,7 @@ export function AnalysisView({
     return fitCF(pts);
   }, [failures]);
 
-  // ── Capacity improvement % vs baseline ──
+  // ── Endurance improvement % vs baseline ──
   // Reference durations for each domain (seconds)
   const REF = { power: 10, strength: 45, endurance: 180 };
 
@@ -443,8 +443,8 @@ export function AnalysisView({
   }, [history, selHand, selGrip, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Note: AUC values used to live here (aucEstimate / aucBaseline /
-  // aucHistory) backing a dedicated "Climbing Capacity · AUC" card.
-  // That card was removed because the Capacity Improvement card
+  // aucHistory) backing a dedicated "Climbing Endurance · AUC" card.
+  // That card was removed because the Endurance Improvement card
   // already shows each grip's Total % (which IS the AUC % gain) and
   // the CF & W' Over Time chart already shows trajectory. AUC math
   // still lives in computeAUC and is used by the recommendation
@@ -684,7 +684,7 @@ export function AnalysisView({
     const zoneMap = {
       power:     { x1: 0,            x2: POWER_MAX,    color: C.red,    label: "Limiter: Power"    },
       strength:  { x1: POWER_MAX,    x2: STRENGTH_MAX, color: C.orange, label: "Limiter: Strength" },
-      endurance: { x1: STRENGTH_MAX, x2: maxDur + 10,  color: C.blue,   label: "Limiter: Capacity" },
+      endurance: { x1: STRENGTH_MAX, x2: maxDur + 10,  color: C.blue,   label: "Limiter: Endurance" },
     };
     return zoneMap[lim.zone] || null;
   }, [history, maxDur]);
@@ -733,8 +733,8 @@ export function AnalysisView({
 
   // ── Zone breakdown (power / strength / capacity) ──
   // Buckets each rep by target_duration (what zone it was *training*),
-  // not actual_time_s, so a failed Capacity-target hang that broke at
-  // 60s still counts as a Capacity failure. Without this, Capacity
+  // not actual_time_s, so a failed Endurance-target hang that broke at
+  // 60s still counts as a Endurance failure. Without this, Endurance
   // failures are structurally impossible when the target sits exactly
   // on the zone boundary (120s). Falls back to actual_time_s when a
   // rep has no target_duration (legacy data).
@@ -759,7 +759,7 @@ export function AnalysisView({
     return {
       power:     { ...zoneStats(0, POWER_MAX),                label: "Power",     color: C.red,    desc: "0–20s",    system: "Phosphocreatine",  tau: `τ₁ ≈ ${PHYS_MODEL_DEFAULT.tauR.fast}s`   },
       strength:  { ...zoneStats(POWER_MAX, STRENGTH_MAX),     label: "Strength",  color: C.orange, desc: "20–120s",  system: "Glycolytic",       tau: `τ₂ ≈ ${PHYS_MODEL_DEFAULT.tauR.medium}s` },
-      endurance: { ...zoneStats(STRENGTH_MAX, Infinity),      label: "Capacity",  color: C.blue,   desc: "120s+",    system: "Oxidative",        tau: `τ₃ ≈ ${PHYS_MODEL_DEFAULT.tauR.slow}s`   },
+      endurance: { ...zoneStats(STRENGTH_MAX, Infinity),      label: "Endurance",  color: C.blue,   desc: "120s+",    system: "Oxidative",        tau: `τ₃ ≈ ${PHYS_MODEL_DEFAULT.tauR.slow}s`   },
     };
   }, [reps]);
 
@@ -1185,7 +1185,7 @@ export function AnalysisView({
           <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
             <span style={{ color: C.red }}>⚡ Power &lt;20s</span>
             <span style={{ color: C.orange }}>💪 Strength 20–120s</span>
-            <span style={{ color: C.blue }}>🔄 Capacity 120s+</span>
+            <span style={{ color: C.blue }}>🔄 Endurance 120s+</span>
           </div>
           {/* Model-fit diagnostic — training RMSE comparison of three-exp
               (the primary curve) against Monod (the second-opinion overlay).
@@ -1295,12 +1295,12 @@ export function AnalysisView({
         );
       })()}
 
-      {/* ── Capacity Improvement summary ──
+      {/* ── Endurance Improvement summary ──
           When no grip filter is active AND ≥2 grips have fits, split
           the card into per-grip sections so Micro (FDP) and Crusher
           (FDS) each show their own Δ% against the shared baseline. */}
       {baseline && (improvement || Object.keys(gripImprovement).length > 0) && (() => {
-        // Reusable row renderer — one header + one Power/Strength/Capacity
+        // Reusable row renderer — one header + one Power/Strength/Endurance
         // row of three Δ% tiles.
         const renderRow = (label, imp) => (
           <div style={{ marginBottom: 12 }}>
@@ -1321,7 +1321,7 @@ export function AnalysisView({
               {[
                 { label: "⚡ Power",     val: imp.power,     color: C.red    },
                 { label: "💪 Strength",  val: imp.strength,  color: C.orange },
-                { label: "🏔️ Capacity",  val: imp.endurance, color: C.blue   },
+                { label: "🏔️ Endurance",  val: imp.endurance, color: C.blue   },
               ].map(({ label, val, color }) => (
                 <div key={label} style={{
                   flex: 1, background: C.bg, borderRadius: 10, padding: "8px 6px", textAlign: "center",
@@ -1390,7 +1390,7 @@ export function AnalysisView({
         return (
           <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Capacity Improvement</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Endurance Improvement</div>
               {!perGripMode && !selGrip && (
                 <div style={{ fontSize: 11, color: C.muted }}>since {baseline.date}</div>
               )}
@@ -1484,7 +1484,7 @@ export function AnalysisView({
         // on Micro-heavy sessions (FDP CF ~6 kg dragging the average
         // away from FDS CF ~25 kg) and read as a regression even when
         // both grips are individually improving — same cross-muscle
-        // artifact the Capacity Improvement card was fixed for.
+        // artifact the Endurance Improvement card was fixed for.
         const splitMode = cumulativeDataByGrip && cumulativeDataByGrip.rows.length >= 2;
         const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
         return (
@@ -1561,13 +1561,13 @@ export function AnalysisView({
               />
               <Line dataKey="power_gap"     stroke={GOAL_CONFIG.power.color}     strokeWidth={2} dot={{ r: 3 }} connectNulls name="⚡ Power" />
               <Line dataKey="strength_gap"  stroke={GOAL_CONFIG.strength.color}  strokeWidth={2} dot={{ r: 3 }} connectNulls name="💪 Strength" />
-              <Line dataKey="endurance_gap" stroke={GOAL_CONFIG.endurance.color} strokeWidth={2} dot={{ r: 3 }} connectNulls name="🏔️ Capacity" />
+              <Line dataKey="endurance_gap" stroke={GOAL_CONFIG.endurance.color} strokeWidth={2} dot={{ r: 3 }} connectNulls name="🏔️ Endurance" />
             </LineChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
             <span style={{ color: GOAL_CONFIG.power.color }}>⚡ Power</span>
             <span style={{ color: GOAL_CONFIG.strength.color }}>💪 Strength</span>
-            <span style={{ color: GOAL_CONFIG.endurance.color }}>🏔️ Capacity</span>
+            <span style={{ color: GOAL_CONFIG.endurance.color }}>🏔️ Endurance</span>
           </div>
         </Card>
       )}
@@ -1692,8 +1692,8 @@ export function AnalysisView({
           );
         })()}
 
-        {/* The Climbing Capacity chart card lived here. Removed because
-            the Capacity Improvement card below already shows each grip's
+        {/* The Climbing Endurance chart card lived here. Removed because
+            the Endurance Improvement card below already shows each grip's
             Total % (= AUC % gain) and CF & W' Over Time already shows
             the trajectory of the underlying fit parameters. */}
 
@@ -1869,7 +1869,7 @@ export function AnalysisView({
                 return [
                   { k: "power",     lbl: "Power",    col: C.red },
                   { k: "strength",  lbl: "Strength", col: C.orange },
-                  { k: "endurance", lbl: "Capacity", col: C.blue },
+                  { k: "endurance", lbl: "Endurance", col: C.blue },
                 ].map(r => {
                   const v = rec.zoneGaps[r.k];
                   const pct = v == null ? 0 : Math.min(100, Math.max(0, (v / maxAbs) * 100));
@@ -1898,7 +1898,7 @@ export function AnalysisView({
                     </div>
                   );
                 }
-                const labels = { power: "Power", strength: "Strength", endurance: "Capacity" };
+                const labels = { power: "Power", strength: "Strength", endurance: "Endurance" };
                 const parts = calibrated.map(([k, s]) => `${labels[k]} (${Math.round(s.n)})`).join(", ");
                 return (
                   <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>

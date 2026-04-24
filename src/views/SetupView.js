@@ -369,7 +369,7 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
 
 // ─────────────────────────────────────────────────────────────
 // ZONE COVERAGE CARD
-// Rolling 30-day count of Power / Strength / Capacity sessions.
+// Rolling 30-day count of Power / Strength / Endurance sessions.
 // ─────────────────────────────────────────────────────────────
 
 // Zone Workout Summary — neutral 30-day volume breakdown. Does NOT
@@ -387,7 +387,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
   const zones = [
     { key: "power",     label: "⚡ Power",     val: coverage.power,     color: "#e05560" },
     { key: "strength",  label: "💪 Strength",  val: coverage.strength,  color: "#e07a30" },
-    { key: "endurance", label: "🏔️ Capacity",  val: coverage.endurance, color: "#3b82f6" },
+    { key: "endurance", label: "🏔️ Endurance",  val: coverage.endurance, color: "#3b82f6" },
   ];
   const maxVal = Math.max(coverage.power, coverage.strength, coverage.endurance, 1);
 

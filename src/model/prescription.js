@@ -389,7 +389,7 @@ export function prescribedLoad(history, hand, grip, targetDuration, freshMap = n
 // than a global curve extrapolation.
 //
 // Why empirical-first: the curve fit is a global model. At extreme
-// zones (Power, Capacity) it can extrapolate aggressively, prescribing
+// zones (Power, Endurance) it can extrapolate aggressively, prescribing
 // 2x what the user has actually proven they can do. The empirical
 // anchor keeps prescriptions grounded in real recent performance.
 //

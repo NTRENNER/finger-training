@@ -7,7 +7,7 @@
 // Conventions: bg = page background, card = elevated surface, border =
 // hairlines, text = primary, muted = secondary. Accent colors map to
 // semantic roles in chart/badge code:
-//   blue   = informational / Capacity zone / Critical Force
+//   blue   = informational / Endurance zone / Critical Force
 //   green  = positive (success, gains, completed reps)
 //   red    = negative / Power zone / failure
 //   orange = warning / Strength zone / W' (anaerobic capacity)

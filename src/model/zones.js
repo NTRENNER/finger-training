@@ -46,13 +46,13 @@ export const ZONE5 = [
   { key: "power",              label: "Power",              short: "Pwr",     color: "#e05560", min:   0, max:  45 },
   { key: "power_strength",     label: "Power-Strength",     short: "Pwr-Str", color: "#e68a48", min:  45, max:  82 },
   { key: "strength",           label: "Strength",           short: "Str",     color: "#e07a30", min:  82, max: 130 },
-  { key: "strength_endurance", label: "Strength-Capacity",  short: "Str-Cap", color: "#7aa0d8", min: 130, max: 178 },
-  { key: "endurance",          label: "Capacity",           short: "Cap",     color: "#3b82f6", min: 178, max: Infinity },
+  { key: "strength_endurance", label: "Strength-Endurance",  short: "Str-End", color: "#7aa0d8", min: 130, max: 178 },
+  { key: "endurance",          label: "Endurance",           short: "End",     color: "#3b82f6", min: 178, max: Infinity },
 ];
 
 // Convert a single rep's duration into a ZONE5 entry. Returns null
 // for zero/invalid reps; clamps long-tail durations to the last
-// bucket so a 600s rep classifies as Capacity rather than null.
+// bucket so a 600s rep classifies as Endurance rather than null.
 export function classifyZone5(durationSec) {
   if (!durationSec || durationSec <= 0) return null;
   return ZONE5.find(z => durationSec >= z.min && durationSec < z.max) ?? ZONE5[ZONE5.length - 1];
