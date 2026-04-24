@@ -37,32 +37,19 @@ import { useTindeq } from "./lib/tindeq.js";
 // App-level hooks (see src/hooks/).
 import { useAuth } from "./hooks/useAuth.js";
 import { useRepHistory } from "./hooks/useRepHistory.js";
+import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
   fetchWorkoutSessions, deleteWorkoutSession,
 } from "./lib/sync.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
-import { today } from "./util.js";
+import { today, uid } from "./util.js";
 import { computeReadiness } from "./model/readiness.js";
-import {
-  getBaseline, getBestLoad, calcLevel,
-} from "./model/levels.js";
-import { fatigueDose, fatigueAfterRest } from "./model/fatigue.js";
 import {
   fitCF,
   computeAUC, fitAdaptiveHandCurve,
 } from "./model/monod.js";
-
-// Prescription layer — used at session-start to decide rep-1 weight.
-// See src/model/prescription.js.
-import {
-  isShortfall,
-  estimateRefWeight,
-  prescribedLoad,
-  empiricalPrescription,
-  suggestWeight,
-} from "./model/prescription.js";
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS / UTILITIES
@@ -111,8 +98,8 @@ const LS_GENESIS_KEY   = "ft_genesis";   // { date, CF, W, auc } — snapshot wh
 const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — user-configurable target date
 
 // Small App-local helpers.
-const uid    = () => Math.random().toString(36).slice(2, 10);
-const nowISO = () => new Date().toISOString();
+// uid + nowISO now live in src/util.js (uid is used by addActivity
+// below and by the session-runner hook; nowISO only by the hook).
 
 // ─────────────────────────────────────────────────────────────
 // SESSION PROTOCOL CONFIG
@@ -355,257 +342,28 @@ export default function App() {
     });
   }, []);
 
-  // ── Session Config ────────────────────────────────────────
-  // hand is hard-coded to "Both": the user always trains both hands, either
-  // alternating per rep or doing all-L-then-all-R. There's no UI toggle for
-  // this anymore; it lives in config only so existing downstream code keeps
-  // working.
-  //
-  // altMode is NOT stored here anymore — it's derived from restTime and
-  // targetTime via configWithDerived below. Storing it as state was a bug
-  // surface: any callsite doing setConfig({...altMode: true}) would have
-  // its value silently overwritten on the next render, hiding the change.
-  // Compute-on-read removes that footgun entirely.
-  const [rawConfig, setConfig] = useState(() => ({
-    hand:       "Both",
-    grip:       "",
-    goal:       "",  // "power" | "strength" | "endurance" — set when SessionPlanner plan is applied
-    repsPerSet: 5,
-    numSets:    3,
-    targetTime: 45,
-    restTime:   20,
-    setRestTime: 180,
-  }));
-
-  // Augment rawConfig with derived altMode so every downstream reader
-  // (handleRepDone, handleRestDone, SessionPlanner ETA, SetupView, etc.)
-  // sees the right value without anyone having to remember to derive it.
-  // setConfig still operates on rawConfig — any caller that tries to
-  // setConfig({altMode: ...}) will be silently no-oped on the altMode
-  // key, which is the desired behavior since altMode is fully derived
-  // from restTime/targetTime. Worth doing this rather than a useEffect
-  // that overwrites altMode in state, which had a stale-write race.
-  const config = useMemo(() => ({
-    ...rawConfig,
-    altMode: rawConfig.restTime >= rawConfig.targetTime,
-  }), [rawConfig]);
-
-  // ── Session State Machine ─────────────────────────────────
-  // phase: 'idle' | 'rep_ready' | 'rep_active' | 'resting' | 'between_sets' | 'switch_hands' | 'alt_switch' | 'done'
-  const [phase,       setPhase]       = useState("idle");
-  const [currentSet,  setCurrentSet]  = useState(0);
-  const [currentRep,  setCurrentRep]  = useState(0);
-  const [fatigue,     setFatigue]     = useState(0);
-  const [sessionReps, setSessionReps] = useState([]);
-  const [sessionId,        setSessionId]        = useState("");
-  const [sessionStartedAt, setSessionStartedAt] = useState("");
-  const [refWeights,       setRefWeights]        = useState({});
-  const [lastRepResult, setLastRepResult] = useState(null);
-  const [leveledUp,   setLeveledUp]   = useState(false);
-  const [newLevel,    setNewLevel]    = useState(1);
-  const [activeHand,  setActiveHand]  = useState("L"); // tracks current hand in Both mode
-  const [altHandRep,  setAltHandRep]  = useState(false); // true while doing the interleaved alt-hand rep
-  const [altRestTime, setAltRestTime] = useState(0);     // rest after alt rep = restTime − actual alt rep time
-
-  // Max strength estimate (for fatigue dose calculation)
-  // Use post-session-1 best; fall back to baseline (first session); then 20 kg if no data
-  const sMaxL = useMemo(() => {
-    const best = getBestLoad(history, "L", config.grip, config.targetTime)
-               || getBaseline(history, "L", config.grip, config.targetTime);
-    return best ? best * 1.2 : 20;
-  }, [history, config.grip, config.targetTime]);
-  const sMaxR = useMemo(() => {
-    const best = getBestLoad(history, "R", config.grip, config.targetTime)
-               || getBaseline(history, "R", config.grip, config.targetTime);
-    return best ? best * 1.2 : 20;
-  }, [history, config.grip, config.targetTime]);
 
   // ── Tindeq ────────────────────────────────────────────────
   const tindeq = useTindeq();
 
-  // ── Start session ─────────────────────────────────────────
-  // refWeights drives the in-workout "Rep 1 suggested weight" display
-  // and the weight that gets recorded against each rep. Prescribed via
-  // the same model-based path as the Setup card (prescribedLoad,
-  // i.e. Monod CF + W'/T) so the two views agree. Falls back to the
-  // older empirical historical-average estimate when there isn't
-  // enough data to fit Monod, then to whatever the user configured
-  // as a last resort.
-  const startSession = useCallback(() => {
-    const sid = uid();
-    const rw = {};
-    // Empirical-first prescription path (matches the Setup card's
-    // "Train at" cell). Cold-start fallbacks: per-grip Monod, then
-    // cross-grip Monod, then historical average. Same chain the
-    // Setup card uses, so the in-workout suggested weight matches
-    // the Setup card to the kg.
-    ["L", "R"].forEach(h => {
-      rw[h] = empiricalPrescription(history, h, config.grip, config.targetTime, { threeExpPriors })
-           ?? prescribedLoad(history, h, config.grip, config.targetTime, freshMap, { threeExpPriors })
-           ?? prescribedLoad(history, h, null,        config.targetTime, freshMap, { threeExpPriors })
-           ?? estimateRefWeight(history, h, config.grip, config.targetTime);
-    });
-    const startedAt = nowISO();
-    setSessionId(sid);
-    setSessionStartedAt(startedAt);
-    setRefWeights(rw);
-    setSessionReps([]);
-    setCurrentSet(0);
-    setCurrentRep(0);
-    setFatigue(0);
-    setLeveledUp(false);
-    setLastRepResult(null);
-    setActiveHand(config.hand === "Both" ? "L" : config.hand);
-    setAltHandRep(false);
-    setPhase("rep_ready");
-    setTab(0); // stay on Train tab
-  }, [history, config, freshMap, threeExpPriors]);
-
-  // ── Handle rep completion ─────────────────────────────────
-  const handleRepDone = useCallback(({ actualTime, avgForce, failed = false }) => {
-    const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
-    // Weight is constant across the set — no within-set fatigue discount.
-    // The rep-time curve (actual_time_s) is what reflects fatigue and feeds
-    // the next session's prescription via Monod.
-    const weight = (() => {
-      const ws = [suggestWeight(refWeights[effectiveHand], 0)].filter(Boolean);
-      return ws.length > 0 ? ws[0] : 0;
-    })();
-
-    const roundedActual = Math.round(actualTime * 10) / 10;
-    const derivedFailed = failed || isShortfall(roundedActual, config.targetTime);
-    const repRecord = {
-      id:              uid(),
-      date:            today(),
-      grip:            config.grip,
-      hand:            effectiveHand,
-      target_duration: config.targetTime,
-      weight_kg:       Math.round(weight * 10) / 10,
-      actual_time_s:   roundedActual,
-      avg_force_kg:    (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
-                         ? Math.round(avgForce * 10) / 10
-                         : null,
-      set_num:         currentSet + 1,
-      rep_num:         currentRep + 1,
-      rest_s:             config.restTime,
-      session_id:         sessionId,
-      failed:             derivedFailed,
-      session_started_at: sessionStartedAt || null,
-    };
-
-    setLastRepResult({ actualTime, avgForce, targetTime: config.targetTime });
-    setSessionReps(reps => [...reps, repRecord]);
-    addReps([repRecord]);
-
-    // Update fatigue
-    const sMax = config.hand === "R" ? sMaxR : sMaxL;
-    const dose = fatigueDose(weight, actualTime, sMax);
-    setFatigue(f => Math.min(f + dose, 0.95));
-
-    // ── Alternating mode: interleave both hands rep-by-rep ────
-    if (config.altMode && config.hand === "Both") {
-      if (!altHandRep) {
-        // Just finished primary hand — immediately switch to alt hand (no rest yet)
-        setAltHandRep(true);
-        setActiveHand(h => h === "L" ? "R" : "L");
-        setPhase("alt_switch");
-      } else {
-        // Just finished alt hand — rest for (restTime − actual alt rep time), then back to primary
-        setAltHandRep(false);
-        setActiveHand(h => h === "L" ? "R" : "L"); // back to primary
-        const rest = Math.max(5, config.restTime - Math.round(repRecord.actual_time_s));
-        setAltRestTime(rest);
-        const nextRep = currentRep + 1;
-        if (nextRep >= config.repsPerSet) {
-          const nextSet = currentSet + 1;
-          if (nextSet >= config.numSets) {
-            finishSession([...sessionReps, repRecord]);
-          } else {
-            setCurrentSet(nextSet);
-            setCurrentRep(0);
-            setFatigue(0);
-            setPhase("between_sets");
-          }
-        } else {
-          setCurrentRep(nextRep);
-          setPhase("resting");
-        }
-      }
-      return;
-    }
-
-    // ── Standard mode ─────────────────────────────────────────
-    const nextRep = currentRep + 1;
-    if (nextRep >= config.repsPerSet) {
-      // Set complete
-      const nextSet = currentSet + 1;
-      if (nextSet >= config.numSets) {
-        // All sets done for this hand
-        if (config.hand === "Both" && activeHand === "L") {
-          // Switch to right hand
-          setCurrentSet(0);
-          setCurrentRep(0);
-          setFatigue(0);
-          setActiveHand("R");
-          setPhase("switch_hands");
-        } else {
-          finishSession([...sessionReps, repRecord]);
-        }
-      } else {
-        setCurrentSet(nextSet);
-        setCurrentRep(0);
-        setFatigue(0);
-        setPhase("between_sets");
-      }
-    } else {
-      setCurrentRep(nextRep);
-      setPhase("resting");
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentRep, currentSet, fatigue, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, sMaxL, sMaxR, activeHand]);
-
-  const finishSession = useCallback((allReps) => {
-    // Check for level up
-    const hands = config.hand === "Both" ? ["L","R"] : [config.hand];
-    let leveled = false;
-    let maxNewLevel = 1;
-    for (const h of hands) {
-      const combined = [...history, ...allReps.filter(r => r.hand === h || r.hand === "B")];
-      const oldLevel = calcLevel(history, h, config.grip, config.targetTime);
-      const newLvl   = calcLevel(combined, h, config.grip, config.targetTime);
-      if (newLvl > oldLevel) { leveled = true; maxNewLevel = Math.max(maxNewLevel, newLvl); }
-    }
-    setLeveledUp(leveled);
-    setNewLevel(maxNewLevel);
-    setPhase("done");
-  }, [config, history]);
-
-  const handleRestDone = useCallback(() => {
-    const restUsed = config.altMode && config.hand === "Both" ? altRestTime : config.restTime;
-    setFatigue(f => fatigueAfterRest(f, restUsed));
-    // When Tindeq is connected, go to rep_ready so AutoRepSessionView can arm
-    // auto-detection and wait for the next pull. When not connected, auto-start
-    // the countdown so the user doesn't need to tap Start Rep.
-    setPhase(tindeq.connected ? "rep_ready" : "rep_active");
-  }, [config.altMode, config.hand, config.restTime, altRestTime, tindeq.connected]);
-
-  const handleNextSet = useCallback(() => {
-    setFatigue(0);
-    setPhase("rep_ready");
-  }, []);
-
-  const handleAbort = useCallback(() => {
-    if (sessionReps.length > 0) finishSession(sessionReps);
-    else setPhase("idle");
-  }, [sessionReps, finishSession]);
-
-  // Compute next rep suggestion for rest screen — same constant set weight.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const nextWeight = useMemo(() => {
-    if (phase !== "resting") return null;
-    const hand = config.hand === "Both" ? activeHand : config.hand;
-    return suggestWeight(refWeights[hand], 0);
-  }, [phase, config.hand, refWeights, activeHand]);
+  // ── In-workout state machine ──────────────────────────────
+  // (see src/hooks/useSessionRunner.js)
+  const {
+    config, setConfig,
+    phase, setPhase,
+    currentSet, currentRep, fatigue,
+    sessionId, refWeights,
+    sessionReps, lastRepResult,
+    leveledUp, newLevel,
+    activeHand, altRestTime,
+    nextWeight,
+    startSession, handleRepDone,
+    handleRestDone, handleNextSet, handleAbort,
+  } = useSessionRunner({
+    history, freshMap, threeExpPriors, addReps,
+    tindeqConnected: tindeq.connected,
+    onSessionStart: () => setTab(0),
+  });
 
   // ── Manual cloud pull ─────────────────────────────────────
   // User-triggered refresh. Flushes any queued local reps first, then

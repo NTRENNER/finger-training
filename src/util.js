@@ -19,3 +19,13 @@ export const ymdLocal = (d = new Date()) => {
 };
 
 export const today = () => ymdLocal();
+
+// Short random id for local-only entities (reps, activities,
+// workout sessions). Not a UUID — Supabase assigns its own
+// uuid on insert; this is just enough collision resistance for
+// in-flight client state.
+export const uid = () => Math.random().toString(36).slice(2, 10);
+
+// Wall-clock timestamp on rows that need a created-at column
+// (rep.session_started_at, workout session.completedAt, etc.).
+export const nowISO = () => new Date().toISOString();
