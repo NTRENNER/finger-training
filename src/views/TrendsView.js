@@ -34,17 +34,9 @@ import { C } from "../ui/theme.js";
 import { Card, Label } from "../ui/components.js";
 import { fmt1, toDisp } from "../ui/format.js";
 import { effectiveLoad } from "../model/prescription.js";
+import { TARGET_OPTIONS } from "../model/zones.js";
 import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 import { gradeRank, weekKey } from "../lib/climbing-grades.js";
-
-// Reference target durations for the Fingers view's filter pills.
-// Mirrors TARGET_OPTIONS in App.js — kept locally so this module
-// doesn't reach back into App.js for a single constant.
-const TARGET_OPTIONS = [
-  { label: "Power",    seconds: 7   },
-  { label: "Strength", seconds: 45  },
-  { label: "Endurance", seconds: 120 },
-];
 
 // ─────────────────────────────────────────────────────────────
 // WORKOUT (strength training log) sub-view

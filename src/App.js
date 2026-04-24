@@ -83,11 +83,11 @@ import {
 // LS_QUEUE_KEY now lives in src/lib/sync.js (imported above) — single
 // source of truth for the offline-rep retry queue's localStorage key.
 
-const TARGET_OPTIONS = [
-  { label: "Power",     seconds: 7   },
-  { label: "Strength",  seconds: 45  },
-  { label: "Endurance",  seconds: 120 },
-];
+// TARGET_OPTIONS (Power / Strength / Endurance picker rows for the
+// Setup form, History "add session" / rep editor, and Trends filter
+// pills) lives in src/model/zones.js next to ZONE_REF_T so its
+// seconds stay tied to the canonical zone reference times. Views
+// import it directly — no need to thread it through App as a prop.
 
 const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
 
@@ -692,7 +692,6 @@ export default function App() {
           defaultWorkouts={DEFAULT_WORKOUTS}
           onDeleteWorkoutSession={deleteWorkoutSession}
           onDownloadWorkoutCSV={downloadWorkoutCSV}
-          targetOptions={TARGET_OPTIONS}
           gripPresets={GRIP_PRESETS}
         />
       )}

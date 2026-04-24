@@ -72,6 +72,13 @@ const ZONE_DETAILS = {
   },
 };
 
+// Per-grip color used wherever Micro and Crusher are charted side-by-
+// side (F-D scatter overlays, AUC-PR cards, CF-over-time chart).
+// Single source of truth so the legend, scatter dots, line strokes,
+// and PR badges all agree without five identical inline declarations.
+// Falls back to C.blue at call sites that pass an unknown grip key.
+const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+
 // Pure helper: given a {CF, W} fit and personalResponse map, compute the
 // projected ΔAUC for each protocol and return the rec payload. Separate
 // from the React memos so it can be called once per grip.
@@ -991,7 +998,6 @@ export function AnalysisView({
           </div>
           {(() => {
             const splitMode = !!fdSplitData;
-            const FD_GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
             return (
               <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
                 <span><span style={{ color: C.green }}>●</span> Completed</span>
@@ -1002,8 +1008,8 @@ export function AnalysisView({
                 {!splitMode && confidenceBandRel && <span title="Bootstrap 90% band around the three-exp curve."><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
                 {splitMode && Object.keys(fdSplitData).map(g => (
                   <span key={g}>
-                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue }}>―</span> {g}
-                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue, opacity: 0.7 }}> ╌</span> 3-min
+                    <span style={{ color: GRIP_COLORS[g] || C.blue }}>―</span> {g}
+                    <span style={{ color: GRIP_COLORS[g] || C.blue, opacity: 0.7 }}> ╌</span> 3-min
                   </span>
                 ))}
                 {splitMode && <span title="Monod-Scherrer overlay per grip — kept as a thin desaturated 'second opinion' line. Three-exp drives prescriptions."><span style={{ color: C.muted, opacity: 0.6 }}>╌</span> Monod (2nd opinion, per grip)</span>}
@@ -1086,12 +1092,11 @@ export function AnalysisView({
                   retain their red/green meaning, but get a colored OUTLINE
                   matching the grip so you can tell which is which. */}
               {fdSplitData && (() => {
-                const FD_GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
                 const grips = Object.keys(fdSplitData);
                 const elements = [];
                 const tMax = Math.max(maxDur, F_D_T_MIN + 10);
                 for (const grip of grips) {
-                  const color = FD_GRIP_COLORS[grip] || C.blue;
+                  const color = GRIP_COLORS[grip] || C.blue;
                   const data = fdSplitData[grip];
                   // Monod overlay — thin desaturated dashed line for
                   // diagnostic comparison ("second opinion"). Drawn first
@@ -1217,8 +1222,8 @@ export function AnalysisView({
         const rmReps = activities.filter(a => a.type === "oneRM" && a.weight_kg > 0);
         if (rmReps.length === 0) return null;
 
-        // Build per-grip datasets
-        const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+        // Build per-grip datasets — colors come from the module-
+        // level GRIP_COLORS map (single source of truth).
         const allDates = [...new Set(rmReps.map(a => a.date))].sort();
         const gripData = {};
         for (const g of RM_GRIPS) {
@@ -1487,7 +1492,7 @@ export function AnalysisView({
         // both grips are individually improving — same cross-muscle
         // artifact the Endurance Improvement card was fixed for.
         const splitMode = cumulativeDataByGrip && cumulativeDataByGrip.rows.length >= 2;
-        const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+        // Per-grip colors come from the module-level GRIP_COLORS.
         return (
           <Card style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>CF Over Time</div>

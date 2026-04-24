@@ -26,6 +26,7 @@ import {
 } from "../ui/format.js";
 import { ymdLocal } from "../util.js";
 import { effectiveLoad, isShortfall } from "../model/prescription.js";
+import { TARGET_OPTIONS } from "../model/zones.js";
 import {
   loadLS, saveLS,
   LS_BW_LOG_KEY, LS_HISTORY_DOMAIN_KEY,
@@ -42,7 +43,6 @@ export function HistoryView({
   defaultWorkouts = {},
   onDeleteWorkoutSession = () => {},
   onDownloadWorkoutCSV = () => {},
-  targetOptions = [],
   gripPresets = [],
 }) {
   const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
@@ -67,7 +67,7 @@ export function HistoryView({
   const [addingSession,    setAddingSession]    = useState(false);
   const [newSessDate,      setNewSessDate]      = useState(() => ymdLocal());
   const [newSessGrip,      setNewSessGrip]      = useState("");
-  const [newSessTarget,    setNewSessTarget]    = useState(targetOptions[0].seconds);
+  const [newSessTarget,    setNewSessTarget]    = useState(TARGET_OPTIONS[0].seconds);
   const [newSessReps,      setNewSessReps]      = useState([]);  // [{ load, time, hand }]
   const [newRepLoad,       setNewRepLoad]       = useState("");
   const [newRepTime,       setNewRepTime]       = useState("");
@@ -214,7 +214,7 @@ export function HistoryView({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22 }}>History</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessDate(ymdLocal()); setNewSessGrip(""); setNewSessTarget(targetOptions[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
+          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessDate(ymdLocal()); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
           {domain === "fingers" && <Btn small onClick={onDownload} color={C.muted}>↓ CSV</Btn>}
         </div>
       </div>
@@ -249,7 +249,7 @@ export function HistoryView({
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
             <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Zone</span>
             <div style={{ display: "flex", gap: 4 }}>
-              {targetOptions.map(o => (
+              {TARGET_OPTIONS.map(o => (
                 <button key={o.seconds} onClick={() => setNewSessTarget(o.seconds)} style={{
                   padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
                   background: newSessTarget === o.seconds ? C.blue : C.border,
@@ -364,7 +364,7 @@ export function HistoryView({
             color: hand === h ? "#fff" : C.muted, border: "none",
           }}>{h === "L" ? "Left" : "Right"}</button>
         ))}
-        {targetOptions.map(o => (
+        {TARGET_OPTIONS.map(o => (
           <button key={o.seconds} onClick={() => setTarget(target === o.seconds ? 0 : o.seconds)} style={{
             padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
             background: target === o.seconds ? C.blue : C.border,
@@ -390,7 +390,7 @@ export function HistoryView({
                 <b>{sess.grip}</b>
                 <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>
                   {sess.hand === "L" ? "Left" : sess.hand === "R" ? "Right" : "L + R"}
-                  {" · "}{targetOptions.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
+                  {" · "}{TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -466,7 +466,7 @@ export function HistoryView({
                 </div>
                 {/* Row 2: zone / target duration */}
                 <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
-                  {targetOptions.map(o => (
+                  {TARGET_OPTIONS.map(o => (
                     <button key={o.seconds} onClick={() => setEditTarget(o.seconds)} style={{
                       padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
                       background: editTarget === o.seconds ? C.blue : C.border,

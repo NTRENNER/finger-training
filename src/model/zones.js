@@ -25,6 +25,19 @@ export const ZONE_REF_T = {
   endurance: 120,
 };
 
+// Selectable target durations for the Setup form, History "add
+// session" picker, History rep editor, and the Trends "best load"
+// chart filter pills. Derived from ZONE_REF_T so the seconds field
+// stays in sync with the model. Exported here (the model layer) so
+// views import it from one place instead of redeclaring it locally
+// (which is how it drifted before — App.js had one copy, TrendsView
+// had a duplicate "Mirrors App.js" copy).
+export const TARGET_OPTIONS = [
+  { label: "Power",     seconds: ZONE_REF_T.power     },
+  { label: "Strength",  seconds: ZONE_REF_T.strength  },
+  { label: "Endurance", seconds: ZONE_REF_T.endurance },
+];
+
 // Classify a target_duration into a zone key.
 export const zoneOf = (td) =>
   td < POWER_MAX        ? "power"    :
