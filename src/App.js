@@ -46,6 +46,7 @@ import {
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
 import { today, uid } from "./util.js";
 import { computeReadiness } from "./model/readiness.js";
+import { zoneOf } from "./model/zones.js";
 import {
   fitCF,
   computeAUC, fitAdaptiveHandCurve,
@@ -80,7 +81,7 @@ import {
 // source of truth for the offline-rep retry queue's localStorage key.
 
 const TARGET_OPTIONS = [
-  { label: "Power",     seconds: 10  },
+  { label: "Power",     seconds: 7   },
   { label: "Strength",  seconds: 45  },
   { label: "Capacity",  seconds: 120 },
 ];
@@ -310,14 +311,19 @@ export default function App() {
 
   // ── Genesis badge detection ───────────────────────────────
   // Snapshot CF/W′ the first time the user has logged at least one session
-  // in each zone (Power 10s, Strength 45s, Capacity 120s). This becomes
-  // the immutable baseline for all subsequent badge progress calculations.
+  // in each zone (Power, Strength, Capacity). This becomes the immutable
+  // baseline for all subsequent badge progress calculations.
+  //
+  // Bucketed by zoneOf rather than exact target_duration matches so any
+  // training within the zone counts — both the current 7s/45s/120s
+  // recommendations and any historical reps logged when Power was 10s
+  // credit the right bucket.
   useEffect(() => {
     if (genesisSnap) return;           // already earned
     if (!liveEstimate) return;         // no curve yet
-    const hasPower    = history.some(r => r.target_duration === 10);
-    const hasStrength = history.some(r => r.target_duration === 45);
-    const hasCapacity = history.some(r => r.target_duration === 120);
+    const hasPower    = history.some(r => zoneOf(r.target_duration) === "power");
+    const hasStrength = history.some(r => zoneOf(r.target_duration) === "strength");
+    const hasCapacity = history.some(r => zoneOf(r.target_duration) === "endurance");
     if (hasPower && hasStrength && hasCapacity) {
       const auc  = computeAUC(liveEstimate.CF, liveEstimate.W);
       const snap = { date: today(), CF: liveEstimate.CF, W: liveEstimate.W, auc };

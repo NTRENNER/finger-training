@@ -16,6 +16,7 @@
 import React from "react";
 import { C } from "../ui/theme.js";
 import { computeAUC } from "../model/monod.js";
+import { zoneOf } from "../model/zones.js";
 
 // Seven-stage badge config — thresholds are % AUC improvement above
 // the Genesis snapshot. Genesis itself (threshold 0) is unlocked by
@@ -31,10 +32,13 @@ export const BADGE_CONFIG = [
 ];
 
 export function BadgesView({ history, liveEstimate, genesisSnap }) {
-  // Zone coverage for Genesis unlock
-  const hasPower    = history.some(r => r.target_duration === 10);
-  const hasStrength = history.some(r => r.target_duration === 45);
-  const hasCapacity = history.some(r => r.target_duration === 120);
+  // Zone coverage for Genesis unlock. Bucketed by zoneOf so any
+  // training within the zone counts (current 7s/45s/120s recommendations
+  // and any historical 10s Power reps from the older protocol both
+  // credit the right bucket).
+  const hasPower    = history.some(r => zoneOf(r.target_duration) === "power");
+  const hasStrength = history.some(r => zoneOf(r.target_duration) === "strength");
+  const hasCapacity = history.some(r => zoneOf(r.target_duration) === "endurance");
   const genesisEarned = hasPower && hasStrength && hasCapacity;
 
   // AUC progress
