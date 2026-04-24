@@ -5306,6 +5306,251 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         )}
       </Card>
 
+      {/* F-D chart hoisted to the top of AnalysisView — most important
+          visual on this view. Empty-state placeholder still appears
+          below in the {reps.length === 0 ? ...} block. */}
+      {reps.length > 0 && (<>
+        {/* ── Force-Duration scatter ── */}
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 6 }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>Force vs. Duration</div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {/* Grip selection lives on the filter card above (All Grips /
+                  Micro / Crusher) — no duplicate toggle here. Only the
+                  display-mode (Absolute / × Bodyweight) toggle stays in
+                  the chart header since it's chart-specific. */}
+              {bodyWeight != null && ["Absolute", "Relative"].map(mode => (
+                <button key={mode} onClick={() => setRelMode(mode === "Relative")} style={{
+                  padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  background: (mode === "Relative") === relMode ? C.purple : C.border,
+                  color: (mode === "Relative") === relMode ? "#fff" : C.muted,
+                }}>{mode}</button>
+              ))}
+            </div>
+          </div>
+          {(() => {
+            const splitMode = !!fdSplitData;
+            const FD_GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+            return (
+              <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
+                <span><span style={{ color: C.green }}>●</span> Completed</span>
+                <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
+                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Sum of three exponentials with depletion-tau basis (PCr/glycolytic/oxidative)."><span style={{ color: C.purple }}>―</span> F-D curve (3-exp)</span>}
+                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow/oxidative compartment dominates here. The closest analog to a 'sustainable force' reference."><span style={{ color: C.purple }}>╌</span> 3-min sustainable</span>}
+                {!splitMode && cfEstimate && <span title="Monod-Scherrer (CF + W'/T) curve, kept as a second-opinion overlay. Three-exp drives prescriptions; Monod is for diagnostic comparison."><span style={{ color: C.muted, opacity: 0.7 }}>╌</span> Monod (2nd opinion)</span>}
+                {!splitMode && confidenceBandRel && <span title="Bootstrap 90% band around the three-exp curve."><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
+                {splitMode && Object.keys(fdSplitData).map(g => (
+                  <span key={g}>
+                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue }}>―</span> {g}
+                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue, opacity: 0.7 }}> ╌</span> 3-min
+                  </span>
+                ))}
+                {splitMode && <span title="Monod-Scherrer overlay per grip — kept as a thin desaturated 'second opinion' line. Three-exp drives prescriptions."><span style={{ color: C.muted, opacity: 0.6 }}>╌</span> Monod (2nd opinion, per grip)</span>}
+                {!splitMode && limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
+                {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
+              </div>
+            );
+          })()}
+          <ResponsiveContainer width="100%" height={260}>
+            <ComposedChart margin={{ top: 10, right: 16, bottom: 28, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis
+                type="number" dataKey="x"
+                domain={[0, maxDur + 10]}
+                label={{ value: "Duration (s)", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
+                tick={{ fill: C.muted, fontSize: 11 }}
+              />
+              <YAxis
+                type="number"
+                domain={[0, Math.ceil(maxForceRel * 1.15 / (useRel ? 0.1 : 10)) * (useRel ? 0.1 : 10)]}
+                tick={{ fill: C.muted, fontSize: 11 }}
+                unit={useRel ? "" : ` ${unit}`}
+                width={42}
+              />
+              <Tooltip content={<ScatterTooltip unit={forceUnit} />} />
+              {/* Zone backgrounds — neutral tint for non-limiter zones,
+                  extra saturation on the limiter zone so the chart
+                  echoes the SessionPlanner recommendation. */}
+              <ReferenceArea x1={0}            x2={POWER_MAX}    fill={C.red}    fillOpacity={limiterZoneBounds?.x1 === 0            ? 0.22 : 0.07} />
+              <ReferenceArea x1={POWER_MAX}    x2={STRENGTH_MAX} fill={C.orange} fillOpacity={limiterZoneBounds?.x1 === POWER_MAX    ? 0.22 : 0.07} />
+              <ReferenceArea x1={STRENGTH_MAX} x2={maxDur + 10}  fill={C.blue}   fillOpacity={limiterZoneBounds?.x1 === STRENGTH_MAX ? 0.22 : 0.07} />
+              {/* Single-fit overlays only when NOT in per-grip split mode.
+                  In split mode they'd be ambiguous (which grip's CF? which
+                  3-exp? which 90% band?). Per-grip rendering takes over. */}
+              {!fdSplitData && confidenceBandRel && (
+                <Line data={confidenceBandRel} dataKey="low"  stroke={C.purple} strokeOpacity={0.35}
+                      strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
+              )}
+              {!fdSplitData && confidenceBandRel && (
+                <Line data={confidenceBandRel} dataKey="high" stroke={C.purple} strokeOpacity={0.35}
+                      strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
+              )}
+              {/* 3-min sustainable reference from three-exp at T=180s
+                  (replaces the Monod CF asymptote, since three-exp has
+                  no true asymptote — it decays to 0). At 180s the slow
+                  oxidative compartment dominates; this is the closest
+                  physiological analog to "what you can sustain". */}
+              {!fdSplitData && threeExpRef180 != null && (
+                <ReferenceLine
+                  y={useRel ? threeExpRef180 / bodyWeight : toDisp(threeExpRef180, unit)}
+                  stroke={C.purple} strokeDasharray="6 3" strokeWidth={1.5}
+                  label={{ value: `3-min ${fmtForce(threeExpRef180)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
+                />
+              )}
+              {/* Monod overlay — kept as a thin desaturated dashed line
+                  for diagnostic comparison ("second opinion"). Not used
+                  in any prescription path; just visible context for
+                  where the hyperbolic fit would land vs three-exp. */}
+              {!fdSplitData && curveDataRel.length > 0 && (
+                <Line data={curveDataRel} dataKey="y" stroke={C.muted}
+                      strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.7}
+                      dot={false} legendType="none" isAnimationActive={false} />
+              )}
+              {/* Primary curve — three-exp F-D. Bold purple solid; this
+                  is the curve the rest of the engine optimizes against. */}
+              {!fdSplitData && threeExpCurveDataRel.length > 0 && (
+                <Line data={threeExpCurveDataRel} dataKey="y" stroke={C.purple}
+                      strokeWidth={2} dot={false}
+                      legendType="none" isAnimationActive={false} />
+              )}
+              {!fdSplitData && (
+                <Scatter data={successDotsRel} dataKey="y" fill={C.green} opacity={0.85} name="Completed" />
+              )}
+              {!fdSplitData && (
+                <Scatter data={failureDotsRel} dataKey="y" fill={C.red} opacity={0.95} name="Auto-failed" />
+              )}
+              {/* Per-grip split mode: one curve + one set of dots per grip.
+                  Avoids the cross-muscle mudding (Micro FDP pinch ~5-10kg vs
+                  Crusher FDS crush ~15-30kg on a single curve). Failure dots
+                  retain their red/green meaning, but get a colored OUTLINE
+                  matching the grip so you can tell which is which. */}
+              {fdSplitData && (() => {
+                const FD_GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+                const grips = Object.keys(fdSplitData);
+                const elements = [];
+                const tMax = Math.max(maxDur, F_D_T_MIN + 10);
+                for (const grip of grips) {
+                  const color = FD_GRIP_COLORS[grip] || C.blue;
+                  const data = fdSplitData[grip];
+                  // Monod overlay — thin desaturated dashed line for
+                  // diagnostic comparison ("second opinion"). Drawn first
+                  // so the three-exp primary sits on top.
+                  const monodRel = data.curve.map(d => ({
+                    x: d.x,
+                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
+                  }));
+                  elements.push(
+                    <Line key={`${grip}-monod`} data={monodRel} dataKey="y"
+                      stroke={color} strokeWidth={1} strokeDasharray="4 3"
+                      strokeOpacity={0.45} dot={false}
+                      legendType="none" isAnimationActive={false} />
+                  );
+                  // Three-exp PRIMARY curve — bold solid grip color. This
+                  // is the curve the engine optimizes against; Monod
+                  // (above) is just for visual comparison. Also emits a
+                  // per-grip "3-min sustainable" reference line so split
+                  // mode shows the same overlays as single-grip mode.
+                  if (threeExpPriors && threeExpPriors.get) {
+                    const prior = threeExpPriors.get(grip);
+                    const failures = (history || []).filter(r =>
+                      r.failed && r.grip === grip
+                      && r.actual_time_s > 0 && r.avg_force_kg > 0 && r.avg_force_kg < 500
+                    );
+                    if (prior && failures.length >= 2) {
+                      const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+                      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1);
+                      const amps = fitThreeExpAmps(pts, { prior, lambda });
+                      if (amps[0] + amps[1] + amps[2] > 0) {
+                        const teeCurve = Array.from({ length: 80 }, (_, i) => {
+                          const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
+                          const f = predForceThreeExp(amps, t);
+                          return {
+                            x: t,
+                            y: useRel && bodyWeight > 0
+                              ? toDisp(Math.max(f, 0), unit) / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1))
+                              : toDisp(Math.max(f, 0), unit),
+                          };
+                        });
+                        elements.push(
+                          <Line key={`${grip}-tee`} data={teeCurve} dataKey="y"
+                            stroke={color} strokeWidth={2} dot={false}
+                            legendType="none" isAnimationActive={false} />
+                        );
+                        // 3-min sustainable reference for this grip — analog
+                        // of the dashed horizontal line in single-grip mode.
+                        const teeRef180 = predForceThreeExp(amps, 180);
+                        if (teeRef180 > 0) {
+                          const refY = useRel && bodyWeight > 0
+                            ? teeRef180 / bodyWeight
+                            : toDisp(teeRef180, unit);
+                          elements.push(
+                            <ReferenceLine key={`${grip}-ref180`} y={refY}
+                              stroke={color} strokeDasharray="6 3" strokeWidth={1}
+                              strokeOpacity={0.7}
+                              label={{ value: `${grip} 3-min ${fmtForce(teeRef180)} ${forceUnit}`,
+                                position: "insideRight", fill: color, fontSize: 9 }}
+                            />
+                          );
+                        }
+                      }
+                    }
+                  }
+                  // Dots: red fill for failures, green for completes — same
+                  // semantic as single-fit mode. The grip identity is read
+                  // from position relative to its own colored curve.
+                  const failRel = data.failures.map(d => ({
+                    x: d.x,
+                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
+                    grip, date: d.date,
+                  }));
+                  const succRel = data.successes.map(d => ({
+                    x: d.x,
+                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
+                    grip, date: d.date,
+                  }));
+                  elements.push(
+                    <Scatter key={`${grip}-fail`} data={failRel} dataKey="y"
+                      fill={C.red} stroke={color} strokeWidth={1.5} opacity={0.95} />
+                  );
+                  elements.push(
+                    <Scatter key={`${grip}-succ`} data={succRel} dataKey="y"
+                      fill={C.green} stroke={color} strokeWidth={1.5} opacity={0.85} />
+                  );
+                }
+                return elements;
+              })()}
+            </ComposedChart>
+          </ResponsiveContainer>
+          {/* Zone labels */}
+          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+            <span style={{ color: C.red }}>⚡ Power &lt;20s</span>
+            <span style={{ color: C.orange }}>💪 Strength 20–120s</span>
+            <span style={{ color: C.blue }}>🔄 Capacity 120s+</span>
+          </div>
+          {/* Model-fit diagnostic — training RMSE comparison of three-exp
+              (the primary curve) against Monod (the second-opinion overlay).
+              Training RMSE is biased optimistic for both, but the relative
+              comparison on the SAME data is meaningful. Holdout LOO-CV
+              validation lives in scripts/validate_taur_vs_taud.js. */}
+          {modelRMSE && (
+            <div style={{ marginTop: 8, padding: "6px 8px", background: C.bg, borderRadius: 6, fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
+              <span style={{ color: C.purple, fontWeight: 600 }}>Fit diagnostic</span>
+              {" · 3-exp RMSE "}
+              <span style={{ color: modelRMSE.threeExp < modelRMSE.monod ? C.green : C.text, fontWeight: 600 }}>
+                {modelRMSE.threeExp.toFixed(2)} kg
+              </span>
+              {" · Monod RMSE "}
+              <span style={{ color: C.text }}>{modelRMSE.monod.toFixed(2)} kg</span>
+              {" · N="}{modelRMSE.n}
+              {" · "}
+              <span style={{ fontStyle: "italic" }}>
+                training fit, not holdout
+              </span>
+            </div>
+          )}
+        </Card>
+      </>)}
+
       {/* ── 1RM PR tracker ── */}
       {(() => {
         const rmReps = activities.filter(a => a.type === "oneRM" && a.weight_kg > 0);
@@ -5680,232 +5925,6 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
         </Card>
       ) : (<>
 
-        {/* ── Force-Duration scatter ── */}
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 6 }}>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>Force vs. Duration</div>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {/* Grip toggle — Micro vs Crusher. Drives the global selGrip,
-                  so picking here also affects the rest of AnalysisView's
-                  per-grip cards. Avoids the cross-muscle confusion of
-                  having both Micro and Crusher on the same chart. */}
-              {["Micro", "Crusher"].map(g => (
-                <button key={g} onClick={() => setSelGrip(selGrip === g ? "" : g)} style={{
-                  padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
-                  background: selGrip === g ? (g === "Micro" ? "#e05560" : C.orange) : C.border,
-                  color: selGrip === g ? "#fff" : C.muted,
-                }}>{g}</button>
-              ))}
-              {bodyWeight != null && ["Absolute", "Relative"].map(mode => (
-                <button key={mode} onClick={() => setRelMode(mode === "Relative")} style={{
-                  padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
-                  background: (mode === "Relative") === relMode ? C.purple : C.border,
-                  color: (mode === "Relative") === relMode ? "#fff" : C.muted,
-                }}>{mode}</button>
-              ))}
-            </div>
-          </div>
-          {(() => {
-            const splitMode = !!fdSplitData;
-            const FD_GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
-            return (
-              <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
-                <span><span style={{ color: C.green }}>●</span> Completed</span>
-                <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
-                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Sum of three exponentials with depletion-tau basis (PCr/glycolytic/oxidative)."><span style={{ color: C.purple }}>―</span> F-D curve (3-exp)</span>}
-                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow/oxidative compartment dominates here. The closest analog to a 'sustainable force' reference."><span style={{ color: C.purple }}>╌</span> 3-min sustainable</span>}
-                {!splitMode && cfEstimate && <span title="Monod-Scherrer (CF + W'/T) curve, kept as a second-opinion overlay. Three-exp drives prescriptions; Monod is for diagnostic comparison."><span style={{ color: C.muted, opacity: 0.7 }}>╌</span> Monod (2nd opinion)</span>}
-                {!splitMode && confidenceBandRel && <span title="Bootstrap 90% band around the three-exp curve."><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
-                {splitMode && Object.keys(fdSplitData).map(g => (
-                  <span key={g}>
-                    <span style={{ color: FD_GRIP_COLORS[g] || C.blue }}>―</span> {g} (3-exp)
-                  </span>
-                ))}
-                {!splitMode && limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
-                {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
-              </div>
-            );
-          })()}
-          <ResponsiveContainer width="100%" height={260}>
-            <ComposedChart margin={{ top: 10, right: 16, bottom: 28, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis
-                type="number" dataKey="x"
-                domain={[0, maxDur + 10]}
-                label={{ value: "Duration (s)", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
-                tick={{ fill: C.muted, fontSize: 11 }}
-              />
-              <YAxis
-                type="number"
-                domain={[0, Math.ceil(maxForceRel * 1.15 / (useRel ? 0.1 : 10)) * (useRel ? 0.1 : 10)]}
-                tick={{ fill: C.muted, fontSize: 11 }}
-                unit={useRel ? "" : ` ${unit}`}
-                width={42}
-              />
-              <Tooltip content={<ScatterTooltip unit={forceUnit} />} />
-              {/* Zone backgrounds — neutral tint for non-limiter zones,
-                  extra saturation on the limiter zone so the chart
-                  echoes the SessionPlanner recommendation. */}
-              <ReferenceArea x1={0}            x2={POWER_MAX}    fill={C.red}    fillOpacity={limiterZoneBounds?.x1 === 0            ? 0.22 : 0.07} />
-              <ReferenceArea x1={POWER_MAX}    x2={STRENGTH_MAX} fill={C.orange} fillOpacity={limiterZoneBounds?.x1 === POWER_MAX    ? 0.22 : 0.07} />
-              <ReferenceArea x1={STRENGTH_MAX} x2={maxDur + 10}  fill={C.blue}   fillOpacity={limiterZoneBounds?.x1 === STRENGTH_MAX ? 0.22 : 0.07} />
-              {/* Single-fit overlays only when NOT in per-grip split mode.
-                  In split mode they'd be ambiguous (which grip's CF? which
-                  3-exp? which 90% band?). Per-grip rendering takes over. */}
-              {!fdSplitData && confidenceBandRel && (
-                <Line data={confidenceBandRel} dataKey="low"  stroke={C.purple} strokeOpacity={0.35}
-                      strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
-              )}
-              {!fdSplitData && confidenceBandRel && (
-                <Line data={confidenceBandRel} dataKey="high" stroke={C.purple} strokeOpacity={0.35}
-                      strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
-              )}
-              {/* 3-min sustainable reference from three-exp at T=180s
-                  (replaces the Monod CF asymptote, since three-exp has
-                  no true asymptote — it decays to 0). At 180s the slow
-                  oxidative compartment dominates; this is the closest
-                  physiological analog to "what you can sustain". */}
-              {!fdSplitData && threeExpRef180 != null && (
-                <ReferenceLine
-                  y={useRel ? threeExpRef180 / bodyWeight : toDisp(threeExpRef180, unit)}
-                  stroke={C.purple} strokeDasharray="6 3" strokeWidth={1.5}
-                  label={{ value: `3-min ${fmtForce(threeExpRef180)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
-                />
-              )}
-              {/* Monod overlay — kept as a thin desaturated dashed line
-                  for diagnostic comparison ("second opinion"). Not used
-                  in any prescription path; just visible context for
-                  where the hyperbolic fit would land vs three-exp. */}
-              {!fdSplitData && curveDataRel.length > 0 && (
-                <Line data={curveDataRel} dataKey="y" stroke={C.muted}
-                      strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.7}
-                      dot={false} legendType="none" isAnimationActive={false} />
-              )}
-              {/* Primary curve — three-exp F-D. Bold purple solid; this
-                  is the curve the rest of the engine optimizes against. */}
-              {!fdSplitData && threeExpCurveDataRel.length > 0 && (
-                <Line data={threeExpCurveDataRel} dataKey="y" stroke={C.purple}
-                      strokeWidth={2} dot={false}
-                      legendType="none" isAnimationActive={false} />
-              )}
-              {!fdSplitData && (
-                <Scatter data={successDotsRel} dataKey="y" fill={C.green} opacity={0.85} name="Completed" />
-              )}
-              {!fdSplitData && (
-                <Scatter data={failureDotsRel} dataKey="y" fill={C.red} opacity={0.95} name="Auto-failed" />
-              )}
-              {/* Per-grip split mode: one curve + one set of dots per grip.
-                  Avoids the cross-muscle mudding (Micro FDP pinch ~5-10kg vs
-                  Crusher FDS crush ~15-30kg on a single curve). Failure dots
-                  retain their red/green meaning, but get a colored OUTLINE
-                  matching the grip so you can tell which is which. */}
-              {fdSplitData && (() => {
-                const FD_GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
-                const grips = Object.keys(fdSplitData);
-                const elements = [];
-                const tMax = Math.max(maxDur, F_D_T_MIN + 10);
-                for (const grip of grips) {
-                  const color = FD_GRIP_COLORS[grip] || C.blue;
-                  const data = fdSplitData[grip];
-                  // Monod overlay — thin desaturated dashed line for
-                  // diagnostic comparison ("second opinion"). Drawn first
-                  // so the three-exp primary sits on top.
-                  const monodRel = data.curve.map(d => ({
-                    x: d.x,
-                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
-                  }));
-                  elements.push(
-                    <Line key={`${grip}-monod`} data={monodRel} dataKey="y"
-                      stroke={color} strokeWidth={1} strokeDasharray="4 3"
-                      strokeOpacity={0.45} dot={false}
-                      legendType="none" isAnimationActive={false} />
-                  );
-                  // Three-exp PRIMARY curve — bold solid grip color. This
-                  // is the curve the engine optimizes against; Monod
-                  // (above) is just for visual comparison.
-                  if (threeExpPriors && threeExpPriors.get) {
-                    const prior = threeExpPriors.get(grip);
-                    const failures = (history || []).filter(r =>
-                      r.failed && r.grip === grip
-                      && r.actual_time_s > 0 && r.avg_force_kg > 0 && r.avg_force_kg < 500
-                    );
-                    if (prior && failures.length >= 2) {
-                      const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
-                      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1);
-                      const amps = fitThreeExpAmps(pts, { prior, lambda });
-                      if (amps[0] + amps[1] + amps[2] > 0) {
-                        const teeCurve = Array.from({ length: 80 }, (_, i) => {
-                          const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
-                          const f = predForceThreeExp(amps, t);
-                          return {
-                            x: t,
-                            y: useRel && bodyWeight > 0
-                              ? toDisp(Math.max(f, 0), unit) / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1))
-                              : toDisp(Math.max(f, 0), unit),
-                          };
-                        });
-                        elements.push(
-                          <Line key={`${grip}-tee`} data={teeCurve} dataKey="y"
-                            stroke={color} strokeWidth={2} dot={false}
-                            legendType="none" isAnimationActive={false} />
-                        );
-                      }
-                    }
-                  }
-                  // Dots: red fill for failures, green for completes — same
-                  // semantic as single-fit mode. The grip identity is read
-                  // from position relative to its own colored curve.
-                  const failRel = data.failures.map(d => ({
-                    x: d.x,
-                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
-                    grip, date: d.date,
-                  }));
-                  const succRel = data.successes.map(d => ({
-                    x: d.x,
-                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
-                    grip, date: d.date,
-                  }));
-                  elements.push(
-                    <Scatter key={`${grip}-fail`} data={failRel} dataKey="y"
-                      fill={C.red} stroke={color} strokeWidth={1.5} opacity={0.95} />
-                  );
-                  elements.push(
-                    <Scatter key={`${grip}-succ`} data={succRel} dataKey="y"
-                      fill={C.green} stroke={color} strokeWidth={1.5} opacity={0.85} />
-                  );
-                }
-                return elements;
-              })()}
-            </ComposedChart>
-          </ResponsiveContainer>
-          {/* Zone labels */}
-          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
-            <span style={{ color: C.red }}>⚡ Power &lt;20s</span>
-            <span style={{ color: C.orange }}>💪 Strength 20–120s</span>
-            <span style={{ color: C.blue }}>🔄 Capacity 120s+</span>
-          </div>
-          {/* Model-fit diagnostic — training RMSE comparison of three-exp
-              (the primary curve) against Monod (the second-opinion overlay).
-              Training RMSE is biased optimistic for both, but the relative
-              comparison on the SAME data is meaningful. Holdout LOO-CV
-              validation lives in scripts/validate_taur_vs_taud.js. */}
-          {modelRMSE && (
-            <div style={{ marginTop: 8, padding: "6px 8px", background: C.bg, borderRadius: 6, fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
-              <span style={{ color: C.purple, fontWeight: 600 }}>Fit diagnostic</span>
-              {" · 3-exp RMSE "}
-              <span style={{ color: modelRMSE.threeExp < modelRMSE.monod ? C.green : C.text, fontWeight: 600 }}>
-                {modelRMSE.threeExp.toFixed(2)} kg
-              </span>
-              {" · Monod RMSE "}
-              <span style={{ color: C.text }}>{modelRMSE.monod.toFixed(2)} kg</span>
-              {" · N="}{modelRMSE.n}
-              {" · "}
-              <span style={{ fontStyle: "italic" }}>
-                training fit, not holdout
-              </span>
-            </div>
-          )}
-        </Card>
 
         {/* ── Critical Force card ──
             When no grip filter is active AND ≥2 grips have fits, render
