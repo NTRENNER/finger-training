@@ -44,6 +44,7 @@ import {
 import {
   coachingRecommendation, coachingRationale,
 } from "../model/coaching.js";
+import { TRAINING_FOCUS } from "../model/training-focus.js";
 
 // ─────────────────────────────────────────────────────────────
 // READINESS UI HELPERS
@@ -460,6 +461,24 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
   // currently consumed elsewhere.
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Engine recommendation, computed once and shared between the
+  // Session Planner card (which uses it for the recommended-zone
+  // pill + Why box) and the Coaching Prescription card (which
+  // contrasts it with the raw curve gap so the two views read as
+  // complementary information instead of competing claims).
+  const coachRec = useMemo(
+    () => (config.grip
+      ? coachingRecommendation(history, config.grip, {
+          freshMap, threeExpPriors,
+          readiness: readiness ?? 5,
+          activities,
+          trainingFocus,
+        })
+      : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [history, config.grip, freshMap, threeExpPriors, readiness, activities, trainingFocus]
+  );
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
@@ -522,15 +541,9 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
         let rationale = "";
         let recommendedGrip = null;
 
-        const coachRec = config.grip
-          ? coachingRecommendation(history, config.grip, {
-              freshMap, threeExpPriors,
-              readiness: readiness ?? 5,
-              activities,
-              trainingFocus,
-            })
-          : null;
-
+        // coachRec lifted above the JSX so the Coaching Prescription
+        // card below can also read it for the balanced-vs-goal-adjusted
+        // contrast in its widestGap callout.
         if (coachRec) {
           zone = coachRec.zone;
           recommendedGrip = config.grip;
@@ -675,20 +688,55 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.{" "}
               <b style={{ color: C.text, fontStyle: "normal" }}>Gap</b> = the training opportunity in that zone.
             </div>
-            {widestGap && widestGap.gap > 0.10 && (
-              <div style={{ fontSize: 12, color: C.text, background: widestGap.cell.cfg?.color + "20" || C.bg,
-                            border: `1px solid ${gapColor(widestGap.gap)}66`, borderRadius: 8,
-                            padding: "8px 10px", marginBottom: 10 }}>
-                <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Largest curve gap: {widestGap.zoneLabel}</span>
-                {" — "}
-                <b>{fmtPct(widestGap.gap)}</b>
-                {" headroom on "}
-                {widestGap.hand === "L" ? "Left" : "Right"}
-                {" ("}
-                {widestGap.zoneKey === "power" ? "fast (PCr)" : widestGap.zoneKey === "strength" ? "middle (glycolytic)" : "slow (oxidative)"}
-                {" compartment). The Session Planner above weighs this against recency, residual fit, and your training focus before picking — see its Why box for the final call."}
-              </div>
-            )}
+            {widestGap && widestGap.gap > 0.10 && (() => {
+              // Two complementary perspectives shown side by side:
+              //   1. Largest raw curve gap — what a "balanced athlete"
+              //      view of the data points at. Pure (potential − train_at)
+              //      / train_at, no goal weighting.
+              //   2. Goal-adjusted recommendation — what the engine
+              //      actually picks, which factors in recency, residual
+              //      fit, intensity match, external load, and the user's
+              //      Training Focus from Settings.
+              //
+              // When they agree, the second line collapses to "matches
+              // above" for brevity. When they differ, the user sees both
+              // signals + understands why they diverge instead of treating
+              // them as competing claims.
+              const recZone = coachRec?.zone;
+              const recLabel = recZone ? GOAL_CONFIG[recZone]?.label : null;
+              const focusKey = coachRec?.trainingFocus;
+              const focusLabel = focusKey && focusKey !== "balanced"
+                ? TRAINING_FOCUS[focusKey]?.label
+                : null;
+              const recHand = coachRec?.hand === "L" ? "Left" : coachRec?.hand === "R" ? "Right" : null;
+              const matches = recZone && recZone === widestGap.zoneKey;
+              return (
+                <div style={{ fontSize: 12, color: C.text, background: widestGap.cell.cfg?.color + "20" || C.bg,
+                              border: `1px solid ${gapColor(widestGap.gap)}66`, borderRadius: 8,
+                              padding: "10px 12px", marginBottom: 10 }}>
+                  <div>
+                    <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Balanced view · largest curve gap:</span>{" "}
+                    {widestGap.zoneLabel} — <b>{fmtPct(widestGap.gap)}</b> headroom on {widestGap.hand === "L" ? "Left" : "Right"}{" "}
+                    ({widestGap.zoneKey === "power" ? "fast (PCr)" : widestGap.zoneKey === "strength" ? "middle (glycolytic)" : "slow (oxidative)"} compartment).
+                  </div>
+                  {recZone && (
+                    <div style={{ marginTop: 6 }}>
+                      <span style={{ fontWeight: 700, color: GOAL_CONFIG[recZone]?.color }}>
+                        {focusLabel ? `Per your ${focusLabel} focus` : "Goal-adjusted pick"}:
+                      </span>{" "}
+                      {matches
+                        ? <>matches above — the Session Planner picks <b>{recLabel}</b>{recHand ? ` on ${recHand}` : ""}.</>
+                        : <>Session Planner picks <b>{recLabel}</b>{recHand ? ` on ${recHand}` : ""} after weighing recency, residual fit{focusLabel ? ", and your training focus" : ""}. See its Why box for the full reasoning.</>}
+                    </div>
+                  )}
+                  {!recZone && (
+                    <div style={{ marginTop: 6, fontStyle: "italic", color: C.muted }}>
+                      The Session Planner above weighs this against recency, residual fit, and your training focus before picking — see its Why box for the final call.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               {zones.map(({ key, cfg, t, L, R }) => {
                 const isActive = config.goal === key;
