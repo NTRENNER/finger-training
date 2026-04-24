@@ -21,15 +21,25 @@
 // just non-negativity instead of "weights sum to 1." Smax = a+b+c
 // falls out as the model's prediction at T=0 (i.e. MVC / fresh max).
 //
-// Role in the app's hierarchy:
-//   - PRIMARY potential model — drives prescriptionPotential.value
-//     when well-supported, surfaces as the "target" curve on the
-//     F-D chart.
-//   - Validated offline (leak-free LOO-CV on pooled history) to beat
-//     Monod by ~7% RMSE at λ=100 with per-grip prior + shrinkage.
-//   - Especially valuable at the extremes (Power, Capacity) where
-//     Monod's hyperbolic shape is provably too rigid to fit both
-//     short-T successes and middle-T failures simultaneously.
+// Role in the app's hierarchy (post Phase A-C migration):
+//   THREE-EXP IS THE GOVERNING MODEL across the entire app:
+//     - F-D chart primary curve (bold purple solid line)
+//     - prescriptionPotential.value (the gap-diagnostic ceiling)
+//     - prescribedLoad (curve-derived prescription fallback, with
+//       success-floor enforcement via fitThreeExpAmpsWithSuccessFloor)
+//     - empiricalPrescription failure case (scale-by-residual against
+//       the per-grip three-exp curve)
+//     - coaching.js residual signal (zoneResidualFactor)
+//
+//   Monod (see monod.js) has been demoted to two narrow jobs: a "second
+//   opinion" overlay on the F-D chart and a cold-start fallback for
+//   prescriptions when no per-grip three-exp prior exists yet.
+//
+//   Validated offline (leak-free LOO-CV on pooled history) to beat
+//   Monod by ~7% RMSE at λ=100 with per-grip prior + shrinkage.
+//   Especially valuable at the extremes (Power, Capacity) where
+//   Monod's hyperbolic shape is provably too rigid to fit both
+//   short-T successes and middle-T failures simultaneously.
 
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 

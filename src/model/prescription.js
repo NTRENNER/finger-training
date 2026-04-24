@@ -3,22 +3,31 @@
 // ─────────────────────────────────────────────────────────────
 // All the load-prescription logic — what weight to train at next
 // session, what your potential ceiling is, what the gap diagnostic
-// says. This module sits on top of the model layer (monod, threeExp,
-// fatigue) and is what the React views call.
+// says. This module sits on top of the model layer (threeExp as the
+// governing model, monod as the cold-start fallback, fatigue for the
+// freshMap adjustment) and is what the React views call.
 //
-// HIERARCHY (from the doc/MODEL_HIERARCHY equivalent):
+// HIERARCHY (post Phase A-C migration; three-exp is governing):
 //   - empiricalPrescription = anchor to most recent rep 1; PRIMARY
-//     prescription path (what to train at today)
-//   - prescribedLoad = curve-derived (Monod with success-floor +
-//     freshMap) FALLBACK when no recent rep 1 exists
-//   - prescriptionPotential = three-exp-primary ceiling (what's
-//     possible); drives the gap diagnostic in the coaching engine
-//   - estimateRefWeight = historical-average emergency fallback
+//     prescription path (what to train at today). Failure case uses
+//     three-exp scale-by-residual (curve shape from per-grip fit,
+//     amplitude anchored to most recent failure). Falls back to Monod
+//     CF/W' update if no per-grip three-exp prior exists yet.
+//   - prescribedLoad = curve-derived FALLBACK when no recent rep 1
+//     exists. Uses fitThreeExpAmpsWithSuccessFloor on freshMap-adjusted
+//     loads. Cold-start path falls back to fitCFWithSuccessFloor (Monod)
+//     when no per-grip three-exp prior is available.
+//   - prescriptionPotential = three-exp ceiling for the gap diagnostic.
+//     Monod is computed alongside but only as the lower-bracket of the
+//     reliability range; the .value field is three-exp-primary.
+//   - estimateRefWeight = historical weighted-average emergency fallback
+//     (no model fit at all; last-resort cold start).
 //
 // The gap between empirical (what you do) and potential (what you
 // could) is the training opportunity. See model/coaching.js for
 // the engine that scores zones using gap × intensity × recency ×
-// external × residual.
+// external × residual (residual is now also computed against the
+// three-exp curve, not Monod).
 
 import { clamp, ymdLocal } from "../util.js";
 import {

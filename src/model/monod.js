@@ -1,18 +1,31 @@
 // ─────────────────────────────────────────────────────────────
-// MONOD-SCHERRER FORCE-DURATION MODEL
+// MONOD-SCHERRER FORCE-DURATION MODEL  (second-opinion / cold-start only)
 // ─────────────────────────────────────────────────────────────
 // F(T) = CF + W'/T   where CF is the sustainable aerobic asymptote
 // and W' is the finite anaerobic capacity above CF.
 //
-// Role in the app's hierarchy:
-//   - Failure-only Monod fit (fitCF) drives the F-D chart's primary
-//     curve display — intentionally honest about your data shape.
-//   - fitCFWithSuccessFloor (Monod with success constraints) drives
-//     the prescription FALLBACK path (when no recent rep 1 exists for
-//     the empirical-first prescription) and the "potential" calculation
-//     where three-exp isn't yet well-supported.
-//   - Three-exp has been promoted as the primary "potential" model
-//     (see threeExp.js) — Monod is now a backup / second opinion.
+// SCOPE (post Phase A-C migration to three-exp):
+//   Monod has been demoted from the governing F-D model to two narrow,
+//   explicitly-named jobs. Three-exp (see threeExp.js) is the single
+//   authoritative model for the F-D chart, prescriptions, the
+//   prescription-potential ceiling, and the coaching residual signal.
+//
+//   Monod's two remaining jobs:
+//     1. "Second opinion" overlay on the F-D chart — thin desaturated
+//        dashed line drawn alongside the bold three-exp purple line, so
+//        users who want to compare hyperbolic-CF intuition against the
+//        sum-of-exponentials shape can see both side by side. Not used
+//        in any prescription path.
+//     2. Cold-start fallback inside prescription.js — when a (hand, grip)
+//        scope doesn't yet have enough data to seed a per-grip three-exp
+//        prior, prescribedLoad and empiricalPrescription fall back to
+//        fitCFWithSuccessFloor / fitCF respectively. As soon as the
+//        per-grip prior is available, three-exp takes over.
+//
+//   No other live consumers. fitAdaptiveHandCurve and computeAUC remain
+//   exported for the analytics views that read CF/W' as an interpretable
+//   diagnostic ("max sustainable force" / "anaerobic reserve"), but those
+//   views label them clearly as Monod-derived.
 
 // pts: array of { x: 1/duration_s, y: avg_force_kg }
 // Returns { CF, W, n } or null if not enough data / degenerate.

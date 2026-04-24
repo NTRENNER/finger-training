@@ -19,12 +19,20 @@
 //                    Capacity slow (~3.5d).
 //   external_load   — recent climbing reduces stimulus tolerance,
 //                    especially Power. No-climbing baseline = 1.0.
-//   residual_factor — F-D chart "dots vs curve" alignment for this
-//                    (zone, hand). Boosts limiter zones, depresses
-//                    above-curve zones. See zoneResidualFactor.
+//   residual_factor — F-D chart "dots vs three-exp curve" alignment
+//                    for this (zone, hand). Boosts limiter zones,
+//                    depresses above-curve zones. See zoneResidualFactor.
 //
 // Returns the zone (and hand) with the highest score, plus the
 // component scores so the UI can explain WHY this was picked.
+//
+// Three-exp is the governing model throughout (post Phase A-C
+// migration). The residual factor uses the same three-exp fit that
+// drives the F-D chart, so the "below the curve" rationale text
+// matches the literal purple curve the user is looking at. The gap
+// uses prescriptionPotential (three-exp-primary) and the trainAt
+// uses empiricalPrescription / prescribedLoad (both three-exp with
+// Monod cold-start fallback, see prescription.js).
 
 import { ymdLocal } from "../util.js";
 import { ZONE_REF_T, zoneOf } from "./zones.js";
