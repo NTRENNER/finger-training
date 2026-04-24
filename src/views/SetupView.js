@@ -268,46 +268,44 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
       </div>
 
       {/* Sliders — within-set structure */}
-      <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-        Within Set
-      </div>
-      <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Reps</span><span style={{ fontWeight: 700, color: C.text }}>{numReps}</span>
+      <Sect title="Within Set">
+        <div style={{ display: "flex", gap: 16, marginBottom: 4 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+              <span>Reps</span><span style={{ fontWeight: 700, color: C.text }}>{numReps}</span>
+            </div>
+            <input type="range" min={2} max={12} value={numReps} onChange={e => setNumReps(Number(e.target.value))}
+              style={{ width: "100%", accentColor: gc.color }} />
           </div>
-          <input type="range" min={2} max={12} value={numReps} onChange={e => setNumReps(Number(e.target.value))}
-            style={{ width: "100%", accentColor: gc.color }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Rep rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+              <span>Rep rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
+            </div>
+            <input type="range" min={5} max={300} step={5} value={rest} onChange={e => setRest(Number(e.target.value))}
+              style={{ width: "100%", accentColor: gc.color }} />
           </div>
-          <input type="range" min={5} max={300} step={5} value={rest} onChange={e => setRest(Number(e.target.value))}
-            style={{ width: "100%", accentColor: gc.color }} />
         </div>
-      </div>
+      </Sect>
 
       {/* Sliders — between-set structure */}
-      <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-        Between Sets
-      </div>
-      <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Sets</span><span style={{ fontWeight: 700, color: C.text }}>{numSets}</span>
+      <Sect title="Between Sets">
+        <div style={{ display: "flex", gap: 16, marginBottom: 4 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+              <span>Sets</span><span style={{ fontWeight: 700, color: C.text }}>{numSets}</span>
+            </div>
+            <input type="range" min={1} max={8} value={numSets} onChange={e => setNumSets(Number(e.target.value))}
+              style={{ width: "100%", accentColor: gc.color }} />
           </div>
-          <input type="range" min={1} max={8} value={numSets} onChange={e => setNumSets(Number(e.target.value))}
-            style={{ width: "100%", accentColor: gc.color }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Set rest</span><span style={{ fontWeight: 700, color: C.text }}>{setRestS}s</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+              <span>Set rest</span><span style={{ fontWeight: 700, color: C.text }}>{setRestS}s</span>
+            </div>
+            <input type="range" min={60} max={1800} step={60} value={setRestS} onChange={e => setSetRestS(Number(e.target.value))}
+              style={{ width: "100%", accentColor: gc.color }} />
           </div>
-          <input type="range" min={60} max={1800} step={60} value={setRestS} onChange={e => setSetRestS(Number(e.target.value))}
-            style={{ width: "100%", accentColor: gc.color }} />
         </div>
-      </div>
+      </Sect>
 
       {/* Sets rationale */}
       <div style={{
@@ -479,7 +477,12 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                 style={{
                   padding: "6px 14px", borderRadius: 20, fontSize: 13,
                   cursor: "pointer", fontWeight: 500,
-                  background: config.grip === g ? C.orange : C.border,
+                  // C.blue (app's primary-accent color) for the selected
+                  // grip pill — orange is reserved for the gap-color
+                  // semantics (negative gap = "you're outpacing the
+                  // curve") and using it here as a generic "active"
+                  // marker leaked that meaning into an unrelated UI.
+                  background: config.grip === g ? C.blue : C.border,
                   color: config.grip === g ? "#fff" : C.muted,
                   border: "none",
                 }}
@@ -659,18 +662,32 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
 
         // Format helpers
         //
-        // Gap colors encode TRAINING OPPORTUNITY, not a warning level.
-        // A large positive gap is room to grow into (good: green) —
-        // the inviting direction the coaching engine points at. A
-        // negative gap means you're already outpacing the curve's
-        // prediction in that zone (orange: model is conservative,
-        // less headroom to chase). Near-zero is muted.
+        // Gap = (potential − train_at) / train_at, so a positive gap
+        // means the curve thinks you can lift more than you're being
+        // prescribed. We render that as TRAINING OPPORTUNITY, not as
+        // a warning level — the convention here is intentionally
+        // inverted from "alarm UI":
+        //
+        //   green  (gap > 20%) = lots of room to grow into; the
+        //                        inviting direction the coaching
+        //                        engine points at.
+        //   yellow (10–20%)    = meaningful headroom worth chasing.
+        //   muted  (0–10%)     = you're tracking the curve closely;
+        //                        no obvious lever here.
+        //   orange (negative)  = you're already outpacing the curve's
+        //                        prediction. NOT a problem — it
+        //                        means the model is conservative for
+        //                        this zone right now (you've been
+        //                        pushing past its estimate). Less
+        //                        runway to chase, hence the cooler
+        //                        color, but nothing's wrong.
         //
         // This matches the rest of the app's framing (dual-perspective
         // callout describes the largest gap as "headroom", the Why
         // box calls it "your widest opportunity"). Earlier the scale
         // was inverted — large gap rendered red like an alarm — which
-        // fought the verbal framing.
+        // fought the verbal framing and confused users who read green
+        // as "good lifts" rather than "good direction".
         const fmtPct = (g) => `${g >= 0 ? "+" : ""}${Math.round(g * 100)}%`;
         const gapColor = (g) => Math.abs(g) < 0.05 ? C.muted
                               : g > 0.20 ? C.green
@@ -680,8 +697,16 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
 
         return (
           <Card style={{ borderColor: C.blue }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>
               Coaching prescription · {config.grip}
+            </div>
+            {/* Subtitle clarifies this card is the DETAILED per-hand
+                reference — the Analysis tab's "Next Session Focus"
+                cards show the actionable per-grip summary. Same data,
+                two scopes; the headers now state which is which so
+                users don't read them as competing recommendations. */}
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+              Per-hand reference · the Analysis tab's <b>Next Session Focus</b> shows the per-grip summary.
             </div>
             {widestGap && widestGap.gap > 0.10 && (() => {
               // Two complementary perspectives shown side by side:

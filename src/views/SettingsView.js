@@ -1,14 +1,25 @@
 // ─────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────
-// User preferences + auth + cloud sync controls. Six cards stacked:
+// User preferences + auth + cloud sync controls. Cards stacked:
 //
-//   Units            — lbs / kg toggle
-//   Body Weight      — input field, drives relative-strength display
-//   Training Goal    — trip name + date; powers the WorkoutTab countdown
-//   Cloud Sync       — Supabase OTP auth + manual pull
+//   Units             — lbs / kg toggle
+//   Body Weight       — input field, drives relative-strength display
+//   Training Goal     — trip name + date; powers the WorkoutTab
+//                       countdown ("days until __"). The "what are
+//                       you training FOR" — an event/date.
+//   Training Focus    — Balanced / Bouldering / Power-endurance /
+//                       Endurance routes. Mild zone-bias weighting
+//                       fed into the coaching engine. The "how
+//                       should this season's mix be shaped".
+//   Cloud Sync        — Supabase OTP auth + manual pull
 //   Tindeq Progressor — informational text about BLE
 //   Developer options — collapsible setup-SQL display
+//
+// Note the deliberate Goal-vs-Focus split: Goal = WHEN (target
+// date), Focus = HOW (zone weighting). Both surface as "Training __"
+// but they answer different questions, so don't let the labels
+// drift into each other.
 //
 // Pure props/callbacks shape — no localStorage reads, no module-level
 // state. All side effects (auth, BW change, trip change, pull) come

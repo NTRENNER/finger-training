@@ -1586,7 +1586,7 @@ export function AnalysisView({
           <div style={{ textAlign: "center", padding: "32px 0", color: C.muted }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
             <div>No session data yet for this selection.</div>
-            <div style={{ fontSize: 12, marginTop: 8 }}>Complete some sessions to see your force-duration curve.</div>
+            <div style={{ fontSize: 12, marginTop: 8 }}>Run a few sessions on this grip / hand to start building a force-duration curve.</div>
           </div>
         </Card>
       ) : (<>
@@ -1927,7 +1927,7 @@ export function AnalysisView({
           if (perGripMode) {
             return (
               <>
-                {Object.values(gripRecs).map(rec => (
+                {Object.values(gripRecs).map((rec, i, arr) => (
                   <Card key={rec.grip} style={{ marginBottom: 16, border: `1px solid ${rec.color}40` }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
                       <div style={{ fontSize: 11, color: rec.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -1947,6 +1947,16 @@ export function AnalysisView({
                     <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
                       CF {fmtW(rec.CF, unit)} {unit} · W′ {fmtW(rec.W, unit)} {unit}·s · {rec.n} failure{rec.n !== 1 ? "s" : ""}
                     </div>
+                    {/* Footnote on the LAST card only — points back at
+                        Setup's Coaching prescription for the per-hand
+                        breakdown. Same data, two scopes; clarifying
+                        which is which keeps users from reading them as
+                        competing recommendations. */}
+                    {i === arr.length - 1 && (
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                        Per-grip summary · the Setup tab's <b>Coaching prescription</b> shows the per-hand reference loads.
+                      </div>
+                    )}
                   </Card>
                 ))}
               </>

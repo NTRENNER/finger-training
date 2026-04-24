@@ -57,6 +57,27 @@ export function Label({ children }) {
 
 // Section divider with a small-caps title — used inside Cards to group
 // related fields with a thin underline.
+//
+// Header convention across the app — two tiers, intentionally distinct:
+//
+//   1. Card title (14px / 700, normal case) — top-of-card primary
+//      heading. Examples: "Coaching prescription · Crusher",
+//      "Zone Workout Summary", "🗓 Session Planner". Inline div, no
+//      Sect wrapper. There's only ever ONE per Card.
+//
+//   2. Subsection (Sect, 11px / 700 uppercase, muted, underline) —
+//      groups related fields inside a Card. Examples: "Within Set",
+//      "Between Sets", "Grip Type". Use Sect for ALL of these so
+//      they share the same visual weight; new subsections that are
+//      tempted to inline an 11px uppercase div should reach for
+//      Sect instead.
+//
+// The 11px uppercase pattern ALSO shows up as an "eyebrow" above a
+// large title (e.g. "NEXT SESSION FOCUS" above "Train Power" on the
+// AnalysisView coaching cards). That's a different role — it's
+// labeling the card itself, not a subsection inside it — so it
+// stays inline rather than using Sect (which would draw an unwanted
+// underline below the eyebrow).
 export function Sect({ title, children }) {
   return (
     <div style={{ marginBottom: 20 }}>
