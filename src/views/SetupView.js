@@ -721,7 +721,7 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                               border: `1px solid ${gapColor(widestGap.gap)}66`, borderRadius: 8,
                               padding: "10px 12px", marginBottom: 10 }}>
                   <div>
-                    <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Balanced view · largest curve gap:</span>{" "}
+                    <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Balanced · largest curve gap:</span>{" "}
                     {widestGap.zoneLabel} — <b>{fmtPct(widestGap.gap)}</b> headroom{" "}
                     ({widestGap.zoneKey === "power" ? "fast (PCr)" : widestGap.zoneKey === "strength" ? "middle (glycolytic)" : "slow (oxidative)"} compartment).
                   </div>
