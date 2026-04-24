@@ -199,8 +199,12 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     const actualTime = (Date.now() - startTimeRef.current) / 1000;
     startTimeRef.current = null;
     setRepPhase("ready");
+    // Capture peak BEFORE stopMeasuring — Tindeq's peak ref isn't
+    // cleared until the next startMeasuring, but reading it here
+    // alongside avgForce keeps the rep payload internally consistent.
+    const peakForce = tindeq.peak;
     if (tindeq.connected) await tindeq.stopMeasuring();
-    onRepDone({ actualTime, avgForce: tindeq.avgForce, failed });
+    onRepDone({ actualTime, avgForce: tindeq.avgForce, peakForce, failed });
   }, [tindeq, onRepDone]);
 
   // Wire auto-failure → endRep for the duration of an active rep only.
@@ -569,6 +573,14 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
   const avgTime    = totalReps > 0 ? reps.reduce((a, r) => a + r.actual_time_s, 0) / totalReps : 0;
   const maxWeight  = Math.max(...reps.map(r => r.weight_kg), 0);
   const hasForce   = reps.some(r => r.avg_force_kg > 0 && r.avg_force_kg < 500);
+  // Peak across the whole session — only meaningful when we have
+  // any peak readings at all. The Tindeq stream populates it for
+  // both manual and auto-rep sessions; older reps logged before
+  // peak capture was wired will be null and excluded from the max.
+  const sessionPeak = reps.reduce((m, r) =>
+    (r.peak_force_kg > 0 && r.peak_force_kg < 500 && r.peak_force_kg > m) ? r.peak_force_kg : m,
+    0);
+  const hasPeak    = sessionPeak > 0;
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -604,10 +616,18 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
             <div style={{ fontSize: 28, fontWeight: 700 }}>{fmtW(maxWeight, unit)} {unit}</div>
           </div>
           {hasForce && (
-            <div style={{ gridColumn: "1 / -1" }}>
+            <div>
               <Label>Avg Force (Tindeq)</Label>
               <div style={{ fontSize: 22, fontWeight: 700, color: C.green }}>
                 {fmtW(reps.reduce((a, r) => a + (r.avg_force_kg || 0), 0) / reps.filter(r => r.avg_force_kg > 0).length, unit)} {unit}
+              </div>
+            </div>
+          )}
+          {hasPeak && (
+            <div>
+              <Label>Peak Force</Label>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.orange }}>
+                {fmtW(sessionPeak, unit)} {unit}
               </div>
             </div>
           )}
@@ -624,6 +644,7 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
                 <th style={{ textAlign: "right", paddingBottom: 6 }}>Weight</th>
                 <th style={{ textAlign: "right", paddingBottom: 6 }}>Time</th>
                 {hasForce && <th style={{ textAlign: "right", paddingBottom: 6 }}>Avg F</th>}
+                {hasPeak  && <th style={{ textAlign: "right", paddingBottom: 6 }}>Peak F</th>}
               </tr>
             </thead>
             <tbody>
@@ -637,6 +658,11 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
                   {hasForce && (
                     <td style={{ textAlign: "right", color: C.green }}>
                       {r.avg_force_kg > 0 ? `${fmtW(r.avg_force_kg, unit)} ${unit}` : "—"}
+                    </td>
+                  )}
+                  {hasPeak && (
+                    <td style={{ textAlign: "right", color: C.orange }}>
+                      {r.peak_force_kg > 0 ? `${fmtW(r.peak_force_kg, unit)} ${unit}` : "—"}
                     </td>
                   )}
                 </tr>
@@ -692,12 +718,12 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   const startTimeRef = useRef(null);
   const timerRef     = useRef(null);
 
-  const handleRepEnd = useCallback(({ actualTime, avgForce }) => {
+  const handleRepEnd = useCallback(({ actualTime, avgForce, peakForce }) => {
     clearInterval(timerRef.current);
     setRepActive(false);
     setElapsed(0);
     startTimeRef.current = null;
-    onRepDone({ actualTime, avgForce, failed: false });
+    onRepDone({ actualTime, avgForce, peakForce, failed: false });
   }, [onRepDone]);
 
   const handleRepStart = useCallback(() => {

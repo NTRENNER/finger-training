@@ -138,7 +138,7 @@ export function HistoryView({
       actual_time_s:   time,
       avg_force_kg:    loadKg,
       weight_kg:       loadKg,
-      peak_force_kg:   0,
+      peak_force_kg:   null,  // unknown for manual entries (Tindeq captures it live)
       set_num:         maxSetNum,
       rep_num:         maxRepNum + 1,
       rest_s:          0,
@@ -164,7 +164,7 @@ export function HistoryView({
         actual_time_s:   parseFloat(r.time),
         avg_force_kg:    loadKg,
         weight_kg:       loadKg,
-        peak_force_kg:   0,
+        peak_force_kg:   null,  // unknown for manual entries (Tindeq captures it live)
         set_num:         1,
         rep_num:         i + 1,
         rest_s:          0,

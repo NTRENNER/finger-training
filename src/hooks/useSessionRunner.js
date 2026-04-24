@@ -156,7 +156,7 @@ export function useSessionRunner({
   }, [config, history]);
 
   // ── Handle rep completion ───────────────────────────────────
-  const handleRepDone = useCallback(({ actualTime, avgForce, failed = false }) => {
+  const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false }) => {
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
     // Weight is constant across the set — no within-set fatigue discount.
     // The rep-time curve (actual_time_s) is what reflects fatigue and feeds
@@ -179,6 +179,14 @@ export function useSessionRunner({
       avg_force_kg:    (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
                          ? Math.round(avgForce * 10) / 10
                          : null,
+      // Peak force from the Tindeq stream — the highest single
+      // sample seen during the rep. Stored alongside avg_force_kg
+      // so the user can see "I hit 38kg even though my average
+      // was 24kg" — useful for power reps where peak is the metric
+      // of interest. Same sanity range as avg.
+      peak_force_kg:   (isFinite(peakForce) && peakForce > 0 && peakForce < 500)
+                         ? Math.round(peakForce * 10) / 10
+                         : null,
       set_num:         currentSet + 1,
       rep_num:         currentRep + 1,
       rest_s:             config.restTime,
@@ -187,7 +195,7 @@ export function useSessionRunner({
       session_started_at: sessionStartedAt || null,
     };
 
-    setLastRepResult({ actualTime, avgForce, targetTime: config.targetTime });
+    setLastRepResult({ actualTime, avgForce, peakForce, targetTime: config.targetTime });
     setSessionReps(reps => [...reps, repRecord]);
     addReps([repRecord]);
 

@@ -15,11 +15,15 @@
 // Two measurement modes are supported:
 //   1. Manual mode (used by ActiveSessionView). The view drives
 //      tare → startMeasuring → user pulls → stopMeasuring; force /
-//      avgForce / peak update live.
+//      avgForce / peak update live. After stopMeasuring the rep's
+//      peak is read from `peak` and persisted alongside avg.
 //   2. Auto-detect mode (used by AutoRepSessionView). The hook
 //      watches the force stream and fires onRepStart / onRepEnd
 //      callbacks when it crosses configurable thresholds — for
-//      spring-strap setups where the user can't tap a button.
+//      spring-strap setups where the user can't tap a button. The
+//      onRepEnd payload includes `peakForce` (this rep's max
+//      sample) so the view doesn't have to read peak before the
+//      next rep resets it.
 //
 // Auto-fail: if the measured force drops below 95% of targetKgRef
 // for >1.5 s during a manual rep, autoFailCallbackRef fires so the
@@ -170,14 +174,20 @@ export function useTindeq() {
             else if (now - adBelowRef.current >= AD_END_MS) {
               const actualTime = (adBelowRef.current - adStartTimeRef.current) / 1000;
               if (actualTime * 1000 >= AD_MIN_MS) {
-                const avg = adSumRef.current / adCountRef.current;
-                const cb  = adOnEndRef.current;
+                const avg  = adSumRef.current / adCountRef.current;
+                // Read peak BEFORE clearing — peakRef gets reset
+                // on the next rep's start. The auto-detect callback
+                // is the only place this value can be captured
+                // for persistence; without it, peak_force_kg
+                // would always be 0 in auto-rep sessions.
+                const peakF = peakRef.current;
+                const cb   = adOnEndRef.current;
                 adActiveRef.current    = false;
                 adStartTimeRef.current = null;
                 adSumRef.current       = 0;
                 adCountRef.current     = 0;
                 adBelowRef.current     = null;
-                cb?.({ actualTime, avgForce: avg });
+                cb?.({ actualTime, avgForce: avg, peakForce: peakF });
               } else {
                 adActiveRef.current    = false;
                 adStartTimeRef.current = null;
