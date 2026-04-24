@@ -732,7 +732,7 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                       </span>{" "}
                       {matches
                         ? <>matches above — the Session Planner picks <b>{recLabel}</b>.</>
-                        : <>Session Planner picks <b>{recLabel}</b> after weighing recency, residual fit{focusLabel ? ", and your training focus" : ""}. See its Why box for the full reasoning.</>}
+                        : <>Session Planner picks <b>{recLabel}</b>: your actual reps there fall below the curve, so this will have the biggest impact.</>}
                     </div>
                   )}
                   {!recZone && (
