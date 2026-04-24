@@ -8,10 +8,9 @@
 //
 // Score 10 = fully fresh; 1 = extremely fatigued.
 //
-// Pure model code: no React, no DOM. The UI-coupled bits
-// (FEEL_OPTIONS for the subjective picker, subjToScore for the
-// 1-5→1-10 mapping, recoveryLabel for the colored badge) live
-// in App.js / SetupView since they carry theme colors and emoji.
+// Pure model code: no React, no DOM. The subjective check-in
+// widget that used to feed this score has been removed; readiness
+// is now computed entirely from training history.
 
 import { clamp, today } from "../util.js";
 import { effectiveLoad } from "./prescription.js";

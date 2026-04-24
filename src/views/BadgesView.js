@@ -96,7 +96,7 @@ export function BadgesView({ history, liveEstimate, genesisSnap }) {
             Log one session in each training zone to unlock your curve.
           </div>
           {[
-            { label: "Power — 10s hang",     done: hasPower },
+            { label: "Power — 7s hang",      done: hasPower },
             { label: "Strength — 45s hang",   done: hasStrength },
             { label: "Endurance — 120s hang",  done: hasCapacity },
           ].map(z => (

@@ -2,8 +2,8 @@
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 // The "Setup" tab — pick a grip, see the coaching recommendation,
-// review prescribed loads per zone, log subjective readiness, set
-// body weight, connect Tindeq, and start the session.
+// review prescribed loads per zone, set body weight, connect Tindeq,
+// and start the session.
 //
 // Bundles the cards that only ever render here:
 //   BwPrompt           — stale-body-weight nudge.
@@ -809,13 +809,8 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                 );
               })}
             </div>
-            {/* Descriptors moved below the cells — at this point the
-                user has already read the L/R loads + pot/gap rows, so
-                the column-name explanations land as confirmation
-                rather than ceremony before the data. The "Train at"
-                gloss was dropped: the bare number under each L/R is
-                obviously the load, the Potential and Gap labels in
-                the cells are the only ones that benefit from a key. */}
+            {/* Potential/Gap key — placed below the cells so the data
+                lands first and the labels read as a confirming legend. */}
             <div style={{ fontSize: 11, color: C.muted, marginTop: 10, fontStyle: "italic", lineHeight: 1.5 }}>
               <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.{" "}
               <b style={{ color: C.text, fontStyle: "normal" }}>Gap</b> = the training opportunity in that zone.

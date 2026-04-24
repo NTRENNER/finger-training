@@ -71,10 +71,12 @@ import {
 //   src/ui/     theme, formatters, shared components
 //
 // What stays here in App.js: the React shell — auth, top-level
-// state (history, activities, bodyWeight, readiness, trip), the
-// reconcile/sync orchestration that owns those pieces, and the
-// tab-switch render gate. Plus the few cross-cutting constants
-// (GOAL_CONFIG, RM_GRIPS, TABS) that the views consume as props.
+// state (history, activities, bodyWeight, readiness, trip,
+// trainingFocus), the reconcile/sync orchestration that owns
+// those pieces, and the tab-switch render gate. Plus GOAL_CONFIG
+// (passed to SetupView + AnalysisView), RM_GRIPS (passed to
+// AnalysisView for the 1RM tracker), and the TABS array used by
+// the top-nav router.
 
 // LS_HISTORY_KEY (formerly LS_KEY = "ft_v3") now lives in src/lib/storage.js;
 // useRepHistory below owns reads/writes to it. App still touches it inside
