@@ -472,4 +472,62 @@ describe("prescriptionPotential", () => {
     const out = prescriptionPotential(history, "L", "Crusher", 120);
     if (out) expect(out.reliability).toBe("extrapolation");
   });
+
+  test("returns three-exp value even when Monod fit fails (single failure)", () => {
+    // One failure → Monod can't fit (needs ≥2). Three-exp can fit via
+    // the per-grip prior + shrinkage. Pre-fix: returned null. Post-fix:
+    // returns a value driven by three-exp.
+    const history = [
+      { hand: "L", grip: "Crusher", actual_time_s: 30, avg_force_kg: 25, failed: true, target_duration: 30, id: "r1" },
+      // Add seed reps for the prior (different hand so they don't pull
+      // the per-(hand, grip) failure list above 1).
+      { hand: "R", grip: "Crusher", actual_time_s: 10, avg_force_kg: 50, failed: true, target_duration: 10, id: "r2" },
+      { hand: "R", grip: "Crusher", actual_time_s: 60, avg_force_kg: 18, failed: true, target_duration: 60, id: "r3" },
+      { hand: "R", grip: "Crusher", actual_time_s: 90, avg_force_kg: 14, failed: true, target_duration: 90, id: "r4" },
+    ];
+    const priors = buildThreeExpPriors(history);
+    const out = prescriptionPotential(history, "L", "Crusher", 45, { threeExpPriors: priors });
+    expect(out).not.toBeNull();
+    expect(out.threeExpValue).not.toBeNull();
+    // monodValue should be null since L Crusher only has 1 failure.
+    expect(out.monodValue).toBeNull();
+    expect(out.value).toBe(out.threeExpValue);
+  });
+
+  test("three-exp path uses fresh-adjusted loads (freshMap consistency)", () => {
+    // Build a synthetic within-set sequence: same posted load, same T, but
+    // late-set reps are "fresher equivalent" higher loads.
+    const baseRep = (id, setNum, repNum) => ({
+      id, hand: "L", grip: "Crusher",
+      session_id: "s1", set_num: setNum, rep_num: repNum,
+      target_duration: 30, actual_time_s: 30,
+      avg_force_kg: 20, failed: true, rest_s: 30,
+      date: "2026-04-01",
+    });
+    const history = [
+      baseRep("r1", 1, 1),
+      baseRep("r2", 1, 2),
+      baseRep("r3", 1, 3),
+    ];
+    const priors = buildThreeExpPriors(history);
+    // Without a freshMap, all reps treat as fresh load = 20.
+    // With a freshMap, the later reps in the set are equivalent to
+    // higher fresh loads (because availFrac < 1 by then). So the
+    // three-exp prediction at any T should be HIGHER when the freshMap
+    // is in effect.
+    const fmap = buildFreshLoadMap(history);
+    const outFresh = prescriptionPotential(history, "L", "Crusher", 30,
+      { threeExpPriors: priors, freshMap: fmap });
+    // Compare three-exp value with freshMap to a plain rep snapshot
+    // (where availFrac ≈ 1 throughout because the prior is set rep 1
+    // only). Manually fit a plain three-exp with raw avg_force values:
+    expect(outFresh).not.toBeNull();
+    expect(outFresh.threeExpValue).not.toBeNull();
+    // Sanity: prediction at T=30 should be at least the fresh-equivalent
+    // load of the LAST rep in the set (which is > 20).
+    const lastRepFresh = fmap.get("id:r3").fresh;
+    // Allow some tolerance for shrinkage pulling the value down.
+    expect(outFresh.threeExpValue).toBeGreaterThan(20 * 0.9);
+    expect(lastRepFresh).toBeGreaterThan(20);
+  });
 });

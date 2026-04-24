@@ -492,7 +492,14 @@ export function empiricalPrescription(history, hand, grip, targetDuration, opts 
 // balanced. Used as the diagnostic ceiling for the gap calculation.
 //
 // Returns { value, lower, upper, reliability, monodValue, threeExpValue }
-// or null. value is three-exp-primary (with Monod fallback).
+// or null. `value` is three-exp-primary (with Monod fallback), and the
+// function returns a result if EITHER model produced a value — Monod
+// is no longer required.
+//
+// Both fits use freshLoadFor() so loads are fatigue-adjusted to their
+// fresh-equivalents (within-set fatigue removed). Both also enforce
+// success-as-lower-bound — failures anchor the curve, successes pin
+// it from below at their (T, F) coordinates.
 export function prescriptionPotential(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
   const { freshMap = null, threeExpPriors = null } = opts;
@@ -510,41 +517,57 @@ export function prescriptionPotential(history, hand, grip, targetDuration, opts 
   ).length;
 
   const fmap = freshMap || buildFreshLoadMap(history);
-  const failurePts = failures.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
   const successes = history.filter(r =>
     !r.failed && r.hand === hand && r.grip === grip
     && r.target_duration > 0 && r.actual_time_s >= r.target_duration
     && r.actual_time_s > 0 && effectiveLoad(r) > 0
   );
-  const successPts = successes.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
-  const monodFit = (failurePts.length + successPts.length >= 2)
-    ? fitCFWithSuccessFloor(failurePts, successPts)
+
+  // Monod path — fresh-adjusted loads, success-floor enforcement.
+  const failurePtsM = failures.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
+  const successPtsM = successes.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
+  const monodFit = (failurePtsM.length + successPtsM.length >= 2)
+    ? fitCFWithSuccessFloor(failurePtsM, successPtsM)
     : null;
   const monodValue = monodFit ? monodFit.CF + monodFit.W / targetDuration : null;
 
+  // Three-exp path — also uses fresh-adjusted loads, also enforces
+  // success-as-lower-bound when successes exist. Per-grip prior +
+  // shrinkage; falls through gracefully when the prior is absent.
+  //
+  // Picks fit function by data shape:
+  //   successes present       → success-floor variant (≥2 combined pts)
+  //   failures only + prior   → plain fitThreeExpAmps (works with 1 pt
+  //                             because the prior anchors the basis)
   let threeExpValue = null;
-  if (threeExpPriors && threeExpPriors.get && failures.length >= 2) {
+  if (threeExpPriors && threeExpPriors.get && failures.length >= 1) {
     const prior = threeExpPriors.get(grip);
-    if (prior) {
-      const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+    if (prior && (prior[0] + prior[1] + prior[2]) > 0) {
+      const failurePtsTE = failures.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
+      const successPtsTE = successes.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
       const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1);
-      const amps = fitThreeExpAmps(pts, { prior, lambda });
-      if (amps[0] + amps[1] + amps[2] > 0) {
+      const amps = successPtsTE.length > 0
+        ? fitThreeExpAmpsWithSuccessFloor(failurePtsTE, successPtsTE, { prior, lambda })
+        : fitThreeExpAmps(failurePtsTE, { prior, lambda });
+      if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
         const v = predForceThreeExp(amps, targetDuration);
         if (v > 0) threeExpValue = v;
       }
     }
   }
 
-  if (monodValue == null) return null;
+  // Three-exp can stand on its own — return a result if EITHER model
+  // produced a value. Only bail when both failed.
+  if (monodValue == null && threeExpValue == null) return null;
 
   const values = [monodValue, threeExpValue].filter(v => v != null);
   const lower = Math.min(...values);
   const upper = Math.max(...values);
 
   let reliability;
-  if (within20 >= 1 && threeExpValue != null
+  if (within20 >= 1 && monodValue != null && threeExpValue != null
       && Math.abs(monodValue - threeExpValue) / monodValue < 0.15) {
+    // Both models agree within 15% AND there's a near-target failure.
     reliability = "well-supported";
   } else if (within50 >= 1) {
     reliability = "marginal";
@@ -552,14 +575,14 @@ export function prescriptionPotential(history, hand, grip, targetDuration, opts 
     reliability = "extrapolation";
   }
 
-  // Three-exp is the primary value when available (promoted from shadow).
+  // Three-exp is the primary value when available; Monod when not.
   const primary = threeExpValue != null ? threeExpValue : monodValue;
   return {
     value: Math.round(primary * 10) / 10,
     lower: Math.round(lower * 10) / 10,
     upper: Math.round(upper * 10) / 10,
     reliability,
-    monodValue:    Math.round(monodValue * 10) / 10,
+    monodValue:    monodValue    != null ? Math.round(monodValue * 10) / 10    : null,
     threeExpValue: threeExpValue != null ? Math.round(threeExpValue * 10) / 10 : null,
   };
 }
