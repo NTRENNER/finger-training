@@ -25,7 +25,7 @@ import { HistoryView } from "./views/HistoryView.js";
 import { SettingsView } from "./views/SettingsView.js";
 import { AnalysisView } from "./views/AnalysisView.js";
 
-// Shared lib helpers (storage, trip dates). See src/lib/.
+// Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
   loadLS, saveLS,
   LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY,
@@ -34,10 +34,15 @@ import {
 import {
   DEFAULT_TRIP, weeksToTrip, tripCountdown,
 } from "./lib/trip.js";
+import { downloadCSV, downloadWorkoutCSV } from "./lib/csv.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
 import { clamp, today } from "./util.js";
 import { computeZoneCoverage } from "./model/zones.js";
+import { computeReadiness } from "./model/readiness.js";
+import {
+  getBaseline, getBestLoad, calcLevel, levelTitle,
+} from "./model/levels.js";
 import {
   PHYS_MODEL_DEFAULT,
   fatigueDose, fatigueAfterRest,
@@ -59,7 +64,6 @@ import {
 // Prescription layer — what to train at, what's possible, the gap diagnostic.
 // See src/model/prescription.js.
 import {
-  effectiveLoad,
   isShortfall,
   buildFreshLoadMap, fitDoseK,
   estimateRefWeight,
@@ -108,9 +112,11 @@ const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-
 const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }] — legacy entries may carry { duration_min, intensity } instead
 const LS_GENESIS_KEY   = "ft_genesis";   // { date, CF, W, auc } — snapshot when first all-zone coverage earned
 
-const LEVEL_STEP = 1.05; // 5% improvement per level
+// LEVEL_STEP now lives in src/model/levels.js (imported above).
 
-// Level display — numeric only, no old badge names
+// Level display — numeric only, no old badge names. Stays in App.js
+// because it's a pure UI flourish used only by SessionSummaryView's
+// level-up animation.
 const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","⭐","💎","🏆","🌟"];
 
 // ─────────────────────────────────────────────────────────────
@@ -125,43 +131,8 @@ const nowISO      = () => new Date().toISOString();
 
 // loadLS and saveLS now live in src/lib/storage.js (imported above).
 
-function toCSV(reps) {
-  const cols = ["id","date","grip","hand","target_duration","weight_kg",
-                "actual_time_s","peak_force_kg","set_num","rep_num","rest_s","session_id"];
-  const esc  = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
-  return [cols.join(","), ...reps.map(r => cols.map(c => esc(r[c])).join(","))].join("\n");
-}
-function downloadCSV(reps) {
-  const blob = new Blob([toCSV(reps)], { type: "text/csv" });
-  const a = Object.assign(document.createElement("a"), {
-    href: URL.createObjectURL(blob), download: "finger-training-history.csv",
-  });
-  a.click();
-}
-
-function downloadWorkoutCSV(log) {
-  // Flatten sessions → one row per set
-  const rows = [];
-  for (const s of log) {
-    for (const [exId, exData] of Object.entries(s.exercises || {})) {
-      const exName = exId.replace(/_/g, " ");
-      if (exData.sets && exData.sets.length > 0) {
-        exData.sets.forEach((set, i) => {
-          rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, set.reps ?? "", set.weight ?? "", set.done ? "yes" : "no"]);
-        });
-      } else {
-        rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, "", "", "", exData.done ? "yes" : "no"]);
-      }
-    }
-  }
-  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "reps", "weight", "done"];
-  const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const a = Object.assign(document.createElement("a"), {
-    href: URL.createObjectURL(blob), download: "workout-history.csv",
-  });
-  a.click();
-}
+// toCSV, downloadCSV, downloadWorkoutCSV now live in src/lib/csv.js
+// (imported above).
 
 // All model-layer math (Monod fits, three-exp fits, fatigue, prescription,
 // coaching) lives under src/model/*.js — imported above. App.js holds only
@@ -187,45 +158,9 @@ function downloadWorkoutCSV(log) {
 // PROTOCOL_RESPONSE, AUC_T_MIN, AUC_T_MAX, computePersonalResponse
 // now live in src/model/personal-response.js (imported above).
 
-// ─────────────────────────────────────────────────────────────
-// READINESS / RECOVERY HELPERS
-// ─────────────────────────────────────────────────────────────
-// Computes a 1-10 readiness score from recent training history.
-// Uses an exponential decay model with ~24h recovery half-life.
-// Score 10 = fully fresh; 1 = extremely fatigued.
-function computeReadiness(history) {
-  if (!history || history.length === 0) return 10;
-  const todayStr = today();
-
-  // Session load = sum of normalized rep doses (weight/refW × sqrt(dur/refDur))
-  const byDate = {};
-  for (const r of history) {
-    if (!r.date) continue;
-    if (!byDate[r.date]) byDate[r.date] = [];
-    byDate[r.date].push(r);
-  }
-
-  let totalRemaining = 0;
-  for (const [date, reps] of Object.entries(byDate)) {
-    const load = reps.reduce((sum, r) => {
-      const w = effectiveLoad(r) || r.weight_kg || 10;
-      const d = r.actual_time_s || 10;
-      return sum + (w / 20) * Math.sqrt(d / 45);
-    }, 0);
-
-    // Estimate hours since this session (no time-of-day stored, approximate)
-    const hoursAgo = date === todayStr
-      ? 3                          // trained today — assume a few hours ago
-      : (new Date(todayStr) - new Date(date)) / (1000 * 3600 * 24) * 24 + 8;
-
-    // Exponential decay: ~50% remaining after 24h
-    totalRemaining += load * Math.exp(-hoursAgo / 24);
-  }
-
-  // Reference: a heavy session of 15 reps at baseline → load ≈ 15
-  // 15 remaining = max fatigue (score 1); 0 = fully fresh (score 10)
-  return Math.max(1, Math.round(10 - clamp(totalRemaining / 15 * 9, 0, 9)));
-}
+// computeReadiness now lives in src/model/readiness.js (imported above).
+// recoveryLabel/FEEL_OPTIONS/subjToScore stay here — they're UI-coupled
+// (theme colors, emoji) and only used by SetupView for now.
 
 function recoveryLabel(score) {
   if (score >= 8) return { text: "Good day to push",            color: C.green,  emoji: "🟢" };
@@ -247,74 +182,9 @@ const subjToScore = (v) => v * 2;
 // ZONE5, classifyZone5, dominantZone5, GOAL_TO_ZONE5 now live in
 // src/model/zones.js (imported above).
 
-// ─────────────────────────────────────────────────────────────
-// GAMIFICATION
-// ─────────────────────────────────────────────────────────────
-
-// A rep counts toward badges only if the athlete completed at least
-// 80% of the target duration (screens out bailed reps).
-function isQualifyingRep(r, targetDuration) {
-  if (!r.actual_time_s || !targetDuration) return true; // no time data → don't exclude
-  return r.actual_time_s >= targetDuration * 0.98;
-}
-
-// Group reps into sessions by their session_id (or date as fallback),
-// returning an array of { sessionKey, date, reps[] } sorted oldest first.
-function groupSessions(history, hand, grip, targetDuration) {
-  const matches = history.filter(r =>
-    r.hand === hand &&
-    (!grip || r.grip === grip) &&
-    r.target_duration === targetDuration &&
-    effectiveLoad(r) > 0 &&
-    isQualifyingRep(r, targetDuration)
-  );
-  const map = new Map();
-  matches.forEach(r => {
-    const key = r.session_id || r.date;
-    if (!map.has(key)) map.set(key, { key, date: r.date, reps: [] });
-    map.get(key).reps.push(r);
-  });
-  return [...map.values()].sort((a, b) => a.date < b.date ? -1 : 1);
-}
-
-// Baseline = best qualifying rep from the FIRST session only.
-function getBaseline(history, hand, grip, targetDuration) {
-  const sessions = groupSessions(history, hand, grip, targetDuration);
-  if (sessions.length === 0) return null;
-  const firstReps = sessions[0].reps;
-  return Math.max(...firstReps.map(r => effectiveLoad(r)));
-}
-
-// Best load = best qualifying rep from sessions AFTER the first.
-// (First session always = badge 1 regardless of within-session variance.)
-function getBestLoad(history, hand, grip, targetDuration) {
-  const sessions = groupSessions(history, hand, grip, targetDuration);
-  if (sessions.length < 2) return null; // no improvement sessions yet
-  const laterReps = sessions.slice(1).flatMap(s => s.reps);
-  if (laterReps.length === 0) return null;
-  return Math.max(...laterReps.map(r => effectiveLoad(r)));
-}
-
-function calcLevel(history, hand, grip, targetDuration) {
-  const baseline = getBaseline(history, hand, grip, targetDuration);
-  if (!baseline || baseline <= 0) return 1;
-  const best = getBestLoad(history, hand, grip, targetDuration);
-  if (!best || best <= baseline) return 1; // first session or no improvement yet
-  return Math.max(1, 1 + Math.floor(Math.log(best / baseline) / Math.log(LEVEL_STEP)));
-}
-
-function levelTitle(level) {
-  return `Level ${level}`;
-}
-
-// Next badge threshold = baseline × LEVEL_STEP^(currentLevel)
-// eslint-disable-next-line no-unused-vars -- kept for future Journey-tab use; was used by the now-removed Setup-page level card.
-function nextLevelTarget(history, hand, grip, targetDuration) {
-  const baseline = getBaseline(history, hand, grip, targetDuration);
-  if (!baseline) return null;
-  const level = calcLevel(history, hand, grip, targetDuration);
-  return Math.round(baseline * Math.pow(LEVEL_STEP, level) * 10) / 10;
-}
+// isQualifyingRep, groupSessions, getBaseline, getBestLoad, calcLevel,
+// levelTitle, nextLevelTarget, LEVEL_STEP now live in src/model/levels.js
+// (imported above).
 
 // ─────────────────────────────────────────────────────────────
 // TINDEQ PROGRESSOR BLUETOOTH HOOK
