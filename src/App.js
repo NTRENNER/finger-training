@@ -4466,7 +4466,7 @@ function buildRecFromFit(fit, personalResponse, unit) {
 }
 
 function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = null, activities = [], liveEstimate = null, gripEstimates = {}, freshMap = null, readiness = 5 }) {
-  const [selHand,   setSelHand]   = useState("L");
+  const [selHand,   setSelHand]   = useState("");   // "" = Both (pool L+R for the F-D chart)
   const [selGrip,   setSelGrip]   = useState("");
   const [relMode,   setRelMode]   = useState(false); // relative strength toggle
 
@@ -4475,9 +4475,11 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     [history]
   );
 
-  // All reps with usable force + time data for the selected filters
+  // All reps with usable force + time data for the selected filters.
+  // selHand === "" means Both — pool L+R for the F-D chart's at-a-glance
+  // view. Per-hand prescriptions still iterate L and R explicitly elsewhere.
   const reps = useMemo(() => history.filter(r =>
-    r.hand === selHand &&
+    (!selHand || r.hand === selHand) &&
     (!selGrip || r.grip === selGrip) &&
     r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
     r.actual_time_s > 0
@@ -5281,6 +5283,16 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: grips.length ? 10 : 0 }}>
+          {/* Both = pool L+R for the F-D chart's at-a-glance view (one
+              curve fit on the combined data). Per-hand prescriptions and
+              the coaching engine still iterate L and R separately, so
+              "Both" only affects the visual aggregation here. */}
+          <button onClick={() => setSelHand("")} style={{
+            padding: "6px 18px", borderRadius: 20, cursor: "pointer",
+            fontWeight: 600, border: "none",
+            background: !selHand ? C.purple : C.border,
+            color: !selHand ? "#fff" : C.muted,
+          }}>Both</button>
           {["L", "R"].map(h => (
             <button key={h} onClick={() => setSelHand(h)} style={{
               padding: "6px 18px", borderRadius: 20, cursor: "pointer",
