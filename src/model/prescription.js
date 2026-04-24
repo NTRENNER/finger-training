@@ -342,7 +342,15 @@ export function prescribedLoad(history, hand, grip, targetDuration, freshMap = n
     r.target_duration > 0 &&
     r.actual_time_s >= r.target_duration
   );
-  if (failures.length < 2 && successes.length < 2) return null;
+  // Need ≥2 total points for any usable fit — matches what
+  // fitCFWithSuccessFloor itself enforces. The earlier
+  // `failures < 2 && successes < 2` form rejected the (1 failure,
+  // 1 success) case while admitting the all-successes (0, 2) and
+  // all-failures (2, 0) cases, which was hard to defend: a failure
+  // + a success below it is the most informative two-point case
+  // (failure anchors the curve, success enforces a lower bound), so
+  // singling it out for rejection didn't make physical sense.
+  if (failures.length + successes.length < 2) return null;
 
   const fmap = freshMap || buildFreshLoadMap(history);
   const bump = rpeProgressionMultiplier(history, hand, grip, targetDuration);
