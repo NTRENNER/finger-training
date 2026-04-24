@@ -21,13 +21,17 @@ import {
 // Top-level views extracted from this file. See src/views/.
 import { BadgesView } from "./views/BadgesView.js";
 import { TrendsView } from "./views/TrendsView.js";
+import { ClimbingHistoryList } from "./views/ClimbingHistoryList.js";
 
-// Shared lib helpers (storage, climbing grades). See src/lib/.
+// Shared lib helpers (storage, climbing). See src/lib/.
 import {
   loadLS, saveLS,
   LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY,
 } from "./lib/storage.js";
-import { V_GRADES, YDS_GRADES } from "./lib/climbing-grades.js";
+import {
+  CLIMB_DISCIPLINES, ASCENT_STYLES,
+  gradesFor, defaultGradeFor,
+} from "./lib/climbing-grades.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
 import { clamp, ymdLocal, today } from "./util.js";
@@ -1176,126 +1180,11 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
 // Climbing is tracked for readiness / context but is intentionally
 // NOT credited to zone coverage (see computeZoneCoverage note).
 // ─────────────────────────────────────────────────────────────
-const CLIMB_DISCIPLINES = [
-  { key: "boulder",  label: "Boulder",  emoji: "⚡", desc: "Power / max moves"     },
-  { key: "top_rope", label: "Top rope", emoji: "🧗", desc: "Roped, top-anchor"     },
-  { key: "lead",     label: "Lead",     emoji: "🪢", desc: "Roped, clip as you go" },
-];
-
-const ASCENT_STYLES = [
-  { key: "onsight",  label: "Onsight",  desc: "1st try, no beta"      },
-  { key: "flash",    label: "Flash",    desc: "1st try, with beta"    },
-  { key: "redpoint", label: "Redpoint", desc: "Sent after working"    },
-  { key: "attempt",  label: "Attempt",  desc: "Worked but didn't send"},
-];
-
-// V_GRADES, YDS_GRADES, gradeRank, weekKey now live in
+// CLIMB_DISCIPLINES, ASCENT_STYLES, disciplineMeta, ascentMeta,
+// describeClimb, gradesFor, defaultGradeFor now live in
 // src/lib/climbing-grades.js (imported above).
 
-function gradesFor(discipline) {
-  return discipline === "boulder" ? V_GRADES : YDS_GRADES;
-}
-
-function defaultGradeFor(discipline) {
-  return discipline === "boulder" ? "V3" : "5.10a";
-}
-
-function disciplineMeta(key) {
-  return CLIMB_DISCIPLINES.find(d => d.key === key)
-      || { key, label: key, emoji: "🧗", desc: "" };
-}
-
-function ascentMeta(key) {
-  return ASCENT_STYLES.find(a => a.key === key)
-      || { key, label: key, desc: "" };
-}
-
-// Pretty one-liner for a single climb entry. Handles legacy
-// intensity/duration entries so old data still renders.
-function describeClimb(a) {
-  if (a.discipline || a.grade || a.ascent) {
-    const d = disciplineMeta(a.discipline).label;
-    const g = a.grade || "—";
-    const s = a.ascent ? ascentMeta(a.ascent).label : "";
-    return s ? `${d} · ${g} · ${s}` : `${d} · ${g}`;
-  }
-  // Legacy (pre-grade) entries
-  const parts = [];
-  if (a.intensity)    parts.push(a.intensity);
-  if (a.duration_min) parts.push(`${a.duration_min}m`);
-  return parts.join(" · ") || "Climbing session";
-}
-
-// Shared date-grouped climb list. Used in the Climbing tab, the
-// History tab's climbing domain, and anywhere else we want to show
-// per-climb rows.
-function ClimbingHistoryList({ climbs, onDeleteActivity = null }) {
-  const byDate = useMemo(() => {
-    const m = new Map();
-    for (const c of climbs) {
-      const d = c.date || "—";
-      if (!m.has(d)) m.set(d, []);
-      m.get(d).push(c);
-    }
-    return [...m.entries()];
-  }, [climbs]);
-
-  if (climbs.length === 0) {
-    return (
-      <Card>
-        <div style={{ color: C.muted, fontSize: 13 }}>
-          No climbs logged yet. Use the Climbing tab to log your first climb.
-        </div>
-      </Card>
-    );
-  }
-
-  return byDate.map(([date, list]) => (
-    <Card key={date}>
-      <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-        {date} · {list.length} climb{list.length === 1 ? "" : "s"}
-      </div>
-      {list.map(c => {
-        const isSend = c.ascent && c.ascent !== "attempt";
-        const disc   = disciplineMeta(c.discipline);
-        return (
-          <div key={c.id || `${c.date}-${c.grade}-${c.ascent}`} style={{
-            display: "flex", alignItems: "center", gap: 10,
-            padding: "8px 0",
-            borderTop: `1px solid ${C.border}`,
-          }}>
-            <div style={{ fontSize: 18 }}>{disc.emoji}</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {c.grade || "—"}{" "}
-                <span style={{ color: C.muted, fontWeight: 400 }}>
-                  {disc.label}
-                </span>
-              </div>
-              <div style={{ fontSize: 11, color: isSend ? C.green : C.muted }}>
-                {c.ascent ? ascentMeta(c.ascent).label : describeClimb(c)}
-              </div>
-            </div>
-            {onDeleteActivity && c.id && (
-              <button
-                onClick={() => {
-                  if (window.confirm("Delete this climb?")) onDeleteActivity(c.id);
-                }}
-                style={{
-                  background: "none", border: "none", color: C.muted,
-                  cursor: "pointer", fontSize: 16, padding: "4px 6px",
-                }}
-                title="Delete climb"
-              >
-                ×
-              </button>
-            )}
-          </div>
-        );
-      })}
-    </Card>
-  ));
-}
+// ClimbingHistoryList now lives in src/views/ClimbingHistoryList.js (imported above).
 
 function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
   const [open,       setOpen]       = useState(false);

@@ -1,9 +1,71 @@
 // ─────────────────────────────────────────────────────────────
-// CLIMBING GRADE HELPERS
+// CLIMBING DATA + GRADE HELPERS
 // ─────────────────────────────────────────────────────────────
-// Pure data + ranking helpers for boulder (V-scale) and rope (YDS)
-// grades. Used by both the Climbing tab (for entry pickers) and the
-// Trends view (for hardest-send chart lines).
+// Pure data + helpers for the climbing log domain. Used by the
+// Climbing tab (entry pickers, log widget), the Trends view
+// (hardest-send chart lines, weekly aggregates), and any other
+// view that needs to display a climb entry.
+
+// Discipline catalogue — keys persisted to log entries; emoji + label
+// drive the UI rendering.
+export const CLIMB_DISCIPLINES = [
+  { key: "boulder",  label: "Boulder",  emoji: "⚡", desc: "Power / max moves"     },
+  { key: "top_rope", label: "Top rope", emoji: "🧗", desc: "Roped, top-anchor"     },
+  { key: "lead",     label: "Lead",     emoji: "🪢", desc: "Roped, clip as you go" },
+];
+
+// Ascent styles ordered from cleanest (onsight) to messiest (attempt).
+// "attempt" is the only non-send entry — used by analytics to filter
+// out unsent climbs from hardest-grade computations.
+export const ASCENT_STYLES = [
+  { key: "onsight",  label: "Onsight",  desc: "1st try, no beta"      },
+  { key: "flash",    label: "Flash",    desc: "1st try, with beta"    },
+  { key: "redpoint", label: "Redpoint", desc: "Sent after working"    },
+  { key: "attempt",  label: "Attempt",  desc: "Worked but didn't send"},
+];
+
+// Discipline + ascent metadata lookup; falls back to a stub object
+// for unknown keys so legacy entries still render with the raw key.
+export function disciplineMeta(key) {
+  return CLIMB_DISCIPLINES.find(d => d.key === key)
+      || { key, label: key, emoji: "🧗", desc: "" };
+}
+
+export function ascentMeta(key) {
+  return ASCENT_STYLES.find(a => a.key === key)
+      || { key, label: key, desc: "" };
+}
+
+// Pretty one-liner for a single climb entry. Handles legacy
+// intensity/duration entries so old data still renders.
+export function describeClimb(a) {
+  if (a.discipline || a.grade || a.ascent) {
+    const d = disciplineMeta(a.discipline).label;
+    const g = a.grade || "—";
+    const s = a.ascent ? ascentMeta(a.ascent).label : "";
+    return s ? `${d} · ${g} · ${s}` : `${d} · ${g}`;
+  }
+  // Legacy (pre-grade) entries
+  const parts = [];
+  if (a.intensity)    parts.push(a.intensity);
+  if (a.duration_min) parts.push(`${a.duration_min}m`);
+  return parts.join(" · ") || "Climbing session";
+}
+
+// Discipline → applicable grades. Boulder uses V-grades; everything
+// else uses YDS.
+export function gradesFor(discipline) {
+  return discipline === "boulder" ? V_GRADES : YDS_GRADES;
+}
+
+// Discipline → default grade selection in the entry picker.
+export function defaultGradeFor(discipline) {
+  return discipline === "boulder" ? "V3" : "5.10a";
+}
+
+// ─────────────────────────────────────────────────────────────
+// GRADES + RANKING
+// ─────────────────────────────────────────────────────────────
 
 // V0..V13 covers the vast majority of recreational to advanced
 // boulder grades.
