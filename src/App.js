@@ -11,6 +11,13 @@ import {
   ReferenceLine, ReferenceArea,
 } from "recharts";
 
+// UI primitives (theme, formatters, shared components). See src/ui/.
+import { C, base } from "./ui/theme.js";
+import { Card, Btn, Sect, Label } from "./ui/components.js";
+import {
+  KG_TO_LBS, fmt0, fmt1, fmtW, fmtTime, toDisp, fromDisp,
+} from "./ui/format.js";
+
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
 import { clamp, ymdLocal, today } from "./util.js";
 import { POWER_MAX, STRENGTH_MAX } from "./model/zones.js";
@@ -97,22 +104,8 @@ const bwOnDate = (bwLog, date) => {
   const candidates = (bwLog || []).filter(e => e.date <= date);
   return candidates.length ? candidates[candidates.length - 1] : null;
 };
-// clamp now lives in src/util.js (imported above).
-const fmt1   = (n) => (typeof n === "number" && isFinite(n)) ? n.toFixed(1) : "—";
-const fmt0   = (n) => (typeof n === "number" && isFinite(n)) ? String(Math.round(n)) : "—";
-
-const KG_TO_LBS = 2.20462;
-// Convert stored kg → display unit
-const toDisp   = (kg, unit) => (unit === "lbs" && typeof kg === "number") ? kg * KG_TO_LBS : kg;
-// Convert display unit → kg for storage
-const fromDisp = (val, unit) => (unit === "lbs" && typeof val === "number") ? val / KG_TO_LBS : val;
-// Format a kg value for display in the current unit
-const fmtW = (kg, unit) => fmt1(toDisp(kg, unit));
-const fmtTime = (s) => {
-  if (!isFinite(s) || s < 0) return "—";
-  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
-  return m > 0 ? `${m}:${String(sec).padStart(2, "0")}` : `${Math.floor(s)}s`;
-};
+// fmt0, fmt1, fmtW, fmtTime, toDisp, fromDisp, KG_TO_LBS now live in
+// src/ui/format.js (imported above).
 
 const loadLS = (key) => {
   try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : null; }
@@ -757,82 +750,8 @@ async function fetchReps() {
   }));
 }
 
-// ─────────────────────────────────────────────────────────────
-// DESIGN TOKENS
-// ─────────────────────────────────────────────────────────────
-const C = {
-  bg:      "#0d1117",
-  card:    "#161b22",
-  border:  "#30363d",
-  text:    "#e6edf3",
-  muted:   "#8b949e",
-  blue:    "#58a6ff",
-  green:   "#3fb950",
-  red:     "#f85149",
-  orange:  "#f0883e",
-  purple:  "#bc8cff",
-  yellow:  "#e3b341",
-};
-
-const base = {
-  fontFamily: "'Segoe UI', system-ui, sans-serif",
-  color: C.text,
-  background: C.bg,
-  minHeight: "100vh",
-  padding: "0",
-  margin: "0",
-};
-
-// ─────────────────────────────────────────────────────────────
-// SHARED UI COMPONENTS
-// ─────────────────────────────────────────────────────────────
-function Card({ children, style }) {
-  return (
-    <div style={{
-      background: C.card, border: `1px solid ${C.border}`,
-      borderRadius: 12, padding: "20px 24px", marginBottom: 16,
-      ...style,
-    }}>
-      {children}
-    </div>
-  );
-}
-
-function Btn({ children, onClick, color = C.blue, disabled, style, small }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        background: disabled ? C.border : color,
-        color: "#fff", border: "none", borderRadius: 8,
-        padding: small ? "6px 14px" : "10px 22px",
-        fontSize: small ? 13 : 15, fontWeight: 600,
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.5 : 1,
-        transition: "opacity 0.15s",
-        ...style,
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Label({ children }) {
-  return <div style={{ fontSize: 12, color: C.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>{children}</div>;
-}
-
-function Sect({ title, children }) {
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-}
+// Theme (C, base) and shared components (Card, Btn, Sect, Label) now live
+// in src/ui/ — see imports at the top of this file.
 
 // Inline body-weight prompt — shown in session setup when BW is stale (>3 days)
 function BwPrompt({ unit = "lbs", onSave }) {
