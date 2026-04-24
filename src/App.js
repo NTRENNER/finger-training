@@ -160,16 +160,9 @@ function downloadWorkoutCSV(log) {
   a.click();
 }
 
-// fitCF, fitCFWeighted now live in src/model/monod.js (imported above).
-
-// fitCFWithSuccessFloor, fitCFWeightedRaw now live in src/model/monod.js (imported above).
-
-// THREE_EXP_LAMBDA_DEFAULT now lives in src/model/threeExp.js (imported above).
-
-// _solve3, _solve2, fitThreeExpAmps, predForceThreeExp, buildThreeExpPriors
-// now live in src/model/threeExp.js (imported above).
-
-// fitAdaptiveHandCurve, predForce, computeAUC now live in src/model/monod.js (imported above).
+// All model-layer math (Monod fits, three-exp fits, fatigue, prescription,
+// coaching) lives under src/model/*.js — imported above. App.js holds only
+// the React shell, BLE handling, view components, and per-component memos.
 
 // Per-session relative response of the two Monod parameters to each
 // training protocol — the POPULATION PRIOR. Values are fractional
@@ -204,11 +197,6 @@ const PROTOCOL_RESPONSE = {
 // (CF) is a stronger predictor of grade than finite reserve (W′).
 const AUC_T_MIN = 10;
 const AUC_T_MAX = 120;
-
-// ─────────────────────────────────────────────────────────────
-// SESSION PLANNER — per-rep fatigue curve prediction
-// ─────────────────────────────────────────────────────────────
-// predictRepTimes now lives in src/model/fatigue.js (imported above).
 
 // ─────────────────────────────────────────────────────────────
 // READINESS / RECOVERY HELPERS
@@ -266,22 +254,6 @@ const FEEL_OPTIONS = [
 ];
 // Map 1-5 subjective → 1-10 display score
 const subjToScore = (v) => v * 2;
-
-// All prescription / load / freshMap / RPE-bump / potential logic now
-// lives in src/model/prescription.js (imported above). Includes:
-//   effectiveLoad, loadedWeight, repKey, SHORTFALL_TOL, isShortfall,
-//   buildSMaxIndex, buildFreshLoadMap, freshLoadFor, fitDoseK,
-//   sessionCompartmentAUC, BUMP_PER_SUCCESS, MAX_BUMP_MULT,
-//   rpeProgressionMultiplier, estimateRefWeight, prescribedLoad,
-//   EMPIRICAL_LOOKBACK_DAYS, empiricalPrescription, prescriptionPotential,
-//   suggestWeight.
-
-// COACHING RECOMMENDATION ENGINE v2 now lives in src/model/coaching.js
-// (imported above). Includes COACH_INTENSITY, COACH_RECOVERY_TAU_DAYS,
-// intensityMatch, recencyPenalty, externalLoadModifier, zoneResidualFactor,
-// coachingRecommendation, coachingRationale.
-
-// sessionCompartmentAUC now lives in src/model/prescription.js (imported above).
 
 // ─────────────────────────────────────────────────────────────
 // 5-zone classifier: categorises a single hang by its
@@ -4919,9 +4891,9 @@ function AnalysisView({ history, unit = "lbs", bodyWeight = null, baseline = nul
     return rows.length >= 2 ? rows : null;
   }, [history, selHand, selGrip, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Three-exp shadow model ──
-  // (threeExpPriors memoized earlier, near top of AnalysisView, so
-  // gapHistory and prescriptionPotential can both consume it.)
+  // ── Three-exp F-D fit (governing model — see src/model/threeExp.js) ──
+  // threeExpPriors memoized earlier in AnalysisView so gapHistory,
+  // prescriptionPotential, and the chart curve all share one fit basis.
 
   // Three-exp fit for the current (selHand, selGrip) scope. Uses the
   // same `failures` array that backs cfEstimate, so the fits are

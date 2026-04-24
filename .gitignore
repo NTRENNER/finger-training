@@ -22,6 +22,8 @@ _trash_*
 *.orig
 src/*.bak
 src/*.bak_*
+*.patch
+!docs/*.patch
 
 # misc
 .DS_Store
