@@ -43,6 +43,9 @@ import {
   effectiveLoad, freshLoadFor, buildFreshLoadMap,
   empiricalPrescription, prescribedLoad, prescriptionPotential,
 } from "./prescription.js";
+import {
+  TRAINING_FOCUS, DEFAULT_TRAINING_FOCUS, focusWeights,
+} from "./training-focus.js";
 
 export const COACH_INTENSITY = {
   power:     1.0,   // Highest neural + PCr demand
@@ -169,8 +172,16 @@ export function zoneResidualFactor(history, hand, grip, targetT, amps, freshMap 
 //
 // opts: { freshMap, threeExpPriors, readiness, activities }
 export function coachingRecommendation(history, grip, opts = {}) {
-  const { freshMap = null, threeExpPriors = null, readiness = 5, activities = [] } = opts;
+  const {
+    freshMap = null, threeExpPriors = null, readiness = 5, activities = [],
+    trainingFocus = DEFAULT_TRAINING_FOCUS,
+  } = opts;
   if (!grip) return null;
+  // Per-zone bias multiplier from the user's current training focus
+  // (Settings → Training Focus). `balanced` is all 1.0 → no behavior
+  // change. Bouldering / sport / endurance lift the matching zone and
+  // soften the others. See model/training-focus.js.
+  const focusBias = focusWeights(trainingFocus);
   // Pre-compute per-hand three-exp fits so zoneResidualFactor doesn't
   // refit on every (zone, hand) loop iteration. This matches the F-D
   // chart's primary curve (post-Phase-A promotion of three-exp), so the
@@ -229,7 +240,8 @@ export function coachingRecommendation(history, grip, opts = {}) {
       const gap = (pot.value - trainAt) / trainAt;
       const resFactor = zoneResidualFactor(history, hand, grip, t, ampsByHand[hand], fmap);
       const gapForScore = Math.max(gap, -0.30); // clamp at -30%
-      const handScore = (gapForScore + 0.30) * iMatch * recency * ext * resFactor;
+      const focusMult = focusBias[zoneKey] ?? 1.0;
+      const handScore = (gapForScore + 0.30) * iMatch * recency * ext * resFactor * focusMult;
       if (handScore > bestScore) {
         bestScore = handScore;
         bestHand = hand;
@@ -248,6 +260,8 @@ export function coachingRecommendation(history, grip, opts = {}) {
       trainAt: bestTrainAt,
       iMatch, recency, ext,
       resFactor: bestResFactor,
+      focusMult: focusBias[zoneKey] ?? 1.0,
+      trainingFocus,
       score: bestScore,
     });
   }
@@ -304,6 +318,21 @@ export function coachingRationale(rec) {
   }
   if (rec.ext < 0.7) {
     reasons.push("recent climbing biased away from harder zones");
+  }
+  // Surface the user's training-focus bias when it isn't the
+  // balanced default. The pct here is the lift/cut applied to this
+  // zone's score; non-balanced focus is sticky enough to deserve
+  // an explicit mention so users understand WHY a smaller-gap zone
+  // is winning.
+  if (rec.focusMult != null && Math.abs(rec.focusMult - 1.0) > 0.05) {
+    const focusLabel = TRAINING_FOCUS[rec.trainingFocus]?.label ?? rec.trainingFocus;
+    if (rec.focusMult > 1.0) {
+      const pct = Math.round((rec.focusMult - 1.0) * 100);
+      reasons.push(`prioritised +${pct}% by your ${focusLabel} focus`);
+    } else {
+      const pct = Math.round((1.0 - rec.focusMult) * 100);
+      reasons.push(`deprioritised −${pct}% by your ${focusLabel} focus`);
+    }
   }
   return reasons.join("; ");
 }

@@ -19,6 +19,7 @@ import { C } from "../ui/theme.js";
 import { Card, Btn, Sect } from "../ui/components.js";
 import { KG_TO_LBS, fmt0, toDisp, fromDisp } from "../ui/format.js";
 import { tripCountdown } from "../lib/trip.js";
+import { TRAINING_FOCUS, DEFAULT_TRAINING_FOCUS } from "../model/training-focus.js";
 
 export function SettingsView({
   user, loginEmail, setLoginEmail,
@@ -29,6 +30,7 @@ export function SettingsView({
   unit = "lbs", onUnitChange = () => {},
   bodyWeight = null, onBWChange = () => {},
   trip = { date: "", name: "" }, onTripChange = () => {},
+  trainingFocus = DEFAULT_TRAINING_FOCUS, onTrainingFocusChange = () => {},
   onPullFromCloud = () => {}, pullStatus = "idle", lastPulledAt = null,
 }) {
   const [showSQL, setShowSQL] = useState(false);
@@ -150,6 +152,51 @@ CREATE POLICY "auth_all" ON reps
               </div>
             );
           })()}
+        </Sect>
+      </Card>
+
+      <Card>
+        <Sect title="Training Focus">
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+            Most of the year, balance keeps every compartment humming. When
+            you're prepping for a specific style — bouldering, power-endurance
+            sport, or an endurance trip like the Red River Gorge — switch the
+            focus to bias recommendations toward what you're working on
+            without abandoning the other compartments.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {Object.entries(TRAINING_FOCUS).map(([key, focus]) => {
+              const selected = trainingFocus === key;
+              return (
+                <label
+                  key={key}
+                  style={{
+                    display: "flex", alignItems: "flex-start", gap: 10,
+                    padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                    background: selected ? C.blue + "22" : C.bg,
+                    border: `1px solid ${selected ? C.blue : C.border}`,
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="trainingFocus"
+                    value={key}
+                    checked={selected}
+                    onChange={() => onTrainingFocusChange(key)}
+                    style={{ marginTop: 3, accentColor: C.blue }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: selected ? C.blue : C.text }}>
+                      {focus.label}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                      {focus.description}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
         </Sect>
       </Card>
 

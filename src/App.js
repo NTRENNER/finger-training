@@ -29,7 +29,9 @@ import {
   LS_HISTORY_KEY,
   LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
+  LS_TRAINING_FOCUS_KEY,
 } from "./lib/storage.js";
+import { DEFAULT_TRAINING_FOCUS } from "./model/training-focus.js";
 import { DEFAULT_TRIP } from "./lib/trip.js";
 import { downloadCSV, downloadWorkoutCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
@@ -181,6 +183,19 @@ export default function App() {
     const merged = { ...trip, ...next };
     setTrip(merged);
     saveLS(LS_TRIP_KEY, merged);
+  };
+
+  // ── Training focus (mild periodization bias) ──────────────
+  // Set once per training cycle (Settings tab). Defaults to
+  // "balanced" so existing users see no behavior change until
+  // they pick. See src/model/training-focus.js for the bias map
+  // and src/model/coaching.js for how it's applied.
+  const [trainingFocus, setTrainingFocusState] = useState(
+    () => loadLS(LS_TRAINING_FOCUS_KEY) || DEFAULT_TRAINING_FOCUS
+  );
+  const setTrainingFocus = (key) => {
+    setTrainingFocusState(key);
+    saveLS(LS_TRAINING_FOCUS_KEY, key);
   };
 
   // ── Session notes ─────────────────────────────────────────
@@ -556,6 +571,7 @@ export default function App() {
               connectSlot={tindeqConnectCard}
               GOAL_CONFIG={GOAL_CONFIG}
               GRIP_PRESETS={GRIP_PRESETS}
+              trainingFocus={trainingFocus}
             />
           );
         }
@@ -660,6 +676,7 @@ export default function App() {
           readiness={readiness}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
+          trainingFocus={trainingFocus}
         />
       )}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
@@ -708,6 +725,8 @@ export default function App() {
           onBWChange={saveBW}
           trip={trip}
           onTripChange={saveTrip}
+          trainingFocus={trainingFocus}
+          onTrainingFocusChange={setTrainingFocus}
           onPullFromCloud={pullFromCloud}
           pullStatus={pullStatus}
           lastPulledAt={lastPulledAt}

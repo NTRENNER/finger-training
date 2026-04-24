@@ -423,7 +423,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 
-export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [] }) {
+export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced" }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -527,6 +527,7 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               freshMap, threeExpPriors,
               readiness: readiness ?? 5,
               activities,
+              trainingFocus,
             })
           : null;
 

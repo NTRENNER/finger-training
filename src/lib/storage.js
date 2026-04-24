@@ -50,3 +50,9 @@ export const LS_WORKOUT_DELETED_KEY = "ft_workout_deleted";
 // Last-selected History-tab domain ("fingers" / "workout" / "climbing").
 // Persisted so the History tab opens to the same domain across sessions.
 export const LS_HISTORY_DOMAIN_KEY = "ft_history_domain";
+
+// Current training focus key — one of TRAINING_FOCUS (balanced /
+// bouldering / power_sport / endurance_sport). Drives the per-zone
+// bias multiplier in coachingRecommendation. Defaults to "balanced"
+// when unset so existing users see no behaviour change.
+export const LS_TRAINING_FOCUS_KEY = "ft_training_focus";

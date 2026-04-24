@@ -113,6 +113,7 @@ export function AnalysisView({
   // module doesn't reach back into App.js for view-level constants.
   GOAL_CONFIG = {},
   RM_GRIPS = [],
+  trainingFocus = "balanced",
 }) {
   const [selHand,   setSelHand]   = useState("");   // "" = Both (pool L+R for the F-D chart)
   const [selGrip,   setSelGrip]   = useState("");
@@ -800,7 +801,7 @@ export function AnalysisView({
     // scope), so we fall back to the legacy ΔAUC ranking on liveEstimate.
     if (selGrip) {
       const coach = coachingRecommendation(history, selGrip, {
-        freshMap, threeExpPriors, readiness, activities,
+        freshMap, threeExpPriors, readiness, activities, trainingFocus,
       });
       if (coach) {
         const d = ZONE_DETAILS[coach.zone];
@@ -870,7 +871,7 @@ export function AnalysisView({
     const out = {};
     for (const [grip, fit] of Object.entries(gripEstimates)) {
       const coach = coachingRecommendation(history, grip, {
-        freshMap, threeExpPriors, readiness, activities,
+        freshMap, threeExpPriors, readiness, activities, trainingFocus,
       });
       if (!coach) continue;
       // Compute per-zone gaps so the bars can show the whole landscape.
@@ -901,7 +902,7 @@ export function AnalysisView({
       };
     }
     return out;
-  }, [gripEstimates, history, freshMap, threeExpPriors, readiness, activities, GOAL_CONFIG]);
+  }, [gripEstimates, history, freshMap, threeExpPriors, readiness, activities, GOAL_CONFIG, trainingFocus]);
 
   const unexplored = Object.entries(zones)
     .filter(([, z]) => z.total === 0)
