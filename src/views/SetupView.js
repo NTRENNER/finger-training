@@ -679,14 +679,14 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               <div style={{ fontSize: 12, color: C.text, background: widestGap.cell.cfg?.color + "20" || C.bg,
                             border: `1px solid ${gapColor(widestGap.gap)}66`, borderRadius: 8,
                             padding: "8px 10px", marginBottom: 10 }}>
-                <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Biggest gap: {widestGap.zoneLabel}</span>
-                {" — your "}
-                {widestGap.zoneKey === "power" ? "fast (PCr)" : widestGap.zoneKey === "strength" ? "middle (glycolytic)" : "slow (oxidative)"}
-                {" compartment is your widest opportunity ("}
+                <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Largest curve gap: {widestGap.zoneLabel}</span>
+                {" — "}
                 <b>{fmtPct(widestGap.gap)}</b>
                 {" headroom on "}
                 {widestGap.hand === "L" ? "Left" : "Right"}
-                {"). Training there has the most leverage."}
+                {" ("}
+                {widestGap.zoneKey === "power" ? "fast (PCr)" : widestGap.zoneKey === "strength" ? "middle (glycolytic)" : "slow (oxidative)"}
+                {" compartment). The Session Planner above weighs this against recency, residual fit, and your training focus before picking — see its Why box for the final call."}
               </div>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
