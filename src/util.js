@@ -10,7 +10,8 @@ export const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 // Local-date YYYY-MM-DD. toISOString() converts to UTC, which dated
 // evening reps to "tomorrow" for users west of UTC (e.g. a 22:00
 // Pacific rep would land on the next day's row, breaking the
-// "this session was today" check in computeReadiness and friends).
+// "this session was today" check used by recency-aware helpers
+// (e.g. coaching.js's recencyFactor).
 export const ymdLocal = (d = new Date()) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");

@@ -47,7 +47,6 @@ import {
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
 import { today, uid } from "./util.js";
-import { computeReadiness } from "./model/readiness.js";
 import { zoneOf } from "./model/zones.js";
 import {
   fitCF,
@@ -60,8 +59,8 @@ import {
 // Most code that App.js used to inline now lives in extracted
 // modules — see the imports above:
 //   src/model/  pure JS math (Monod, three-exp, fatigue, prescription,
-//               coaching, zones, levels, readiness, personal-response,
-//               limiter)
+//               coaching, zones, levels, personal-response, limiter,
+//               training-focus)
 //   src/views/  React tabs + the active-session flow (BadgesView,
 //               TrendsView, HistoryView, ClimbingTab, SetupView,
 //               AnalysisView, SettingsView, WorkoutTab,
@@ -71,12 +70,12 @@ import {
 //   src/ui/     theme, formatters, shared components
 //
 // What stays here in App.js: the React shell — auth, top-level
-// state (history, activities, bodyWeight, readiness, trip,
-// trainingFocus), the reconcile/sync orchestration that owns
-// those pieces, and the tab-switch render gate. Plus GOAL_CONFIG
-// (passed to SetupView + AnalysisView), RM_GRIPS (passed to
-// AnalysisView for the 1RM tracker), and the TABS array used by
-// the top-nav router.
+// state (history, activities, bodyWeight, trip, trainingFocus),
+// the reconcile/sync orchestration that owns those pieces, and
+// the tab-switch render gate. Plus GOAL_CONFIG (passed to
+// SetupView + AnalysisView), RM_GRIPS (passed to AnalysisView
+// for the 1RM tracker), and the TABS array used by the top-nav
+// router.
 
 // LS_HISTORY_KEY (formerly LS_KEY = "ft_v3") now lives in src/lib/storage.js;
 // useRepHistory below owns reads/writes to it. App still touches it inside
@@ -96,9 +95,11 @@ const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
 // trip keys live in their respective view modules (WorkoutTab, etc.).
 const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
-// LS_READINESS_KEY ("ft_readiness") was the subjective daily check-in.
-// Removed in favor of the computed-from-history readiness model. Old
-// stored ratings are orphaned but harmless; nothing reads them.
+// LS_READINESS_KEY ("ft_readiness") was the subjective daily check-in
+// emoji. Both that widget AND the computed-from-history readiness
+// score that briefly replaced it have been removed — coaching now
+// uses a constant neutral readiness=5. Old stored ratings under
+// "ft_readiness" are orphaned but harmless; nothing reads them.
 const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-calibration snapshot
 const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }]
 const LS_GENESIS_KEY   = "ft_genesis";   // { date, CF, W, auc } — snapshot when first all-zone coverage earned
@@ -230,16 +231,16 @@ export default function App() {
   // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
 
-  // ── Readiness score ───────────────────────────────────────
-  // Computed entirely from training history via a 24h-decay model
-  // (see src/model/readiness.js). The earlier subjective check-in
-  // widget — emoji picker on the Setup tab — was removed: the
-  // override added daily friction without enough signal to justify
-  // it (effect on the coaching score was a single multiplier in
-  // [0.5, 1.0], compared to the much larger gap/residual/focus
-  // factors). Old subjective ratings under LS_READINESS_KEY are
-  // now orphaned but harmless; they aren't read anywhere.
-  const readiness = useMemo(() => computeReadiness(history), [history]);
+  // Readiness score was previously displayed as a 1-10 number computed
+  // from training history (24h-decay model in src/model/readiness.js)
+  // and fed into the coaching engine. It was removed from the UI and
+  // from the coaching pipeline because (a) the displayed number was
+  // hard to act on, and (b) the multiplier it produced ([0.5, 1.0])
+  // was small relative to the gap/residual/focus factors that
+  // actually drive recommendations. The earlier subjective check-in
+  // widget — emoji picker on the Setup tab — is also gone. Coaching
+  // now uses the engine's default readiness=5 (neutral). Old subjective
+  // ratings under LS_READINESS_KEY are orphaned but harmless.
 
   // ── Live CF/W′ estimate (all failure reps, both hands, all grips) ─────────────
   // Used by SessionPlannerCard and AnalysisView. Updates as training data grows.
@@ -556,7 +557,6 @@ export default function App() {
               freshMap={freshMap}
               unit={unit}
               onBwSave={saveBW}
-              readiness={readiness}
               liveEstimate={liveEstimate}
               gripEstimates={gripEstimates}
               activities={activities}
@@ -666,7 +666,6 @@ export default function App() {
           liveEstimate={liveEstimate}
           gripEstimates={gripEstimates}
           freshMap={freshMap}
-          readiness={readiness}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
           trainingFocus={trainingFocus}

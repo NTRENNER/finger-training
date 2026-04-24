@@ -231,7 +231,7 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
       </div>
 
       {/* Coaching rationale — explains WHY this zone was recommended,
-          combining the gap diagnostic with readiness/recency/external-load
+          combining the gap diagnostic with recency/external-load/focus
           context. Only shown when there's something meaningful to say
           (rationale string non-empty). */}
       {recommendedRationale && (
@@ -411,7 +411,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 
-export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, readiness = null, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced" }) {
+export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced" }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -457,13 +457,12 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
     () => (config.grip
       ? coachingRecommendation(history, config.grip, {
           freshMap, threeExpPriors,
-          readiness: readiness ?? 5,
           activities,
           trainingFocus,
         })
       : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [history, config.grip, freshMap, threeExpPriors, readiness, activities, trainingFocus]
+    [history, config.grip, freshMap, threeExpPriors, activities, trainingFocus]
   );
 
   return (

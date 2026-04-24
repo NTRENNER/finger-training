@@ -7,8 +7,8 @@
 // recommendations driven by the v2 coaching engine.
 //
 // All state comes in via props: history, freshMap, threeExpPriors,
-// liveEstimate, gripEstimates, readiness, etc. No localStorage
-// access, no BLE, no live session state — pure read-and-render.
+// liveEstimate, gripEstimates, etc. No localStorage access, no BLE,
+// no live session state — pure read-and-render.
 //
 // Cross-cutting App config (GOAL_CONFIG, RM_GRIPS) is passed in as
 // props so this module stays decoupled from App.js's constant block;
@@ -108,7 +108,7 @@ function buildRecFromFit(fit, personalResponse, unit) {
 export function AnalysisView({
   history, unit = "lbs", bodyWeight = null, baseline = null,
   activities = [], liveEstimate = null, gripEstimates = {},
-  freshMap = null, readiness = 5,
+  freshMap = null,
   // Cross-cutting App config — passed in rather than imported so this
   // module doesn't reach back into App.js for view-level constants.
   GOAL_CONFIG = {},
@@ -801,7 +801,7 @@ export function AnalysisView({
     // scope), so we fall back to the legacy ΔAUC ranking on liveEstimate.
     if (selGrip) {
       const coach = coachingRecommendation(history, selGrip, {
-        freshMap, threeExpPriors, readiness, activities, trainingFocus,
+        freshMap, threeExpPriors, activities, trainingFocus,
       });
       if (coach) {
         const d = ZONE_DETAILS[coach.zone];
@@ -859,7 +859,7 @@ export function AnalysisView({
       limiterKey, limiterGrip, coverageKey, agree,
       coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
     };
-  }, [liveEstimate, gripEstimates, selGrip, history, activities, unit, personalResponse, freshMap, threeExpPriors, readiness]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [liveEstimate, gripEstimates, selGrip, history, activities, unit, personalResponse, freshMap, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Per-grip recommendations — one rec per grip with enough data for
   // a coaching call. Uses the v2 coaching engine: gap × intensity ×
@@ -871,7 +871,7 @@ export function AnalysisView({
     const out = {};
     for (const [grip, fit] of Object.entries(gripEstimates)) {
       const coach = coachingRecommendation(history, grip, {
-        freshMap, threeExpPriors, readiness, activities, trainingFocus,
+        freshMap, threeExpPriors, activities, trainingFocus,
       });
       if (!coach) continue;
       // Compute per-zone gaps so the bars can show the whole landscape.
@@ -902,7 +902,7 @@ export function AnalysisView({
       };
     }
     return out;
-  }, [gripEstimates, history, freshMap, threeExpPriors, readiness, activities, GOAL_CONFIG, trainingFocus]);
+  }, [gripEstimates, history, freshMap, threeExpPriors, activities, GOAL_CONFIG, trainingFocus]);
 
   const unexplored = Object.entries(zones)
     .filter(([, z]) => z.total === 0)
