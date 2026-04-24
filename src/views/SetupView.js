@@ -1,0 +1,858 @@
+// ─────────────────────────────────────────────────────────────
+// SETUP VIEW
+// ─────────────────────────────────────────────────────────────
+// The "Setup" tab — pick a grip, see the coaching recommendation,
+// review prescribed loads per zone, log subjective readiness, set
+// body weight, connect Tindeq, and start the session.
+//
+// Bundles the cards that only ever render here:
+//   BwPrompt           — stale-body-weight nudge.
+//   SessionPlannerCard — zone picker + within/between-set sliders +
+//                        predicted fatigue curve. Takes GOAL_CONFIG
+//                        as a prop so it doesn't reach back into App.js.
+//   ZoneCoverageCard   — rolling 30-day session count by zone.
+//
+// Plus the small readiness-UI helpers (recoveryLabel, FEEL_OPTIONS,
+// subjToScore) that are only consumed by the readiness widget here.
+// Cross-cutting App config (GOAL_CONFIG, GRIP_PRESETS) is passed in
+// as props so this module stays decoupled from App.js's constant block.
+
+import React, { useMemo, useState } from "react";
+import {
+  ResponsiveContainer, LineChart, Line,
+  XAxis, YAxis, Tooltip, CartesianGrid,
+  ReferenceLine,
+} from "recharts";
+
+import { C } from "../ui/theme.js";
+import { Card, Btn, Sect } from "../ui/components.js";
+import { fmt0, fmtW, toDisp, fromDisp } from "../ui/format.js";
+
+import { loadLS, LS_BW_LOG_KEY } from "../lib/storage.js";
+
+import { computeZoneCoverage } from "../model/zones.js";
+import { computeLimiterZone } from "../model/limiter.js";
+import { predictRepTimes } from "../model/fatigue.js";
+import {
+  AUC_T_MIN, AUC_T_MAX, computePersonalResponse,
+} from "../model/personal-response.js";
+import { buildThreeExpPriors } from "../model/threeExp.js";
+import {
+  empiricalPrescription, prescribedLoad, prescriptionPotential,
+  estimateRefWeight,
+} from "../model/prescription.js";
+import {
+  coachingRecommendation, coachingRationale,
+} from "../model/coaching.js";
+
+// ─────────────────────────────────────────────────────────────
+// READINESS UI HELPERS
+// ─────────────────────────────────────────────────────────────
+// Theme-coupled labels for the readiness widget — kept here rather
+// than in model/readiness.js because they carry colors and emoji.
+
+function recoveryLabel(score) {
+  if (score >= 8) return { text: "Good day to push",            color: C.green,  emoji: "🟢" };
+  if (score >= 5) return { text: "Quality volume day",          color: C.yellow, emoji: "🟡" };
+  return              { text: "Consider light work or rest",   color: C.red,    emoji: "🔴" };
+}
+
+// 5-point subjective feeling scale → 1-10 score + label
+const FEEL_OPTIONS = [
+  { val: 1, emoji: "😴", label: "Wrecked"    },
+  { val: 2, emoji: "😓", label: "Tired"      },
+  { val: 3, emoji: "😐", label: "OK"         },
+  { val: 4, emoji: "💪", label: "Good"       },
+  { val: 5, emoji: "🔥", label: "Fired up"   },
+];
+// Map 1-5 subjective → 1-10 display score
+const subjToScore = (v) => v * 2;
+
+// ─────────────────────────────────────────────────────────────
+// BW PROMPT — stale-body-weight nudge
+// ─────────────────────────────────────────────────────────────
+
+// Inline body-weight prompt — shown in session setup when BW is stale
+// (>3 days). Exported because WorkoutTab also renders it before its
+// session log so users get the same nudge regardless of entry tab.
+export function BwPrompt({ unit = "lbs", onSave }) {
+  const bwLog  = loadLS(LS_BW_LOG_KEY) || [];
+  const latest = bwLog.length ? bwLog[bwLog.length - 1] : null;
+  const daysSince = latest
+    ? Math.floor((Date.now() - new Date(latest.date).getTime()) / 864e5)
+    : Infinity;
+
+  const [editing,  setEditing]  = useState(false);
+  const [inputVal, setInputVal] = useState(() =>
+    latest ? fmt0(toDisp(latest.kg, unit)) : ""
+  );
+
+  // Only show if stale or never set
+  if (daysSince < 3) return null;
+
+  const save = () => {
+    // Integer precision — body weight doesn't need decimal accuracy
+    const kg = fromDisp(Math.round(parseFloat(inputVal)), unit);
+    if (!isNaN(kg) && kg > 0) { onSave(kg); setEditing(false); }
+  };
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "10px 14px", borderRadius: 10, marginBottom: 14,
+      background: C.card, border: `1px solid ${C.border}`,
+    }}>
+      <span style={{ fontSize: 16 }}>⚖️</span>
+      {!editing ? (
+        <>
+          <span style={{ flex: 1, fontSize: 13, color: C.muted }}>
+            {latest
+              ? <>Still <b style={{ color: C.text }}>{fmt0(toDisp(latest.kg, unit))} {unit}</b>?</>
+              : <span>Body weight not set</span>}
+          </span>
+          <button onClick={() => setEditing(true)} style={{
+            padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: C.border, color: C.text, fontSize: 12, fontWeight: 600,
+          }}>{latest ? "Update" : "Set"}</button>
+          {latest && (
+            <button onClick={() => onSave(latest.kg)} style={{
+              padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+              background: C.green + "33", color: C.green, fontSize: 12, fontWeight: 600,
+            }}>✓ Yes</button>
+          )}
+        </>
+      ) : (
+        <>
+          <input
+            type="number"
+            inputMode="numeric"
+            step={1}
+            min={30}
+            max={500}
+            value={inputVal}
+            onChange={e => setInputVal(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && save()}
+            autoFocus
+            style={{
+              flex: 1, background: C.bg, border: `1px solid ${C.border}`,
+              borderRadius: 6, color: C.text, fontSize: 14, padding: "5px 8px",
+            }}
+          />
+          <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
+          <button onClick={save} style={{
+            padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: C.blue, color: "#000", fontSize: 12, fontWeight: 700,
+          }}>Save</button>
+          <button onClick={() => setEditing(false)} style={{
+            padding: "5px 8px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: C.border, color: C.muted, fontSize: 12,
+          }}>✕</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// SESSION PLANNER CARD
+// ─────────────────────────────────────────────────────────────
+// Zone picker + within/between-set sliders + a small predicted
+// fatigue chart. Only consumed by SetupView, but kept as its own
+// component because it owns its own form state.
+
+function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null, recommendedGrip = null, recommendedLabel = "recommended", recommendedScope = null, recommendedRationale = "", GOAL_CONFIG = {} }) {
+  // Default goal to the recommended zone when we know it; fall back to strength
+  const initGoal = (recommendedZone && GOAL_CONFIG[recommendedZone]) ? recommendedZone : "strength";
+  const [goal,    setGoal]    = useState(initGoal);
+  const [numReps, setNumReps] = useState(GOAL_CONFIG[initGoal].repsDefault);
+  const [rest,    setRest]    = useState(GOAL_CONFIG[initGoal].restDefault);
+  const [numSets,  setNumSets]  = useState(GOAL_CONFIG[initGoal].setsDefault);
+  const [setRestS, setSetRestS] = useState(GOAL_CONFIG[initGoal].setRestDefault);
+
+  const handleGoal = (g) => {
+    setGoal(g);
+    setNumReps(GOAL_CONFIG[g].repsDefault);
+    setRest(GOAL_CONFIG[g].restDefault);
+    setNumSets(GOAL_CONFIG[g].setsDefault);
+    setSetRestS(GOAL_CONFIG[g].setRestDefault);
+  };
+
+  const gc = GOAL_CONFIG[goal];
+  const firstRepTime = gc.refTime;
+
+  const repTimes = useMemo(
+    () => predictRepTimes({ numReps, firstRepTime, restSeconds: rest }),
+    [numReps, firstRepTime, rest]
+  );
+
+  const chartData = repTimes.map((t, i) => ({ rep: i + 1, time: t }));
+  const tail = repTimes.length > 1 ? Math.round((repTimes[repTimes.length - 1] / firstRepTime) * 100) : 100;
+
+  // Total session volume: sum of all predicted hold times across all sets
+  const totalVolume = Math.round(repTimes.reduce((s, t) => s + t, 0) * numSets);
+
+  return (
+    <Card style={{ marginBottom: 16, border: `1px solid ${gc.color}40` }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>🗓 Session Planner</div>
+          {recommendedScope && (
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
+              Recommendation for <span style={{ color: C.text, fontWeight: 600 }}>{recommendedScope}</span>
+            </div>
+          )}
+        </div>
+        {recommendedGrip && (
+          <div style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+            padding: "2px 8px", borderRadius: 10,
+            background: gc.color + "22", color: gc.color,
+          }}>
+            {recommendedGrip}
+          </div>
+        )}
+      </div>
+
+      {/* Goal picker */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {Object.entries(GOAL_CONFIG).map(([key, g]) => {
+          const isRec = key === recommendedZone;
+          return (
+            <button key={key} onClick={() => handleGoal(key)} style={{
+              flex: 1, padding: "8px 4px", borderRadius: 10, cursor: "pointer",
+              background: goal === key ? g.color : C.border,
+              color: goal === key ? "#fff" : C.muted,
+              fontWeight: 700, fontSize: 12, transition: "all 0.15s",
+              border: isRec ? `2px solid ${g.color}` : "2px solid transparent",
+              position: "relative",
+            }}>
+              {isRec && (
+                <div style={{
+                  position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)",
+                  fontSize: 9, fontWeight: 700, background: g.color, color: "#fff",
+                  padding: "1px 5px", borderRadius: 6, whiteSpace: "nowrap",
+                }}>
+                  {recommendedLabel}
+                </div>
+              )}
+              <div style={{ fontSize: 16 }}>{g.emoji}</div>
+              <div style={{ marginTop: 2 }}>{g.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Coaching rationale — explains WHY this zone was recommended,
+          combining the gap diagnostic with readiness/recency/external-load
+          context. Only shown when there's something meaningful to say
+          (rationale string non-empty). */}
+      {recommendedRationale && (
+        <div style={{
+          fontSize: 11, color: C.muted, marginBottom: 12,
+          padding: "8px 10px", background: C.bg, borderRadius: 8,
+          border: `1px solid ${gc.color}33`, lineHeight: 1.5,
+        }}>
+          <span style={{ color: gc.color, fontWeight: 700 }}>Why {gc.label}: </span>
+          {recommendedRationale}
+        </div>
+      )}
+
+      {/* Prescription summary strip */}
+      <div style={{
+        display: "flex", gap: 6, marginBottom: 14,
+        background: C.bg, borderRadius: 10, padding: "10px 14px", alignItems: "center",
+      }}>
+        {[
+          { label: "First rep",  value: `${firstRepTime}s` },
+          { label: "Reps",       value: numReps },
+          { label: "Sets",       value: numSets },
+          { label: "Rep rest",   value: `${rest}s` },
+          { label: "Set rest",   value: `${setRestS}s` },
+        ].map(({ label, value }, i, arr) => (
+          <React.Fragment key={label}>
+            <div style={{ textAlign: "center", flex: 1 }}>
+              <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: gc.color }}>{value}</div>
+            </div>
+            {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* Sliders — within-set structure */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+        Within Set
+      </div>
+      <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Reps</span><span style={{ fontWeight: 700, color: C.text }}>{numReps}</span>
+          </div>
+          <input type="range" min={2} max={12} value={numReps} onChange={e => setNumReps(Number(e.target.value))}
+            style={{ width: "100%", accentColor: gc.color }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Rep rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
+          </div>
+          <input type="range" min={5} max={300} step={5} value={rest} onChange={e => setRest(Number(e.target.value))}
+            style={{ width: "100%", accentColor: gc.color }} />
+        </div>
+      </div>
+
+      {/* Sliders — between-set structure */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+        Between Sets
+      </div>
+      <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Sets</span><span style={{ fontWeight: 700, color: C.text }}>{numSets}</span>
+          </div>
+          <input type="range" min={1} max={8} value={numSets} onChange={e => setNumSets(Number(e.target.value))}
+            style={{ width: "100%", accentColor: gc.color }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Set rest</span><span style={{ fontWeight: 700, color: C.text }}>{setRestS}s</span>
+          </div>
+          <input type="range" min={60} max={1800} step={60} value={setRestS} onChange={e => setSetRestS(Number(e.target.value))}
+            style={{ width: "100%", accentColor: gc.color }} />
+        </div>
+      </div>
+
+      {/* Sets rationale */}
+      <div style={{
+        background: gc.color + "12", borderLeft: `3px solid ${gc.color}`,
+        borderRadius: "0 8px 8px 0", padding: "8px 12px", marginBottom: 14,
+        fontSize: 12, color: C.muted, lineHeight: 1.6,
+      }}>
+        {gc.setsRationale}
+      </div>
+
+      {/* Predicted fatigue curve (within one set) */}
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>
+        Predicted hold time per rep · tail at <b style={{ color: gc.color }}>{tail}%</b>
+        &nbsp;· total volume ~<b style={{ color: gc.color }}>{totalVolume}s</b> across {numSets} set{numSets !== 1 ? "s" : ""}
+      </div>
+      <ResponsiveContainer width="100%" height={130}>
+        <LineChart data={chartData} margin={{ top: 4, right: 12, bottom: 24, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+          <XAxis dataKey="rep" tick={{ fill: C.muted, fontSize: 11 }}
+            label={{ value: "Rep (within set)", position: "insideBottom", offset: -14, fill: C.muted, fontSize: 11 }} />
+          <YAxis tick={{ fill: C.muted, fontSize: 10 }} unit="s" width={34} domain={[0, firstRepTime * 1.15]} />
+          <ReferenceLine y={firstRepTime} stroke={C.border} strokeDasharray="4 2" />
+          <Tooltip
+            contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+            formatter={(val) => [`${val}s`, "Hold"]}
+          />
+          <Line dataKey="time" stroke={gc.color} strokeWidth={2.5}
+            dot={{ fill: gc.color, r: 4, strokeWidth: 0 }} name="Hold" />
+        </LineChart>
+      </ResponsiveContainer>
+
+      {/* CTA */}
+      <Btn
+        onClick={() => onApplyPlan({
+          goal,
+          targetTime: firstRepTime, repsPerSet: numReps, restTime: rest,
+          numSets, setRestTime: setRestS,
+        })}
+        color={gc.color}
+        style={{ width: "100%", marginTop: 12, padding: "12px 0", borderRadius: 10, fontSize: 14, fontWeight: 700 }}
+      >
+        Use This Plan →
+      </Btn>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// ZONE COVERAGE CARD
+// Rolling 30-day count of Power / Strength / Capacity sessions.
+// ─────────────────────────────────────────────────────────────
+
+// Zone Workout Summary — neutral 30-day volume breakdown. Does NOT
+// prescribe training: the SessionPlanner owns the recommendation
+// (per-grip Monod cross-zone residual). This card is purely a log.
+// computeZoneCoverage still returns .recommended because the planner
+// uses it as a fallback when there's too little failure data for the
+// curve-residual signal; we just don't display that prescription here.
+function ZoneCoverageCard({ history, activities = [] }) {
+  const coverage = useMemo(() => computeZoneCoverage(history, activities),
+    [history, activities]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (coverage.total === 0) return null;
+
+  const zones = [
+    { key: "power",     label: "⚡ Power",     val: coverage.power,     color: "#e05560" },
+    { key: "strength",  label: "💪 Strength",  val: coverage.strength,  color: "#e07a30" },
+    { key: "endurance", label: "🏔️ Capacity",  val: coverage.endurance, color: "#3b82f6" },
+  ];
+  const maxVal = Math.max(coverage.power, coverage.strength, coverage.endurance, 1);
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Zone Workout Summary</div>
+        <div style={{ fontSize: 11, color: C.muted }}>last 30 days · {coverage.total} sessions</div>
+      </div>
+      {zones.map(({ key, label, val, color }) => (
+        <div key={key} style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+            <div style={{ fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 6 }}>
+              {label}
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>{val}</div>
+          </div>
+          <div style={{ height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+            <div style={{
+              height: "100%", borderRadius: 3,
+              width: `${(val / maxVal) * 100}%`,
+              background: color,
+              opacity: 0.85,
+            }} />
+          </div>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// SETUP VIEW
+// ─────────────────────────────────────────────────────────────
+
+export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, readiness = null, todaySubj = null, onSubjReadiness = () => {}, isEstimated = false, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [] }) {
+  const [customGrip, setCustomGrip] = useState("");
+
+  const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
+
+  // Note: model-prescribed first-rep loads are computed inline in the
+  // Prescribed Load card below, where we show all three zones at once
+  // (F = CF + W'/refTime(zone)). The fallback chain there is:
+  //   1. per-hand × per-grip failure fit (most specific)
+  //   2. per-hand, any-grip failure fit (more data, less specific)
+  //   3. historical weighted-average weight at similar target time
+
+  // (Level/journey progress vars removed — the Setup-page summary card
+  // that consumed these now lives on the Journey tab. nextLevelTarget,
+  // calcLevel, getBestLoad are still used elsewhere in the app.)
+
+  // Fatigue-adjusted load index for the prescribed-load card (computed once
+  // per history change, then reused across the multiple prescribedLoad calls
+  // in the card below). Uses the user's back-fit dose constant when there's
+  // enough within-set data; otherwise falls back to the population prior.
+  // Stable fingerprint so the 60-step grid search inside fitDoseK
+  // doesn't re-run on every history reference change (Supabase syncs,
+  // unrelated state updates that touch the App-level history array).
+  // Keyed on length + last rep's id + last rep's date — captures the
+  // dominant "new rep added" case. Edits to old reps will use the
+  // stale k until the next session, which is fine since k varies
+  // gently with sample size and the fatigue model isn't sensitive to
+  // small k shifts (CV² minimum is broad — see fitDoseK).
+  // freshMap is now provided by App via prop so the in-workout
+  // startSession path uses the SAME memoized fatigue map (with the
+  // user-fitted doseK) — without that sharing, the Setup-card
+  // prescription and the in-workout "Rep 1 suggested weight" disagreed
+  // by 1-2 lbs because startSession was falling back to DEF_DOSE_K.
+  // Three-exp prior memo stays local to SetupView since it isn't
+  // currently consumed elsewhere.
+  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+      <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
+
+      <Card>
+        <Sect title="Grip Type">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+            {GRIP_PRESETS.map(g => (
+              <button
+                key={g}
+                onClick={() => handleGrip(g)}
+                style={{
+                  padding: "6px 14px", borderRadius: 20, fontSize: 13,
+                  cursor: "pointer", fontWeight: 500,
+                  background: config.grip === g ? C.orange : C.border,
+                  color: config.grip === g ? "#fff" : C.muted,
+                  border: "none",
+                }}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={customGrip}
+              onChange={e => setCustomGrip(e.target.value)}
+              placeholder="Custom grip…"
+              style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 14 }}
+            />
+            <Btn small onClick={() => { if (customGrip.trim()) { handleGrip(customGrip.trim()); setCustomGrip(""); } }}>
+              Use
+            </Btn>
+          </div>
+        </Sect>
+      </Card>
+
+      {/* Zone Workout Summary — neutral 30-day volume breakdown (no prescription) */}
+      {/* (Level / journey card removed from setup — lives on the Journey tab now.) */}
+
+      {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
+
+      {/* Session Planner — always shown; defaults to the limiter zone
+          (Monod cross-zone residual: the zone that falls farthest
+          below the curve fit on the other two zones' rep-1 failures
+          in the last 30 days), falling back to coverage when failure
+          data is too sparse for the cross-zone fit. Matches the
+          Analysis tab's precedence so the two views never disagree. */}
+      {(() => {
+        // Coaching engine v2: pick the next zone based on
+        //   gap × intensity_match × recency × external_load
+        // Falls back to the legacy heuristic chain when there's no grip
+        // selected or no scoreable zones (cold start with no data).
+        const gripFit = config.grip && gripEstimates[config.grip];
+        const fitForRec = gripFit ?? liveEstimate;
+        const scopeLabel = gripFit ? config.grip : (config.grip ? `${config.grip} (pooled)` : "overall");
+
+        let zone = null;
+        let label = "recommended";
+        let rationale = "";
+        let recommendedGrip = null;
+
+        const coachRec = config.grip
+          ? coachingRecommendation(history, config.grip, {
+              freshMap, threeExpPriors,
+              readiness: readiness ?? 5,
+              activities,
+            })
+          : null;
+
+        if (coachRec) {
+          zone = coachRec.zone;
+          recommendedGrip = config.grip;
+          // Label captures the dominant reason (gap > 10% → "biggest gap",
+          // else fall through to "recommended" as a neutral default).
+          label = coachRec.gap > 0.10 ? "biggest gap" : "recommended";
+          rationale = coachingRationale(coachRec);
+        } else {
+          // Legacy fallback: limiter → coverage → ΔAUC.
+          const limiter = computeLimiterZone(history);
+          recommendedGrip = limiter?.grip ?? null;
+          if (fitForRec && fitForRec.CF > 0) {
+            const { CF, W } = fitForRec;
+            const response = computePersonalResponse(history);
+            let bestKey = null, bestGain = -Infinity;
+            for (const [key, resp] of Object.entries(response)) {
+              const gain = CF * resp.cf * (AUC_T_MAX - AUC_T_MIN)
+                         + W  * resp.w  * Math.log(AUC_T_MAX / AUC_T_MIN);
+              if (gain > bestGain) { bestGain = gain; bestKey = key; }
+            }
+            zone = bestKey;
+            label = "biggest gain (cold start)";
+          } else if (limiter?.zone) {
+            zone = limiter.zone;
+            label = "limiter";
+          } else {
+            const cov = computeZoneCoverage(history, activities);
+            if (cov.total > 0) {
+              zone = cov.recommended;
+              label = "least trained";
+            }
+          }
+        }
+
+        return (
+          <SessionPlannerCard
+            GOAL_CONFIG={GOAL_CONFIG}
+            liveEstimate={fitForRec}
+            recommendedZone={zone}
+            recommendedGrip={recommendedGrip}
+            recommendedLabel={label}
+            recommendedScope={scopeLabel}
+            recommendedRationale={rationale}
+            onApplyPlan={({ goal, targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
+              setConfig(c => ({ ...c, goal, targetTime, repsPerSet, restTime, numSets, setRestTime }))
+            }
+          />
+        );
+      })()}
+
+      {/* Prescribed load — appears once a grip is selected. Shows loads
+          for ALL THREE zones side-by-side so the user doesn't have to
+          guess which target time the card is reflecting. Load for each
+          zone = CF + W'/refTime(zone). Load is CONSTANT across all reps
+          of a set: rep 1 hits target, rep 2+ fall short as compartments
+          drain. Source label reflects whichever fit (per-grip / cross-
+          grip / history) backs the primary zone column. */}
+      {config.grip && (() => {
+        // Coaching prescription: empirical-first (anchored to user's
+        // most recent rep 1 outcome at this exact scope), with the
+        // curve-derived "potential" shown alongside as a diagnostic
+        // ceiling. The GAP between train-at and potential is the
+        // training opportunity — biggest gap = weakest compartment
+        // relative to the rest of the user's physiology.
+        //
+        // Three sources of truth per cell:
+        //   - TRAIN AT: empirical or curve-fallback (the load to use)
+        //   - POTENTIAL: curve ceiling (Monod or three-exp consensus)
+        //   - GAP: (potential − train_at) / train_at as percentage
+        //
+        // Reliability tiers gate the potential display:
+        //   well-supported → show numeric potential confidently
+        //   marginal → show potential with "models disagree" caveat
+        //   extrapolation → don't show numeric, suggest training the zone
+
+        const cellFor = (hand, t) => {
+          // Empirical-first: anchored to user's most recent rep 1
+          const emp = empiricalPrescription(history, hand, config.grip, t, { threeExpPriors });
+          let trainAt, source;
+          if (emp != null) {
+            trainAt = emp;
+            source = "empirical";
+          } else {
+            // Cold start: fall back to the curve. Try per-grip first,
+            // then cross-grip, then historical average.
+            const v1 = prescribedLoad(history, hand, config.grip, t, freshMap, { threeExpPriors });
+            if (v1 != null) { trainAt = v1; source = "curve-grip"; }
+            else {
+              const v2 = prescribedLoad(history, hand, null, t, freshMap, { threeExpPriors });
+              if (v2 != null) { trainAt = v2; source = "curve-global"; }
+              else {
+                const v3 = estimateRefWeight(history, hand, config.grip, t);
+                if (v3 != null) { trainAt = v3; source = "history"; }
+                else return { trainAt: null, source: null, potential: null };
+              }
+            }
+          }
+          // Potential ceiling — curve-derived, with reliability tier.
+          const potential = prescriptionPotential(history, hand, config.grip, t, {
+            freshMap, threeExpPriors,
+          });
+          return { trainAt, source, potential };
+        };
+
+        const zones = ["power", "strength", "endurance"].map(zoneKey => {
+          const t = GOAL_CONFIG[zoneKey].refTime;
+          const L = cellFor("L", t);
+          const R = cellFor("R", t);
+          return { key: zoneKey, cfg: GOAL_CONFIG[zoneKey], t, L, R };
+        });
+        const anyLoaded = zones.some(z => z.L.trainAt != null || z.R.trainAt != null);
+        if (!anyLoaded) return null;
+
+        // Find the widest reliable gap across all (zone, hand) cells —
+        // that's the recommendation engine's "biggest leverage" pointer.
+        let widestGap = null;
+        for (const z of zones) {
+          for (const [handLabel, cell] of [["L", z.L], ["R", z.R]]) {
+            if (!cell.potential || !cell.trainAt) continue;
+            if (cell.potential.reliability === "extrapolation") continue;
+            const gap = (cell.potential.value - cell.trainAt) / cell.trainAt;
+            if (widestGap == null || gap > widestGap.gap) {
+              widestGap = { zoneKey: z.key, zoneLabel: z.cfg.label, hand: handLabel, gap, cell };
+            }
+          }
+        }
+
+        // Format helpers
+        const fmtPct = (g) => `${g >= 0 ? "+" : ""}${Math.round(g * 100)}%`;
+        const gapColor = (g) => Math.abs(g) < 0.05 ? C.muted
+                              : g > 0.20 ? C.red
+                              : g > 0.10 ? C.orange
+                              : C.green;
+
+        return (
+          <Card style={{ borderColor: C.blue }}>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
+              Coaching prescription · {config.grip}
+            </div>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontStyle: "italic" }}>
+              <b style={{ color: C.text, fontStyle: "normal" }}>Train at</b> = what to lift today (anchored to your most recent rep 1 + RPE 10 push).{" "}
+              <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.{" "}
+              <b style={{ color: C.text, fontStyle: "normal" }}>Gap</b> = the training opportunity in that zone.
+            </div>
+            {widestGap && widestGap.gap > 0.10 && (
+              <div style={{ fontSize: 12, color: C.text, background: widestGap.cell.cfg?.color + "20" || C.bg,
+                            border: `1px solid ${gapColor(widestGap.gap)}66`, borderRadius: 8,
+                            padding: "8px 10px", marginBottom: 10 }}>
+                <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Biggest gap: {widestGap.zoneLabel}</span>
+                {" — your "}
+                {widestGap.zoneKey === "power" ? "fast (PCr)" : widestGap.zoneKey === "strength" ? "middle (glycolytic)" : "slow (oxidative)"}
+                {" compartment is your widest opportunity ("}
+                <b>{fmtPct(widestGap.gap)}</b>
+                {" headroom on "}
+                {widestGap.hand === "L" ? "Left" : "Right"}
+                {"). Training there has the most leverage."}
+              </div>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              {zones.map(({ key, cfg, t, L, R }) => {
+                const isActive = config.goal === key;
+                return (
+                  <div
+                    key={key}
+                    style={{
+                      padding: "10px 12px",
+                      background: isActive ? cfg.color + "22" : C.bg,
+                      border: `1px solid ${isActive ? cfg.color : C.border}`,
+                      borderRadius: 10,
+                    }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 700, color: cfg.color, marginBottom: 2 }}>
+                      {cfg.emoji} {cfg.label}
+                    </div>
+                    <div style={{ fontSize: 10, color: C.muted, marginBottom: 8 }}>
+                      target {t}s
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      {[["L", L], ["R", R]].map(([handLabel, cell]) => {
+                        const sourceMark = cell.source === "curve-global" ? "°"
+                                         : cell.source === "history" ? "ʰ"
+                                         : cell.source === "curve-grip" ? "*"
+                                         : "";
+                        const sourceTitle = cell.source === "curve-global"
+                            ? `Cold start: not enough recent ${config.grip} data on ${handLabel} at ${t}s, falling back to cross-grip curve.`
+                          : cell.source === "history"
+                            ? `Cold start: no model fit available, using historical average on ${handLabel} ${config.grip} at ${t}s.`
+                          : cell.source === "curve-grip"
+                            ? `Cold start: no recent rep 1 at this target, using ${config.grip} curve fit on ${handLabel}.`
+                            : `Empirical: anchored to your most recent rep 1 on ${handLabel} ${config.grip} at ${t}s, with RPE 10 progression.`;
+                        const pot = cell.potential;
+                        const gap = (pot && cell.trainAt && pot.reliability !== "extrapolation")
+                          ? (pot.value - cell.trainAt) / cell.trainAt : null;
+                        return (
+                          <div key={handLabel} style={{ flex: 1 }}>
+                            <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>{handLabel}</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }} title={sourceTitle}>
+                              {cell.trainAt != null ? `${fmtW(cell.trainAt, unit)}` : "—"}
+                              {sourceMark && (
+                                <span style={{ fontSize: 11, color: C.yellow, marginLeft: 2 }}>
+                                  {sourceMark}
+                                </span>
+                              )}
+                            </div>
+                            {pot && pot.reliability !== "extrapolation" && (
+                              <div style={{ fontSize: 9, color: C.muted, marginTop: 3 }}>
+                                pot {pot.reliability === "marginal"
+                                  ? `${fmtW(pot.lower, unit)}–${fmtW(pot.upper, unit)}`
+                                  : fmtW(pot.value, unit)}
+                                {pot.reliability === "marginal" && (
+                                  <span title="Monod and three-exp models disagree at this duration — treat the range as the credible band, not a precise number." style={{ color: C.yellow, marginLeft: 2 }}>
+                                    ?
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {pot && pot.reliability === "extrapolation" && (
+                              <div style={{ fontSize: 9, color: C.muted, marginTop: 3, fontStyle: "italic" }} title={`No failure data within ±50% of ${t}s — the curve is extrapolating. Train this zone to anchor it.`}>
+                                pot ?
+                              </div>
+                            )}
+                            {gap != null && (
+                              <div style={{ fontSize: 9, fontWeight: 600, color: gapColor(gap), marginTop: 2 }}
+                                   title={`Gap: train-at ${fmtW(cell.trainAt, unit)} → potential ${fmtW(pot.value, unit)} = ${fmtPct(gap)} headroom. ${gap > 0.10 ? "Worth training this zone." : "Already close to your modeled potential here."}`}>
+                                gap {fmtPct(gap)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+              <span>
+                <span style={{ color: C.muted }}>* = curve fallback (no recent rep 1) · ° = cross-grip · ʰ = historical avg · ? = uncertain potential</span>
+              </span>
+              <span>values in {unit}</span>
+            </div>
+          </Card>
+        );
+      })()}
+
+      {/* Readiness / how-do-you-feel widget */}
+      {(() => {
+        const rl = readiness != null ? recoveryLabel(readiness) : null;
+        const selectedFeel = FEEL_OPTIONS.find(f => f.val === todaySubj);
+        return (
+          <div style={{
+            marginBottom: 16, padding: "14px 16px",
+            background: C.card, border: `1px solid ${rl ? rl.color + "44" : C.border}`,
+            borderRadius: 12,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+                How do you feel today?
+              </div>
+              {readiness != null && rl && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: 18,
+                    background: rl.color + "22",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 18, fontWeight: 900, color: rl.color,
+                  }}>
+                    {readiness}
+                  </div>
+                  <div style={{ fontSize: 12, color: rl.color, fontWeight: 600 }}>{rl.text}</div>
+                </div>
+              )}
+            </div>
+
+            {/* 5-emoji picker */}
+            <div style={{ display: "flex", gap: 8 }}>
+              {FEEL_OPTIONS.map(f => {
+                const selected = todaySubj === f.val;
+                return (
+                  <button
+                    key={f.val}
+                    onClick={() => onSubjReadiness(f.val)}
+                    title={f.label}
+                    style={{
+                      flex: 1, padding: "10px 0", borderRadius: 10, cursor: "pointer",
+                      border: selected ? `2px solid ${recoveryLabel(subjToScore(f.val)).color}` : `2px solid ${C.border}`,
+                      background: selected ? recoveryLabel(subjToScore(f.val)).color + "22" : C.bg,
+                      fontSize: 22, lineHeight: 1, transition: "all 0.15s",
+                    }}
+                  >
+                    {f.emoji}
+                    <div style={{ fontSize: 9, color: selected ? recoveryLabel(subjToScore(f.val)).color : C.muted, marginTop: 3, fontWeight: selected ? 700 : 400 }}>
+                      {f.label}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Source label */}
+            <div style={{ marginTop: 9, fontSize: 11, color: C.muted, textAlign: "right" }}>
+              {todaySubj != null
+                ? `You rated today ${selectedFeel?.emoji} ${selectedFeel?.label} — tap to update`
+                : isEstimated
+                  ? "Estimated from logged training only — doesn't include climbing or other activity"
+                  : ""}
+            </div>
+          </div>
+        );
+      })()}
+
+      <BwPrompt unit={unit} onSave={onBwSave} />
+
+      {/* Tindeq Connect slot — rendered just above the Start button */}
+      {connectSlot}
+
+      <Btn
+        onClick={onStart}
+        disabled={!config.grip}
+        style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12 }}
+      >
+        {config.grip ? "Start Session →" : "Select a grip to start"}
+      </Btn>
+    </div>
+  );
+}
