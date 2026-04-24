@@ -50,6 +50,8 @@ import {
   computePersonalResponse,
 } from "../model/personal-response.js";
 import { computeLimiterZone } from "../model/limiter.js";
+import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
+import { EnergySystemBreakdownCard } from "./analysis/EnergySystemBreakdownCard.js";
 
 // ─────────────────────────────────────────────────────────────
 // ZONE_DETAILS — shared recommendation metadata used by both the
@@ -1218,88 +1220,7 @@ export function AnalysisView({
       </>)}
 
       {/* ── 1RM PR tracker ── */}
-      {(() => {
-        const rmReps = activities.filter(a => a.type === "oneRM" && a.weight_kg > 0);
-        if (rmReps.length === 0) return null;
-
-        // Build per-grip datasets — colors come from the module-
-        // level GRIP_COLORS map (single source of truth).
-        const allDates = [...new Set(rmReps.map(a => a.date))].sort();
-        const gripData = {};
-        for (const g of RM_GRIPS) {
-          const byDate = {};
-          for (const a of rmReps.filter(r => r.grip === g || (!r.grip && g === "Micro"))) {
-            if (!byDate[a.date] || a.weight_kg > byDate[a.date]) byDate[a.date] = a.weight_kg;
-          }
-          if (Object.keys(byDate).length > 0) {
-            gripData[g] = {
-              pr: Math.max(...Object.values(byDate)),
-              latest: byDate[allDates.filter(d => byDate[d]).at(-1)] ?? 0,
-              byDate,
-            };
-          }
-        }
-        if (Object.keys(gripData).length === 0) return null;
-
-        // Merge into chart data — one row per date, one column per grip
-        const chartData = allDates.map(date => {
-          const row = { date };
-          for (const g of RM_GRIPS) {
-            if (gripData[g]?.byDate[date]) row[g] = toDisp(gripData[g].byDate[date], unit);
-          }
-          return row;
-        });
-        const hasChart = chartData.length >= 2;
-
-        return (
-          <Card style={{ marginBottom: 16, border: `1px solid ${"#e05560"}30` }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏋️ 1RM Progress</div>
-
-            {/* PR summary per grip */}
-            <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
-              {RM_GRIPS.filter(g => gripData[g]).map(g => {
-                const { pr, latest } = gripData[g];
-                const isPR = latest >= pr;
-                return (
-                  <div key={g}>
-                    <div style={{ fontSize: 11, color: C.muted }}>{g} PR</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: GRIP_COLORS[g], lineHeight: 1.1 }}>
-                      {fmtW(pr, unit)} {unit}
-                    </div>
-                    {isPR && chartData.length > 1 && (
-                      <div style={{ fontSize: 11, color: GRIP_COLORS[g], fontWeight: 600 }}>🎉 PR today!</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {hasChart && (
-              <ResponsiveContainer width="100%" height={110}>
-                <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                  <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }}
-                    tickFormatter={d => d.slice(5)} interval="preserveStartEnd" />
-                  <YAxis hide domain={["auto", "auto"]} />
-                  <Tooltip
-                    contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
-                    formatter={(v, name) => [`${fmt1(v)} ${unit}`, name]}
-                    labelFormatter={d => d}
-                  />
-                  {RM_GRIPS.filter(g => gripData[g]).map(g => (
-                    <Line key={g} type="monotone" dataKey={g}
-                      stroke={GRIP_COLORS[g]} strokeWidth={2.5}
-                      dot={{ r: 3, fill: GRIP_COLORS[g] }} connectNulls />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
-              Max single effort · logged pre-climb
-            </div>
-          </Card>
-        );
-      })()}
+      <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
 
       {/* ── Endurance Improvement summary ──
           When no grip filter is active AND ≥2 grips have fits, split
@@ -1821,32 +1742,7 @@ export function AnalysisView({
         })()}
 
         {/* ── Energy system breakdown ── */}
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Energy System Breakdown</div>
-          {Object.entries(zones).map(([, z]) => (
-            <div key={z.label} style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 5 }}>
-                <span>
-                  <span style={{ color: z.color, fontWeight: 700 }}>{z.label}</span>
-                  <span style={{ color: C.muted }}> · {z.system} · {z.tau}</span>
-                </span>
-                <span style={{ color: C.muted }}>
-                  {z.total === 0 ? "No data" : `${z.failures} fail / ${z.total} total`}
-                </span>
-              </div>
-              <div style={{ height: 10, background: C.border, borderRadius: 5, overflow: "hidden" }}>
-                {z.failRate !== null && (
-                  <div style={{ height: "100%", width: `${z.failRate * 100}%`, background: z.color, borderRadius: 5, transition: "width 0.4s" }} />
-                )}
-              </div>
-              {z.total === 0 && (
-                <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>
-                  Add {z.desc} hangs to characterise this system.
-                </div>
-              )}
-            </div>
-          ))}
-        </Card>
+        <EnergySystemBreakdownCard zones={zones} />
 
         {/* ── Unified training recommendation ──
             When no grip filter is active AND ≥2 grips have fits, render
