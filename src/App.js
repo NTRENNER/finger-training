@@ -67,8 +67,27 @@ import {
 } from "./model/prescription.js";
 
 // ─────────────────────────────────────────────────────────────
-// CONSTANTS
+// CONSTANTS / UTILITIES
 // ─────────────────────────────────────────────────────────────
+// Most code that App.js used to inline now lives in extracted
+// modules — see the imports above:
+//   src/model/  pure JS math (Monod, three-exp, fatigue, prescription,
+//               coaching, zones, levels, readiness, personal-response,
+//               limiter)
+//   src/views/  React tabs + the active-session flow (BadgesView,
+//               TrendsView, HistoryView, ClimbingTab, SetupView,
+//               AnalysisView, SettingsView, WorkoutTab,
+//               ActiveSessionViews, etc.)
+//   src/lib/    side-effecting infrastructure (storage, csv, supabase,
+//               sync, tindeq, trip, climbing-grades)
+//   src/ui/     theme, formatters, shared components
+//
+// What stays here in App.js: the React shell — auth, top-level
+// state (history, activities, bodyWeight, readiness, trip), the
+// reconcile/sync orchestration that owns those pieces, and the
+// tab-switch render gate. Plus the few cross-cutting constants
+// (GOAL_CONFIG, RM_GRIPS, TABS) that the views consume as props.
+
 const LS_KEY       = "ft_v3";
 // LS_QUEUE_KEY now lives in src/lib/sync.js (imported above) — single
 // source of truth for the offline-rep retry queue's localStorage key.
@@ -81,96 +100,29 @@ const TARGET_OPTIONS = [
 
 const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
 
-// PHYS_MODEL_DEFAULT and DEF_FAT now live in src/model/fatigue.js (imported above).
-
+// localStorage keys for App-level state. The workout-plan / state /
+// trip keys live in their respective view modules (WorkoutTab, etc.).
 const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
-// LS_BW_LOG_KEY now lives in src/lib/storage.js (imported above).
 const LS_READINESS_KEY = "ft_readiness"; // { [date]: 1-5 } subjective daily rating
 const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-calibration snapshot
-const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }] — legacy entries may carry { duration_min, intensity } instead
+const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }]
 const LS_GENESIS_KEY   = "ft_genesis";   // { date, CF, W, auc } — snapshot when first all-zone coverage earned
 const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — user-configurable target date
 
-// LEVEL_STEP and LEVEL_EMOJIS now live in src/model/levels.js and
-// src/views/ActiveSessionViews.js respectively (imported above).
+// Small App-local helpers.
+const uid    = () => Math.random().toString(36).slice(2, 10);
+const nowISO = () => new Date().toISOString();
 
 // ─────────────────────────────────────────────────────────────
-// UTILITIES
+// SESSION PROTOCOL CONFIG
 // ─────────────────────────────────────────────────────────────
-const uid     = () => Math.random().toString(36).slice(2, 10);
-// ymdLocal and today now live in src/util.js (imported above).
-const nowISO      = () => new Date().toISOString();
-// fmtClock and bwOnDate now live in src/ui/format.js (imported above).
-// fmt0, fmt1, fmtW, fmtTime, toDisp, fromDisp, KG_TO_LBS now live in
-// src/ui/format.js (imported above).
-
-// loadLS and saveLS now live in src/lib/storage.js (imported above).
-
-// toCSV, downloadCSV, downloadWorkoutCSV now live in src/lib/csv.js
-// (imported above).
-
-// All model-layer math (Monod fits, three-exp fits, fatigue, prescription,
-// coaching) lives under src/model/*.js — imported above. App.js holds only
-// the React shell, BLE handling, view components, and per-component memos.
-
-// Per-session relative response of the two Monod parameters to each
-// training protocol — the POPULATION PRIOR. Values are fractional
-// (% of current); ratios within a row and among rows matter, not the
-// overall magnitude, since we only compare protocols.
-//
-// Physiological story (CF = F-D asymptote, W′ = finite reserve above it):
-//   • Power (short max efforts) primarily builds W′ — the anaerobic
-//     reserve — with minor CF carry-over via MVC neural gains.
-//   • Strength (mid-duration max hangs, 1RM work) raises the absolute
-//     force ceiling. Since CF typically sits ~60–70% of max, lifting
-//     the ceiling lifts CF proportionally — the "ceiling effect."
-//     Largest CF-response of the three.
-//   • Capacity (sustained threshold work) raises CF as a fraction of
-//     the existing ceiling — the "ratio effect." Real but bounded;
-//     once you're near the trainable CF:max ratio ceiling, further
-//     gains require lifting max itself (i.e., strength work).
-//
-// PROTOCOL_RESPONSE, AUC_T_MIN, AUC_T_MAX, computePersonalResponse
-// now live in src/model/personal-response.js (imported above).
-
-// computeReadiness now lives in src/model/readiness.js (imported above).
-// recoveryLabel/FEEL_OPTIONS/subjToScore are UI-coupled (theme colors,
-// emoji) and travel with SetupView in src/views/SetupView.js.
-
-// ZONE5, classifyZone5, dominantZone5, GOAL_TO_ZONE5 now live in
-// src/model/zones.js (imported above).
-
-// isQualifyingRep, groupSessions, getBaseline, getBestLoad, calcLevel,
-// levelTitle, nextLevelTarget, LEVEL_STEP now live in src/model/levels.js
-// (imported above).
-
-// useTindeq + parseTindeqPacket + Tindeq BLE constants now live
-// in src/lib/tindeq.js (imported above).
-// All Supabase round-trip helpers (pushRep, fetchReps,
-// enqueueReps, flushQueue, pushWorkoutSession, fetchWorkoutSessions,
-// deleteWorkoutSession, repPayload) now live in src/lib/sync.js
-// (imported above).
-// Theme (C, base) and shared components (Card, Btn, Sect, Label) now live
-// in src/ui/ — see imports at the top of this file.
-
-// BwPrompt now lives in src/views/SetupView.js (imported above).
-
-// BigTimer now lives in src/views/ActiveSessionViews.js (imported above).
-// ForceGauge now lives in src/views/ActiveSessionViews.js (imported above).
-// RepDots now lives in src/views/ActiveSessionViews.js (imported above).
-
-// ─────────────────────────────────────────────────────────────
-// SESSION PLANNER CARD
-// ─────────────────────────────────────────────────────────────
-// Shows a goal picker + predicted per-rep fatigue curve + "Use this plan" button.
-// Requires a live CF/W′ estimate fitted from training history.
-// Uniform protocol: 20s rest between every hang, 4–6 hangs per session
-// depending on zone. The set count is chosen so per-hang hold-time
-// converges to its asymptote (you've drained to compartment-3 steady state).
-// Power drains only the fast pool which refills ~75% in 20s, so it takes ~6
-// hangs to hit the tail. Capacity drains all three pools per hang, so the tail
-// is reached in ~4 hangs. Strength sits between.
+// Per-zone defaults the SessionPlanner card surfaces (rep count,
+// rest, target time, intensity copy). Set counts are tuned so per-
+// hang hold-time converges to its asymptote for that protocol —
+// power needs ~6 hangs (PCr-only drain, ~75% refill in 20s),
+// capacity ~4 (all three pools drained, 20s only refills the fast
+// one), strength sits in between.
 const GOAL_CONFIG = {
   power: {
     label: "Power", emoji: "⚡", color: "#e05560",
@@ -192,196 +144,16 @@ const GOAL_CONFIG = {
   },
 };
 
-// BADGE_CONFIG now lives in src/views/BadgesView.js (imported above).
-
-// SessionPlannerCard now lives in src/views/SetupView.js
-// (imported above) — only ever rendered from SetupView.
 // ─────────────────────────────────────────────────────────────
-// ZONE COVERAGE CARD
-// Rolling 30-day count of Power / Strength / Capacity sessions.
-// Shows which zone is undertrained and should be trained next.
+// 1RM PR TRACKER (legacy)
 // ─────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────
-// CLIMBING LOG
-// Each logged entry = one climb (discipline, grade, ascent style).
-// Climbing is tracked for readiness / context but is intentionally
-// NOT credited to zone coverage (see computeZoneCoverage note).
-// ─────────────────────────────────────────────────────────────
-// CLIMB_DISCIPLINES, ASCENT_STYLES, disciplineMeta, ascentMeta,
-// describeClimb, gradesFor, defaultGradeFor now live in
-// src/lib/climbing-grades.js (imported above).
-
-// ClimbingHistoryList now lives in src/views/ClimbingHistoryList.js (imported above).
-
-// ClimbingLogWidget now lives in src/views/ClimbingTab.js (imported above).
-
-// ─────────────────────────────────────────────────────────────
-// 1RM legacy — the OneRMWidget has been removed from the UI now that
-// the power protocol (6 × 5–7s max hangs at 20s rest) is used as the
-// pre-climb warm-up and replaces a standalone 1RM test.
-// RM_GRIPS stays so the 1RM PR tracker on the Analysis tab can render
-// historical data; computeZoneCoverage still treats any existing
-// `type: "oneRM"` activity entries as Power credit.
-// ─────────────────────────────────────────────────────────────
+// The standalone OneRMWidget was retired now that the power
+// protocol (6 × 5–7s max hangs at 20s rest) doubles as a 1RM-
+// equivalent warm-up. RM_GRIPS stays so the 1RM PR tracker on
+// the Analysis tab can still render historical data, and so
+// computeZoneCoverage credits any legacy `type: "oneRM"`
+// activity entries to Power.
 const RM_GRIPS = ["Micro", "Crusher"];
-
-// computeZoneCoverage now lives in src/model/zones.js (imported above).
-// Climbing sessions are intentionally NOT credited to any zone — the
-// old heuristic (hard→strength, easy→capacity, boulder→power) over-
-// counted climbing toward finger-specific zones it didn't really
-// stimulate. Legacy 1RM activities still credit Power.
-
-// Physiological limiter: which compartment is the user's capacity
-// shortfall relative to their own force-duration curve?
-// Returns { zone, grip } | null. Null means no/ambiguous data — caller
-// should fall back to coverage.
-//
-// WHY SEGMENT BY GRIP.
-// Absolute force on Crusher (~30 kg CF) and Micro (~10 kg CF) are not
-// on the same scale — different joint, different skin, different
-// tendon moment arm. Pooling them into one Monod fit produces a fit
-// pulled toward the average and residuals that reflect tool choice
-// rather than physiology. Each grip gets its own CF/W' fit, just as
-// prescribedLoad already does for load prescription.
-//
-// PRIMARY SIGNAL — Monod cross-zone residual.
-// Within a single grip, for each zone Z, fit F = CF + W'/T on rep-1
-// failures from the OTHER two zones, then predict force at each of
-// Z's actual_time_s values. The residual = predicted − actual is the
-// capacity shortfall in Z relative to the curve implied by the other
-// two zones. The zone with the biggest positive residual is the one
-// that falls farthest below the user's own curve for that grip.
-//
-// Why Monod and not true three-compartment decay?
-// Three-compartment (F = F_max × Σ A_i·e^(-T/τ_i)) either (a) assumes
-// textbook A_i/τ_i and reintroduces the reference-athlete bias, or
-// (b) frees all 6+ parameters and needs far more data to fit stably.
-// Monod is a 2-parameter linear fit (via fitCF) that closely
-// approximates the three-compartment shape over 5s–300s and is
-// numerically stable at the data volumes we actually see.
-//
-// FALLBACK — failure-count distribution within the same grip.
-// If a grip has data but not enough for cross-zone CV (e.g. only two
-// zones trained), fall back to the least-trained zone by rep-1
-// failure count within that grip. Under RPE-10 every session ends in
-// failure by design — fail RATE saturates near 1.0 so count is the
-// only usable summary statistic.
-//
-// GRIP SELECTION.
-// If the user trains multiple grips, we rank grips by recent rep-1
-// failure volume (most-trained grip = user's current focus) and
-// return the recommendation for the first grip whose data supports
-// one. A grip with a balanced curve is skipped — we try the next.
-//
-// Why only rep 1?  Reps 2+ in strength/capacity are to-failure by
-// protocol design — their failed flag is ~100% true regardless of
-// physiology. Rep 1 is the clean probe of "did you meet the zone's
-// demand".
-//
-// Why bucket by target_duration?  A failing rep of a strength session
-// may drop to 10s (power by actual_time_s), but it's still strength-
-// protocol data. target_duration reflects intended zone.
-// computeLimiterZone (and its LIMITER_* constants) now lives in
-// src/model/limiter.js (imported above).
-
-// ── Personalized response calibration ───────────────────────────────
-// Fits per-zone CF/W′ response rates from the user's own training log
-// and shrinks them toward the PROTOCOL_RESPONSE prior with Bayesian
-// shrinkage. Early on (thin data) the returned coefficients equal the
-// prior; as training-under-tension accumulates in a given zone, the
-// fit pulls toward the observed personal rate. A zone needs at least
-// MIN_SESSIONS effective session-equivalents before any personal
-// signal is blended in.
-//
-// Attribution: proportional by time-under-tension (TUT), not by rep
-// count or dominant zone. A day with 15s of power warm-up + 180s of
-// strength work gets 8% / 92% attribution, not all-or-nothing to the
-// dominant zone. This correctly handles the common case where a user
-// does a short max-effort warm-up (power) before their main training
-// block — the warm-up gets its proportional share, the main block
-// gets most of it. No user-facing toggle required: if power always
-// comes in small TUT doses, its effective-n stays small and its
-// personal calibration stays near prior.
-//
-// Per-day loop: for each calendar day with failures, refit Monod on
-// all data up to that day vs. through the previous day. Fractional
-// ΔCF and ΔW′ are split across zones proportional to that day's TUT
-// per zone, then accumulated as weighted observations. Noise in
-// single-day deltas averages out over many weighted observations.
-// Negative observed rates are floored at zero (likely confounds:
-// illness, taper, bad mount) rather than propagated as "training
-// hurt me" into a negative coefficient.
-//
-// Shrinkage: posterior = (k₀·prior + n_eff·weighted_mean) / (k₀ + n_eff).
-// With k₀ = PERSONAL_RESPONSE_PRIOR_WEIGHT, a zone needs roughly k₀
-// session-equivalents of evidence before personal rates dominate. n_eff
-// is fractional: a warm-up contributing 8% TUT counts as 0.08 sessions.
-// PERSONAL_RESPONSE_PRIOR_WEIGHT/MIN_SESSIONS and computePersonalResponse
-// now live in src/model/personal-response.js (imported above).
-
-// Zone Workout Summary — neutral 30-day volume breakdown. Does NOT
-// prescribe training: the SessionPlanner owns the recommendation
-// (per-grip Monod cross-zone residual). This card is purely a log.
-// computeZoneCoverage still returns .recommended because the planner
-// uses it as a fallback when there's too little failure data for the
-// curve-residual signal; we just don't display that prescription here.
-// ZoneCoverageCard now lives in src/views/SetupView.js
-// (imported above) — only ever rendered from SetupView.
-// SetupView now lives in src/views/SetupView.js (imported above).
-// ─────────────────────────────────────────────────────────────
-// ACTIVE SESSION VIEW
-// ActiveSessionView now lives in src/views/ActiveSessionViews.js (imported above).
-// playBeep now lives in src/views/ActiveSessionViews.js (imported above).
-// RestView now lives in src/views/ActiveSessionViews.js (imported above).
-// SwitchHandsView now lives in src/views/ActiveSessionViews.js (imported above).
-// AltSwitchView now lives in src/views/ActiveSessionViews.js (imported above).
-// BetweenSetsView now lives in src/views/ActiveSessionViews.js (imported above).
-// SessionSummaryView now lives in src/views/ActiveSessionViews.js (imported above).
-// ─────────────────────────────────────────────────────────────
-// HISTORY VIEW
-// WorkoutHistoryView now lives in src/views/WorkoutHistoryView.js (imported above).
-
-// HistoryView now lives in src/views/HistoryView.js (imported above).
-
-// All four Trends sub-views (TrendsView wrapper + WorkoutTrendsView,
-// BodyWeightTrendsView, ClimbingTrendsView) and the weekKey helper now
-// live in src/views/TrendsView.js (imported above).
-
-// AnalysisView (and its private helpers ZONE_DETAILS + buildRecFromFit)
-// now lives in src/views/AnalysisView.js (imported above).
-
-// ─────────────────────────────────────────────────────────────
-// SETTINGS VIEW
-// ─────────────────────────────────────────────────────────────
-// SettingsView now lives in src/views/SettingsView.js (imported above).
-
-// ─────────────────────────────────────────────────────────────
-// MAIN APP
-// ─────────────────────────────────────────────────────────────
-// BadgesView now lives in src/views/BadgesView.js (imported above).
-
-// ─────────────────────────────────────────────────────────────
-// AUTO REP SESSION VIEW
-// ─────────────────────────────────────────────────────────────
-// Touchless session mode for spring-strap / pre-calibrated setups.
-// Tindeq detects pull start and release automatically — no button taps needed.
-// AutoRepSessionView now lives in src/views/ActiveSessionViews.js (imported above).
-// ─────────────────────────────────────────────────────────────
-// DEFAULT_TRIP, parseTripDate, weeksToTrip, tripCountdown now live in
-// src/lib/trip.js (imported above).
-// WorkoutTab + its private support code (DEFAULT_WORKOUTS,
-// WTypeBadge, ExerciseRow, SessionExRow, WorkoutEditor, plus
-// LS_WORKOUT_PLAN_KEY/STATE_KEY/TRIP_KEY, WK_ROTATION,
-// WTYPE_META, EXERCISE_SUBSTITUTES) now lives in
-// src/views/WorkoutTab.js (imported above).
-// ─────────────────────────────────────────────────────────────
-// CLIMBING TAB
-// Dedicated home for logging individual climbs and reviewing
-// climbing history (discipline / grade / ascent style). Separate
-// from finger-training zone coverage by design — climbing is not
-// credited to Power / Strength / Capacity buckets.
-// ─────────────────────────────────────────────────────────────
-// ClimbingTab now lives in src/views/ClimbingTab.js (imported above).
 
 const TABS = ["Fingers", "Analysis", "Journey", "Workout", "Climbing", "History", "Trends", "Settings"];
 
