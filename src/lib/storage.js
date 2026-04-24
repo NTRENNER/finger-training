@@ -27,6 +27,11 @@ export function saveLS(key, v) {
   }
 }
 
+// Canonical client-side rep array. Owned by useRepHistory; the
+// pullFromCloud action in App.js also reads it during the
+// "reconcile local-only reps before overwriting" pre-flight.
+export const LS_HISTORY_KEY = "ft_v3";
+
 // Body-weight log: [{ date: "YYYY-MM-DD", kg: number }]
 export const LS_BW_LOG_KEY = "ft_bw_log";
 

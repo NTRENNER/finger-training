@@ -3,7 +3,6 @@
 import React, {
   useCallback, useEffect, useMemo, useState,
 } from "react";
-import { supabase } from "./lib/supabase";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
 import { Card, Btn } from "./ui/components.js";
@@ -27,6 +26,7 @@ import { WorkoutTab, DEFAULT_WORKOUTS } from "./views/WorkoutTab.js";
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
   loadLS, saveLS,
+  LS_HISTORY_KEY,
   LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
 } from "./lib/storage.js";
@@ -36,10 +36,10 @@ import { useTindeq } from "./lib/tindeq.js";
 
 // App-level hooks (see src/hooks/).
 import { useAuth } from "./hooks/useAuth.js";
+import { useRepHistory } from "./hooks/useRepHistory.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
-  pushWorkoutSession, fetchWorkoutSessions, deleteWorkoutSession,
-  LS_QUEUE_KEY,
+  fetchWorkoutSessions, deleteWorkoutSession,
 } from "./lib/sync.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
@@ -48,21 +48,16 @@ import { computeReadiness } from "./model/readiness.js";
 import {
   getBaseline, getBestLoad, calcLevel,
 } from "./model/levels.js";
-import {
-  PHYS_MODEL_DEFAULT,
-  fatigueDose, fatigueAfterRest,
-} from "./model/fatigue.js";
+import { fatigueDose, fatigueAfterRest } from "./model/fatigue.js";
 import {
   fitCF,
   computeAUC, fitAdaptiveHandCurve,
 } from "./model/monod.js";
-import { buildThreeExpPriors } from "./model/threeExp.js";
 
 // Prescription layer — used at session-start to decide rep-1 weight.
 // See src/model/prescription.js.
 import {
   isShortfall,
-  buildFreshLoadMap, fitDoseK,
   estimateRefWeight,
   prescribedLoad,
   empiricalPrescription,
@@ -91,7 +86,9 @@ import {
 // tab-switch render gate. Plus the few cross-cutting constants
 // (GOAL_CONFIG, RM_GRIPS, TABS) that the views consume as props.
 
-const LS_KEY       = "ft_v3";
+// LS_HISTORY_KEY (formerly LS_KEY = "ft_v3") now lives in src/lib/storage.js;
+// useRepHistory below owns reads/writes to it. App still touches it inside
+// pullFromCloud's "reconcile local-only reps before overwriting" pre-flight.
 // LS_QUEUE_KEY now lives in src/lib/sync.js (imported above) — single
 // source of truth for the offline-rep retry queue's localStorage key.
 
@@ -212,205 +209,16 @@ export default function App() {
 
   // Auth subscription + setUser are owned by useAuth() above.
 
-  // ── History (all reps) ───────────────────────────────────
-  const [history, setHistory] = useState(() => loadLS(LS_KEY) || []);
-  useEffect(() => saveLS(LS_KEY, history), [history]);
-
-  // App-level freshMap (fatigue-adjusted load lookup per rep). Lifted out
-  // of SetupView so the in-workout startSession path uses the SAME memo
-  // — without this, SetupView's prescription would compute with the
-  // user-fitted doseK while startSession would fall back to DEF_DOSE_K
-  // and produce a 1-2 lb discrepancy between Setup's "Prescribed load"
-  // card and the in-workout "Rep 1 suggested weight." Sharing the memo
-  // makes the two views byte-identical.
-  const freshMapFp = useMemo(() => {
-    const last = history[history.length - 1];
-    return `${history.length}|${last?.id ?? ""}|${last?.date ?? ""}`;
-  }, [history]);
-  const freshMap = useMemo(() => {
-    const k = fitDoseK(history) ?? PHYS_MODEL_DEFAULT.doseK;
-    return buildFreshLoadMap(history, { doseK: k });
-  }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // App-level three-exp per-grip priors. Hoisted out of SetupView /
-  // AnalysisView so all three callers (Setup card, Analysis chart,
-  // in-workout startSession) share one memo and pass the same priors
-  // into prescribedLoad/empiricalPrescription/prescriptionPotential.
-  // Without this, startSession was falling through to the Monod cold-
-  // start fallback even when SetupView already had a usable prior,
-  // producing different prescriptions between the two views.
-  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Track how many reps are waiting to be synced to Supabase.
-  const [pendingCount, setPendingCount] = useState(() => (loadLS(LS_QUEUE_KEY) || []).length);
-  const refreshPending = () => setPendingCount((loadLS(LS_QUEUE_KEY) || []).length);
-
-  // Load from Supabase when signed in; reconcile any offline reps first.
-  //
-  // Flow:
-  //   1. flushQueue() — retry reps that failed a previous authenticated push.
-  //   2. fetchReps() — grab the current remote state.
-  //   3. Reconcile — find local reps not present remotely (identified by
-  //      session_id + set_num + rep_num + hand) and push those. This is
-  //      the critical step: reps added while logged out live only in LS,
-  //      and without this step they'd be overwritten by setHistory(remote).
-  //   4. Re-fetch after pushes so state reflects the full merged set.
-  //
-  // Only replace local history if Supabase actually returned rows — an empty
-  // response (expired JWT silently blocked by RLS, network hiccup, etc.) must
-  // never wipe out a good local cache.
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    (async () => {
-      const flushed = await flushQueue();
-      if (!cancelled && flushed > 0) refreshPending();
-
-      const remote = await fetchReps();
-      if (cancelled) return;
-
-      if (remote) {
-        // Reconcile local-only reps (offline sessions) up to the cloud.
-        const localReps = loadLS(LS_KEY) || [];
-        const keyFor = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
-        const remoteKeys = new Set(remote.map(keyFor));
-        const toSync = localReps.filter(r => !remoteKeys.has(keyFor(r)));
-
-        let pushedAny = false;
-        for (const rep of toSync) {
-          const ok = await pushRep(rep);
-          if (ok) pushedAny = true;
-          else enqueueReps([rep]);
-        }
-        if (cancelled) return;
-
-        // If we pushed offline reps, refetch so state includes them with
-        // proper server-assigned ids. Otherwise use the first fetch.
-        const finalReps = pushedAny ? (await fetchReps()) : remote;
-        if (cancelled) return;
-        if (finalReps && finalReps.length > 0) setHistory(finalReps);
-      }
-
-      if (!cancelled) refreshPending();
-    })();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
-
-  // ── Workout session sync ─────────────────────────────────
-  const markSynced = (id) => {
-    if (!id) return;
-    const s = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
-    s.add(id);
-    saveLS(LS_WORKOUT_SYNCED_KEY, [...s]);
-  };
-
-  const handleWorkoutSessionSaved = useCallback(async (session) => {
-    if (!user) return;
-    const ok = await pushWorkoutSession(session);
-    if (ok) markSynced(session.id);
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!user) return;
-    fetchWorkoutSessions().then(async (remote) => {
-      const local = loadLS(LS_WORKOUT_LOG_KEY) || [];
-
-      // Mark all remote sessions as synced
-      const remoteIds = new Set((remote || []).map(s => s.id).filter(Boolean));
-      const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
-      remoteIds.forEach(id => synced.add(id));
-
-      // Merge any remote sessions not yet in local, skipping tombstoned deletions
-      const localIds = new Set(local.map(s => s.id).filter(Boolean));
-      const deletedIds = new Set(loadLS(LS_WORKOUT_DELETED_KEY) || []);
-      const merged = [...local, ...(remote || []).filter(s => !localIds.has(s.id) && !deletedIds.has(s.id))];
-      if (merged.length > local.length) saveLS(LS_WORKOUT_LOG_KEY, merged);
-
-      // ── One-time migration: push local sessions missing from Supabase ──
-      // Assign IDs to old sessions that never got one, then push all unsynced
-      let changed = false;
-      const genId = () => { try { return crypto.randomUUID(); } catch { return `ws_${Date.now()}_${Math.random().toString(36).slice(2,9)}`; } };
-      const toMigrate = merged.map(s => {
-        if (!s.id) { changed = true; return { ...s, id: genId() }; }
-        return s;
-      });
-      if (changed) saveLS(LS_WORKOUT_LOG_KEY, toMigrate);
-
-      for (const s of toMigrate) {
-        if (!remoteIds.has(s.id) && !deletedIds.has(s.id)) {
-          const ok = await pushWorkoutSession(s);
-          if (ok) synced.add(s.id);
-        }
-      }
-
-      saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
-
-  const addReps = useCallback((newReps) => {
-    setHistory(h => {
-      const existing = new Set(h.map(r => r.id));
-      const fresh    = newReps.filter(r => !existing.has(r.id));
-      return [...fresh, ...h];
-    });
-    if (user) {
-      // Push each rep; enqueue any that fail for later retry.
-      newReps.forEach(rep => {
-        pushRep(rep).then(ok => {
-          if (!ok) { enqueueReps([rep]); refreshPending(); }
-        });
-      });
-    }
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const updateSession = useCallback(async (sessionKey, updates) => {
-    // updates: { hand?, grip?, target_duration? }
-    setHistory(h => h.map(r =>
-      (r.session_id || r.date) === sessionKey ? { ...r, ...updates } : r
-    ));
-    if (user) {
-      const { error } = await supabase.from("reps")
-        .update(updates)
-        .eq("session_id", sessionKey);
-      if (error) console.warn("Supabase update:", error.message);
-    }
-  }, [user]);
-
-  // Rep-level identity: prefer Supabase id, fall back to composite key
-  const repMatchKey = (r) =>
-    r.id ? `id:${r.id}` : `${r.session_id || r.date}|${r.set_num}|${r.rep_num}`;
-
-  const deleteRep = useCallback(async (rep) => {
-    const k = repMatchKey(rep);
-    setHistory(h => h.filter(r => repMatchKey(r) !== k));
-    if (user && rep.id) {
-      const { error } = await supabase.from("reps").delete().eq("id", rep.id);
-      if (error) console.warn("Supabase deleteRep:", error.message);
-    }
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const updateRep = useCallback(async (rep, updates) => {
-    const k = repMatchKey(rep);
-    setHistory(h => h.map(r => repMatchKey(r) === k ? { ...r, ...updates } : r));
-    if (user && rep.id) {
-      const { error } = await supabase.from("reps").update(updates).eq("id", rep.id);
-      if (error) console.warn("Supabase updateRep:", error.message);
-    }
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const deleteSession = useCallback(async (sessionKey) => {
-    // sessionKey is session_id or date (same key used in grouping)
-    setHistory(h => h.filter(r => (r.session_id || r.date) !== sessionKey));
-    if (user) {
-      // Fetch the ids to delete (already removed from state, use a snapshot)
-      // Delete from Supabase by session_id if available, else by date
-      const { error } = await supabase.from("reps").delete()
-        .or(`session_id.eq.${sessionKey},and(session_id.is.null,date.eq.${sessionKey})`);
-      if (error) console.warn("Supabase delete:", error.message);
-    }
-  }, [user]);
+  // ── Rep history + freshMap + cloud reconcile + CRUD ──────
+  // (see src/hooks/useRepHistory.js)
+  const {
+    history,
+    freshMap, freshMapFp, threeExpPriors,
+    pendingCount, refreshPending,
+    addReps, updateRep, deleteRep, updateSession, deleteSession,
+    replaceHistory,
+    handleWorkoutSessionSaved,
+  } = useRepHistory({ user });
 
   // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
@@ -816,7 +624,7 @@ export default function App() {
       // Reps — reconcile any local-only reps before overwriting state.
       const remoteReps = await fetchReps();
       if (remoteReps) {
-        const localReps = loadLS(LS_KEY) || [];
+        const localReps = loadLS(LS_HISTORY_KEY) || [];
         const keyFor = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
         const remoteKeys = new Set(remoteReps.map(keyFor));
         const toSync = localReps.filter(r => !remoteKeys.has(keyFor(r)));
@@ -827,7 +635,7 @@ export default function App() {
           else enqueueReps([rep]);
         }
         const finalReps = pushedAny ? (await fetchReps()) : remoteReps;
-        if (finalReps && finalReps.length > 0) setHistory(finalReps);
+        replaceHistory(finalReps);
       }
 
       // Workout sessions — merge into localStorage (skipping tombstoned ids).
