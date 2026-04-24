@@ -176,6 +176,35 @@ describe("zoneResidualFactor", () => {
     ];
     expect(zoneResidualFactor(wayAbove, "L", "Crusher", 45, amps)).toBeGreaterThanOrEqual(0.5);
   });
+
+  test("uses freshLoadFor when freshMap is passed", () => {
+    // Build a within-set sequence: posted load 20 throughout, but the
+    // freshMap will say later reps are equivalent to higher fresh loads.
+    // Without the fmap, the function compares curve to raw 20.
+    // With the fmap, the function compares curve to fresh-equivalent
+    // (which is > 20 for later reps). Same amps and same actual reps.
+    const baseRep = (id, repNum) => ({
+      id, hand: "L", grip: "Crusher", failed: true,
+      session_id: "s1", set_num: 1, rep_num: repNum,
+      target_duration: 45, actual_time_s: 45,
+      avg_force_kg: 20, rest_s: 30,
+      date: "2026-04-01",
+    });
+    const history = [baseRep("r1", 1), baseRep("r2", 2), baseRep("r3", 3)];
+    // amps with predicted F(45) ≈ 25.4 (above raw 20, above fresh ~22)
+    const amps = [80, 40, 20];
+    const noFmap = zoneResidualFactor(history, "L", "Crusher", 45, amps);
+    // Build the freshMap: late-set reps will have fresh > 20.
+    // (We import buildFreshLoadMap from prescription.js for the test.)
+    // eslint-disable-next-line global-require
+    const { buildFreshLoadMap } = require("../prescription.js");
+    const fmap = buildFreshLoadMap(history);
+    const withFmap = zoneResidualFactor(history, "L", "Crusher", 45, amps, fmap);
+    // With the fmap, actual loads are higher, so residual (pred - actual)
+    // is smaller, so factor is closer to 1.0 (or smaller). It must
+    // differ from the no-fmap value.
+    expect(withFmap).not.toBe(noFmap);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────

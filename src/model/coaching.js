@@ -40,7 +40,8 @@ import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
 import {
-  effectiveLoad, empiricalPrescription, prescribedLoad, prescriptionPotential,
+  effectiveLoad, freshLoadFor, buildFreshLoadMap,
+  empiricalPrescription, prescribedLoad, prescriptionPotential,
 } from "./prescription.js";
 
 export const COACH_INTENSITY = {
@@ -128,7 +129,13 @@ export function externalLoadModifier(zone, activities) {
 // curve, so the residual signal matches the visual "dots vs curve" the
 // user sees. `amps` may be null when the (hand, grip) doesn't have
 // enough data to fit three-exp, in which case we return 1.0 (neutral).
-export function zoneResidualFactor(history, hand, grip, targetT, amps) {
+//
+// freshMap: when present, both the curve (which was fit on fresh-
+// equivalent loads upstream) and the per-rep actual values use
+// freshLoadFor — apples-to-apples comparison. When absent, falls back
+// to raw effectiveLoad on both sides so the comparison is still
+// internally consistent (just both raw, not both fresh).
+export function zoneResidualFactor(history, hand, grip, targetT, amps, freshMap = null) {
   if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) return 1.0;
   const targetZone = zoneOf(targetT);
   const fails = (history || []).filter(r =>
@@ -138,11 +145,15 @@ export function zoneResidualFactor(history, hand, grip, targetT, amps) {
     && r.actual_time_s > 0 && effectiveLoad(r) > 0
   );
   if (fails.length === 0) return 1.0;
+  const loadOf = freshMap
+    ? (r) => freshLoadFor(r, freshMap)
+    : (r) => effectiveLoad(r);
   let sumRes = 0, sumActual = 0;
   for (const r of fails) {
     const pred = predForceThreeExp(amps, r.actual_time_s);
-    sumRes += pred - effectiveLoad(r);
-    sumActual += effectiveLoad(r);
+    const actual = loadOf(r);
+    sumRes += pred - actual;
+    sumActual += actual;
   }
   const meanActual = sumActual / fails.length;
   if (meanActual <= 0) return 1.0;
@@ -165,14 +176,23 @@ export function coachingRecommendation(history, grip, opts = {}) {
   // chart's primary curve (post-Phase-A promotion of three-exp), so the
   // residual factor reflects what the user sees visually ("dots above
   // or below the purple curve in this zone").
+  //
+  // Both the fit and the residual computation use freshLoadFor — same
+  // basis as prescriptionPotential and the chart, so the curves are
+  // directly comparable. Allow a single failure when the per-grip prior
+  // exists (matches prescriptionPotential's behavior; with a strong
+  // prior the basis is anchored and one observation is enough to
+  // adjust amplitudes).
+  const fmap = freshMap || buildFreshLoadMap(history);
   const ampsByHand = {};
   const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
+  const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
   for (const h of ["L", "R"]) {
     const failPts = (history || []).filter(r =>
       r.failed && r.hand === h && r.grip === grip
       && r.actual_time_s > 0 && effectiveLoad(r) > 0
-    ).map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
-    if (failPts.length >= 2 && prior && (prior[0] + prior[1] + prior[2]) > 0) {
+    ).map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
+    if (failPts.length >= 1 && hasPrior) {
       const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failPts.length, 1);
       const amps = fitThreeExpAmps(failPts, { prior, lambda });
       ampsByHand[h] = (amps && (amps[0] + amps[1] + amps[2]) > 0) ? amps : null;
@@ -207,7 +227,7 @@ export function coachingRecommendation(history, grip, opts = {}) {
       const pot = prescriptionPotential(history, hand, grip, t, { freshMap, threeExpPriors });
       if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
       const gap = (pot.value - trainAt) / trainAt;
-      const resFactor = zoneResidualFactor(history, hand, grip, t, ampsByHand[hand]);
+      const resFactor = zoneResidualFactor(history, hand, grip, t, ampsByHand[hand], fmap);
       const gapForScore = Math.max(gap, -0.30); // clamp at -30%
       const handScore = (gapForScore + 0.30) * iMatch * recency * ext * resFactor;
       if (handScore > bestScore) {
