@@ -33,6 +33,9 @@ import {
 import { DEFAULT_TRIP } from "./lib/trip.js";
 import { downloadCSV, downloadWorkoutCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
+
+// App-level hooks (see src/hooks/).
+import { useAuth } from "./hooks/useAuth.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
   pushWorkoutSession, fetchWorkoutSessions, deleteWorkoutSession,
@@ -158,9 +161,13 @@ const RM_GRIPS = ["Micro", "Crusher"];
 const TABS = ["Fingers", "Analysis", "Journey", "Workout", "Climbing", "History", "Trends", "Settings"];
 
 export default function App() {
-  // ── Auth ──────────────────────────────────────────────────
-  const [user,       setUser]       = useState(null);
-  const [loginEmail, setLoginEmail] = useState("");
+  // ── Auth + OTP login (see src/hooks/useAuth.js) ──────────
+  const {
+    user,
+    loginEmail, setLoginEmail,
+    otpSent, otpCode, setOtpCode, otpBusy, otpError,
+    sendOtp, verifyOtp, cancelOtp, signOut,
+  } = useAuth();
 
   // ── Unit preference ───────────────────────────────────────
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
@@ -203,11 +210,7 @@ export default function App() {
     });
   }, []);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setUser(s?.user ?? null));
-    return () => sub.subscription.unsubscribe();
-  }, []);
+  // Auth subscription + setUser are owned by useAuth() above.
 
   // ── History (all reps) ───────────────────────────────────
   const [history, setHistory] = useState(() => loadLS(LS_KEY) || []);
@@ -863,58 +866,7 @@ export default function App() {
     }
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Auth helpers (6-digit OTP) ────────────────────────────
-  // We intentionally don't pass emailRedirectTo: users type the 6-digit
-  // code into the app instead of clicking a magic link. This avoids the
-  // Android "link opens in Gmail's in-app browser, session never reaches
-  // Chrome" class of failures.
-  //
-  // IMPORTANT: Requires the Supabase "Magic Link" email template to
-  // include {{ .Token }} so users actually see the code in their email.
-  // Update at: Supabase dashboard -> Authentication -> Email Templates.
-  const [otpSent,  setOtpSent]  = useState(false);
-  const [otpCode,  setOtpCode]  = useState("");
-  const [otpBusy,  setOtpBusy]  = useState(false);
-  const [otpError, setOtpError] = useState(null);
-
-  const sendOtp = async () => {
-    if (!loginEmail || otpBusy) return;
-    setOtpBusy(true);
-    setOtpError(null);
-    const { error } = await supabase.auth.signInWithOtp({
-      email: loginEmail,
-      options: { shouldCreateUser: true },
-    });
-    setOtpBusy(false);
-    if (error) { setOtpError(error.message); return; }
-    setOtpSent(true);
-    setOtpCode("");
-  };
-
-  const verifyOtp = async () => {
-    const token = (otpCode || "").replace(/\s+/g, "");
-    if (!loginEmail || !token || otpBusy) return;
-    setOtpBusy(true);
-    setOtpError(null);
-    const { error } = await supabase.auth.verifyOtp({
-      email: loginEmail,
-      token,
-      type: "email",
-    });
-    setOtpBusy(false);
-    if (error) { setOtpError(error.message); return; }
-    // Success: onAuthStateChange will set `user` and trigger the history fetch.
-    setOtpSent(false);
-    setOtpCode("");
-  };
-
-  const cancelOtp = () => {
-    setOtpSent(false);
-    setOtpCode("");
-    setOtpError(null);
-  };
-
-  const signOut = async () => { await supabase.auth.signOut(); };
+  // OTP send/verify/cancel + signOut are owned by useAuth() above.
 
   // ── Render ────────────────────────────────────────────────
   return (
