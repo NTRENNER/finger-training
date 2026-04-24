@@ -692,7 +692,7 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
 
         return (
           <Card style={{ borderColor: C.blue }}>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
               Coaching prescription · {config.grip}
             </div>
             {widestGap && widestGap.gap > 0.10 && (() => {
