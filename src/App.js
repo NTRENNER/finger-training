@@ -51,6 +51,13 @@ import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
   buildThreeExpPriors,
 } from "./model/threeExp.js";
+import { computeLimiterZone } from "./model/limiter.js";
+import {
+  AUC_T_MIN, AUC_T_MAX,
+  PERSONAL_RESPONSE_MIN_SESSIONS,
+  computePersonalResponse,
+} from "./model/personal-response.js";
+
 // Prescription layer — what to train at, what's possible, the gap diagnostic.
 // See src/model/prescription.js.
 import {
@@ -180,22 +187,8 @@ function downloadWorkoutCSV(log) {
 //     once you're near the trainable CF:max ratio ceiling, further
 //     gains require lifting max itself (i.e., strength work).
 //
-// These are priors, not truths. computePersonalResponse() fits them to
-// the user's own CF/W' trajectory and shrinks the prior toward the
-// observed rate as evidence accumulates.
-const PROTOCOL_RESPONSE = {
-  power:     { cf: 0.010, w: 0.060 },  // W′-dominant, tiny CF via MVC
-  strength:  { cf: 0.045, w: 0.015 },  // CF-dominant via ceiling effect
-  endurance: { cf: 0.030, w: 0.008 },  // CF via ratio effect, small W′
-};
-
-// Integration window for the "climbing-relevant" AUC — covers power
-// through capacity durations. CF is weighted (tMax−tMin) = 110; W′ is
-// weighted ln(tMax/tMin) ≈ 2.485, so CF dominates AUC by ~44×. This
-// matches the climbing-grade literature: sustainable finger force
-// (CF) is a stronger predictor of grade than finite reserve (W′).
-const AUC_T_MIN = 10;
-const AUC_T_MAX = 120;
+// PROTOCOL_RESPONSE, AUC_T_MIN, AUC_T_MAX, computePersonalResponse
+// now live in src/model/personal-response.js (imported above).
 
 // ─────────────────────────────────────────────────────────────
 // READINESS / RECOVERY HELPERS
@@ -1295,94 +1288,8 @@ function computeZoneCoverage(history, activities = []) {
 // Why bucket by target_duration?  A failing rep of a strength session
 // may drop to 10s (power by actual_time_s), but it's still strength-
 // protocol data. target_duration reflects intended zone.
-const LIMITER_WINDOW_DAYS      = 30;
-const LIMITER_MIN_FAILURES     = 3;    // total within a grip before we trust the signal
-const LIMITER_MIN_PTS_TRAIN    = 2;    // each of the two "training" zones needs this many points
-const LIMITER_MIN_PTS_HELDOUT  = 1;    // the held-out zone needs at least this many
-const LIMITER_RESIDUAL_KG      = 0.5;  // smallest gap we'll call a limiter — below this the curve is balanced
-function computeLimiterZone(history) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - LIMITER_WINDOW_DAYS);
-  const cutoffStr = ymdLocal(cutoff);
-
-  const allFailures = history.filter(r =>
-    r.rep_num === 1 && r.failed &&
-    r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
-    r.actual_time_s > 0 && r.target_duration > 0 &&
-    (r.date || "") >= cutoffStr &&
-    r.grip   // require known grip — otherwise we can't attribute
-  );
-  if (allFailures.length < LIMITER_MIN_FAILURES) return null;
-
-  // Segment by grip. Force scales aren't comparable across grips.
-  const byGrip = {};
-  for (const r of allFailures) (byGrip[r.grip] ||= []).push(r);
-
-  const zoneOf = (td) =>
-    td < POWER_MAX        ? "power"    :
-    td < STRENGTH_MAX     ? "strength" :
-                            "endurance";
-
-  // Try each grip, most-trained-in-30-days first. Return the first
-  // grip whose data supports a recommendation. Skipping a grip with
-  // a balanced curve is correct — it means that grip is on-curve,
-  // and the next-most-trained grip may still have a deficit.
-  const rankedGrips = Object.entries(byGrip)
-    .sort(([, a], [, b]) => b.length - a.length);
-
-  for (const [grip, failures] of rankedGrips) {
-    if (failures.length < LIMITER_MIN_FAILURES) continue;
-
-    const byZone = { power: [], strength: [], endurance: [] };
-    for (const r of failures) byZone[zoneOf(r.target_duration)].push(r);
-
-    // ── Primary: Monod cross-zone residual (per grip) ──
-    const zones = ["power", "strength", "endurance"];
-    const residuals = {};
-    let cvWorked = true;
-    for (const Z of zones) {
-      const heldOut = byZone[Z];
-      const others  = zones.filter(z => z !== Z);
-      const bothTrainZonesOk = others.every(z => byZone[z].length >= LIMITER_MIN_PTS_TRAIN);
-      if (!bothTrainZonesOk || heldOut.length < LIMITER_MIN_PTS_HELDOUT) {
-        cvWorked = false;
-        break;
-      }
-      const trainPts = others
-        .flatMap(z => byZone[z])
-        .map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
-      const fit = fitCF(trainPts);
-      if (!fit) { cvWorked = false; break; }
-
-      // Average predicted − actual across all held-out rep-1 failures.
-      // Positive = actual fell short of the cross-zone prediction.
-      const gaps = heldOut.map(r => predForce(fit, r.actual_time_s) - r.avg_force_kg);
-      residuals[Z] = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-    }
-
-    if (cvWorked) {
-      const ranked = Object.entries(residuals).sort(([, a], [, b]) => b - a);
-      // Only return a pick if the top gap is meaningfully positive.
-      // Below LIMITER_RESIDUAL_KG this grip's curve is balanced — try
-      // the next grip rather than falling through to counts (counts
-      // would disagree with a balanced curve and pick noise).
-      if (ranked[0][1] > LIMITER_RESIDUAL_KG) return { zone: ranked[0][0], grip };
-      continue;
-    }
-
-    // ── Fallback: failure-count within this grip ──
-    const counts = {
-      power:     byZone.power.length,
-      strength:  byZone.strength.length,
-      endurance: byZone.endurance.length,
-    };
-    const vals = Object.values(counts);
-    if (vals.every(v => v === vals[0])) continue;
-    const picked = Object.entries(counts).sort(([, a], [, b]) => a - b)[0][0];
-    return { zone: picked, grip };
-  }
-  return null;
-}
+// computeLimiterZone (and its LIMITER_* constants) now lives in
+// src/model/limiter.js (imported above).
 
 // ── Personalized response calibration ───────────────────────────────
 // Fits per-zone CF/W′ response rates from the user's own training log
@@ -1416,104 +1323,8 @@ function computeLimiterZone(history) {
 // With k₀ = PERSONAL_RESPONSE_PRIOR_WEIGHT, a zone needs roughly k₀
 // session-equivalents of evidence before personal rates dominate. n_eff
 // is fractional: a warm-up contributing 8% TUT counts as 0.08 sessions.
-const PERSONAL_RESPONSE_PRIOR_WEIGHT = 10;  // pseudo-sessions
-const PERSONAL_RESPONSE_MIN_SESSIONS = 5;    // hard gate per zone (effective-n)
-
-function computePersonalResponse(history) {
-  const zoneOf = (td) =>
-    td < POWER_MAX    ? "power"    :
-    td < STRENGTH_MAX ? "strength" :
-                        "endurance";
-
-  // Default: everyone starts at the prior with source='prior', n=0.
-  const result = {
-    power:     { ...PROTOCOL_RESPONSE.power,     n: 0, source: "prior" },
-    strength:  { ...PROTOCOL_RESPONSE.strength,  n: 0, source: "prior" },
-    endurance: { ...PROTOCOL_RESPONSE.endurance, n: 0, source: "prior" },
-  };
-
-  if (!history || history.length < 4) return result;
-
-  const failures = history.filter(r =>
-    r.failed &&
-    r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
-    r.actual_time_s > 0 && r.target_duration > 0 && r.date
-  );
-  if (failures.length < 4) return result;
-
-  // Sort and bucket by date.
-  const sorted = [...failures].sort((a, b) => a.date.localeCompare(b.date));
-  const byDate = {};
-  for (const r of sorted) (byDate[r.date] ||= []).push(r);
-  const dates = Object.keys(byDate).sort();
-
-  // Walk dates; at each date with enough prior data, refit before/after
-  // and split the fractional delta across zones by TUT proportion.
-  // obs[zone] is an array of { weight, dCF, dW } — weight = TUT fraction.
-  const obs = { power: [], strength: [], endurance: [] };
-
-  for (const date of dates) {
-    const before = sorted.filter(r => r.date < date);
-    const after  = sorted.filter(r => r.date <= date);
-    if (before.length < 2) continue;
-
-    const fitBefore = fitCF(before.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
-    const fitAfter  = fitCF(after.map(r  => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })));
-    if (!fitBefore || !fitAfter) continue;
-    if (fitBefore.CF <= 0) continue;
-
-    const dCF = (fitAfter.CF - fitBefore.CF) / fitBefore.CF;
-    const dW  = fitBefore.W > 0 ? (fitAfter.W - fitBefore.W) / fitBefore.W : 0;
-
-    // TUT per zone for the day — sum actual_time_s bucketed by the zone
-    // each rep was *targeting* (target_duration), not the zone the rep
-    // fell into. A failed capacity-target rep at 60s still attributes
-    // to capacity training. Matches the zone-bucketing convention used
-    // everywhere else in the app.
-    const tut = { power: 0, strength: 0, endurance: 0 };
-    for (const r of byDate[date]) tut[zoneOf(r.target_duration)] += r.actual_time_s;
-    const totalTUT = tut.power + tut.strength + tut.endurance;
-    if (totalTUT <= 0) continue;
-
-    for (const zone of Object.keys(tut)) {
-      const w = tut[zone] / totalTUT;
-      if (w > 0) obs[zone].push({ weight: w, dCF, dW });
-    }
-  }
-
-  // Weighted shrinkage. Effective-n = Σ weights (can be fractional).
-  const k0 = PERSONAL_RESPONSE_PRIOR_WEIGHT;
-  for (const zone of Object.keys(PROTOCOL_RESPONSE)) {
-    const zoneObs = obs[zone];
-    const nEff = zoneObs.reduce((s, o) => s + o.weight, 0);
-
-    if (nEff < PERSONAL_RESPONSE_MIN_SESSIONS) {
-      result[zone] = { ...PROTOCOL_RESPONSE[zone], n: nEff, source: "prior" };
-      continue;
-    }
-
-    // Weighted mean of observed fractional deltas. Divides by Σweights
-    // so each day's total contribution (across all zones) is 1 unit of
-    // evidence, split proportionally by that day's TUT distribution.
-    const wMeanCF = zoneObs.reduce((s, o) => s + o.weight * o.dCF, 0) / nEff;
-    const wMeanW  = zoneObs.reduce((s, o) => s + o.weight * o.dW,  0) / nEff;
-    const prior   = PROTOCOL_RESPONSE[zone];
-
-    // Floor at zero: negative observed rate is almost always confounded
-    // (illness, injury, mount variance) rather than true anti-response.
-    const cfBlended = Math.max(0, (k0 * prior.cf + nEff * wMeanCF) / (k0 + nEff));
-    const wBlended  = Math.max(0, (k0 * prior.w  + nEff * wMeanW)  / (k0 + nEff));
-
-    result[zone] = {
-      cf: cfBlended,
-      w:  wBlended,
-      n:  nEff,
-      source: "blended",
-    };
-  }
-
-  return result;
-}
+// PERSONAL_RESPONSE_PRIOR_WEIGHT/MIN_SESSIONS and computePersonalResponse
+// now live in src/model/personal-response.js (imported above).
 
 // Zone Workout Summary — neutral 30-day volume breakdown. Does NOT
 // prescribe training: the SessionPlanner owns the recommendation
