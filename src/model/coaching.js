@@ -278,19 +278,24 @@ export function coachingRationale(rec) {
   const compName = rec.zone === "power" ? "fast (PCr)"
                  : rec.zone === "strength" ? "middle (glycolytic)"
                  : "slow (oxidative)";
-  const handLabel = rec.hand === "L" ? "Left" : "Right";
+  // Note: rec.hand still tracks the better-scoring hand internally for
+  // the per-zone score, but we don't surface it in the rationale text.
+  // Most users train both hands per session, so saying "on Left" /
+  // "on Right" at the recommendation level adds noise without
+  // changing what they'd do. Per-hand info still appears in the
+  // per-zone prescription cells (L 48.7 / R 46.3 etc.).
   const reasons = [];
   if (rec.gap > 0.10) {
     const pct = Math.round(rec.gap * 100);
-    reasons.push(`+${pct}% gap on ${handLabel} (your ${compName} compartment is your widest opportunity)`);
+    reasons.push(`+${pct}% gap (your ${compName} compartment is your widest opportunity)`);
   } else if (rec.gap > -0.05) {
     // Near-zero gap: user is essentially AT potential here. Maintain.
-    reasons.push(`at potential on ${handLabel} (your ${compName} compartment is balanced — best zone among balanced options)`);
+    reasons.push(`at potential (your ${compName} compartment is balanced — best zone among balanced options)`);
   } else {
     // Negative gap: user is exceeding the model's view of potential.
     // The model is running behind your real fitness here.
     const pct = Math.round(-rec.gap * 100);
-    reasons.push(`exceeding modeled potential by ${pct}% on ${handLabel} (the model is conservative here — pick this zone to maintain or push the ceiling further)`);
+    reasons.push(`exceeding modeled potential by ${pct}% (the model is conservative here — pick this zone to maintain or push the ceiling further)`);
   }
   // Residual signal — visible on the F-D chart as dots-vs-three-exp-curve.
   // Strong limiter signal when the user's actuals fall systematically below

@@ -17,7 +17,7 @@
 // Cross-cutting App config (GOAL_CONFIG, GRIP_PRESETS) is passed in
 // as props so this module stays decoupled from App.js's constant block.
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer, LineChart, Line,
   XAxis, YAxis, Tooltip, CartesianGrid,
@@ -177,6 +177,18 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
     setNumSets(GOAL_CONFIG[g].setsDefault);
     setSetRestS(GOAL_CONFIG[g].setRestDefault);
   };
+
+  // Follow `recommendedZone` when it changes (e.g. user picked a
+  // different Training Focus in Settings, or switched grip). Without
+  // this, `goal` stayed stuck at whatever was recommended on first
+  // mount, and the "Why X" header drifted out of sync with the
+  // actually-recommended zone shown by the pill.
+  useEffect(() => {
+    if (recommendedZone && GOAL_CONFIG[recommendedZone] && recommendedZone !== goal) {
+      handleGoal(recommendedZone);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recommendedZone]);
 
   const gc = GOAL_CONFIG[goal];
   const firstRepTime = gc.refTime;
@@ -708,7 +720,6 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               const focusLabel = focusKey && focusKey !== "balanced"
                 ? TRAINING_FOCUS[focusKey]?.label
                 : null;
-              const recHand = coachRec?.hand === "L" ? "Left" : coachRec?.hand === "R" ? "Right" : null;
               const matches = recZone && recZone === widestGap.zoneKey;
               return (
                 <div style={{ fontSize: 12, color: C.text, background: widestGap.cell.cfg?.color + "20" || C.bg,
@@ -716,7 +727,7 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                               padding: "10px 12px", marginBottom: 10 }}>
                   <div>
                     <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Balanced view · largest curve gap:</span>{" "}
-                    {widestGap.zoneLabel} — <b>{fmtPct(widestGap.gap)}</b> headroom on {widestGap.hand === "L" ? "Left" : "Right"}{" "}
+                    {widestGap.zoneLabel} — <b>{fmtPct(widestGap.gap)}</b> headroom{" "}
                     ({widestGap.zoneKey === "power" ? "fast (PCr)" : widestGap.zoneKey === "strength" ? "middle (glycolytic)" : "slow (oxidative)"} compartment).
                   </div>
                   {recZone && (
@@ -725,8 +736,8 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                         {focusLabel ? `Per your ${focusLabel} focus` : "Goal-adjusted pick"}:
                       </span>{" "}
                       {matches
-                        ? <>matches above — the Session Planner picks <b>{recLabel}</b>{recHand ? ` on ${recHand}` : ""}.</>
-                        : <>Session Planner picks <b>{recLabel}</b>{recHand ? ` on ${recHand}` : ""} after weighing recency, residual fit{focusLabel ? ", and your training focus" : ""}. See its Why box for the full reasoning.</>}
+                        ? <>matches above — the Session Planner picks <b>{recLabel}</b>.</>
+                        : <>Session Planner picks <b>{recLabel}</b> after weighing recency, residual fit{focusLabel ? ", and your training focus" : ""}. See its Why box for the full reasoning.</>}
                     </div>
                   )}
                   {!recZone && (

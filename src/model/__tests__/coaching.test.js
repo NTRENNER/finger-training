@@ -272,11 +272,14 @@ describe("coachingRationale", () => {
     expect(coachingRationale(null)).toBe("");
   });
 
-  test("includes zone-compartment and hand language", () => {
+  test("includes zone-compartment language but not hand-side", () => {
+    // hand-side intentionally omitted from rationale: most users train
+    // both hands per session so "on Left" / "on Right" at the
+    // recommendation level adds noise without changing what they'd do.
     const rec = { zone: "power", hand: "L", gap: 0.20, iMatch: 0.9, recency: 0.9, ext: 1, resFactor: 1 };
     const text = coachingRationale(rec);
     expect(text).toMatch(/fast|PCr/i);
-    expect(text).toMatch(/Left/);
+    expect(text).not.toMatch(/Left|Right/);
   });
 
   test("calls out the 3-exp curve in residual signal", () => {
