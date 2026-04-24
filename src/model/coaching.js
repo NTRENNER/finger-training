@@ -28,7 +28,9 @@
 
 import { ymdLocal } from "../util.js";
 import { ZONE_REF_T, zoneOf } from "./zones.js";
-import { fitCF } from "./monod.js";
+import {
+  THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
+} from "./threeExp.js";
 import {
   effectiveLoad, empiricalPrescription, prescribedLoad, prescriptionPotential,
 } from "./prescription.js";
@@ -102,22 +104,24 @@ export function externalLoadModifier(zone, activities) {
   return baseReduction + (1 - baseReduction) * recoveryFraction;
 }
 
-// For (hand, grip, target T), compute mean residual between the failure-
-// only Monod curve and the actual achieved force on failures in the same
-// zone. Positive mean residual = curve over-predicts (your reps fall
-// BELOW the curve in that zone) = limiter signal. Negative = you're
-// outperforming the curve in that zone.
+// For (hand, grip, target T), compute mean residual between the three-exp
+// F-D curve and the actual achieved force on failures in the same zone.
+// Positive mean residual = curve over-predicts (your reps fall BELOW the
+// curve in that zone) = limiter signal. Negative = you're outperforming
+// the curve in that zone.
 //
 // Returns a multiplier for the coaching score:
 //   factor > 1: limiter zone — boost score (train this)
 //   factor = 1: at curve — neutral
 //   factor < 1: above curve — depress score (other zones have more room)
 //
-// Uses `fit` (failure-only Monod) passed in by caller so we don't refit
-// per-zone. `fit` may be null when the (hand, grip) doesn't have ≥2
-// failures, in which case we return 1.0 (neutral — no signal).
-export function zoneResidualFactor(history, hand, grip, targetT, fit) {
-  if (!fit) return 1.0;
+// Uses `amps` (three-exp [a, b, c] for this (hand, grip)) passed in by
+// caller so we don't refit per-zone. The same fit drives the F-D chart
+// curve, so the residual signal matches the visual "dots vs curve" the
+// user sees. `amps` may be null when the (hand, grip) doesn't have
+// enough data to fit three-exp, in which case we return 1.0 (neutral).
+export function zoneResidualFactor(history, hand, grip, targetT, amps) {
+  if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) return 1.0;
   const targetZone = zoneOf(targetT);
   const fails = (history || []).filter(r =>
     r.failed && r.hand === hand && r.grip === grip
@@ -128,7 +132,7 @@ export function zoneResidualFactor(history, hand, grip, targetT, fit) {
   if (fails.length === 0) return 1.0;
   let sumRes = 0, sumActual = 0;
   for (const r of fails) {
-    const pred = fit.CF + fit.W / r.actual_time_s;
+    const pred = predForceThreeExp(amps, r.actual_time_s);
     sumRes += pred - effectiveLoad(r);
     sumActual += effectiveLoad(r);
   }
@@ -148,17 +152,25 @@ export function zoneResidualFactor(history, hand, grip, targetT, fit) {
 export function coachingRecommendation(history, grip, opts = {}) {
   const { freshMap = null, threeExpPriors = null, readiness = 5, activities = [] } = opts;
   if (!grip) return null;
-  // Pre-compute per-hand failure-only Monod fits so zoneResidualFactor
-  // doesn't refit on every (zone, hand) loop iteration. This is the SAME
-  // fit the F-D chart displays, so the residual factor matches what the
-  // user sees visually ("dots below the curve in this zone").
-  const failureFitByHand = {};
+  // Pre-compute per-hand three-exp fits so zoneResidualFactor doesn't
+  // refit on every (zone, hand) loop iteration. This matches the F-D
+  // chart's primary curve (post-Phase-A promotion of three-exp), so the
+  // residual factor reflects what the user sees visually ("dots above
+  // or below the purple curve in this zone").
+  const ampsByHand = {};
+  const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
   for (const h of ["L", "R"]) {
     const failPts = (history || []).filter(r =>
       r.failed && r.hand === h && r.grip === grip
       && r.actual_time_s > 0 && effectiveLoad(r) > 0
-    ).map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
-    failureFitByHand[h] = failPts.length >= 2 ? fitCF(failPts) : null;
+    ).map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
+    if (failPts.length >= 2 && prior && (prior[0] + prior[1] + prior[2]) > 0) {
+      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failPts.length, 1);
+      const amps = fitThreeExpAmps(failPts, { prior, lambda });
+      ampsByHand[h] = (amps && (amps[0] + amps[1] + amps[2]) > 0) ? amps : null;
+    } else {
+      ampsByHand[h] = null;
+    }
   }
 
   const zones = ["power", "strength", "endurance"];
@@ -187,7 +199,7 @@ export function coachingRecommendation(history, grip, opts = {}) {
       const pot = prescriptionPotential(history, hand, grip, t, { freshMap, threeExpPriors });
       if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
       const gap = (pot.value - trainAt) / trainAt;
-      const resFactor = zoneResidualFactor(history, hand, grip, t, failureFitByHand[hand]);
+      const resFactor = zoneResidualFactor(history, hand, grip, t, ampsByHand[hand]);
       const gapForScore = Math.max(gap, -0.30); // clamp at -30%
       const handScore = (gapForScore + 0.30) * iMatch * recency * ext * resFactor;
       if (handScore > bestScore) {
@@ -238,17 +250,18 @@ export function coachingRationale(rec) {
     const pct = Math.round(-rec.gap * 100);
     reasons.push(`exceeding modeled potential by ${pct}% on ${handLabel} (the model is conservative here — pick this zone to maintain or push the ceiling further)`);
   }
-  // Residual signal — visible on the F-D chart as dots-vs-curve. Strong
-  // limiter signal when the user's actuals fall systematically below the
-  // failure-only Monod curve in this zone.
+  // Residual signal — visible on the F-D chart as dots-vs-three-exp-curve.
+  // Strong limiter signal when the user's actuals fall systematically below
+  // the three-exp curve in this zone (the curve over-predicts → physiology
+  // can't keep up → limiter compartment).
   if (rec.resFactor != null) {
     if (rec.resFactor >= 1.5) {
       const pct = Math.round((rec.resFactor - 1) * 10); // approx mean residual %
-      reasons.push(`reps fall ~${pct}% below the curve here — limiter signal from the F-D chart`);
+      reasons.push(`reps fall ~${pct}% below the 3-exp curve here — limiter signal from the F-D chart`);
     } else if (rec.resFactor >= 1.15) {
-      reasons.push("reps fall slightly below the curve here — mild limiter signal");
+      reasons.push("reps fall slightly below the 3-exp curve here — mild limiter signal");
     } else if (rec.resFactor < 0.85) {
-      reasons.push("reps sit above the curve here — strong-zone signal (consistent with the conservative-model reading above)");
+      reasons.push("reps sit above the 3-exp curve here — strong-zone signal");
     }
   }
   if (rec.iMatch >= 0.85) {
