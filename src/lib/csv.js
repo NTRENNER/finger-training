@@ -8,9 +8,22 @@
 
 // Per-rep grip-training CSV — flat schema matching the Supabase
 // `reps` table for round-trip import in spreadsheets.
+//
+// avg_force_kg is the Tindeq-measured actual force during the hang;
+// the model layer prefers it over weight_kg for "effective load"
+// (see effectiveLoad() in src/model/prescription.js). Reps that
+// have weight_kg = 0 but a real avg_force_kg reading are still
+// informative — without this column, those rows looked like blank
+// zero-load rows in earlier exports.
+//
+// `failed` is the auto-failure flag (true if the rep timed out or
+// the user marked it failed). Failure reps are what drives the
+// curve fit, so leaving it out of the export made it impossible to
+// reconstruct the model's view of which reps mattered.
 export function toCSV(reps) {
   const cols = ["id","date","grip","hand","target_duration","weight_kg",
-                "actual_time_s","peak_force_kg","set_num","rep_num","rest_s","session_id"];
+                "actual_time_s","avg_force_kg","peak_force_kg",
+                "set_num","rep_num","rest_s","session_id","failed"];
   const esc  = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
   return [cols.join(","), ...reps.map(r => cols.map(c => esc(r[c])).join(","))].join("\n");
 }
