@@ -32,3 +32,16 @@ export const LS_BW_LOG_KEY = "ft_bw_log";
 
 // Strength-workout log: [{ id, date, workout, exercises: { [id]: { sets: [...] } } }]
 export const LS_WORKOUT_LOG_KEY = "ft_workout_log";
+
+// Set<id> of workout sessions confirmed in Supabase. Used to render
+// the cloud/local sync badge in WorkoutHistoryView.
+export const LS_WORKOUT_SYNCED_KEY = "ft_workout_synced";
+
+// Set<id> of workout-session tombstones. Once a session id is in
+// here, the merge-from-Supabase pass never re-adds it, so deletes
+// stick across sync cycles.
+export const LS_WORKOUT_DELETED_KEY = "ft_workout_deleted";
+
+// Last-selected History-tab domain ("fingers" / "workout" / "climbing").
+// Persisted so the History tab opens to the same domain across sessions.
+export const LS_HISTORY_DOMAIN_KEY = "ft_history_domain";

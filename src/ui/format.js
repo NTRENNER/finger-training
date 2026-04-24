@@ -35,3 +35,23 @@ export const fmtTime = (s) => {
   const m = Math.floor(s / 60), sec = Math.floor(s % 60);
   return m > 0 ? `${m}:${String(sec).padStart(2, "0")}` : `${Math.floor(s)}s`;
 };
+
+// Format an ISO timestamp as a localized clock time ("hh:mm AM/PM").
+// Returns "" on invalid input rather than throwing.
+export const fmtClock = (iso) => {
+  try {
+    return new Date(iso).toLocaleTimeString([], {
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+};
+
+// Return the most recent body-weight log entry on or before `date`
+// (YYYY-MM-DD), or null. Used to attach a same-or-prior BW reading
+// to historical session rows.
+export const bwOnDate = (bwLog, date) => {
+  const candidates = (bwLog || []).filter(e => e.date <= date);
+  return candidates.length ? candidates[candidates.length - 1] : null;
+};
