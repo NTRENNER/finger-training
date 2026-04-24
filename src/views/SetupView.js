@@ -659,11 +659,25 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
         }
 
         // Format helpers
+        //
+        // Gap colors encode TRAINING OPPORTUNITY, not a warning level.
+        // A large positive gap is room to grow into (good: green) —
+        // the inviting direction the coaching engine points at. A
+        // negative gap means you're already outpacing the curve's
+        // prediction in that zone (orange: model is conservative,
+        // less headroom to chase). Near-zero is muted.
+        //
+        // This matches the rest of the app's framing (dual-perspective
+        // callout describes the largest gap as "headroom", the Why
+        // box calls it "your widest opportunity"). Earlier the scale
+        // was inverted — large gap rendered red like an alarm — which
+        // fought the verbal framing.
         const fmtPct = (g) => `${g >= 0 ? "+" : ""}${Math.round(g * 100)}%`;
         const gapColor = (g) => Math.abs(g) < 0.05 ? C.muted
-                              : g > 0.20 ? C.red
-                              : g > 0.10 ? C.orange
-                              : C.green;
+                              : g > 0.20 ? C.green
+                              : g > 0.10 ? C.yellow
+                              : g > 0    ? C.muted
+                              : C.orange;
 
         return (
           <Card style={{ borderColor: C.blue }}>
