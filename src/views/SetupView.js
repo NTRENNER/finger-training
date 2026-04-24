@@ -692,13 +692,8 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
 
         return (
           <Card style={{ borderColor: C.blue }}>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
               Coaching prescription · {config.grip}
-            </div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontStyle: "italic" }}>
-              <b style={{ color: C.text, fontStyle: "normal" }}>Train at</b> = what to lift today (anchored to your most recent rep 1 + RPE 10 push).{" "}
-              <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.{" "}
-              <b style={{ color: C.text, fontStyle: "normal" }}>Gap</b> = the training opportunity in that zone.
             </div>
             {widestGap && widestGap.gap > 0.10 && (() => {
               // Two complementary perspectives shown side by side:
@@ -824,6 +819,17 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                   </div>
                 );
               })}
+            </div>
+            {/* Descriptors moved below the cells — at this point the
+                user has already read the L/R loads + pot/gap rows, so
+                the column-name explanations land as confirmation
+                rather than ceremony before the data. The "Train at"
+                gloss was dropped: the bare number under each L/R is
+                obviously the load, the Potential and Gap labels in
+                the cells are the only ones that benefit from a key. */}
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 10, fontStyle: "italic", lineHeight: 1.5 }}>
+              <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.{" "}
+              <b style={{ color: C.text, fontStyle: "normal" }}>Gap</b> = the training opportunity in that zone.
             </div>
             <div style={{ fontSize: 10, color: C.muted, marginTop: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
               <span>
