@@ -1,3 +1,18 @@
+/* Paint html + body with the app's dark background so iOS Safari's
+   rubber-band overscroll (horizontal AND vertical) reveals dark
+   instead of the default white. The React root sets its own bg via
+   `base` in src/ui/theme.js, but that only covers inside the root —
+   when the top nav is wider than the viewport and the user swipes
+   past the last tab, or when the page bounces past the bottom, the
+   bg of html/body is what shows through. Keeping these in sync with
+   C.bg ("#0d1117") avoids the flash of white. overscroll-behavior:
+   none on the html element also disables the bounce on browsers
+   that respect it (which keeps things steadier on Android). */
+html, body {
+  background: #0d1117;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
