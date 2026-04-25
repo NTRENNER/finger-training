@@ -36,7 +36,19 @@ export const LS_HISTORY_KEY = "ft_v3";
 export const LS_BW_LOG_KEY = "ft_bw_log";
 
 // Strength-workout log: [{ id, date, workout, exercises: { [id]: { sets: [...] } } }]
+//
+// Special entries with `workout === ROTATION_PIN_KEY` are NOT real
+// workouts — they're synced markers used by WorkoutTab to set the
+// next-up rotation manually (recovery valve when devices drift or
+// the user wants to restart a cycle). Every consumer that displays
+// or aggregates the log should filter these out; only WorkoutTab's
+// rotation-derivation useMemo cares about them.
 export const LS_WORKOUT_LOG_KEY = "ft_workout_log";
+
+// Marker workout name for rotation-override entries (see comment
+// above). Kept in storage.js so WorkoutTab, WorkoutHistoryView,
+// TrendsView, and the CSV export can all import the same constant.
+export const ROTATION_PIN_KEY = "__rotation_pin";
 
 // Set<id> of workout sessions confirmed in Supabase. Used to render
 // the cloud/local sync badge in WorkoutHistoryView.

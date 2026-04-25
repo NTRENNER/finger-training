@@ -35,7 +35,7 @@ import { Card, Label } from "../ui/components.js";
 import { fmt1, toDisp } from "../ui/format.js";
 import { effectiveLoad } from "../model/prescription.js";
 import { TARGET_OPTIONS } from "../model/zones.js";
-import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
+import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY, ROTATION_PIN_KEY } from "../lib/storage.js";
 import { gradeRank, weekKey } from "../lib/climbing-grades.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -45,7 +45,9 @@ function WorkoutTrendsView({ unit = "lbs", defaultWorkouts = {} }) {
   // Always read fresh from localStorage. The dependency array is
   // empty by design — workout log changes happen elsewhere and we
   // refresh on tab change rather than on every render.
-  const wLog = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Filter out rotation-pin entries (synced markers from WorkoutTab,
+  // not real workout sessions — they shouldn't appear in trends/PRs).
+  const wLog = useMemo(() => (loadLS(LS_WORKOUT_LOG_KEY) || []).filter(s => s.workout !== ROTATION_PIN_KEY), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // All exercises that have logged weight data. defaultWorkouts is
   // passed in so we can pretty-print the human-readable name.

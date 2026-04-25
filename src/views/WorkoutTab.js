@@ -24,7 +24,7 @@ import { Card } from "../ui/components.js";
 
 import {
   loadLS, saveLS,
-  LS_WORKOUT_LOG_KEY,
+  LS_WORKOUT_LOG_KEY, ROTATION_PIN_KEY,
 } from "../lib/storage.js";
 import {
   DEFAULT_TRIP, weeksToTrip, tripCountdown,
@@ -43,7 +43,14 @@ import { BwPrompt } from "./SetupView.js";
 // WORKOUT PLAN
 // ─────────────────────────────────────────────────────────────
 const LS_WORKOUT_PLAN_KEY    = "ft_workout_plan";
-const LS_WORKOUT_STATE_KEY   = "ft_workout_state";
+// LS_WORKOUT_STATE_KEY ("ft_workout_state") used to store the
+// rotation index + sessionCount as local state. It is no longer
+// read or written — rotation is now derived from wLog (which
+// syncs across devices via fetchWorkoutSessions) so that two
+// devices for the same user can't drift on what's "next up".
+// Existing values under "ft_workout_state" are orphaned but
+// harmless; nothing reads them.
+//
 // LS_WORKOUT_LOG_KEY now lives in src/lib/storage.js (imported above).
 // LS_TRIP_KEY stays in App.js — that's where the trip-load/save lives;
 // WorkoutTab receives the resolved `trip` value as a prop.
@@ -543,16 +550,58 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   // code actually did, since it ALWAYS advanced on completion in the
   // common case where the user followed the recommendation.
   //
+  // Rotation pins (workout === ROTATION_PIN_KEY) are synthetic
+  // entries the user can write via the "Make X the next-up" action.
+  // The MOST RECENT pin establishes a new baseline: rotation index
+  // resets to the position of pin.exercises.__pinTo, and only
+  // sessions logged AFTER that pin contribute to further advances.
+  // Pins are themselves wasRecommended:false so they don't double-
+  // count as advances. This is the cross-device recovery valve when
+  // sync gaps drift the rotation, and also the "start a fresh cycle"
+  // gesture going forward.
+  //
   // The old LS_WORKOUT_STATE_KEY is left in place (orphaned, harmless)
   // — nothing reads it anymore.
   const { rotationIndex, sessionCount } = useMemo(() => {
+    // Sort by date+completedAt so out-of-order arrivals from the
+    // cloud reconcile (legacy sessions without completedAt) still
+    // produce a stable derivation.
+    const sorted = [...wLog].sort((a, b) => {
+      const ta = `${a.date || ""}|${a.completedAt || ""}`;
+      const tb = `${b.date || ""}|${b.completedAt || ""}`;
+      return ta.localeCompare(tb);
+    });
+
+    // Most recent pin establishes a baseline.
+    let pinIdx = -1;
+    let pinTo = null;
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      if (sorted[i].workout === ROTATION_PIN_KEY) {
+        pinIdx = i;
+        pinTo = sorted[i].exercises?.__pinTo ?? null;
+        break;
+      }
+    }
+
+    let baseIdx = 0;
+    let countFrom = 0;
+    if (pinIdx >= 0 && WK_ROTATION.includes(pinTo)) {
+      baseIdx = WK_ROTATION.indexOf(pinTo);
+      countFrom = pinIdx + 1;     // count only sessions AFTER the pin
+    }
+
     let advanced = 0;
-    for (const s of wLog) {
+    for (let i = countFrom; i < sorted.length; i++) {
+      const s = sorted[i];
+      if (s.workout === ROTATION_PIN_KEY) continue;
       if (s.wasRecommended !== false) advanced++;
     }
+
     return {
-      rotationIndex: advanced % WK_ROTATION.length,
-      sessionCount: wLog.length,
+      // Visible session count excludes pin entries — pins aren't
+      // workouts, just rotation markers.
+      sessionCount: sorted.filter(s => s.workout !== ROTATION_PIN_KEY).length,
+      rotationIndex: (baseIdx + advanced) % WK_ROTATION.length,
     };
   }, [wLog]);
 
@@ -576,6 +625,33 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
     setDisplayKey(k);
     setSwaps({});
     setSwapPickerFor(null);
+  };
+
+  // Manual rotation override. Writes a synthetic "pin" entry into
+  // wLog and pushes it through onSessionSaved so it syncs across
+  // devices (other devices then derive the same rotation from the
+  // same pin). Use cases:
+  //   * Recovery from cross-device sync drift ("Set next to B" on
+  //     each phone gets them back in lockstep).
+  //   * Starting a fresh training cycle.
+  //   * Skipping a workout you'd already done elsewhere.
+  // The pin itself is filtered out of all display surfaces — it's
+  // a rotation marker, not a workout.
+  const setRotationTo = (key) => {
+    if (!WK_ROTATION.includes(key)) return;
+    const pinSession = {
+      id: genId(),
+      date: today(),
+      completedAt: nowISO(),
+      workout: ROTATION_PIN_KEY,
+      sessionNumber: 0,
+      wasRecommended: false,
+      exercises: { __pinTo: key },
+    };
+    const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    saveLog([...freshLog, pinSession]);
+    if (onSessionSaved) onSessionSaved(pinSession);
+    setDisplayKey(key);
   };
 
   // Previous best set weights for an exercise in this workout slot
@@ -748,7 +824,23 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
                   WORKOUT {displayKey}
                   {displayKey === rotKey
                     ? "  ·  NEXT UP"
-                    : <span style={{ color: C.orange }}>  ·  OUT OF ORDER — queue still starts with {rotKey}</span>
+                    : (
+                      <span style={{ color: C.orange }}>
+                        {"  ·  OUT OF ORDER — queue still starts with "}{rotKey}
+                        {" · "}
+                        <button
+                          onClick={() => setRotationTo(displayKey)}
+                          title="Reset the rotation so the cycle starts here. Useful if devices have drifted out of sync, or to start a fresh training cycle."
+                          style={{
+                            background: "none", border: "none", color: C.blue,
+                            fontSize: 11, fontWeight: 700, padding: 0,
+                            textDecoration: "underline", cursor: "pointer",
+                          }}
+                        >
+                          Make {displayKey} the next-up
+                        </button>
+                      </span>
+                    )
                   }
                 </div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{workout.name}</div>

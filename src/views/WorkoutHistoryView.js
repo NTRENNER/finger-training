@@ -22,6 +22,7 @@ import {
   loadLS, saveLS,
   LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
+  ROTATION_PIN_KEY,
 } from "../lib/storage.js";
 
 export function WorkoutHistoryView({
@@ -40,7 +41,9 @@ export function WorkoutHistoryView({
   const [filterDays, setFilterDays] = useState(0);   // 0 = all time, else last N days
   const [relMode,    setRelMode]    = useState(false);
 
-  const log      = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY)  || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Filter out rotation-pin entries — they're synced markers used by
+  // WorkoutTab to override the next-up rotation, not real workouts.
+  const log      = useMemo(() => (loadLS(LS_WORKOUT_LOG_KEY) || []).filter(s => s.workout !== ROTATION_PIN_KEY), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   const bwLog    = useMemo(() => loadLS(LS_BW_LOG_KEY)       || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   const syncedIds = useMemo(() => new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 

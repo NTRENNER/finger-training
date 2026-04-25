@@ -42,6 +42,11 @@ export function downloadCSV(reps) {
 export function downloadWorkoutCSV(log) {
   const rows = [];
   for (const s of log) {
+    // Skip rotation-pin entries — they're synced markers from
+    // WorkoutTab (see ROTATION_PIN_KEY in src/lib/storage.js), not
+    // real workout sessions, and have no exercises to export.
+    // Hardcoded literal here to keep src/lib/csv.js dependency-free.
+    if (s.workout === "__rotation_pin") continue;
     for (const [exId, exData] of Object.entries(s.exercises || {})) {
       const exName = exId.replace(/_/g, " ");
       if (exData.sets && exData.sets.length > 0) {
