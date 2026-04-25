@@ -481,7 +481,12 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
           version (with radio rows + extra context) still lives in
           Settings; this is the in-flow micro-version. */}
       <Card>
-        <Sect title="Training Focus">
+        {/* Card title in the 14/700 normal-case style that matches
+            Zone Workout Summary, Coaching prescription, etc. — Sect's
+            11px uppercase variant is reserved for subsections inside
+            a multi-section Card. */}
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Training Focus</div>
+        <div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
             {Object.entries(TRAINING_FOCUS).map(([key, focus]) => {
               const selected = trainingFocus === key;
@@ -512,11 +517,12 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               {currentFocus.coachingImpact}
             </div>
           </div>
-        </Sect>
+        </div>
       </Card>
 
       <Card>
-        <Sect title="Grip Type">
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Grip Type</div>
+        <div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
             {GRIP_PRESETS.map(g => (
               <button
@@ -550,7 +556,7 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               Use
             </Btn>
           </div>
-        </Sect>
+        </div>
       </Card>
 
       {/* Zone Workout Summary — neutral 30-day volume breakdown (no prescription) */}

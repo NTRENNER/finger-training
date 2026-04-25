@@ -61,16 +61,21 @@ export function Label({ children }) {
 // Header convention across the app — two tiers, intentionally distinct:
 //
 //   1. Card title (14px / 700, normal case) — top-of-card primary
-//      heading. Examples: "Coaching prescription · Crusher",
-//      "Zone Workout Summary", "🗓 Session Planner". Inline div, no
-//      Sect wrapper. There's only ever ONE per Card.
+//      heading. Used for EVERY Card, including ones that contain a
+//      single section (e.g. "Grip Type", "Training Focus"), since
+//      in those cases the heading IS the card title — not a
+//      subsection of one. Examples: "Coaching prescription · Crusher",
+//      "Zone Workout Summary", "🗓 Session Planner", "Grip Type",
+//      "Training Focus". Inline div, no Sect wrapper. One per Card.
 //
 //   2. Subsection (Sect, 11px / 700 uppercase, muted, underline) —
-//      groups related fields inside a Card. Examples: "Within Set",
-//      "Between Sets", "Grip Type". Use Sect for ALL of these so
-//      they share the same visual weight; new subsections that are
-//      tempted to inline an 11px uppercase div should reach for
-//      Sect instead.
+//      ONLY for grouping related fields inside a Card that already
+//      has a card-title heading. Examples: "Within Set" and
+//      "Between Sets" inside the Session Planner card. If a Card
+//      has only one section, that section's heading should be a
+//      14/700 card title, not a Sect — Sect's underline + small-
+//      caps treatment looks visually weak when it's standing in
+//      for the card's primary heading.
 //
 // The 11px uppercase pattern ALSO shows up as an "eyebrow" above a
 // large title (e.g. "NEXT SESSION FOCUS" above "Train Power" on the
