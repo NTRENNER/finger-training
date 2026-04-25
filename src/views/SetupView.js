@@ -409,7 +409,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 
-export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced" }) {
+export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced", onTrainingFocusChange = () => {} }) {
   const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -463,9 +463,57 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
     [history, config.grip, freshMap, threeExpPriors, activities, trainingFocus]
   );
 
+  // Resolve the active focus once for the picker card. Falls back to
+  // the Balanced entry for unknown / missing keys so the panel always
+  // has something to render even if the LS-stored value drifts.
+  const currentFocus = TRAINING_FOCUS[trainingFocus] ?? TRAINING_FOCUS.balanced;
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
+
+      {/* Training Focus picker — same selector as Settings, surfaced
+          here so the user can see and adjust the bias right where the
+          coaching prescription is generated. The description below
+          the pills explains both the climbing style and the per-zone
+          weighting effect, so a tap on a focus key gives immediate
+          feedback about how recommendations will shift. The full
+          version (with radio rows + extra context) still lives in
+          Settings; this is the in-flow micro-version. */}
+      <Card>
+        <Sect title="Training Focus">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+            {Object.entries(TRAINING_FOCUS).map(([key, focus]) => {
+              const selected = trainingFocus === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => onTrainingFocusChange(key)}
+                  style={{
+                    padding: "6px 12px", borderRadius: 16,
+                    fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    background: selected ? C.blue : C.border,
+                    color:      selected ? "#fff" : C.muted,
+                    border: "none",
+                    transition: "background 0.15s",
+                  }}
+                >
+                  {focus.label}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.55 }}>
+            <div style={{ marginBottom: 6 }}>
+              <span style={{ color: C.text, fontWeight: 700 }}>{currentFocus.label}:</span>{" "}
+              {currentFocus.description}
+            </div>
+            <div style={{ fontStyle: "italic" }}>
+              {currentFocus.coachingImpact}
+            </div>
+          </div>
+        </Sect>
+      </Card>
 
       <Card>
         <Sect title="Grip Type">

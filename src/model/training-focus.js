@@ -31,25 +31,34 @@
 //   * Lives in src/model/ (not src/lib/) because the weights are
 //     part of the recommendation engine's math, not infrastructure.
 
+// `description` describes the climbing style this focus is for.
+// `coachingImpact` describes what the focus DOES to recommendations —
+// the per-zone weighting in plain language, so the user can tell at
+// a glance whether the bias matches what they want. Both are surfaced
+// in the Training Focus picker on Setup and in Settings.
 export const TRAINING_FOCUS = {
   balanced: {
     label: "Balanced",
     description: "Keep all three compartments humming.",
+    coachingImpact: "No per-zone bias — coaching picks whichever zone has the widest curve gap.",
     weights: { power: 1.0, strength: 1.0, endurance: 1.0 },
   },
   bouldering: {
     label: "Bouldering",
     description: "Short, max-effort moves.",
+    coachingImpact: "Power ×1.5, Endurance ×0.6 — the engine favors short max-effort sessions even when your Endurance gap is technically larger.",
     weights: { power: 1.5, strength: 1.0, endurance: 0.6 },
   },
   power_sport: {
     label: "Power-endurance sport",
     description: "Steep, punchy routes with hard cruxes.",
+    coachingImpact: "Strength ×1.5, Power ×1.1, Endurance ×0.9 — the engine favors mid-duration max hangs that build the force ceiling steep routes need.",
     weights: { power: 1.1, strength: 1.5, endurance: 0.9 },
   },
   endurance_sport: {
     label: "Endurance routes",
     description: "Long sustained climbing — e.g. Red River Gorge.",
+    coachingImpact: "Endurance ×1.5, Power ×0.6 — the engine favors sustained holds even when shorter zones look like bigger curve gaps.",
     weights: { power: 0.6, strength: 1.0, endurance: 1.5 },
   },
 };

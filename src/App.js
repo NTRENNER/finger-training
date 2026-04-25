@@ -565,6 +565,7 @@ export default function App() {
               GOAL_CONFIG={GOAL_CONFIG}
               GRIP_PRESETS={GRIP_PRESETS}
               trainingFocus={trainingFocus}
+              onTrainingFocusChange={setTrainingFocus}
             />
           );
         }

@@ -203,6 +203,16 @@ CREATE POLICY "auth_all" ON reps
                     <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
                       {focus.description}
                     </div>
+                    {/* Coaching impact — only shown for the selected
+                        focus (avoids cluttering all four rows with
+                        weighting copy that's only actionable for the
+                        active choice). The Setup tab's mini-picker
+                        shows the same text in the same role. */}
+                    {selected && (
+                      <div style={{ fontSize: 12, color: C.muted, marginTop: 6, fontStyle: "italic", lineHeight: 1.5 }}>
+                        {focus.coachingImpact}
+                      </div>
+                    )}
                   </div>
                 </label>
               );
