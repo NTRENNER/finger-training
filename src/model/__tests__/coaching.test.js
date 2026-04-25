@@ -1,49 +1,26 @@
 // Tests for src/model/coaching.js — coaching recommendation engine v2.
-// Covers intensityMatch, recencyPenalty, externalLoadModifier,
-// zoneResidualFactor, coachingRecommendation, coachingRationale.
+// Covers recencyPenalty, externalLoadModifier, zoneResidualFactor,
+// coachingRecommendation, coachingRationale.
+//
+// The earlier intensityMatch / readiness pathway has been removed
+// (the readiness score was no longer displayed or settable, so the
+// factor silently collapsed into a hidden per-zone bias). Tests for
+// it were dropped along with the function.
 
 import {
-  COACH_INTENSITY, COACH_RECOVERY_TAU_DAYS,
-  intensityMatch, recencyPenalty, externalLoadModifier,
+  COACH_RECOVERY_TAU_DAYS,
+  recencyPenalty, externalLoadModifier,
   zoneResidualFactor, coachingRecommendation, coachingRationale,
 } from "../coaching.js";
 import { buildThreeExpPriors } from "../threeExp.js";
 
 // ─────────────────────────────────────────────────────────────
-// COACH_INTENSITY / COACH_RECOVERY_TAU_DAYS — sanity
+// COACH_RECOVERY_TAU_DAYS — sanity
 // ─────────────────────────────────────────────────────────────
 describe("coaching constants", () => {
-  test("intensity ordered: power > strength > endurance", () => {
-    expect(COACH_INTENSITY.power).toBeGreaterThan(COACH_INTENSITY.strength);
-    expect(COACH_INTENSITY.strength).toBeGreaterThan(COACH_INTENSITY.endurance);
-  });
-
   test("recovery taus ordered: power < strength < endurance", () => {
     expect(COACH_RECOVERY_TAU_DAYS.power).toBeLessThan(COACH_RECOVERY_TAU_DAYS.strength);
     expect(COACH_RECOVERY_TAU_DAYS.strength).toBeLessThan(COACH_RECOVERY_TAU_DAYS.endurance);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// intensityMatch — readiness × zone alignment
-// ─────────────────────────────────────────────────────────────
-describe("intensityMatch", () => {
-  test("returns highest score when readiness matches zone intensity", () => {
-    // Power needs high readiness (zone intensity = 1.0)
-    // readiness=10 normalizes to 1.0, perfect match
-    const m = intensityMatch("power", 10);
-    expect(m).toBeCloseTo(1.0, 1);
-  });
-
-  test("low readiness penalizes power more than endurance", () => {
-    const powerLow = intensityMatch("power", 1);
-    const endLow   = intensityMatch("endurance", 1);
-    expect(endLow).toBeGreaterThan(powerLow);
-  });
-
-  test("never returns below 0.1 (floor)", () => {
-    expect(intensityMatch("power", 1)).toBeGreaterThanOrEqual(0.1);
-    expect(intensityMatch("endurance", 10)).toBeGreaterThanOrEqual(0.1);
   });
 });
 
@@ -244,23 +221,8 @@ describe("coachingRecommendation", () => {
     expect(["L", "R"]).toContain(rec.hand);
     expect(typeof rec.gap).toBe("number");
     expect(typeof rec.score).toBe("number");
-    expect(typeof rec.iMatch).toBe("number");
     expect(typeof rec.recency).toBe("number");
     expect(typeof rec.ext).toBe("number");
-  });
-
-  test("higher readiness should score Power higher relative to Capacity", () => {
-    const history = buildHistory();
-    const priors = buildThreeExpPriors(history);
-    const recHigh = coachingRecommendation(history, "Crusher",
-      { threeExpPriors: priors, readiness: 10 });
-    const recLow  = coachingRecommendation(history, "Crusher",
-      { threeExpPriors: priors, readiness: 1 });
-    // We don't assert WHICH zone wins — depends on the exact gap shape —
-    // but recHigh's Power-zone iMatch should beat recLow's Power iMatch.
-    const im10 = intensityMatch("power", 10);
-    const im1  = intensityMatch("power", 1);
-    expect(im10).toBeGreaterThan(im1);
   });
 });
 
@@ -276,20 +238,20 @@ describe("coachingRationale", () => {
     // hand-side intentionally omitted from rationale: most users train
     // both hands per session so "on Left" / "on Right" at the
     // recommendation level adds noise without changing what they'd do.
-    const rec = { zone: "power", hand: "L", gap: 0.20, iMatch: 0.9, recency: 0.9, ext: 1, resFactor: 1 };
+    const rec = { zone: "power", hand: "L", gap: 0.20, recency: 0.9, ext: 1, resFactor: 1 };
     const text = coachingRationale(rec);
     expect(text).toMatch(/fast|PCr/i);
     expect(text).not.toMatch(/Left|Right/);
   });
 
   test("calls out the 3-exp curve in residual signal", () => {
-    const rec = { zone: "strength", hand: "R", gap: 0.10, iMatch: 0.8, recency: 0.9, ext: 1, resFactor: 1.6 };
+    const rec = { zone: "strength", hand: "R", gap: 0.10, recency: 0.9, ext: 1, resFactor: 1.6 };
     const text = coachingRationale(rec);
     expect(text).toMatch(/3-exp curve/);
   });
 
   test("formats positive gap with explicit percentage", () => {
-    const rec = { zone: "power", hand: "L", gap: 0.25, iMatch: 0.9, recency: 0.9, ext: 1, resFactor: 1 };
+    const rec = { zone: "power", hand: "L", gap: 0.25, recency: 0.9, ext: 1, resFactor: 1 };
     const text = coachingRationale(rec);
     expect(text).toMatch(/\+25%/);
   });

@@ -3,25 +3,33 @@
 // ─────────────────────────────────────────────────────────────
 // Picks the next training zone using a multi-factor score:
 //
-//   score = (gap + 0.30) × intensity_match × recency_penalty
-//                       × external_load × residual_factor
+//   score = (gap + 0.30) × recency_penalty × external_load
+//                       × residual_factor × focus_weight
 //
 // where:
-//   gap            — potential − current, normalized. Largest gap =
-//                    biggest training leverage (the physiological
-//                    weak compartment). Clamped at -30% so the engine
-//                    never falls through on all-negative-gap zones.
-//   intensity_match — how well the zone's neural/metabolic intensity
-//                    fits the user's current readiness. Power needs
-//                    high readiness; Endurance tolerates lower.
+//   gap             — potential − current, normalized. Largest gap =
+//                     biggest training leverage (the physiological
+//                     weak compartment). Clamped at -30% so the engine
+//                     never falls through on all-negative-gap zones.
 //   recency_penalty — exponential recovery curve since last session
-//                    on this zone. Power recovers fast (~1.5d),
-//                    Endurance slow (~3.5d).
+//                     on this zone. Power recovers fast (~1.5d),
+//                     Endurance slow (~3.5d).
 //   external_load   — recent climbing reduces stimulus tolerance,
-//                    especially Power. No-climbing baseline = 1.0.
+//                     especially Power. No-climbing baseline = 1.0.
 //   residual_factor — F-D chart "dots vs three-exp curve" alignment
-//                    for this (zone, hand). Boosts limiter zones,
-//                    depresses above-curve zones. See zoneResidualFactor.
+//                     for this (zone, hand). Boosts limiter zones,
+//                     depresses above-curve zones. See zoneResidualFactor.
+//   focus_weight    — per-zone bias from the user's Training Focus
+//                     setting (Balanced / Bouldering / etc.). Default
+//                     1.0 across all zones for "Balanced".
+//
+// An earlier version of the engine multiplied in an `intensity_match`
+// factor that aligned the zone's neural/metabolic intensity with a
+// 1-10 readiness score. That whole pathway has been removed: the
+// readiness score was no longer displayed or settable, so the factor
+// silently collapsed into a fixed per-zone weighting that biased
+// against Power without any user-visible reason. Better to leave
+// readiness out of scoring entirely than to keep a hidden lever.
 //
 // Returns the zone (and hand) with the highest score, plus the
 // component scores so the UI can explain WHY this was picked.
@@ -47,28 +55,11 @@ import {
   TRAINING_FOCUS, DEFAULT_TRAINING_FOCUS, focusWeights,
 } from "./training-focus.js";
 
-export const COACH_INTENSITY = {
-  power:     1.0,   // Highest neural + PCr demand
-  strength:  0.7,   // Middle (glycolytic dominant)
-  endurance: 0.4,   // Lower per-rep intensity (sub-max sustained)
-};
-
 export const COACH_RECOVERY_TAU_DAYS = {
   power:     1.5,   // PCr/neural recovery is fast
   strength:  2.5,   // Glycolytic recovers middle
   endurance: 3.5,   // Oxidative adaptations need more time
 };
-
-// Map readiness (1-10) and zone intensity to a 0.1-1.0 multiplier.
-// Match curve: peak when zone-intensity matches readiness-normalized;
-// gentle dropoff for mismatch (so the system isn't too punishing for
-// near-miss readiness scores).
-export function intensityMatch(zone, readiness) {
-  const zoneI = COACH_INTENSITY[zone] ?? 0.5;
-  const readinessNorm = Math.max(0, Math.min(1, (readiness - 1) / 9));
-  const mismatch = Math.abs(zoneI - readinessNorm);
-  return Math.max(0.1, 1 - Math.pow(mismatch, 1.2));
-}
 
 // Recovery curve: returns 0 immediately after training the zone, rising
 // asymptotically to 1.0 as days_ago grows. Zone-specific tau means
@@ -91,8 +82,8 @@ export function recencyPenalty(zone, history, grip) {
   return 1 - Math.exp(-daysAgo / tau);
 }
 
-// External load (climbing) adds systemic fatigue that the per-rep
-// readiness signal doesn't fully capture. Recent climbing biases
+// External load (climbing) adds systemic fatigue that the in-session
+// rep timing alone doesn't fully capture. Recent climbing biases
 // against Power most heavily, Endurance least.
 export function externalLoadModifier(zone, activities) {
   if (!activities || activities.length === 0) return 1.0;
@@ -170,10 +161,10 @@ export function zoneResidualFactor(history, hand, grip, targetT, amps, freshMap 
 // Main coaching recommendation. Returns the highest-scoring (zone, hand)
 // with all component factors so the UI can explain the rationale.
 //
-// opts: { freshMap, threeExpPriors, readiness, activities }
+// opts: { freshMap, threeExpPriors, activities, trainingFocus }
 export function coachingRecommendation(history, grip, opts = {}) {
   const {
-    freshMap = null, threeExpPriors = null, readiness = 5, activities = [],
+    freshMap = null, threeExpPriors = null, activities = [],
     trainingFocus = DEFAULT_TRAINING_FOCUS,
   } = opts;
   if (!grip) return null;
@@ -217,7 +208,6 @@ export function coachingRecommendation(history, grip, opts = {}) {
   for (const zoneKey of zones) {
     const t = ZONE_REF_T[zoneKey];
     if (!t) continue;
-    const iMatch  = intensityMatch(zoneKey, readiness);
     const recency = recencyPenalty(zoneKey, history, grip);
     const ext     = externalLoadModifier(zoneKey, activities);
 
@@ -241,7 +231,7 @@ export function coachingRecommendation(history, grip, opts = {}) {
       const resFactor = zoneResidualFactor(history, hand, grip, t, ampsByHand[hand], fmap);
       const gapForScore = Math.max(gap, -0.30); // clamp at -30%
       const focusMult = focusBias[zoneKey] ?? 1.0;
-      const handScore = (gapForScore + 0.30) * iMatch * recency * ext * resFactor * focusMult;
+      const handScore = (gapForScore + 0.30) * recency * ext * resFactor * focusMult;
       if (handScore > bestScore) {
         bestScore = handScore;
         bestHand = hand;
@@ -258,7 +248,7 @@ export function coachingRecommendation(history, grip, opts = {}) {
       gap: bestGap,
       potential: bestPotential.value,
       trainAt: bestTrainAt,
-      iMatch, recency, ext,
+      recency, ext,
       resFactor: bestResFactor,
       focusMult: focusBias[zoneKey] ?? 1.0,
       trainingFocus,
@@ -310,11 +300,6 @@ export function coachingRationale(rec) {
     } else if (rec.resFactor < 0.85) {
       reasons.push("reps sit above the 3-exp curve here — strong-zone signal");
     }
-  }
-  if (rec.iMatch >= 0.85) {
-    reasons.push("intensity matches your current readiness");
-  } else if (rec.iMatch < 0.5) {
-    reasons.push("intensity may not match your current readiness — proceed with feel");
   }
   if (rec.recency >= 0.85) {
     reasons.push("zone fully recovered since last session");
