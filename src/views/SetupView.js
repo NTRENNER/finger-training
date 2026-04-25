@@ -834,10 +834,17 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               })}
             </div>
             {/* Potential/Gap key — placed below the cells so the data
-                lands first and the labels read as a confirming legend. */}
+                lands first and the labels read as a confirming legend.
+                Each term gets its own row so the bolded label always
+                starts a fresh line at the left margin instead of
+                tucking in after the previous sentence's period. */}
             <div style={{ fontSize: 11, color: C.muted, marginTop: 10, fontStyle: "italic", lineHeight: 1.5 }}>
-              <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.{" "}
-              <b style={{ color: C.text, fontStyle: "normal" }}>Gap</b> = the training opportunity in that zone.
+              <div>
+                <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <b style={{ color: C.text, fontStyle: "normal" }}>Gap</b> = the training opportunity in that zone.
+              </div>
             </div>
             <div style={{ fontSize: 10, color: C.muted, marginTop: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
               <span>
