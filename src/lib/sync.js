@@ -17,12 +17,25 @@
 //   CREATE TABLE workout_sessions (
 //     id text PRIMARY KEY,
 //     date text, workout text, session_number integer,
+//     was_recommended boolean,
 //     exercises jsonb,
 //     created_at timestamptz DEFAULT now()
 //   );
 //   ALTER TABLE workout_sessions ENABLE ROW LEVEL SECURITY;
 //   CREATE POLICY "auth_all" ON workout_sessions
 //     FOR ALL USING (auth.uid() IS NOT NULL);
+//
+// For existing tables (added later — run once in the Supabase SQL
+// editor; safe to re-run because of IF NOT EXISTS):
+//   ALTER TABLE workout_sessions
+//     ADD COLUMN IF NOT EXISTS was_recommended boolean;
+//
+// `was_recommended` carries the WorkoutTab rotation signal across
+// devices. WorkoutTab derives "next workout" from the synced log,
+// counting only sessions where this flag is true (or null, treated
+// as true for legacy rows). Without the column, two devices see
+// the same set of sessions but drift on rotation when the user
+// occasionally picks off-rotation.
 //
 //   CREATE TABLE reps (
 //     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -53,12 +66,17 @@ export const LS_QUEUE_KEY = "ft_push_queue";
 export async function pushWorkoutSession(session) {
   try {
     const { error } = await supabase.from("workout_sessions").upsert({
-      id:             session.id,
-      date:           session.date,
-      completed_at:   session.completedAt ?? null,
-      workout:        session.workout,
-      session_number: session.sessionNumber,
-      exercises:      session.exercises,
+      id:               session.id,
+      date:             session.date,
+      completed_at:     session.completedAt ?? null,
+      workout:          session.workout,
+      session_number:   session.sessionNumber,
+      // null when the session was logged before the wasRecommended
+      // flag existed; the WorkoutTab derivation treats null as "yes"
+      // for back-compat (the old code always advanced on completion
+      // in the common case).
+      was_recommended:  session.wasRecommended ?? null,
+      exercises:        session.exercises,
     }, { onConflict: "id" });
     if (error) { console.warn("Supabase workout push:", error.message); return false; }
     return true;
@@ -75,12 +93,17 @@ export async function fetchWorkoutSessions() {
     .order("date", { ascending: false });
   if (error) { console.warn("Supabase workout fetch:", error.message); return null; }
   return (data || []).map(s => ({
-    id:            s.id,
-    date:          s.date,
-    completedAt:   s.completed_at ?? null,
-    workout:       s.workout,
-    sessionNumber: s.session_number,
-    exercises:     s.exercises || {},
+    id:              s.id,
+    date:            s.date,
+    completedAt:     s.completed_at ?? null,
+    workout:         s.workout,
+    sessionNumber:   s.session_number,
+    // Carry was_recommended through. Null/undefined means "legacy or
+    // pre-column row" — WorkoutTab's rotation derivation treats !== false
+    // as a positive, so unknowns advance the rotation. Only an explicit
+    // false suppresses advancement.
+    wasRecommended:  s.was_recommended ?? undefined,
+    exercises:       s.exercises || {},
   }));
 }
 

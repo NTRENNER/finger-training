@@ -17,7 +17,7 @@
 // both want it for their workout-history rendering; App.js imports it
 // here and passes it as a `defaultWorkouts` prop to those views.
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
@@ -516,7 +516,6 @@ function WorkoutEditor({ wKey, workout, onSave, onClose, onReset }) {
 export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_TRIP }) {
   const [subTab, setSubTab]         = useState("today");
   const [plan,   setPlan]           = useState(() => loadLS(LS_WORKOUT_PLAN_KEY)  || DEFAULT_WORKOUTS);
-  const [wState, setWState]         = useState(() => loadLS(LS_WORKOUT_STATE_KEY) || { rotationIndex: 0, sessionCount: 0 });
   const [wLog,   setWLog]           = useState(() => loadLS(LS_WORKOUT_LOG_KEY)   || []);
   const [sessionActive,  setSessionActive]  = useState(false);
   const [sessionData,    setSessionData]    = useState({});    // exId → {sets, done}
@@ -525,10 +524,39 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   const [editingKey, setEditingKey] = useState(null);          // "A"|"B"|"C"|null
 
   const savePlan  = (p) => { setPlan(p);  saveLS(LS_WORKOUT_PLAN_KEY,  p); };
-  const saveState = (s) => { setWState(s); saveLS(LS_WORKOUT_STATE_KEY, s); };
   const saveLog   = (l) => { setWLog(l);  saveLS(LS_WORKOUT_LOG_KEY,   l); };
 
-  const rotKey    = WK_ROTATION[wState.rotationIndex % WK_ROTATION.length];
+  // ── Derive rotation state from the synced workout log ─────
+  // Previously this lived in LS_WORKOUT_STATE_KEY (`ft_workout_state`)
+  // as { rotationIndex, sessionCount } that was only ever written to
+  // localStorage — never synced to Supabase. The result was that two
+  // devices for the same user disagreed on "what's next" because each
+  // tracked its own counter. Computing the rotation from wLog (which
+  // IS synced via fetchWorkoutSessions) makes both devices see the
+  // same recommendation.
+  //
+  // Sessions tagged `wasRecommended: true` advance the rotation;
+  // off-rotation picks (user chose B when rotKey was A) DON'T, so
+  // the queue persists across one-off deviations — same UX as the
+  // old local-state code. Legacy sessions (logged before this flag
+  // existed) are treated as recommended; this matches what the old
+  // code actually did, since it ALWAYS advanced on completion in the
+  // common case where the user followed the recommendation.
+  //
+  // The old LS_WORKOUT_STATE_KEY is left in place (orphaned, harmless)
+  // — nothing reads it anymore.
+  const { rotationIndex, sessionCount } = useMemo(() => {
+    let advanced = 0;
+    for (const s of wLog) {
+      if (s.wasRecommended !== false) advanced++;
+    }
+    return {
+      rotationIndex: advanced % WK_ROTATION.length,
+      sessionCount: wLog.length,
+    };
+  }, [wLog]);
+
+  const rotKey    = WK_ROTATION[rotationIndex % WK_ROTATION.length];
   // displayKey: the workout currently being previewed / logged. Defaults to the
   // recommendation (rotKey) but the user can override via the picker below.
   // If the user picks something other than rotKey and completes it, we log the
@@ -538,7 +566,7 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   // displayed workout back to the new recommendation.
   useEffect(() => { setDisplayKey(rotKey); }, [rotKey]);
   const workout   = plan[displayKey] || plan[rotKey];
-  const sessionN  = wState.sessionCount + 1;
+  const sessionN  = sessionCount + 1;
   const wtr       = weeksToTrip(trip.date);
 
   // Switch the previewed workout. Clear any in-flight swaps since they
@@ -620,22 +648,22 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   };
 
   const completeSession = () => {
-    const session = { id: genId(), date: today(), completedAt: nowISO(), workout: displayKey, sessionNumber: sessionN, exercises: sessionData };
+    // wasRecommended flag is what the rotation derivation reads to
+    // decide whether this session should advance the queue. True
+    // when the user completed the workout the rotation was offering;
+    // false when they picked a different one (off-rotation deviation).
+    // Persisted on the session record so it syncs to other devices.
+    const wasRecommended = displayKey === rotKey && WK_ROTATION.includes(displayKey);
+    const session = { id: genId(), date: today(), completedAt: nowISO(), workout: displayKey, sessionNumber: sessionN, wasRecommended, exercises: sessionData };
     // Read fresh from localStorage rather than the React state snapshot, which may
     // be stale if the migration effect rewrote the log after this component mounted.
     const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
     saveLog([...freshLog, session]);
     if (onSessionSaved) onSessionSaved(session);
-    // Only advance the rotation when the recommended workout was actually done.
-    // Picking a different workout (one that is not the recommended rotKey) logs
-    // the session but leaves the rotation queue alone so nothing gets skipped.
-    const didRecommended = displayKey === rotKey && WK_ROTATION.includes(displayKey);
-    saveState({
-      rotationIndex: didRecommended
-        ? (wState.rotationIndex + 1) % WK_ROTATION.length
-        : wState.rotationIndex,
-      sessionCount: wState.sessionCount + 1,
-    });
+    // No separate rotation state to bump — rotationIndex is derived
+    // from wLog by the useMemo above, so the next render automatically
+    // reflects the new completion (and other devices will recompute
+    // the same answer when they sync wLog from Supabase).
     setSessionActive(false);
     setSessionData({});
     setSwaps({});
