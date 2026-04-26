@@ -778,10 +778,14 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
     const r  = s.reps   ?? s.leftReps   ?? s.rightReps   ?? "";
     return (w !== "" && w != null) || (r !== "" && r != null);
   };
-  const prevBestSets = (exId, exDef) => {
+  // Two-pass lookup: prefer same-workout history (so Workout A's curls
+  // don't crowd Workout B's), but fall back to ANY workout containing
+  // the exercise so shared lifts always have a prev to anchor on.
+  // Mirrors findLastSession in src/model/workout-progression.js.
+  const prevSetsFromMatching = (exId, exDef, predicate) => {
     for (let i = wLog.length - 1; i >= 0; i--) {
       const e = wLog[i];
-      if (e.workout !== displayKey) continue;
+      if (!predicate(e)) continue;
       const sets = e.exercises?.[exId]?.sets;
       if (!sets || sets.length === 0) continue;
       if (!sets.some(setIsUsable)) continue;  // skip aborted/empty sessions
@@ -795,7 +799,13 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
       }
       return sets.map(s => s.weight ?? s.leftWeight ?? "").filter(Boolean);
     }
-    return [];
+    return null;
+  };
+  const prevBestSets = (exId, exDef) => {
+    const sameWorkout = prevSetsFromMatching(exId, exDef, e => e.workout === displayKey);
+    if (sameWorkout) return sameWorkout;
+    const anyWorkout = prevSetsFromMatching(exId, exDef, e => !!e);
+    return anyWorkout || [];
   };
 
   const startSession = () => {

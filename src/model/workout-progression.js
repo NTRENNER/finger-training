@@ -192,16 +192,16 @@ function recommendSide(prev, exDef, repRange) {
   };
 }
 
-// Find the most recent session of the given workout key that
-// contains the given exercise WITH usable data. "Usable" means at
-// least one set was either marked done or had a non-empty weight or
-// reps recorded — sessions the user opened and abandoned without
-// logging anything are skipped so they don't shadow real prior data.
-function findLastSession(history, workoutKey, exId) {
-  if (!Array.isArray(history)) return null;
+// Walk history backward and return the most recent session matching
+// the given predicate that contains the given exercise WITH usable
+// data. "Usable" means at least one set was either marked done or had
+// a non-empty weight or reps recorded — sessions the user opened and
+// abandoned without logging anything are skipped so they don't shadow
+// real prior data.
+function findLastSessionWhere(history, exId, predicate) {
   for (let i = history.length - 1; i >= 0; i--) {
     const s = history[i];
-    if (s?.workout !== workoutKey) continue;
+    if (!predicate(s)) continue;
     const sets = s?.exercises?.[exId]?.sets;
     if (!Array.isArray(sets) || sets.length === 0) continue;
     const hasUsable = sets.some(set => {
@@ -214,6 +214,25 @@ function findLastSession(history, workoutKey, exId) {
     if (hasUsable) return s;
   }
   return null;
+}
+
+// Find the most recent usable session for `exId`. Two-pass:
+//   1. Prefer a session whose `workout` key matches the active one
+//      (so Workout B's curls history isn't crowded out by Workout A's).
+//   2. Fall back to ANY workout that contains the exercise — useful
+//      for shared lifts like curls that the user does in multiple
+//      workouts but logs more often in one of them. Without this
+//      fallback, a sparse exercise in a freshly-rotated workout sees
+//      no prev/recommendation even though the user has clearly been
+//      doing it elsewhere.
+// The caller can compare the returned session's `workout` to the
+// requested key to detect a cross-workout fallback (we surface this
+// via a "[from <workout>]" hint prepended to the reasoning string).
+function findLastSession(history, workoutKey, exId) {
+  if (!Array.isArray(history)) return null;
+  const sameWorkout = findLastSessionWhere(history, exId, s => s?.workout === workoutKey);
+  if (sameWorkout) return sameWorkout;
+  return findLastSessionWhere(history, exId, s => !!s);
 }
 
 // Public API: recommend a single set's pre-fill given history,
@@ -235,6 +254,19 @@ export function recommendSet(history, exDef, workoutKey, setIdx, bw = null) {
   const lastSession = findLastSession(history, workoutKey, exDef.id);
   const lastSet = lastSession?.exercises?.[exDef.id]?.sets?.[setIdx];
 
+  // If we fell back across workouts, prepend a small hint to the
+  // reasoning so the user understands why the suggestion exists when
+  // the current workout has no history for this exercise.
+  const fromOtherWorkout = lastSession && lastSession.workout && lastSession.workout !== workoutKey
+    ? lastSession.workout
+    : null;
+  const decorate = (rec) => {
+    if (!fromOtherWorkout) return rec;
+    const hint = `[from ${fromOtherWorkout}]`;
+    const r = rec?.reasoning;
+    return { ...rec, reasoning: r ? `${hint} ${r}` : hint };
+  };
+
   if (exDef?.unilateral) {
     // Per-side history: prefer L/R fields if the prior session was
     // unilateral, fall back to the bilateral weight/reps fields
@@ -249,8 +281,8 @@ export function recommendSet(history, exDef, workoutKey, setIdx, bw = null) {
       reps:   lastSet.rightReps   ?? lastSet.reps   ?? "",
       done:   !!lastSet.done,
     } : null;
-    const left  = recommendSide(leftPrev,  exDef, repRange);
-    const right = recommendSide(rightPrev, exDef, repRange);
+    const left  = decorate(recommendSide(leftPrev,  exDef, repRange));
+    const right = decorate(recommendSide(rightPrev, exDef, repRange));
     return {
       leftWeight:    left.weight,
       leftReps:      left.reps,
@@ -271,5 +303,5 @@ export function recommendSet(history, exDef, workoutKey, setIdx, bw = null) {
   // current logic doesn't branch on it).
   void isBodyweightAdditive(exDef);
   void bw;
-  return recommendSide(prev, exDef, repRange);
+  return decorate(recommendSide(prev, exDef, repRange));
 }
