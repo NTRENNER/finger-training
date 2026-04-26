@@ -389,8 +389,14 @@ export function HistoryView({
               <div>
                 <b>{sess.grip}</b>
                 <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>
-                  {sess.hand === "L" ? "Left" : sess.hand === "R" ? "Right" : "L + R"}
-                  {" · "}{TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
+                  {/* Single-hand sessions show "Left" or "Right" so you
+                      know what was trained. Multi-hand / Both sessions
+                      drop the prefix entirely — the per-rep chips below
+                      already tell the L/R story session-by-session, so
+                      "L + R" up here was just noise. */}
+                  {sess.hand === "L" && "Left · "}
+                  {sess.hand === "R" && "Right · "}
+                  {TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
