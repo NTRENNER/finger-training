@@ -99,13 +99,16 @@ const WTYPE_META = {
 // Swaps are session-only and do not modify the plan template.
 const EXERCISE_SUBSTITUTES = {
   bench_press:   [
-    { id: "ohp",           name: "Overhead press",         type: "S", reps: "5",       logWeight: true,  note: "KB or barbell" },
+    { id: "ohp",           name: "Overhead press",         type: "S", reps: "5",       logWeight: true,  unilateral: true, note: "Single-arm — KB or DB" },
     { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  note: "Good shoulder stability option" },
     { id: "push_ups",      name: "Push-ups",               type: "S", reps: "8–12",    logWeight: false, note: "Weighted vest if bodyweight is easy" },
   ],
-  ohp:           [
+  kb_press:      [
+    // Substitutions FOR kb_press (the bilateral two-KB press in
+    // Workout B). Single-arm OHP is offered as the unilateral
+    // alternative — useful when you only have one KB available.
+    { id: "ohp",           name: "Overhead press",         type: "S", reps: "5",       logWeight: true,  unilateral: true, note: "Single-arm — KB or DB" },
     { id: "bench_press",   name: "Bench press",            type: "S", reps: "5",       logWeight: true,  note: "" },
-    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  note: "" },
     { id: "push_ups",      name: "Push-ups",               type: "S", reps: "8–12",    logWeight: false, note: "Weighted vest if bodyweight is easy" },
   ],
   pull_ups:      [
@@ -190,7 +193,7 @@ export const DEFAULT_WORKOUTS = {
     exercises: [
       { id: "pull_ups",      name: "Weighted pull-ups",     type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Add weight when all reps clean" },
       { id: "landmine_rows", name: "One-arm landmine rows", type: "S", sets: 2,    reps: "5",      logWeight: true,  unilateral: true, note: "Alternate sides" },
-      { id: "ohp",           name: "Overhead press",        type: "S", sets: 2,    reps: "5",      logWeight: true,  note: "KB or barbell" },
+      { id: "kb_press",      name: "KB press",              type: "S", sets: 2,    reps: "5",      logWeight: true,  note: "Two KBs simultaneously" },
       { id: "dips",          name: "Dips",                  type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Weighted when bodyweight is easy" },
       { id: "bicep_curls",   name: "Bicep curls",           type: "S", sets: 2,    reps: "8",      logWeight: true,  unilateral: true, note: "Undercling strength" },
       { id: "rdl",           name: "RDL",                   type: "H", sets: 2,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
