@@ -463,12 +463,27 @@ export function HistoryView({
                       }}>{h === "L" ? "Left" : h === "R" ? "Right" : "Both"}</button>
                     ))}
                   </div>
-                  <input
-                    value={editGrip}
-                    onChange={e => setEditGrip(e.target.value)}
-                    placeholder="Grip type"
-                    style={{ flex: 1, minWidth: 80, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 12 }}
-                  />
+                  {/* Grip selector — pills matching the Hand and Zone
+                      rows above/below. Built from gripPresets first
+                      (Crusher / Micro / Thunder), then any historical
+                      grip names not in that list so legacy / custom
+                      grips remain selectable. Free-text input was
+                      replaced because the canonical grip set is small
+                      and tapping a pill is faster + drift-proof
+                      (typos like "crusher" vs "Crusher" no longer
+                      fragment the data). */}
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {[
+                      ...gripPresets,
+                      ...grips.filter(g => !gripPresets.includes(g)),
+                    ].map(g => (
+                      <button key={g} onClick={() => setEditGrip(g)} style={{
+                        padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                        background: editGrip === g ? C.purple : C.border,
+                        color: editGrip === g ? "#fff" : C.muted,
+                      }}>{g}</button>
+                    ))}
+                  </div>
                 </div>
                 {/* Row 2: zone / target duration */}
                 <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
