@@ -503,9 +503,8 @@ export function TrendsView({ history, unit = "lbs", activities = [], defaultWork
     };
   }, [data]);
 
-  const lines = selHand === "L" ? [{ key: "L", color: C.blue,   name: "Left"  }]
-              : selHand === "R" ? [{ key: "R", color: C.orange, name: "Right" }]
-              : [{ key: "L", color: C.blue, name: "Left" }, { key: "R", color: C.orange, name: "Right" }];
+  // (The `lines` array used to drive the chart's L/R series — it was
+  // dropped when the chart itself was removed.)
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -596,51 +595,14 @@ export function TrendsView({ history, unit = "lbs", activities = [], defaultWork
             </Card>
           )}
 
-          <Card>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
-              Best daily load · {TARGET_OPTIONS.find(o => o.seconds === sel)?.label}
-              {selGrip ? ` · ${selGrip}` : ""}
-            </div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
-              <span style={{ color: C.yellow }}>★</span> = personal record
-            </div>
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} unit={` ${unit}`} />
-                <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
-                <Legend />
-                {lines.map(l => (
-                  <Line
-                    key={l.key}
-                    type="monotone"
-                    dataKey={l.key}
-                    stroke={l.color}
-                    strokeWidth={2}
-                    name={l.name}
-                    connectNulls
-                    dot={(props) => {
-                      const { cx, cy, payload } = props;
-                      const isPR = l.key === "L" ? payload.isPR_L : payload.isPR_R;
-                      const val  = payload[l.key];
-                      if (val == null) return null;
-                      if (!isPR) return (
-                        <circle key={`dot-${cx}-${cy}`} cx={cx} cy={cy} r={2.5} fill={l.color} opacity={0.6} />
-                      );
-                      return (
-                        <g key={`pr-${cx}-${cy}`}>
-                          <circle cx={cx} cy={cy} r={7} fill={C.yellow} opacity={0.2} />
-                          <circle cx={cx} cy={cy} r={4} fill={C.yellow} />
-                          <text x={cx} y={cy - 12} textAnchor="middle" fill={C.yellow} fontSize={9} fontWeight="bold">PR</text>
-                        </g>
-                      );
-                    }}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
+          {/* Best-daily-load chart used to render here. Removed once
+              the PR card above became the only thing users actually
+              looked at — the per-day line was visually noisy without
+              adding insight (the F-D chart on the Analysis tab tells
+              the load-vs-time story with proper modeling). The
+              `data` / `lines` memos that fed it are still computed
+              one scope up because `latestPR` is derived from the
+              same per-day aggregation; that's fine, it's cheap. */}
         </>
       )}
       </>}
