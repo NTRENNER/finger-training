@@ -193,13 +193,25 @@ function recommendSide(prev, exDef, repRange) {
 }
 
 // Find the most recent session of the given workout key that
-// contains the given exercise. Returns the session record or null.
+// contains the given exercise WITH usable data. "Usable" means at
+// least one set was either marked done or had a non-empty weight or
+// reps recorded — sessions the user opened and abandoned without
+// logging anything are skipped so they don't shadow real prior data.
 function findLastSession(history, workoutKey, exId) {
   if (!Array.isArray(history)) return null;
   for (let i = history.length - 1; i >= 0; i--) {
     const s = history[i];
     if (s?.workout !== workoutKey) continue;
-    if (s?.exercises?.[exId]?.sets?.length > 0) return s;
+    const sets = s?.exercises?.[exId]?.sets;
+    if (!Array.isArray(sets) || sets.length === 0) continue;
+    const hasUsable = sets.some(set => {
+      if (!set) return false;
+      if (set.done) return true;
+      const w = set.weight ?? set.leftWeight ?? set.rightWeight ?? "";
+      const r = set.reps   ?? set.leftReps   ?? set.rightReps   ?? "";
+      return (w !== "" && w != null) || (r !== "" && r != null);
+    });
+    if (hasUsable) return s;
   }
   return null;
 }

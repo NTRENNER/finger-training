@@ -764,23 +764,36 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   // Returns one entry per set. Bilateral exercises get a string
   // weight per set; unilateral exercises get { L, R } per set so the
   // session UI can show the previous left/right weights side-by-side.
-  // Falls back to mirroring the bilateral weight on both L+R when the
-  // historical session was logged before unilateral split existed.
+  //
+  // Walks the log backward and SKIPS sessions where the exercise's
+  // sets have no usable data (e.g., a session the user opened but
+  // never actually completed — sets array exists but every entry
+  // has empty weight/reps and done=false). Without that skip, an
+  // aborted session would shadow the real previous data right behind
+  // it, leaving the prev column empty and the recommender blind.
+  const setIsUsable = (s) => {
+    if (!s) return false;
+    if (s.done) return true;
+    const w  = s.weight ?? s.leftWeight ?? s.rightWeight ?? "";
+    const r  = s.reps   ?? s.leftReps   ?? s.rightReps   ?? "";
+    return (w !== "" && w != null) || (r !== "" && r != null);
+  };
   const prevBestSets = (exId, exDef) => {
     for (let i = wLog.length - 1; i >= 0; i--) {
       const e = wLog[i];
-      if (e.workout === displayKey && e.exercises?.[exId]?.sets) {
-        const sets = e.exercises[exId].sets;
-        if (exDef?.unilateral) {
-          return sets.map(s => {
-            const left  = s.leftWeight  ?? s.weight ?? "";
-            const right = s.rightWeight ?? s.weight ?? "";
-            if (!left && !right) return null;
-            return { L: left, R: right };
-          }).filter(Boolean);
-        }
-        return sets.map(s => s.weight ?? s.leftWeight ?? "").filter(Boolean);
+      if (e.workout !== displayKey) continue;
+      const sets = e.exercises?.[exId]?.sets;
+      if (!sets || sets.length === 0) continue;
+      if (!sets.some(setIsUsable)) continue;  // skip aborted/empty sessions
+      if (exDef?.unilateral) {
+        return sets.map(s => {
+          const left  = s.leftWeight  ?? s.weight ?? "";
+          const right = s.rightWeight ?? s.weight ?? "";
+          if (!left && !right) return null;
+          return { L: left, R: right };
+        }).filter(Boolean);
       }
+      return sets.map(s => s.weight ?? s.leftWeight ?? "").filter(Boolean);
     }
     return [];
   };
