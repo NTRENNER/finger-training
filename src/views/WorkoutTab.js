@@ -101,13 +101,13 @@ const WTYPE_META = {
 const EXERCISE_SUBSTITUTES = {
   bench_press:   [
     { id: "ohp",           name: "Overhead press",         type: "S", reps: "5",       logWeight: true,  unilateral: true, note: "Single-arm — KB or DB" },
-    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  note: "Good shoulder stability option" },
+    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  unilateral: true, availableLoads: [35, 50, 55, 62, 70], note: "Single-arm — alternating sides" },
     { id: "push_ups",      name: "Push-ups",               type: "S", reps: "8–12",    logWeight: false, note: "Weighted vest if bodyweight is easy" },
   ],
   kb_press:      [
-    // Substitutions FOR kb_press (the bilateral two-KB press in
-    // Workout B). Single-arm OHP is offered as the unilateral
-    // alternative — useful when you only have one KB available.
+    // Substitutions FOR kb_press (single-arm KB press in Workout B,
+    // alternating sides). Bench / push-ups are bilateral
+    // alternatives if you don't have a KB; OHP also single-arm.
     { id: "ohp",           name: "Overhead press",         type: "S", reps: "5",       logWeight: true,  unilateral: true, note: "Single-arm — KB or DB" },
     { id: "bench_press",   name: "Bench press",            type: "S", reps: "5",       logWeight: true,  note: "" },
     { id: "push_ups",      name: "Push-ups",               type: "S", reps: "8–12",    logWeight: false, note: "Weighted vest if bodyweight is easy" },
@@ -125,7 +125,7 @@ const EXERCISE_SUBSTITUTES = {
   dips:          [
     { id: "close_bench",   name: "Close-grip bench",       type: "S", reps: "5",       logWeight: true,  note: "" },
     { id: "tricep_ext",    name: "Tricep extension",       type: "S", reps: "8–10",    logWeight: true,  note: "Cable or DB" },
-    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  note: "" },
+    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  unilateral: true, availableLoads: [35, 50, 55, 62, 70], note: "Single-arm — alternating sides" },
   ],
   rdl:           [
     { id: "good_morning",  name: "Good mornings",          type: "H", reps: "5",       logWeight: true,  note: "" },
@@ -194,7 +194,7 @@ export const DEFAULT_WORKOUTS = {
     exercises: [
       { id: "pull_ups",      name: "Weighted pull-ups",     type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Add weight when all reps clean" },
       { id: "landmine_rows", name: "One-arm landmine rows", type: "S", sets: 2,    reps: "5",      logWeight: true,  unilateral: true, note: "Alternate sides" },
-      { id: "kb_press",      name: "KB press",              type: "S", sets: 2,    reps: "5",      logWeight: true,  availableLoads: [35, 50, 55, 62, 70], note: "Two KBs simultaneously" },
+      { id: "kb_press",      name: "KB press",              type: "S", sets: 2,    reps: "5",      logWeight: true,  unilateral: true, availableLoads: [35, 50, 55, 62, 70], note: "Single-arm — alternating sides" },
       { id: "dips",          name: "Dips",                  type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Weighted when bodyweight is easy" },
       { id: "bicep_curls",   name: "Bicep curls",           type: "S", sets: 2,    reps: "8",      logWeight: true,  unilateral: true, note: "Undercling strength" },
       { id: "rdl",           name: "RDL",                   type: "H", sets: 2,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
@@ -582,7 +582,53 @@ function WorkoutEditor({ wKey, workout, onSave, onClose, onReset }) {
 // ── Main WorkoutTab ───────────────────────────────────────────
 export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_TRIP }) {
   const [subTab, setSubTab]         = useState("today");
-  const [plan,   setPlan]           = useState(() => loadLS(LS_WORKOUT_PLAN_KEY)  || DEFAULT_WORKOUTS);
+  // Load the stored plan if any, then re-apply per-exercise metadata
+  // from DEFAULT_WORKOUTS (unilateral flag, availableLoads ladder,
+  // bodyweightAdditive flag, updated note) on top. The stored plan
+  // is the source of truth for STRUCTURE (which exercises in which
+  // workout, in what order); DEFAULT_WORKOUTS is the source of truth
+  // for METADATA (per-exercise flags that drive the UI and
+  // recommender). Without this merge, a user who customized their
+  // plan once would never receive future metadata updates — kb_press
+  // would stay bilateral even after the code marked it unilateral,
+  // for example.
+  //
+  // Match by id; the lookup table is built from every workout's
+  // exercises in DEFAULT_WORKOUTS (id is unique across workouts).
+  // Fields that land on top: unilateral, availableLoads,
+  // bodyweightAdditive. Anything the user might have legitimately
+  // customized (sets, reps, name, note) is preserved as-is.
+  const [plan,   setPlan]           = useState(() => {
+    const stored = loadLS(LS_WORKOUT_PLAN_KEY);
+    if (!stored) return DEFAULT_WORKOUTS;
+    const defMeta = {};
+    for (const wk of Object.values(DEFAULT_WORKOUTS)) {
+      for (const ex of (wk.exercises || [])) {
+        if (!defMeta[ex.id]) defMeta[ex.id] = {
+          unilateral: ex.unilateral,
+          availableLoads: ex.availableLoads,
+          bodyweightAdditive: ex.bodyweightAdditive,
+        };
+      }
+    }
+    const merged = {};
+    for (const [key, wk] of Object.entries(stored)) {
+      merged[key] = {
+        ...wk,
+        exercises: (wk.exercises || []).map(ex => {
+          const meta = defMeta[ex.id];
+          if (!meta) return ex;
+          return {
+            ...ex,
+            ...(meta.unilateral !== undefined && { unilateral: meta.unilateral }),
+            ...(meta.availableLoads !== undefined && { availableLoads: meta.availableLoads }),
+            ...(meta.bodyweightAdditive !== undefined && { bodyweightAdditive: meta.bodyweightAdditive }),
+          };
+        }),
+      };
+    }
+    return merged;
+  });
   const [wLog,   setWLog]           = useState(() => loadLS(LS_WORKOUT_LOG_KEY)   || []);
   const [sessionActive,  setSessionActive]  = useState(false);
   const [sessionData,    setSessionData]    = useState({});    // exId → {sets, done}
