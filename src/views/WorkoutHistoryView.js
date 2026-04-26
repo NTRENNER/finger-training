@@ -307,36 +307,54 @@ export function WorkoutHistoryView({
                   <div key={id} style={{ marginBottom: 10 }}>
                     <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{exName}</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {data.sets.map((s, si) => (
-                        <span key={si} style={{
-                          padding: "3px 10px", borderRadius: 7, fontSize: 12,
-                          background: s.done ? "#1a2f1a" : C.border,
-                          border: `1px solid ${s.done ? C.green : C.border}`,
-                          color: s.done ? C.text : C.muted,
-                        }}>
-                          {(() => {
-                            // Pill text: "{reps} × {weight} {unit}". Falls back
-                            // gracefully when one half is missing — bodyweight-
-                            // only sets show just the rep count, weight-only
-                            // sets show just the weight.
-                            const reps = parseRepsCount(s.reps);
-                            const w = parseFloat(s.weight);
-                            const hasReps = reps > 0;
-                            const hasW    = isFinite(w) && w > 0;
-                            if (!hasReps && !hasW) return "—";
-
-                            if (relMode && hasW && bodyWeight != null && bodyWeight > 0) {
-                              const bwDisp = toDisp(bodyWeight, unit);
-                              const pct = Math.round((w / bwDisp) * 100);
-                              const wStr = `${w >= bwDisp ? "+" : ""}${pct}% BW`;
-                              return hasReps ? `${reps} × ${wStr}` : wStr;
-                            }
-                            if (hasReps && hasW) return `${reps} × ${s.weight} ${unit}`;
-                            if (hasReps)         return `${reps} reps`;
-                            return `${s.weight} ${unit}`;
-                          })()}
-                        </span>
-                      ))}
+                      {data.sets.map((s, si) => {
+                        // Detect unilateral schema by presence of any
+                        // L/R field. Bilateral sets render as a single
+                        // "5 × 80 lbs" pill; unilateral renders as a
+                        // single pill with both sides stacked
+                        // ("L 8 × 80 / R 7 × 80") so per-side
+                        // asymmetry stays visible at a glance.
+                        const isUni = s.leftReps != null  || s.leftWeight  != null
+                                   || s.rightReps != null || s.rightWeight != null;
+                        const formatSide = (reps, weight) => {
+                          const r = parseRepsCount(reps);
+                          const w = parseFloat(weight);
+                          const hasReps = r > 0;
+                          const hasW    = isFinite(w) && w > 0;
+                          if (!hasReps && !hasW) return "—";
+                          if (relMode && hasW && bodyWeight != null && bodyWeight > 0) {
+                            const bwDisp = toDisp(bodyWeight, unit);
+                            const pct = Math.round((w / bwDisp) * 100);
+                            const wStr = `${w >= bwDisp ? "+" : ""}${pct}% BW`;
+                            return hasReps ? `${r} × ${wStr}` : wStr;
+                          }
+                          if (hasReps && hasW) return `${r} × ${weight} ${unit}`;
+                          if (hasReps)         return `${r} reps`;
+                          return `${weight} ${unit}`;
+                        };
+                        return (
+                          <span key={si} style={{
+                            padding: "3px 10px", borderRadius: 7, fontSize: 12,
+                            background: s.done ? "#1a2f1a" : C.border,
+                            border: `1px solid ${s.done ? C.green : C.border}`,
+                            color: s.done ? C.text : C.muted,
+                            display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 1,
+                          }}>
+                            {isUni ? (
+                              <>
+                                <span style={{ fontSize: 11 }}>
+                                  <span style={{ color: C.muted }}>L </span>{formatSide(s.leftReps, s.leftWeight)}
+                                </span>
+                                <span style={{ fontSize: 11 }}>
+                                  <span style={{ color: C.muted }}>R </span>{formatSide(s.rightReps, s.rightWeight)}
+                                </span>
+                              </>
+                            ) : (
+                              formatSide(s.reps, s.weight)
+                            )}
+                          </span>
+                        );
+                      })}
                     </div>
                     {/* Per-exercise tonnage + est 1RM annotation. The
                         "+X% vs last" delta only renders when there's

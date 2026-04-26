@@ -114,7 +114,7 @@ const EXERCISE_SUBSTITUTES = {
     { id: "band_pullups",  name: "Band-assisted pull-ups", type: "S", reps: "5",       logWeight: false, note: "" },
   ],
   landmine_rows: [
-    { id: "db_rows",       name: "DB rows",                type: "S", reps: "5/side",  logWeight: true,  note: "" },
+    { id: "db_rows",       name: "DB rows",                type: "S", reps: "5",       logWeight: true,  unilateral: true, note: "" },
     { id: "cable_rows",    name: "Cable rows",             type: "S", reps: "5",       logWeight: true,  note: "" },
     { id: "trx_rows",      name: "TRX rows",               type: "S", reps: "8–10",    logWeight: false, note: "Feet elevated for more load" },
   ],
@@ -131,20 +131,20 @@ const EXERCISE_SUBSTITUTES = {
   trx_ham_curl:  [
     { id: "nordic_curl",   name: "Nordic curl",            type: "H", reps: "3–5",     logWeight: false, note: "Slow lowering; add 1 rep/1–2 wks" },
     { id: "sb_ham_curl",   name: "Stability ball curl",    type: "H", reps: "8–10",    logWeight: false, note: "" },
-    { id: "glute_bridge",  name: "Single-leg glute bridge",type: "H", reps: "10/side", logWeight: false, note: "" },
+    { id: "glute_bridge",  name: "Single-leg glute bridge",type: "H", reps: "10",      logWeight: false, unilateral: true, note: "" },
   ],
   goblet_squat:  [
-    { id: "step_up",       name: "Step-up",                type: "S", reps: "6–8/side",logWeight: true,  note: "Climbing & hiking strength" },
+    { id: "step_up",       name: "Step-up",                type: "S", reps: "6–8",     logWeight: true,  unilateral: true, note: "Climbing & hiking strength" },
     { id: "box_squat",     name: "Box squat",              type: "S", reps: "5",       logWeight: true,  note: "" },
-    { id: "split_squat",   name: "Bulgarian split squat",  type: "S", reps: "6/side",  logWeight: true,  note: "" },
+    { id: "split_squat",   name: "Bulgarian split squat",  type: "S", reps: "6",       logWeight: true,  unilateral: true, note: "" },
   ],
   step_up:       [
     { id: "goblet_squat",  name: "Goblet squat",           type: "S", reps: "8",       logWeight: true,  note: "Joint health — keep load moderate" },
-    { id: "split_squat",   name: "Bulgarian split squat",  type: "S", reps: "6/side",  logWeight: true,  note: "" },
-    { id: "lunge",         name: "Reverse lunge",          type: "S", reps: "8/side",  logWeight: true,  note: "" },
+    { id: "split_squat",   name: "Bulgarian split squat",  type: "S", reps: "6",       logWeight: true,  unilateral: true, note: "" },
+    { id: "lunge",         name: "Reverse lunge",          type: "S", reps: "8",       logWeight: true,  unilateral: true, note: "" },
   ],
   bicep_curls:   [
-    { id: "hammer_curls",  name: "Hammer curls",           type: "S", reps: "8",       logWeight: true,  note: "Brachialis emphasis" },
+    { id: "hammer_curls",  name: "Curls",                  type: "S", reps: "8",       logWeight: true,  unilateral: true, note: "Brachialis emphasis (hammer grip)" },
     { id: "band_curls",    name: "Band curls",             type: "S", reps: "10–12",   logWeight: false, note: "" },
     { id: "chin_up",       name: "Chin-ups (supinated)",   type: "S", reps: "5",       logWeight: true,  note: "Direct bicep transfer" },
   ],
@@ -155,7 +155,7 @@ const EXERCISE_SUBSTITUTES = {
   ],
   kb_snatch:     [
     { id: "kb_swing",      name: "KB swing",               type: "P", reps: "10",      logWeight: true,  note: "" },
-    { id: "db_snatch",     name: "DB snatch",              type: "P", reps: "5/side",  logWeight: true,  note: "" },
+    { id: "db_snatch",     name: "DB snatch",              type: "P", reps: "5",       logWeight: true,  unilateral: true, note: "" },
     { id: "power_clean",   name: "Power clean",            type: "P", reps: "5",       logWeight: true,  note: "" },
   ],
 };
@@ -175,10 +175,10 @@ export const DEFAULT_WORKOUTS = {
     name: "Lift Day 1 (Push + Pull)",
     exercises: [
       { id: "pull_ups",      name: "Weighted pull-ups",     type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Add weight when all reps clean" },
-      { id: "landmine_rows", name: "One-arm landmine rows", type: "S", sets: 2,    reps: "5/side", logWeight: true,  note: "Alternate sides" },
+      { id: "landmine_rows", name: "One-arm landmine rows", type: "S", sets: 2,    reps: "5",      logWeight: true,  unilateral: true, note: "Alternate sides" },
       { id: "bench_press",   name: "Bench press",           type: "S", sets: 2,    reps: "5",      logWeight: true,  note: "" },
       { id: "dips",          name: "Dips",                  type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Weighted when bodyweight is easy" },
-      { id: "bicep_curls",   name: "Bicep curls",           type: "S", sets: 2,    reps: "8",      logWeight: true,  note: "Undercling strength" },
+      { id: "bicep_curls",   name: "Bicep curls",           type: "S", sets: 2,    reps: "8",      logWeight: true,  unilateral: true, note: "Undercling strength" },
       { id: "rdl",           name: "RDL",                   type: "H", sets: 2,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
       { id: "trx_ham_curl",  name: "TRX hamstring curl",    type: "H", sets: 2,    reps: "6–8",    logWeight: false, note: "Slow eccentric; single-leg when ready" },
       { id: "goblet_squat",  name: "Goblet squat",          type: "S", sets: 1,    reps: "8",      logWeight: true,  note: "Joint health — keep load moderate" },
@@ -189,13 +189,13 @@ export const DEFAULT_WORKOUTS = {
     name: "Lift Day 2 (Push + Pull)",
     exercises: [
       { id: "pull_ups",      name: "Weighted pull-ups",     type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Add weight when all reps clean" },
-      { id: "landmine_rows", name: "One-arm landmine rows", type: "S", sets: 2,    reps: "5/side", logWeight: true,  note: "Alternate sides" },
+      { id: "landmine_rows", name: "One-arm landmine rows", type: "S", sets: 2,    reps: "5",      logWeight: true,  unilateral: true, note: "Alternate sides" },
       { id: "ohp",           name: "Overhead press",        type: "S", sets: 2,    reps: "5",      logWeight: true,  note: "KB or barbell" },
       { id: "dips",          name: "Dips",                  type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Weighted when bodyweight is easy" },
-      { id: "bicep_curls",   name: "Bicep curls",           type: "S", sets: 2,    reps: "8",      logWeight: true,  note: "Undercling strength" },
+      { id: "bicep_curls",   name: "Bicep curls",           type: "S", sets: 2,    reps: "8",      logWeight: true,  unilateral: true, note: "Undercling strength" },
       { id: "rdl",           name: "RDL",                   type: "H", sets: 2,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
       { id: "trx_ham_curl",  name: "TRX hamstring curl",    type: "H", sets: 2,    reps: "6–8",    logWeight: false, note: "Slow eccentric; single-leg when ready" },
-      { id: "step_up",       name: "Step-up",               type: "S", sets: 1,    reps: "6–8/side", logWeight: true, note: "Climbing & hiking strength — load when bodyweight easy" },
+      { id: "step_up",       name: "Step-up",               type: "S", sets: 1,    reps: "6–8",     logWeight: true, unilateral: true, note: "Climbing & hiking strength — load when bodyweight easy" },
       { id: "stretch",       name: "Stretching",            type: "X", sets: null, reps: null,     logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
     ],
   },
@@ -203,7 +203,7 @@ export const DEFAULT_WORKOUTS = {
     name: "Power",
     exercises: [
       { id: "slam_balls",  name: "Slam balls", type: "P", sets: 2,    reps: "8–10",   logWeight: true,  note: "Advance weight when 10 reps hold full speed" },
-      { id: "kb_snatch",   name: "KB snatch",  type: "P", sets: 2,    reps: "5/side", logWeight: true,  note: "Full hip snap, crisp catch" },
+      { id: "kb_snatch",   name: "KB snatch",  type: "P", sets: 2,    reps: "5",      logWeight: true,  unilateral: true, note: "Full hip snap, crisp catch" },
       { id: "stretch",     name: "Stretching", type: "X", sets: null, reps: null,     logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
     ],
   },
@@ -284,6 +284,12 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
 
           {ex.logWeight && setsData?.sets ? (
             // ── Per-set rows ──
+            // Unilateral exercises render TWO short rows per set (L
+            // on top, R below) so each side gets its own reps + weight
+            // input. The pair shares one done button — a "set" of
+            // unilateral work is one logical unit even though the two
+            // sides happen sequentially. Bilateral exercises keep the
+            // original single-row layout.
             <div style={{ marginTop: 10 }}>
               {/* Column headers */}
               <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
@@ -297,64 +303,95 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
 
               {setsData.sets.map((s, i) => {
                 const isExtra = i >= (ex.sets || 0);
-                return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    {/* Set label */}
-                    <span style={{ fontSize: 12, color: isExtra ? C.orange : C.muted, width: 36, flexShrink: 0 }}>
-                      S{i + 1}
-                    </span>
-                    {/* Reps input */}
-                    <input
-                      type="text" inputMode="text"
-                      value={s.reps ?? ex.reps ?? ""}
-                      onChange={e => {
+
+                // Renders one side's row of inputs. For unilateral
+                // sets, we call this twice per set with side="L"/"R";
+                // for bilateral, once with side=null.
+                const renderSideRow = (side, sLabel, sideKey) => {
+                  const repsKey   = side ? `${side.toLowerCase()}Reps`   : "reps";
+                  const weightKey = side ? `${side.toLowerCase()}Weight` : "weight";
+                  const repsVal   = s[repsKey] ?? (side ? "" : ex.reps) ?? "";
+                  const weightVal = s[weightKey] ?? "";
+                  const prev      = prevSets?.[i];
+                  const prevShown = side
+                    ? (prev && typeof prev === "object" ? prev[side] : null)
+                    : prev;
+                  return (
+                    <div key={sideKey} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: side === "L" ? 4 : 6 }}>
+                      <span style={{ fontSize: 12, color: isExtra ? C.orange : C.muted, width: 36, flexShrink: 0 }}>
+                        {sLabel}
+                      </span>
+                      <input
+                        type="text" inputMode="text"
+                        value={repsVal}
+                        onChange={e => {
+                          const next = [...setsData.sets];
+                          next[i] = { ...next[i], [repsKey]: e.target.value };
+                          onSetsChange({ sets: next });
+                        }}
+                        style={{ ...inputStyle, width: 48, fontSize: 13 }}
+                        placeholder={ex.reps || ""}
+                      />
+                      <input
+                        type="number" inputMode="decimal"
+                        value={weightVal}
+                        onChange={e => {
+                          const next = [...setsData.sets];
+                          next[i] = { ...next[i], [weightKey]: e.target.value };
+                          onSetsChange({ sets: next });
+                        }}
+                        style={inputStyle}
+                      />
+                      <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
+                      {prevShown ? (
+                        <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevShown}</span>
+                      ) : prevSets?.length > 0 ? (
+                        <span style={{ width: 44 }} />
+                      ) : null}
+                      {/* Done button — render only on the last (or
+                          only) side row so it sits at the visual
+                          end of the set. */}
+                      {(side === null || side === "R") && doneBtn(s.done, () => {
                         const next = [...setsData.sets];
-                        next[i] = { ...next[i], reps: e.target.value };
+                        next[i] = { ...next[i], done: !next[i].done };
                         onSetsChange({ sets: next });
-                      }}
-                      style={{ ...inputStyle, width: 48, fontSize: 13 }}
-                      placeholder={ex.reps || ""}
-                    />
-                    {/* Weight input */}
-                    <input
-                      type="number" inputMode="decimal"
-                      value={s.weight}
-                      onChange={e => {
-                        const next = [...setsData.sets];
-                        next[i] = { ...next[i], weight: e.target.value };
-                        onSetsChange({ sets: next });
-                      }}
-                      style={inputStyle}
-                    />
-                    <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
-                    {/* Prev weight */}
-                    {prevSets?.[i] ? (
-                      <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevSets[i]}</span>
-                    ) : prevSets?.length > 0 ? (
-                      <span style={{ width: 44 }} />
-                    ) : null}
-                    {/* Done button */}
-                    {doneBtn(s.done, () => {
-                      const next = [...setsData.sets];
-                      next[i] = { ...next[i], done: !next[i].done };
-                      onSetsChange({ sets: next });
-                    })}
-                    {/* Remove extra set */}
-                    {isExtra && (
-                      <button
-                        onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
-                        style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1 }}
-                        title="Remove this set"
-                      >−</button>
-                    )}
-                  </div>
-                );
+                      })}
+                      {/* Remove extra set — only on last side row */}
+                      {(side === null || side === "R") && isExtra && (
+                        <button
+                          onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
+                          style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1 }}
+                          title="Remove this set"
+                        >−</button>
+                      )}
+                    </div>
+                  );
+                };
+
+                if (ex.unilateral) {
+                  return (
+                    <div key={i} style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, color: isExtra ? C.orange : C.muted, marginBottom: 2 }}>
+                        S{i + 1}
+                      </div>
+                      {renderSideRow("L", "L", `${i}-L`)}
+                      {renderSideRow("R", "R", `${i}-R`)}
+                    </div>
+                  );
+                }
+                return renderSideRow(null, `S${i + 1}`, `${i}`);
               })}
 
-              {/* Add set button */}
+              {/* Add set button — initialize new set with the right
+                  schema so users don't end up mixing bilateral fields
+                  on a unilateral exercise (which the volume math
+                  would happily skip). */}
               <button
                 onClick={() => onSetsChange({
-                  sets: [...setsData.sets, { weight: "", reps: ex.reps || "", done: false }]
+                  sets: [...setsData.sets, ex.unilateral
+                    ? { leftReps: ex.reps || "", leftWeight: "", rightReps: ex.reps || "", rightWeight: "", done: false }
+                    : { weight: "", reps: ex.reps || "", done: false }
+                  ]
                 })}
                 style={{
                   marginTop: 4, width: "100%", padding: "5px 0",
@@ -654,30 +691,61 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
     setDisplayKey(key);
   };
 
-  // Previous best set weights for an exercise in this workout slot
-  const prevBestSets = (exId) => {
+  // Previous best set weights for an exercise in this workout slot.
+  // Returns one entry per set. Bilateral exercises get a string
+  // weight per set; unilateral exercises get { L, R } per set so the
+  // session UI can show the previous left/right weights side-by-side.
+  // Falls back to mirroring the bilateral weight on both L+R when the
+  // historical session was logged before unilateral split existed.
+  const prevBestSets = (exId, exDef) => {
     for (let i = wLog.length - 1; i >= 0; i--) {
       const e = wLog[i];
       if (e.workout === displayKey && e.exercises?.[exId]?.sets) {
-        return e.exercises[exId].sets.map(s => s.weight).filter(Boolean);
+        const sets = e.exercises[exId].sets;
+        if (exDef?.unilateral) {
+          return sets.map(s => {
+            const left  = s.leftWeight  ?? s.weight ?? "";
+            const right = s.rightWeight ?? s.weight ?? "";
+            if (!left && !right) return null;
+            return { L: left, R: right };
+          }).filter(Boolean);
+        }
+        return sets.map(s => s.weight ?? s.leftWeight ?? "").filter(Boolean);
       }
     }
     return [];
   };
 
   const startSession = () => {
-    // Pre-populate weights and reps from last session for this workout
+    // Pre-populate weights and reps from last session for this workout.
+    // Unilateral exercises get a per-side schema; bilateral keeps the
+    // legacy {weight, reps, done} shape. When the previous session
+    // was bilateral and the exercise is now unilateral, we mirror
+    // its weight to both sides so the user has a sensible starting
+    // point instead of empty fields.
     const prevLog = [...wLog].reverse().find(e => e.workout === displayKey);
     const init = {};
     workout.exercises.forEach(ex => {
       const prevEx = prevLog?.exercises?.[ex.id];
       if (ex.logWeight && ex.sets) {
         init[ex.id] = {
-          sets: Array.from({ length: ex.sets }, (_, i) => ({
-            weight: prevEx?.sets?.[i]?.weight || "",
-            reps:   prevEx?.sets?.[i]?.reps   || ex.reps || "",
-            done: false,
-          }))
+          sets: Array.from({ length: ex.sets }, (_, i) => {
+            const prev = prevEx?.sets?.[i];
+            if (ex.unilateral) {
+              return {
+                leftReps:    prev?.leftReps    ?? prev?.reps   ?? ex.reps ?? "",
+                leftWeight:  prev?.leftWeight  ?? prev?.weight ?? "",
+                rightReps:   prev?.rightReps   ?? prev?.reps   ?? ex.reps ?? "",
+                rightWeight: prev?.rightWeight ?? prev?.weight ?? "",
+                done: false,
+              };
+            }
+            return {
+              weight: prev?.weight     ?? prev?.leftWeight ?? "",
+              reps:   prev?.reps       ?? prev?.leftReps   ?? ex.reps ?? "",
+              done: false,
+            };
+          })
         };
       } else {
         init[ex.id] = { done: false };
@@ -1054,7 +1122,7 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
                 <SessionExRow
                   ex={activeEx}
                   unit={unit}
-                  prevSets={prevBestSets(sKey)}
+                  prevSets={prevBestSets(sKey, activeEx)}
                   setsData={sessionData[sKey]}
                   onSetsChange={(val) => setSessionData(prev => ({ ...prev, [sKey]: val }))}
                   done={!!sessionData[sKey]?.done}

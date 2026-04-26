@@ -56,10 +56,34 @@ function effectiveLoad(weight, bw, additive) {
   return safeW + safeBw;
 }
 
-// Sum of (reps × effective_load) across all DONE sets. Skips any
-// set marked done=false — those are sets the user planned but
-// didn't complete, and including them would inflate "what I
-// actually did". Returns 0 when nothing usable.
+// Pull the per-side "side payloads" out of a set, regardless of
+// schema. Returns an array of {reps, weight} entries — one for
+// bilateral sets, two (left, right) for unilateral sets that have
+// either side populated. Lets the volume + 1RM helpers iterate
+// uniformly without caring which schema is in play.
+//
+// Unilateral set shape: { leftReps, leftWeight, rightReps, rightWeight, done }
+// Bilateral set shape:  { reps, weight, done }
+// Either schema's `done` gates the whole set; we don't track per-side
+// completion separately (a "set" of unilateral work is one logical
+// unit even though the two sides happen sequentially).
+function sidePayloads(set) {
+  if (!set) return [];
+  const hasUni = set.leftReps != null || set.leftWeight != null
+              || set.rightReps != null || set.rightWeight != null;
+  if (hasUni) {
+    return [
+      { reps: set.leftReps,  weight: set.leftWeight  },
+      { reps: set.rightReps, weight: set.rightWeight },
+    ];
+  }
+  return [{ reps: set.reps, weight: set.weight }];
+}
+
+// Sum of (reps × effective_load) across all DONE sets, summing both
+// sides for unilateral sets. Skips sets marked done=false — those
+// are sets the user planned but didn't complete, and including them
+// would inflate "what I actually did". Returns 0 when nothing usable.
 //
 // `bw` should be the user's bodyweight at the session date (display
 // units), not the current one — bodyweight changes meaningfully
@@ -70,19 +94,22 @@ export function sessionExerciseVolume(sets, bw, exDef) {
   let total = 0;
   for (const s of sets) {
     if (!s || !s.done) continue;
-    const reps = parseRepsCount(s.reps);
-    if (reps <= 0) continue;
-    const load = effectiveLoad(s.weight, bw, additive);
-    if (load <= 0) continue;
-    total += reps * load;
+    for (const side of sidePayloads(s)) {
+      const reps = parseRepsCount(side.reps);
+      if (reps <= 0) continue;
+      const load = effectiveLoad(side.weight, bw, additive);
+      if (load <= 0) continue;
+      total += reps * load;
+    }
   }
   return Math.round(total);
 }
 
 // Epley estimated 1RM: weight × (1 + reps/30). Computed per done
-// set; the session's est. 1RM is the MAX across sets (any single
-// hard set sets the ceiling — averaging would understate). Returns
-// 0 when no usable data.
+// set's side; the session's est. 1RM is the MAX across all sides of
+// all done sets (any single hard side sets the ceiling — averaging
+// across sides would understate left-right asymmetry). Returns 0
+// when no usable data.
 //
 // Same bodyweight handling as sessionExerciseVolume — additive
 // exercises use bw + added.
@@ -92,12 +119,14 @@ export function sessionExerciseEst1RM(sets, bw, exDef) {
   let best = 0;
   for (const s of sets) {
     if (!s || !s.done) continue;
-    const reps = parseRepsCount(s.reps);
-    if (reps <= 0) continue;
-    const load = effectiveLoad(s.weight, bw, additive);
-    if (load <= 0) continue;
-    const est = load * (1 + reps / 30);
-    if (est > best) best = est;
+    for (const side of sidePayloads(s)) {
+      const reps = parseRepsCount(side.reps);
+      if (reps <= 0) continue;
+      const load = effectiveLoad(side.weight, bw, additive);
+      if (load <= 0) continue;
+      const est = load * (1 + reps / 30);
+      if (est > best) best = est;
+    }
   }
   return Math.round(best * 10) / 10;
 }

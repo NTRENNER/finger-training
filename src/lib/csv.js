@@ -51,14 +51,25 @@ export function downloadWorkoutCSV(log) {
       const exName = exId.replace(/_/g, " ");
       if (exData.sets && exData.sets.length > 0) {
         exData.sets.forEach((set, i) => {
-          rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, set.reps ?? "", set.weight ?? "", set.done ? "yes" : "no"]);
+          // Unilateral sets emit two rows (L, R) so per-side
+          // asymmetry survives the export. Bilateral sets emit one
+          // row with side="" so existing pipelines reading the
+          // file still parse cleanly.
+          const isUni = set.leftReps != null  || set.leftWeight  != null
+                     || set.rightReps != null || set.rightWeight != null;
+          if (isUni) {
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "L", set.leftReps ?? "",  set.leftWeight ?? "",  set.done ? "yes" : "no"]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "R", set.rightReps ?? "", set.rightWeight ?? "", set.done ? "yes" : "no"]);
+          } else {
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "",  set.reps ?? "",      set.weight ?? "",      set.done ? "yes" : "no"]);
+          }
         });
       } else {
-        rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, "", "", "", exData.done ? "yes" : "no"]);
+        rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, "", "", "", "", exData.done ? "yes" : "no"]);
       }
     }
   }
-  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "reps", "weight", "done"];
+  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "side", "reps", "weight", "done"];
   const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const a = Object.assign(document.createElement("a"), {
