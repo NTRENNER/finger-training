@@ -31,6 +31,7 @@ import {
 } from "../lib/trip.js";
 
 import { today } from "../util.js";
+import { recommendSet } from "../model/workout-progression.js";
 
 import { BwPrompt } from "./SetupView.js";
 
@@ -193,7 +194,7 @@ export const DEFAULT_WORKOUTS = {
     exercises: [
       { id: "pull_ups",      name: "Weighted pull-ups",     type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Add weight when all reps clean" },
       { id: "landmine_rows", name: "One-arm landmine rows", type: "S", sets: 2,    reps: "5",      logWeight: true,  unilateral: true, note: "Alternate sides" },
-      { id: "kb_press",      name: "KB press",              type: "S", sets: 2,    reps: "5",      logWeight: true,  note: "Two KBs simultaneously" },
+      { id: "kb_press",      name: "KB press",              type: "S", sets: 2,    reps: "5",      logWeight: true,  availableLoads: [35, 50, 55, 62, 70], note: "Two KBs simultaneously" },
       { id: "dips",          name: "Dips",                  type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Weighted when bodyweight is easy" },
       { id: "bicep_curls",   name: "Bicep curls",           type: "S", sets: 2,    reps: "8",      logWeight: true,  unilateral: true, note: "Undercling strength" },
       { id: "rdl",           name: "RDL",                   type: "H", sets: 2,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
@@ -254,7 +255,7 @@ function ExerciseRow({ ex, last }) {
 }
 
 // ── Session logging row ───────────────────────────────────────
-function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onToggle, last }) {
+function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onToggle, last, recommendations = [] }) {
   const allSetsDone = ex.logWeight && setsData?.sets
     ? setsData.sets.every(s => s.done)
     : !!done;
@@ -371,6 +372,12 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                   );
                 };
 
+                // Per-set progression hint(s) from the recommender.
+                // Bilateral exercises get a single hint line under
+                // the set; unilateral get one per side.
+                const rec = recommendations[i];
+                const hintStyle = { fontSize: 10, color: C.muted, marginLeft: 44, marginTop: -2, marginBottom: 4, fontStyle: "italic" };
+
                 if (ex.unilateral) {
                   return (
                     <div key={i} style={{ marginBottom: 8 }}>
@@ -378,11 +385,24 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                         S{i + 1}
                       </div>
                       {renderSideRow("L", "L", `${i}-L`)}
+                      {rec?.leftReasoning && (
+                        <div style={hintStyle}>{rec.leftReasoning}</div>
+                      )}
                       {renderSideRow("R", "R", `${i}-R`)}
+                      {rec?.rightReasoning && (
+                        <div style={hintStyle}>{rec.rightReasoning}</div>
+                      )}
                     </div>
                   );
                 }
-                return renderSideRow(null, `S${i + 1}`, `${i}`);
+                return (
+                  <div key={i}>
+                    {renderSideRow(null, `S${i + 1}`, `${i}`)}
+                    {rec?.reasoning && (
+                      <div style={hintStyle}>{rec.reasoning}</div>
+                    )}
+                  </div>
+                );
               })}
 
               {/* Add set button — initialize new set with the right
@@ -720,32 +740,32 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   };
 
   const startSession = () => {
-    // Pre-populate weights and reps from last session for this workout.
-    // Unilateral exercises get a per-side schema; bilateral keeps the
-    // legacy {weight, reps, done} shape. When the previous session
-    // was bilateral and the exercise is now unilateral, we mirror
-    // its weight to both sides so the user has a sensible starting
-    // point instead of empty fields.
-    const prevLog = [...wLog].reverse().find(e => e.workout === displayKey);
+    // Pre-populate inputs using the progression recommender — see
+    // src/model/workout-progression.js. The recommender does smart
+    // things based on history: a clean session bumps weight (or
+    // reps for KB-style discrete-load exercises); a missed-reps
+    // session holds weight; a catastrophic miss backs off. The
+    // returned reasoning is also rendered under each input by
+    // SessionExRow so the user knows why the suggestion is what
+    // it is.
     const init = {};
     workout.exercises.forEach(ex => {
-      const prevEx = prevLog?.exercises?.[ex.id];
       if (ex.logWeight && ex.sets) {
         init[ex.id] = {
           sets: Array.from({ length: ex.sets }, (_, i) => {
-            const prev = prevEx?.sets?.[i];
+            const rec = recommendSet(wLog, ex, displayKey, i);
             if (ex.unilateral) {
               return {
-                leftReps:    prev?.leftReps    ?? prev?.reps   ?? ex.reps ?? "",
-                leftWeight:  prev?.leftWeight  ?? prev?.weight ?? "",
-                rightReps:   prev?.rightReps   ?? prev?.reps   ?? ex.reps ?? "",
-                rightWeight: prev?.rightWeight ?? prev?.weight ?? "",
+                leftReps:    rec.leftReps    ?? "",
+                leftWeight:  rec.leftWeight  ?? "",
+                rightReps:   rec.rightReps   ?? "",
+                rightWeight: rec.rightWeight ?? "",
                 done: false,
               };
             }
             return {
-              weight: prev?.weight     ?? prev?.leftWeight ?? "",
-              reps:   prev?.reps       ?? prev?.leftReps   ?? ex.reps ?? "",
+              weight: rec.weight ?? "",
+              reps:   rec.reps   ?? "",
               done: false,
             };
           })
@@ -1134,6 +1154,12 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
                     [sKey]: { ...prev[sKey], done: !prev[sKey]?.done },
                   }))}
                   last={isLast && !pickerOpen}
+                  // Per-set progression suggestions — same recommender
+                  // that startSession used to pre-fill the inputs.
+                  // Computed here per render so the reasoning text
+                  // stays in sync with whatever set count the user
+                  // has after add/remove.
+                  recommendations={(activeEx.sets ? Array.from({ length: Math.max(activeEx.sets, sessionData[sKey]?.sets?.length || 0) }, (_, i) => recommendSet(wLog, activeEx, displayKey, i)) : [])}
                 />
               </div>
             );
