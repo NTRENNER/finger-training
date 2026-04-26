@@ -662,7 +662,6 @@ export default function App() {
           history={history}
           unit={unit}
           bodyWeight={bodyWeight}
-          baseline={baseline}
           activities={activities}
           liveEstimate={liveEstimate}
           gripEstimates={gripEstimates}

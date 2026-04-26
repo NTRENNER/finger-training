@@ -32,7 +32,7 @@ import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
 import { POWER_MAX, STRENGTH_MAX } from "../model/zones.js";
 import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
 import {
-  fitCF, fitCFWithSuccessFloor, predForce,
+  fitCF, fitCFWithSuccessFloor,
 } from "../model/monod.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
@@ -115,7 +115,7 @@ function buildRecFromFit(fit, personalResponse, unit) {
 }
 
 export function AnalysisView({
-  history, unit = "lbs", bodyWeight = null, baseline = null,
+  history, unit = "lbs", bodyWeight = null,
   activities = [], liveEstimate = null, gripEstimates = {},
   freshMap = null,
   // Cross-cutting App config — passed in rather than imported so this
@@ -181,21 +181,50 @@ export function AnalysisView({
   }, [failures]);
 
   // ── Endurance improvement % vs baseline ──
-  // Reference durations for each domain (seconds)
+  // Reference durations for each domain (seconds). The Endurance
+  // anchor (180s) lands deep into the slow/oxidative compartment of
+  // the three-exp basis, where the curve is most stable; that's
+  // intentionally where the headline "Endurance" % comes from.
   const REF = { power: 10, strength: 45, endurance: 180 };
 
-  // Reusable: compute {power, strength, endurance, total} Δ% for a
-  // current fit against a reference fit. The reference is injected so
-  // the pooled path and per-grip path can each compare apples-to-
-  // apples (pooled-current vs pooled-baseline; Micro-now vs Micro-
-  // then; Crusher-now vs Crusher-then).
-  const improvementForFit = (fit, ref) => {
-    if (!ref || !fit) return null;
+  // Migrated from Monod (CF + W'/T) to the three-exp basis in March
+  // 2026 — see commit migrating this card. The rest of the app moved
+  // to three-exp during Phases A–D; leaving this card on Monod meant
+  // the headline % the user saw here didn't agree with the curve they
+  // saw on the F-D chart, AND the Power column in particular was
+  // dominated by W' fit noise (small-N Monod fits over-estimate W',
+  // which inflates F at short T, producing phantom regressions). The
+  // three-exp basis with a grip-prior anchors the fast amplitude even
+  // when failures are sparse, so the Power column behaves.
+
+  // Three-exp fit helper: pulls the grip-aware prior from
+  // threeExpPriors and applies adaptive lambda shrinkage so small-N
+  // fits don't run away. Returns [a, b, c] amps or null. Same
+  // pattern coaching.js uses for its per-hand fits — keeps both
+  // surfaces honest about where small-sample data is being smoothed.
+  const fitAmpsForPts = (pts, grip) => {
+    if (!pts || pts.length < 1) return null;
+    const prior = (grip && threeExpPriors && threeExpPriors.get)
+      ? (threeExpPriors.get(grip) ?? [0, 0, 0])
+      : [0, 0, 0];
+    const hasPrior = (prior[0] + prior[1] + prior[2]) > 0;
+    const lambda = hasPrior ? THREE_EXP_LAMBDA_DEFAULT / Math.max(pts.length, 1) : 0;
+    const amps = fitThreeExpAmps(pts, { prior, lambda });
+    if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) return null;
+    return amps;
+  };
+
+  // Reusable: compute {power, strength, endurance, total} Δ% from a
+  // current set of three-exp amps vs a reference set. Same shape as
+  // the old improvementForFit but operating on amps arrays instead
+  // of {CF, W} fit objects.
+  const improvementForAmps = (curAmps, refAmps) => {
+    if (!curAmps || !refAmps) return null;
     const pct = (t) => {
-      const cur  = predForce(fit, t);
-      const base = predForce(ref, t);
-      if (base <= 0) return null;
-      return Math.round((cur / base - 1) * 100);
+      const cur = predForceThreeExp(curAmps, t);
+      const ref = predForceThreeExp(refAmps, t);
+      if (ref <= 0) return null;
+      return Math.round((cur / ref - 1) * 100);
     };
     const p = pct(REF.power);
     const s = pct(REF.strength);
@@ -204,25 +233,54 @@ export function AnalysisView({
     return { power: p, strength: s, endurance: e, total: Math.round((p + s + e) / 3) };
   };
 
-  const improvement = useMemo(
-    () => improvementForFit(cfEstimate, baseline),
-    [baseline, cfEstimate] // eslint-disable-line react-hooks/exhaustive-deps
+  // Three-exp current fit on the filtered failures — this is the
+  // role cfEstimate (Monod) used to play here, but now scoped to
+  // the same {hand, grip} filter the user has set on this view.
+  const current3xAmps = useMemo(
+    () => fitAmpsForPts(failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })), selGrip),
+    [failures, selGrip, threeExpPriors] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // Per-grip baselines — for each grip, find the earliest window of
-  // failure reps (≥5 reps, ≥3 distinct target durations) and fit a
-  // Monod-Scherrer snapshot from just that grip's reps. This mirrors
-  // the global auto-baseline seeding logic (App-level useEffect) but
-  // scoped per grip, with a tighter threshold:
-  //   - ≥5 reps (vs 3 globally) to damp W' estimate variance
-  //   - ≥3 distinct durations (vs 2 globally) so the Monod fit has
-  //     real spread along the 1/T axis instead of a 2-point line
-  // Small-N Monod fits have high variance in W' — the anaerobic
-  // numerator — and that noise is amplified at short T by the 1/T
-  // factor. A 3-rep baseline across 2 durations was producing
-  // optimistic W' values that later fits naturally pulled down,
-  // showing up as phantom "Power regression" of -50% or so. 5 reps
-  // across 3 durations gives a far more stable intercept+slope.
+  // Pooled three-exp baseline — re-derived from the same earliest-
+  // window seed logic the App-level Monod baseline uses (≥3 failures
+  // across ≥2 distinct durations, dated to the earliest rep in the
+  // seed window). Computed locally rather than loaded from the
+  // App.js Monod snapshot so the comparison is purely three-exp on
+  // both sides; the two halves of the Δ% live in the same model.
+  const global3xBaseline = useMemo(() => {
+    const allFails = (history || [])
+      .filter(r => r.failed && r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const acc = [];
+    const durs = new Set();
+    for (const r of allFails) {
+      acc.push(r);
+      durs.add(r.target_duration);
+      if (acc.length >= 3 && durs.size >= 2) {
+        const amps = fitAmpsForPts(
+          acc.map(x => ({ T: x.actual_time_s, F: x.avg_force_kg })),
+          null  // pooled across grips → no per-grip prior
+        );
+        if (amps) return { date: acc[0].date, amps };
+        return null;
+      }
+    }
+    return null;
+  }, [history, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const improvement = useMemo(
+    () => improvementForAmps(current3xAmps, global3xBaseline?.amps),
+    [current3xAmps, global3xBaseline] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Per-grip baselines (three-exp). For each grip, find the earliest
+  // window of failure reps (≥5 reps, ≥3 distinct target durations)
+  // and fit a three-exp basis from just that grip's reps. Mirrors the
+  // global seeding logic but scoped per-grip; tighter thresholds (5/3
+  // vs 3/2 globally) preserve the historical "small fits are noisy"
+  // damping. The grip-aware prior shrinkage from fitAmpsForPts further
+  // anchors the fast amplitude, which under Monod was the main source
+  // of phantom Power regressions at low N.
   const gripBaselines = useMemo(() => {
     const out = {};
     const byGrip = {};
@@ -241,40 +299,66 @@ export function AnalysisView({
         acc.push(r);
         durs.add(r.target_duration);
         if (acc.length >= 5 && durs.size >= 3) {
-          const fit = fitCF(acc.map(x => ({ x: 1 / x.actual_time_s, y: x.avg_force_kg })));
-          if (fit) out[grip] = { date: acc[0].date, CF: fit.CF, W: fit.W };
+          const amps = fitAmpsForPts(
+            acc.map(x => ({ T: x.actual_time_s, F: x.avg_force_kg })),
+            grip
+          );
+          if (amps) out[grip] = { date: acc[0].date, amps };
           break;
         }
       }
     }
     return out;
-  }, [history]);
+  }, [history, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Per-grip capacity improvement — each grip's current fit vs its
-  // own per-grip baseline. Only emitted for grips that have both a
-  // per-grip baseline AND a per-grip current fit, so the card never
-  // shows a misleading cross-muscle comparison.
+  // Per-grip CURRENT three-exp amps — the "now" side of the per-grip
+  // improvement comparison. Pulls every failure on that grip and fits
+  // a three-exp basis with the grip's prior. (The Monod equivalent
+  // was App.js's `gripEstimates`, but we want both sides of the Δ%
+  // to live in the same model.)
+  const grip3xEstimates = useMemo(() => {
+    const out = {};
+    const byGrip = {};
+    for (const r of history) {
+      if (!r.failed || !r.grip) continue;
+      if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+      if (!(r.actual_time_s > 0)) continue;
+      if (!byGrip[r.grip]) byGrip[r.grip] = [];
+      byGrip[r.grip].push(r);
+    }
+    for (const [grip, reps] of Object.entries(byGrip)) {
+      const amps = fitAmpsForPts(
+        reps.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+        grip
+      );
+      if (amps) out[grip] = amps;
+    }
+    return out;
+  }, [history, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-grip improvement — each grip's current three-exp fit vs its
+  // own per-grip three-exp baseline. Only emitted for grips that have
+  // both, so the card never shows a misleading cross-muscle comparison.
   const gripImprovement = useMemo(() => {
     const out = {};
-    for (const [grip, fit] of Object.entries(gripEstimates)) {
+    for (const [grip, amps] of Object.entries(grip3xEstimates)) {
       const ref = gripBaselines[grip];
       if (!ref) continue;
-      const imp = improvementForFit(fit, ref);
+      const imp = improvementForAmps(amps, ref.amps);
       if (imp) out[grip] = { ...imp, baselineDate: ref.date };
     }
     return out;
-  }, [gripBaselines, gripEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gripBaselines, grip3xEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
-  // ── Per-hand × per-grip baselines ──
-  // Same seeding logic as gripBaselines but scoped to a single hand on
-  // a single grip. Needed because Monod W' has high variance at small
-  // N — if we compared each (grip,hand) fit against the POOLED global
-  // baseline, cross-muscle (FDP vs FDS) and cross-hand asymmetries
-  // contaminated the reference and produced phantom regressions on
-  // whichever hand/grip combo started above the pooled mean. With a
-  // per-(grip,hand) baseline, Δ% is an apples-to-apples comparison.
-  // Threshold: ≥5 failures across ≥3 distinct durations per combo.
+  // ── Per-hand × per-grip baselines (three-exp) ──
+  // Same seeding logic as gripBaselines but scoped to a single hand
+  // on a single grip. Threshold: ≥5 failures across ≥3 distinct
+  // durations per (grip, hand). The grip-aware prior in fitAmpsForPts
+  // anchors the fast amplitude even when these per-(hand,grip) sets
+  // are sparse; under Monod the small-N W' variance was the source
+  // of phantom Power regressions on whichever combo started above
+  // the pooled mean.
   const perHandGripBaselines = useMemo(() => {
     const out = {};
     const byKey = {};
@@ -294,14 +378,18 @@ export function AnalysisView({
         acc.push(r);
         durs.add(r.target_duration);
         if (acc.length >= 5 && durs.size >= 3) {
-          const fit = fitCF(acc.map(x => ({ x: 1 / x.actual_time_s, y: x.avg_force_kg })));
-          if (fit) out[key] = { date: acc[0].date, CF: fit.CF, W: fit.W };
+          const grip = key.split("|")[0];
+          const amps = fitAmpsForPts(
+            acc.map(x => ({ T: x.actual_time_s, F: x.avg_force_kg })),
+            grip
+          );
+          if (amps) out[key] = { date: acc[0].date, amps };
           break;
         }
       }
     }
     return out;
-  }, [history]);
+  }, [history, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Progress toward unlocking a per-grip (or per-grip × hand) baseline.
   // Returns {failures, distinctDurations, ready} so UI placeholders can
@@ -1226,7 +1314,7 @@ export function AnalysisView({
           When no grip filter is active AND ≥2 grips have fits, split
           the card into per-grip sections so Micro (FDP) and Crusher
           (FDS) each show their own Δ% against the shared baseline. */}
-      {baseline && (improvement || Object.keys(gripImprovement).length > 0) && (() => {
+      {(improvement || Object.keys(gripImprovement).length > 0) && (() => {
         // Reusable row renderer — one header + one Power/Strength/Endurance
         // row of three Δ% tiles.
         const renderRow = (label, imp) => (
@@ -1298,17 +1386,17 @@ export function AnalysisView({
           const phgRef = phgKey ? perHandGripBaselines[phgKey] : null;
           const gRef   = gripBaselines[selGrip];
           if (phgRef) {
-            // Tightest match: use cfEstimate (already hand+grip scoped) vs
-            // per-hand-grip baseline.
-            scopedImp = improvementForFit(cfEstimate, phgRef);
+            // Tightest match: current3xAmps (already hand+grip scoped
+            // via the `failures` filter) vs per-(hand,grip) baseline.
+            scopedImp = improvementForAmps(current3xAmps, phgRef.amps);
             scopedBaselineDate = phgRef.date;
             scopedScopeLabel = `${selGrip} · ${selHand === "L" ? "Left" : "Right"}`;
-          } else if (gRef && gripEstimates[selGrip]) {
-            // Fallback: per-hand-grip baseline doesn't exist yet, but the
-            // grip-pooled baseline does. Use the grip-pooled CURRENT fit
-            // (gripEstimates[selGrip], which pools both hands) so both
-            // sides of the comparison live in the same scope.
-            scopedImp = improvementForFit(gripEstimates[selGrip], gRef);
+          } else if (gRef && grip3xEstimates[selGrip]) {
+            // Fallback: per-(hand,grip) baseline doesn't exist yet, but
+            // the grip-pooled baseline does. Use the grip-pooled CURRENT
+            // amps (pools both hands) so both sides of the comparison
+            // live in the same scope.
+            scopedImp = improvementForAmps(grip3xEstimates[selGrip], gRef.amps);
             scopedBaselineDate = gRef.date;
             scopedScopeLabel = `${selGrip} (both hands)`;
           }
@@ -1318,8 +1406,8 @@ export function AnalysisView({
           <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Endurance Improvement</div>
-              {!perGripMode && !selGrip && (
-                <div style={{ fontSize: 11, color: C.muted }}>since {baseline.date}</div>
+              {!perGripMode && !selGrip && global3xBaseline && (
+                <div style={{ fontSize: 11, color: C.muted }}>since {global3xBaseline.date}</div>
               )}
               {selGrip && scopedImp && (
                 <div style={{ fontSize: 11, color: C.muted }}>since {scopedBaselineDate}</div>
@@ -1366,7 +1454,7 @@ export function AnalysisView({
                 </>
               ) : (
                 <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-                  Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the comparison is too noisy to be useful (small-sample Monod fits have high W′ variance, which inflates predicted force at short durations).
+                  Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the three-exp fit can't separate the fast / medium / slow compartments cleanly enough for the per-zone Δ% to be meaningful.
                 </div>
               )
             ) : selGrip ? (
