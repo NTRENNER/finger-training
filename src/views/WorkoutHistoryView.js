@@ -24,6 +24,10 @@ import {
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
   ROTATION_PIN_KEY,
 } from "../lib/storage.js";
+import {
+  sessionExerciseVolume, sessionExerciseEst1RM,
+  isBodyweightAdditive, parseRepsCount,
+} from "../model/workout-volume.js";
 
 export function WorkoutHistoryView({
   unit = "lbs", bodyWeight = null,
@@ -53,6 +57,19 @@ export function WorkoutHistoryView({
     for (const wk of Object.values(defaultWorkouts)) {
       for (const ex of (wk.exercises || [])) {
         if (!map[ex.id]) map[ex.id] = ex.name || ex.id.replace(/_/g, " ");
+      }
+    }
+    return map;
+  }, [defaultWorkouts]);
+
+  // Flat exercise-definition lookup, so we can ask isBodyweightAdditive
+  // (and any future per-exercise metadata) at render time without
+  // re-walking the workout plan tree.
+  const exDefs = useMemo(() => {
+    const map = {};
+    for (const wk of Object.values(defaultWorkouts)) {
+      for (const ex of (wk.exercises || [])) {
+        if (!map[ex.id]) map[ex.id] = ex;
       }
     }
     return map;
@@ -253,12 +270,41 @@ export function WorkoutHistoryView({
             {/* Exercises — render all that have actual data, regardless of workout definition */}
             {Object.entries(session.exercises || {}).map(([id, data]) => {
               const exName = exNames[id] || id.replace(/_/g, " ");
+              const exDef  = exDefs[id];
 
               if (data.sets && data.sets.length) {
                 const anyDone = data.sets.some(s => s.done);
                 if (!anyDone) return null;
+
+                // Per-exercise volume + est 1RM. Bodyweight from the
+                // session's date (in display unit, since per-set
+                // weights are stored in display unit too — see the
+                // pill render below). Compare against the most
+                // recent earlier session of the same workout-type
+                // that contained this exercise; show "+X% vs last"
+                // if a comparable predecessor exists.
+                const bwAtSessionKg = bwOnDate(bwLog, session.date)?.kg ?? null;
+                const bwAtSessionDisp = bwAtSessionKg != null ? toDisp(bwAtSessionKg, unit) : null;
+                const additive = isBodyweightAdditive(exDef);
+                const vol  = sessionExerciseVolume(data.sets, bwAtSessionDisp, exDef);
+                const e1rm = sessionExerciseEst1RM(data.sets, bwAtSessionDisp, exDef);
+
+                let prevVol = null;
+                for (const prior of sorted) {
+                  if (prior.workout !== session.workout) continue;
+                  if (prior.date >= session.date && prior !== session) continue;
+                  if (prior === session) continue;
+                  const priorEx = prior.exercises?.[id];
+                  if (!priorEx?.sets?.length) continue;
+                  const priorBwKg = bwOnDate(bwLog, prior.date)?.kg ?? bwAtSessionKg;
+                  const priorBwDisp = priorBwKg != null ? toDisp(priorBwKg, unit) : null;
+                  const v = sessionExerciseVolume(priorEx.sets, priorBwDisp, exDef);
+                  if (v > 0) { prevVol = v; break; }
+                }
+                const deltaPct = (prevVol && vol) ? Math.round((vol / prevVol - 1) * 100) : null;
+
                 return (
-                  <div key={id} style={{ marginBottom: 8 }}>
+                  <div key={id} style={{ marginBottom: 10 }}>
                     <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{exName}</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {data.sets.map((s, si) => (
@@ -269,18 +315,58 @@ export function WorkoutHistoryView({
                           color: s.done ? C.text : C.muted,
                         }}>
                           {(() => {
-                            if (!s.weight) return "—";
+                            // Pill text: "{reps} × {weight} {unit}". Falls back
+                            // gracefully when one half is missing — bodyweight-
+                            // only sets show just the rep count, weight-only
+                            // sets show just the weight.
+                            const reps = parseRepsCount(s.reps);
                             const w = parseFloat(s.weight);
-                            if (relMode && bodyWeight != null && bodyWeight > 0) {
+                            const hasReps = reps > 0;
+                            const hasW    = isFinite(w) && w > 0;
+                            if (!hasReps && !hasW) return "—";
+
+                            if (relMode && hasW && bodyWeight != null && bodyWeight > 0) {
                               const bwDisp = toDisp(bodyWeight, unit);
                               const pct = Math.round((w / bwDisp) * 100);
-                              return `${w >= bwDisp ? "+" : ""}${pct}% BW`;
+                              const wStr = `${w >= bwDisp ? "+" : ""}${pct}% BW`;
+                              return hasReps ? `${reps} × ${wStr}` : wStr;
                             }
+                            if (hasReps && hasW) return `${reps} × ${s.weight} ${unit}`;
+                            if (hasReps)         return `${reps} reps`;
                             return `${s.weight} ${unit}`;
                           })()}
                         </span>
                       ))}
                     </div>
+                    {/* Per-exercise tonnage + est 1RM annotation. The
+                        "+X% vs last" delta only renders when there's
+                        a comparable predecessor session (same workout
+                        type, same exercise, an earlier date, with a
+                        non-zero volume). For bodyweight-additive
+                        exercises (pull-ups, dips) the load includes
+                        bodyweight at the time of the session, not
+                        current bodyweight, so cycle-long bodyweight
+                        changes don't pollute the comparison. */}
+                    {(vol > 0 || e1rm > 0) && (
+                      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {vol > 0 && (
+                          <span>vol <b style={{ color: C.text }}>{vol} {unit}</b></span>
+                        )}
+                        {e1rm > 0 && (
+                          <span>1RM ~<b style={{ color: C.text }}>{fmt1(e1rm)} {unit}</b></span>
+                        )}
+                        {deltaPct != null && (
+                          <span style={{ color: deltaPct >= 0 ? C.green : C.orange }}>
+                            {deltaPct >= 0 ? "+" : ""}{deltaPct}% vs last
+                          </span>
+                        )}
+                        {additive && (
+                          <span title="Bodyweight added to recorded weight for volume + 1RM" style={{ opacity: 0.7 }}>
+                            +BW
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               }
