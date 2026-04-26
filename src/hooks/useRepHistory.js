@@ -33,7 +33,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase.js";
 import {
   loadLS, saveLS,
-  LS_HISTORY_KEY,
+  LS_HISTORY_KEY, LS_REP_DELETED_KEY,
   LS_WORKOUT_LOG_KEY, LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
 } from "../lib/storage.js";
 import {
@@ -50,6 +50,22 @@ import { buildThreeExpPriors } from "../model/threeExp.js";
 // (offline-only sessions, manually added rows, etc.).
 const repMatchKey = (r) =>
   r.id ? `id:${r.id}` : `${r.session_id || r.date}|${r.set_num}|${r.rep_num}`;
+
+// Append rep ids to the tombstone list (LS_REP_DELETED_KEY). The
+// reconcile pass reads this list to avoid re-uploading deleted reps
+// — see the comment on LS_REP_DELETED_KEY in src/lib/storage.js.
+// Reps without an id (un-synced offline ones) can't be tombstoned;
+// they have no cloud presence to defend against, so it's fine.
+function addRepTombstones(ids) {
+  const fresh = (ids || []).filter(Boolean);
+  if (fresh.length === 0) return;
+  const existing = new Set(loadLS(LS_REP_DELETED_KEY) || []);
+  let changed = false;
+  for (const id of fresh) {
+    if (!existing.has(id)) { existing.add(id); changed = true; }
+  }
+  if (changed) saveLS(LS_REP_DELETED_KEY, [...existing]);
+}
 
 export function useRepHistory({ user }) {
   const [history, setHistory] = useState(() => loadLS(LS_HISTORY_KEY) || []);
@@ -101,10 +117,20 @@ export function useRepHistory({ user }) {
 
       if (remote) {
         // Reconcile local-only reps (offline sessions) up to the cloud.
+        // Tombstone filter: reps whose id is on LS_REP_DELETED_KEY were
+        // explicitly deleted on this device — never re-upload them, even
+        // if they're "missing" from cloud. Without this, deleting via
+        // direct DB access (or any path that bypasses deleteRep's local
+        // state update) leaves stale entries in localStorage that the
+        // reconcile would helpfully resurrect.
         const localReps = loadLS(LS_HISTORY_KEY) || [];
         const keyFor = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
         const remoteKeys = new Set(remote.map(keyFor));
-        const toSync = localReps.filter(r => !remoteKeys.has(keyFor(r)));
+        const tombstoned = new Set(loadLS(LS_REP_DELETED_KEY) || []);
+        const toSync = localReps.filter(r =>
+          !remoteKeys.has(keyFor(r)) &&
+          !(r.id && tombstoned.has(r.id))
+        );
 
         let pushedAny = false;
         for (const rep of toSync) {
@@ -221,6 +247,9 @@ export function useRepHistory({ user }) {
   const deleteRep = useCallback(async (rep) => {
     const k = repMatchKey(rep);
     setHistory(h => h.filter(r => repMatchKey(r) !== k));
+    // Tombstone the id so a future reconcile can't resurrect it from
+    // a stale local cache or from another device's mirror.
+    if (rep.id) addRepTombstones([rep.id]);
     if (user && rep.id) {
       const { error } = await supabase.from("reps").delete().eq("id", rep.id);
       if (error) console.warn("Supabase deleteRep:", error.message);
@@ -237,7 +266,14 @@ export function useRepHistory({ user }) {
   }, [user]);
 
   const deleteSession = useCallback(async (sessionKey) => {
-    setHistory(h => h.filter(r => (r.session_id || r.date) !== sessionKey));
+    setHistory(h => {
+      // Tombstone the ids of every rep we're about to drop. Ids that
+      // are missing (offline-only, never synced) can't be tombstoned
+      // — they have no cloud presence to resurrect.
+      const removed = h.filter(r => (r.session_id || r.date) === sessionKey);
+      addRepTombstones(removed.map(r => r.id));
+      return h.filter(r => (r.session_id || r.date) !== sessionKey);
+    });
     if (user) {
       const { error } = await supabase.from("reps").delete()
         .or(`session_id.eq.${sessionKey},and(session_id.is.null,date.eq.${sessionKey})`);

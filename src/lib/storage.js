@@ -63,6 +63,25 @@ export const LS_WORKOUT_DELETED_KEY = "ft_workout_deleted";
 // Persisted so the History tab opens to the same domain across sessions.
 export const LS_HISTORY_DOMAIN_KEY = "ft_history_domain";
 
+// Set<id> of rep tombstones — Supabase rep ids that have been deleted
+// from this device. Mirrors LS_WORKOUT_DELETED_KEY's role for whole
+// workouts. The cloud-reconcile pass in useRepHistory uses this to
+// avoid re-uploading deleted reps: any local rep whose id is on this
+// list gets filtered out of the toSync push set, even if it's
+// "missing" from cloud. Without this, a reconcile after a direct
+// DB delete (or after another device's delete that hasn't propagated
+// to this device's local cache) would resurrect the deleted reps by
+// pushing them back up as if they were unsynced offline work.
+//
+// Scope: local-only. A future enhancement could sync the tombstone
+// list to Supabase for true cross-device delete durability, but for
+// now each device maintains its own list. The list is keyed by id;
+// reps without an id (unsynced offline reps that never reached
+// Supabase) can't be tombstoned this way and rely on local state
+// removal alone — which is fine because they have no cloud presence
+// to be resurrected from.
+export const LS_REP_DELETED_KEY = "ft_rep_deleted";
+
 // Current training focus key — one of TRAINING_FOCUS (balanced /
 // bouldering / power_sport / endurance_sport). Drives the per-zone
 // bias multiplier in coachingRecommendation. Defaults to "balanced"

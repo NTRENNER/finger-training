@@ -26,7 +26,7 @@ import { WorkoutTab, DEFAULT_WORKOUTS } from "./views/WorkoutTab.js";
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
   loadLS, saveLS,
-  LS_HISTORY_KEY,
+  LS_HISTORY_KEY, LS_REP_DELETED_KEY,
   LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
   LS_TRAINING_FOCUS_KEY,
@@ -398,12 +398,20 @@ export default function App() {
       if (flushed > 0) refreshPending();
 
       // Reps — reconcile any local-only reps before overwriting state.
+      // Tombstone filter (LS_REP_DELETED_KEY) prevents re-uploading
+      // reps that were explicitly deleted on this device — see the
+      // matching logic + comment in src/hooks/useRepHistory.js's
+      // auth-driven reconcile.
       const remoteReps = await fetchReps();
       if (remoteReps) {
         const localReps = loadLS(LS_HISTORY_KEY) || [];
         const keyFor = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
         const remoteKeys = new Set(remoteReps.map(keyFor));
-        const toSync = localReps.filter(r => !remoteKeys.has(keyFor(r)));
+        const tombstoned = new Set(loadLS(LS_REP_DELETED_KEY) || []);
+        const toSync = localReps.filter(r =>
+          !remoteKeys.has(keyFor(r)) &&
+          !(r.id && tombstoned.has(r.id))
+        );
         let pushedAny = false;
         for (const rep of toSync) {
           const ok = await pushRep(rep);
