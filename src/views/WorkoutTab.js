@@ -1471,6 +1471,24 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
                 <span style={{ color: C.muted, fontWeight: 400 }}> · session-sequenced, not day-specific · C requires a rest day before climbing</span>
               </div>
 
+              {/* One-tap reset for the whole plan — useful when stale
+                  exercise IDs (or other drift) need to be cleared
+                  without drilling into each workout's editor. */}
+              <div style={{ marginBottom: 16, textAlign: "right" }}>
+                <button
+                  onClick={() => {
+                    if (window.confirm("Reset ALL workouts (A, B, C) to defaults? This will replace any custom edits.")) {
+                      savePlan(DEFAULT_WORKOUTS);
+                    }
+                  }}
+                  style={{
+                    padding: "6px 12px", background: "transparent",
+                    border: `1px solid ${C.border}`, color: C.muted,
+                    borderRadius: 6, cursor: "pointer", fontSize: 12,
+                  }}
+                >Reset all to defaults</button>
+              </div>
+
               {/* Workout cards */}
               {["A", "B", "C"].map(key => {
                 const wk = plan[key];
