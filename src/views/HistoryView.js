@@ -63,6 +63,7 @@ export function HistoryView({
   const [editRepLoad, setEditRepLoad] = useState("");          // display-unit load (edit or add)
   const [editRepTime, setEditRepTime] = useState("");          // seconds (edit or add)
   const [editRepHand, setEditRepHand] = useState(null);        // "L" | "R" — null in add-mode means "auto-derive at save"
+  const [editRepRest, setEditRepRest] = useState("");          // seconds of rest_s (edit or add) — empty string means "leave existing value"
   // Manual session entry
   const [addingSession,    setAddingSession]    = useState(false);
   const [newSessDate,      setNewSessDate]      = useState(() => ymdLocal());
@@ -78,8 +79,9 @@ export function HistoryView({
     setEditRepLoad(String(fmt1(toDisp(effectiveLoad(rep), unit))));
     setEditRepTime(String(rep.actual_time_s));
     setEditRepHand(rep.hand === "L" || rep.hand === "R" ? rep.hand : null);
+    setEditRepRest(rep.rest_s != null ? String(rep.rest_s) : "");
   };
-  const closeRepEdit = () => { setEditingRep(null); setAddingRep(null); setEditRepHand(null); };
+  const closeRepEdit = () => { setEditingRep(null); setAddingRep(null); setEditRepHand(null); setEditRepRest(""); };
 
   const saveRepEdit = () => {
     if (!editingRep) return;
@@ -92,6 +94,12 @@ export function HistoryView({
     // Re-derive failed from the new time so edits keep the flag honest.
     const tgt = editingRep.rep.target_duration;
     if (tgt > 0 && newTime > 0) updates.failed = isShortfall(newTime, tgt);
+    // Rest_s edit — only write if user typed a non-empty value (so
+    // the field can be left blank to leave the existing value intact).
+    if (editRepRest.trim() !== "") {
+      const restN = parseInt(editRepRest, 10);
+      if (Number.isFinite(restN) && restN >= 0) updates.rest_s = restN;
+    }
     onUpdateRep(editingRep.rep, updates);
     closeRepEdit();
   };
@@ -102,6 +110,7 @@ export function HistoryView({
     setEditRepLoad("");
     setEditRepTime("");
     setEditRepHand(null); // null = auto-derive from session in saveRepAdd
+    setEditRepRest("");   // empty = saveRepAdd will default to 20s (matches sync.js fallback)
   };
 
   const saveRepAdd = (sess) => {
@@ -141,7 +150,15 @@ export function HistoryView({
       peak_force_kg:   null,  // unknown for manual entries (Tindeq captures it live)
       set_num:         maxSetNum,
       rep_num:         maxRepNum + 1,
-      rest_s:          0,
+      // rest_s: prefer the user's typed value if present, otherwise
+      // mirror the previous rep's rest_s, otherwise default to 20s
+      // (the protocol default for all three zones).
+      rest_s:          (() => {
+        const typed = parseInt(editRepRest, 10);
+        if (Number.isFinite(typed) && typed >= 0) return typed;
+        const prev = existingReps.length ? existingReps[existingReps.length - 1].rest_s : null;
+        return Number.isFinite(prev) ? prev : 20;
+      })(),
       session_id:      sessionId,
       failed:          isShortfall(time, sess.target_duration),
     };
@@ -540,6 +557,15 @@ export function HistoryView({
                       }}
                     >
                       <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
+                      {/* Rest interval — small muted suffix so it's
+                          visible at a glance for verifying edits and
+                          spotting protocol drift, without crowding
+                          the load+time pair that's the primary signal. */}
+                      {r.rest_s != null && (
+                        <span style={{ color: C.muted, marginLeft: 6, fontSize: 11 }}>
+                          · {r.rest_s}s rest
+                        </span>
+                      )}
                     </div>
                     {repEditMode === sessKey && (
                       <button
@@ -641,6 +667,19 @@ export function HistoryView({
                         );
                       })}
                     </div>
+                  </div>
+                  {/* Rest interval edit. Blank = leave existing value
+                      (in edit mode the box is pre-filled with the
+                      current rest_s; clearing it keeps the original). */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    <label style={{ fontSize: 10, color: C.muted }}>Rest (s)</label>
+                    <input
+                      type="number"
+                      value={editRepRest}
+                      onChange={e => setEditRepRest(e.target.value)}
+                      placeholder="20"
+                      style={{ width: 60, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 13 }}
+                    />
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
