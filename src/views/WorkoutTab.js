@@ -659,15 +659,32 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
         };
       }
     }
+    // Exercise ID migrations — when an exercise was renamed (cloud
+    // history was migrated to the new id), users with a customized
+    // local plan are still iterating the OLD id, calling recommendSet
+    // with a key that has no history → empty inputs. Re-key them on
+    // load so the recommender finds the migrated history.
+    const ID_MIGRATIONS = {
+      ohp: "kb_press",
+      hammer_curls: "bicep_curls",
+    };
+    const migrateId = (id) => ID_MIGRATIONS[id] || id;
     const merged = {};
     for (const [key, wk] of Object.entries(stored)) {
       merged[key] = {
         ...wk,
         exercises: (wk.exercises || []).map(ex => {
-          const meta = defMeta[ex.id];
-          if (!meta) return ex;
+          const newId = migrateId(ex.id);
+          // Pull DEFAULT_WORKOUTS metadata for the (possibly migrated)
+          // id so the renamed exercise inherits the correct
+          // unilateral/availableLoads/bodyweightAdditive flags. If
+          // the migrated id has new metadata it overrides whatever
+          // the stored plan had.
+          const meta = defMeta[newId];
+          const baseEx = newId !== ex.id ? { ...ex, id: newId } : ex;
+          if (!meta) return baseEx;
           return {
-            ...ex,
+            ...baseEx,
             ...(meta.unilateral !== undefined && { unilateral: meta.unilateral }),
             ...(meta.availableLoads !== undefined && { availableLoads: meta.availableLoads }),
             ...(meta.bodyweightAdditive !== undefined && { bodyweightAdditive: meta.bodyweightAdditive }),
@@ -677,7 +694,29 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
     }
     return merged;
   });
-  const [wLog,   setWLog]           = useState(() => loadLS(LS_WORKOUT_LOG_KEY)   || []);
+  // Same id migration applied to the local wLog cache. Cloud was
+  // migrated server-side, but if the user's local cache still holds
+  // pre-migration sessions (e.g., an old offline-logged session that
+  // never re-synced), the recommender wouldn't find them under the
+  // new id. Cheap one-time pass at load.
+  const [wLog,   setWLog]           = useState(() => {
+    const raw = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    const ID_MIGRATIONS = { ohp: "kb_press", hammer_curls: "bicep_curls" };
+    return raw.map(s => {
+      if (!s?.exercises) return s;
+      const migrated = {};
+      let changed = false;
+      for (const [exId, exData] of Object.entries(s.exercises)) {
+        const newId = ID_MIGRATIONS[exId] || exId;
+        if (newId !== exId) changed = true;
+        // If both old and new id exist in the same session, keep the new
+        // one's data (more recent semantics) and drop the old.
+        if (migrated[newId]) continue;
+        migrated[newId] = exData;
+      }
+      return changed ? { ...s, exercises: migrated } : s;
+    });
+  });
   const [sessionActive,  setSessionActive]  = useState(false);
   const [sessionData,    setSessionData]    = useState({});    // exId → {sets, done}
   const [swaps,          setSwaps]          = useState({});    // originalExId → substituteEx
