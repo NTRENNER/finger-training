@@ -374,13 +374,21 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                         style={inputStyle}
                         placeholder={recWeight != null ? String(recWeight) : ""}
                       />
-                      {/* DEBUG: show the live recommendation value next to
-                          the input as orange text. If this shows a number
-                          but the input/placeholder is empty, the rendering
-                          is broken. If this is "—", the recommender
-                          itself didn't produce a value. */}
-                      <span style={{ fontSize: 10, color: "#ff8800", fontFamily: "monospace" }}>
-                        rec:{recWeight != null ? String(recWeight) : "—"}
+                      {/* DEBUG: dump rec shape for this side so we can see
+                          which key is missing on the unilateral path.
+                          Shows: rec=null|undef|keys, lW (leftWeight),
+                          w (bilateral weight), uni (exDef.unilateral). */}
+                      <span style={{ fontSize: 9, color: "#ff8800", fontFamily: "monospace" }}>
+                        {(() => {
+                          if (rec == null) return `rec=${rec === null ? "null" : "undef"}`;
+                          const keys = Object.keys(rec).join(",");
+                          const lw = rec[weightKey];
+                          const w  = rec.weight;
+                          const uni = String(!!ex.unilateral);
+                          const lwStr = lw === undefined ? "undef" : (lw === "" ? "''" : String(lw));
+                          const wStr  = w  === undefined ? "undef" : (w  === "" ? "''" : String(w));
+                          return `uni=${uni} k=${keys} ${weightKey}=${lwStr} w=${wStr}`;
+                        })()}
                       </span>
                       <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
                       {prevShown ? (
@@ -1138,7 +1146,7 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
         fontSize: 9, color: C.muted, opacity: 0.5,
         fontFamily: "monospace", pointerEvents: "none",
       }}>
-        v.debug.recvalue
+        v.debug.recshape
       </div>
 
       {/* Sub-tab nav */}
