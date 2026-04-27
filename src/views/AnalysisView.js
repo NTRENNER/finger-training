@@ -29,7 +29,7 @@ import {
   computeZoneCoverage,
 } from "../model/zones.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
-import { POWER_MAX, STRENGTH_MAX } from "../model/zones.js";
+import { POWER_MAX, STRENGTH_MAX, ZONE_REF_T } from "../model/zones.js";
 import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
 import {
   fitCF, fitCFWithSuccessFloor,
@@ -180,12 +180,19 @@ export function AnalysisView({
     return fitCF(pts);
   }, [failures]);
 
-  // ── Endurance improvement % vs baseline ──
-  // Reference durations for each domain (seconds). The Endurance
-  // anchor (180s) lands deep into the slow/oxidative compartment of
-  // the three-exp basis, where the curve is most stable; that's
-  // intentionally where the headline "Endurance" % comes from.
-  const REF = { power: 10, strength: 45, endurance: 180 };
+  // ── Curve improvement % vs baseline ──
+  // Reference durations for each zone come from ZONE_REF_T (the
+  // canonical model reference). Previously this used hardcoded
+  // {10, 45, 180} which drifted from the rest of the app when Power
+  // moved 10→7 and Endurance moved 180→120. The whole app now
+  // evaluates the F-D curve at the same three timepoints the user
+  // actually trains at, so this card's % deltas reflect "how much
+  // stronger am I at the times I train."
+  const REF = {
+    power:     ZONE_REF_T.power,
+    strength:  ZONE_REF_T.strength,
+    endurance: ZONE_REF_T.endurance,
+  };
 
   // Migrated from Monod (CF + W'/T) to the three-exp basis in March
   // 2026 — see commit migrating this card. The rest of the app moved
@@ -1313,7 +1320,8 @@ export function AnalysisView({
       {/* ── Curve Improvement summary ──
           (Was "Endurance Improvement" — renamed because the headline
           isn't endurance, it's the average of three F-D curve point
-          improvements at 10s/45s/180s. The blue Endurance cell is the
+          improvements at ZONE_REF_T's power/strength/endurance times
+          — currently 7s / 45s / 120s. The blue Endurance cell is the
           one true endurance signal; Power and Strength are the other
           two reference points on the same curve.)
           When no grip filter is active AND ≥2 grips have fits, split
