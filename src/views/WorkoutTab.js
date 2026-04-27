@@ -308,14 +308,35 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
               {setsData.sets.map((s, i) => {
                 const isExtra = i >= (ex.sets || 0);
 
+                // Per-set progression hint(s) from the recommender.
+                // Also used as a fallback for the input values below —
+                // if startSession's pre-fill missed (stale state, code
+                // mismatch, schema drift), the renderer surfaces the
+                // recommendation directly so the user sees a number
+                // rather than an empty box that contradicts the hint.
+                const rec = recommendations[i];
+
                 // Renders one side's row of inputs. For unilateral
                 // sets, we call this twice per set with side="L"/"R";
                 // for bilateral, once with side=null.
                 const renderSideRow = (side, sLabel, sideKey) => {
                   const repsKey   = side ? `${side.toLowerCase()}Reps`   : "reps";
                   const weightKey = side ? `${side.toLowerCase()}Weight` : "weight";
-                  const repsVal   = s[repsKey] ?? (side ? "" : ex.reps) ?? "";
-                  const weightVal = s[weightKey] ?? "";
+                  // Fallback chain: stored sessionData → recommendation →
+                  // template default → empty. Treat "" as "not set"
+                  // (every "stored" value the user types is non-empty;
+                  // an explicit empty just means they want the rec).
+                  const stored = (k) => {
+                    const v = s[k];
+                    return v != null && v !== "" ? v : null;
+                  };
+                  const repsVal   = stored(repsKey)
+                    ?? (rec ? (rec[repsKey] ?? rec.reps) : null)
+                    ?? (side ? "" : ex.reps)
+                    ?? "";
+                  const weightVal = stored(weightKey)
+                    ?? (rec ? (rec[weightKey] ?? rec.weight) : null)
+                    ?? "";
                   const prev      = prevSets?.[i];
                   const prevShown = side
                     ? (prev && typeof prev === "object" ? prev[side] : null)
@@ -372,10 +393,10 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                   );
                 };
 
-                // Per-set progression hint(s) from the recommender.
-                // Bilateral exercises get a single hint line under
-                // the set; unilateral get one per side.
-                const rec = recommendations[i];
+                // Hint line styling — `rec` declared above (also used
+                // as the input-value fallback). Bilateral exercises
+                // get a single hint line under the set; unilateral get
+                // one per side.
                 const hintStyle = { fontSize: 10, color: C.muted, marginLeft: 44, marginTop: -2, marginBottom: 4, fontStyle: "italic" };
 
                 if (ex.unilateral) {
@@ -890,7 +911,40 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
     // false when they picked a different one (off-rotation deviation).
     // Persisted on the session record so it syncs to other devices.
     const wasRecommended = displayKey === rotKey && WK_ROTATION.includes(displayKey);
-    const session = { id: genId(), date: today(), completedAt: nowISO(), workout: displayKey, sessionNumber: sessionN, wasRecommended, exercises: sessionData };
+    // Normalize sessionData before saving so empty fields that were
+    // displayed using the live recommendation get written with the
+    // recommended value. Mirrors the input-value fallback in
+    // SessionExRow so "what you saw" is "what gets recorded".
+    const isEmpty = (v) => v == null || v === "";
+    const normalizedExercises = {};
+    for (const [exId, exData] of Object.entries(sessionData)) {
+      const exDef = (workout.exercises.find(e => e.id === exId)) || swaps[exId];
+      if (!exDef || !exDef.logWeight || !Array.isArray(exData?.sets)) {
+        normalizedExercises[exId] = exData;
+        continue;
+      }
+      normalizedExercises[exId] = {
+        ...exData,
+        sets: exData.sets.map((s, i) => {
+          const rec = recommendSet(wLog, exDef, displayKey, i);
+          if (exDef.unilateral) {
+            return {
+              ...s,
+              leftReps:    isEmpty(s.leftReps)    ? (rec.leftReps    ?? "") : s.leftReps,
+              leftWeight:  isEmpty(s.leftWeight)  ? (rec.leftWeight  ?? "") : s.leftWeight,
+              rightReps:   isEmpty(s.rightReps)   ? (rec.rightReps   ?? "") : s.rightReps,
+              rightWeight: isEmpty(s.rightWeight) ? (rec.rightWeight ?? "") : s.rightWeight,
+            };
+          }
+          return {
+            ...s,
+            reps:   isEmpty(s.reps)   ? (rec.reps   ?? "") : s.reps,
+            weight: isEmpty(s.weight) ? (rec.weight ?? "") : s.weight,
+          };
+        }),
+      };
+    }
+    const session = { id: genId(), date: today(), completedAt: nowISO(), workout: displayKey, sessionNumber: sessionN, wasRecommended, exercises: normalizedExercises };
     // Read fresh from localStorage rather than the React state snapshot, which may
     // be stale if the migration effect rewrote the log after this component mounted.
     const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
