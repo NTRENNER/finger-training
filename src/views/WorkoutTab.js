@@ -374,6 +374,14 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                         style={inputStyle}
                         placeholder={recWeight != null ? String(recWeight) : ""}
                       />
+                      {/* DEBUG: show the live recommendation value next to
+                          the input as orange text. If this shows a number
+                          but the input/placeholder is empty, the rendering
+                          is broken. If this is "—", the recommender
+                          itself didn't produce a value. */}
+                      <span style={{ fontSize: 10, color: "#ff8800", fontFamily: "monospace" }}>
+                        rec:{recWeight != null ? String(recWeight) : "—"}
+                      </span>
                       <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
                       {prevShown ? (
                         <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevShown}</span>
@@ -1130,7 +1138,7 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
         fontSize: 9, color: C.muted, opacity: 0.5,
         fontFamily: "monospace", pointerEvents: "none",
       }}>
-        v.placeholder.0ca5365
+        v.debug.recvalue
       </div>
 
       {/* Sub-tab nav */}
