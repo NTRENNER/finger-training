@@ -1121,6 +1121,18 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   // ── Render ──
   return (
     <div style={{ padding: "16px 16px 80px" }}>
+      {/* Build version stamp — small, top-right corner. Lets us
+          confirm what code is actually running on the device when
+          debugging cache/deploy mismatches. Bumped per commit by
+          editing the literal below. */}
+      <div style={{
+        position: "absolute", top: 6, right: 8,
+        fontSize: 9, color: C.muted, opacity: 0.5,
+        fontFamily: "monospace", pointerEvents: "none",
+      }}>
+        v.placeholder.0ca5365
+      </div>
+
       {/* Sub-tab nav */}
       <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, marginBottom: 20 }}>
         {tabPill("Today", "today")}
