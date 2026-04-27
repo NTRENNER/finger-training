@@ -16,12 +16,16 @@ export const CLIMB_DISCIPLINES = [
 
 // Ascent styles ordered from cleanest (onsight) to messiest (attempt).
 // "attempt" is the only non-send entry — used by analytics to filter
-// out unsent climbs from hardest-grade computations.
+// out unsent climbs from hardest-grade computations. "rest" counts as
+// a send (the route was completed) but is distinct from a redpoint
+// because the climber took weight on the rope (or stepped off the
+// wall on a boulder) at least once between bottom and top.
 export const ASCENT_STYLES = [
-  { key: "onsight",  label: "Onsight",  desc: "1st try, no beta"      },
-  { key: "flash",    label: "Flash",    desc: "1st try, with beta"    },
-  { key: "redpoint", label: "Redpoint", desc: "Sent after working"    },
-  { key: "attempt",  label: "Attempt",  desc: "Worked but didn't send"},
+  { key: "onsight",  label: "Onsight",          desc: "1st try, no beta"          },
+  { key: "flash",    label: "Flash",            desc: "1st try, with beta"        },
+  { key: "redpoint", label: "Redpoint",         desc: "Sent clean after working"  },
+  { key: "rest",     label: "Completed w/ rest",desc: "Sent with mid-route rest"  },
+  { key: "attempt",  label: "Attempt",          desc: "Worked but didn't send"    },
 ];
 
 // Boulder wall types — V-grades on a MoonBoard / Kilter are notably
