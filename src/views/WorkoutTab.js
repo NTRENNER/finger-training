@@ -829,25 +829,40 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   // Two-pass lookup: prefer same-workout history (so Workout A's curls
   // don't crowd Workout B's), but fall back to ANY workout containing
   // the exercise so shared lifts always have a prev to anchor on.
-  // Mirrors findLastSession in src/model/workout-progression.js.
+  // Mirrors findLastSession in src/model/workout-progression.js — same
+  // chronological selection (date DESC, then completedAt DESC) rather
+  // than array-position walking, because wLog insertion order can drift
+  // from chronological order and would otherwise let older sessions
+  // shadow newer ones (e.g., 04-16 A dips with empty weight shadowing
+  // 04-21 A dips with weight=10).
   const prevSetsFromMatching = (exId, exDef, predicate) => {
-    for (let i = wLog.length - 1; i >= 0; i--) {
-      const e = wLog[i];
+    const matches = [];
+    for (const e of wLog) {
       if (!predicate(e)) continue;
       const sets = e.exercises?.[exId]?.sets;
       if (!sets || sets.length === 0) continue;
-      if (!sets.some(setIsUsable)) continue;  // skip aborted/empty sessions
-      if (exDef?.unilateral) {
-        return sets.map(s => {
-          const left  = s.leftWeight  ?? s.weight ?? "";
-          const right = s.rightWeight ?? s.weight ?? "";
-          if (!left && !right) return null;
-          return { L: left, R: right };
-        }).filter(Boolean);
-      }
-      return sets.map(s => s.weight ?? s.leftWeight ?? "").filter(Boolean);
+      if (!sets.some(setIsUsable)) continue;
+      matches.push(e);
     }
-    return null;
+    if (matches.length === 0) return null;
+    matches.sort((a, b) => {
+      const ad = a?.date || "";
+      const bd = b?.date || "";
+      if (ad !== bd) return bd.localeCompare(ad);
+      const ac = a?.completedAt || "";
+      const bc = b?.completedAt || "";
+      return bc.localeCompare(ac);
+    });
+    const sets = matches[0].exercises[exId].sets;
+    if (exDef?.unilateral) {
+      return sets.map(s => {
+        const left  = s.leftWeight  ?? s.weight ?? "";
+        const right = s.rightWeight ?? s.weight ?? "";
+        if (!left && !right) return null;
+        return { L: left, R: right };
+      }).filter(Boolean);
+    }
+    return sets.map(s => s.weight ?? s.leftWeight ?? "").filter(Boolean);
   };
   const prevBestSets = (exId, exDef) => {
     const sameWorkout = prevSetsFromMatching(exId, exDef, e => e.workout === displayKey);

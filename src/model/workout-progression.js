@@ -192,26 +192,39 @@ function recommendSide(prev, exDef, repRange) {
   };
 }
 
-// Walk history backward and return the most recent session matching
-// the given predicate that contains the given exercise WITH usable
-// data. "Usable" means at least one set was either marked done or had
-// a non-empty weight or reps recorded — sessions the user opened and
-// abandoned without logging anything are skipped so they don't shadow
-// real prior data.
+// Find the most recent USABLE session matching the given predicate.
+// Sorts candidates by date DESC (then completedAt DESC as tiebreaker)
+// rather than walking the array backward, because the array's
+// insertion order can drift from chronological order — a tombstone
+// reconcile, an out-of-order cloud sync, or a manual edit can leave
+// an older session sitting at a higher index than a newer one. Picking
+// by array position let those older sessions shadow newer ones (e.g.,
+// an empty-weight 04-16 dips entry was returned instead of a clean
+// 04-21 dips entry, leaving the recommender with no weight to work with).
+//
+// "Usable" still means at least one set was marked done. Non-empty
+// weight/reps alone aren't enough because startSession pre-fills both
+// from the recommendation — an aborted session looks just like a
+// partially-typed real one and would otherwise shadow real prior data.
 function findLastSessionWhere(history, exId, predicate) {
-  for (let i = history.length - 1; i >= 0; i--) {
-    const s = history[i];
+  const candidates = [];
+  for (const s of history) {
     if (!predicate(s)) continue;
     const sets = s?.exercises?.[exId]?.sets;
     if (!Array.isArray(sets) || sets.length === 0) continue;
-    // Strict: at least one set must be marked done. Non-empty
-    // weight/reps alone aren't enough because startSession pre-fills
-    // both from the recommendation — an aborted session looks just
-    // like a partially-typed real one and would otherwise shadow
-    // real prior data.
-    if (sets.some(set => !!(set && set.done))) return s;
+    if (!sets.some(set => !!(set && set.done))) continue;
+    candidates.push(s);
   }
-  return null;
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => {
+    const ad = a?.date || "";
+    const bd = b?.date || "";
+    if (ad !== bd) return bd.localeCompare(ad); // newer date first
+    const ac = a?.completedAt || "";
+    const bc = b?.completedAt || "";
+    return bc.localeCompare(ac); // newer completion first
+  });
+  return candidates[0];
 }
 
 // Find the most recent usable session for `exId`. Two-pass:
