@@ -1343,7 +1343,19 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
       {subTab === "today" && sessionActive && (
         <Card>
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, color: C.muted }}>WORKOUT {rotKey}  ·  SESSION #{sessionN}</div>
+            {/* Show the workout the user is actually IN (displayKey),
+                not the rotation pointer (rotKey). They diverge when
+                the user manually picks an off-rotation workout from
+                the picker. Previously this displayed rotKey, which
+                was misleading when displayKey ≠ rotKey (e.g., the
+                user logging Workout B while the rotation says C is
+                next). */}
+            <div style={{ fontSize: 11, color: C.muted }}>
+              WORKOUT {displayKey}  ·  SESSION #{sessionN}
+              {displayKey !== rotKey && (
+                <span style={{ color: C.orange, marginLeft: 8 }}>(off-rotation; next: {rotKey})</span>
+              )}
+            </div>
             <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{workout.name}</div>
           </div>
 
