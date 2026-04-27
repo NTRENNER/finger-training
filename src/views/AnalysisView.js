@@ -1310,7 +1310,12 @@ export function AnalysisView({
       {/* ── 1RM PR tracker ── */}
       <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
 
-      {/* ── Endurance Improvement summary ──
+      {/* ── Curve Improvement summary ──
+          (Was "Endurance Improvement" — renamed because the headline
+          isn't endurance, it's the average of three F-D curve point
+          improvements at 10s/45s/180s. The blue Endurance cell is the
+          one true endurance signal; Power and Strength are the other
+          two reference points on the same curve.)
           When no grip filter is active AND ≥2 grips have fits, split
           the card into per-grip sections so Micro (FDP) and Crusher
           (FDS) each show their own Δ% against the shared baseline. */}
@@ -1405,7 +1410,7 @@ export function AnalysisView({
         return (
           <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Endurance Improvement</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Improvement</div>
               {!perGripMode && !selGrip && global3xBaseline && (
                 <div style={{ fontSize: 11, color: C.muted }}>since {global3xBaseline.date}</div>
               )}
