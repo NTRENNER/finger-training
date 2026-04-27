@@ -330,12 +330,18 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                     const v = s[k];
                     return v != null && v !== "" ? v : null;
                   };
+                  // Recommended values from the live recommender (used
+                  // as a fallback for the input value AND as a visible
+                  // placeholder so the suggestion is impossible to miss
+                  // even if value-fallback fails for some reason).
+                  const recReps   = rec ? (rec[repsKey]   ?? rec.reps)   : null;
+                  const recWeight = rec ? (rec[weightKey] ?? rec.weight) : null;
                   const repsVal   = stored(repsKey)
-                    ?? (rec ? (rec[repsKey] ?? rec.reps) : null)
+                    ?? recReps
                     ?? (side ? "" : ex.reps)
                     ?? "";
                   const weightVal = stored(weightKey)
-                    ?? (rec ? (rec[weightKey] ?? rec.weight) : null)
+                    ?? recWeight
                     ?? "";
                   const prev      = prevSets?.[i];
                   const prevShown = side
@@ -355,7 +361,7 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                           onSetsChange({ sets: next });
                         }}
                         style={{ ...inputStyle, width: 48, fontSize: 13 }}
-                        placeholder={ex.reps || ""}
+                        placeholder={recReps != null ? String(recReps) : (ex.reps || "")}
                       />
                       <input
                         type="number" inputMode="decimal"
@@ -366,6 +372,7 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                           onSetsChange({ sets: next });
                         }}
                         style={inputStyle}
+                        placeholder={recWeight != null ? String(recWeight) : ""}
                       />
                       <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
                       {prevShown ? (
