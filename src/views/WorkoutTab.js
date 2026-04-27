@@ -897,14 +897,19 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
     setSessionActive(true);
   };
 
-  // Belt-and-suspenders sync: when sessionActive flips on, walk every
-  // logWeight exercise and fill in any empty sessionData fields with
-  // the live recommendation. startSession should already do this, but
-  // if it ever leaves an empty value (stale closure, schema drift,
-  // partial swap state), this effect heals the data so the inputs
-  // and the saved record both match what the recommender suggests.
-  // Intentionally depends only on sessionActive so it runs once per
-  // session-start and doesn't fight user typing.
+  // Belt-and-suspenders sync: when sessionActive flips on (or wLog
+  // updates mid-session, which happens when a cloud sync brings in
+  // sessions the local cache was missing), walk every logWeight
+  // exercise and fill in any empty sessionData fields with the live
+  // recommendation. startSession populates initially, but if it ran
+  // with a stale wLog (cloud sync hadn't completed yet) the prior-
+  // session lookup may have returned nothing — when wLog refreshes
+  // with the missing data, this effect backfills the inputs without
+  // the user needing to restart the session.
+  //
+  // Mutation guard via sameSet prevents loops: if no field changed
+  // (because user typed values OR because the recommendation hasn't
+  // changed since last sync), setSessionData returns prev unchanged.
   useEffect(() => {
     if (!sessionActive) return;
     setSessionData(prev => {
@@ -930,7 +935,7 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
       return anyChange ? next : prev;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionActive]);
+  }, [sessionActive, wLog]);
 
   // Swap an exercise for the current session only
   const doSwap = (originalEx, substituteEx) => {
