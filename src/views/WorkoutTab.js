@@ -320,8 +320,19 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                 // sets, we call this twice per set with side="L"/"R";
                 // for bilateral, once with side=null.
                 const renderSideRow = (side, sLabel, sideKey) => {
-                  const repsKey   = side ? `${side.toLowerCase()}Reps`   : "reps";
-                  const weightKey = side ? `${side.toLowerCase()}Weight` : "weight";
+                  // side is "L" or "R" (single char) — map to the
+                  // schema's full word "left"/"right". Previously this
+                  // used `side.toLowerCase()` directly which produced
+                  // "lWeight" / "rWeight" — keys that don't exist on
+                  // anything (recommender returns leftWeight; cloud
+                  // stores leftWeight; volume math reads leftWeight).
+                  // The bug caused every unilateral input to be empty
+                  // and every typed unilateral value to be saved under
+                  // garbage keys that the recommender then couldn't
+                  // find on the next session.
+                  const sideWord  = side === "L" ? "left" : side === "R" ? "right" : null;
+                  const repsKey   = sideWord ? `${sideWord}Reps`   : "reps";
+                  const weightKey = sideWord ? `${sideWord}Weight` : "weight";
                   // Fallback chain: stored sessionData → recommendation →
                   // template default → empty. Treat "" as "not set"
                   // (every "stored" value the user types is non-empty;
@@ -374,22 +385,6 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
                         style={inputStyle}
                         placeholder={recWeight != null ? String(recWeight) : ""}
                       />
-                      {/* DEBUG: dump rec shape for this side so we can see
-                          which key is missing on the unilateral path.
-                          Shows: rec=null|undef|keys, lW (leftWeight),
-                          w (bilateral weight), uni (exDef.unilateral). */}
-                      <span style={{ fontSize: 9, color: "#ff8800", fontFamily: "monospace" }}>
-                        {(() => {
-                          if (rec == null) return `rec=${rec === null ? "null" : "undef"}`;
-                          const keys = Object.keys(rec).join(",");
-                          const lw = rec[weightKey];
-                          const w  = rec.weight;
-                          const uni = String(!!ex.unilateral);
-                          const lwStr = lw === undefined ? "undef" : (lw === "" ? "''" : String(lw));
-                          const wStr  = w  === undefined ? "undef" : (w  === "" ? "''" : String(w));
-                          return `uni=${uni} k=${keys} ${weightKey}=${lwStr} w=${wStr}`;
-                        })()}
-                      </span>
                       <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
                       {prevShown ? (
                         <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevShown}</span>
@@ -1146,7 +1141,7 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
         fontSize: 9, color: C.muted, opacity: 0.5,
         fontFamily: "monospace", pointerEvents: "none",
       }}>
-        v.debug.recshape
+        v.fix.sidekey
       </div>
 
       {/* Sub-tab nav */}
