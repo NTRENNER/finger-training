@@ -24,6 +24,21 @@ export const ASCENT_STYLES = [
   { key: "attempt",  label: "Attempt",  desc: "Worked but didn't send"},
 ];
 
+// Boulder wall types — V-grades on a MoonBoard / Kilter are notably
+// stiffer than the same number on a commercial set, so we capture the
+// surface alongside the grade. Only meaningful for discipline=boulder;
+// rope routes don't get a wall annotation.
+export const BOULDER_WALLS = [
+  { key: "commercial", label: "Commercial set", emoji: "🧱" },
+  { key: "moonboard",  label: "MoonBoard",      emoji: "🌙" },
+  { key: "kilter",     label: "Kilter Board",   emoji: "🎯" },
+];
+
+export function wallMeta(key) {
+  return BOULDER_WALLS.find(w => w.key === key)
+      || (key ? { key, label: key, emoji: "🧱" } : null);
+}
+
 // Discipline + ascent metadata lookup; falls back to a stub object
 // for unknown keys so legacy entries still render with the raw key.
 export function disciplineMeta(key) {
@@ -37,13 +52,20 @@ export function ascentMeta(key) {
 }
 
 // Pretty one-liner for a single climb entry. Handles legacy
-// intensity/duration entries so old data still renders.
+// intensity/duration entries so old data still renders. The wall is
+// boulder-only and may be missing on legacy boulder entries; we elide
+// it when absent rather than rendering an "—".
 export function describeClimb(a) {
   if (a.discipline || a.grade || a.ascent) {
     const d = disciplineMeta(a.discipline).label;
     const g = a.grade || "—";
     const s = a.ascent ? ascentMeta(a.ascent).label : "";
-    return s ? `${d} · ${g} · ${s}` : `${d} · ${g}`;
+    const w = a.discipline === "boulder" && a.wall ? wallMeta(a.wall)?.label : "";
+    const parts = [d];
+    if (w) parts.push(w);
+    parts.push(g);
+    if (s) parts.push(s);
+    return parts.join(" · ");
   }
   // Legacy (pre-grade) entries
   const parts = [];

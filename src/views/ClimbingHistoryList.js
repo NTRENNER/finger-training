@@ -11,7 +11,7 @@ import React, { useMemo } from "react";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import {
-  disciplineMeta, ascentMeta, describeClimb,
+  disciplineMeta, ascentMeta, wallMeta, describeClimb,
 } from "../lib/climbing-grades.js";
 
 export function ClimbingHistoryList({ climbs, onDeleteActivity = null }) {
@@ -43,6 +43,8 @@ export function ClimbingHistoryList({ climbs, onDeleteActivity = null }) {
       {list.map(c => {
         const isSend = c.ascent && c.ascent !== "attempt";
         const disc   = disciplineMeta(c.discipline);
+        // Wall is boulder-only and may be missing on legacy entries.
+        const wall   = c.discipline === "boulder" && c.wall ? wallMeta(c.wall) : null;
         return (
           <div key={c.id || `${c.date}-${c.grade}-${c.ascent}`} style={{
             display: "flex", alignItems: "center", gap: 10,
@@ -54,7 +56,7 @@ export function ClimbingHistoryList({ climbs, onDeleteActivity = null }) {
               <div style={{ fontSize: 13, fontWeight: 600 }}>
                 {c.grade || "—"}{" "}
                 <span style={{ color: C.muted, fontWeight: 400 }}>
-                  {disc.label}
+                  {disc.label}{wall ? ` · ${wall.label}` : ""}
                 </span>
               </div>
               <div style={{ fontSize: 11, color: isSend ? C.green : C.muted }}>

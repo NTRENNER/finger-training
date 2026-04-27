@@ -21,7 +21,7 @@ import { C } from "../ui/theme.js";
 import { Card, Btn, Sect } from "../ui/components.js";
 import { today, ymdLocal } from "../util.js";
 import {
-  CLIMB_DISCIPLINES, ASCENT_STYLES,
+  CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS,
   gradesFor, defaultGradeFor,
 } from "../lib/climbing-grades.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
@@ -36,6 +36,9 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
   const [discipline, setDiscipline] = useState("boulder");
   const [grade,      setGrade]      = useState(defaultGradeFor("boulder"));
   const [ascent,     setAscent]     = useState("flash");
+  // Wall surface — boulder only. Defaults to commercial since that's
+  // the most common starting point; users on a board re-select.
+  const [wall,       setWall]       = useState("commercial");
   const [logged,     setLogged]     = useState(false);
 
   const todayActivities = activities.filter(a => a.date === today() && a.type === "climbing");
@@ -50,7 +53,12 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
   };
 
   const handleLog = () => {
-    onLog({ date: today(), type: "climbing", discipline, grade, ascent });
+    // Only attach `wall` for boulder; rope routes don't get a wall
+    // annotation (and shouldn't carry stale state if the user toggled
+    // discipline back and forth).
+    const entry = { date: today(), type: "climbing", discipline, grade, ascent };
+    if (discipline === "boulder") entry.wall = wall;
+    onLog(entry);
     setLogged(true);
     setTimeout(() => setLogged(false), 3000);
   };
@@ -99,6 +107,27 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
               </button>
             ))}
           </div>
+
+          {/* Wall surface — boulder only. V4 on a MoonBoard ≠ V4 on
+              a commercial set, so we capture the surface alongside
+              the grade for honest grade tracking. */}
+          {discipline === "boulder" && (
+            <>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>Wall</div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                {BOULDER_WALLS.map(({ key, label, emoji }) => (
+                  <button key={key} onClick={() => setWall(key)} style={{
+                    flex: "1 1 30%", padding: "8px 6px", borderRadius: 8, cursor: "pointer",
+                    border: wall === key ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
+                    background: wall === key ? C.blue + "22" : C.bg,
+                    color: C.text, textAlign: "center",
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{emoji} {label}</div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           {/* Grade picker (V for boulder, YDS for TR/lead) */}
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>
