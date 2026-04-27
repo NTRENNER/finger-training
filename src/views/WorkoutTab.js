@@ -771,13 +771,13 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   // has empty weight/reps and done=false). Without that skip, an
   // aborted session would shadow the real previous data right behind
   // it, leaving the prev column empty and the recommender blind.
-  const setIsUsable = (s) => {
-    if (!s) return false;
-    if (s.done) return true;
-    const w  = s.weight ?? s.leftWeight ?? s.rightWeight ?? "";
-    const r  = s.reps   ?? s.leftReps   ?? s.rightReps   ?? "";
-    return (w !== "" && w != null) || (r !== "" && r != null);
-  };
+  // A set is "usable" only when the user explicitly marked it done.
+  // We deliberately ignore non-empty weight/reps because startSession
+  // pre-fills both fields from the recommendation — an aborted session
+  // ends up with prefilled values + done=false and would otherwise
+  // shadow real prior data. If the user really did the work but
+  // forgot to tick done, that's a UX miss they can correct in History.
+  const setIsUsable = (s) => !!(s && s.done);
   // Two-pass lookup: prefer same-workout history (so Workout A's curls
   // don't crowd Workout B's), but fall back to ANY workout containing
   // the exercise so shared lifts always have a prev to anchor on.

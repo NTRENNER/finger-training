@@ -204,14 +204,12 @@ function findLastSessionWhere(history, exId, predicate) {
     if (!predicate(s)) continue;
     const sets = s?.exercises?.[exId]?.sets;
     if (!Array.isArray(sets) || sets.length === 0) continue;
-    const hasUsable = sets.some(set => {
-      if (!set) return false;
-      if (set.done) return true;
-      const w = set.weight ?? set.leftWeight ?? set.rightWeight ?? "";
-      const r = set.reps   ?? set.leftReps   ?? set.rightReps   ?? "";
-      return (w !== "" && w != null) || (r !== "" && r != null);
-    });
-    if (hasUsable) return s;
+    // Strict: at least one set must be marked done. Non-empty
+    // weight/reps alone aren't enough because startSession pre-fills
+    // both from the recommendation — an aborted session looks just
+    // like a partially-typed real one and would otherwise shadow
+    // real prior data.
+    if (sets.some(set => !!(set && set.done))) return s;
   }
   return null;
 }
