@@ -105,6 +105,25 @@ export function sessionExerciseVolume(sets, bw, exDef) {
   return Math.round(total);
 }
 
+// Top weight for a session: max effective load across all done sides
+// of all done sets. For unilateral exercises this is naturally the
+// heavier of the two sides (typically your strong arm); for bilateral
+// it's the heaviest set you actually finished. Bodyweight-additive
+// folds bodyweight in just like the volume + 1RM helpers do.
+export function sessionExerciseTopWeight(sets, bw, exDef) {
+  if (!Array.isArray(sets) || sets.length === 0) return 0;
+  const additive = isBodyweightAdditive(exDef);
+  let best = 0;
+  for (const s of sets) {
+    if (!s || !s.done) continue;
+    for (const side of sidePayloads(s)) {
+      const load = effectiveLoad(side.weight, bw, additive);
+      if (load > best) best = load;
+    }
+  }
+  return Math.round(best * 10) / 10;
+}
+
 // Epley estimated 1RM: weight × (1 + reps/30). Computed per done
 // set's side; the session's est. 1RM is the MAX across all sides of
 // all done sets (any single hard side sets the ceiling — averaging

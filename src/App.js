@@ -22,6 +22,7 @@ import {
   BetweenSetsView, SessionSummaryView,
 } from "./views/ActiveSessionViews.js";
 import { WorkoutTab, DEFAULT_WORKOUTS } from "./views/WorkoutTab.js";
+import { WorkoutAnalysisView } from "./views/WorkoutAnalysisView.js";
 
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
@@ -150,7 +151,7 @@ const GOAL_CONFIG = {
 // activity entries to Power.
 const RM_GRIPS = ["Micro", "Crusher"];
 
-const TABS = ["Fingers", "Analysis", "Journey", "Workout", "Climbing", "History", "Trends", "Settings"];
+const TABS = ["Fingers", "Analysis", "Journey", "Workout", "Lifts", "Climbing", "History", "Trends", "Settings"];
 
 export default function App() {
   // ── Auth + OTP login (see src/hooks/useAuth.js) ──────────
@@ -681,8 +682,9 @@ export default function App() {
       )}
       {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
-      {tab === 4 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
-      {tab === 5 && (
+      {tab === 4 && <WorkoutAnalysisView unit={unit} bodyWeight={bodyWeight} defaultWorkouts={DEFAULT_WORKOUTS} />}
+      {tab === 5 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
+      {tab === 6 && (
         <HistoryView
           history={history}
           onDownload={() => downloadCSV(history)}
@@ -703,8 +705,8 @@ export default function App() {
           gripPresets={GRIP_PRESETS}
         />
       )}
-      {tab === 6 && <TrendsView history={history} unit={unit} activities={activities} defaultWorkouts={DEFAULT_WORKOUTS} />}
-      {tab === 7 && (
+      {tab === 7 && <TrendsView history={history} unit={unit} activities={activities} defaultWorkouts={DEFAULT_WORKOUTS} />}
+      {tab === 8 && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}
