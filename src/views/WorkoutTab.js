@@ -600,6 +600,33 @@ function WorkoutEditor({ wKey, workout, onSave, onClose, onReset }) {
 
 // ─────────────────────────────────────────────────────────────
 
+// Pure helper: returns a new set object with empty fields backfilled
+// from the recommendation. Stored values (anything non-empty) win.
+// Schema-aware: unilateral exDef writes leftWeight/leftReps/etc.;
+// bilateral writes weight/reps. Used by the sessionActive sync effect.
+function mergeSetWithRec(s, rec, exDef, isEmpty) {
+  const out = { ...s };
+  if (exDef.unilateral) {
+    if (isEmpty(out.leftWeight)  && rec?.leftWeight)  out.leftWeight  = rec.leftWeight;
+    if (isEmpty(out.leftReps)    && rec?.leftReps)    out.leftReps    = rec.leftReps;
+    if (isEmpty(out.rightWeight) && rec?.rightWeight) out.rightWeight = rec.rightWeight;
+    if (isEmpty(out.rightReps)   && rec?.rightReps)   out.rightReps   = rec.rightReps;
+  } else {
+    if (isEmpty(out.weight) && rec?.weight) out.weight = rec.weight;
+    if (isEmpty(out.reps)   && rec?.reps)   out.reps   = rec.reps;
+  }
+  return out;
+}
+
+// Shallow equality for set objects on the keys we care about. Avoids
+// noisy state updates when the merge produced an identical set.
+function sameSet(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = ["weight", "reps", "leftWeight", "leftReps", "rightWeight", "rightReps", "done"];
+  return keys.every(k => (a[k] ?? "") === (b[k] ?? ""));
+}
+
 // ── Main WorkoutTab ───────────────────────────────────────────
 export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_TRIP }) {
   const [subTab, setSubTab]         = useState("today");
@@ -869,6 +896,41 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
     setSwapPickerFor(null);
     setSessionActive(true);
   };
+
+  // Belt-and-suspenders sync: when sessionActive flips on, walk every
+  // logWeight exercise and fill in any empty sessionData fields with
+  // the live recommendation. startSession should already do this, but
+  // if it ever leaves an empty value (stale closure, schema drift,
+  // partial swap state), this effect heals the data so the inputs
+  // and the saved record both match what the recommender suggests.
+  // Intentionally depends only on sessionActive so it runs once per
+  // session-start and doesn't fight user typing.
+  useEffect(() => {
+    if (!sessionActive) return;
+    setSessionData(prev => {
+      const isEmpty = (v) => v == null || v === "";
+      // Build a fresh state by recomputing every logWeight set with
+      // the live recommendation merged over what's already stored.
+      // Stored values win; empties get backfilled. Only commit the
+      // new state if we actually changed anything (avoids re-render
+      // churn in the common case where startSession populated cleanly).
+      const next = { ...prev };
+      let anyChange = false;
+      for (const ex of (workout?.exercises || [])) {
+        if (!ex.logWeight || !ex.sets) continue;
+        const cur = next[ex.id];
+        if (!cur || !Array.isArray(cur.sets)) continue;
+        const newSets = cur.sets.map((s, i) => mergeSetWithRec(s, recommendSet(wLog, ex, displayKey, i), ex, isEmpty));
+        const changed = newSets.some((ns, i) => !sameSet(ns, cur.sets[i]));
+        if (changed) {
+          next[ex.id] = { ...cur, sets: newSets };
+          anyChange = true;
+        }
+      }
+      return anyChange ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionActive]);
 
   // Swap an exercise for the current session only
   const doSwap = (originalEx, substituteEx) => {
