@@ -227,22 +227,20 @@ function findLastSessionWhere(history, exId, predicate) {
   return candidates[0];
 }
 
-// Find the most recent usable session for `exId`. Two-pass:
-//   1. Prefer a session whose `workout` key matches the active one
-//      (so Workout B's curls history isn't crowded out by Workout A's).
-//   2. Fall back to ANY workout that contains the exercise — useful
-//      for shared lifts like curls that the user does in multiple
-//      workouts but logs more often in one of them. Without this
-//      fallback, a sparse exercise in a freshly-rotated workout sees
-//      no prev/recommendation even though the user has clearly been
-//      doing it elsewhere.
-// The caller can compare the returned session's `workout` to the
-// requested key to detect a cross-workout fallback (we surface this
-// via a "[from <workout>]" hint prepended to the reasoning string).
+// Find the most recent usable session containing `exId`, REGARDLESS
+// of which workout key it was logged under. For exercises that appear
+// in multiple workouts (dips lives in both A and B; pull-ups in both;
+// curls when they show up across rotations), progression should track
+// the most recent time the user actually did the lift — not the most
+// recent time they did it in this specific workout slot. Otherwise
+// Workout A's dips drift from yesterday's Workout B dips and you end
+// up recommending stale weights.
+//
+// `workoutKey` is still passed in so the caller can detect when the
+// returned session came from a different workout (we annotate the
+// reasoning with "[from <workout>]" in that case for transparency).
 function findLastSession(history, workoutKey, exId) {
   if (!Array.isArray(history)) return null;
-  const sameWorkout = findLastSessionWhere(history, exId, s => s?.workout === workoutKey);
-  if (sameWorkout) return sameWorkout;
   return findLastSessionWhere(history, exId, s => !!s);
 }
 

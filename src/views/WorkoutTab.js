@@ -864,11 +864,13 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
     }
     return sets.map(s => s.weight ?? s.leftWeight ?? "").filter(Boolean);
   };
+  // Most recent session containing the exercise, regardless of which
+  // workout slot it was logged under. Mirrors findLastSession in
+  // src/model/workout-progression.js — a lift like dips that appears
+  // in both A and B should anchor its prev pill to whichever session
+  // was most recent, not to "the most recent A session" specifically.
   const prevBestSets = (exId, exDef) => {
-    const sameWorkout = prevSetsFromMatching(exId, exDef, e => e.workout === displayKey);
-    if (sameWorkout) return sameWorkout;
-    const anyWorkout = prevSetsFromMatching(exId, exDef, e => !!e);
-    return anyWorkout || [];
+    return prevSetsFromMatching(exId, exDef, () => true) || [];
   };
 
   const startSession = () => {
