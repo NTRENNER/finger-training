@@ -556,20 +556,7 @@ export function AnalysisView({
   // engine and ΔAUC ranking.
 
   // Fitted force-duration curve points for overlay.
-  // Clipped at T≥5s — the Monod asymptote F = CF + W'/T diverges as
-  // T→0, which exploded the Y-axis with ~6-figure forces. Below ~5s
-  // we're outside the Monod validity range anyway (MVC ceiling, neural
-  // rather than metabolic limitation), so nothing is lost by clipping.
   const F_D_T_MIN = 5;
-  const curveData = useMemo(() => {
-    if (!cfEstimate) return [];
-    const { CF, W } = cfEstimate;
-    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
-    return Array.from({ length: 80 }, (_, i) => {
-      const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
-      return { x: t, y: toDisp(Math.max(CF + W / t, CF), unit) };
-    });
-  }, [cfEstimate, maxDur, unit]);
 
   // Per-grip Monod curves + dots, used in the F-D chart when no grip
   // filter is active. Pooling Micro and Crusher onto one chart conflates
@@ -742,42 +729,6 @@ export function AnalysisView({
   // hand asymmetry is surfaced more clearly on the Per-Hand CF card
   // below the chart.)
 
-  // Bootstrap confidence band around the three-exp F-D curve — resample
-  // failure points with replacement, refit each sample, take 5th/95th
-  // percentile of predicted force at each T. Band narrows as more data
-  // accumulates, so users can see when the fit is actually trustworthy.
-  // Deterministic RNG seeded from the data so the band is stable across
-  // renders. Bootstrapped against three-exp (now the primary curve) so
-  // the band represents uncertainty in the curve we're actually showing.
-  const confidenceBand = useMemo(() => {
-    if (!failures || failures.length < 3) return null;
-    const tePts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
-    const prior = selGrip ? (threeExpPriors.get(selGrip) || [0,0,0]) : [0,0,0];
-    const lambda = selGrip ? THREE_EXP_LAMBDA_DEFAULT / Math.max(failures.length, 1) : 0;
-    const N = 150;
-    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
-    const nSamples = 60;
-    const ts = Array.from({ length: nSamples }, (_, i) =>
-      F_D_T_MIN + ((tMax - F_D_T_MIN) / (nSamples - 1)) * i
-    );
-    let seed = (failures.length * 1000 + Math.floor((failures[0].actual_time_s || 1) * 1e6)) >>> 0;
-    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const curves = [];
-    for (let i = 0; i < N; i++) {
-      const sample = Array.from({ length: tePts.length }, () => tePts[Math.floor(rng() * tePts.length)]);
-      const amps = fitThreeExpAmps(sample, { prior, lambda });
-      if (amps[0] + amps[1] + amps[2] > 0) {
-        curves.push(ts.map(t => Math.max(predForceThreeExp(amps, t), 0)));
-      }
-    }
-    if (curves.length < 20) return null;
-    return ts.map((t, j) => {
-      const vals = curves.map(c => c[j]).sort((a, b) => a - b);
-      const p5  = vals[Math.floor(vals.length * 0.05)];
-      const p95 = vals[Math.min(Math.floor(vals.length * 0.95), vals.length - 1)];
-      return { x: t, lowKg: p5, highKg: p95 };
-    });
-  }, [failures, maxDur, selGrip, threeExpPriors]);
 
   // Limiter zone (the zone that falls farthest below the F-D curve
   // predicted by the other two zones). Drives the saturated background
@@ -815,20 +766,10 @@ export function AnalysisView({
     y: useRel ? r.avg_force_kg / bodyWeight : toDisp(r.avg_force_kg, unit),
     date: r.date, grip: r.grip,
   }));
-  const curveDataRel = curveData.map(d => ({
-    x: d.x,
-    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
-  }));
   const threeExpCurveDataRel = threeExpCurveData.map(d => ({
     x: d.x,
     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
   }));
-  // Unit-transform helper for memos that hold values in kg (confidenceBand):
-  // converts to display unit or × BW depending on relMode.
-  const kgToDisp = (kg) => useRel && bodyWeight > 0 ? kg / bodyWeight : toDisp(kg, unit);
-  const confidenceBandRel = confidenceBand ? confidenceBand.map(d => ({
-    x: d.x, low: kgToDisp(d.lowKg), high: kgToDisp(d.highKg),
-  })) : null;
   const maxForceRel = Math.max(
     ...(useRel
       ? reps.map(r => r.avg_force_kg / bodyWeight)
@@ -1101,7 +1042,6 @@ export function AnalysisView({
                 <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
                 {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Sum of three exponentials with depletion-tau basis (PCr/glycolytic/oxidative)."><span style={{ color: C.purple }}>―</span> F-D curve (3-exp)</span>}
                 {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow/oxidative compartment dominates here. The closest analog to a 'sustainable force' reference."><span style={{ color: C.purple }}>╌</span> 3-min sustainable</span>}
-                {!splitMode && confidenceBandRel && <span title="Bootstrap 90% band around the three-exp curve."><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
                 {splitMode && Object.keys(fdSplitData).map(g => (
                   <span key={g}>
                     <span style={{ color: GRIP_COLORS[g] || C.blue }}>―</span> {g}
@@ -1139,14 +1079,6 @@ export function AnalysisView({
               {/* Single-fit overlays only when NOT in per-grip split mode.
                   In split mode they'd be ambiguous (which grip's CF? which
                   3-exp? which 90% band?). Per-grip rendering takes over. */}
-              {!fdSplitData && confidenceBandRel && (
-                <Line data={confidenceBandRel} dataKey="low"  stroke={C.purple} strokeOpacity={0.35}
-                      strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
-              )}
-              {!fdSplitData && confidenceBandRel && (
-                <Line data={confidenceBandRel} dataKey="high" stroke={C.purple} strokeOpacity={0.35}
-                      strokeDasharray="3 3" strokeWidth={1} dot={false} legendType="none" isAnimationActive={false} />
-              )}
               {/* 3-min sustainable reference from three-exp at T=180s
                   (replaces the Monod CF asymptote, since three-exp has
                   no true asymptote — it decays to 0). At 180s the slow
