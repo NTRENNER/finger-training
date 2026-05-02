@@ -680,7 +680,7 @@ export default function App() {
           trainingFocus={trainingFocus}
         />
       )}
-      {tab === 2 && <BadgesView history={history} liveEstimate={liveEstimate} genesisSnap={genesisSnap} />}
+      {tab === 2 && <BadgesView history={history} threeExpPriors={threeExpPriors} />}
       {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 4 && <WorkoutAnalysisView unit={unit} bodyWeight={bodyWeight} defaultWorkouts={DEFAULT_WORKOUTS} />}
       {tab === 5 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}

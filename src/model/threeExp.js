@@ -212,6 +212,29 @@ export function predForceThreeExp(amps, T, taus = null) {
   return amps[0]*Math.exp(-T/tau[0]) + amps[1]*Math.exp(-T/tau[1]) + amps[2]*Math.exp(-T/tau[2]);
 }
 
+// Definite integral of the three-exp F-D curve over [tMin, tMax]:
+//   ∫ a·e^(-t/τ) dt = a·τ·(e^(-tMin/τ) - e^(-tMax/τ))
+// Sum over the three compartments. Units = force·seconds (force-area).
+//
+// Used as a single "total capacity" scalar for the Journey/AUC tracker
+// — captures the area beneath the user's whole curve from the Power
+// boundary out into deep Endurance, so growth in any compartment
+// contributes proportionally to how much that compartment dominates
+// in its zone. Default range [5, 180] covers the meaningful training
+// span (post-fast-spike at 5s, well into oxidative steady-state at 3min).
+export function computeAUCThreeExp(amps, tMin = 5, tMax = 180, taus = null) {
+  if (!Array.isArray(amps) || amps.length !== 3) return 0;
+  const tau = taus || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
+  let sum = 0;
+  for (let i = 0; i < 3; i++) {
+    const a = amps[i];
+    const t = tau[i];
+    if (!isFinite(a) || a <= 0 || !isFinite(t) || t <= 0) continue;
+    sum += a * t * (Math.exp(-tMin / t) - Math.exp(-tMax / t));
+  }
+  return sum;
+}
+
 // Build per-grip three-exp prior by pooling all that grip's failures
 // across hands. Used as the shrinkage target for per-(hand, grip) fits.
 // Returns Map<grip, [a, b, c]>. Pooling within-grip avoids the cross-
