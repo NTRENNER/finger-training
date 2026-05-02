@@ -1101,7 +1101,6 @@ export function AnalysisView({
                 <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
                 {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Sum of three exponentials with depletion-tau basis (PCr/glycolytic/oxidative)."><span style={{ color: C.purple }}>―</span> F-D curve (3-exp)</span>}
                 {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow/oxidative compartment dominates here. The closest analog to a 'sustainable force' reference."><span style={{ color: C.purple }}>╌</span> 3-min sustainable</span>}
-                {!splitMode && cfEstimate && <span title="Monod-Scherrer (CF + W'/T) curve, kept as a second-opinion overlay. Three-exp drives prescriptions; Monod is for diagnostic comparison."><span style={{ color: C.muted, opacity: 0.7 }}>╌</span> Monod (2nd opinion)</span>}
                 {!splitMode && confidenceBandRel && <span title="Bootstrap 90% band around the three-exp curve."><span style={{ color: C.purple, opacity: 0.4 }}>▓</span> 90% band</span>}
                 {splitMode && Object.keys(fdSplitData).map(g => (
                   <span key={g}>
@@ -1109,7 +1108,6 @@ export function AnalysisView({
                     <span style={{ color: GRIP_COLORS[g] || C.blue, opacity: 0.7 }}> ╌</span> 3-min
                   </span>
                 ))}
-                {splitMode && <span title="Monod-Scherrer overlay per grip — kept as a thin desaturated 'second opinion' line. Three-exp drives prescriptions."><span style={{ color: C.muted, opacity: 0.6 }}>╌</span> Monod (2nd opinion, per grip)</span>}
                 {!splitMode && limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
                 {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
               </div>
@@ -1161,15 +1159,6 @@ export function AnalysisView({
                   label={{ value: `3-min ${fmtForce(threeExpRef180)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
                 />
               )}
-              {/* Monod overlay — kept as a thin desaturated dashed line
-                  for diagnostic comparison ("second opinion"). Not used
-                  in any prescription path; just visible context for
-                  where the hyperbolic fit would land vs three-exp. */}
-              {!fdSplitData && curveDataRel.length > 0 && (
-                <Line data={curveDataRel} dataKey="y" stroke={C.muted}
-                      strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.7}
-                      dot={false} legendType="none" isAnimationActive={false} />
-              )}
               {/* Primary curve — three-exp F-D. Bold purple solid; this
                   is the curve the rest of the engine optimizes against. */}
               {!fdSplitData && threeExpCurveDataRel.length > 0 && (
@@ -1195,19 +1184,6 @@ export function AnalysisView({
                 for (const grip of grips) {
                   const color = GRIP_COLORS[grip] || C.blue;
                   const data = fdSplitData[grip];
-                  // Monod overlay — thin desaturated dashed line for
-                  // diagnostic comparison ("second opinion"). Drawn first
-                  // so the three-exp primary sits on top.
-                  const monodRel = data.curve.map(d => ({
-                    x: d.x,
-                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
-                  }));
-                  elements.push(
-                    <Line key={`${grip}-monod`} data={monodRel} dataKey="y"
-                      stroke={color} strokeWidth={1} strokeDasharray="4 3"
-                      strokeOpacity={0.45} dot={false}
-                      legendType="none" isAnimationActive={false} />
-                  );
                   // Three-exp PRIMARY curve — bold solid grip color. This
                   // is the curve the engine optimizes against; Monod
                   // (above) is just for visual comparison. Also emits a
@@ -1290,20 +1266,16 @@ export function AnalysisView({
             <span style={{ color: C.orange }}>💪 Strength 20–120s</span>
             <span style={{ color: C.blue }}>🔄 Endurance 120s+</span>
           </div>
-          {/* Model-fit diagnostic — training RMSE comparison of three-exp
-              (the primary curve) against Monod (the second-opinion overlay).
-              Training RMSE is biased optimistic for both, but the relative
-              comparison on the SAME data is meaningful. Holdout LOO-CV
-              validation lives in scripts/validate_taur_vs_taud.js. */}
+          {/* Model-fit diagnostic — training RMSE for the three-exp curve.
+              Biased optimistic (training not holdout) but useful for
+              tracking whether the fit is degrading over time. */}
           {modelRMSE && (
             <div style={{ marginTop: 8, padding: "6px 8px", background: C.bg, borderRadius: 6, fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
               <span style={{ color: C.purple, fontWeight: 600 }}>Fit diagnostic</span>
               {" · 3-exp RMSE "}
-              <span style={{ color: modelRMSE.threeExp < modelRMSE.monod ? C.green : C.text, fontWeight: 600 }}>
+              <span style={{ color: C.text, fontWeight: 600 }}>
                 {modelRMSE.threeExp.toFixed(2)} kg
               </span>
-              {" · Monod RMSE "}
-              <span style={{ color: C.text }}>{modelRMSE.monod.toFixed(2)} kg</span>
               {" · N="}{modelRMSE.n}
               {" · "}
               <span style={{ fontStyle: "italic" }}>
