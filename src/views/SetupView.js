@@ -714,40 +714,65 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
           }
         }
 
-        // Format helpers
+        // Label + color helpers.
         //
-        // Gap = (potential − train_at) / train_at, so a positive gap
-        // means the curve thinks you can lift more than you're being
-        // prescribed. We render that as TRAINING OPPORTUNITY, not as
-        // a warning level — the convention here is intentionally
-        // inverted from "alarm UI":
+        // gap = (potential − train_at) / train_at. We render it not
+        // as a signed number (which made "-12%" read like a warning)
+        // but as one of two phrased badges:
         //
-        //   green  (gap > 20%) = lots of room to grow into; the
-        //                        inviting direction the coaching
-        //                        engine points at.
-        //   yellow (10–20%)    = meaningful headroom worth chasing.
-        //   muted  (0–10%)     = you're tracking the curve closely;
-        //                        no obvious lever here.
-        //   orange (negative)  = you're already outpacing the curve's
-        //                        prediction. NOT a problem — it
-        //                        means the model is conservative for
-        //                        this zone right now (you've been
-        //                        pushing past its estimate). Less
-        //                        runway to chase, hence the cooler
-        //                        color, but nothing's wrong.
+        //   "room +X%"  → positive gap: curve thinks you can lift more
+        //                 than you're being prescribed. Action: push
+        //                 harder here. Color escalates with magnitude:
+        //                 muted → yellow → orange → red as the gap
+        //                 widens, because a big room-to-grow signal is
+        //                 a clear "do something about this" prompt.
+        //   "ahead +X%" → negative gap: your demonstrated work is
+        //                 already exceeding the curve's prediction.
+        //                 This is the win state — your physiology
+        //                 has outpaced what the failure-driven fit
+        //                 has captured. Color: green (positive signal).
+        //   "on target" → |gap| < 5%. Well-calibrated. Muted.
         //
-        // This matches the rest of the app's framing (dual-perspective
-        // callout describes the largest gap as "headroom", the Why
-        // box calls it "your widest opportunity"). Earlier the scale
-        // was inverted — large gap rendered red like an alarm — which
-        // fought the verbal framing and confused users who read green
-        // as "good lifts" rather than "good direction".
+        // Earlier convention used signed text ("gap -12%") and inverted
+        // the color logic (green for positive room-to-grow, orange for
+        // "ahead"). That was technically defensible — green = "training
+        // opportunity direction" — but read backwards to most users
+        // because negative numbers in orange feel like alarms. New
+        // version flips both: positive numbers + words on every cell,
+        // green for the genuinely-good "ahead" state.
+        // Signed-percent — kept for the widestGap callout above the
+        // cells, which reads as a sentence ("Power — +12% headroom").
         const fmtPct = (g) => `${g >= 0 ? "+" : ""}${Math.round(g * 100)}%`;
-        const gapColor = (g) => Math.abs(g) < 0.05 ? C.muted
-                              : g > 0.20 ? C.green
-                              : g > 0.10 ? C.yellow
-                              : g > 0    ? C.muted
-                              : C.orange;
+        const labelFor = (g) => {
+          if (Math.abs(g) < 0.05) return "on target";
+          const pct = Math.round(Math.abs(g) * 100);
+          return g > 0 ? `room +${pct}%` : `ahead +${pct}%`;
+        };
+        const gapColor = (g) => {
+          if (Math.abs(g) < 0.05) return C.muted;
+          if (g >= 0.20) return C.red;
+          if (g >= 0.10) return C.orange;
+          if (g >  0)    return C.yellow;
+          return C.green;  // any negative gap = ahead of curve = good
+        };
+
+        // All-zones-exceeding detector: when every (zone × hand) cell
+        // has reliable potential AND actual > potential by ≥3%, the
+        // model's curve has collectively been outpaced and the per-cell
+        // numbers stop being useful as individual training prompts.
+        // Surface a single recalibration-pending banner instead.
+        let allCells = 0;
+        let exceedingCells = 0;
+        for (const z of zones) {
+          for (const cell of [z.L, z.R]) {
+            if (!cell.potential || !cell.trainAt) continue;
+            if (cell.potential.reliability === "extrapolation") continue;
+            allCells++;
+            const g = (cell.potential.value - cell.trainAt) / cell.trainAt;
+            if (g < -0.03) exceedingCells++;
+          }
+        }
+        const allZonesExceeding = allCells >= 4 && exceedingCells === allCells;
 
         return (
           <Card style={{ borderColor: C.blue }}>
@@ -762,6 +787,30 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
               Per-hand reference · the Analysis tab's <b>Next Session Focus</b> shows the per-grip summary.
             </div>
+
+            {/* All-zones-exceeding banner: when every reliable cell
+                is meaningfully above its modeled potential, individual
+                "ahead +X%" badges stop being actionable signals (they
+                just say "everything is great" everywhere). One banner
+                tells the real story — your physiology has outrun the
+                model and the curve needs new failure data to catch up. */}
+            {allZonesExceeding && (
+              <div style={{
+                padding: "10px 12px", marginBottom: 12,
+                background: C.green + "1a",
+                border: `1px solid ${C.green}80`,
+                borderRadius: 8, fontSize: 12, lineHeight: 1.5, color: C.text,
+              }}>
+                <div style={{ fontWeight: 700, color: C.green, marginBottom: 3 }}>
+                  Curve recalibration pending
+                </div>
+                Your performance has outpaced the model in every zone.
+                The curve will catch up as new failure data comes in —
+                push to genuine failure on a probe session to give the
+                fit a fresh ceiling to work with.
+              </div>
+            )}
+
             {widestGap && widestGap.gap > 0.10 && (() => {
               // Two complementary perspectives shown side by side:
               //   1. Largest raw curve gap — what a "balanced athlete"
@@ -875,8 +924,8 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                             )}
                             {gap != null && (
                               <div style={{ fontSize: 9, fontWeight: 600, color: gapColor(gap), marginTop: 2 }}
-                                   title={`Gap: train-at ${fmtW(cell.trainAt, unit)} → potential ${fmtW(pot.value, unit)} = ${fmtPct(gap)} headroom. ${gap > 0.10 ? "Worth training this zone." : "Already close to your modeled potential here."}`}>
-                                gap {fmtPct(gap)}
+                                   title={`train-at ${fmtW(cell.trainAt, unit)} vs potential ${fmtW(pot.value, unit)}. ${gap > 0.10 ? "Push harder here — the curve says you have room." : gap < -0.03 ? "You're outperforming the curve at this zone — model will catch up as new failure data comes in." : "Well-calibrated."}`}>
+                                {labelFor(gap)}
                               </div>
                             )}
                           </div>
@@ -897,7 +946,10 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                 <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.
               </div>
               <div style={{ marginTop: 4 }}>
-                <b style={{ color: C.text, fontStyle: "normal" }}>Gap</b> = the training opportunity in that zone.
+                <b style={{ color: C.text, fontStyle: "normal" }}>Room +X%</b> = the curve says you can lift more — a training opportunity worth pushing into.
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <b style={{ color: C.green, fontStyle: "normal" }}>Ahead +X%</b> = your demonstrated work is exceeding the curve's prediction. The model will catch up as you generate more failure data.
               </div>
             </div>
             <div style={{ fontSize: 10, color: C.muted, marginTop: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
