@@ -1949,9 +1949,8 @@ export function AnalysisView({
           return (
             <Card style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Compartment Dose (Area Under the Curve)</div>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-                Training dose delivered to each energy system per session. Dose = load × A<sub>i</sub> × τ<sub>Di</sub> · (1 − e<sup>−t/τ<sub>Di</sub></sup>).
-                Units: kg·s.
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+                Training dose delivered to each energy system per session. Dose = load × A<sub>i</sub> × τ<sub>Di</sub> · (1 − e<sup>−t/τ<sub>Di</sub></sup>). Units: kg·s.
               </div>
               <div style={{ height: 180 }}>
                 <ResponsiveContainer>
