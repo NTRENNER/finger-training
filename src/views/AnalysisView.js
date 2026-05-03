@@ -1283,6 +1283,49 @@ export function AnalysisView({
       {/* ── 1RM PR tracker ── */}
       <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
 
+      {/* ── Total Capacity (Area Under the Curve) over time — % vs baseline ──
+          Headline trajectory card: single-number capacity tracker per grip
+          showing ∫ F(t) dt over [5,180]s under the three-exp curve refit
+          each training date, expressed as % above each grip's baseline.
+          Lives at the top because the trajectory is the whole-page story
+          ("am I growing?") in one rising-line visual. Per-grip lines,
+          never pooled. Same integration window the Journey badges use,
+          so chart progress and badge progress read the same metric. The
+          absolute (kg·s) view of the same metric lives in the Advanced
+          metrics section at the bottom. */}
+      {aucHistoryByGrip && aucHistoryByGrip.hasPct && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (Area Under the Curve) — % vs baseline</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+            Same metric as a percentage above each grip's baseline. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have.
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={aucHistoryByGrip.pctRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
+                label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+              <ReferenceLine y={0} stroke={C.muted} strokeWidth={2}
+                label={{ value: "baseline", position: "insideRight", fill: C.muted, fontSize: 10 }} />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit="%"
+                label={{ value: "vs baseline", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
+              />
+              {aucHistoryByGrip.grips.map(g => (
+                <Line key={g} dataKey={`${g}_pct`} stroke={GRIP_COLORS[g] || C.blue}
+                  strokeWidth={2} dot={{ r: 3 }} connectNulls name={g} />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+            {aucHistoryByGrip.grips.map(g => (
+              <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* ── Curve Improvement summary ──
           (Was "Endurance Improvement" — renamed because the headline
           isn't endurance, it's the average of three F-D curve point
@@ -1290,6 +1333,9 @@ export function AnalysisView({
           — currently 7s / 45s / 120s. The blue Endurance cell is the
           one true endurance signal; Power and Strength are the other
           two reference points on the same curve.)
+          Now sits BELOW the Area Under the Curve trajectory because
+          this card is the per-zone breakdown that answers "where are
+          the gains coming from?" once the trajectory has hooked you.
           When no grip filter is active AND ≥2 grips have fits, split
           the card into per-grip sections so Micro (FDP) and Crusher
           (FDS) each show their own Δ% against the shared baseline. */}
@@ -1516,49 +1562,6 @@ export function AnalysisView({
           </Card>
         );
       })()}
-
-      {/* ── Total AUC over time — % vs baseline ──
-          Single-number capacity tracker per grip: ∫ F(t) dt over [5,180]s
-          under the three-exp curve refit each training date with data up
-          to that date, expressed as % above each grip's baseline AUC.
-          The absolute (kg·s) view of the same metric lives in the
-          Advanced metrics section at the bottom. Per-grip lines, never
-          pooled (FDP-pinch and FDS-crush adapt against different
-          baselines). Same integration window the Journey badges ladder
-          uses, so chart progress and badge progress read the same
-          metric. */}
-      {aucHistoryByGrip && aucHistoryByGrip.hasPct && (
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (AUC) — % vs baseline</div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-            Same metric as a percentage above each grip's baseline AUC. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have.
-          </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={aucHistoryByGrip.pctRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-                label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-              <ReferenceLine y={0} stroke={C.muted} strokeWidth={2}
-                label={{ value: "baseline", position: "insideRight", fill: C.muted, fontSize: 10 }} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit="%"
-                label={{ value: "vs baseline", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
-              />
-              {aucHistoryByGrip.grips.map(g => (
-                <Line key={g} dataKey={`${g}_pct`} stroke={GRIP_COLORS[g] || C.blue}
-                  strokeWidth={2} dot={{ r: 3 }} connectNulls name={g} />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
-            {aucHistoryByGrip.grips.map(g => (
-              <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
-            ))}
-          </div>
-        </Card>
-      )}
 
       {/* ── Performance vs. Model, over time ──
           Flipped-sign gap chart: positive = outperforming the model's
@@ -1879,7 +1882,7 @@ export function AnalysisView({
             sanity-check the headline % against the underlying area. */}
         {aucHistoryByGrip && (
           <Card style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (AUC) — absolute</div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (Area Under the Curve) — absolute</div>
             <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
               Total area under your three-exp F-D curve from 5s to 3 min, per grip. Higher = bigger total work envelope. Each point refits the curve with data up to that date — early points stabilize as the data stack grows.
             </div>
@@ -1945,7 +1948,7 @@ export function AnalysisView({
           const lastTotalReps = lastZoneCounts.reduce((s, z) => s + z.count, 0);
           return (
             <Card style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Compartment Dose (AUC)</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Compartment Dose (Area Under the Curve)</div>
               <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
                 Training dose delivered to each energy system per session. Dose = load × A<sub>i</sub> × τ<sub>Di</sub> · (1 − e<sup>−t/τ<sub>Di</sub></sup>).
                 Units: kg·s.
