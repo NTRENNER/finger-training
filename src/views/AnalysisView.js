@@ -124,7 +124,13 @@ export function AnalysisView({
   RM_GRIPS = [],
   trainingFocus = "balanced",
 }) {
-  const [selHand,   setSelHand]   = useState("");   // "" = Both (pool L+R for the F-D chart)
+  // Hand-filter state retired (the L/R/Both buttons were removed —
+  // see the FilterCard comment near render). Kept as a const so the
+  // many `(!selHand || r.hand === selHand)` checks scattered through
+  // the file still compile and behave as "no hand filter applied."
+  // Cleaner refactor would inline-strip every reference, but this
+  // is a minimum-diff change that's trivially reversible.
+  const selHand = "";
   const [selGrip,   setSelGrip]   = useState("");
   const [relMode,   setRelMode]   = useState(false); // relative strength toggle
 
@@ -948,26 +954,16 @@ export function AnalysisView({
 
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: grips.length ? 10 : 0 }}>
-          {/* Both = pool L+R for the F-D chart's at-a-glance view (one
-              curve fit on the combined data). Per-hand prescriptions and
-              the coaching engine still iterate L and R separately, so
-              "Both" only affects the visual aggregation here. */}
-          <button onClick={() => setSelHand("")} style={{
-            padding: "6px 18px", borderRadius: 20, cursor: "pointer",
-            fontWeight: 600, border: "none",
-            background: !selHand ? C.purple : C.border,
-            color: !selHand ? "#fff" : C.muted,
-          }}>Both</button>
-          {["L", "R"].map(h => (
-            <button key={h} onClick={() => setSelHand(h)} style={{
-              padding: "6px 18px", borderRadius: 20, cursor: "pointer",
-              fontWeight: 600, border: "none",
-              background: selHand === h ? C.purple : C.border,
-              color: selHand === h ? "#fff" : C.muted,
-            }}>{h === "L" ? "Left" : "Right"}</button>
-          ))}
-        </div>
+        {/* Hand selector removed: per-hand data already lives in the
+            Coaching Prescription L/R columns, the Critical Force
+            cards' per-hand split, and the Curve Improvement card's
+            single-hand mode (selectable via the per-grip filter alone
+            — Both is now an honest average of L+R per-hand fits, not
+            a pooled-fit refit that inflated the displayed deltas).
+            Removing the top-level filter eliminates a class of
+            silent-filter bugs (e.g., 5581094 where selHand="L"
+            default hid Micro reps logged as R) without losing any
+            actionable per-hand information. */}
         {grips.length > 0 && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => setSelGrip("")} style={{
