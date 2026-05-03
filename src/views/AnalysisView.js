@@ -1517,80 +1517,47 @@ export function AnalysisView({
         );
       })()}
 
-      {/* ── Total AUC over time ──
+      {/* ── Total AUC over time — % vs baseline ──
           Single-number capacity tracker per grip: ∫ F(t) dt over [5,180]s
           under the three-exp curve refit each training date with data up
-          to that date. Two stacked charts:
-            • % vs baseline — easier to read; starts at 0% and grows.
-            • Absolute (kg·s, force·time area) — the raw "how big is your
-              curve" signal in honest physical units.
-          Per-grip lines on each chart, never pooled (FDP-pinch and
-          FDS-crush adapt against different baselines). Same integration
-          window the Journey badges ladder uses, so chart progress and
-          badge progress read the same metric. */}
-      {aucHistoryByGrip && (() => {
-        const renderAucChart = (data, title, dataKeySuffix, unitSuffix, valueLabel) => (
-          <Card key={title} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{title}</div>
-            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-              {valueLabel}
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={data} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-                  label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-                {unitSuffix === "%" && <ReferenceLine y={0} stroke={C.border} strokeWidth={1.5} />}
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit={unitSuffix}
-                  label={{ value: unitSuffix === "%" ? "vs baseline" : "kg·s", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                  formatter={(val, name) => [
-                    val == null ? "—"
-                      : unitSuffix === "%" ? `${val >= 0 ? "+" : ""}${val}%`
-                      : `${val.toLocaleString()} kg·s`,
-                    name,
-                  ]}
-                />
-                {aucHistoryByGrip.grips.map(g => (
-                  <Line
-                    key={g}
-                    dataKey={`${g}${dataKeySuffix}`}
-                    stroke={GRIP_COLORS[g] || C.blue}
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    connectNulls
-                    name={g}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-            <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+          to that date, expressed as % above each grip's baseline AUC.
+          The absolute (kg·s) view of the same metric lives in the
+          Advanced metrics section at the bottom. Per-grip lines, never
+          pooled (FDP-pinch and FDS-crush adapt against different
+          baselines). Same integration window the Journey badges ladder
+          uses, so chart progress and badge progress read the same
+          metric. */}
+      {aucHistoryByGrip && aucHistoryByGrip.hasPct && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (AUC) — % vs baseline</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+            Same metric as a percentage above each grip's baseline AUC. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have.
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={aucHistoryByGrip.pctRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
+                label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+              <ReferenceLine y={0} stroke={C.border} strokeWidth={1.5} />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit="%"
+                label={{ value: "vs baseline", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
+              />
               {aucHistoryByGrip.grips.map(g => (
-                <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
+                <Line key={g} dataKey={`${g}_pct`} stroke={GRIP_COLORS[g] || C.blue}
+                  strokeWidth={2} dot={{ r: 3 }} connectNulls name={g} />
               ))}
-            </div>
-          </Card>
-        );
-        return (
-          <>
-            {aucHistoryByGrip.hasPct && renderAucChart(
-              aucHistoryByGrip.pctRows,
-              "Total Capacity (AUC) — % vs baseline",
-              "_pct",
-              "%",
-              "Same metric as a percentage above each grip's baseline AUC. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have."
-            )}
-            {renderAucChart(
-              aucHistoryByGrip.absRows,
-              "Total Capacity (AUC) — absolute",
-              "_abs",
-              "",
-              "Total area under your three-exp F-D curve from 5s to 3 min, per grip. Higher = bigger total work envelope. Each point refits the curve with data up to that date — early points stabilize as the data stack grows."
-            )}
-          </>
-        );
-      })()}
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+            {aucHistoryByGrip.grips.map(g => (
+              <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* ── Performance vs. Model, over time ──
           Flipped-sign gap chart: positive = outperforming the model's
@@ -1773,133 +1740,11 @@ export function AnalysisView({
             Total % (= AUC % gain) and CF & W' Over Time already shows
             the trajectory of the underlying fit parameters. */}
 
-        {/* ── Per-compartment AUC (dose delivered per energy system, per session) ── */}
-        {(() => {
-          // Group selected reps by session_id; fall back to date
-          const bySession = new Map();
-          for (const r of reps) {
-            const key = r.session_id || r.date;
-            if (!bySession.has(key)) bySession.set(key, { key, date: r.date, reps: [] });
-            bySession.get(key).reps.push(r);
-          }
-          const sessions = [...bySession.values()]
-            .sort((a, b) => a.date.localeCompare(b.date))
-            .slice(-10)
-            .map(s => {
-              const auc = sessionCompartmentAUC(s.reps);
-              const dom = dominantZone5(s.reps);
-              return {
-                label: s.date.slice(5), // "MM-DD"
-                Fast: Math.round(auc.fast),
-                Medium: Math.round(auc.medium),
-                Slow: Math.round(auc.slow),
-                total: Math.round(auc.total),
-                n: s.reps.length,
-                reps: s.reps,
-                dom,
-              };
-            });
-          if (sessions.length === 0) return null;
-          const last = sessions[sessions.length - 1];
-          const pct = (v) => last.total > 0 ? Math.round((v / last.total) * 100) : 0;
-          // Build the last-session zone distribution (count of reps per ZONE5 bucket)
-          const lastZoneCounts = ZONE5.map(z => ({
-            ...z,
-            count: last.reps.filter(r => classifyZone5(r.actual_time_s)?.key === z.key).length,
-          }));
-          const lastTotalReps = lastZoneCounts.reduce((s, z) => s + z.count, 0);
-          return (
-            <Card style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Compartment Dose (AUC)</div>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-                Training dose delivered to each energy system per session. Dose = load × A<sub>i</sub> × τ<sub>Di</sub> · (1 − e<sup>−t/τ<sub>Di</sub></sup>).
-                Units: kg·s.
-              </div>
-              <div style={{ height: 180 }}>
-                <ResponsiveContainer>
-                  <BarChart data={sessions} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-                    <XAxis dataKey="label" stroke={C.muted} tick={{ fontSize: 10 }} />
-                    <YAxis stroke={C.muted} tick={{ fontSize: 10 }} />
-                    <Tooltip
-                      contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12 }}
-                      labelStyle={{ color: C.muted }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="Fast"   stackId="a" fill="#e05560" />
-                    <Bar dataKey="Medium" stackId="a" fill="#e07a30" />
-                    <Bar dataKey="Slow"   stackId="a" fill="#3b82f6" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              {/* Last-session breakdown */}
-              <div style={{
-                display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
-                gap: 8, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}`,
-              }}>
-                <div>
-                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>FAST · PCR</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#e05560" }}>{last.Fast}</div>
-                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Fast)}% · τ 15s</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>MEDIUM · GLYCO</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#e07a30" }}>{last.Medium}</div>
-                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Medium)}% · τ 90s</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>SLOW · OXID</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#3b82f6" }}>{last.Slow}</div>
-                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Slow)}% · τ 600s</div>
-                </div>
-              </div>
-              <div style={{ fontSize: 11, color: C.muted, marginTop: 8, fontStyle: "italic" }}>
-                Last session: {last.n} rep{last.n !== 1 ? "s" : ""}, {last.total} kg·s total dose.
-                {last.dom && <> · landed in <span style={{ color: last.dom.color, fontWeight: 700, fontStyle: "normal" }}>{last.dom.label}</span></>}
-              </div>
-
-              {/* ── Last-session zone distribution (5-zone classifier) ── */}
-              {lastTotalReps > 0 && (
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, marginBottom: 6, textTransform: "uppercase" }}>
-                    Landed Zones · last session
-                  </div>
-                  <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: 6 }}>
-                    {lastZoneCounts.map(z => z.count > 0 && (
-                      <div
-                        key={z.key}
-                        title={`${z.label}: ${z.count} rep${z.count !== 1 ? "s" : ""}`}
-                        style={{
-                          flex: z.count,
-                          background: z.color,
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 10, color: C.muted }}>
-                    {lastZoneCounts.filter(z => z.count > 0).map(z => (
-                      <span key={z.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: 2, background: z.color, display: "inline-block" }} />
-                        {z.short} · {z.count}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </Card>
-          );
-        })()}
-
-        {/* ── Energy system breakdown ── */}
-        <EnergySystemBreakdownCard zones={zones} />
-
-        {/* ── Unified training recommendation ──
-            When no grip filter is active AND ≥2 grips have fits, render
-            a separate card per grip so Micro (FDP) and Crusher (FDS)
-            each get their own verdict — they are independent muscles
-            with independent force-duration curves, so pooling hides
-            the real story. Otherwise fall back to the single pooled /
-            selGrip-scoped card with the limiter/coverage diagnostics. */}
+        {/* ── Train block (Next Session Focus + Unexplored notice) ──
+            Moved up directly under Critical Force so the actionable
+            prescription sits above the fold. The Advanced metrics
+            section below holds the supporting detail (AUC absolute,
+            per-compartment dose, energy system breakdown). */}
         {(() => {
           // Helper — render per-zone gap bars. Replaces the old projected-ΔAUC
           // bars to match the gap-driven coaching engine: the recommended zone
@@ -2086,7 +1931,8 @@ export function AnalysisView({
           );
         })()}
 
-        {/* Unexplored zones notice */}
+        {/* Unexplored zones notice — kept with Train since it's an
+            actionable training hint, not a metric. */}
         {unexplored.length > 0 && (
           <Card style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 13, color: C.yellow, marginBottom: 6 }}>
@@ -2097,6 +1943,188 @@ export function AnalysisView({
             </div>
           </Card>
         )}
+
+        {/* ── Advanced metrics section ──
+            Below this divider sit the supporting / detail metrics that
+            most users won't engage with day-to-day: the absolute (kg·s)
+            view of AUC, the per-compartment training dose, and the
+            energy-system breakdown. They live below Train so the
+            actionable prescription sits above the fold. */}
+        <div style={{
+          marginTop: 24,
+          marginBottom: 12,
+          paddingTop: 16,
+          borderTop: `1px solid ${C.border}`,
+        }}>
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: C.muted,
+            textTransform: "uppercase",
+            letterSpacing: "0.12em",
+            marginBottom: 4,
+          }}>
+            Advanced metrics
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+            Detail-level views of the same data the cards above summarize. Useful for sanity-checking and physiology drill-down.
+          </div>
+        </div>
+
+        {/* ── Total Capacity (AUC) — absolute (kg·s) ──
+            Same metric as the % vs baseline chart at the top of the
+            page, but in raw physical units. Useful when you want to
+            sanity-check the headline % against the underlying area. */}
+        {aucHistoryByGrip && (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (AUC) — absolute</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+              Total area under your three-exp F-D curve from 5s to 3 min, per grip. Higher = bigger total work envelope. Each point refits the curve with data up to that date — early points stabilize as the data stack grows.
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={aucHistoryByGrip.absRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
+                  label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48}
+                  label={{ value: "kg·s", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                  formatter={(val, name) => [val == null ? "—" : `${val.toLocaleString()} kg·s`, name]}
+                />
+                {aucHistoryByGrip.grips.map(g => (
+                  <Line key={g} dataKey={`${g}_abs`} stroke={GRIP_COLORS[g] || C.blue}
+                    strokeWidth={2} dot={{ r: 3 }} connectNulls name={g} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+            <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+              {aucHistoryByGrip.grips.map(g => (
+                <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* ── Per-compartment AUC (dose delivered per energy system, per session) ── */}
+        {(() => {
+          // Group selected reps by session_id; fall back to date
+          const bySession = new Map();
+          for (const r of reps) {
+            const key = r.session_id || r.date;
+            if (!bySession.has(key)) bySession.set(key, { key, date: r.date, reps: [] });
+            bySession.get(key).reps.push(r);
+          }
+          const sessions = [...bySession.values()]
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .slice(-10)
+            .map(s => {
+              const auc = sessionCompartmentAUC(s.reps);
+              const dom = dominantZone5(s.reps);
+              return {
+                label: s.date.slice(5), // "MM-DD"
+                Fast: Math.round(auc.fast),
+                Medium: Math.round(auc.medium),
+                Slow: Math.round(auc.slow),
+                total: Math.round(auc.total),
+                n: s.reps.length,
+                reps: s.reps,
+                dom,
+              };
+            });
+          if (sessions.length === 0) return null;
+          const last = sessions[sessions.length - 1];
+          const pct = (v) => last.total > 0 ? Math.round((v / last.total) * 100) : 0;
+          // Build the last-session zone distribution (count of reps per ZONE5 bucket)
+          const lastZoneCounts = ZONE5.map(z => ({
+            ...z,
+            count: last.reps.filter(r => classifyZone5(r.actual_time_s)?.key === z.key).length,
+          }));
+          const lastTotalReps = lastZoneCounts.reduce((s, z) => s + z.count, 0);
+          return (
+            <Card style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Compartment Dose (AUC)</div>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+                Training dose delivered to each energy system per session. Dose = load × A<sub>i</sub> × τ<sub>Di</sub> · (1 − e<sup>−t/τ<sub>Di</sub></sup>).
+                Units: kg·s.
+              </div>
+              <div style={{ height: 180 }}>
+                <ResponsiveContainer>
+                  <BarChart data={sessions} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                    <XAxis dataKey="label" stroke={C.muted} tick={{ fontSize: 10 }} />
+                    <YAxis stroke={C.muted} tick={{ fontSize: 10 }} />
+                    <Tooltip
+                      contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12 }}
+                      labelStyle={{ color: C.muted }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey="Fast"   stackId="a" fill="#e05560" />
+                    <Bar dataKey="Medium" stackId="a" fill="#e07a30" />
+                    <Bar dataKey="Slow"   stackId="a" fill="#3b82f6" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {/* Last-session breakdown */}
+              <div style={{
+                display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
+                gap: 8, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}`,
+              }}>
+                <div>
+                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>FAST · PCR</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#e05560" }}>{last.Fast}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Fast)}% · τ 15s</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>MEDIUM · GLYCO</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#e07a30" }}>{last.Medium}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Medium)}% · τ 90s</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>SLOW · OXID</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#3b82f6" }}>{last.Slow}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Slow)}% · τ 600s</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 8, fontStyle: "italic" }}>
+                Last session: {last.n} rep{last.n !== 1 ? "s" : ""}, {last.total} kg·s total dose.
+                {last.dom && <> · landed in <span style={{ color: last.dom.color, fontWeight: 700, fontStyle: "normal" }}>{last.dom.label}</span></>}
+              </div>
+
+              {/* ── Last-session zone distribution (5-zone classifier) ── */}
+              {lastTotalReps > 0 && (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, marginBottom: 6, textTransform: "uppercase" }}>
+                    Landed Zones · last session
+                  </div>
+                  <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: 6 }}>
+                    {lastZoneCounts.map(z => z.count > 0 && (
+                      <div
+                        key={z.key}
+                        title={`${z.label}: ${z.count} rep${z.count !== 1 ? "s" : ""}`}
+                        style={{
+                          flex: z.count,
+                          background: z.color,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 10, color: C.muted }}>
+                    {lastZoneCounts.filter(z => z.count > 0).map(z => (
+                      <span key={z.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: z.color, display: "inline-block" }} />
+                        {z.short} · {z.count}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+          );
+        })()}
+
+        {/* ── Energy system breakdown ── */}
+        <EnergySystemBreakdownCard zones={zones} />
 
       </>)}
     </div>
