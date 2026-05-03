@@ -1856,20 +1856,20 @@ export function AnalysisView({
             energy-system breakdown. They live below Train so the
             actionable prescription sits above the fold. */}
         <div style={{
-          marginTop: 24,
-          marginBottom: 12,
-          paddingTop: 16,
+          marginTop: 32,
+          marginBottom: 16,
+          paddingTop: 20,
           borderTop: `1px solid ${C.border}`,
         }}>
           <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: C.muted,
+            fontSize: 20,
+            fontWeight: 800,
+            color: C.text,
             textTransform: "uppercase",
-            letterSpacing: "0.12em",
-            marginBottom: 4,
+            letterSpacing: "0.10em",
+            marginBottom: 6,
           }}>
-            Advanced metrics
+            Advanced Metrics
           </div>
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
             Detail-level views of the same data the cards above summarize. Useful for sanity-checking and physiology drill-down.
