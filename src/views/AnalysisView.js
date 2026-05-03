@@ -518,9 +518,6 @@ export function AnalysisView({
     return rows.length >= 2 ? { rows, grips, baselineByGrip } : null;
   }, [failures, history, selHand, selGrip, unit, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Legacy alias — kept so the single-grip render path below still compiles.
-  // In practice cumulativeDataByGrip now handles all cases (single + multi grip).
-  const cumulativeData = [];
 
   // Note: AUC values used to live here (aucEstimate / aucBaseline /
   // aucHistory) backing a dedicated "Climbing Endurance · AUC" card.
@@ -1384,10 +1381,8 @@ export function AnalysisView({
         );
       })()}
 
-      {/* ── Curve parameters over time ── */}
-      {cumulativeData.length >= 2 && (() => {
-        // When no grip filter is active and ≥2 grips have data, split
-        if (!cumulativeDataByGrip) return null;
+      {/* ── 120s capacity over time ── */}
+      {cumulativeDataByGrip && (() => {
         const { rows, grips, baselineByGrip } = cumulativeDataByGrip;
         return (
           <Card style={{ marginBottom: 16 }}>
