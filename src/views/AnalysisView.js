@@ -349,20 +349,9 @@ export function AnalysisView({
     return out;
   }, [history, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Per-grip improvement — each grip's current three-exp fit vs its
-  // own per-grip three-exp baseline. Only emitted for grips that have
-  // both, so the card never shows a misleading cross-muscle comparison.
-  const gripImprovement = useMemo(() => {
-    const out = {};
-    for (const [grip, amps] of Object.entries(grip3xEstimates)) {
-      const ref = gripBaselines[grip];
-      if (!ref) continue;
-      const imp = improvementForAmps(amps, ref.amps);
-      if (imp) out[grip] = { ...imp, baselineDate: ref.date };
-    }
-    return out;
-  }, [gripBaselines, grip3xEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
-
+  // gripImprovement is defined AFTER perHandGripBaselines (below)
+  // because it now depends on per-hand baselines for the averaged
+  // delta path. See the const further down for the actual definition.
 
   // ── Per-hand × per-grip baselines (three-exp) ──
   // Same seeding logic as gripBaselines but scoped to a single hand
@@ -403,6 +392,57 @@ export function AnalysisView({
     }
     return out;
   }, [history, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-grip improvement — when both per-hand baselines exist for a
+  // grip, compute per-hand improvements (L vs L-baseline, R vs R-
+  // baseline) and AVERAGE the per-zone deltas. Otherwise fall back to
+  // a pooled-fit comparison (current pooled fit vs pooled baseline)
+  // for grips that don't have a complete per-hand baseline yet.
+  //
+  // Why averaged: the pooled-fit approach inflates the displayed
+  // delta because shrinkage relaxes asymmetrically between the
+  // small-N baseline and larger-N current — both push higher than
+  // per-hand fits but by different amounts, producing numbers that
+  // look like Right + Left instead of an honest average. Averaging
+  // is the user's intuitive reading and stays internally consistent
+  // with the per-hand cells. Same fix applied to the single-grip
+  // scopedImp branch in the render below.
+  const gripImprovement = useMemo(() => {
+    const out = {};
+    for (const grip of Object.keys(grip3xEstimates)) {
+      const lBase = perHandGripBaselines[`${grip}|L`];
+      const rBase = perHandGripBaselines[`${grip}|R`];
+      const pooledRef = gripBaselines[grip];
+      if (lBase && rBase) {
+        const buildHandPts = (hand) => history
+          .filter(r => r.failed && r.grip === grip && r.hand === hand)
+          .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
+          .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+        const lAmps = fitAmpsForPts(buildHandPts("L"), grip);
+        const rAmps = fitAmpsForPts(buildHandPts("R"), grip);
+        const lImp = lAmps ? improvementForAmps(lAmps, lBase.amps) : null;
+        const rImp = rAmps ? improvementForAmps(rAmps, rBase.amps) : null;
+        if (lImp && rImp) {
+          const since = lBase.date < rBase.date ? lBase.date : rBase.date;
+          out[grip] = {
+            power:     Math.round((lImp.power     + rImp.power)     / 2),
+            strength:  Math.round((lImp.strength  + rImp.strength)  / 2),
+            endurance: Math.round((lImp.endurance + rImp.endurance) / 2),
+            total:     Math.round((lImp.total     + rImp.total)     / 2),
+            baselineDate: since,
+          };
+          continue;
+        }
+      }
+      // Fallback: pooled-fit comparison when per-hand baselines aren't
+      // ready yet on at least one side of this grip.
+      if (pooledRef) {
+        const imp = improvementForAmps(grip3xEstimates[grip], pooledRef.amps);
+        if (imp) out[grip] = { ...imp, baselineDate: pooledRef.date };
+      }
+    }
+    return out;
+  }, [gripBaselines, perHandGripBaselines, grip3xEstimates, history]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Progress toward unlocking a per-grip (or per-grip × hand) baseline.
   // Returns {failures, distinctDurations, ready} so UI placeholders can
