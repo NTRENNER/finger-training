@@ -480,7 +480,6 @@ export function AnalysisView({
       ? failures  // already filtered to selGrip above
       : history.filter(r =>
           r.failed && r.grip &&
-          (!selHand || r.hand === selHand) &&
           r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
           r.actual_time_s > 0
         );
