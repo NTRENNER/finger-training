@@ -1538,7 +1538,8 @@ export function AnalysisView({
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
                 label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-              <ReferenceLine y={0} stroke={C.border} strokeWidth={1.5} />
+              <ReferenceLine y={0} stroke={C.muted} strokeWidth={2}
+                label={{ value: "baseline", position: "insideRight", fill: C.muted, fontSize: 10 }} />
               <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit="%"
                 label={{ value: "vs baseline", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
               <Tooltip
@@ -1584,7 +1585,8 @@ export function AnalysisView({
                 <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
                 <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
                   label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-                <ReferenceLine y={0} stroke={C.border} strokeWidth={1.5} />
+                <ReferenceLine y={0} stroke={C.muted} strokeWidth={2}
+                  label={{ value: "model", position: "insideRight", fill: C.muted, fontSize: 10 }} />
                 <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={42} unit="%"
                   label={{ value: "vs. model", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
                 <Tooltip
