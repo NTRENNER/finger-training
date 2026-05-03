@@ -1517,6 +1517,81 @@ export function AnalysisView({
         );
       })()}
 
+      {/* ── Total AUC over time ──
+          Single-number capacity tracker per grip: ∫ F(t) dt over [5,180]s
+          under the three-exp curve refit each training date with data up
+          to that date. Two stacked charts:
+            • % vs baseline — easier to read; starts at 0% and grows.
+            • Absolute (kg·s, force·time area) — the raw "how big is your
+              curve" signal in honest physical units.
+          Per-grip lines on each chart, never pooled (FDP-pinch and
+          FDS-crush adapt against different baselines). Same integration
+          window the Journey badges ladder uses, so chart progress and
+          badge progress read the same metric. */}
+      {aucHistoryByGrip && (() => {
+        const renderAucChart = (data, title, dataKeySuffix, unitSuffix, valueLabel) => (
+          <Card key={title} style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{title}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+              {valueLabel}
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={data} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
+                  label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+                {unitSuffix === "%" && <ReferenceLine y={0} stroke={C.border} strokeWidth={1.5} />}
+                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit={unitSuffix}
+                  label={{ value: unitSuffix === "%" ? "vs baseline" : "kg·s", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                  formatter={(val, name) => [
+                    val == null ? "—"
+                      : unitSuffix === "%" ? `${val >= 0 ? "+" : ""}${val}%`
+                      : `${val.toLocaleString()} kg·s`,
+                    name,
+                  ]}
+                />
+                {aucHistoryByGrip.grips.map(g => (
+                  <Line
+                    key={g}
+                    dataKey={`${g}${dataKeySuffix}`}
+                    stroke={GRIP_COLORS[g] || C.blue}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    connectNulls
+                    name={g}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+            <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+              {aucHistoryByGrip.grips.map(g => (
+                <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
+              ))}
+            </div>
+          </Card>
+        );
+        return (
+          <>
+            {aucHistoryByGrip.hasPct && renderAucChart(
+              aucHistoryByGrip.pctRows,
+              "Total Capacity (AUC) — % vs baseline",
+              "_pct",
+              "%",
+              "Same metric as a percentage above each grip's baseline AUC. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have."
+            )}
+            {renderAucChart(
+              aucHistoryByGrip.absRows,
+              "Total Capacity (AUC) — absolute",
+              "_abs",
+              "",
+              "Total area under your three-exp F-D curve from 5s to 3 min, per grip. Higher = bigger total work envelope. Each point refits the curve with data up to that date — early points stabilize as the data stack grows."
+            )}
+          </>
+        );
+      })()}
+
       {/* ── Performance vs. Model, over time ──
           Flipped-sign gap chart: positive = outperforming the model's
           prediction, negative = headroom still to capture. Rising lines
@@ -1571,81 +1646,6 @@ export function AnalysisView({
           );
         }
         return null;
-      })()}
-
-      {/* ── Total AUC over time ──
-          Single-number capacity tracker per grip: ∫ F(t) dt over [5,180]s
-          under the three-exp curve refit each training date with data up
-          to that date. Two stacked charts:
-            • Absolute (kg·s, force·time area) — the raw "how big is your
-              curve" signal in honest physical units.
-            • % vs baseline — easier to read; starts at 0% and grows.
-          Per-grip lines on each chart, never pooled (FDP-pinch and
-          FDS-crush adapt against different baselines). Same integration
-          window the Journey badges ladder uses, so chart progress and
-          badge progress read the same metric. */}
-      {aucHistoryByGrip && (() => {
-        const renderAucChart = (data, title, dataKeySuffix, unitSuffix, valueLabel) => (
-          <Card key={title} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{title}</div>
-            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-              {valueLabel}
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={data} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-                  label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-                {unitSuffix === "%" && <ReferenceLine y={0} stroke={C.border} strokeWidth={1.5} />}
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit={unitSuffix}
-                  label={{ value: unitSuffix === "%" ? "vs baseline" : "kg·s", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                  formatter={(val, name) => [
-                    val == null ? "—"
-                      : unitSuffix === "%" ? `${val >= 0 ? "+" : ""}${val}%`
-                      : `${val.toLocaleString()} kg·s`,
-                    name,
-                  ]}
-                />
-                {aucHistoryByGrip.grips.map(g => (
-                  <Line
-                    key={g}
-                    dataKey={`${g}${dataKeySuffix}`}
-                    stroke={GRIP_COLORS[g] || C.blue}
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    connectNulls
-                    name={g}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-            <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
-              {aucHistoryByGrip.grips.map(g => (
-                <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
-              ))}
-            </div>
-          </Card>
-        );
-        return (
-          <>
-            {renderAucChart(
-              aucHistoryByGrip.absRows,
-              "Total Capacity (AUC) — absolute",
-              "_abs",
-              "",
-              "Total area under your three-exp F-D curve from 5s to 3 min, per grip. Higher = bigger total work envelope. Each point refits the curve with data up to that date — early points stabilize as the data stack grows."
-            )}
-            {aucHistoryByGrip.hasPct && renderAucChart(
-              aucHistoryByGrip.pctRows,
-              "Total Capacity (AUC) — % vs baseline",
-              "_pct",
-              "%",
-              "Same metric as a percentage above each grip's baseline AUC. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have."
-            )}
-          </>
-        );
       })()}
 
       {/* Per-Hand Critical Force card removed — duplicated info from
