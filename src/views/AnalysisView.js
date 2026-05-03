@@ -619,7 +619,8 @@ export function AnalysisView({
           const trainAt = empiricalPrescription(upTo, h, selGrip, T, { threeExpPriors });
           const pot = prescriptionPotential(upTo, h, selGrip, T, { threeExpPriors });
           if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
-          const gap = (pot.value - trainAt) / trainAt;
+          // Flipped sign: positive = outperforming model, negative = headroom to grow
+          const gap = (trainAt - pot.value) / pot.value;
           if (bestGap == null || gap > bestGap) bestGap = gap;
         }
         row[`${key}_gap`] = bestGap != null ? Math.round(bestGap * 100) : null;
@@ -1423,28 +1424,28 @@ export function AnalysisView({
         );
       })()}
 
-      {/* ── Gap to Potential, over time ──
-          The "am I closing the gap toward my modeled potential" tracker.
-          Per-zone line shows how the gap (potential − empirical, as %) has
-          evolved over training history. Narrowing trends = adaptation
-          delivering. Widening = the model thinks you have more headroom
-          than your training is unlocking; widen the focus on that zone.
+      {/* ── Performance vs. Model, over time ──
+          Flipped-sign gap chart: positive = outperforming the model's
+          prediction, negative = headroom still to capture. Rising lines
+          mean adaptation is delivering. Zones persistently below zero
+          have room to grow — focus there.
 
-          Only renders when a grip filter is set (cross-grip gap doesn't
-          mean anything physiologically). */}
+          Only renders when a grip filter is set (cross-grip comparison
+          doesn't mean anything physiologically). */}
       {gapHistory && gapHistory.length >= 2 && (
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Gap to Potential — {selGrip}{selHand ? ` · ${selHand === "L" ? "Left" : "Right"}` : ""}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Performance vs. Model — {selGrip}{selHand ? ` · ${selHand === "L" ? "Left" : "Right"}` : ""}</div>
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-            % headroom between what you're training at and what the curve says you could hit. Narrowing lines mean adaptation is delivering. Widening lines mean the model sees more potential than you're unlocking — focus there.
+            How much you're outperforming (+) or underperforming (−) the model's prediction per zone. Rising lines mean adaptation is delivering. Zones below zero have headroom left — focus there.
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={gapHistory} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
                 label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+              <ReferenceLine y={0} stroke={C.border} strokeWidth={1.5} />
               <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={42} unit="%"
-                label={{ value: "Gap %", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
+                label={{ value: "vs. model", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
               <Tooltip
                 contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
                 formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
