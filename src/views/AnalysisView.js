@@ -1617,9 +1617,6 @@ export function AnalysisView({
         return null;
       })()}
 
-      {/* Per-Hand Critical Force card removed — duplicated info from
-          the Critical Force Estimate cards below. */}
-
       {reps.length === 0 ? (
         <Card>
           <div style={{ textAlign: "center", padding: "32px 0", color: C.muted }}>
@@ -1630,112 +1627,15 @@ export function AnalysisView({
         </Card>
       ) : (<>
 
-
-        {/* ── Critical Force card ──
-            When no grip filter is active AND ≥2 grips have fits, render
-            one card per grip (Micro, Crusher) so each muscle's CF / W′
-            and curve shape are read independently. Otherwise fall back
-            to the pooled / selGrip-scoped single card. */}
-        {(() => {
-          // Shared renderer for the CF/W′/curve-shape body of the card.
-          const renderCFBody = (fit) => {
-            const ratio = fit.CF > 0 ? fit.W / fit.CF : 0;
-            const pct   = Math.min(100, Math.max(0, (ratio / 120) * 100));
-            const { shape, color: sc, caption } =
-              ratio < 30  ? { shape: "CF-dominant (Flat)",    color: C.blue,   caption: "Your curve is flat — CF is high relative to W′. Your sustainable force is well developed; your finite anaerobic reserve is small." } :
-              ratio < 80  ? { shape: "Balanced",              color: C.green,  caption: "CF and W′ are roughly proportional — neither the aerobic asymptote nor the anaerobic reserve dominates the curve." } :
-                            { shape: "W′-dominant (Steep)",   color: C.orange, caption: "Your curve is steep — W′ is large relative to CF. Your short-burst capacity is well developed; your sustainable asymptote is lower." };
-            return (
-              <>
-                <div style={{ display: "flex", gap: 0, marginBottom: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Critical Force (CF)</div>
-                    <div style={{ fontSize: 32, fontWeight: 800, color: C.purple, lineHeight: 1 }}>
-                      {fmtW(fit.CF, unit)}
-                    </div>
-                    <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit} · max sustainable</div>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Anaerobic Capacity (W′)</div>
-                    <div style={{ fontSize: 32, fontWeight: 800, color: C.orange, lineHeight: 1 }}>
-                      {fmtW(fit.W, unit)}·s
-                    </div>
-                    <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{unit}·s · finite reserve above CF</div>
-                  </div>
-                </div>
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 5 }}>
-                    <span>Curve Shape</span>
-                    <span style={{ color: sc, fontWeight: 700 }}>{shape}</span>
-                  </div>
-                  <div style={{ position: "relative", height: 8, borderRadius: 4, overflow: "hidden",
-                    background: "linear-gradient(to right, #3b82f6, #22c55e, #e07a30)" }}>
-                    <div style={{
-                      position: "absolute", top: "50%", left: `${pct}%`,
-                      transform: "translate(-50%, -50%)",
-                      width: 14, height: 14, borderRadius: 7,
-                      background: "#fff", border: `2px solid ${sc}`,
-                      boxShadow: "0 0 4px rgba(0,0,0,0.4)",
-                    }} />
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.muted, marginTop: 3 }}>
-                    <span>Flat (CF dominant)</span><span>Steep (W′ dominant)</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
-                    {caption} See <b>Next Session Focus</b> above for what to train next.
-                  </div>
-                </div>
-                <div style={{ fontSize: 12, color: C.muted, borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
-                  Estimated from {fit.n} failure point{fit.n !== 1 ? "s" : ""}. Accuracy improves as failures span multiple time domains — try power hangs (5–10s) and capacity hangs (2+ min) to sharpen the curve.
-                </div>
-              </>
-            );
-          };
-
-          const perGripMode = !selGrip && Object.keys(gripEstimates).length >= 2;
-          if (perGripMode) {
-            return (
-              <>
-                {Object.entries(gripEstimates).map(([grip, fit]) => (
-                  <Card key={grip} style={{ marginBottom: 16 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700 }}>Critical Force Estimate</div>
-                      <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{grip}</div>
-                    </div>
-                    {renderCFBody(fit)}
-                  </Card>
-                ))}
-              </>
-            );
-          }
-
-          if (cfEstimate) {
-            return (
-              <Card style={{ marginBottom: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>Critical Force Estimate</div>
-                  {selGrip && (
-                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{selGrip}</div>
-                  )}
-                </div>
-                {renderCFBody(cfEstimate)}
-              </Card>
-            );
-          }
-
-          return (
-            <Card style={{ marginBottom: 16, border: `1px solid ${C.yellow}30` }}>
-              <div style={{ fontSize: 13, color: C.yellow, marginBottom: 6 }}>
-                {failures.length === 0 ? "⚠ Critical Force requires failure data" : "⚠ Need 2+ failures at different durations to fit the curve"}
-              </div>
-              <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-                {failures.length === 0
-                  ? "The shape of your force-duration curve is defined by reps that end in auto-failure. Completed reps set the floor; failed reps define the curve."
-                  : "You have failure data in one time domain. Add failures at a shorter or longer duration to fit the Monod-Scherrer curve and estimate Critical Force."}
-              </div>
-            </Card>
-          );
-        })()}
+        {/* The Critical Force Estimate card lived here. Removed because
+            CF / W' are Monod-derived but the rest of the Analysis surface
+            (AUC, Performance vs. Model, Coaching, the F-D curve overlay
+            itself) all moved to the three-exp basis — keeping a Monod-only
+            headline card created two competing models on the same page.
+            The "sustainable force ceiling" number CF used to give isn't
+            lost: the F-D chart's dashed "X-min" reference lines already
+            show F(180s) per grip from the three-exp curve, in honest
+            three-exp units. */}
 
         {/* The Climbing Endurance chart card lived here. Removed because
             the Endurance Improvement card below already shows each grip's
@@ -1855,7 +1755,7 @@ export function AnalysisView({
                     </div>
                     {renderGainsBars(rec)}
                     <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
-                      CF {fmtW(rec.CF, unit)} {unit} · W′ {fmtW(rec.W, unit)} {unit}·s · {rec.n} failure{rec.n !== 1 ? "s" : ""}
+                      Based on {rec.n} failure{rec.n !== 1 ? "s" : ""} — see the F-D chart for the per-grip 3-min sustainable force.
                     </div>
                     {/* Footnote on the LAST card only — points back at
                         Setup's Coaching prescription for the per-hand
@@ -1907,7 +1807,7 @@ export function AnalysisView({
                   <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
                     <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Shape:</span>
                     <span>
-                      Curve-shape diagnostic agrees — this zone also falls farthest below its own Monod curve
+                      Curve-shape diagnostic agrees — this zone also falls farthest below its own 3-exp curve
                       {recommendation.limiterGrip ? <> on <b>{recommendation.limiterGrip}</b></> : null}.
                     </span>
                   </div>
