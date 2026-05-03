@@ -1769,10 +1769,16 @@ export function AnalysisView({
               marginBottom: 10, fontSize: 11,
             }}>
               <div style={{ color: C.muted, letterSpacing: 0.4, textTransform: "uppercase", fontSize: 10, marginBottom: 6 }}>
-                Gap to potential · per zone
+                Per-zone reading
               </div>
               {(() => {
-                // Find max absolute gap for bar scaling
+                // Find max absolute gap for bar scaling.
+                // Sign convention: gap > 0 = under potential (room to grow,
+                // training opportunity); gap < 0 = over potential (already
+                // exceeding the model — a good state). We render both as
+                // positive numbers with directional words ("room" / "ahead")
+                // so the page never has unsigned-negative numbers in zone
+                // colors that read as alarms when they actually mean wins.
                 const maxAbs = Math.max(0.05, ...Object.values(rec.zoneGaps).filter(v => v != null).map(v => Math.abs(v)));
                 return [
                   { k: "power",     lbl: "Power",    col: C.red },
@@ -1780,18 +1786,30 @@ export function AnalysisView({
                   { k: "endurance", lbl: "Endurance", col: C.blue },
                 ].map(r => {
                   const v = rec.zoneGaps[r.k];
-                  const pct = v == null ? 0 : Math.min(100, Math.max(0, (v / maxAbs) * 100));
+                  const pct = v == null ? 0 : Math.min(100, Math.max(0, (Math.abs(v) / maxAbs) * 100));
                   const isBest = r.k === rec.key;
+                  // Bar color: zone color for "room to grow" (action zone),
+                  // green for "ahead of model" (already exceeding — good).
+                  const barColor = v == null ? C.muted : (v >= 0 ? r.col : C.green);
+                  // Label: "X% room" if under potential (training opportunity);
+                  // "X% ahead" if over potential (outperforming the model).
+                  const label = v == null ? "—"
+                              : v >= 0 ? `${Math.round(v * 100)}% room`
+                              : `${Math.round(Math.abs(v) * 100)}% ahead`;
+                  const labelColor = v == null ? C.muted
+                                   : v < 0 ? C.green
+                                   : isBest ? r.col
+                                   : C.muted;
                   return (
                     <div key={r.k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                       <span style={{ width: 62, color: r.col, fontWeight: isBest ? 700 : 400 }}>
                         {r.lbl}
                       </span>
                       <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${pct}%`, background: v == null ? C.muted : r.col, borderRadius: 3, transition: "width 0.3s", opacity: v == null ? 0.4 : 1 }} />
+                        <div style={{ height: "100%", width: `${pct}%`, background: barColor, borderRadius: 3, transition: "width 0.3s", opacity: v == null ? 0.4 : 1 }} />
                       </div>
-                      <span style={{ width: 56, textAlign: "right", color: isBest ? r.col : C.muted, fontWeight: isBest ? 700 : 400 }}>
-                        {v == null ? "—" : `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`}
+                      <span style={{ width: 72, textAlign: "right", color: labelColor, fontWeight: isBest ? 700 : 400, fontSize: 10 }}>
+                        {label}
                       </span>
                     </div>
                   );
