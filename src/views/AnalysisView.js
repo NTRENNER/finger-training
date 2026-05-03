@@ -1274,20 +1274,60 @@ export function AnalysisView({
           const phgKey = selHand && selHand !== "Both" ? `${selGrip}|${selHand}` : null;
           const phgRef = phgKey ? perHandGripBaselines[phgKey] : null;
           const gRef   = gripBaselines[selGrip];
+          const lBase  = perHandGripBaselines[`${selGrip}|L`];
+          const rBase  = perHandGripBaselines[`${selGrip}|R`];
           if (phgRef) {
             // Tightest match: current3xAmps (already hand+grip scoped
             // via the `failures` filter) vs per-(hand,grip) baseline.
             scopedImp = improvementForAmps(current3xAmps, phgRef.amps);
             scopedBaselineDate = phgRef.date;
             scopedScopeLabel = `${selGrip} · ${selHand === "L" ? "Left" : "Right"}`;
+          } else if (!selHand && lBase && rBase) {
+            // "Both" mode AND both per-hand baselines exist → display
+            // the AVERAGE of per-hand improvements rather than a
+            // pooled-fit comparison. The pooled approach used here
+            // before produced delta %s that looked like Right + Left
+            // because pooled-fit shrinkage relaxes asymmetrically
+            // between the small-N baseline and the larger-N current
+            // (both push higher than per-hand fits, but by different
+            // amounts). The average is the user's intuitive reading
+            // ("what's my typical improvement across both hands") and
+            // is internally consistent with the per-hand cells.
+            const buildHandPts = (hand) => history
+              .filter(r => r.failed && r.grip === selGrip && r.hand === hand)
+              .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
+              .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+            const lAmps = fitAmpsForPts(buildHandPts("L"), selGrip);
+            const rAmps = fitAmpsForPts(buildHandPts("R"), selGrip);
+            const lImp = lAmps ? improvementForAmps(lAmps, lBase.amps) : null;
+            const rImp = rAmps ? improvementForAmps(rAmps, rBase.amps) : null;
+            if (lImp && rImp) {
+              scopedImp = {
+                power:     Math.round((lImp.power     + rImp.power)     / 2),
+                strength:  Math.round((lImp.strength  + rImp.strength)  / 2),
+                endurance: Math.round((lImp.endurance + rImp.endurance) / 2),
+                total:     Math.round((lImp.total     + rImp.total)     / 2),
+              };
+              // Use the EARLIER of the two baseline dates as the "since"
+              // label so the reader sees the start of meaningful tracking.
+              scopedBaselineDate = lBase.date < rBase.date ? lBase.date : rBase.date;
+              scopedScopeLabel = `${selGrip} · avg of Left + Right`;
+            } else if (gRef && grip3xEstimates[selGrip]) {
+              // Per-hand fits unavailable for some reason — fall back to
+              // pooled. Same fallback as the no-per-hand-baseline path.
+              scopedImp = improvementForAmps(grip3xEstimates[selGrip], gRef.amps);
+              scopedBaselineDate = gRef.date;
+              scopedScopeLabel = `${selGrip} (pooled fit)`;
+            }
           } else if (gRef && grip3xEstimates[selGrip]) {
-            // Fallback: per-(hand,grip) baseline doesn't exist yet, but
-            // the grip-pooled baseline does. Use the grip-pooled CURRENT
-            // amps (pools both hands) so both sides of the comparison
-            // live in the same scope.
+            // Fallback: per-(hand,grip) baseline doesn't exist yet for
+            // both hands (e.g., one hand under-trained), but the grip-
+            // pooled baseline does. Use the grip-pooled CURRENT amps
+            // (pools both hands) so both sides of the comparison live
+            // in the same scope.
             scopedImp = improvementForAmps(grip3xEstimates[selGrip], gRef.amps);
             scopedBaselineDate = gRef.date;
-            scopedScopeLabel = `${selGrip} (both hands)`;
+            scopedScopeLabel = `${selGrip} (pooled fit · awaiting per-hand baseline)`;
           }
         }
 
@@ -1350,7 +1390,13 @@ export function AnalysisView({
               scopedImp ? (
                 <>
                   <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                    {scopedScopeLabel} vs {scopedScopeLabel} baseline
+                    {/* Subtitle phrasing depends on scope. The single-
+                        hand and pooled-fit labels read naturally as
+                        "X vs X baseline". The averaged-hands label
+                        already names what it is, so just print it. */}
+                    {scopedScopeLabel?.includes("avg")
+                      ? scopedScopeLabel
+                      : `${scopedScopeLabel} vs ${scopedScopeLabel} baseline`}
                   </div>
                   {renderRow(null, scopedImp)}
                 </>
