@@ -36,7 +36,7 @@ import {
 } from "../model/monod.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
-  buildThreeExpPriors,
+  buildThreeExpPriors, computeAUCThreeExp,
 } from "../model/threeExp.js";
 import {
   sessionCompartmentAUC,
@@ -701,6 +701,82 @@ export function AnalysisView({
     }
     return Object.keys(out).length > 0 ? out : null;
   }, [history, selHand, selGrip, grips, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Total AUC over time, per-grip ──
+  // Single number per grip per training date: ∫ F(t) dt over [5, 180]s
+  // under the three-exp curve fit on that grip's failures up to that
+  // date. Captures total work capacity in a single scalar — more
+  // actionable than three zone lines for the "am I getting bigger
+  // overall?" question. Same integration window the badges ladder uses,
+  // so the chart and the badge progression are reading the same metric.
+  //
+  // Scope: per-grip lines, never pooled (pooling FDP-pinch and FDS-crush
+  // hides each muscle's individual trajectory and inflates the headline
+  // when only one is moving). Returns the union of all dates across
+  // grips, with each grip's column filled where it has a fit.
+  const aucHistoryByGrip = useMemo(() => {
+    // Per-grip date-keyed map of AUC values (and % vs baseline).
+    const perGrip = {};            // grip -> Map<date, { abs, pct }>
+    const baselineByGrip = {};     // grip -> baseline AUC
+    const datesUnion = new Set();
+    for (const g of grips) {
+      const gripFails = (history || []).filter(r =>
+        r.grip === g && r.failed &&
+        r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0
+      );
+      if (gripFails.length < 3) continue;
+      // Distinct training dates for this grip — sparse but representative.
+      const datesSet = new Set();
+      for (const r of gripFails) if (r.date) datesSet.add(r.date);
+      const dates = [...datesSet].sort();
+      if (dates.length < 2) continue;
+      // Baseline AUC for the % view — same per-grip baseline the Curve
+      // Improvement card uses (≥5 failures across ≥3 distinct durations).
+      const baseAmps = gripBaselines[g]?.amps;
+      if (baseAmps) baselineByGrip[g] = computeAUCThreeExp(baseAmps);
+      const seriesMap = new Map();
+      for (const date of dates) {
+        const upToFails = gripFails.filter(r => (r.date || "") <= date);
+        if (upToFails.length < 3) continue;
+        const amps = fitAmpsForPts(
+          upToFails.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+          g
+        );
+        if (!amps) continue;
+        const abs = computeAUCThreeExp(amps);
+        if (!(abs > 0)) continue;
+        const baseAUC = baselineByGrip[g];
+        const pct = baseAUC && baseAUC > 0
+          ? Math.round((abs / baseAUC - 1) * 100)
+          : null;
+        seriesMap.set(date, { abs: Math.round(abs), pct });
+        datesUnion.add(date);
+      }
+      if (seriesMap.size >= 2) perGrip[g] = seriesMap;
+    }
+    if (Object.keys(perGrip).length === 0) return null;
+    // Flatten to row-per-date with one column per grip per metric.
+    const dates = [...datesUnion].sort();
+    const absRows = [];
+    const pctRows = [];
+    for (const date of dates) {
+      const aRow = { date };
+      const pRow = { date };
+      for (const g of Object.keys(perGrip)) {
+        const v = perGrip[g].get(date);
+        aRow[`${g}_abs`] = v ? v.abs : null;
+        pRow[`${g}_pct`] = v ? v.pct : null;
+      }
+      absRows.push(aRow);
+      pctRows.push(pRow);
+    }
+    return {
+      grips: Object.keys(perGrip),
+      absRows,
+      pctRows,
+      hasPct: Object.values(baselineByGrip).some(v => v > 0),
+    };
+  }, [history, grips, gripBaselines, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Three-exp F-D fit (governing model — see src/model/threeExp.js) ──
   // threeExpPriors memoized earlier in AnalysisView so gapHistory,
@@ -1585,6 +1661,81 @@ export function AnalysisView({
           );
         }
         return null;
+      })()}
+
+      {/* ── Total AUC over time ──
+          Single-number capacity tracker per grip: ∫ F(t) dt over [5,180]s
+          under the three-exp curve refit each training date with data up
+          to that date. Two stacked charts:
+            • Absolute (kg·s, force·time area) — the raw "how big is your
+              curve" signal in honest physical units.
+            • % vs baseline — easier to read; starts at 0% and grows.
+          Per-grip lines on each chart, never pooled (FDP-pinch and
+          FDS-crush adapt against different baselines). Same integration
+          window the Journey badges ladder uses, so chart progress and
+          badge progress read the same metric. */}
+      {aucHistoryByGrip && (() => {
+        const renderAucChart = (data, title, dataKeySuffix, unitSuffix, valueLabel) => (
+          <Card key={title} style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{title}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+              {valueLabel}
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={data} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
+                  label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+                {unitSuffix === "%" && <ReferenceLine y={0} stroke={C.border} strokeWidth={1.5} />}
+                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit={unitSuffix}
+                  label={{ value: unitSuffix === "%" ? "vs baseline" : "kg·s", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                  formatter={(val, name) => [
+                    val == null ? "—"
+                      : unitSuffix === "%" ? `${val >= 0 ? "+" : ""}${val}%`
+                      : `${val.toLocaleString()} kg·s`,
+                    name,
+                  ]}
+                />
+                {aucHistoryByGrip.grips.map(g => (
+                  <Line
+                    key={g}
+                    dataKey={`${g}${dataKeySuffix}`}
+                    stroke={GRIP_COLORS[g] || C.blue}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    connectNulls
+                    name={g}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+            <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+              {aucHistoryByGrip.grips.map(g => (
+                <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
+              ))}
+            </div>
+          </Card>
+        );
+        return (
+          <>
+            {renderAucChart(
+              aucHistoryByGrip.absRows,
+              "Total Capacity (AUC) — absolute",
+              "_abs",
+              "",
+              "Total area under your three-exp F-D curve from 5s to 3 min, per grip. Higher = bigger total work envelope. Each point refits the curve with data up to that date — early points stabilize as the data stack grows."
+            )}
+            {aucHistoryByGrip.hasPct && renderAucChart(
+              aucHistoryByGrip.pctRows,
+              "Total Capacity (AUC) — % vs baseline",
+              "_pct",
+              "%",
+              "Same metric as a percentage above each grip's baseline AUC. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have."
+            )}
+          </>
+        );
       })()}
 
       {/* Per-Hand Critical Force card removed — duplicated info from
