@@ -511,58 +511,11 @@ export function AnalysisView({
     return Object.keys(result).length > 0 ? result : null;
   }, [history, perHandGripBaselines]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── 120s capacity over time ──
-  // For each training date, refit three-exp on all failures up to that
-  // date (per grip when multiple grips exist) and record F(120s) —
-  // the predicted sustainable force at 2 minutes. This is the closest
-  // three-exp analog to Critical Force and tracks slow/oxidative
-  // compartment progress. F(120s) is grip-scoped so Micro (~10 kg CF)
-  // and Crusher (~25 kg CF) don't contaminate each other's trend lines.
-  // baselineByGrip records the FIRST computed F(120s) per grip so the
-  // chart can anchor a reference line to session 1.
-  const cumulativeDataByGrip = useMemo(() => {
-    const byGrip = {};
-    const relevantFails = selGrip
-      ? failures  // already filtered to selGrip above
-      : history.filter(r =>
-          r.failed && r.grip &&
-          r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
-          r.actual_time_s > 0
-        );
-    for (const r of relevantFails) {
-      const g = r.grip || selGrip || "?";
-      if (!byGrip[g]) byGrip[g] = [];
-      byGrip[g].push(r);
-    }
-    const grips = Object.keys(byGrip).filter(g => byGrip[g].length >= 2);
-    if (grips.length === 0) return null;
-    const allDates = [...new Set(relevantFails.map(r => r.date))].sort();
-    const rows = [];
-    const baselineByGrip = {};
-    for (const date of allDates) {
-      const row = { date };
-      let any = false;
-      for (const grip of grips) {
-        const upTo = byGrip[grip].filter(r => r.date <= date);
-        if (upTo.length < 2) continue;
-        const prior = threeExpPriors?.get ? threeExpPriors.get(grip) : null;
-        if (!prior) continue;
-        const pts = upTo.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
-        const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(upTo.length, 1);
-        const amps = fitThreeExpAmps(pts, { prior, lambda });
-        if (!(amps[0] + amps[1] + amps[2] > 0)) continue;
-        const f120 = predForceThreeExp(amps, 120);
-        if (!(f120 > 0)) continue;
-        const displayed = toDisp(f120, unit);
-        row[`${grip}_f120`] = displayed;
-        if (baselineByGrip[grip] == null) baselineByGrip[grip] = displayed;
-        any = true;
-      }
-      if (any) rows.push(row);
-    }
-    return rows.length >= 2 ? { rows, grips, baselineByGrip } : null;
-  }, [failures, history, selHand, selGrip, unit, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
-
+  // Note: 120s capacity over time chart removed — superseded by
+  // aucHistoryByGrip (Total Capacity over time), which integrates the
+  // whole curve from 5 to 180s rather than reading a single F(120)
+  // slice. The Performance vs. Model chart already covers per-zone
+  // progress more meaningfully.
 
   // Note: AUC values used to live here (aucEstimate / aucBaseline /
   // aucHistory) backing a dedicated "Climbing Endurance · AUC" card.
@@ -1560,49 +1513,6 @@ export function AnalysisView({
             ) : improvement ? (
               renderRow(null, improvement)
             ) : null}
-          </Card>
-        );
-      })()}
-
-      {/* ── 120s capacity over time ── */}
-      {cumulativeDataByGrip && (() => {
-        const { rows, grips, baselineByGrip } = cumulativeDataByGrip;
-        return (
-          <Card style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>120s Capacity Over Time</div>
-            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-              Three-exp predicted force at 2 minutes, per grip — refit after every failure.
-              Dashed line = first session baseline.
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={rows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-                  label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={46}
-                  label={{ value: unit, angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                  formatter={(val, name) => [fmt1(val) + " " + unit, name]}
-                />
-                {grips.map(g => (
-                  <Line key={g} dataKey={`${g}_f120`} stroke={GRIP_COLORS[g] || C.blue}
-                    strokeWidth={2} dot={false} name={g} connectNulls />
-                ))}
-                {grips.map(g => baselineByGrip[g] != null && (
-                  <ReferenceLine key={`${g}-base`} y={baselineByGrip[g]}
-                    stroke={GRIP_COLORS[g] || C.blue} strokeDasharray="4 3" strokeOpacity={0.5}
-                    label={{ value: `${g} start`, position: "insideTopRight", fill: GRIP_COLORS[g] || C.blue, fontSize: 9 }}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-            <div style={{ display: "flex", gap: 16, justifyContent: "center", fontSize: 10, color: C.muted, marginTop: 4, flexWrap: "wrap" }}>
-              {grips.map(g => (
-                <span key={g}><span style={{ color: GRIP_COLORS[g] || C.blue }}>━</span> {g}</span>
-              ))}
-              <span><span style={{ color: C.muted, opacity: 0.6 }}>╌</span> start baseline</span>
-            </div>
           </Card>
         );
       })()}
