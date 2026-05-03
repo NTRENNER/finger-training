@@ -90,7 +90,7 @@ import {
 // seconds stay tied to the canonical zone reference times. Views
 // import it directly — no need to thread it through App as a prop.
 
-const GRIP_PRESETS = ["Crusher", "Micro", "Thunder"];
+const GRIP_PRESETS = ["Crusher", "Micro", "Prime"];
 
 // localStorage keys for App-level state. The workout-plan / state /
 // trip keys live in their respective view modules (WorkoutTab, etc.).
@@ -149,7 +149,7 @@ const GOAL_CONFIG = {
 // the Analysis tab can still render historical data, and so
 // computeZoneCoverage credits any legacy `type: "oneRM"`
 // activity entries to Power.
-const RM_GRIPS = ["Micro", "Crusher"];
+const RM_GRIPS = ["Micro", "Crusher", "Prime"];
 
 const TABS = ["Fingers", "Analysis", "Journey", "Workout", "Lifts", "Climbing", "History", "Trends", "Settings"];
 

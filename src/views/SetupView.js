@@ -410,7 +410,6 @@ function ZoneCoverageCard({ history, activities = [] }) {
 // ─────────────────────────────────────────────────────────────
 
 export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced", onTrainingFocusChange = () => {} }) {
-  const [customGrip, setCustomGrip] = useState("");
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
 
@@ -544,17 +543,6 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                 {g}
               </button>
             ))}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              value={customGrip}
-              onChange={e => setCustomGrip(e.target.value)}
-              placeholder="Custom grip…"
-              style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 14 }}
-            />
-            <Btn small onClick={() => { if (customGrip.trim()) { handleGrip(customGrip.trim()); setCustomGrip(""); } }}>
-              Use
-            </Btn>
           </div>
         </div>
       </Card>

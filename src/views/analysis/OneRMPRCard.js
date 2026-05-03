@@ -28,7 +28,7 @@ import { fmt1, fmtW, toDisp } from "../../ui/format.js";
 // shouldn't reach into a sibling view for a 2-key constant.
 // Same shape, same values; if either drifts, the visual stops
 // matching the F-D chart's split mode and we'll catch it visually.
-const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 
 export function OneRMPRCard({ activities = [], rmGrips = [], unit = "lbs" }) {
   const rmReps = activities.filter(a => a.type === "oneRM" && a.weight_kg > 0);

@@ -79,7 +79,7 @@ const ZONE_DETAILS = {
 // Single source of truth so the legend, scatter dots, line strokes,
 // and PR badges all agree without five identical inline declarations.
 // Falls back to C.blue at call sites that pass an unknown grip key.
-const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange };
+const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 
 // Pure helper: given a {CF, W} fit and personalResponse map, compute the
 // projected ΔAUC for each protocol and return the rec payload. Separate
