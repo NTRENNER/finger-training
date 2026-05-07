@@ -121,12 +121,35 @@ export function useTindeq() {
   }, []);
 
   // ── Packet handler — defined once, reused across reconnects ──
+  //
+  // RAMP-UP EXCLUSION (added Phase B, May 2026)
+  // Originally this averaged every sample where kg > 0. For short reps
+  // (Power, ~7s target) the 1-2s pull-to-target ramp-up artificially
+  // dragged the average down by ~14% — F(short T) on the curve was
+  // systematically conservative. Quantified bias:
+  //   Power 7s:     avg ≈ 0.86 × target (14% under)
+  //   Strength 45s: avg ≈ 0.98 × target (2% under)
+  //   Endurance 120s: avg ≈ 0.99 × target (<1% under)
+  // Fix: only count samples toward the average when force is above 85%
+  // of targetKgRef — i.e., the user is actually at the prescribed hold
+  // load, not still ramping up to it. When no target is set (manual
+  // sessions, BLE-disconnected workouts), fall back to the original
+  // "any non-zero force" threshold to preserve old behavior.
+  // peak_force_kg is unchanged — peak is the max instantaneous force
+  // and never had the bias.
   const handlePacket = useCallback((evt) => {
     parseTindeqPacket(evt.target.value, ({ kg }) => {
       setForce(kg);
       if (kg > peakRef.current) { peakRef.current = kg; setPeak(kg); }
 
-      if (measuringRef.current && kg > 0) {
+      // Stable-hold threshold for averaging. When a target is set, only
+      // include samples ≥ 85% of target. Otherwise (no target available)
+      // include any positive sample, matching legacy behavior.
+      const tgtForAvg = targetKgRef.current;
+      const stableThreshold = (tgtForAvg && tgtForAvg > 0) ? 0.85 * tgtForAvg : 0;
+      const isStableSample = stableThreshold > 0 ? kg >= stableThreshold : kg > 0;
+
+      if (measuringRef.current && isStableSample) {
         sumRef.current   += kg;
         countRef.current += 1;
         setAvgForce(sumRef.current / countRef.current);
@@ -154,32 +177,39 @@ export function useTindeq() {
           if (kg >= AD_START_KG) {
             adActiveRef.current    = true;
             adStartTimeRef.current = now;
-            adSumRef.current       = kg;
-            adCountRef.current     = 1;
+            // Initialize sum/count to ZERO — wait for stable samples
+            // (≥0.85×target) before accumulating. The first sample at
+            // AD_START_KG (4 kg) is in ramp-up, not hold, so excluding
+            // it is correct.
+            adSumRef.current       = 0;
+            adCountRef.current     = 0;
             adBelowRef.current     = null;
-            // Reset peak and live average when a new auto-rep begins
-            // so the gauge shows this-rep stats rather than carryover
-            // from the previous one.
             peakRef.current = kg; setPeak(kg);
-            setAvgForce(kg);
+            setAvgForce(0);
             adOnStartRef.current?.();
           }
         } else {
-          adSumRef.current  += kg;
-          adCountRef.current += 1;
-          // Live running average so the in-rep ForceGauge can show it.
-          setAvgForce(adSumRef.current / adCountRef.current);
+          // Only accumulate when force is at the stable hold level.
+          // Ramp-up samples (below 0.85×target) get excluded.
+          if (isStableSample) {
+            adSumRef.current  += kg;
+            adCountRef.current += 1;
+            setAvgForce(adSumRef.current / adCountRef.current);
+          }
           if (kg < AD_END_KG) {
             if (adBelowRef.current === null) adBelowRef.current = now;
             else if (now - adBelowRef.current >= AD_END_MS) {
               const actualTime = (adBelowRef.current - adStartTimeRef.current) / 1000;
               if (actualTime * 1000 >= AD_MIN_MS) {
-                const avg  = adSumRef.current / adCountRef.current;
+                // Compute avg from stable samples. Edge case: if the
+                // user never reached 85% of target (rep was a sub-threshold
+                // attempt), fall back to peak as the best available force
+                // estimate so we don't persist a 0.
+                const avg = adCountRef.current > 0
+                  ? adSumRef.current / adCountRef.current
+                  : peakRef.current;
                 // Read peak BEFORE clearing — peakRef gets reset
-                // on the next rep's start. The auto-detect callback
-                // is the only place this value can be captured
-                // for persistence; without it, peak_force_kg
-                // would always be 0 in auto-rep sessions.
+                // on the next rep's start.
                 const peakF = peakRef.current;
                 const cb   = adOnEndRef.current;
                 adActiveRef.current    = false;
