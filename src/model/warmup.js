@@ -113,27 +113,40 @@ export function getRecentMaxPullups(wLog, daysOld = 7) {
   return maxReps > 0 ? maxReps : null;
 }
 
-// Default T_max reference used when the curve can't reach the target
-// load (e.g., hanging at half-bodyweight when training has only been
-// at much lower forces). 120s matches the order of magnitude implied
-// by the source video's screenshots (where T_max for two-handed
-// hanging at bodyweight worked out to ~156s).
-const DEFAULT_TMAX_REF_SEC = 120;
+// Default T_max reference used when the curve can't give a usable
+// estimate at the target load. Either:
+//  - load > predicted MVC (curve doesn't reach the load at all), OR
+//  - load is near-MVC so curve T_max is too short to scale by % into
+//    meaningful warm-up durations.
+// In both cases, err SHORT rather than long. 40s × percentages gives:
+//   25% → 10s  (quick muscle activation)
+//   50% → 20s  (light-moderate engagement)
+//   30% → 12s  (short cross-loaded holds)
+// Anchored to the fast-compartment time-scale (PCr τ ≈ 15s) since
+// near-MVC loads deplete the fast compartment within seconds.
+const DEFAULT_TMAX_REF_SEC = 40;
+
+// Curve-derived T_max below this threshold gets treated as the
+// fallback case. If the model says the user can only hold the
+// hanging load for, say, 15s at MVC, then percentages of 15s
+// (3.75s, 7.5s) aren't useful warm-up durations — switch to the
+// conservative default rather than emitting near-zero target times
+// that all collapse to the minSec floor.
+const MIN_USABLE_TMAX_SEC = 30;
 
 // Compute a target hold duration: T_max at the given load, scaled by
 // pct, clamped to a sensible range.
 //
-// If the curve can't reach the target load (load above predicted MVC,
-// usually because training has been at lower forces than the bodyweight
-// hanging load), fall back to a fixed reference T_max so the warm-up
-// still differentiates step intensity correctly. The percentages stay
-// meaningful even on the fallback path — 25% × 120 = 30s, 50% × 120 =
-// 60s, 30% × 120 = 36s. Returns { sec, fromCurve } so the UI can flag
-// when prescription is curve-derived vs default.
-function targetTimeFromLoad(amps, loadKg, pct, minSec = 10, maxSec = 240) {
+// Falls back to a conservative default reference when the curve can't
+// give a usable estimate — either because the load exceeds predicted
+// MVC (no solution exists) or because predicted T_max is too short
+// for percentages to differentiate the steps meaningfully. Returns
+// { sec, fromCurve } so the UI can flag when prescription is curve-
+// derived vs default.
+function targetTimeFromLoad(amps, loadKg, pct, minSec = 5, maxSec = 240) {
   const tMax = solveTimeAtForce(amps, loadKg);
   let sec, fromCurve;
-  if (!tMax || !isFinite(tMax) || tMax <= 1) {
+  if (!tMax || !isFinite(tMax) || tMax < MIN_USABLE_TMAX_SEC) {
     sec = Math.round(DEFAULT_TMAX_REF_SEC * pct);
     fromCurve = false;
   } else {
