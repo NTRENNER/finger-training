@@ -287,46 +287,6 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
         <div style={{ fontSize: 12, color: C.muted, marginBottom: 16, lineHeight: 1.5 }}>
           Tindeq-driven. Loads come from your force curves; targets are short, sub-failure holds. Same intensity for every user, every session. Connect the Crusher first; you'll be prompted to swap to the Micro mid-warmup.
         </div>
-
-        {/* Tindeq connect row — same shape as the connect card on the
-            Setup page, condensed to fit inside the preview. The user
-            can connect / tare here before starting so they don't get
-            redirected to a separate connection screen mid-flow. */}
-        <div style={{
-          background: C.bg, border: `1px solid ${C.border}`,
-          borderRadius: 10, padding: "10px 12px", marginBottom: 16,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Tindeq Progressor</div>
-              <div style={{ fontSize: 11, color: tindeqConnected ? C.green : C.muted }}>
-                {tindeqConnected
-                  ? "Connected ✓"
-                  : tindeqReconnecting
-                    ? "Reconnecting…"
-                    : tindeq?.bleError || "Not connected"}
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {tindeqConnected && (
-                <Btn small onClick={tindeq.tare} color={C.muted}>Tare</Btn>
-              )}
-              <Btn
-                small
-                onClick={() => tindeq?.connect?.()}
-                disabled={tindeqConnected || tindeqReconnecting}
-                color={tindeqConnected ? C.green : tindeqReconnecting ? C.orange : C.blue}
-              >
-                {tindeqConnected ? "Connected" : tindeqReconnecting ? "Reconnecting…" : "Connect BLE"}
-              </Btn>
-            </div>
-          </div>
-          {tindeqConnected && (
-            <div style={{ marginTop: 6, fontSize: 11, color: C.muted }}>
-              Live force: <b style={{ color: C.blue }}>{fmtW(tindeq.force, unit)} {unit}</b> · tap Tare to zero before starting.
-            </div>
-          )}
-        </div>
         <div style={{ marginBottom: 16 }}>
           {steps.map((s, i) => (
             <div key={s.id} style={{
@@ -369,6 +329,47 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
           {protocol.pullupSource.count != null && ` (${protocol.pullupSource.count})`}.
           Nothing here gets logged as training data.
         </div>
+
+        {/* Tindeq connect row — placed directly above the Start button
+            so the connection prerequisite reads as a step you take
+            right before tapping Start. Mirrors the connect card on
+            Session Setup but condensed for inline use. */}
+        <div style={{
+          background: C.bg, border: `1px solid ${C.border}`,
+          borderRadius: 10, padding: "10px 12px", marginBottom: 12,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Tindeq Progressor</div>
+              <div style={{ fontSize: 11, color: tindeqConnected ? C.green : C.muted }}>
+                {tindeqConnected
+                  ? "Connected ✓"
+                  : tindeqReconnecting
+                    ? "Reconnecting…"
+                    : tindeq?.bleError || "Not connected"}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {tindeqConnected && (
+                <Btn small onClick={tindeq.tare} color={C.muted}>Tare</Btn>
+              )}
+              <Btn
+                small
+                onClick={() => tindeq?.connect?.()}
+                disabled={tindeqConnected || tindeqReconnecting}
+                color={tindeqConnected ? C.green : tindeqReconnecting ? C.orange : C.blue}
+              >
+                {tindeqConnected ? "Connected" : tindeqReconnecting ? "Reconnecting…" : "Connect BLE"}
+              </Btn>
+            </div>
+          </div>
+          {tindeqConnected && (
+            <div style={{ marginTop: 6, fontSize: 11, color: C.muted }}>
+              Live force: <b style={{ color: C.blue }}>{fmtW(tindeq.force, unit)} {unit}</b> · tap Tare to zero before starting.
+            </div>
+          )}
+        </div>
+
         <div style={{ display: "flex", gap: 10 }}>
           <Btn
             onClick={startProtocol}
@@ -379,11 +380,6 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
           </Btn>
           <Btn onClick={onClose} color={C.border} small>Back</Btn>
         </div>
-        {!tindeqConnected && (
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 8, fontStyle: "italic" }}>
-            Connect the Tindeq above before starting — the warm-up uses real-time force feedback to hit prescribed loads.
-          </div>
-        )}
       </Card>
     );
   }
