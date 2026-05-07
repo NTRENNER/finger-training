@@ -681,7 +681,7 @@ export default function App() {
         />
       )}
       {tab === 2 && <BadgesView history={history} threeExpPriors={threeExpPriors} />}
-      {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
+      {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} history={history} bodyWeight={bodyWeight} />}
       {tab === 4 && <WorkoutAnalysisView unit={unit} bodyWeight={bodyWeight} defaultWorkouts={DEFAULT_WORKOUTS} />}
       {tab === 5 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
       {tab === 6 && (

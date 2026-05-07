@@ -21,6 +21,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
+import { WarmupView } from "./WarmupView.js";
 
 import {
   loadLS, saveLS,
@@ -646,7 +647,7 @@ function sameSet(a, b) {
 }
 
 // ── Main WorkoutTab ───────────────────────────────────────────
-export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_TRIP }) {
+export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_TRIP, history = [], bodyWeight = null }) {
   const [subTab, setSubTab]         = useState("today");
   // Load the stored plan if any, then re-apply per-exercise metadata
   // from DEFAULT_WORKOUTS (unilateral flag, availableLoads ladder,
@@ -736,6 +737,7 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
     });
   });
   const [sessionActive,  setSessionActive]  = useState(false);
+  const [warmupActive,   setWarmupActive]   = useState(false);
   const [sessionData,    setSessionData]    = useState({});    // exId → {sets, done}
   const [swaps,          setSwaps]          = useState({});    // originalExId → substituteEx
   const [swapPickerFor,  setSwapPickerFor]  = useState(null);  // originalExId showing picker
@@ -1150,9 +1152,49 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
         {tabPill("Plan", "plan")}
       </div>
 
+      {/* ─── WARM-UP view ────────────────────────────────────── */}
+      {/* When the user taps "Generate Warm-up" we hand the screen to
+          WarmupView until they end / complete it. Sits at the top of
+          the conditional chain so it takes precedence over both the
+          Today preview and the active session views. */}
+      {subTab === "today" && warmupActive && (
+        <WarmupView
+          history={history}
+          wLog={wLog}
+          bodyWeightKg={bodyWeight}
+          onClose={() => setWarmupActive(false)}
+        />
+      )}
+
       {/* ─── TODAY view ─────────────────────────────────────── */}
-      {subTab === "today" && !sessionActive && (
+      {subTab === "today" && !sessionActive && !warmupActive && (
         <>
+          {/* ── Adaptive Warm-up entry point ──
+              One-tap force-curve-derived warm-up generated on the fly.
+              Nothing here gets logged as training data — it's a pure
+              prescription. Sits above the workout picker so it's the
+              first thing visible when you tap Workout. */}
+          <Card style={{ marginBottom: 12, border: `1px solid ${C.purple}40` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Adaptive Warm-up</div>
+                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.4 }}>
+                  Force-curve-derived hangs + cross-loaded pullups. Same feel every session, never near failure.
+                </div>
+              </div>
+              <button
+                onClick={() => setWarmupActive(true)}
+                style={{
+                  background: C.purple, color: "#fff", border: "none", borderRadius: 8,
+                  padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Generate
+              </button>
+            </div>
+          </Card>
+
           {/* Workout card */}
           <Card style={{ marginBottom: 12 }}>
             {/* Workout picker — recommended is highlighted; pick any for this session */}
