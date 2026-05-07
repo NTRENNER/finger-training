@@ -59,49 +59,82 @@ function fitGripAmps(history, grip) {
   return amps;
 }
 
-// Read recent max pullup reps from the Lifts/Workout log. Two-pass
-// search:
-//   1. Strict pass — sets explicitly marked done (s.done === true)
-//      within the strict window (default 30 days).
-//   2. Loose pass — any set with reps > 0, same window. Picks up
-//      sessions where the user finished without per-set done taps.
-// Returns { maxReps, ageDays, strict } or null if nothing found.
+// Epley 1RM estimate: 1RM ≈ load × (1 + reps/30). Standard formula
+// for converting submaximal sets to a one-rep-max equivalent. Reliable
+// up to ~10 reps, increasingly approximate beyond that — we cap output
+// reps at 30 for the bodyweight-pullup use case to keep the warm-up
+// prescription sensible.
+function epleyOneRM(loadLbs, reps) {
+  if (!(loadLbs > 0) || !(reps > 0)) return null;
+  return loadLbs * (1 + reps / 30);
+}
+
+// Reverse Epley: given a 1RM and a target load, how many reps could
+// the user do at that load? reps ≈ 30 × (1RM/load − 1). Returns null
+// if 1RM ≤ load (meaning load IS or exceeds the 1RM, can't do reps).
+function epleyRepsAtLoad(oneRM, loadLbs) {
+  if (!(oneRM > 0) || !(loadLbs > 0)) return null;
+  if (oneRM <= loadLbs) return 1;
+  return 30 * (oneRM / loadLbs - 1);
+}
+
+// Read recent max pullup CAPACITY from the Lifts/Workout log, expressed
+// as estimated UNWEIGHTED bodyweight pullup reps. For weighted pullups,
+// we use Epley to convert the logged (weight × reps) set into a 1RM
+// estimate, then back to estimated reps at bodyweight. For sets logged
+// without added weight (weight = 0 or null), we use the rep count as-is.
 //
-// The two-pass design protects against the common case where the user
-// taps "Finish Session" without explicitly marking each set done — the
-// data is there, it just doesn't carry the strict flag. A loose match
-// returns the same number with strict=false so the UI can flag it.
-export function getRecentMaxPullups(wLog, daysOld = 30) {
-  if (!Array.isArray(wLog)) return null;
+// Two-pass search:
+//   1. Strict pass — sets explicitly marked done (s.done === true).
+//   2. Loose pass — any set with reps > 0 (catches "Finish Session"
+//      without per-set done taps).
+//
+// Returns { unweightedReps, ageDays, strict, sourceWeightLbs, sourceReps }
+// or null if nothing found within `daysOld`.
+export function getRecentMaxPullups(wLog, { daysOld = 30, bodyWeightLbs } = {}) {
+  if (!Array.isArray(wLog) || !(bodyWeightLbs > 0)) return null;
   const now = Date.now();
   const cutoffMs = now - daysOld * 24 * 60 * 60 * 1000;
 
   const search = (strict) => {
-    let maxReps = 0;
-    let mostRecentMs = null;
+    let bestUnweightedReps = 0;
+    let bestSet = null; // { weight, reps, ts }
     for (const session of wLog) {
       if (!session?.date) continue;
       const sessTs = Date.parse(session.date);
       if (!isFinite(sessTs) || sessTs < cutoffMs) continue;
       const sets = session.exercises?.["pull_ups"]?.sets;
       if (!Array.isArray(sets)) continue;
-      let sessionContributed = false;
       for (const set of sets) {
         if (strict && !set?.done) continue;
         const reps = Number(set?.reps);
+        const addedWeightLbs = Number(set?.weight) || 0;
         if (!Number.isFinite(reps) || reps <= 0) continue;
-        if (reps > maxReps) maxReps = reps;
-        sessionContributed = true;
-      }
-      if (sessionContributed && (mostRecentMs == null || sessTs > mostRecentMs)) {
-        mostRecentMs = sessTs;
+        // Total load on the user during the pullup = bodyweight + added.
+        const totalLoadLbs = bodyWeightLbs + Math.max(0, addedWeightLbs);
+        const oneRM = epleyOneRM(totalLoadLbs, reps);
+        if (!oneRM) continue;
+        // Estimated unweighted (BW only) reps at this 1RM.
+        const bwReps = epleyRepsAtLoad(oneRM, bodyWeightLbs);
+        if (!(bwReps > 0)) continue;
+        const cappedBwReps = Math.min(30, Math.round(bwReps));
+        if (cappedBwReps > bestUnweightedReps) {
+          bestUnweightedReps = cappedBwReps;
+          bestSet = { weight: addedWeightLbs, reps, ts: sessTs };
+        }
       }
     }
-    if (maxReps <= 0) return null;
-    const ageDays = mostRecentMs != null
-      ? Math.max(0, Math.round((now - mostRecentMs) / (24 * 60 * 60 * 1000)))
+    if (bestUnweightedReps <= 0) return null;
+    const ageDays = bestSet?.ts != null
+      ? Math.max(0, Math.round((now - bestSet.ts) / (24 * 60 * 60 * 1000)))
       : null;
-    return { maxReps, ageDays, strict };
+    return {
+      unweightedReps: bestUnweightedReps,
+      ageDays,
+      strict,
+      sourceWeightLbs: bestSet?.weight ?? 0,
+      sourceReps: bestSet?.reps ?? null,
+    };
   };
 
   return search(true) || search(false) || null;
@@ -204,28 +237,35 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
   }
 
   // ── Step 4: Pullup finisher ──
-  // Reps = 40% of recent max bodyweight pullups (≤30 days) with a
-  // floor of 2. Default to 5 if no recent data. The reader does a
-  // two-pass search (strict → loose) to handle sessions where sets
-  // weren't explicitly marked done.
-  const pullupMatch = getRecentMaxPullups(wLog, 30);
-  const recentMaxPullups = pullupMatch?.maxReps ?? null;
+  // Reps = 40% of estimated UNWEIGHTED max (Epley-converted from your
+  // recent weighted-pullup session if applicable) with a floor of 2.
+  // Default to 5 if no recent pullup data within 30 days.
+  const bodyWeightLbs = Math.round(bodyWeightKg * 2.20462 * 10) / 10;
+  const pullupMatch = getRecentMaxPullups(wLog, { daysOld: 30, bodyWeightLbs });
+  const unweightedMax = pullupMatch?.unweightedReps ?? null;
   const pullupAge = pullupMatch?.ageDays ?? null;
   const pullupStrict = pullupMatch?.strict ?? false;
+  const sourceWeight = pullupMatch?.sourceWeightLbs ?? 0;
+  const sourceReps = pullupMatch?.sourceReps ?? null;
 
-  const targetReps = recentMaxPullups
-    ? Math.max(2, Math.round(recentMaxPullups * 0.4))
+  const targetReps = unweightedMax
+    ? Math.max(2, Math.round(unweightedMax * 0.4))
     : 5;
 
-  // Compose the source text for the UI.
+  // Compose the source text for the UI. Show the original weighted set
+  // plus the Epley-derived unweighted estimate so the user can see how
+  // we got the number.
   let pullupSourceText;
-  if (recentMaxPullups) {
+  if (unweightedMax) {
     const ageText = pullupAge === 0 ? "today"
                   : pullupAge === 1 ? "1 day ago"
                   : `${pullupAge} days ago`;
+    const sourceText = sourceWeight > 0
+      ? `${sourceReps} reps × +${sourceWeight} lbs ${ageText} → ~${unweightedMax} unweighted`
+      : `${sourceReps} reps unweighted ${ageText}`;
     pullupSourceText = pullupStrict
-      ? `recent max ${recentMaxPullups} (${ageText})`
-      : `recent max ${recentMaxPullups} (${ageText}, sets not marked done)`;
+      ? sourceText
+      : `${sourceText} (sets not marked done)`;
   } else {
     pullupSourceText = "no recent data — using default 5";
   }
@@ -233,25 +273,27 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
   steps.push({
     id: "pullup-finisher",
     title: "Pullup Finisher",
-    intensityLabel: recentMaxPullups
-      ? `${targetReps} reps × 2 sets · 40% of ${pullupSourceText}`
+    intensityLabel: unweightedMax
+      ? `${targetReps} reps × 2 sets · 40% of ~${unweightedMax} unweighted`
       : `${targetReps} reps × 2 sets · default (no recent pullup data)`,
     type: "pullup",
     targetReps,
     sets: 2,
     restAfterSec: 60,
     description:
-      "Heart rate up, lats engaged, full prep. No Tindeq needed — just count reps. Two sets at 40% of your recent max.",
+      "Heart rate up, lats engaged, full prep. No Tindeq needed — just count reps. Two sets at 40% of your estimated unweighted max.",
   });
 
   return {
     ok: true,
     bodyWeightKg,
-    bodyWeightLbs: Math.round(bodyWeightKg * 2.20462 * 10) / 10,
+    bodyWeightLbs,
     pullupSource: {
-      count: recentMaxPullups,
+      count: unweightedMax,
       ageDays: pullupAge,
       strict: pullupStrict,
+      sourceWeightLbs: sourceWeight,
+      sourceReps,
       sourceText: pullupSourceText,
     },
     steps,
