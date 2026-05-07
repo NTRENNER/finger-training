@@ -188,51 +188,64 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
 
   const steps = [];
 
-  // ── Step 1: Crusher · 25% × F_crusher(30s) for 30s ──
-  const load1 = targetLoadFromCurve(crusherAmps, 30, 0.25);
+  // ── Step 1: Crusher · 50% × F_crusher(30s) for 30s ──
+  // The original video used 25% of T_max at fixed bodyweight load,
+  // which feels like "quick activation." Our load-based prescription
+  // requires a higher % to map to the same subjective intensity:
+  // 50% × F at the prescribed duration is the load-based equivalent
+  // of "moderate activation." Lower than this and the warm-up barely
+  // engages the muscle.
+  const load1 = targetLoadFromCurve(crusherAmps, 30, 0.50);
   steps.push({
-    id: "crusher-25",
+    id: "crusher-50pct-30s",
     title: "Two-Handed Crusher",
-    intensityLabel: "25%",
+    intensityLabel: "50%",
     type: "hang",
     grip: "Crusher",
     targetLoadKg: load1,
     targetSec: 30,
     restAfterSec: 60,
     description:
-      "Light squeeze on the Crusher to wake up the big finger flexors. Pull to the target load, hold for 30s, release. Alternates Left → Right.",
+      "Moderate squeeze to wake up the big finger flexors. Pull to the target load, hold for 30s, release. Alternates Left → Right.",
   });
 
-  // ── Step 2: Crusher · 50% × F_crusher(60s) for 60s ──
-  const load2 = targetLoadFromCurve(crusherAmps, 60, 0.50);
+  // ── Step 2: Crusher · 75% × F_crusher(60s) for 60s ──
+  // "Working pump" intensity: 75% of sustainable force at 60s. Total
+  // work is meaningfully higher than Step 1 because both load and
+  // time are increased. Stays well below failure since 75% × F(60)
+  // is by definition sustainable for 60s with margin.
+  const load2 = targetLoadFromCurve(crusherAmps, 60, 0.75);
   steps.push({
-    id: "crusher-50",
+    id: "crusher-75pct-60s",
     title: "Two-Handed Crusher",
-    intensityLabel: "50%",
+    intensityLabel: "75%",
     type: "hang",
     grip: "Crusher",
     targetLoadKg: load2,
     targetSec: 60,
     restAfterSec: 180,
     description:
-      "Same Crusher gripper, longer + heavier hold. Forearms get a working pump — well below failure thanks to the curve-derived load.",
+      "Same Crusher gripper, heavier + longer hold. Forearms get a working pump — still well below failure thanks to the curve-derived load.",
   });
 
-  // ── Step 3: Micro · 30% × F_micro(30s) for 30s ──
-  // Skipped if Micro curve data is missing.
+  // ── Step 3: Micro · 50% × F_micro(30s) for 30s ──
+  // Light Micro introduction. Same intensity % as Step 1 but on the
+  // smaller hold, so the user gets skin contact and finger-position
+  // wake-up without the high-load Micro work that risks tweaking a
+  // pulley.
   if (microAmps) {
-    const load3 = targetLoadFromCurve(microAmps, 30, 0.30);
+    const load3 = targetLoadFromCurve(microAmps, 30, 0.50);
     steps.push({
-      id: "micro-30",
+      id: "micro-50pct-30s",
       title: "Two-Handed Micro",
-      intensityLabel: "30%",
+      intensityLabel: "50%",
       type: "hang",
       grip: "Micro",
       targetLoadKg: load3,
       targetSec: 30,
       restAfterSec: 60,
       description:
-        "Swap the Tindeq to the Micro gripper. Light pull on the smaller hold introduces the skin and finger position without going near failure.",
+        "Swap the Tindeq to the Micro gripper. Moderate pull on the smaller hold introduces the skin and finger position without going near failure.",
     });
   }
 
