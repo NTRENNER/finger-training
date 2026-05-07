@@ -2,39 +2,34 @@
 // ADAPTIVE WARM-UP PROTOCOL GENERATOR
 // ─────────────────────────────────────────────────────────────
 //
-// Builds a personalized 5-step warm-up protocol on demand from the user's
+// Builds a personalized warm-up protocol on demand from the user's
 // per-grip three-exp force curves + bodyweight + recent pullup max.
 //
-// Inspired by the Grip Gains Adaptive Warm-up: every load is
-// force-curve-normalized so the warm-up feels the same for everyone.
-// Goal: get to performance plateau quickly without flash pump or
-// excessive energy depletion before the real work begins.
+// Tindeq-driven design: each hang step prescribes a target LOAD (in kg)
+// derived from the curve at a fixed reference time, and a target HOLD
+// duration. The user pulls into the Tindeq until they reach the target
+// load, holds for the prescribed time, releases. No bodyweight hanging,
+// no extrapolation — loads always come from the curve at durations the
+// curve has actually seen.
 //
 // IMPORTANT: warm-up reps DO NOT get logged or counted as training data.
-// This module is a pure prescription generator — no Tindeq required, no
-// reps written back, no curve updates. The user sees a target time/rep
-// count and runs through it with the timer UI; we just generate the
-// numbers and step through them.
+// Pure prescription — nothing flows back into the F-D fit.
 //
-// Protocol structure:
-//   1. Two-Handed Crusher @ 25% T_max — wakes up the big finger flexors
-//   2. Two-Handed Crusher @ 50% T_max — moderate-intensity hang
-//   3. Right Micro · Left Crusher (cross-loaded @ ~30% T_max)
-//   4. Left Micro · Right Crusher (mirror of #3)
-//   5. Cross-loaded pullup finisher — reps derived from your recent
-//      bodyweight pullup max in the Lifts tab (40% of max, ≥7 days fresh)
+// Protocol structure (4 steps):
+//   1. Two-Handed Crusher · 25%  — 25% × F_crusher(30s) per hand, 30s hold
+//   2. Two-Handed Crusher · 50%  — 50% × F_crusher(60s) per hand, 60s hold
+//   3. Two-Handed Micro   · 30%  — 30% × F_micro(30s)   per hand, 30s hold
+//   4. Pullup finisher           — bodyweight, 40% of recent max × 2 sets
+//
+// Each hang step alternates L → R using one Tindeq. Between step 2 and
+// step 3 the Tindeq swaps from the Crusher to the Micro gripper (the
+// view prompts for this).
 //
 // Math:
-//   - Two-handed Crusher: each hand carries bodyweight ÷ 2. Look up the
-//     time T such that F_crusher(T) = bodyweight / 2 on the Crusher
-//     three-exp curve. Target = X% × T.
-//   - Cross-loaded: when hanging from one Crusher and one Micro, the
-//     load distributes proportionally to each grip's force capacity
-//     (the stronger grip naturally takes more weight). The Micro is
-//     the limiter, so target time is derived from F_micro(T) = micro's
-//     load share of bodyweight, then × 30%.
-//   - Pullups: 40% of recent max. Floor of 2 reps. Default to 5 if no
-//     recent Lifts data.
+//   F_grip(T) = three-exp prediction at duration T on that grip's curve.
+//   Step load = intensity_pct × F_grip(reference_time).
+//   These are loads the curve has covered, so no extrapolation issues
+//   regardless of how strong the user is relative to bodyweight.
 
 import {
   fitThreeExpAmps,
@@ -42,31 +37,6 @@ import {
   buildThreeExpPriors,
   THREE_EXP_LAMBDA_DEFAULT,
 } from "./threeExp.js";
-
-// Solve F(T) = targetForce for T via bisection. Three-exp F is
-// monotonically decreasing in T (for non-negative amps), so a clean
-// bisection is sufficient. Returns null if the load is above the
-// fresh-max amplitude (a+b+c).
-function solveTimeAtForce(amps, targetForce, tLo = 1, tHi = 1800) {
-  if (!amps || amps.length !== 3) return null;
-  const ampSum = amps[0] + amps[1] + amps[2];
-  if (ampSum <= 0) return null;
-  // Above-MVC load → can't hold at all.
-  if (targetForce >= ampSum) return null;
-  // Below-asymptote load → bisection would push to tHi; just return tHi.
-  if (predForceThreeExp(amps, tHi) >= targetForce) return tHi;
-  // F(tLo) should be > targetForce (load is below MVC). If not, the
-  // user is at near-MVC and can barely hold — return tLo.
-  if (predForceThreeExp(amps, tLo) <= targetForce) return tLo;
-  let lo = tLo, hi = tHi;
-  for (let i = 0; i < 50; i++) {
-    const mid = (lo + hi) / 2;
-    const f = predForceThreeExp(amps, mid);
-    if (f > targetForce) lo = mid;
-    else hi = mid;
-  }
-  return (lo + hi) / 2;
-}
 
 // Fit per-grip three-exp amps from the user's failure history. Mirrors
 // the AnalysisView grip3xEstimates pattern: per-grip prior + adaptive
@@ -113,63 +83,14 @@ export function getRecentMaxPullups(wLog, daysOld = 7) {
   return maxReps > 0 ? maxReps : null;
 }
 
-// Default T_max reference used when the curve can't give a usable
-// estimate at the target load. Either:
-//  - load > predicted MVC (curve doesn't reach the load at all), OR
-//  - load is near-MVC so curve T_max is too short to scale by % into
-//    meaningful warm-up durations.
-// In both cases, err SHORT rather than long. 40s × percentages gives:
-//   25% → 10s  (quick muscle activation)
-//   50% → 20s  (light-moderate engagement)
-//   30% → 12s  (short cross-loaded holds)
-// Anchored to the fast-compartment time-scale (PCr τ ≈ 15s) since
-// near-MVC loads deplete the fast compartment within seconds.
-const DEFAULT_TMAX_REF_SEC = 40;
-
-// Curve-derived T_max below this threshold gets treated as the
-// fallback case. If the model says the user can only hold the
-// hanging load for, say, 15s at MVC, then percentages of 15s
-// (3.75s, 7.5s) aren't useful warm-up durations — switch to the
-// conservative default rather than emitting near-zero target times
-// that all collapse to the minSec floor.
-const MIN_USABLE_TMAX_SEC = 30;
-
-// Compute a target hold duration: T_max at the given load, scaled by
-// pct, clamped to a sensible range.
-//
-// Falls back to a conservative default reference when the curve can't
-// give a usable estimate — either because the load exceeds predicted
-// MVC (no solution exists) or because predicted T_max is too short
-// for percentages to differentiate the steps meaningfully. Returns
-// { sec, fromCurve } so the UI can flag when prescription is curve-
-// derived vs default.
-function targetTimeFromLoad(amps, loadKg, pct, minSec = 5, maxSec = 240) {
-  const tMax = solveTimeAtForce(amps, loadKg);
-  let sec, fromCurve;
-  if (!tMax || !isFinite(tMax) || tMax < MIN_USABLE_TMAX_SEC) {
-    sec = Math.round(DEFAULT_TMAX_REF_SEC * pct);
-    fromCurve = false;
-  } else {
-    sec = Math.round(tMax * pct);
-    fromCurve = true;
-  }
-  return {
-    sec: Math.max(minSec, Math.min(maxSec, sec)),
-    fromCurve,
-  };
-}
-
-// Capacity-proportional load split for cross-loaded steps. When hanging
-// with one Crusher hand + one Micro hand, weight naturally distributes
-// to the stronger grip. Use F at a representative duration (60s) as
-// the "capacity" weight per grip. The Micro's share of bodyweight is
-// (F_micro / (F_crusher + F_micro)).
-function microLoadShare(crusherAmps, microAmps, bodyWeightKg, refSec = 60) {
-  const fCrusher = predForceThreeExp(crusherAmps, refSec);
-  const fMicro   = predForceThreeExp(microAmps,   refSec);
-  const total = fCrusher + fMicro;
-  const share = total > 0 ? fMicro / total : 0.5;
-  return bodyWeightKg * share;
+// Compute target load: intensity_pct × F_grip(reference_time).
+// Floors at 1 kg so we never prescribe near-zero loads that the Tindeq
+// auto-detect threshold (4 kg) wouldn't trigger on.
+function targetLoadFromCurve(amps, refSec, intensityPct) {
+  if (!amps) return null;
+  const f = predForceThreeExp(amps, refSec);
+  if (!isFinite(f) || f <= 0) return null;
+  return Math.max(1, f * intensityPct);
 }
 
 /**
@@ -181,17 +102,22 @@ function microLoadShare(crusherAmps, microAmps, bodyWeightKg, refSec = 60) {
  * @param {number} args.bodyWeightKg  - user's bodyweight in kg
  * @returns {Object} { ok, reason?, bodyWeightKg, bodyWeightLbs, pullupSource, steps[] }
  *
- * Each step has:
- *   { id, title, intensityLabel, type: 'hang'|'pullup',
- *     leftGrip, rightGrip,
- *     targetSec?, targetReps?, sets?, swapAfterSet?,
- *     restAfterSec, description }
+ * Each hang step has:
+ *   { id, title, intensityLabel, type: 'hang',
+ *     grip,                  - "Crusher" or "Micro" (single grip per step)
+ *     targetLoadKg,          - per-hand target force in kg
+ *     targetSec,             - target hold duration
+ *     restAfterSec,
+ *     description }
+ *
+ * The pullup finisher step:
+ *   { id, title, type: 'pullup', targetReps, sets, restAfterSec, description }
  */
 export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
   if (!bodyWeightKg || bodyWeightKg <= 0) {
     return {
       ok: false,
-      reason: "Bodyweight not set. Go to Settings and enter your bodyweight, then come back to generate a personalized warm-up.",
+      reason: "Bodyweight not set. Go to Settings, enter your bodyweight, and come back.",
     };
   }
   const crusherAmps = fitGripAmps(history, "Crusher");
@@ -203,119 +129,76 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
   }
   const microAmps = fitGripAmps(history, "Micro");
 
-  const halfBW = bodyWeightKg / 2;
   const steps = [];
-  let anyFallback = false;
 
-  // ── Step 1: Two-Handed Crusher @ 25% T_max ──
-  {
-    const t = targetTimeFromLoad(crusherAmps, halfBW, 0.25);
-    if (!t.fromCurve) anyFallback = true;
+  // ── Step 1: Crusher · 25% × F_crusher(30s) for 30s ──
+  const load1 = targetLoadFromCurve(crusherAmps, 30, 0.25);
+  steps.push({
+    id: "crusher-25",
+    title: "Two-Handed Crusher",
+    intensityLabel: "25%",
+    type: "hang",
+    grip: "Crusher",
+    targetLoadKg: load1,
+    targetSec: 30,
+    restAfterSec: 60,
+    description:
+      "Light squeeze on the Crusher to wake up the big finger flexors. Pull to the target load, hold for 30s, release. Alternates Left → Right.",
+  });
+
+  // ── Step 2: Crusher · 50% × F_crusher(60s) for 60s ──
+  const load2 = targetLoadFromCurve(crusherAmps, 60, 0.50);
+  steps.push({
+    id: "crusher-50",
+    title: "Two-Handed Crusher",
+    intensityLabel: "50%",
+    type: "hang",
+    grip: "Crusher",
+    targetLoadKg: load2,
+    targetSec: 60,
+    restAfterSec: 180,
+    description:
+      "Same Crusher gripper, longer + heavier hold. Forearms get a working pump — well below failure thanks to the curve-derived load.",
+  });
+
+  // ── Step 3: Micro · 30% × F_micro(30s) for 30s ──
+  // Skipped if Micro curve data is missing.
+  if (microAmps) {
+    const load3 = targetLoadFromCurve(microAmps, 30, 0.30);
     steps.push({
-      id: "crusher-25",
-      title: "Two-Handed Crusher",
-      intensityLabel: "25%",
+      id: "micro-30",
+      title: "Two-Handed Micro",
+      intensityLabel: "30%",
       type: "hang",
-      leftGrip: "Crusher",
-      rightGrip: "Crusher",
-      targetSec: t.sec,
-      targetFromCurve: t.fromCurve,
+      grip: "Micro",
+      targetLoadKg: load3,
+      targetSec: 30,
       restAfterSec: 60,
       description:
-        "Both hands on Crushers, hang at bodyweight. Big finger flexors get woken up at low intensity — easy on purpose.",
+        "Swap the Tindeq to the Micro gripper. Light pull on the smaller hold introduces the skin and finger position without going near failure.",
     });
   }
 
-  // ── Step 2: Two-Handed Crusher @ 50% T_max ──
-  {
-    const t = targetTimeFromLoad(crusherAmps, halfBW, 0.50);
-    if (!t.fromCurve) anyFallback = true;
-    steps.push({
-      id: "crusher-50",
-      title: "Two-Handed Crusher",
-      intensityLabel: "50%",
-      type: "hang",
-      leftGrip: "Crusher",
-      rightGrip: "Crusher",
-      targetSec: t.sec,
-      targetFromCurve: t.fromCurve,
-      restAfterSec: 180,
-      description:
-        "Same setup, longer hold. Brings the forearms close to a working pump — well below failure thanks to the curve.",
-    });
-  }
-
-  // ── Cross-loaded steps require Micro curve data. Skip gracefully if
-  //    Micro hasn't been baselined yet. ──
-  if (microAmps) {
-    const microLoad = microLoadShare(crusherAmps, microAmps, bodyWeightKg);
-
-    // Step 3: Right Micro · Left Crusher
-    {
-      const t = targetTimeFromLoad(microAmps, microLoad, 0.30);
-      if (!t.fromCurve) anyFallback = true;
-      steps.push({
-        id: "cross-rmlc",
-        title: "Right Micro · Left Crusher",
-        intensityLabel: "30%",
-        type: "hang",
-        leftGrip: "Crusher",
-        rightGrip: "Micro",
-        targetSec: t.sec,
-        targetFromCurve: t.fromCurve,
-        restAfterSec: 60,
-        description:
-          "Cross-loaded hang. Crusher hand naturally carries more, Micro hand less — your body finds the balance, the curve sets the time.",
-      });
-    }
-
-    // Step 4: Left Micro · Right Crusher (mirror)
-    {
-      const t = targetTimeFromLoad(microAmps, microLoad, 0.30);
-      if (!t.fromCurve) anyFallback = true;
-      steps.push({
-        id: "cross-lmrc",
-        title: "Left Micro · Right Crusher",
-        intensityLabel: "30%",
-        type: "hang",
-        leftGrip: "Micro",
-        rightGrip: "Crusher",
-        targetSec: t.sec,
-        targetFromCurve: t.fromCurve,
-        restAfterSec: 60,
-        description:
-          "Same as above, swapped. Skin gets a small-hold introduction without going near failure.",
-      });
-    }
-  }
-
-  // ── Step 5: Cross-loaded pullup finisher ──
-  // Only render if Micro is baselined (the finisher is grip-mixed).
-  // Reps = 40% of your recent max bodyweight pullups (≤7 days fresh)
-  // with a floor of 2. Default to 5 if no recent data.
+  // ── Step 4: Pullup finisher ──
+  // Reps = 40% of recent max bodyweight pullups (≤7 days fresh) with a
+  // floor of 2. Default to 5 if no recent data.
   const recentMaxPullups = getRecentMaxPullups(wLog, 7);
-  if (microAmps) {
-    const targetReps = recentMaxPullups
-      ? Math.max(2, Math.round(recentMaxPullups * 0.4))
-      : 5;
-    steps.push({
-      id: "pullup-finisher",
-      title: "Cross-Loaded Pullups",
-      intensityLabel: recentMaxPullups
-        ? `${targetReps} reps × 2 sets · 40% of recent max ${recentMaxPullups}`
-        : `${targetReps} reps × 2 sets · default (no recent pullup data)`,
-      type: "pullup",
-      // Set 1: L-Crusher / R-Micro. Set 2: L-Micro / R-Crusher.
-      leftGrip: "Crusher",
-      rightGrip: "Micro",
-      swapAfterSet: true,
-      targetReps,
-      sets: 2,
-      restAfterSec: 60,
-      description:
-        "Pullups with mixed grips. Each side gets a different load profile — Crusher bicep heavy + Micro fingers light, then swapped between sets.",
-    });
-  }
+  const targetReps = recentMaxPullups
+    ? Math.max(2, Math.round(recentMaxPullups * 0.4))
+    : 5;
+  steps.push({
+    id: "pullup-finisher",
+    title: "Pullup Finisher",
+    intensityLabel: recentMaxPullups
+      ? `${targetReps} reps × 2 sets · 40% of recent max ${recentMaxPullups}`
+      : `${targetReps} reps × 2 sets · default (no recent pullup data)`,
+    type: "pullup",
+    targetReps,
+    sets: 2,
+    restAfterSec: 60,
+    description:
+      "Heart rate up, lats engaged, full prep. No Tindeq needed — just count reps. Two sets at 40% of your recent max.",
+  });
 
   return {
     ok: true,
@@ -324,10 +207,6 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
     pullupSource: recentMaxPullups
       ? { count: recentMaxPullups, sourceText: "recent max within 7 days" }
       : { count: null, sourceText: "no recent data — using default 5" },
-    // True when one or more hang targets fell back to the default
-    // T_max reference (curve doesn't extrapolate to bodyweight load).
-    // The UI surfaces this so the user knows the times are estimates.
-    anyFallback,
     steps,
   };
 }

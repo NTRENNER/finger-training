@@ -576,6 +576,7 @@ export default function App() {
               trainingFocus={trainingFocus}
               onTrainingFocusChange={setTrainingFocus}
               bodyWeight={bodyWeight}
+              tindeq={tindeq}
             />
           );
         }

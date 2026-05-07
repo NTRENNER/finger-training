@@ -410,7 +410,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 
-export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced", onTrainingFocusChange = () => {}, bodyWeight = null }) {
+export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced", onTrainingFocusChange = () => {}, bodyWeight = null, tindeq = null }) {
 
   // Warm-up sub-state — when true, the entire SetupView is replaced by
   // the WarmupView until the user closes it. Adaptive Warm-up lives on
@@ -487,6 +487,8 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
           history={history}
           wLog={wLog}
           bodyWeightKg={bodyWeight}
+          tindeq={tindeq}
+          unit={unit}
           onClose={() => setWarmupActive(false)}
         />
       </div>
