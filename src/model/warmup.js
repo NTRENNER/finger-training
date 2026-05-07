@@ -59,28 +59,52 @@ function fitGripAmps(history, grip) {
   return amps;
 }
 
-// Read recent max pullup reps from the Lifts/Workout log. Looks at the
-// pull_ups exercise across all workout sessions within `daysOld` days
-// and returns the highest rep count of any completed set. Returns null
-// if no recent data.
-export function getRecentMaxPullups(wLog, daysOld = 7) {
+// Read recent max pullup reps from the Lifts/Workout log. Two-pass
+// search:
+//   1. Strict pass — sets explicitly marked done (s.done === true)
+//      within the strict window (default 30 days).
+//   2. Loose pass — any set with reps > 0, same window. Picks up
+//      sessions where the user finished without per-set done taps.
+// Returns { maxReps, ageDays, strict } or null if nothing found.
+//
+// The two-pass design protects against the common case where the user
+// taps "Finish Session" without explicitly marking each set done — the
+// data is there, it just doesn't carry the strict flag. A loose match
+// returns the same number with strict=false so the UI can flag it.
+export function getRecentMaxPullups(wLog, daysOld = 30) {
   if (!Array.isArray(wLog)) return null;
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - daysOld);
-  let maxReps = 0;
-  for (const session of wLog) {
-    if (!session?.date) continue;
-    const sessDate = new Date(session.date);
-    if (isNaN(sessDate.getTime()) || sessDate < cutoff) continue;
-    const sets = session.exercises?.["pull_ups"]?.sets;
-    if (!Array.isArray(sets)) continue;
-    for (const set of sets) {
-      if (!set?.done) continue;
-      const reps = Number(set.reps);
-      if (Number.isFinite(reps) && reps > maxReps) maxReps = reps;
+  const now = Date.now();
+  const cutoffMs = now - daysOld * 24 * 60 * 60 * 1000;
+
+  const search = (strict) => {
+    let maxReps = 0;
+    let mostRecentMs = null;
+    for (const session of wLog) {
+      if (!session?.date) continue;
+      const sessTs = Date.parse(session.date);
+      if (!isFinite(sessTs) || sessTs < cutoffMs) continue;
+      const sets = session.exercises?.["pull_ups"]?.sets;
+      if (!Array.isArray(sets)) continue;
+      let sessionContributed = false;
+      for (const set of sets) {
+        if (strict && !set?.done) continue;
+        const reps = Number(set?.reps);
+        if (!Number.isFinite(reps) || reps <= 0) continue;
+        if (reps > maxReps) maxReps = reps;
+        sessionContributed = true;
+      }
+      if (sessionContributed && (mostRecentMs == null || sessTs > mostRecentMs)) {
+        mostRecentMs = sessTs;
+      }
     }
-  }
-  return maxReps > 0 ? maxReps : null;
+    if (maxReps <= 0) return null;
+    const ageDays = mostRecentMs != null
+      ? Math.max(0, Math.round((now - mostRecentMs) / (24 * 60 * 60 * 1000)))
+      : null;
+    return { maxReps, ageDays, strict };
+  };
+
+  return search(true) || search(false) || null;
 }
 
 // Compute target load: intensity_pct × F_grip(reference_time).
@@ -180,17 +204,37 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
   }
 
   // ── Step 4: Pullup finisher ──
-  // Reps = 40% of recent max bodyweight pullups (≤7 days fresh) with a
-  // floor of 2. Default to 5 if no recent data.
-  const recentMaxPullups = getRecentMaxPullups(wLog, 7);
+  // Reps = 40% of recent max bodyweight pullups (≤30 days) with a
+  // floor of 2. Default to 5 if no recent data. The reader does a
+  // two-pass search (strict → loose) to handle sessions where sets
+  // weren't explicitly marked done.
+  const pullupMatch = getRecentMaxPullups(wLog, 30);
+  const recentMaxPullups = pullupMatch?.maxReps ?? null;
+  const pullupAge = pullupMatch?.ageDays ?? null;
+  const pullupStrict = pullupMatch?.strict ?? false;
+
   const targetReps = recentMaxPullups
     ? Math.max(2, Math.round(recentMaxPullups * 0.4))
     : 5;
+
+  // Compose the source text for the UI.
+  let pullupSourceText;
+  if (recentMaxPullups) {
+    const ageText = pullupAge === 0 ? "today"
+                  : pullupAge === 1 ? "1 day ago"
+                  : `${pullupAge} days ago`;
+    pullupSourceText = pullupStrict
+      ? `recent max ${recentMaxPullups} (${ageText})`
+      : `recent max ${recentMaxPullups} (${ageText}, sets not marked done)`;
+  } else {
+    pullupSourceText = "no recent data — using default 5";
+  }
+
   steps.push({
     id: "pullup-finisher",
     title: "Pullup Finisher",
     intensityLabel: recentMaxPullups
-      ? `${targetReps} reps × 2 sets · 40% of recent max ${recentMaxPullups}`
+      ? `${targetReps} reps × 2 sets · 40% of ${pullupSourceText}`
       : `${targetReps} reps × 2 sets · default (no recent pullup data)`,
     type: "pullup",
     targetReps,
@@ -204,9 +248,12 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
     ok: true,
     bodyWeightKg,
     bodyWeightLbs: Math.round(bodyWeightKg * 2.20462 * 10) / 10,
-    pullupSource: recentMaxPullups
-      ? { count: recentMaxPullups, sourceText: "recent max within 7 days" }
-      : { count: null, sourceText: "no recent data — using default 5" },
+    pullupSource: {
+      count: recentMaxPullups,
+      ageDays: pullupAge,
+      strict: pullupStrict,
+      sourceText: pullupSourceText,
+    },
     steps,
   };
 }
