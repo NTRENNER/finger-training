@@ -26,7 +26,8 @@ import { C } from "../ui/theme.js";
 import { Card, Btn, Sect } from "../ui/components.js";
 import { fmt0, fmtW, toDisp, fromDisp } from "../ui/format.js";
 
-import { loadLS, LS_BW_LOG_KEY } from "../lib/storage.js";
+import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
+import { WarmupView } from "./WarmupView.js";
 
 import { computeZoneCoverage } from "../model/zones.js";
 import { computeLimiterZone } from "../model/limiter.js";
@@ -409,7 +410,13 @@ function ZoneCoverageCard({ history, activities = [] }) {
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 
-export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced", onTrainingFocusChange = () => {} }) {
+export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced", onTrainingFocusChange = () => {}, bodyWeight = null }) {
+
+  // Warm-up sub-state — when true, the entire SetupView is replaced by
+  // the WarmupView until the user closes it. Adaptive Warm-up lives on
+  // the Fingers tab because it's a finger-training prep tool (uses the
+  // grippers and your force curves), not a strength-training session.
+  const [warmupActive, setWarmupActive] = useState(false);
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
 
@@ -467,9 +474,54 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
   // has something to render even if the LS-stored value drifts.
   const currentFocus = TRAINING_FOCUS[trainingFocus] ?? TRAINING_FOCUS.balanced;
 
+  // ── Adaptive Warm-up takeover ──
+  // When the user taps "Generate" on the warm-up entry card below, the
+  // entire SetupView is replaced by WarmupView until they close it.
+  // wLog is read fresh from localStorage rather than threaded through
+  // App state — keeps the warm-up decoupled from WorkoutTab's lifecycle.
+  if (warmupActive) {
+    const wLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    return (
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+        <WarmupView
+          history={history}
+          wLog={wLog}
+          bodyWeightKg={bodyWeight}
+          onClose={() => setWarmupActive(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
+
+      {/* ── Adaptive Warm-up entry point ──
+          Force-curve-derived hangs + cross-loaded pullups generated on
+          the fly. Lives on Fingers (not Workout) because it's a finger-
+          training prep tool, not a strength-training session. Nothing
+          here gets logged as training data — pure prescription. */}
+      <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Adaptive Warm-up</div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.4 }}>
+              Force-curve-derived hangs + cross-loaded pullups. Same feel every session, never near failure.
+            </div>
+          </div>
+          <button
+            onClick={() => setWarmupActive(true)}
+            style={{
+              background: C.purple, color: "#fff", border: "none", borderRadius: 8,
+              padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Generate
+          </button>
+        </div>
+      </Card>
 
       {/* Training Focus picker — same selector as Settings, surfaced
           here so the user can see and adjust the bias right where the

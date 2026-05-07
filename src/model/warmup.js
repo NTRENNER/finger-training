@@ -113,13 +113,37 @@ export function getRecentMaxPullups(wLog, daysOld = 7) {
   return maxReps > 0 ? maxReps : null;
 }
 
+// Default T_max reference used when the curve can't reach the target
+// load (e.g., hanging at half-bodyweight when training has only been
+// at much lower forces). 120s matches the order of magnitude implied
+// by the source video's screenshots (where T_max for two-handed
+// hanging at bodyweight worked out to ~156s).
+const DEFAULT_TMAX_REF_SEC = 120;
+
 // Compute a target hold duration: T_max at the given load, scaled by
-// pct, clamped to a sensible range. Returns minSec on degenerate fits
-// rather than null so the warm-up always has a number to show.
+// pct, clamped to a sensible range.
+//
+// If the curve can't reach the target load (load above predicted MVC,
+// usually because training has been at lower forces than the bodyweight
+// hanging load), fall back to a fixed reference T_max so the warm-up
+// still differentiates step intensity correctly. The percentages stay
+// meaningful even on the fallback path — 25% × 120 = 30s, 50% × 120 =
+// 60s, 30% × 120 = 36s. Returns { sec, fromCurve } so the UI can flag
+// when prescription is curve-derived vs default.
 function targetTimeFromLoad(amps, loadKg, pct, minSec = 10, maxSec = 240) {
   const tMax = solveTimeAtForce(amps, loadKg);
-  if (!tMax || !isFinite(tMax)) return minSec;
-  return Math.max(minSec, Math.min(maxSec, Math.round(tMax * pct)));
+  let sec, fromCurve;
+  if (!tMax || !isFinite(tMax) || tMax <= 1) {
+    sec = Math.round(DEFAULT_TMAX_REF_SEC * pct);
+    fromCurve = false;
+  } else {
+    sec = Math.round(tMax * pct);
+    fromCurve = true;
+  }
+  return {
+    sec: Math.max(minSec, Math.min(maxSec, sec)),
+    fromCurve,
+  };
 }
 
 // Capacity-proportional load split for cross-loaded steps. When hanging
@@ -168,34 +192,45 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
 
   const halfBW = bodyWeightKg / 2;
   const steps = [];
+  let anyFallback = false;
 
   // ── Step 1: Two-Handed Crusher @ 25% T_max ──
-  steps.push({
-    id: "crusher-25",
-    title: "Two-Handed Crusher",
-    intensityLabel: "25%",
-    type: "hang",
-    leftGrip: "Crusher",
-    rightGrip: "Crusher",
-    targetSec: targetTimeFromLoad(crusherAmps, halfBW, 0.25),
-    restAfterSec: 60,
-    description:
-      "Both hands on Crushers, hang at bodyweight. Big finger flexors get woken up at low intensity — easy on purpose.",
-  });
+  {
+    const t = targetTimeFromLoad(crusherAmps, halfBW, 0.25);
+    if (!t.fromCurve) anyFallback = true;
+    steps.push({
+      id: "crusher-25",
+      title: "Two-Handed Crusher",
+      intensityLabel: "25%",
+      type: "hang",
+      leftGrip: "Crusher",
+      rightGrip: "Crusher",
+      targetSec: t.sec,
+      targetFromCurve: t.fromCurve,
+      restAfterSec: 60,
+      description:
+        "Both hands on Crushers, hang at bodyweight. Big finger flexors get woken up at low intensity — easy on purpose.",
+    });
+  }
 
   // ── Step 2: Two-Handed Crusher @ 50% T_max ──
-  steps.push({
-    id: "crusher-50",
-    title: "Two-Handed Crusher",
-    intensityLabel: "50%",
-    type: "hang",
-    leftGrip: "Crusher",
-    rightGrip: "Crusher",
-    targetSec: targetTimeFromLoad(crusherAmps, halfBW, 0.50),
-    restAfterSec: 180,
-    description:
-      "Same setup, longer hold. Brings the forearms close to a working pump — well below failure thanks to the curve.",
-  });
+  {
+    const t = targetTimeFromLoad(crusherAmps, halfBW, 0.50);
+    if (!t.fromCurve) anyFallback = true;
+    steps.push({
+      id: "crusher-50",
+      title: "Two-Handed Crusher",
+      intensityLabel: "50%",
+      type: "hang",
+      leftGrip: "Crusher",
+      rightGrip: "Crusher",
+      targetSec: t.sec,
+      targetFromCurve: t.fromCurve,
+      restAfterSec: 180,
+      description:
+        "Same setup, longer hold. Brings the forearms close to a working pump — well below failure thanks to the curve.",
+    });
+  }
 
   // ── Cross-loaded steps require Micro curve data. Skip gracefully if
   //    Micro hasn't been baselined yet. ──
@@ -203,32 +238,42 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
     const microLoad = microLoadShare(crusherAmps, microAmps, bodyWeightKg);
 
     // Step 3: Right Micro · Left Crusher
-    steps.push({
-      id: "cross-rmlc",
-      title: "Right Micro · Left Crusher",
-      intensityLabel: "30%",
-      type: "hang",
-      leftGrip: "Crusher",
-      rightGrip: "Micro",
-      targetSec: targetTimeFromLoad(microAmps, microLoad, 0.30),
-      restAfterSec: 60,
-      description:
-        "Cross-loaded hang. Crusher hand naturally carries more, Micro hand less — your body finds the balance, the curve sets the time.",
-    });
+    {
+      const t = targetTimeFromLoad(microAmps, microLoad, 0.30);
+      if (!t.fromCurve) anyFallback = true;
+      steps.push({
+        id: "cross-rmlc",
+        title: "Right Micro · Left Crusher",
+        intensityLabel: "30%",
+        type: "hang",
+        leftGrip: "Crusher",
+        rightGrip: "Micro",
+        targetSec: t.sec,
+        targetFromCurve: t.fromCurve,
+        restAfterSec: 60,
+        description:
+          "Cross-loaded hang. Crusher hand naturally carries more, Micro hand less — your body finds the balance, the curve sets the time.",
+      });
+    }
 
     // Step 4: Left Micro · Right Crusher (mirror)
-    steps.push({
-      id: "cross-lmrc",
-      title: "Left Micro · Right Crusher",
-      intensityLabel: "30%",
-      type: "hang",
-      leftGrip: "Micro",
-      rightGrip: "Crusher",
-      targetSec: targetTimeFromLoad(microAmps, microLoad, 0.30),
-      restAfterSec: 60,
-      description:
-        "Same as above, swapped. Skin gets a small-hold introduction without going near failure.",
-    });
+    {
+      const t = targetTimeFromLoad(microAmps, microLoad, 0.30);
+      if (!t.fromCurve) anyFallback = true;
+      steps.push({
+        id: "cross-lmrc",
+        title: "Left Micro · Right Crusher",
+        intensityLabel: "30%",
+        type: "hang",
+        leftGrip: "Micro",
+        rightGrip: "Crusher",
+        targetSec: t.sec,
+        targetFromCurve: t.fromCurve,
+        restAfterSec: 60,
+        description:
+          "Same as above, swapped. Skin gets a small-hold introduction without going near failure.",
+      });
+    }
   }
 
   // ── Step 5: Cross-loaded pullup finisher ──
@@ -266,6 +311,10 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
     pullupSource: recentMaxPullups
       ? { count: recentMaxPullups, sourceText: "recent max within 7 days" }
       : { count: null, sourceText: "no recent data — using default 5" },
+    // True when one or more hang targets fell back to the default
+    // T_max reference (curve doesn't extrapolate to bodyweight load).
+    // The UI surfaces this so the user knows the times are estimates.
+    anyFallback,
     steps,
   };
 }

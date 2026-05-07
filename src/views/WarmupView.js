@@ -234,6 +234,15 @@ export function WarmupView({ history, wLog, bodyWeightKg, onClose }) {
               </div>
             ))}
           </div>
+          {protocol.anyFallback && (
+            <div style={{
+              fontSize: 11, color: C.yellow, marginBottom: 8, lineHeight: 1.5,
+              padding: "6px 10px", background: `${C.yellow}10`,
+              border: `1px solid ${C.yellow}30`, borderRadius: 6,
+            }}>
+              ⚠ Some hang targets are using a default 120s reference because your force curve doesn't reach bodyweight load yet. Run a few near-MVC Crusher hangs to seed the curve and these will calibrate to your data.
+            </div>
+          )}
           <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5, fontStyle: "italic" }}>
             Pullup count: {protocol.pullupSource.sourceText}
             {protocol.pullupSource.count != null && ` (${protocol.pullupSource.count})`}.
