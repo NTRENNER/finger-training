@@ -150,6 +150,31 @@ function targetLoadFromCurve(amps, refSec, intensityPct) {
   return Math.max(1, f * intensityPct);
 }
 
+// Find the highest peak_force_kg recorded for a given grip within the
+// lookback window. Used as an MVC proxy for warm-up load prescription —
+// peak captures near-MVC moments during reps that the sustained-force
+// curve never sees, and isn't subject to the ramp-up bias that drags
+// avg_force_kg low at short durations.
+//
+// Returns null if no peak data is available (legacy reps from before
+// peak capture was implemented, or no reps for this grip).
+function getRecentPeakMVC(history, grip, daysOld = 90) {
+  if (!Array.isArray(history) || !grip) return null;
+  const cutoffMs = Date.now() - daysOld * 24 * 60 * 60 * 1000;
+  let maxPeak = 0;
+  for (const r of history) {
+    if (r?.grip !== grip) continue;
+    const peak = Number(r?.peak_force_kg);
+    if (!Number.isFinite(peak) || peak <= 0 || peak >= 500) continue;
+    if (r.date) {
+      const ts = Date.parse(r.date);
+      if (isFinite(ts) && ts < cutoffMs) continue;
+    }
+    if (peak > maxPeak) maxPeak = peak;
+  }
+  return maxPeak > 0 ? maxPeak : null;
+}
+
 /**
  * Generate the adaptive warm-up protocol.
  *
@@ -186,66 +211,67 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
   }
   const microAmps = fitGripAmps(history, "Micro");
 
+  // ── MVC reference per grip ──
+  // Peak force across recent reps gives a near-MVC reference that's
+  // calibrated to the user's actual high-effort moments (no ramp-up
+  // bias, captures spikes the sustained-force curve never sees). Fall
+  // back to F(30s) on the curve if no peak data is available (legacy
+  // reps from before peak capture).
+  const crusherPeak = getRecentPeakMVC(history, "Crusher");
+  const microPeak   = getRecentPeakMVC(history, "Micro");
+  const crusherMVC  = crusherPeak ?? targetLoadFromCurve(crusherAmps, 30, 1.0);
+  const microMVC    = microPeak ?? (microAmps ? targetLoadFromCurve(microAmps, 30, 1.0) : null);
+  const crusherSource = crusherPeak ? "peak" : "curve";
+  const microSource   = microPeak ? "peak" : (microAmps ? "curve" : null);
+
   const steps = [];
 
-  // ── Step 1: Crusher · 50% × F_crusher(30s) for 30s ──
-  // The original video used 25% of T_max at fixed bodyweight load,
-  // which feels like "quick activation." Our load-based prescription
-  // requires a higher % to map to the same subjective intensity:
-  // 50% × F at the prescribed duration is the load-based equivalent
-  // of "moderate activation." Lower than this and the warm-up barely
-  // engages the muscle.
-  const load1 = targetLoadFromCurve(crusherAmps, 30, 0.50);
+  // ── Step 1: Crusher · 40% × MVC for 30s ──
+  // Light activation set. 40% of MVC is a standard hangboard warm-up
+  // intensity — engages the muscle without going near failure.
   steps.push({
-    id: "crusher-50pct-30s",
+    id: "crusher-40pct-30s",
     title: "Two-Handed Crusher",
-    intensityLabel: "50%",
+    intensityLabel: "40% MVC",
     type: "hang",
     grip: "Crusher",
-    targetLoadKg: load1,
+    targetLoadKg: Math.max(1, crusherMVC * 0.40),
     targetSec: 30,
     restAfterSec: 60,
     description:
-      "Moderate squeeze to wake up the big finger flexors. Pull to the target load, hold for 30s, release. Alternates Left → Right.",
+      "Moderate squeeze at 40% of your max effort. Pull to the target load, hold 30s, release. Alternates Left → Right.",
   });
 
-  // ── Step 2: Crusher · 75% × F_crusher(60s) for 60s ──
-  // "Working pump" intensity: 75% of sustainable force at 60s. Total
-  // work is meaningfully higher than Step 1 because both load and
-  // time are increased. Stays well below failure since 75% × F(60)
-  // is by definition sustainable for 60s with margin.
-  const load2 = targetLoadFromCurve(crusherAmps, 60, 0.75);
+  // ── Step 2: Crusher · 60% × MVC for 60s ──
+  // Working set at 60% MVC — meaningfully harder than Step 1 in both
+  // load and duration. Still below failure for a sustained 60s hold.
   steps.push({
-    id: "crusher-75pct-60s",
+    id: "crusher-60pct-60s",
     title: "Two-Handed Crusher",
-    intensityLabel: "75%",
+    intensityLabel: "60% MVC",
     type: "hang",
     grip: "Crusher",
-    targetLoadKg: load2,
+    targetLoadKg: Math.max(1, crusherMVC * 0.60),
     targetSec: 60,
     restAfterSec: 180,
     description:
-      "Same Crusher gripper, heavier + longer hold. Forearms get a working pump — still well below failure thanks to the curve-derived load.",
+      "Same Crusher gripper, 60% of max effort for a longer hold. Forearms get a working pump, well below failure.",
   });
 
-  // ── Step 3: Micro · 50% × F_micro(30s) for 30s ──
-  // Light Micro introduction. Same intensity % as Step 1 but on the
-  // smaller hold, so the user gets skin contact and finger-position
-  // wake-up without the high-load Micro work that risks tweaking a
-  // pulley.
-  if (microAmps) {
-    const load3 = targetLoadFromCurve(microAmps, 30, 0.50);
+  // ── Step 3: Micro · 40% × MVC for 30s ──
+  // Light Micro introduction. Skipped if no Micro data at all.
+  if (microMVC) {
     steps.push({
-      id: "micro-50pct-30s",
+      id: "micro-40pct-30s",
       title: "Two-Handed Micro",
-      intensityLabel: "50%",
+      intensityLabel: "40% MVC",
       type: "hang",
       grip: "Micro",
-      targetLoadKg: load3,
+      targetLoadKg: Math.max(1, microMVC * 0.40),
       targetSec: 30,
       restAfterSec: 60,
       description:
-        "Swap the Tindeq to the Micro gripper. Moderate pull on the smaller hold introduces the skin and finger position without going near failure.",
+        "Swap the Tindeq to the Micro gripper. Light pull on the smaller hold introduces the skin and finger position.",
     });
   }
 
@@ -301,6 +327,15 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
     ok: true,
     bodyWeightKg,
     bodyWeightLbs,
+    mvcSource: {
+      // "peak" = derived from peak_force_kg in recent reps (preferred).
+      // "curve" = fell back to F(30s) on the three-exp curve (legacy
+      //          reps without peak data, or peak_force_kg never captured).
+      crusher: crusherSource,
+      micro: microSource,
+      crusherKg: crusherMVC,
+      microKg: microMVC,
+    },
     pullupSource: {
       count: unweightedMax,
       ageDays: pullupAge,
