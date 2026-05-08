@@ -26,3 +26,13 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Hide scrollbars on the top tab nav. Inline `scrollbarWidth: none`
+   handles Firefox; `msOverflowStyle: none` handles legacy IE/Edge;
+   the WebKit pseudo-element below covers Chrome / Safari (which
+   can't be set via inline style). The element keeps overflow-x:auto
+   so swipe / trackpad scroll still work — we're just hiding the
+   visual scrollbar, not the scrolling behavior. */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

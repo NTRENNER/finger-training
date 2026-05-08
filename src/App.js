@@ -501,13 +501,28 @@ export default function App() {
   // ── Render ────────────────────────────────────────────────
   return (
     <div style={base}>
-      {/* Top nav */}
-      <div style={{
-        background: C.card, borderBottom: `1px solid ${C.border}`,
-        display: "flex", alignItems: "center", padding: "0 16px",
-        position: "sticky", top: 0, zIndex: 100,
-      }}>
-        <div style={{ fontSize: 16, fontWeight: 800, color: C.blue, marginRight: 16, padding: "14px 0" }}>
+      {/* Top nav — horizontally scrollable. With 9 tabs the row
+          overflows the viewport on phones; rather than hide tabs in
+          a hamburger or wrap to two rows (which loses the sticky-
+          single-line shape), let the row scroll horizontally and
+          hide the scrollbar. flexShrink: 0 on each button keeps
+          tabs from compressing into illegibility when the container
+          narrows. The .no-scrollbar class hides the WebKit scrollbar
+          (Chrome/Safari) since that pseudo-element can't be set
+          inline; scrollbarWidth/msOverflowStyle handle Firefox + IE. */}
+      <div
+        className="no-scrollbar"
+        style={{
+          background: C.card, borderBottom: `1px solid ${C.border}`,
+          display: "flex", alignItems: "center", padding: "0 16px",
+          position: "sticky", top: 0, zIndex: 100,
+          overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",   // Firefox
+          msOverflowStyle: "none",  // IE/Edge legacy
+        }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 800, color: C.blue, marginRight: 16, padding: "14px 0", flexShrink: 0 }}>
           🧗 Finger
         </div>
         {TABS.map((t, i) => (
@@ -519,6 +534,7 @@ export default function App() {
               color: tab === i ? C.blue : C.muted, background: "none", border: "none",
               borderBottom: tab === i ? `2px solid ${C.blue}` : "2px solid transparent",
               cursor: "pointer", whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             {t}

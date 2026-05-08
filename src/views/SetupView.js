@@ -202,18 +202,31 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
         )}
       </div>
 
-      {/* Goal picker */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+      {/* Goal picker — 3-column grid that wraps to two rows of three
+          on narrow screens. With 6 zones (post-migration), a single
+          flex row overflows the card on mobile, especially with the
+          longer hybrid labels (Power/Strength, Strength/Endurance).
+          The grid keeps every pill equal width and visible without
+          horizontal scroll. Top spacing bumped to make room for the
+          "limiter" badge that floats above the recommended pill. */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: 8,
+        marginTop: recommendedZone ? 12 : 0,
+        marginBottom: 14,
+      }}>
         {Object.entries(GOAL_CONFIG).map(([key, g]) => {
           const isRec = key === recommendedZone;
           return (
             <button key={key} onClick={() => handleGoal(key)} style={{
-              flex: 1, padding: "8px 4px", borderRadius: 10, cursor: "pointer",
+              padding: "8px 4px", borderRadius: 10, cursor: "pointer",
               background: goal === key ? g.color : C.border,
               color: goal === key ? "#fff" : C.muted,
-              fontWeight: 700, fontSize: 12, transition: "all 0.15s",
+              fontWeight: 700, fontSize: 11, transition: "all 0.15s",
               border: isRec ? `2px solid ${g.color}` : "2px solid transparent",
               position: "relative",
+              minWidth: 0, // allow grid cell to shrink without overflow
             }}>
               {isRec && (
                 <div style={{
@@ -225,7 +238,12 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
                 </div>
               )}
               <div style={{ fontSize: 16 }}>{g.emoji}</div>
-              <div style={{ marginTop: 2 }}>{g.label}</div>
+              <div style={{
+                marginTop: 2,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}>{g.label}</div>
             </button>
           );
         })}
