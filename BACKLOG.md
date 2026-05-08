@@ -127,3 +127,62 @@ just be aware):
   about, not worth shipping ad-hoc.
 - Document the current dual semantics in the schema comment so future
   readers don't misread the field.
+
+---
+
+## 3. Decompose `AnalysisView`
+
+**Problem.** `AnalysisView.js` is ~2,000 lines and mixes three concerns
+(model derivation, chart prep, rendering) in one file. After the
+6-zone migration it grew further. Even with the per-section comments
+it's hard to navigate — especially for someone returning to the file
+after a few weeks. `EnergySystemBreakdownCard` was extracted earlier
+as a precedent; the pattern just stopped at one component.
+
+**Proposed component decomposition:**
+
+- `ForceDurationChart` — F-D scatter + curve overlays + zone bands
+- `GapTrackerCard` — Performance vs. Model time series (per-grip)
+- `CapacityCards` — AUC % vs baseline + AUC absolute + Curve
+  Improvement (the headline progress trio)
+- `RecommendationCards` — Train cards + per-grip Train + Unexplored
+
+`AnalysisView` shrinks to a top-level layout that wires the cards
+together with shared filter state (selGrip, relMode) and shared
+model derivations from the hooks below.
+
+**Proposed hook decomposition** (declined the
+"useAnalysisModel() returns everything" framing — same anti-pattern
+as the spread-everything AppShell, just one layer down):
+
+- `useGripImprovements(...)` — Δ% deltas for Curve Improvement
+- `useGapHistory(...)` — Performance vs. Model series, per-grip
+- `useAucHistoryByGrip(...)` — AUC % + absolute time series
+- `useCoachingRecs(...)` — recommendation + gripRecs
+
+Each consumer pulls only what it needs. No giant model-bag hook.
+
+**Important overlap with item #1.** The two heaviest model derivations
+currently in AnalysisView — `gripBaselines` and `perHandGripBaselines`
+— are already in scope for `useFingerHistory` (item #1) because
+`BadgesView` also computes the same baseline seed window for its
+per-grip AUC growth. So those move out of AnalysisView as part of #1,
+not as part of this item. The hooks above all consume those baselines
+as inputs.
+
+**Sequencing.** Do this AFTER #1, not before. If we decompose
+AnalysisView while gripBaselines is still local, we'd extract it into
+an Analysis-local hook only to move it again to useFingerHistory.
+Wrong order means moving the same code twice. Correct order:
+
+  1. Lockout system ships.
+  2. App.js domain hook extraction (item #1) lands. gripBaselines and
+     perHandGripBaselines move to useFingerHistory.
+  3. AnalysisView decomposition (this item) builds on top — splits
+     the remaining view-specific derivations into focused hooks and
+     the rendering into focused components.
+
+**Effort.** Medium-large. Each component extraction is mechanical, but
+there are 4 of them, and the prop wiring needs care to avoid
+regression in the chart filters and the cross-card recommendation echo
+(Curve Improvement banner ↔ Train card).
