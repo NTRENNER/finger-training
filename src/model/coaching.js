@@ -44,6 +44,7 @@
 
 import { ymdLocal } from "../util.js";
 import { ZONE_REF_T, ZONE_KEYS, zoneOf } from "./zones.js";
+import { getZoneStaleness, stalenessBoost } from "./lockout.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
@@ -218,6 +219,17 @@ export function coachingRecommendation(history, grip, opts = {}) {
     }
   }
 
+  // Per-zone staleness — bumps the score for zones the user has been
+  // avoiding. Computed once outside the loop since it's the same map
+  // for every (zone, hand) pair. Soft lockout: 1.0 / 1.4 / 2.0 for
+  // ok / warning / stale (and stale-or-never gets the same firm 2×).
+  // Computed across all of `history`, not per-grip, so all-grips
+  // training counts toward keeping a zone fresh — a Crusher Endurance
+  // session keeps Endurance unlocked even if Micro Endurance hasn't
+  // been touched. Aligns with the soft-nag spirit: we want users to
+  // train the zone, not necessarily the (zone, grip) cell.
+  const stalenessMap = getZoneStaleness(history);
+
   // Iterate all 6 zones in physiological order. ZONE_KEYS comes from
   // src/model/zones.js so the order stays in sync with the rest of
   // the model layer.
@@ -227,6 +239,7 @@ export function coachingRecommendation(history, grip, opts = {}) {
     if (!t) continue;
     const recency = recencyPenalty(zoneKey, history, grip);
     const ext     = externalLoadModifier(zoneKey, activities);
+    const stale   = stalenessBoost(zoneKey, stalenessMap);
 
     // Score per (zone, hand) so the residual factor (which is hand-
     // specific) gets included properly. Pick the highest-scoring hand
@@ -248,7 +261,10 @@ export function coachingRecommendation(history, grip, opts = {}) {
       const resFactor = zoneResidualFactor(history, hand, grip, t, ampsByHand[hand], fmap);
       const gapForScore = Math.max(gap, -0.30); // clamp at -30%
       const focusMult = focusBias[zoneKey] ?? 1.0;
-      const handScore = (gapForScore + 0.30) * recency * ext * resFactor * focusMult;
+      // Staleness multiplier last so it scales the entire composite —
+      // a stale zone with weak gap still gets meaningfully promoted,
+      // and a fresh zone with strong gap still wins on merit.
+      const handScore = (gapForScore + 0.30) * recency * ext * resFactor * focusMult * stale;
       if (handScore > bestScore) {
         bestScore = handScore;
         bestHand = hand;
@@ -268,6 +284,8 @@ export function coachingRecommendation(history, grip, opts = {}) {
       recency, ext,
       resFactor: bestResFactor,
       focusMult: focusBias[zoneKey] ?? 1.0,
+      stale,
+      staleStatus: stalenessMap[zoneKey]?.status ?? "ok",
       trainingFocus,
       score: bestScore,
     });

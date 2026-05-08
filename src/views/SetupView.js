@@ -27,9 +27,11 @@ import { Card, Btn, Sect } from "../ui/components.js";
 import { fmt0, fmtW, toDisp, fromDisp } from "../ui/format.js";
 
 import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
+import { today } from "../util.js";
 import { WarmupView } from "./WarmupView.js";
 
 import { computeZoneCoverage, ZONE_KEYS } from "../model/zones.js";
+import { getZoneStaleness, getAnnualSessionPace, ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS } from "../model/lockout.js";
 import { computeLimiterZone } from "../model/limiter.js";
 import { predictRepTimes } from "../model/fatigue.js";
 import {
@@ -373,6 +375,292 @@ function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null,
 }
 
 // ─────────────────────────────────────────────────────────────
+// CLIMBING RPE QUICK-LOG
+// ─────────────────────────────────────────────────────────────
+// Inline expand/collapse on Setup. Discipline + RPE + Save. Lets
+// the user quickly log a climbing day without navigating to the
+// Climbing tab. The full Climbing tab still owns detailed logging
+// (grade, ascent style, wall) — this is just the minimum-viable
+// signal needed for the lockout system + future "climbing partially
+// resets zones" logic.
+//
+// Schema: { date, type:"climbing", discipline, rpe }. The full
+// Climbing tab logger creates entries with grade/ascent/wall too;
+// both shapes coexist (rpe + grade/ascent are independently optional).
+const RPE_DESCRIPTIONS = {
+  1:  "Very easy — barely a workout",
+  2:  "Easy — recovery-level",
+  3:  "Light — warm-up intensity",
+  4:  "Moderate — comfortable training",
+  5:  "Hard — focused training day",
+  6:  "Hard+ — pushing into fatigue",
+  7:  "Very hard — strong session",
+  8:  "Very hard+ — limit attempts",
+  9:  "Near maximum — couldn't have done much more",
+  10: "Maximum — true RPE 10, full effort",
+};
+
+function ClimbingRPEQuickLog({ activities = [], onLog }) {
+  const [open, setOpen]             = useState(false);
+  const [discipline, setDiscipline] = useState("boulder");
+  const [rpe, setRpe]               = useState(7);
+  const [logged, setLogged]         = useState(false);
+
+  const todayClimbing = activities.filter(a => a.date === today() && a.type === "climbing");
+  const handleSave = () => {
+    onLog({ date: today(), type: "climbing", discipline, rpe });
+    setLogged(true);
+    setOpen(false);
+    setTimeout(() => setLogged(false), 2500);
+  };
+
+  // Collapsed state — single-row button with today's climb count.
+  if (!open) {
+    return (
+      <Card style={{
+        marginBottom: 16,
+        padding: 0,
+        background: logged ? `${C.green}1a` : C.card,
+        border: `1px solid ${logged ? C.green : C.border}`,
+        transition: "all 0.2s",
+      }}>
+        <button
+          onClick={() => setOpen(true)}
+          style={{
+            width: "100%", padding: "12px 16px", background: "none", border: "none",
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between",
+            color: C.text, fontSize: 13, fontWeight: 600,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>🧗</span>
+            <span>{logged ? "Logged ✓" : "Log climbing session"}</span>
+          </div>
+          <div style={{ fontSize: 11, color: C.muted, fontWeight: 400 }}>
+            {todayClimbing.length > 0
+              ? `${todayClimbing.length} logged today · tap to add another`
+              : "tap to expand"}
+          </div>
+        </button>
+      </Card>
+    );
+  }
+
+  // Expanded state — discipline picker + RPE slider + save/cancel.
+  const DISCIPLINES = [
+    { key: "boulder",      label: "Boulder",      emoji: "🪨" },
+    { key: "sport",        label: "Sport",        emoji: "🧗" },
+    { key: "multi-pitch",  label: "Multi-pitch",  emoji: "⛰" },
+  ];
+
+  return (
+    <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>🧗 Log Climbing Session</div>
+        <button
+          onClick={() => setOpen(false)}
+          style={{
+            background: "none", border: "none", color: C.muted,
+            cursor: "pointer", fontSize: 12, padding: 0,
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+          Discipline
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {DISCIPLINES.map(d => (
+            <button
+              key={d.key}
+              onClick={() => setDiscipline(d.key)}
+              style={{
+                flex: 1, padding: "8px 4px", borderRadius: 8, cursor: "pointer",
+                background: discipline === d.key ? C.purple : C.bg,
+                color: discipline === d.key ? "#fff" : C.muted,
+                border: `1px solid ${discipline === d.key ? C.purple : C.border}`,
+                fontSize: 12, fontWeight: 600,
+              }}
+            >
+              <div style={{ fontSize: 14 }}>{d.emoji}</div>
+              <div style={{ marginTop: 2 }}>{d.label}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Effort (RPE)
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: C.purple }}>
+            {rpe}<span style={{ fontSize: 12, color: C.muted, fontWeight: 400 }}>/10</span>
+          </div>
+        </div>
+        <input
+          type="range"
+          min="1" max="10" step="1"
+          value={rpe}
+          onChange={(e) => setRpe(Number(e.target.value))}
+          style={{ width: "100%", accentColor: C.purple }}
+        />
+        <div style={{
+          fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.4,
+          minHeight: "1.4em", // reserve space so layout doesn't jump as user drags
+        }}>
+          {RPE_DESCRIPTIONS[rpe]}
+        </div>
+      </div>
+
+      <Btn onClick={handleSave} color={C.green} style={{ width: "100%" }}>
+        Save
+      </Btn>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// TRAINING BALANCE CARD
+// Per-zone staleness + annual session pace. Soft lockout: surfaces
+// zones that are approaching or past their detraining window so the
+// user can see what they've been avoiding. Stale zones also get
+// score-boosted in the coaching engine, so the recommendation will
+// pick them up too — this card just gives the user the same picture.
+// ─────────────────────────────────────────────────────────────
+function TrainingBalanceCard({ history }) {
+  const staleness = useMemo(() => getZoneStaleness(history), [history]);
+  const pace = useMemo(() => getAnnualSessionPace(history), [history]);
+
+  // Don't render until there's at least one rep — the empty state of
+  // "everything is `never`" doesn't help a brand-new user.
+  if (pace.current === 0) return null;
+
+  // Order: stale first (red), then warning (yellow), then never
+  // (gray, since the user hasn't tried that zone yet), then ok (green).
+  // Within each group, keep ZONE_KEYS physiological order.
+  const STATUS_ORDER = { stale: 0, warning: 1, never: 2, ok: 3 };
+  const STATUS_LABEL = {
+    stale:   { color: C.red,    text: "stale"   },
+    warning: { color: C.orange, text: "soon"    },
+    never:   { color: C.muted,  text: "never"   },
+    ok:      { color: C.green,  text: "fresh"   },
+  };
+  const sortedZones = [...ZONE_KEYS].sort((a, b) => {
+    const sa = STATUS_ORDER[staleness[a].status];
+    const sb = STATUS_ORDER[staleness[b].status];
+    if (sa !== sb) return sa - sb;
+    return ZONE_KEYS.indexOf(a) - ZONE_KEYS.indexOf(b);
+  });
+
+  // Headline status: count of zones in each bucket.
+  const counts = sortedZones.reduce((acc, k) => {
+    acc[staleness[k].status] = (acc[staleness[k].status] || 0) + 1;
+    return acc;
+  }, {});
+  const staleCount   = counts.stale   || 0;
+  const warningCount = counts.warning || 0;
+  const neverCount   = counts.never   || 0;
+
+  // Pace text — give the user a feel for whether they're on track.
+  const onPace = pace.paceYearEnd >= ANNUAL_SESSION_GOAL;
+  const paceLabel = onPace
+    ? `on pace for ${pace.paceYearEnd}`
+    : `pace ${pace.paceYearEnd} of ${ANNUAL_SESSION_GOAL}`;
+  const paceColor = onPace ? C.green : pace.paceYearEnd >= ANNUAL_SESSION_GOAL * 0.8 ? C.orange : C.red;
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Training Balance</div>
+        <div style={{ fontSize: 11, color: C.muted, textAlign: "right" }}>
+          <div><b style={{ color: C.text }}>{pace.current}</b> / {ANNUAL_SESSION_GOAL} this year</div>
+          <div style={{ color: paceColor, marginTop: 2 }}>{paceLabel}</div>
+        </div>
+      </div>
+
+      {/* Soft-lockout banner — only appears when zones are stale or
+          warning. Lists which zones are overdue so the user can see
+          what's pulling the recommendation. */}
+      {(staleCount > 0 || warningCount > 0 || neverCount > 0) && (
+        <div style={{
+          padding: "8px 10px", marginBottom: 12,
+          background: C.bg, borderRadius: 8,
+          border: `1px solid ${staleCount > 0 ? C.red : warningCount > 0 ? C.orange : C.border}40`,
+          fontSize: 11, color: C.muted, lineHeight: 1.5,
+        }}>
+          {staleCount > 0 && (
+            <div>
+              <span style={{ color: C.red, fontWeight: 700 }}>● {staleCount} stale</span>
+              {warningCount > 0 || neverCount > 0 ? " · " : ""}
+            </div>
+          )}
+          {warningCount > 0 && (
+            <div>
+              <span style={{ color: C.orange, fontWeight: 700 }}>● {warningCount} approaching</span>
+              {neverCount > 0 ? " · " : ""}
+            </div>
+          )}
+          {neverCount > 0 && (
+            <div>
+              <span style={{ color: C.muted, fontWeight: 700 }}>● {neverCount} never trained</span>
+            </div>
+          )}
+          <div style={{ marginTop: 4, fontStyle: "italic" }}>
+            The recommendation engine prioritizes stale zones so your training stays balanced.
+          </div>
+        </div>
+      )}
+
+      {/* Per-zone rows — sorted with stale first */}
+      <div>
+        {sortedZones.map(k => {
+          const s = staleness[k];
+          const cfg = STATUS_LABEL[s.status];
+          const window = LOCKOUT_WINDOW_DAYS[k];
+          const daysText = s.days == null
+            ? "never trained"
+            : s.days === 0
+              ? "today"
+              : s.days === 1
+                ? "1 day ago"
+                : `${s.days} days ago`;
+          return (
+            <div key={k} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "6px 0",
+              borderBottom: `1px solid ${C.border}`,
+            }}>
+              <div style={{ fontSize: 12, color: C.text }}>
+                {/* Use the GOAL_CONFIG label if available — fallback to the key */}
+                {k.replace(/_/g, " · ").replace(/\b\w/g, c => c.toUpperCase())}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ fontSize: 11, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                  {daysText}
+                </span>
+                <span style={{
+                  fontSize: 9, fontWeight: 700, color: cfg.color,
+                  background: `${cfg.color}1a`,
+                  padding: "2px 6px", borderRadius: 4,
+                  textTransform: "uppercase", letterSpacing: 0.5,
+                  whiteSpace: "nowrap",
+                }}>
+                  {cfg.text} · {window}d
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // ZONE COVERAGE CARD
 // Rolling 30-day count of Power / Strength / Endurance sessions.
 // ─────────────────────────────────────────────────────────────
@@ -549,6 +837,12 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
         </div>
       </Card>
 
+      {/* Climbing RPE quick-log — minimum-viable signal for the lockout
+          system. Lives near the top so logging a climbing day is a
+          one-tap action when the user opens the app to set up a finger
+          session. The full Climbing tab still owns detailed logging. */}
+      <ClimbingRPEQuickLog activities={activities} onLog={onLogActivity} />
+
       {/* Training Focus picker — same selector as Settings, surfaced
           here so the user can see and adjust the bias right where the
           coaching prescription is generated. The description below
@@ -624,6 +918,12 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
           </div>
         </div>
       </Card>
+
+      {/* Training Balance — staleness + annual pace. The soft-lockout
+          card. Recommendation engine reads the same staleness signal
+          and boosts stale zones; this surface gives the user the same
+          picture so the recommendation isn't a black box. */}
+      {history.length > 0 && <TrainingBalanceCard history={history} />}
 
       {/* Zone Workout Summary — neutral 30-day volume breakdown (no prescription) */}
       {/* (Level / journey card removed from setup — lives on the Journey tab now.) */}
