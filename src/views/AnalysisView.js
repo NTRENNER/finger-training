@@ -29,7 +29,7 @@ import {
   computeZoneCoverage,
 } from "../model/zones.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
-import { POWER_MAX, STRENGTH_MAX, ZONE_REF_T, ZONE_KEYS } from "../model/zones.js";
+import { STRENGTH_MAX, ZONE_REF_T, ZONE_KEYS, ZONE6 } from "../model/zones.js";
 import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
 import {
   fitCF, fitCFWithSuccessFloor,
@@ -824,12 +824,16 @@ export function AnalysisView({
   const limiterZoneBounds = useMemo(() => {
     const lim = computeLimiterZone(history);
     if (!lim) return null;
-    const zoneMap = {
-      power:     { x1: 0,            x2: POWER_MAX,    color: C.red,    label: "Limiter: Power"    },
-      strength:  { x1: POWER_MAX,    x2: STRENGTH_MAX, color: C.orange, label: "Limiter: Strength" },
-      endurance: { x1: STRENGTH_MAX, x2: maxDur + 10,  color: C.blue,   label: "Limiter: Endurance" },
+    // Derive bounds from ZONE6 directly so the 6-zone schema stays
+    // the single source of truth for boundaries and colors.
+    const z = ZONE6.find(zz => zz.key === lim.zone);
+    if (!z) return null;
+    return {
+      x1: z.min,
+      x2: z.max === Infinity ? maxDur + 10 : z.max,
+      color: z.color,
+      label: `Limiter: ${z.label}`,
     };
-    return zoneMap[lim.zone] || null;
   }, [history, maxDur]);
 
   // ── Relative strength helpers ──
@@ -876,6 +880,10 @@ export function AnalysisView({
   // to match the red/green rendering in History. The stored r.failed flag
   // only flips on auto-failure (Tindeq force-drop); manually-ended short
   // hangs leave r.failed=false even though the rep clearly failed.
+  // Per-zone Energy System Breakdown stats — driven by ZONE6 so the
+  // 6-zone schema is the single source of truth for boundaries +
+  // colors. The system + tau labels are mapped per-zone for the
+  // hybrids (which span two energy systems' time domains).
   const zones = useMemo(() => {
     const zoneStats = (lo, hi) => {
       const z = reps.filter(r => {
@@ -889,11 +897,40 @@ export function AnalysisView({
       return { total: z.length, failures: f, successes: z.length - f,
                failRate: z.length > 0 ? f / z.length : null };
     };
-    return {
-      power:     { ...zoneStats(0, POWER_MAX),                label: "Power",     color: C.red,    desc: "0–20s",    system: "Phosphocreatine",  tau: `τ₁ ≈ ${PHYS_MODEL_DEFAULT.tauR.fast}s`   },
-      strength:  { ...zoneStats(POWER_MAX, STRENGTH_MAX),     label: "Strength",  color: C.orange, desc: "20–120s",  system: "Glycolytic",       tau: `τ₂ ≈ ${PHYS_MODEL_DEFAULT.tauR.medium}s` },
-      endurance: { ...zoneStats(STRENGTH_MAX, Infinity),      label: "Endurance",  color: C.blue,   desc: "120s+",    system: "Oxidative",        tau: `τ₃ ≈ ${PHYS_MODEL_DEFAULT.tauR.slow}s`   },
+    const SYSTEM_BY_ZONE = {
+      max_strength:       "Neural / PCr",
+      power:              "Phosphocreatine",
+      power_strength:     "PCr–Glycolytic",
+      strength:           "Glycolytic",
+      strength_endurance: "Glycolytic–Oxidative",
+      endurance:          "Oxidative",
     };
+    const TAU_BY_ZONE = {
+      max_strength:       `≪ τ₁ (${PHYS_MODEL_DEFAULT.tauR.fast}s)`,
+      power:              `τ₁ ≈ ${PHYS_MODEL_DEFAULT.tauR.fast}s`,
+      power_strength:     `τ₁ → τ₂`,
+      strength:           `τ₂ ≈ ${PHYS_MODEL_DEFAULT.tauR.medium}s`,
+      strength_endurance: `τ₂ → τ₃`,
+      endurance:          `τ₃ ≈ ${PHYS_MODEL_DEFAULT.tauR.slow}s`,
+    };
+    const out = {};
+    for (const z of ZONE6) {
+      const hi = z.max === Infinity ? 9999 : z.max;
+      const desc = z.max === Infinity
+        ? `${z.min}s+`
+        : z.min === 0
+          ? `<${z.max}s`
+          : `${z.min}–${z.max}s`;
+      out[z.key] = {
+        ...zoneStats(z.min, hi),
+        label: z.label,
+        color: z.color,
+        desc,
+        system: SYSTEM_BY_ZONE[z.key],
+        tau: TAU_BY_ZONE[z.key],
+      };
+    }
+    return out;
   }, [reps]);
 
   // ── Personal response calibration ──
@@ -1149,10 +1186,23 @@ export function AnalysisView({
               <Tooltip content={<ScatterTooltip unit={forceUnit} />} />
               {/* Zone backgrounds — neutral tint for non-limiter zones,
                   extra saturation on the limiter zone so the chart
-                  echoes the SessionPlanner recommendation. */}
-              <ReferenceArea x1={0}            x2={POWER_MAX}    fill={C.red}    fillOpacity={limiterZoneBounds?.x1 === 0            ? 0.22 : 0.07} />
-              <ReferenceArea x1={POWER_MAX}    x2={STRENGTH_MAX} fill={C.orange} fillOpacity={limiterZoneBounds?.x1 === POWER_MAX    ? 0.22 : 0.07} />
-              <ReferenceArea x1={STRENGTH_MAX} x2={maxDur + 10}  fill={C.blue}   fillOpacity={limiterZoneBounds?.x1 === STRENGTH_MAX ? 0.22 : 0.07} />
+                  echoes the SessionPlanner recommendation. Driven by
+                  ZONE6 so the 6-zone schema is the single source of
+                  truth for both boundaries and colors. */}
+              {ZONE6.map(z => {
+                const x1 = z.min;
+                const x2 = z.max === Infinity ? maxDur + 10 : z.max;
+                const isLimiter = limiterZoneBounds?.x1 === z.min;
+                return (
+                  <ReferenceArea
+                    key={z.key}
+                    x1={x1}
+                    x2={x2}
+                    fill={z.color}
+                    fillOpacity={isLimiter ? 0.22 : 0.07}
+                  />
+                );
+              })}
               {/* Single-fit overlays only when NOT in per-grip split mode.
                   In split mode they'd be ambiguous (which grip's CF? which
                   3-exp? which 90% band?). Per-grip rendering takes over. */}
@@ -1269,11 +1319,25 @@ export function AnalysisView({
               })()}
             </ComposedChart>
           </ResponsiveContainer>
-          {/* Zone labels */}
-          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
-            <span style={{ color: C.red }}>⚡ Power &lt;20s</span>
-            <span style={{ color: C.orange }}>💪 Strength 20–120s</span>
-            <span style={{ color: C.blue }}>🔄 Endurance 120s+</span>
+          {/* Zone labels — 6-zone scheme. Wraps to two rows on narrow
+              screens so all six fit cleanly. Boundaries come from ZONE6
+              so labels stay in sync if the schema is tuned later. */}
+          <div style={{
+            display: "flex", flexWrap: "wrap", justifyContent: "center",
+            gap: "4px 12px", marginTop: 6, fontSize: 10, color: C.muted,
+          }}>
+            {ZONE6.map(z => {
+              const range = z.max === Infinity
+                ? `${z.min}s+`
+                : z.min === 0
+                  ? `<${z.max}s`
+                  : `${z.min}–${z.max}s`;
+              return (
+                <span key={z.key} style={{ color: z.color, whiteSpace: "nowrap" }}>
+                  {z.short} {range}
+                </span>
+              );
+            })}
           </div>
           {/* Model-fit diagnostic — training RMSE for the three-exp curve.
               Biased optimistic (training not holdout) but useful for
