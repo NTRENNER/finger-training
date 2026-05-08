@@ -203,17 +203,14 @@ export function AnalysisView({
 
   // ── Curve improvement % vs baseline ──
   // Reference durations for each zone come from ZONE_REF_T (the
-  // canonical model reference). Previously this used hardcoded
-  // {10, 45, 180} which drifted from the rest of the app when Power
-  // moved 10→7 and Endurance moved 180→120. The whole app now
-  // evaluates the F-D curve at the same three timepoints the user
-  // actually trains at, so this card's % deltas reflect "how much
-  // stronger am I at the times I train."
-  const REF = {
-    power:     ZONE_REF_T.power,
-    strength:  ZONE_REF_T.strength,
-    endurance: ZONE_REF_T.endurance,
-  };
+  // canonical model reference). Now built from ZONE_KEYS so the
+  // 6-zone schema flows through here automatically: this card's
+  // % deltas reflect "how much stronger am I at the times I train"
+  // across the full force-time landscape (max strength → endurance).
+  const REF = useMemo(
+    () => Object.fromEntries(ZONE_KEYS.map(k => [k, ZONE_REF_T[k]])),
+    []
+  );
 
   // Migrated from Monod (CF + W'/T) to the three-exp basis in March
   // 2026 — see commit migrating this card. The rest of the app moved
@@ -242,10 +239,10 @@ export function AnalysisView({
     return amps;
   };
 
-  // Reusable: compute {power, strength, endurance, total} Δ% from a
-  // current set of three-exp amps vs a reference set. Same shape as
-  // the old improvementForFit but operating on amps arrays instead
-  // of {CF, W} fit objects.
+  // Reusable: compute per-zone Δ% from a current set of three-exp
+  // amps vs a reference set. Returns one key per ZONE_KEY plus a
+  // `total` field that's the simple average across zones. Operating
+  // on amps arrays instead of {CF, W} fit objects.
   const improvementForAmps = (curAmps, refAmps) => {
     if (!curAmps || !refAmps) return null;
     const pct = (t) => {
@@ -254,11 +251,15 @@ export function AnalysisView({
       if (ref <= 0) return null;
       return Math.round((cur / ref - 1) * 100);
     };
-    const p = pct(REF.power);
-    const s = pct(REF.strength);
-    const e = pct(REF.endurance);
-    if (p == null || s == null || e == null) return null;
-    return { power: p, strength: s, endurance: e, total: Math.round((p + s + e) / 3) };
+    const result = {};
+    for (const k of ZONE_KEYS) {
+      const v = pct(REF[k]);
+      if (v == null) return null;
+      result[k] = v;
+    }
+    const sum = ZONE_KEYS.reduce((s, k) => s + result[k], 0);
+    result.total = Math.round(sum / ZONE_KEYS.length);
+    return result;
   };
 
   // Three-exp current fit on the filtered failures — this is the
@@ -439,13 +440,13 @@ export function AnalysisView({
         const rImp = rAmps ? improvementForAmps(rAmps, rBase.amps) : null;
         if (lImp && rImp) {
           const since = lBase.date < rBase.date ? lBase.date : rBase.date;
-          out[grip] = {
-            power:     Math.round((lImp.power     + rImp.power)     / 2),
-            strength:  Math.round((lImp.strength  + rImp.strength)  / 2),
-            endurance: Math.round((lImp.endurance + rImp.endurance) / 2),
-            total:     Math.round((lImp.total     + rImp.total)     / 2),
-            baselineDate: since,
-          };
+          // Average per-hand Δ% per zone — works for any number of zones
+          // since improvementForAmps now returns one key per ZONE_KEY.
+          const avg = { baselineDate: since };
+          for (const k of [...ZONE_KEYS, "total"]) {
+            avg[k] = Math.round((lImp[k] + rImp[k]) / 2);
+          }
+          out[grip] = avg;
           continue;
         }
       }
@@ -1436,22 +1437,31 @@ export function AnalysisView({
                 <div style={{ fontSize: 11, color: C.muted }}>total</div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {[
-                { label: "⚡ Power",     val: imp.power,     color: C.red    },
-                { label: "💪 Strength",  val: imp.strength,  color: C.orange },
-                { label: "🏔️ Endurance",  val: imp.endurance, color: C.blue   },
-              ].map(({ label, val, color }) => (
-                <div key={label} style={{
-                  flex: 1, background: C.bg, borderRadius: 10, padding: "8px 6px", textAlign: "center",
-                  border: `1px solid ${color}30`,
-                }}>
-                  <div style={{ fontSize: 10, color: C.muted, marginBottom: 3 }}>{label}</div>
-                  <div style={{ fontSize: 17, fontWeight: 800, color: val >= 0 ? color : C.red }}>
-                    {val >= 0 ? "+" : ""}{val}%
+            {/* 6 zone tiles. Two rows of three on narrow screens
+                (gridTemplateColumns auto-wraps via `repeat(3, ...)`).
+                Short labels (Max/Pwr/P/S/Str/S/E/End) keep tiles
+                readable on mobile. Driven by ZONE6 so labels and
+                colors come from the schema. */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 6,
+            }}>
+              {ZONE6.map(z => {
+                const val = imp[z.key];
+                if (val == null) return null;
+                return (
+                  <div key={z.key} style={{
+                    background: C.bg, borderRadius: 10, padding: "8px 6px", textAlign: "center",
+                    border: `1px solid ${z.color}30`,
+                  }}>
+                    <div style={{ fontSize: 9, color: C.muted, marginBottom: 3 }}>{z.short}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: val >= 0 ? z.color : C.red }}>
+                      {val >= 0 ? "+" : ""}{val}%
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
@@ -1517,12 +1527,13 @@ export function AnalysisView({
             const lImp = lAmps ? improvementForAmps(lAmps, lBase.amps) : null;
             const rImp = rAmps ? improvementForAmps(rAmps, rBase.amps) : null;
             if (lImp && rImp) {
-              scopedImp = {
-                power:     Math.round((lImp.power     + rImp.power)     / 2),
-                strength:  Math.round((lImp.strength  + rImp.strength)  / 2),
-                endurance: Math.round((lImp.endurance + rImp.endurance) / 2),
-                total:     Math.round((lImp.total     + rImp.total)     / 2),
-              };
+              // Average per-hand Δ% per zone — works for any number of
+              // zones since improvementForAmps returns one key per
+              // ZONE_KEY.
+              scopedImp = {};
+              for (const k of [...ZONE_KEYS, "total"]) {
+                scopedImp[k] = Math.round((lImp[k] + rImp[k]) / 2);
+              }
               // Use the EARLIER of the two baseline dates as the "since"
               // label so the reader sees the start of meaningful tracking.
               scopedBaselineDate = lBase.date < rBase.date ? lBase.date : rBase.date;
@@ -1752,17 +1763,17 @@ export function AnalysisView({
                 // so the page never has unsigned-negative numbers in zone
                 // colors that read as alarms when they actually mean wins.
                 const maxAbs = Math.max(0.05, ...Object.values(rec.zoneGaps).filter(v => v != null).map(v => Math.abs(v)));
-                return [
-                  { k: "power",     lbl: "Power",    col: C.red },
-                  { k: "strength",  lbl: "Strength", col: C.orange },
-                  { k: "endurance", lbl: "Endurance", col: C.blue },
-                ].map(r => {
-                  const v = rec.zoneGaps[r.k];
+                // Iterate ZONE6 so all six zones render in physiological
+                // order. Short labels keep the row compact; the bar +
+                // value column tells the user which zone has room and
+                // which is ahead.
+                return ZONE6.map(z => {
+                  const v = rec.zoneGaps[z.key];
                   const pct = v == null ? 0 : Math.min(100, Math.max(0, (Math.abs(v) / maxAbs) * 100));
-                  const isBest = r.k === rec.key;
+                  const isBest = z.key === rec.key;
                   // Bar color: zone color for "room to grow" (action zone),
                   // green for "ahead of model" (already exceeding — good).
-                  const barColor = v == null ? C.muted : (v >= 0 ? r.col : C.green);
+                  const barColor = v == null ? C.muted : (v >= 0 ? z.color : C.green);
                   // Label: "X% room" if under potential (training opportunity);
                   // "X% ahead" if over potential (outperforming the model).
                   const label = v == null ? "—"
@@ -1770,12 +1781,12 @@ export function AnalysisView({
                               : `${Math.round(Math.abs(v) * 100)}% ahead`;
                   const labelColor = v == null ? C.muted
                                    : v < 0 ? C.green
-                                   : isBest ? r.col
+                                   : isBest ? z.color
                                    : C.muted;
                   return (
-                    <div key={r.k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <span style={{ width: 62, color: r.col, fontWeight: isBest ? 700 : 400 }}>
-                        {r.lbl}
+                    <div key={z.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ width: 70, color: z.color, fontWeight: isBest ? 700 : 400, fontSize: 10 }}>
+                        {z.short}
                       </span>
                       <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
                         <div style={{ height: "100%", width: `${pct}%`, background: barColor, borderRadius: 3, transition: "width 0.3s", opacity: v == null ? 0.4 : 1 }} />
