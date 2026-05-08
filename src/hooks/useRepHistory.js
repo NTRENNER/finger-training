@@ -71,17 +71,42 @@ export function useRepHistory({ user }) {
   const [history, setHistory] = useState(() => loadLS(LS_HISTORY_KEY) || []);
   useEffect(() => saveLS(LS_HISTORY_KEY, history), [history]);
 
-  // Stable fingerprint for fatigue/prior memos so unrelated
-  // history-array reference churn (cloud syncs that touch the
-  // array without actually adding rows) doesn't re-fire the
-  // O(N) fits below. Length + last-rep id + last-rep date is
-  // enough to capture the dominant "new rep added" case; edits
-  // to old reps will use the stale memo until the next session,
-  // which is fine since the fits aren't sensitive to small
-  // shifts in old data.
+  // Content-aware fingerprint for fatigue/prior memos. Cloud-sync
+  // poll churn (history array reference changes without content
+  // changes) is filtered by the outer useMemo's reference compare
+  // — we only pay the O(N) string-build when history actually
+  // re-references. Downstream memos then key off the fingerprint
+  // string, so they ONLY recompute when content meaningfully
+  // changed (a new rep, an edit to an old rep, or a delete).
+  //
+  // Previous version used `history.length | last.id | last.date`,
+  // which missed edits to old reps entirely. Fixing a typo on a
+  // historical avg_force_kg or weight_kg silently left freshMap /
+  // threeExpPriors stale until the next session — and for outlier
+  // reps near curve hinge points, that staleness measurably
+  // shifted CF / W' / amps. Worth the per-update O(N) cost to get
+  // the right answer.
+  //
+  // Fields included: those that feed the fit functions
+  // (target_duration, actual_time_s, avg_force_kg, peak_force_kg,
+  // weight_kg, failed, rep_num, rest_s) plus filter/identity
+  // fields (id, date, hand, grip). set_num is not consumed by the
+  // fit code paths so it's omitted to keep the string smaller.
   const freshMapFp = useMemo(() => {
-    const last = history[history.length - 1];
-    return `${history.length}|${last?.id ?? ""}|${last?.date ?? ""}`;
+    return history.map(r => [
+      r.id,
+      r.date,
+      r.hand,
+      r.grip,
+      r.target_duration,
+      r.actual_time_s,
+      r.avg_force_kg,
+      r.peak_force_kg,
+      r.weight_kg,
+      r.failed ? 1 : 0,
+      r.rep_num,
+      r.rest_s,
+    ].join(":")).join("|");
   }, [history]);
 
   const freshMap = useMemo(() => {
