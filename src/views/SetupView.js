@@ -29,7 +29,7 @@ import { fmt0, fmtW, toDisp, fromDisp } from "../ui/format.js";
 import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 import { WarmupView } from "./WarmupView.js";
 
-import { computeZoneCoverage } from "../model/zones.js";
+import { computeZoneCoverage, ZONE_KEYS } from "../model/zones.js";
 import { computeLimiterZone } from "../model/limiter.js";
 import { predictRepTimes } from "../model/fatigue.js";
 import {
@@ -757,7 +757,10 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
           return { trainAt, source, potential };
         };
 
-        const zones = ["power", "strength", "endurance"].map(zoneKey => {
+        // Iterate ZONE_KEYS so all 6 zones get a card. The display
+        // grid below (changed from 3-col to 3×2) lays them out in two
+        // rows to keep cards readable on phones.
+        const zones = ZONE_KEYS.map(zoneKey => {
           const t = GOAL_CONFIG[zoneKey].refTime;
           const L = cellFor("L", t);
           const R = cellFor("R", t);
@@ -905,7 +908,14 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                   <div>
                     <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Balanced · largest curve gap:</span>{" "}
                     {widestGap.zoneLabel} — <b>{fmtPct(widestGap.gap)}</b> headroom{" "}
-                    ({widestGap.zoneKey === "power" ? "fast (PCr)" : widestGap.zoneKey === "strength" ? "middle (glycolytic)" : "slow (oxidative)"} compartment).
+                    ({
+                      widestGap.zoneKey === "max_strength"       ? "neural / fast (PCr)" :
+                      widestGap.zoneKey === "power"              ? "fast (PCr)" :
+                      widestGap.zoneKey === "power_strength"     ? "fast / middle (PCr-glycolytic)" :
+                      widestGap.zoneKey === "strength"           ? "middle (glycolytic)" :
+                      widestGap.zoneKey === "strength_endurance" ? "middle / slow (glycolytic-aerobic)" :
+                                                                   "slow (oxidative)"
+                    } compartment).
                   </div>
                   {recZone && (
                     <div style={{ marginTop: 6 }}>
@@ -925,7 +935,10 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                 </div>
               );
             })()}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            {/* 3-column grid that wraps to 2 rows of 3 for the 6-zone
+                schema. Each card shows the per-hand (L/R) prescribed
+                load + curve potential for that zone's reference time. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
               {zones.map(({ key, cfg, t, L, R }) => {
                 const isActive = config.goal === key;
                 return (
