@@ -300,15 +300,20 @@ export function coachingRecommendation(history, grip, opts = {}) {
 // picked, not just THAT it was picked.
 export function coachingRationale(rec) {
   if (!rec) return "";
-  // Energy-system label per zone for the rationale text. Hybrids name
-  // both crossover compartments since neither dominates exclusively.
+  // Energy-system label per zone for the rationale text. Names the
+  // curve-fit components — fast / middle / slow — for the time
+  // domains they sit in. Energy-system tags (PCr / glycolytic /
+  // oxidative) are kept in parentheses as the systems each component
+  // approximately aligns with in the climbing-physiology literature,
+  // not as direct measurements of underlying tissue pools. Hybrids
+  // name both crossover components since neither dominates.
   const compName =
-      rec.zone === "max_strength"       ? "neural / fast (PCr)"
-    : rec.zone === "power"              ? "fast (PCr)"
-    : rec.zone === "power_strength"     ? "fast / middle (PCr-glycolytic)"
-    : rec.zone === "strength"           ? "middle (glycolytic)"
-    : rec.zone === "strength_endurance" ? "middle / slow (glycolytic-aerobic)"
-    :                                     "slow (oxidative)";
+      rec.zone === "max_strength"       ? "neural / fast (PCr-aligned)"
+    : rec.zone === "power"              ? "fast (PCr-aligned)"
+    : rec.zone === "power_strength"     ? "fast / middle (PCr-glycolytic-aligned)"
+    : rec.zone === "strength"           ? "middle (glycolytic-aligned)"
+    : rec.zone === "strength_endurance" ? "middle / slow (glycolytic-aerobic-aligned)"
+    :                                     "slow (oxidative-aligned)";
   // Note: rec.hand still tracks the better-scoring hand internally for
   // the per-zone score, but we don't surface it in the rationale text.
   // Most users train both hands per session, so saying "on Left" /
@@ -318,10 +323,10 @@ export function coachingRationale(rec) {
   const reasons = [];
   if (rec.gap > 0.10) {
     const pct = Math.round(rec.gap * 100);
-    reasons.push(`+${pct}% gap (your ${compName} compartment is your widest opportunity)`);
+    reasons.push(`+${pct}% gap (your ${compName} component is your widest opportunity)`);
   } else if (rec.gap > -0.05) {
     // Near-zero gap: user is essentially AT potential here. Maintain.
-    reasons.push(`at potential (your ${compName} compartment is balanced — best zone among balanced options)`);
+    reasons.push(`at potential (your ${compName} component is balanced — best zone among balanced options)`);
   } else {
     // Negative gap: user is exceeding the model's view of potential.
     // The model is running behind your real fitness here.
@@ -331,7 +336,7 @@ export function coachingRationale(rec) {
   // Residual signal — visible on the F-D chart as dots-vs-three-exp-curve.
   // Strong limiter signal when the user's actuals fall systematically below
   // the three-exp curve in this zone (the curve over-predicts → physiology
-  // can't keep up → limiter compartment).
+  // can't keep up → limiter component).
   if (rec.resFactor != null) {
     if (rec.resFactor >= 1.5) {
       const pct = Math.round((rec.resFactor - 1) * 10); // approx mean residual %

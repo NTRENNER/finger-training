@@ -369,9 +369,13 @@ CREATE POLICY "auth_all" ON reps
       <Card>
         <Sect title="About">
           <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
-            <b>Fatigue Model:</b> Three-compartment IV-kinetics analogy. Fast (15 s), medium (90 s),
-            and slow (600 s) exponential decay model phosphocreatine replenishment, glycolytic clearance,
-            and metabolic byproduct removal respectively.
+            <b>Fatigue Model:</b> Phenomenological three-component decay
+            (sum of three exponentials, fast ≈15 s / medium ≈90 s / slow ≈600 s).
+            The components are named for the energy systems they approximately
+            align with — phosphocreatine replenishment, glycolytic clearance,
+            and aerobic / metabolic byproduct removal — but they're regression
+            components fit to your data, not direct measurements of underlying
+            tissue pools.
             <br /><br />
             <b>Level System:</b> Each 5% improvement in your best load at a target duration = +1 level.
             <br /><br />

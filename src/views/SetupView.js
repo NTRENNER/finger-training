@@ -1209,13 +1209,13 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                     <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Balanced · largest curve gap:</span>{" "}
                     {widestGap.zoneLabel} — <b>{fmtPct(widestGap.gap)}</b> headroom{" "}
                     ({
-                      widestGap.zoneKey === "max_strength"       ? "neural / fast (PCr)" :
-                      widestGap.zoneKey === "power"              ? "fast (PCr)" :
-                      widestGap.zoneKey === "power_strength"     ? "fast / middle (PCr-glycolytic)" :
-                      widestGap.zoneKey === "strength"           ? "middle (glycolytic)" :
-                      widestGap.zoneKey === "strength_endurance" ? "middle / slow (glycolytic-aerobic)" :
-                                                                   "slow (oxidative)"
-                    } compartment).
+                      widestGap.zoneKey === "max_strength"       ? "neural / fast (PCr-aligned)" :
+                      widestGap.zoneKey === "power"              ? "fast (PCr-aligned)" :
+                      widestGap.zoneKey === "power_strength"     ? "fast / middle (PCr-glycolytic-aligned)" :
+                      widestGap.zoneKey === "strength"           ? "middle (glycolytic-aligned)" :
+                      widestGap.zoneKey === "strength_endurance" ? "middle / slow (glycolytic-aerobic-aligned)" :
+                                                                   "slow (oxidative-aligned)"
+                    } component).
                   </div>
                   {recZone && (
                     <div style={{ marginTop: 6 }}>

@@ -189,44 +189,19 @@ regression in the chart filters and the cross-card recommendation echo
 
 ---
 
-## 4. Hedge model-precision language
+## 4. Hedge model-precision language ✓ SHIPPED
 
-**Problem.** The three-exp force-duration model
-F(T) = a·e^(-T/τ₁) + b·e^(-T/τ₂) + c·e^(-T/τ₃) is phenomenological
-— a sum of three exponentials with fixed time constants fitted to
-force-duration data. It predicts well (~7% RMSE improvement over
-Monod in offline validation) but the math doesn't require the three
-terms to map to literal PCr / glycolytic / oxidative compartments.
-The amplitudes (a, b, c) are regression coefficients that *behave*
-like compartment amplitudes, not strict tissue probes.
-
-The codebase routinely overstates this. Examples:
-
-- Energy System Breakdown card shows fast/medium/slow percentages
-  that read as physiology, not as model fit.
-- `GOAL_CONFIG` rationale strings include claims like "20s refills
-  ~75% of PCr (τ₁≈15s) between hangs" — physiology claim that
-  exceeds what the math justifies.
-- Per-zone captions ("fast (PCr) / middle (glycolytic) / slow
-  (oxidative)" compartments) are named as if read off a tissue
-  probe rather than as a fit-mapping convenience.
-
-**Fix.** Mostly a tone pass on captions and rationale strings:
-
-- Reframe compartment language as "fast / medium / slow regression
-  components, named for the energy systems they approximately
-  align with."
-- Soften absolute physiology claims in `GOAL_CONFIG` rationales
-  ("aligns with PCr's depletion timeline" rather than "refills 75%
-  of PCr").
-- Add a one-liner to the Energy System Breakdown card explaining
-  that percentages reflect curve fit, not direct measurement.
-
-No math changes. Could ship as a focused polish PR — low risk,
-low effort.
-
-**Effort.** Small. Pure copy edits across GOAL_CONFIG comments and
-a handful of card captions.
+Delivered: `GOAL_CONFIG` rationales softened (literal "refills 75% of
+PCr" / "PCr-glycolytic crossover" claims rephrased as fast/medium/slow
+component framing aligned with the energy-system literature), Energy
+System Breakdown card now leads with a hedging caption (labels reflect
+curve-fit components, not direct measurements), `coachingRationale`
+and the `widestGap` callout in SetupView use "-aligned" suffix
+("fast (PCr-aligned)" instead of "fast (PCr)"), AnalysisView system
+labels and F-D chart legend tooltips updated, SettingsView About panel
+reframes the fatigue model as phenomenological, and `threeExp.js`
+header now states the phenomenological-not-mechanistic caveat
+explicitly. No math changes; tests still 130/130 green.
 
 ---
 

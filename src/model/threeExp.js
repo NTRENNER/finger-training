@@ -3,11 +3,24 @@
 // ─────────────────────────────────────────────────────────────
 // F(T) = a·exp(-T/τ₁) + b·exp(-T/τ₂) + c·exp(-T/τ₃)
 //
+// IMPORTANT: this model is PHENOMENOLOGICAL, not mechanistic.
+// It's a sum of three exponentials with fixed time constants fit to
+// force-duration data. It predicts well (~7% RMSE improvement over
+// Monod in offline LOO-CV) but the math doesn't require the three
+// terms to map to literal PCr / glycolytic / oxidative tissue pools.
+// The amplitudes (a, b, c) are regression coefficients that *behave*
+// like compartment amplitudes given the chosen time constants — not
+// strict tissue probes. We name the components fast / medium / slow
+// for the energy systems they approximately align with in the
+// climbing-physiology literature; downstream UI uses the "-aligned"
+// suffix to keep that distinction visible to users.
+//
 // τ₁, τ₂, τ₃ are the DEPLETION time constants (PHYS_MODEL_DEFAULT.tauD)
-// of the three energy compartments — fast (PCr ≈10s), medium (glycolytic
-// ≈30s), slow (oxidative ≈180s). The model describes how max sustainable
-// force decays during a sustained hold, which is depletion physics, so
-// the basis is the depletion taus, not the recovery taus.
+// of the three model components — fast (≈10s, PCr-aligned), medium
+// (≈30s, glycolytic-aligned), slow (≈180s, oxidative-aligned). The
+// model describes how max sustainable force decays during a sustained
+// hold, which is depletion physics, so the basis is the depletion
+// taus, not the recovery taus.
 //
 // (Earlier versions of this model used tauR as the basis by accident —
 // inherited from the rest-period fatigue decay model where tauR is the

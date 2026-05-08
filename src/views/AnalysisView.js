@@ -898,13 +898,18 @@ export function AnalysisView({
       return { total: z.length, failures: f, successes: z.length - f,
                failRate: z.length > 0 ? f / z.length : null };
     };
+    // Zone → energy-system label. These are how the curve fit's
+    // fast / middle / slow components align with the climbing-
+    // physiology literature — phenomenological labels for the
+    // regression components, not direct measurements of underlying
+    // tissue pools.
     const SYSTEM_BY_ZONE = {
-      max_strength:       "Neural / PCr",
-      power:              "Phosphocreatine",
-      power_strength:     "PCr–Glycolytic",
-      strength:           "Glycolytic",
-      strength_endurance: "Glycolytic–Oxidative",
-      endurance:          "Oxidative",
+      max_strength:       "Neural / fast",
+      power:              "Fast (PCr-aligned)",
+      power_strength:     "Fast → middle",
+      strength:           "Middle (glycolytic-aligned)",
+      strength_endurance: "Middle → slow",
+      endurance:          "Slow (oxidative-aligned)",
     };
     const TAU_BY_ZONE = {
       max_strength:       `≪ τ₁ (${PHYS_MODEL_DEFAULT.tauR.fast}s)`,
@@ -1155,8 +1160,8 @@ export function AnalysisView({
               <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
                 <span><span style={{ color: C.green }}>●</span> Completed</span>
                 <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
-                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Sum of three exponentials with depletion-tau basis (PCr/glycolytic/oxidative)."><span style={{ color: C.purple }}>―</span> F-D curve (3-exp)</span>}
-                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow/oxidative compartment dominates here. The closest analog to a 'sustainable force' reference."><span style={{ color: C.purple }}>╌</span> 3-min sustainable</span>}
+                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Phenomenological sum of three exponentials with depletion-tau basis; the fast / middle / slow components approximately align with PCr / glycolytic / oxidative timescales but are not direct tissue measurements."><span style={{ color: C.purple }}>―</span> F-D curve (3-exp)</span>}
+                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow component dominates here, broadly aligned with sustainable / oxidative-driven work in the climbing literature. The closest model analog to a 'sustainable force' reference."><span style={{ color: C.purple }}>╌</span> 3-min sustainable</span>}
                 {splitMode && Object.keys(fdSplitData).map(g => (
                   <span key={g}>
                     <span style={{ color: GRIP_COLORS[g] || C.blue }}>―</span> {g}
@@ -1210,8 +1215,10 @@ export function AnalysisView({
               {/* 3-min sustainable reference from three-exp at T=180s
                   (replaces the Monod CF asymptote, since three-exp has
                   no true asymptote — it decays to 0). At 180s the slow
-                  oxidative compartment dominates; this is the closest
-                  physiological analog to "what you can sustain". */}
+                  curve-fit component dominates; this is the closest
+                  model analog to "what you can sustain", broadly
+                  aligned with sustainable / oxidative-driven force in
+                  the climbing-physiology literature. */}
               {!fdSplitData && threeExpRef180 != null && (
                 <ReferenceLine
                   y={useRel ? threeExpRef180 / bodyWeight : toDisp(threeExpRef180, unit)}
@@ -1609,7 +1616,7 @@ export function AnalysisView({
                 </>
               ) : (
                 <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-                  Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the three-exp fit can't separate the fast / medium / slow compartments cleanly enough for the per-zone Δ% to be meaningful.
+                  Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the three-exp fit can't separate the fast / medium / slow components cleanly enough for the per-zone Δ% to be meaningful.
                 </div>
               )
             ) : selGrip ? (
