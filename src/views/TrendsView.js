@@ -468,7 +468,12 @@ export function TrendsView({ history, unit = "lbs", activities = [], defaultWork
 
   const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
 
-  const data = useMemo(() => {
+  // Per-day max load for the selected grip + target duration, with
+  // running PR flags. Renamed from `data` after the per-day chart
+  // that consumed it was removed (see comment further down) — the
+  // PR cards still rely on this aggregation, but the old name read
+  // like it was feeding a chart that no longer exists.
+  const dailyFingerPRData = useMemo(() => {
     const byDate = {};
     for (const r of history.filter(r =>
       r.target_duration === sel &&
@@ -495,13 +500,13 @@ export function TrendsView({ history, unit = "lbs", activities = [], defaultWork
 
   // Latest PR values for summary display
   const latestPR = useMemo(() => {
-    const prsL = data.filter(d => d.isPR_L);
-    const prsR = data.filter(d => d.isPR_R);
+    const prsL = dailyFingerPRData.filter(d => d.isPR_L);
+    const prsR = dailyFingerPRData.filter(d => d.isPR_R);
     return {
       L: prsL.length ? prsL[prsL.length - 1] : null,
       R: prsR.length ? prsR[prsR.length - 1] : null,
     };
-  }, [data]);
+  }, [dailyFingerPRData]);
 
   // (The `lines` array used to drive the chart's L/R series — it was
   // dropped when the chart itself was removed.)
@@ -562,7 +567,7 @@ export function TrendsView({ history, unit = "lbs", activities = [], defaultWork
         </div>
       )}
 
-      {data.length === 0 ? (
+      {dailyFingerPRData.length === 0 ? (
         <div style={{ textAlign: "center", color: C.muted, marginTop: 60 }}>
           No data for this filter yet.
         </div>
@@ -600,9 +605,11 @@ export function TrendsView({ history, unit = "lbs", activities = [], defaultWork
               looked at — the per-day line was visually noisy without
               adding insight (the F-D chart on the Analysis tab tells
               the load-vs-time story with proper modeling). The
-              `data` / `lines` memos that fed it are still computed
-              one scope up because `latestPR` is derived from the
-              same per-day aggregation; that's fine, it's cheap. */}
+              `dailyFingerPRData` memo (named that way for exactly
+              this reason — it's no longer a chart feed) is still
+              computed one scope up because `latestPR` is derived
+              from the same per-day aggregation; that's fine, it's
+              cheap. */}
         </>
       )}
       </>}

@@ -30,8 +30,22 @@ everything" framing because it just relocates the centralization):
   last-pulled-at, sync status. Takes data setters as deps; doesn't
   own the data itself.
 - `useFingerHistory()` — rep history + baseline + gripEstimates +
-  threeExpPriors + freshMap. Natural cohesion: rep saved → curve
-  refits → baseline checks → gripEstimates updates.
+  threeExpPriors + freshMap, **PLUS the structurally-shared model
+  derivations**: `gripBaselines` (≥5-failure per-grip seed window)
+  and `perHandGripBaselines` (hand-scoped variant). These are
+  currently duplicated between `AnalysisView` (Curve Improvement
+  card, Performance vs. Model chart) and `BadgesView` (per-grip
+  AUC growth). Lifting them into the hook unifies the computation
+  + saves work since both views currently pay the O(N) baseline
+  scan independently. Other AnalysisView-specific chart prep
+  (gripRecs, gapHistory, aucHistoryByGrip, F-D chart series)
+  stays in the view — those have only one consumer.
+
+  Does NOT include a single `useModelSelectors()` mega-hook that
+  returns every derived value at once. That just hides the
+  dependency graph one layer down and forces views to pay for
+  derivations they don't need. Per-concern composition is the
+  better pattern.
 - `useActivities()` — climbing log + 1RM activities. Small, isolated.
 
 **What stays in `App.js`.** Phase machine, tab routing, top-level
