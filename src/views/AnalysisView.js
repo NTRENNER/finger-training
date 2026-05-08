@@ -29,7 +29,7 @@ import {
   computeZoneCoverage,
 } from "../model/zones.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
-import { POWER_MAX, STRENGTH_MAX, ZONE_REF_T } from "../model/zones.js";
+import { POWER_MAX, STRENGTH_MAX, ZONE_REF_T, ZONE_KEYS } from "../model/zones.js";
 import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
 import {
   fitCF, fitCFWithSuccessFloor,
@@ -56,17 +56,32 @@ import { EnergySystemBreakdownCard } from "./analysis/EnergySystemBreakdownCard.
 // ─────────────────────────────────────────────────────────────
 // ZONE_DETAILS — shared recommendation metadata used by both the
 // pooled/selGrip-scoped `recommendation` useMemo and the per-grip
-// `gripRecs` useMemo so the title/color/caption shown for "Train
-// Power / Strength / Endurance" stay consistent between scopes.
+// `gripRecs` useMemo so the title/color/caption stay consistent
+// between scopes. One entry per ZONE_KEY (6 total after the
+// May 2026 6-zone migration) so coachingRecommendation can return
+// any zone without ZONE_DETAILS[coach.zone] coming back undefined
+// and crashing the render.
 // ─────────────────────────────────────────────────────────────
 const ZONE_DETAILS = {
+  max_strength: {
+    title: "Train Max Strength", color: "#c83838",
+    caption: "near-MVC efforts that develop neural drive and motor unit recruitment — the ceiling that all other zones operate against.",
+  },
   power: {
     title: "Train Power", color: C.red,
     caption: "short, high-force efforts that develop W′, the finite anaerobic reserve above your CF asymptote.",
   },
+  power_strength: {
+    title: "Train Power/Strength", color: "#e68a48",
+    caption: "mid-glycolytic crossover holds that build lactate buffering capacity and power endurance.",
+  },
   strength: {
     title: "Train Strength", color: C.orange,
     caption: "mid-duration max hangs that lift the force ceiling — and with it, CF.",
+  },
+  strength_endurance: {
+    title: "Train Strength/Endurance", color: "#7aa0d8",
+    caption: "aerobic-glycolytic blend holds that bridge max-effort capacity with sustained CF work.",
   },
   endurance: {
     title: "Train Endurance", color: C.blue,
@@ -923,7 +938,7 @@ export function AnalysisView({
       if (coach) {
         const d = ZONE_DETAILS[coach.zone];
         // Compute per-zone gap landscape for the bars
-        const zones = ["power", "strength", "endurance"];
+        const zones = ZONE_KEYS;
         const zoneGaps = {};
         for (const zoneKey of zones) {
           const t = GOAL_CONFIG[zoneKey].refTime;
