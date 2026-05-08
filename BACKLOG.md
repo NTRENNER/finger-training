@@ -186,3 +186,78 @@ Wrong order means moving the same code twice. Correct order:
 there are 4 of them, and the prop wiring needs care to avoid
 regression in the chart filters and the cross-card recommendation echo
 (Curve Improvement banner ↔ Train card).
+
+---
+
+## 4. Hedge model-precision language
+
+**Problem.** The three-exp force-duration model
+F(T) = a·e^(-T/τ₁) + b·e^(-T/τ₂) + c·e^(-T/τ₃) is phenomenological
+— a sum of three exponentials with fixed time constants fitted to
+force-duration data. It predicts well (~7% RMSE improvement over
+Monod in offline validation) but the math doesn't require the three
+terms to map to literal PCr / glycolytic / oxidative compartments.
+The amplitudes (a, b, c) are regression coefficients that *behave*
+like compartment amplitudes, not strict tissue probes.
+
+The codebase routinely overstates this. Examples:
+
+- Energy System Breakdown card shows fast/medium/slow percentages
+  that read as physiology, not as model fit.
+- `GOAL_CONFIG` rationale strings include claims like "20s refills
+  ~75% of PCr (τ₁≈15s) between hangs" — physiology claim that
+  exceeds what the math justifies.
+- Per-zone captions ("fast (PCr) / middle (glycolytic) / slow
+  (oxidative)" compartments) are named as if read off a tissue
+  probe rather than as a fit-mapping convenience.
+
+**Fix.** Mostly a tone pass on captions and rationale strings:
+
+- Reframe compartment language as "fast / medium / slow regression
+  components, named for the energy systems they approximately
+  align with."
+- Soften absolute physiology claims in `GOAL_CONFIG` rationales
+  ("aligns with PCr's depletion timeline" rather than "refills 75%
+  of PCr").
+- Add a one-liner to the Energy System Breakdown card explaining
+  that percentages reflect curve fit, not direct measurement.
+
+No math changes. Could ship as a focused polish PR — low risk,
+low effort.
+
+**Effort.** Small. Pure copy edits across GOAL_CONFIG comments and
+a handful of card captions.
+
+---
+
+## 5. Per-hand limiter diagnostic + audit `fitAdaptiveHandCurve` callers
+
+**Problem.** `fitAdaptiveHandCurve` returns the stronger hand's fit
+when L/R CF diverges >20%. For climbing the weaker hand is often the
+actual limiter, so an "always-stronger" pooled fit is biased optimistic.
+
+**Impact in current code is smaller than it sounds.** Most modern
+code paths are already per-hand:
+
+- `perHandGripBaselines`, `prescribedLoad`, `empiricalPrescription`,
+  the coaching engine, and the F-D chart's L-vs-R split all work
+  per-hand and aren't affected.
+- The bias leaks only into the pooled views: `liveEstimate`,
+  `gripEstimates` (when no hand filter), and the Curve Improvement
+  card's pooled-fit fallback.
+
+**Three-bucket fix** (matching the audit recommendation):
+
+- *Global ceiling* (e.g., F-D chart with no hand filter, headline
+  AUC card) — stronger hand is fine. No change.
+- *Prescription / recommendation* — already per-hand. Audit the
+  call sites to confirm none accidentally use the pooled fit when
+  a per-hand fit was available.
+- *Limiter diagnosis* — currently we don't surface "your weaker
+  hand is X% behind your stronger hand" anywhere. Adding a
+  per-hand asymmetry diagnostic (small banner on Curve Improvement
+  or the F-D chart) is the real gap. Not a refactor — a small new
+  feature.
+
+**Effort.** Small for the audit pass; small-medium for the new
+diagnostic surface.
