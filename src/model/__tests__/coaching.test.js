@@ -39,23 +39,25 @@ describe("recencyPenalty", () => {
 
   test("returns near-zero immediately after training (today)", () => {
     const today = new Date().toISOString().slice(0, 10);
-    const history = [{ grip: "Crusher", target_duration: 7, date: today }];
+    // Power refTime is 30s after the 6-zone migration.
+    const history = [{ grip: "Crusher", target_duration: 30, date: today }];
     const out = recencyPenalty("power", history, "Crusher");
     expect(out).toBeLessThan(0.1);
   });
 
   test("approaches 1.0 as days_ago grows", () => {
     const longAgo = "2020-01-01";
-    const history = [{ grip: "Crusher", target_duration: 7, date: longAgo }];
+    const history = [{ grip: "Crusher", target_duration: 30, date: longAgo }];
     expect(recencyPenalty("power", history, "Crusher")).toBeGreaterThan(0.9);
   });
 
   test("matches by grip + target_duration (not other zones)", () => {
     const today = new Date().toISOString().slice(0, 10);
-    const history = [{ grip: "Crusher", target_duration: 45, date: today }];
+    // Strength refTime is 115s after the 6-zone migration.
+    const history = [{ grip: "Crusher", target_duration: 115, date: today }];
     // Trained Strength today, so Strength recency is low
     expect(recencyPenalty("strength", history, "Crusher")).toBeLessThan(0.1);
-    // But Power was not trained
+    // But Power (refTime 30s) was not trained
     expect(recencyPenalty("power", history, "Crusher")).toBe(1.0);
   });
 });
@@ -217,7 +219,10 @@ describe("coachingRecommendation", () => {
     const priors = buildThreeExpPriors(history);
     const rec = coachingRecommendation(history, "Crusher", { threeExpPriors: priors });
     expect(rec).not.toBeNull();
-    expect(["power", "strength", "endurance"]).toContain(rec.zone);
+    expect([
+      "max_strength", "power", "power_strength",
+      "strength", "strength_endurance", "endurance",
+    ]).toContain(rec.zone);
     expect(["L", "R"]).toContain(rec.hand);
     expect(typeof rec.gap).toBe("number");
     expect(typeof rec.score).toBe("number");

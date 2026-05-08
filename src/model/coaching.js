@@ -43,7 +43,7 @@
 // Monod cold-start fallback, see prescription.js).
 
 import { ymdLocal } from "../util.js";
-import { ZONE_REF_T, zoneOf } from "./zones.js";
+import { ZONE_REF_T, ZONE_KEYS, zoneOf } from "./zones.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
@@ -55,10 +55,17 @@ import {
   TRAINING_FOCUS, DEFAULT_TRAINING_FOCUS, focusWeights,
 } from "./training-focus.js";
 
+// Per-zone recovery time-constants (days). Larger tau = slower
+// recovery from a session of that zone. PCr/neural recovers fast,
+// glycolytic middle, aerobic adaptations need the most time. Hybrids
+// interpolate between their bordering pure zones.
 export const COACH_RECOVERY_TAU_DAYS = {
-  power:     1.5,   // PCr/neural recovery is fast
-  strength:  2.5,   // Glycolytic recovers middle
-  endurance: 3.5,   // Oxidative adaptations need more time
+  max_strength:       1.0,   // neural recovers fastest
+  power:              1.5,   // PCr / fast-twitch
+  power_strength:     2.0,   // crossover
+  strength:           2.5,   // glycolytic
+  strength_endurance: 3.0,   // crossover
+  endurance:          3.5,   // oxidative — slowest adaptation cycle
 };
 
 // Recovery curve: returns 0 immediately after training the zone, rising
@@ -100,9 +107,17 @@ export function externalLoadModifier(zone, activities) {
     }
   }
   if (mostRecentClimbHoursAgo > 48) return 1.0;
-  const baseReduction = zone === "power"     ? 0.4
-                      : zone === "strength"  ? 0.7
-                      : 0.9;
+  // Per-zone post-climb readiness: the more PCr/short-duration the
+  // zone, the more it benefits from (and tolerates) climbing residual
+  // fatigue. Long-duration aerobic work is most affected by a fresh
+  // climbing session because it taxes the same recovery systems.
+  const baseReduction =
+      zone === "max_strength"        ? 0.3  // can train Max Strength surprisingly soon — neural drive recovers fast
+    : zone === "power"               ? 0.4
+    : zone === "power_strength"      ? 0.55
+    : zone === "strength"            ? 0.7
+    : zone === "strength_endurance"  ? 0.8
+    :                                  0.9; // endurance — wants the most recovery
   const recoveryFraction = mostRecentClimbHoursAgo / 48;
   return baseReduction + (1 - baseReduction) * recoveryFraction;
 }
@@ -203,9 +218,11 @@ export function coachingRecommendation(history, grip, opts = {}) {
     }
   }
 
-  const zones = ["power", "strength", "endurance"];
+  // Iterate all 6 zones in physiological order. ZONE_KEYS comes from
+  // src/model/zones.js so the order stays in sync with the rest of
+  // the model layer.
   const candidates = [];
-  for (const zoneKey of zones) {
+  for (const zoneKey of ZONE_KEYS) {
     const t = ZONE_REF_T[zoneKey];
     if (!t) continue;
     const recency = recencyPenalty(zoneKey, history, grip);
@@ -265,9 +282,15 @@ export function coachingRecommendation(history, grip, opts = {}) {
 // picked, not just THAT it was picked.
 export function coachingRationale(rec) {
   if (!rec) return "";
-  const compName = rec.zone === "power" ? "fast (PCr)"
-                 : rec.zone === "strength" ? "middle (glycolytic)"
-                 : "slow (oxidative)";
+  // Energy-system label per zone for the rationale text. Hybrids name
+  // both crossover compartments since neither dominates exclusively.
+  const compName =
+      rec.zone === "max_strength"       ? "neural / fast (PCr)"
+    : rec.zone === "power"              ? "fast (PCr)"
+    : rec.zone === "power_strength"     ? "fast / middle (PCr-glycolytic)"
+    : rec.zone === "strength"           ? "middle (glycolytic)"
+    : rec.zone === "strength_endurance" ? "middle / slow (glycolytic-aerobic)"
+    :                                     "slow (oxidative)";
   // Note: rec.hand still tracks the better-scoring hand internally for
   // the per-zone score, but we don't surface it in the rationale text.
   // Most users train both hands per session, so saying "on Left" /

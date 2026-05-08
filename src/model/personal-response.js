@@ -36,24 +36,32 @@
 // With k₀ = PERSONAL_RESPONSE_PRIOR_WEIGHT, a zone needs roughly k₀
 // session-equivalents of evidence before personal rates dominate.
 
-import { POWER_MAX, STRENGTH_MAX } from "./zones.js";
+import { ZONE_KEYS, zoneOf } from "./zones.js";
 import { fitCF } from "./monod.js";
 
 // Per-zone fractional response priors. Each entry maps to {cf, w} —
 // expected fractional change in CF and W' per session of that zone.
 //
+// Max Strength → very small CF, small W' (neural / type IIx focus).
 // Power → tiny CF (W' is the proximal target), large W'.
+// Power/Strength → blend of Power and Strength.
 // Strength → CF-dominant via ceiling effect (force ceiling lifts CF).
+// Strength/Endurance → blend of Strength and Endurance.
 // Endurance → CF via ratio effect (sub-CF training drags CF up over time),
 //            small W' since W' is barely loaded.
 //
-// These are priors, not truths. computePersonalResponse() fits them
-// to the user's own CF/W' trajectory and shrinks toward the observed
-// rate as evidence accumulates.
+// Hybrids interpolate between their bordering pure zones; the pure-zone
+// priors are unchanged from the 3-zone era. These are priors, not
+// truths. computePersonalResponse() fits them to the user's own CF/W'
+// trajectory and shrinks toward the observed rate as evidence
+// accumulates.
 export const PROTOCOL_RESPONSE = {
-  power:     { cf: 0.010, w: 0.060 },  // W'-dominant, tiny CF via MVC
-  strength:  { cf: 0.045, w: 0.015 },  // CF-dominant via ceiling effect
-  endurance: { cf: 0.030, w: 0.008 },  // CF via ratio effect, small W'
+  max_strength:       { cf: 0.005, w: 0.030 },  // neural/IIx focus, small both
+  power:              { cf: 0.010, w: 0.060 },  // W'-dominant, tiny CF via MVC
+  power_strength:     { cf: 0.025, w: 0.040 },  // interpolated
+  strength:           { cf: 0.045, w: 0.015 },  // CF-dominant via ceiling effect
+  strength_endurance: { cf: 0.035, w: 0.011 },  // interpolated
+  endurance:          { cf: 0.030, w: 0.008 },  // CF via ratio effect, small W'
 };
 
 // Integration window for the "climbing-relevant" AUC — covers power
@@ -73,17 +81,13 @@ export const PERSONAL_RESPONSE_PRIOR_WEIGHT = 10;  // pseudo-sessions
 export const PERSONAL_RESPONSE_MIN_SESSIONS = 5;   // hard gate per zone (effective-n)
 
 export function computePersonalResponse(history) {
-  const zoneOf = (td) =>
-    td < POWER_MAX    ? "power"    :
-    td < STRENGTH_MAX ? "strength" :
-                        "endurance";
+  // zoneOf is imported from zones.js — uses the 6-zone classification.
 
-  // Default: everyone starts at the prior with source='prior', n=0.
-  const result = {
-    power:     { ...PROTOCOL_RESPONSE.power,     n: 0, source: "prior" },
-    strength:  { ...PROTOCOL_RESPONSE.strength,  n: 0, source: "prior" },
-    endurance: { ...PROTOCOL_RESPONSE.endurance, n: 0, source: "prior" },
-  };
+  // Default: everyone starts at the prior with source='prior', n=0
+  // for every zone.
+  const result = Object.fromEntries(
+    ZONE_KEYS.map(k => [k, { ...PROTOCOL_RESPONSE[k], n: 0, source: "prior" }])
+  );
 
   if (!history || history.length < 4) return result;
 
@@ -103,7 +107,7 @@ export function computePersonalResponse(history) {
   // Walk dates; at each date with enough prior data, refit before/after
   // and split the fractional delta across zones by TUT proportion.
   // obs[zone] is an array of { weight, dCF, dW } — weight = TUT fraction.
-  const obs = { power: [], strength: [], endurance: [] };
+  const obs = Object.fromEntries(ZONE_KEYS.map(k => [k, []]));
 
   for (const date of dates) {
     const before = sorted.filter(r => r.date < date);
@@ -120,15 +124,14 @@ export function computePersonalResponse(history) {
 
     // TUT per zone for the day — sum actual_time_s bucketed by the zone
     // each rep was *targeting* (target_duration), not the zone the rep
-    // fell into. A failed capacity-target rep at 60s still attributes
-    // to capacity training. Matches the zone-bucketing convention used
-    // everywhere else in the app.
-    const tut = { power: 0, strength: 0, endurance: 0 };
+    // fell into. Matches the zone-bucketing convention used everywhere
+    // else in the app.
+    const tut = Object.fromEntries(ZONE_KEYS.map(k => [k, 0]));
     for (const r of byDate[date]) tut[zoneOf(r.target_duration)] += r.actual_time_s;
-    const totalTUT = tut.power + tut.strength + tut.endurance;
+    const totalTUT = ZONE_KEYS.reduce((s, k) => s + tut[k], 0);
     if (totalTUT <= 0) continue;
 
-    for (const zone of Object.keys(tut)) {
+    for (const zone of ZONE_KEYS) {
       const w = tut[zone] / totalTUT;
       if (w > 0) obs[zone].push({ weight: w, dCF, dW });
     }

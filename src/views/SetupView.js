@@ -371,12 +371,18 @@ function ZoneCoverageCard({ history, activities = [] }) {
 
   if (coverage.total === 0) return null;
 
+  // Zones list mirrors src/model/zones.js ZONE6 in the same display
+  // order. Coverage counts come back from computeZoneCoverage with
+  // matching keys.
   const zones = [
-    { key: "power",     label: "⚡ Power",     val: coverage.power,     color: "#e05560" },
-    { key: "strength",  label: "💪 Strength",  val: coverage.strength,  color: "#e07a30" },
-    { key: "endurance", label: "🏔️ Endurance",  val: coverage.endurance, color: "#3b82f6" },
+    { key: "max_strength",       label: "💥 Max Strength",       val: coverage.max_strength,       color: "#c83838" },
+    { key: "power",              label: "⚡ Power",               val: coverage.power,              color: "#e05560" },
+    { key: "power_strength",     label: "🔶 Power/Strength",      val: coverage.power_strength,     color: "#e68a48" },
+    { key: "strength",           label: "💪 Strength",            val: coverage.strength,           color: "#e07a30" },
+    { key: "strength_endurance", label: "🟦 Strength/Endurance",  val: coverage.strength_endurance, color: "#7aa0d8" },
+    { key: "endurance",          label: "🏔️ Endurance",           val: coverage.endurance,          color: "#3b82f6" },
   ];
-  const maxVal = Math.max(coverage.power, coverage.strength, coverage.endurance, 1);
+  const maxVal = Math.max(...zones.map(z => z.val), 1);
 
   return (
     <Card style={{ marginBottom: 16 }}>

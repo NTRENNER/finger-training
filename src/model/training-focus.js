@@ -36,30 +36,48 @@
 // the per-zone weighting in plain language, so the user can tell at
 // a glance whether the bias matches what they want. Both are surfaced
 // in the Training Focus picker on Setup and in Settings.
+//
+// Weights are 6-zone now (May 2026 migration). Hybrid zones interpolate
+// between their two pure neighbors so the focus bias stays consistent
+// across the whole curve. Missing keys default to 1.0 in the engine
+// via `focusBias[zoneKey] ?? 1.0`, so older focus configs without the
+// new keys still work — they just won't bias the new hybrid zones.
 export const TRAINING_FOCUS = {
   balanced: {
     label: "Balanced",
-    description: "Keep all three compartments humming.",
+    description: "Keep all six compartments humming.",
     coachingImpact: "No per-zone bias — coaching picks whichever zone has the widest curve gap.",
-    weights: { power: 1.0, strength: 1.0, endurance: 1.0 },
+    weights: {
+      max_strength: 1.0, power: 1.0, power_strength: 1.0,
+      strength: 1.0, strength_endurance: 1.0, endurance: 1.0,
+    },
   },
   bouldering: {
     label: "Bouldering",
     description: "Short, max-effort moves.",
-    coachingImpact: "Power ×1.5, Endurance ×0.6 — the engine favors short max-effort sessions even when your Endurance gap is technically larger.",
-    weights: { power: 1.5, strength: 1.0, endurance: 0.6 },
+    coachingImpact: "Max Strength ×1.7, Power ×1.5, Endurance ×0.6 — the engine favors short max-effort sessions even when your Endurance gap is technically larger.",
+    weights: {
+      max_strength: 1.7, power: 1.5, power_strength: 1.2,
+      strength: 1.0, strength_endurance: 0.8, endurance: 0.6,
+    },
   },
   power_sport: {
     label: "Power-endurance sport",
     description: "Steep, punchy routes with hard cruxes.",
-    coachingImpact: "Strength ×1.5, Power ×1.1, Endurance ×0.9 — the engine favors mid-duration max hangs that build the force ceiling steep routes need.",
-    weights: { power: 1.1, strength: 1.5, endurance: 0.9 },
+    coachingImpact: "Strength ×1.5, Power ×1.1 — the engine favors mid-duration max hangs that build the force ceiling steep routes need.",
+    weights: {
+      max_strength: 1.0, power: 1.1, power_strength: 1.4,
+      strength: 1.5, strength_endurance: 1.1, endurance: 0.9,
+    },
   },
   endurance_sport: {
     label: "Endurance routes",
     description: "Long sustained climbing — e.g. Red River Gorge.",
     coachingImpact: "Endurance ×1.5, Power ×0.6 — the engine favors sustained holds even when shorter zones look like bigger curve gaps.",
-    weights: { power: 0.6, strength: 1.0, endurance: 1.5 },
+    weights: {
+      max_strength: 0.5, power: 0.6, power_strength: 0.85,
+      strength: 1.0, strength_endurance: 1.3, endurance: 1.5,
+    },
   },
 };
 

@@ -119,24 +119,53 @@ const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — use
 // power needs ~6 hangs (PCr-only drain, ~75% refill in 20s),
 // capacity ~4 (all three pools drained, 20s only refills the fast
 // one), strength sits in between.
+// 6-zone scheme (May 2026) — Grip Gains community time domains plus
+// an added Max Strength zone for near-MVC work. ZONE_REF_T in
+// src/model/zones.js is the source of truth for refTime values; this
+// table just adds UI metadata (emoji, color, copy text) on top.
+//
+// Defaults below for repsDefault / restDefault / setsDefault are
+// best-guess starting points for the new hybrid zones — tune as the
+// protocols get used in practice. The text rationales for the new
+// zones are intentionally shorter than the original three until we
+// have empirical observations to write detailed compartment-physiology
+// commentary the way the old strings did for power/strength/endurance.
 const GOAL_CONFIG = {
+  max_strength: {
+    label: "Max Strength", emoji: "💥", color: "#c83838",
+    refTime: 5, restDefault: 180, repsDefault: 5, setsDefault: 1, setRestDefault: 0,
+    intensity: "5 × 5s near-max · 3min rest",
+    setsRationale: "Max Strength protocol: 5 hangs of ~5s at near-MVC load with full 3-minute rest between. Long rest fully refills PCr (τ₁≈15s reaches ~99% recovery in 3min) so each hang is a fresh max-effort attempt. Trains neural drive, motor unit recruitment, and intramuscular coordination — adaptations that the longer-duration zones don't touch. Use sparingly: high CNS cost, ~1 session per week tops. Best done warm and well-rested.",
+  },
   power: {
     label: "Power", emoji: "⚡", color: "#e05560",
-    refTime: 7, restDefault: 20, repsDefault: 6, setsDefault: 1, setRestDefault: 0,
-    intensity: "6 × 5–7s max · 20s rest",
-    setsRationale: "Power protocol: 6 hangs of 5–7s at near-max load with 20s rest. 20s refills ~75% of PCr (τ₁≈15s) between hangs — enough to keep output high but not enough to fully recover. Six hangs reaches the asymptote where subsequent hangs would produce similar output; beyond that you're spinning your wheels. Use as a pre-climbing warm-up; primes neural drive without shredding you. Load auto-prescribed from CF + W'/7.",
+    refTime: 30, restDefault: 60, repsDefault: 5, setsDefault: 1, setRestDefault: 0,
+    intensity: "5 × 30s · 60s rest",
+    setsRationale: "Power protocol: 5 hangs of ~30s at the load that takes you to failure around that duration, with 60s rest between. The 30s mark is the PCr-glycolytic crossover — fast pool drained, glycolytic ramping. 60s rest refills PCr but only partially restores glycolytic capacity (τ₂≈90s), so successive hangs drift shorter and the rep-time curve becomes a personal glycolytic-recovery probe.",
+  },
+  power_strength: {
+    label: "Power/Strength", emoji: "🔶", color: "#e68a48",
+    refTime: 70, restDefault: 90, repsDefault: 4, setsDefault: 1, setRestDefault: 0,
+    intensity: "4 × 70s · 90s rest",
+    setsRationale: "Power/Strength protocol: 4 hangs of ~70s with 90s rest. Mid-glycolytic time domain — lactate accumulation, buffering capacity. Bridges the gap between Power and Strength so you're not skipping the 50–90s window where many hard route cruxes actually live.",
   },
   strength: {
     label: "Strength", emoji: "💪", color: "#e07a30",
-    refTime: 45, restDefault: 20, repsDefault: 5, setsDefault: 1, setRestDefault: 0,
-    intensity: "45s + 4 to failure · 20s rest",
-    setsRationale: "Strength protocol: hang 1 targets 45s, hangs 2–5 go to failure, 20s rest between. 20s refills PCr but barely touches the glycolytic pool (τ₂≈90s → ~20% recovery), so fatigue compounds and each subsequent hang falls short of the last. Stop at 5 hangs: you've reached the compartment-2 + 3 steady state. The rep-time decay curve is a personal τ₂ probe — watch it flatten over weeks as glycolytic recovery improves. Load auto-prescribed from CF + W'/45.",
+    refTime: 115, restDefault: 120, repsDefault: 4, setsDefault: 1, setRestDefault: 0,
+    intensity: "4 × ~115s · 2min rest",
+    setsRationale: "Strength protocol: 4 hangs targeting ~115s with 2-minute rest between. Glycolytic-aerobic crossover — heavily lactate-driven but with rising oxidative contribution. Trains lactate tolerance and clearance. Watch hold-time decay across hangs as a personal recovery probe.",
+  },
+  strength_endurance: {
+    label: "Strength/Endurance", emoji: "🟦", color: "#7aa0d8",
+    refTime: 160, restDefault: 120, repsDefault: 3, setsDefault: 1, setRestDefault: 0,
+    intensity: "3 × ~160s · 2min rest",
+    setsRationale: "Strength/Endurance protocol: 3 hangs of ~160s with 2-minute rest. Aerobic-glycolytic blend, dominated by lactate clearance and rising oxidative engagement. Catches the 140–180s window between pure strength and aerobic-dominant endurance.",
   },
   endurance: {
     label: "Endurance", emoji: "🏔️", color: "#3b82f6",
-    refTime: 120, restDefault: 20, repsDefault: 4, setsDefault: 1, setRestDefault: 0,
-    intensity: "120s + 3 to failure · 20s rest · just above CF",
-    setsRationale: "Endurance protocol at load ≈ CF + W'/120 (a hair above Critical Force). Hang 1 targets 120s continuous; hangs 2–4 go to failure with 20s rest. Each hang drains all three pools; 20s rest refills the fast pool but leaves medium and slow heavily depleted, so hold-time drops fast toward the CF asymptote. Stop at 4 hangs — subsequent hangs would be nearly flat on the tail. Trains CF / capillarity / mitochondrial density. Load auto-prescribed from CF + W'/120.",
+    refTime: 220, restDefault: 60, repsDefault: 3, setsDefault: 1, setRestDefault: 0,
+    intensity: "3 × ~220s · 60s rest · near CF",
+    setsRationale: "Endurance protocol at load ≈ CF (just above Critical Force). 3 hangs targeting ~220s with 60s rest. Aerobic-dominant — trains capillarity, mitochondrial density, fat oxidation. Hold-time drops fast across hangs as the slow compartment depletes; trust the curve, the load is calibrated to fail you on the tail.",
   },
 };
 
@@ -324,20 +353,28 @@ export default function App() {
 
   // ── Genesis badge detection ───────────────────────────────
   // Snapshot CF/W′ the first time the user has logged at least one session
-  // in each zone (Power, Strength, Endurance). This becomes the immutable
-  // baseline for all subsequent badge progress calculations.
+  // in each of the three major energy-system FAMILIES:
+  //   PCr        : max_strength OR power
+  //   Glycolytic : power_strength OR strength
+  //   Aerobic    : strength_endurance OR endurance
   //
-  // Bucketed by zoneOf rather than exact target_duration matches so any
-  // training within the zone counts — both the current 7s/45s/120s
-  // recommendations and any historical reps logged when Power was 10s
-  // credit the right bucket.
+  // Family-level (not zone-level) gate after the 6-zone migration so users
+  // with historical 7s reps (now classified as max_strength under the new
+  // boundaries) still register as having trained the PCr family — instead
+  // of failing the gate because nothing happened to land in the exact
+  // "power" bucket. Same idea for the other two families.
+  //
+  // The snapshot is the immutable baseline for all subsequent badge
+  // progress calculations, so we want the trigger to behave the same way
+  // it did in the 3-zone era from the user's perspective: "you've trained
+  // all three energy systems at least once."
   useEffect(() => {
     if (genesisSnap) return;           // already earned
     if (!liveEstimate) return;         // no curve yet
-    const hasPower    = history.some(r => zoneOf(r.target_duration) === "power");
-    const hasStrength = history.some(r => zoneOf(r.target_duration) === "strength");
-    const hasCapacity = history.some(r => zoneOf(r.target_duration) === "endurance");
-    if (hasPower && hasStrength && hasCapacity) {
+    const hasPCr        = history.some(r => ["max_strength", "power"].includes(zoneOf(r.target_duration)));
+    const hasGlycolytic = history.some(r => ["power_strength", "strength"].includes(zoneOf(r.target_duration)));
+    const hasAerobic    = history.some(r => ["strength_endurance", "endurance"].includes(zoneOf(r.target_duration)));
+    if (hasPCr && hasGlycolytic && hasAerobic) {
       const auc  = computeAUC(liveEstimate.CF, liveEstimate.W);
       const snap = { date: today(), CF: liveEstimate.CF, W: liveEstimate.W, auc };
       saveLS(LS_GENESIS_KEY, snap);
