@@ -1,9 +1,15 @@
 // Tests for src/model/monod.js — Monod-Scherrer F-D model.
-// Covers fitCF (failure-only OLS), fitCFWithSuccessFloor (success
-// constraints), predForce, computeAUC, fitAdaptiveHandCurve.
+// Covers fitCF (OLS on 1/T vs F), fitCFWeighted, predForce,
+// computeAUC, fitAdaptiveHandCurve.
+//
+// Note: fitCFWithSuccessFloor remains exported from monod.js for
+// backward compatibility but is DEPRECATED under the train-to-failure
+// data model (May 2026) — every rep is treated as a failure data
+// point, so the success-floor lower-bound iteration is a no-op in
+// practice. Its behavior is no longer tested here.
 
 import {
-  fitCF, fitCFWeighted, fitCFWithSuccessFloor,
+  fitCF, fitCFWeighted,
   predForce, computeAUC, fitAdaptiveHandCurve,
 } from "../monod.js";
 
@@ -98,61 +104,7 @@ describe("fitCFWeighted", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────
-// fitCFWithSuccessFloor — failures anchor, successes lower-bound
-// ─────────────────────────────────────────────────────────────
-describe("fitCFWithSuccessFloor", () => {
-  test("with no successes, matches the failure-only fit", () => {
-    const failPts = [10, 30, 60, 120].map(T => ({ x: 1/T, y: 20 + 200/T }));
-    const baseline = fitCF(failPts);
-    const withFloor = fitCFWithSuccessFloor(failPts, []);
-    expect(withFloor).not.toBeNull();
-    expect(withFloor.CF).toBeCloseTo(baseline.CF, 4);
-    expect(withFloor.W).toBeCloseTo(baseline.W, 4);
-  });
-
-  test("a success above the curve bumps the curve up at that T", () => {
-    // Failures define a curve that predicts F(45) = 24.4 kg.
-    const failPts = [10, 30, 60, 120].map(T => ({ x: 1/T, y: 20 + 200/T }));
-    // Now claim a success at T=45 with F=30 (above the curve).
-    const succPts = [{ x: 1/45, y: 30 }];
-    const baseline = fitCF(failPts);
-    const withFloor = fitCFWithSuccessFloor(failPts, succPts);
-    const baselinePred45 = baseline.CF + baseline.W / 45;
-    const floorPred45 = withFloor.CF + withFloor.W / 45;
-    // The success-floor fit should predict at-or-above 30 at T=45,
-    // strictly higher than the failure-only baseline.
-    expect(floorPred45).toBeGreaterThan(baselinePred45);
-    expect(floorPred45).toBeGreaterThanOrEqual(30 - 0.1);  // tol matches algorithm
-  });
-
-  test("successes below the curve don't disturb it", () => {
-    const failPts = [10, 30, 60, 120].map(T => ({ x: 1/T, y: 20 + 200/T }));
-    const succPts = [{ x: 1/45, y: 10 }];  // way below curve at 45s
-    const baseline = fitCF(failPts);
-    const withFloor = fitCFWithSuccessFloor(failPts, succPts);
-    expect(withFloor.CF).toBeCloseTo(baseline.CF, 4);
-    expect(withFloor.W).toBeCloseTo(baseline.W, 4);
-  });
-
-  test("returns null when both lists are too small", () => {
-    expect(fitCFWithSuccessFloor([], [])).toBeNull();
-    expect(fitCFWithSuccessFloor([{ x: 0.1, y: 30 }], [])).toBeNull();
-  });
-
-  test("works with successes only when failures are empty", () => {
-    // Two successes: the floor-iteration should fit a curve that
-    // passes through (or above) both.
-    const succPts = [
-      { x: 1/10, y: 40 },
-      { x: 1/60, y: 25 },
-    ];
-    const fit = fitCFWithSuccessFloor([], succPts);
-    expect(fit).not.toBeNull();
-    expect(fit.CF + fit.W / 10).toBeGreaterThanOrEqual(40 - 0.5);
-    expect(fit.CF + fit.W / 60).toBeGreaterThanOrEqual(25 - 0.5);
-  });
-});
+// (fitCFWithSuccessFloor is deprecated — see header note. No tests.)
 
 // ─────────────────────────────────────────────────────────────
 // predForce, computeAUC — analytical helpers

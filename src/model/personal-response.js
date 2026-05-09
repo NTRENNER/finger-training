@@ -91,8 +91,9 @@ export function computePersonalResponse(history) {
 
   if (!history || history.length < 4) return result;
 
+  // Train-to-failure model: every rep with valid actual_time_s is a
+  // (T, F) failure data point. Drop the legacy r.failed filter.
   const failures = history.filter(r =>
-    r.failed &&
     r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
     r.actual_time_s > 0 && r.target_duration > 0 && r.date
   );

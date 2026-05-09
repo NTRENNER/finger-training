@@ -182,70 +182,31 @@ describe("fitDoseK", () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// rpeProgressionMultiplier — +5%/streak, capped at +30%
+// rpeProgressionMultiplier — DEPRECATED no-op under train-to-failure
 // ─────────────────────────────────────────────────────────────
-describe("rpeProgressionMultiplier", () => {
+// Under the train-to-failure data model (May 2026), every rep ends
+// in physical failure regardless of how it compares to the prescribed
+// target. There is no "success" to streak-bump, so the multiplier is
+// now a no-op that always returns 1.0. The function is kept exported
+// for backward compat with anything that imported it; new code should
+// not call it. See prescription.js for the deprecation note.
+describe("rpeProgressionMultiplier (deprecated no-op)", () => {
   const today = new Date().toISOString().slice(0, 10);
-  const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  const dayBefore = new Date(Date.now() - 2*86400000).toISOString().slice(0, 10);
 
   test("returns 1.0 with no history", () => {
     expect(rpeProgressionMultiplier([], "L", "Crusher", 45)).toBe(1);
     expect(rpeProgressionMultiplier(null, "L", "Crusher", 45)).toBe(1);
   });
 
-  test("returns 1.0 if last rep was a failure (no streak)", () => {
-    const history = [{
-      hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-      actual_time_s: 30, failed: true, date: today, session_id: "s1",
-    }];
-    expect(rpeProgressionMultiplier(history, "L", "Crusher", 45)).toBe(1);
-  });
-
-  test("one success → 1.05 multiplier", () => {
+  test("returns 1.0 with success history (no longer bumps)", () => {
     const history = [{
       hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
       actual_time_s: 45, failed: false, date: today, session_id: "s1",
     }];
-    expect(rpeProgressionMultiplier(history, "L", "Crusher", 45)).toBeCloseTo(1.05, 4);
+    expect(rpeProgressionMultiplier(history, "L", "Crusher", 45)).toBe(1);
   });
 
-  test("two consecutive successes → 1.05² = 1.1025", () => {
-    const history = [
-      { hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-        actual_time_s: 45, failed: false, date: yday, session_id: "s1" },
-      { hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-        actual_time_s: 47, failed: false, date: today, session_id: "s2" },
-    ];
-    expect(rpeProgressionMultiplier(history, "L", "Crusher", 45)).toBeCloseTo(1.1025, 4);
-  });
-
-  test("caps at MAX_BUMP_MULT (1.30)", () => {
-    const history = Array.from({ length: 20 }, (_, i) => ({
-      hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-      actual_time_s: 45, failed: false,
-      date: new Date(Date.now() - i*86400000).toISOString().slice(0, 10),
-      session_id: `s${i}`,
-    }));
-    expect(rpeProgressionMultiplier(history, "L", "Crusher", 45)).toBe(MAX_BUMP_MULT);
-  });
-
-  test("a failure resets the streak", () => {
-    const history = [
-      // older success
-      { hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-        actual_time_s: 45, failed: false, date: dayBefore, session_id: "s0" },
-      // mid failure resets
-      { hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-        actual_time_s: 30, failed: true, date: yday, session_id: "s1" },
-      // recent success: streak = 1 (just this one, since failure broke it)
-      { hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-        actual_time_s: 45, failed: false, date: today, session_id: "s2" },
-    ];
-    expect(rpeProgressionMultiplier(history, "L", "Crusher", 45)).toBeCloseTo(1.05, 4);
-  });
-
-  test("BUMP_PER_SUCCESS is 0.05; MAX_BUMP_MULT is 1.30", () => {
+  test("BUMP_PER_SUCCESS and MAX_BUMP_MULT constants kept for compat", () => {
     expect(BUMP_PER_SUCCESS).toBeCloseTo(0.05, 6);
     expect(MAX_BUMP_MULT).toBeCloseTo(1.30, 6);
   });
@@ -298,8 +259,12 @@ describe("EMPIRICAL_LOOKBACK_DAYS", () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// empiricalPrescription — primary path; success bumps, failure scales
+// empiricalPrescription — primary path; curve scale-by-residual
 // ─────────────────────────────────────────────────────────────
+// Train-to-failure model (May 2026): every rep is a (T, F) failure
+// data point. The legacy success/failure dichotomy is gone; the
+// prescription is always derived from the curve scale-by-residual at
+// the most recent rep.
 describe("empiricalPrescription", () => {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -308,46 +273,50 @@ describe("empiricalPrescription", () => {
     expect(empiricalPrescription(null, "L", "Crusher", 45)).toBeNull();
   });
 
-  test("success bumps load by 5% (single success)", () => {
-    const history = [{
-      hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-      actual_time_s: 45, avg_force_kg: 20, failed: false,
-      date: today, session_id: "s1",
-    }];
-    const out = empiricalPrescription(history, "L", "Crusher", 45);
-    expect(out).toBeCloseTo(21.0, 1);  // 20 × 1.05
-  });
-
-  test("failure case prescribes a lighter load (Monod cold-start path)", () => {
-    // No three-exp prior provided → falls into Monod CF/W' update path.
-    // Need ≥2 failures for fitCF, with consistent CF + W' shape.
+  test("returns a positive load when there's recent rep-1 data", () => {
+    // Two failure data points so the cold-start Monod fit (Path 2)
+    // has enough to work with, then a recent rep-1 anchor.
     const history = [
-      { hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-        actual_time_s: 30, avg_force_kg: 26, failed: true, date: today, session_id: "s1" },
-      // Earlier failure points to seed the Monod fit
       { hand: "L", grip: "Crusher", target_duration: 10, rep_num: 1,
-        actual_time_s: 10, avg_force_kg: 50, failed: true, date: "2025-01-01", session_id: "s0a" },
+        actual_time_s: 10, avg_force_kg: 50, failed: true,
+        date: "2026-04-01", session_id: "s0a" },
       { hand: "L", grip: "Crusher", target_duration: 60, rep_num: 1,
-        actual_time_s: 60, avg_force_kg: 22, failed: true, date: "2025-01-02", session_id: "s0b" },
+        actual_time_s: 60, avg_force_kg: 22, failed: true,
+        date: "2026-04-02", session_id: "s0b" },
+      { hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
+        actual_time_s: 30, avg_force_kg: 26, failed: true,
+        date: today, session_id: "s1" },
     ];
     const out = empiricalPrescription(history, "L", "Crusher", 45);
     expect(out).not.toBeNull();
     // The user just failed at 26 kg in 30s targeting 45s. The next
-    // prescription should be lighter than 26 kg.
+    // prescription should be lighter than 26 kg (curve down-scales
+    // because actual time fell short of target).
     expect(out).toBeLessThan(26);
   });
 
-  test("success-streak bump capped at MAX_BUMP_MULT", () => {
-    // Many recent successes
-    const history = Array.from({ length: 20 }, (_, i) => ({
-      hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-      actual_time_s: 45, avg_force_kg: 20, failed: false,
-      date: new Date(Date.now() - i*86400000).toISOString().slice(0, 10),
-      session_id: `s${i}`,
-    }));
+  test("recent rep that exceeded target produces an upward scale", () => {
+    // User held longer than target — the curve scale-by-residual
+    // should produce a prescription larger than the most recent rep's
+    // load, since they out-performed the previous prediction.
+    const history = [
+      // Cold-start seed points
+      { hand: "L", grip: "Crusher", target_duration: 10, rep_num: 1,
+        actual_time_s: 10, avg_force_kg: 50, failed: true,
+        date: "2026-04-01", session_id: "s0a" },
+      { hand: "L", grip: "Crusher", target_duration: 60, rep_num: 1,
+        actual_time_s: 60, avg_force_kg: 22, failed: true,
+        date: "2026-04-02", session_id: "s0b" },
+      // Recent rep where user exceeded the target by holding to 60s
+      // when target was 45s, at 22 kg.
+      { hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
+        actual_time_s: 60, avg_force_kg: 22, failed: true,
+        date: today, session_id: "s1" },
+    ];
     const out = empiricalPrescription(history, "L", "Crusher", 45);
-    // 20 × 1.30 = 26
-    expect(out).toBeCloseTo(20 * MAX_BUMP_MULT, 1);
+    expect(out).not.toBeNull();
+    // Held 60s at 22 kg → curve says you should be doing more at 45s.
+    expect(out).toBeGreaterThan(22);
   });
 
   test("respects EMPIRICAL_LOOKBACK_DAYS — old reps don't anchor", () => {

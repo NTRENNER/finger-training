@@ -41,8 +41,11 @@ export function computeLimiterZone(history) {
   cutoff.setDate(cutoff.getDate() - LIMITER_WINDOW_DAYS);
   const cutoffStr = ymdLocal(cutoff);
 
+  // Train-to-failure model: every rep with valid actual_time_s is a
+  // (T, F) failure data point. Drop the legacy r.failed filter; keep
+  // rep_num === 1 to avoid within-set fatigue contamination.
   const allFailures = history.filter(r =>
-    r.rep_num === 1 && r.failed &&
+    r.rep_num === 1 &&
     r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
     r.actual_time_s > 0 && r.target_duration > 0 &&
     (r.date || "") >= cutoffStr &&

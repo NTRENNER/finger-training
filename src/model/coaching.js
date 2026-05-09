@@ -148,8 +148,10 @@ export function externalLoadModifier(zone, activities) {
 export function zoneResidualFactor(history, hand, grip, targetT, amps, freshMap = null) {
   if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) return 1.0;
   const targetZone = zoneOf(targetT);
+  // Train-to-failure model: every rep with valid actual_time_s is a
+  // (T, F) data point. Drop the legacy r.failed filter.
   const fails = (history || []).filter(r =>
-    r.failed && r.hand === hand && r.grip === grip
+    r.hand === hand && r.grip === grip
     && r.target_duration > 0
     && zoneOf(r.target_duration) === targetZone
     && r.actual_time_s > 0 && effectiveLoad(r) > 0
@@ -206,8 +208,10 @@ export function coachingRecommendation(history, grip, opts = {}) {
   const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
   const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
   for (const h of ["L", "R"]) {
+    // Train-to-failure model: every rep with valid actual_time_s is a
+    // (T, F) data point. Drop the legacy r.failed filter.
     const failPts = (history || []).filter(r =>
-      r.failed && r.hand === h && r.grip === grip
+      r.hand === h && r.grip === grip
       && r.actual_time_s > 0 && effectiveLoad(r) > 0
     ).map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
     if (failPts.length >= 1 && hasPrior) {

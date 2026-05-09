@@ -1,10 +1,16 @@
 // Tests for src/model/threeExp.js — three-exponential F-D model.
 // Covers fitThreeExpAmps (with and without prior + weights),
-// fitThreeExpAmpsWithSuccessFloor, predForceThreeExp, buildThreeExpPriors.
+// predForceThreeExp, buildThreeExpPriors.
+//
+// Note: fitThreeExpAmpsWithSuccessFloor remains exported for backward
+// compatibility but is DEPRECATED under the train-to-failure data
+// model (May 2026) — every rep is treated as a failure data point,
+// so the success-floor lower-bound iteration is a no-op in practice.
+// Its behavior is no longer tested here.
 
 import {
   THREE_EXP_LAMBDA_DEFAULT,
-  fitThreeExpAmps, fitThreeExpAmpsWithSuccessFloor,
+  fitThreeExpAmps,
   predForceThreeExp, buildThreeExpPriors,
 } from "../threeExp.js";
 import { PHYS_MODEL_DEFAULT } from "../fatigue.js";
@@ -126,58 +132,7 @@ describe("fitThreeExpAmps", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────
-// fitThreeExpAmpsWithSuccessFloor — successes act as lower bounds
-// ─────────────────────────────────────────────────────────────
-describe("fitThreeExpAmpsWithSuccessFloor", () => {
-  test("with no successes, matches the failure-only fit", () => {
-    const failures = [
-      { T: 10, F: 50 },
-      { T: 30, F: 25 },
-      { T: 60, F: 18 },
-    ];
-    const baseline = fitThreeExpAmps(failures);
-    const withFloor = fitThreeExpAmpsWithSuccessFloor(failures, []);
-    expect(withFloor[0]).toBeCloseTo(baseline[0], 4);
-    expect(withFloor[1]).toBeCloseTo(baseline[1], 4);
-    expect(withFloor[2]).toBeCloseTo(baseline[2], 4);
-  });
-
-  test("a success above the curve bumps the curve up at that T", () => {
-    const failures = [
-      { T: 10, F: 50 },
-      { T: 30, F: 25 },
-      { T: 60, F: 18 },
-    ];
-    // Success at T=45 with F=30 (above what the failure curve predicts)
-    const successes = [{ T: 45, F: 30 }];
-    const baseline = fitThreeExpAmps(failures);
-    const withFloor = fitThreeExpAmpsWithSuccessFloor(failures, successes);
-    const baselinePred = predForceThreeExp(baseline, 45);
-    const floorPred = predForceThreeExp(withFloor, 45);
-    expect(floorPred).toBeGreaterThan(baselinePred);
-    expect(floorPred).toBeGreaterThanOrEqual(30 - 0.5);
-  });
-
-  test("returns null when both lists are empty", () => {
-    expect(fitThreeExpAmpsWithSuccessFloor([], [])).toBeNull();
-    expect(fitThreeExpAmpsWithSuccessFloor([{ T: 10, F: 30 }], [])).toBeNull();
-  });
-
-  test("successes far below the curve are non-binding", () => {
-    const failures = [
-      { T: 10, F: 50 },
-      { T: 30, F: 25 },
-      { T: 60, F: 18 },
-    ];
-    const successes = [{ T: 45, F: 5 }];  // way below
-    const baseline = fitThreeExpAmps(failures);
-    const withFloor = fitThreeExpAmpsWithSuccessFloor(failures, successes);
-    expect(withFloor[0]).toBeCloseTo(baseline[0], 4);
-    expect(withFloor[1]).toBeCloseTo(baseline[1], 4);
-    expect(withFloor[2]).toBeCloseTo(baseline[2], 4);
-  });
-});
+// (fitThreeExpAmpsWithSuccessFloor is deprecated — see header note. No tests.)
 
 // ─────────────────────────────────────────────────────────────
 // predForceThreeExp — analytical evaluation
@@ -229,24 +184,35 @@ describe("buildThreeExpPriors", () => {
     expect(priors.get("Micro").length).toBe(3);
   });
 
-  test("skips grips with fewer than 2 failures", () => {
+  test("skips grips with fewer than 2 data points", () => {
     const history = [
-      { failed: true, grip: "Crusher", hand: "L", actual_time_s: 10, avg_force_kg: 50 },
-      { failed: true, grip: "Crusher", hand: "R", actual_time_s: 30, avg_force_kg: 25 },
-      { failed: true, grip: "OnlyOne", hand: "L", actual_time_s: 10, avg_force_kg: 20 },
+      { grip: "Crusher", hand: "L", actual_time_s: 10, avg_force_kg: 50 },
+      { grip: "Crusher", hand: "R", actual_time_s: 30, avg_force_kg: 25 },
+      { grip: "OnlyOne", hand: "L", actual_time_s: 10, avg_force_kg: 20 },
     ];
     const priors = buildThreeExpPriors(history);
     expect(priors.has("Crusher")).toBe(true);
     expect(priors.has("OnlyOne")).toBe(false);
   });
 
-  test("ignores successes, missing fields, and out-of-range forces", () => {
+  test("treats every rep as a data point regardless of failed flag", () => {
+    // Train-to-failure model: legacy `failed` flag no longer gates.
+    // Both 'failures' (failed: true) and 'successes' (failed: false)
+    // contribute to the prior — every rep is a (T, F) data point.
     const history = [
-      { failed: false, grip: "Crusher", actual_time_s: 10, avg_force_kg: 50 }, // success
-      { failed: true,  grip: null,      actual_time_s: 10, avg_force_kg: 50 }, // no grip
-      { failed: true,  grip: "Crusher", actual_time_s: 0,  avg_force_kg: 50 }, // bad T
-      { failed: true,  grip: "Crusher", actual_time_s: 10, avg_force_kg: 0 },  // bad F
-      { failed: true,  grip: "Crusher", actual_time_s: 10, avg_force_kg: 600 }, // out-of-range F
+      { failed: true,  grip: "Crusher", actual_time_s: 10, avg_force_kg: 50 },
+      { failed: false, grip: "Crusher", actual_time_s: 30, avg_force_kg: 25 },
+    ];
+    const priors = buildThreeExpPriors(history);
+    expect(priors.has("Crusher")).toBe(true);
+  });
+
+  test("ignores missing fields and out-of-range forces", () => {
+    const history = [
+      { grip: null,      actual_time_s: 10, avg_force_kg: 50 }, // no grip
+      { grip: "Crusher", actual_time_s: 0,  avg_force_kg: 50 }, // bad T
+      { grip: "Crusher", actual_time_s: 10, avg_force_kg: 0 },  // bad F
+      { grip: "Crusher", actual_time_s: 10, avg_force_kg: 600 }, // out-of-range F
     ];
     const priors = buildThreeExpPriors(history);
     expect(priors.size).toBe(0);

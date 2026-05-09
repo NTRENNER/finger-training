@@ -32,7 +32,7 @@ import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
 import { STRENGTH_MAX, ZONE_REF_T, ZONE_KEYS, ZONE6 } from "../model/zones.js";
 import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
 import {
-  fitCF, fitCFWithSuccessFloor,
+  fitCF,
 } from "../model/monod.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
@@ -558,24 +558,20 @@ export function AnalysisView({
       if (selHand && r.hand !== selHand) continue;
       if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
       if (!(r.actual_time_s > 0)) continue;
-      if (!byGrip[r.grip]) byGrip[r.grip] = { failures: [], successes: [] };
-      const bucket = r.failed ? "failures" : "successes";
-      // Successes only count toward the chart when they hit target —
-      // partial holds without a fail flag are ambiguous (matches the
-      // existing prescribedLoad scope).
-      if (bucket === "successes" && !(r.target_duration > 0 && r.actual_time_s >= r.target_duration)) continue;
-      byGrip[r.grip][bucket].push(r);
+      if (!byGrip[r.grip]) byGrip[r.grip] = { points: [] };
+      // Train-to-failure model: every rep with a valid actual_time_s
+      // is a (T, F) data point. The legacy failed/successes split is
+      // gone; the curve fits to all data points uniformly.
+      byGrip[r.grip].points.push(r);
     }
-    const grips = Object.keys(byGrip).filter(g => byGrip[g].failures.length >= 2);
+    const grips = Object.keys(byGrip).filter(g => byGrip[g].points.length >= 2);
     if (grips.length < 2) return null;
     const tMax = Math.max(maxDur, F_D_T_MIN + 10);
     const out = {};
     for (const grip of grips) {
-      const fail = byGrip[grip].failures;
-      const succ = byGrip[grip].successes;
-      const fit = fitCFWithSuccessFloor(
-        fail.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })),
-        succ.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg })),
+      const points = byGrip[grip].points;
+      const fit = fitCF(
+        points.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }))
       );
       if (!fit) continue;
       const curve = Array.from({ length: 80 }, (_, i) => {
@@ -585,8 +581,11 @@ export function AnalysisView({
       out[grip] = {
         fit,
         curve,
-        failures: fail.map(r => ({ x: r.actual_time_s, y: toDisp(r.avg_force_kg, unit), date: r.date, grip: r.grip })),
-        successes: succ.map(r => ({ x: r.actual_time_s, y: toDisp(r.avg_force_kg, unit), date: r.date, grip: r.grip })),
+        // Legacy field shape preserved (consumers expect 'failures' /
+        // 'successes' keys for chart series). Under the new model
+        // every point is a 'failure' data point; 'successes' is empty.
+        failures: points.map(r => ({ x: r.actual_time_s, y: toDisp(r.avg_force_kg, unit), date: r.date, grip: r.grip })),
+        successes: [],
       };
     }
     return Object.keys(out).length >= 2 ? out : null;

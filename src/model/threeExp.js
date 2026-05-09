@@ -248,15 +248,19 @@ export function computeAUCThreeExp(amps, tMin = 5, tMax = 180, taus = null) {
   return sum;
 }
 
-// Build per-grip three-exp prior by pooling all that grip's failures
+// Build per-grip three-exp prior by pooling all that grip's data
 // across hands. Used as the shrinkage target for per-(hand, grip) fits.
 // Returns Map<grip, [a, b, c]>. Pooling within-grip avoids the cross-
 // muscle (FDP vs FDS) amplitude contamination that broke the global
 // pooled prior in offline validation.
+//
+// Train-to-failure model (May 2026): every rep with valid
+// actual_time_s is a (T, F) failure data point. The legacy r.failed
+// filter is gone — every rep contributes uniformly.
 export function buildThreeExpPriors(history) {
   const byGrip = {};
   for (const r of history || []) {
-    if (!r.failed || !r.grip) continue;
+    if (!r.grip) continue;
     if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
     if (!(r.actual_time_s > 0)) continue;
     if (!byGrip[r.grip]) byGrip[r.grip] = [];

@@ -42,9 +42,11 @@ import {
 // the AnalysisView grip3xEstimates pattern: per-grip prior + adaptive
 // shrinkage.
 function fitGripAmps(history, grip) {
+  // Train-to-failure model: every rep with valid actual_time_s is a
+  // (T, F) failure data point. Drop the legacy r.failed filter.
   const pts = (history || [])
     .filter(r =>
-      r.failed && r.grip === grip &&
+      r.grip === grip &&
       r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
       r.actual_time_s > 0
     )
