@@ -120,39 +120,61 @@ export function stalenessBoost(zoneKey, stalenessMap) {
   }
 }
 
-// Count distinct training sessions in a calendar year. Uses
-// session_id when available, falling back to date as the session key
-// for older reps without a session_id.
-export function getAnnualSessionCount(history, year = new Date().getFullYear()) {
-  const yearStr = String(year);
+// Rolling 365-day session count + pace projection.
+//
+// We use a rolling window rather than a calendar year so the metric
+// doesn't reset to zero on Jan 1, which would wipe late-year
+// consistency from the motivation signal — train hard in November and
+// you'd lose the credit for it on New Year's Day. With a rolling
+// window the count always reflects "what have you actually done in
+// the last 12 months," which is what the user cares about.
+//
+// `current`     = distinct sessions in the last 365 days.
+// `paceYearEnd` = projected sessions over the next 365 days at the
+//                 current rate. For users with ≥365 days of training
+//                 history this equals `current` trivially; for newer
+//                 users we extrapolate from the active training
+//                 window so the pace projection is meaningful from
+//                 month one.
+//
+// Session identity comes from `session_id` when available, falling
+// back to `date` for older reps without a session_id.
+export function getRollingSessionPace(history, today = new Date()) {
+  const todayMs = today instanceof Date ? today.getTime() : Date.parse(today);
+  const ms       = 24 * 60 * 60 * 1000;
+  const window   = 365;
+  const cutoffMs = todayMs - window * ms;
+
   const sessions = new Set();
+  let firstSessionMs = Infinity;
   for (const r of history || []) {
-    if (!r?.date || !r.date.startsWith(yearStr)) continue;
+    if (!r?.date) continue;
+    const repMs = Date.parse(r.date);
+    if (!isFinite(repMs)) continue;
+    if (repMs < firstSessionMs) firstSessionMs = repMs;
+    if (repMs < cutoffMs) continue;
     const sid = r.session_id || r.date;
     sessions.add(sid);
   }
-  return sessions.size;
-}
+  const current = sessions.size;
 
-// Pace projection: given current annual count and date, project the
-// year-end total at the current rate. Returns { current, paceYearEnd,
-// goalGap, daysIntoYear, daysRemaining }.
-export function getAnnualSessionPace(history, today = new Date()) {
-  const year = today instanceof Date ? today.getFullYear() : new Date(today).getFullYear();
-  const current = getAnnualSessionCount(history, year);
-  const yearStart = new Date(year, 0, 1);
-  const yearEnd = new Date(year + 1, 0, 1);
-  const todayMs = today instanceof Date ? today.getTime() : Date.parse(today);
-  const daysIntoYear = Math.max(1, Math.floor((todayMs - yearStart.getTime()) / (24 * 60 * 60 * 1000)));
-  const totalYearDays = Math.floor((yearEnd.getTime() - yearStart.getTime()) / (24 * 60 * 60 * 1000));
-  const daysRemaining = totalYearDays - daysIntoYear;
-  const paceYearEnd = Math.round(current * (totalYearDays / daysIntoYear));
+  let paceYearEnd;
+  if (firstSessionMs === Infinity) {
+    paceYearEnd = 0;
+  } else {
+    // Extrapolate from the actual active training window. Capped at
+    // `window` so a year+ of history just returns `current` directly
+    // (no amplification for mature users).
+    const trainingDays = Math.max(1, Math.floor((todayMs - firstSessionMs) / ms));
+    const activeDays   = Math.min(window, trainingDays);
+    paceYearEnd = Math.round(current * (window / activeDays));
+  }
+
   return {
     current,
     paceYearEnd,
-    goal: ANNUAL_SESSION_GOAL,
-    goalGap: ANNUAL_SESSION_GOAL - current,
-    daysIntoYear,
-    daysRemaining,
+    goal:       ANNUAL_SESSION_GOAL,
+    goalGap:    ANNUAL_SESSION_GOAL - current,
+    windowDays: window,
   };
 }

@@ -55,7 +55,7 @@ import {
 } from "../lib/climbing-grades.js";
 
 import { ZONE_KEYS } from "../model/zones.js";
-import { getZoneStaleness, getAnnualSessionPace, ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS } from "../model/lockout.js";
+import { getZoneStaleness, getRollingSessionPace, ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS } from "../model/lockout.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { coachingRecommendationContinuous } from "../model/coaching.js";
 
@@ -653,7 +653,7 @@ function ContinuousPickCard({
 // because the curve can't be trusted there at all.
 function CurveCoverageCard({ history }) {
   const staleness = useMemo(() => getZoneStaleness(history), [history]);
-  const pace = useMemo(() => getAnnualSessionPace(history), [history]);
+  const pace = useMemo(() => getRollingSessionPace(history), [history]);
 
   if (pace.current === 0) return null;
 
@@ -679,11 +679,17 @@ function CurveCoverageCard({ history }) {
   const warningCount = counts.warning || 0;
   const neverCount   = counts.never   || 0;
 
-  const onPace = pace.paceYearEnd >= ANNUAL_SESSION_GOAL;
-  const paceLabel = onPace
-    ? `on pace for ${pace.paceYearEnd}`
-    : `pace ${pace.paceYearEnd} of ${ANNUAL_SESSION_GOAL}`;
-  const paceColor = onPace ? C.green : pace.paceYearEnd >= ANNUAL_SESSION_GOAL * 0.8 ? C.orange : C.red;
+  // Pace = projection over the next 365 days at the current rate. For
+  // mature users (≥1 year of history) this equals `pace.current` and
+  // the second line is just confirmation; for newer users it's the
+  // extrapolated forecast. We hide the projection line when the two
+  // numbers match to avoid the redundant "26 of 100 next 12 months"
+  // restating "26 / 100 last 12 months."
+  const onPace      = pace.paceYearEnd >= ANNUAL_SESSION_GOAL;
+  const paceColor   = onPace ? C.green
+                    : pace.paceYearEnd >= ANNUAL_SESSION_GOAL * 0.8 ? C.orange
+                    : C.red;
+  const showPaceLine = pace.paceYearEnd !== pace.current;
 
   return (
     <Card style={{ marginBottom: 16 }}>
@@ -695,8 +701,17 @@ function CurveCoverageCard({ history }) {
           </div>
         </div>
         <div style={{ fontSize: 11, color: C.muted, textAlign: "right" }}>
-          <div><b style={{ color: C.text }}>{pace.current}</b> / {ANNUAL_SESSION_GOAL} this year</div>
-          <div style={{ color: paceColor, marginTop: 2 }}>{paceLabel}</div>
+          <div>
+            <b style={{ color: showPaceLine ? C.text : paceColor }}>
+              {pace.current}
+            </b>
+            {" / "}{ANNUAL_SESSION_GOAL} last 12 months
+          </div>
+          {showPaceLine && (
+            <div style={{ color: paceColor, marginTop: 2 }}>
+              on pace for {pace.paceYearEnd} next 12 months
+            </div>
+          )}
         </div>
       </div>
 
