@@ -45,7 +45,6 @@ import {
 import {
   coachingRecommendation, coachingRationale,
 } from "../model/coaching.js";
-import { TRAINING_FOCUS } from "../model/training-focus.js";
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
@@ -722,7 +721,7 @@ function ZoneCoverageCard({ history, activities = [] }) {
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 
-export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], trainingFocus = "balanced", onTrainingFocusChange = () => {}, bodyWeight = null, tindeq = null }) {
+export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], bodyWeight = null, tindeq = null }) {
 
   // Warm-up sub-state — when true, the entire SetupView is replaced by
   // the WarmupView until the user closes it. Adaptive Warm-up lives on
@@ -774,17 +773,15 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
       ? coachingRecommendation(history, config.grip, {
           freshMap, threeExpPriors,
           activities,
-          trainingFocus,
         })
       : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [history, config.grip, freshMap, threeExpPriors, activities, trainingFocus]
+    [history, config.grip, freshMap, threeExpPriors, activities]
   );
 
-  // Resolve the active focus once for the picker card. Falls back to
-  // the Balanced entry for unknown / missing keys so the panel always
-  // has something to render even if the LS-stored value drifts.
-  const currentFocus = TRAINING_FOCUS[trainingFocus] ?? TRAINING_FOCUS.balanced;
+  // (Training Focus removed May 2026 — under the curve-trust philosophy
+  // the curve is the single source of truth; no user-configurable bias
+  // overrides it.)
 
   // ── Adaptive Warm-up takeover ──
   // When the user taps "Generate" on the warm-up entry card below, the
@@ -843,53 +840,13 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
           session. The full Climbing tab still owns detailed logging. */}
       <ClimbingRPEQuickLog activities={activities} onLog={onLogActivity} />
 
-      {/* Training Focus picker — same selector as Settings, surfaced
-          here so the user can see and adjust the bias right where the
-          coaching prescription is generated. The description below
-          the pills explains both the climbing style and the per-zone
-          weighting effect, so a tap on a focus key gives immediate
-          feedback about how recommendations will shift. The full
-          version (with radio rows + extra context) still lives in
-          Settings; this is the in-flow micro-version. */}
-      <Card>
-        {/* Card title in the 14/700 normal-case style that matches
-            Zone Workout Summary, Coaching prescription, etc. — Sect's
-            11px uppercase variant is reserved for subsections inside
-            a multi-section Card. */}
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Training Focus</div>
-        <div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-            {Object.entries(TRAINING_FOCUS).map(([key, focus]) => {
-              const selected = trainingFocus === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => onTrainingFocusChange(key)}
-                  style={{
-                    padding: "6px 12px", borderRadius: 16,
-                    fontSize: 12, fontWeight: 600, cursor: "pointer",
-                    background: selected ? C.blue : C.border,
-                    color:      selected ? "#fff" : C.muted,
-                    border: "none",
-                    transition: "background 0.15s",
-                  }}
-                >
-                  {focus.label}
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.55 }}>
-            <div style={{ marginBottom: 6 }}>
-              <span style={{ color: C.text, fontWeight: 700 }}>{currentFocus.label}:</span>{" "}
-              {currentFocus.description}
-            </div>
-            <div style={{ fontStyle: "italic" }}>
-              {currentFocus.coachingImpact}
-            </div>
-          </div>
-        </div>
-      </Card>
+      {/* (Training Focus picker removed May 2026 — under the curve-trust
+          philosophy, the curve is the single source of truth for what
+          to train. Adding a user-configurable bias overrides the curve
+          based on preference rather than physiology, which contradicts
+          the model. The coaching engine no longer accepts a focus
+          weight; recommendations are driven entirely by the curve fit
+          + staleness + recency + external load.) */}
 
       <Card>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Grip Type</div>
@@ -1184,11 +1141,11 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               // Two complementary perspectives shown side by side:
               //   1. Largest raw curve gap — what a "balanced athlete"
               //      view of the data points at. Pure (potential − train_at)
-              //      / train_at, no goal weighting.
-              //   2. Goal-adjusted recommendation — what the engine
-              //      actually picks, which factors in recency, residual
-              //      fit, intensity match, external load, and the user's
-              //      Training Focus from Settings.
+              //      / train_at across all (zone × hand) cells.
+              //   2. Engine recommendation — what the engine actually picks,
+              //      which factors in staleness, recency, residual fit, and
+              //      external load (no Training Focus weight; that was
+              //      removed under the curve-trust philosophy).
               //
               // When they agree, the second line collapses to "matches
               // above" for brevity. When they differ, the user sees both
@@ -1196,17 +1153,13 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
               // them as competing claims.
               const recZone = coachRec?.zone;
               const recLabel = recZone ? GOAL_CONFIG[recZone]?.label : null;
-              const focusKey = coachRec?.trainingFocus;
-              const focusLabel = focusKey && focusKey !== "balanced"
-                ? TRAINING_FOCUS[focusKey]?.label
-                : null;
               const matches = recZone && recZone === widestGap.zoneKey;
               return (
                 <div style={{ fontSize: 12, color: C.text, background: widestGap.cell.cfg?.color + "20" || C.bg,
                               border: `1px solid ${gapColor(widestGap.gap)}66`, borderRadius: 8,
                               padding: "10px 12px", marginBottom: 10 }}>
                   <div>
-                    <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Balanced · largest curve gap:</span>{" "}
+                    <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Largest curve gap:</span>{" "}
                     {widestGap.zoneLabel} — <b>{fmtPct(widestGap.gap)}</b> headroom{" "}
                     ({
                       widestGap.zoneKey === "max_strength"       ? "neural / fast (PCr-aligned)" :
@@ -1220,16 +1173,16 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                   {recZone && (
                     <div style={{ marginTop: 6 }}>
                       <span style={{ fontWeight: 700, color: GOAL_CONFIG[recZone]?.color }}>
-                        {focusLabel ? `Per your ${focusLabel} focus` : "Goal-adjusted pick"}:
+                        Engine pick:
                       </span>{" "}
                       {matches
                         ? <>matches above — the Session Planner picks <b>{recLabel}</b>.</>
-                        : <>Session Planner picks <b>{recLabel}</b>: your actual reps there fall below the curve, so this will have the biggest impact.</>}
+                        : <>Session Planner picks <b>{recLabel}</b>: factoring in staleness, recency, and residual fit shifts the choice from the raw widest gap.</>}
                     </div>
                   )}
                   {!recZone && (
                     <div style={{ marginTop: 6, fontStyle: "italic", color: C.muted }}>
-                      The Session Planner above weighs this against recency, residual fit, and your training focus before picking — see its Why box for the final call.
+                      The Session Planner above weighs this against recency, residual fit, and zone staleness before picking — see its Why box for the final call.
                     </div>
                   )}
                 </div>
