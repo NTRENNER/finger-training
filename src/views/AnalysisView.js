@@ -23,12 +23,8 @@ import {
 } from "recharts";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
-import {
-  computeZoneCoverage,
-} from "../model/zones.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
 import { STRENGTH_MAX, ZONE_REF_T, ZONE_KEYS, ZONE6 } from "../model/zones.js";
-import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
 import {
   fitCF,
 } from "../model/monod.js";
@@ -37,15 +33,9 @@ import {
   buildThreeExpPriors, computeAUCThreeExp,
 } from "../model/threeExp.js";
 import {
-  prescribedLoad,
   empiricalPrescription, prescriptionPotential,
 } from "../model/prescription.js";
-import { coachingRecommendation, coachingRationale } from "../model/coaching.js";
-import {
-  AUC_T_MIN, AUC_T_MAX,
-  PERSONAL_RESPONSE_MIN_SESSIONS,
-  computePersonalResponse,
-} from "../model/personal-response.js";
+// (computePersonalResponse import removed — fed the now-gone Train block)
 import { computeLimiterZone } from "../model/limiter.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 // (EnergySystemBreakdownCard import removed — card dropped under curve-trust)
@@ -56,35 +46,7 @@ import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 // `gripRecs` useMemo so the title/color/caption stay consistent
 // between scopes. One entry per ZONE_KEY (6 total after the
 // May 2026 6-zone migration) so coachingRecommendation can return
-// any zone without ZONE_DETAILS[coach.zone] coming back undefined
-// and crashing the render.
-// ─────────────────────────────────────────────────────────────
-const ZONE_DETAILS = {
-  max_strength: {
-    title: "Train Max Strength", color: "#c83838",
-    caption: "near-MVC efforts that develop neural drive and motor unit recruitment — the ceiling that all other zones operate against.",
-  },
-  power: {
-    title: "Train Power", color: C.red,
-    caption: "short, high-force efforts that develop W′, the finite anaerobic reserve above your CF asymptote.",
-  },
-  power_strength: {
-    title: "Train Power/Strength", color: "#e68a48",
-    caption: "mid-glycolytic crossover holds that build lactate buffering capacity and power endurance.",
-  },
-  strength: {
-    title: "Train Strength", color: C.orange,
-    caption: "mid-duration max hangs that lift the force ceiling — and with it, CF.",
-  },
-  strength_endurance: {
-    title: "Train Strength/Endurance", color: "#7aa0d8",
-    caption: "aerobic-glycolytic blend holds that bridge max-effort capacity with sustained CF work.",
-  },
-  endurance: {
-    title: "Train Endurance", color: C.blue,
-    caption: "sustained threshold holds that raise CF as a fraction of your existing ceiling.",
-  },
-};
+// (ZONE_DETAILS removed — only consumed by the now-gone Train block.)
 
 // Per-grip color used wherever Micro and Crusher are charted side-by-
 // side (F-D scatter overlays, AUC-PR cards, CF-over-time chart).
@@ -93,38 +55,9 @@ const ZONE_DETAILS = {
 // Falls back to C.blue at call sites that pass an unknown grip key.
 const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 
-// Pure helper: given a {CF, W} fit and personalResponse map, compute the
-// projected ΔAUC for each protocol and return the rec payload. Separate
-// from the React memos so it can be called once per grip.
-function buildRecFromFit(fit, personalResponse, unit) {
-  if (!fit) return null;
-  const { CF, W } = fit;
-  const gains = {};
-  for (const [key, resp] of Object.entries(personalResponse)) {
-    const dCF = CF * resp.cf;
-    const dW  = W  * resp.w;
-    const gainKg = dCF * (AUC_T_MAX - AUC_T_MIN) + dW * Math.log(AUC_T_MAX / AUC_T_MIN);
-    gains[key] = toDisp(gainKg, unit);
-  }
-  const bestKey = Object.entries(gains).reduce((a, b) => b[1] > a[1] ? b : a)[0];
-  const d = ZONE_DETAILS[bestKey];
-  const responseSource = {};
-  for (const key of Object.keys(personalResponse)) {
-    responseSource[key] = {
-      source: personalResponse[key].source,
-      n:      personalResponse[key].n,
-    };
-  }
-  return {
-    key:     bestKey,
-    title:   d.title,
-    color:   d.color,
-    insight: `Largest projected AUC gain from ${d.caption}`,
-    gains,
-    aucGain: gains[bestKey],
-    responseSource,
-  };
-}
+// (buildRecFromFit removed under curve-trust — the per-grip Train
+// cards it backed are gone; Setup's ContinuousPickCard is the
+// prescription surface now.)
 
 export function AnalysisView({
   history, unit = "lbs", bodyWeight = null,
@@ -916,207 +849,12 @@ export function AnalysisView({
   // to match the red/green rendering in History. The stored r.failed flag
   // only flips on auto-failure (Tindeq force-drop); manually-ended short
   // hangs leave r.failed=false even though the rep clearly failed.
-  // Per-zone Energy System Breakdown stats — driven by ZONE6 so the
-  // 6-zone schema is the single source of truth for boundaries +
-  // colors. The system + tau labels are mapped per-zone for the
-  // hybrids (which span two energy systems' time domains).
-  const zones = useMemo(() => {
-    const zoneStats = (lo, hi) => {
-      const z = reps.filter(r => {
-        const t = r.target_duration > 0 ? r.target_duration : r.actual_time_s;
-        return t >= lo && t < hi;
-      });
-      const f = z.filter(r => {
-        if (r.target_duration > 0) return r.actual_time_s < r.target_duration;
-        return r.failed;
-      }).length;
-      return { total: z.length, failures: f, successes: z.length - f,
-               failRate: z.length > 0 ? f / z.length : null };
-    };
-    // Zone → energy-system label. These are how the curve fit's
-    // fast / middle / slow components align with the climbing-
-    // physiology literature — phenomenological labels for the
-    // regression components, not direct measurements of underlying
-    // tissue pools.
-    const SYSTEM_BY_ZONE = {
-      max_strength:       "Neural / fast",
-      power:              "Fast (PCr-aligned)",
-      power_strength:     "Fast → middle",
-      strength:           "Middle (glycolytic-aligned)",
-      strength_endurance: "Middle → slow",
-      endurance:          "Slow (oxidative-aligned)",
-    };
-    const TAU_BY_ZONE = {
-      max_strength:       `≪ τ₁ (${PHYS_MODEL_DEFAULT.tauR.fast}s)`,
-      power:              `τ₁ ≈ ${PHYS_MODEL_DEFAULT.tauR.fast}s`,
-      power_strength:     `τ₁ → τ₂`,
-      strength:           `τ₂ ≈ ${PHYS_MODEL_DEFAULT.tauR.medium}s`,
-      strength_endurance: `τ₂ → τ₃`,
-      endurance:          `τ₃ ≈ ${PHYS_MODEL_DEFAULT.tauR.slow}s`,
-    };
-    const out = {};
-    for (const z of ZONE6) {
-      const hi = z.max === Infinity ? 9999 : z.max;
-      const desc = z.max === Infinity
-        ? `${z.min}s+`
-        : z.min === 0
-          ? `<${z.max}s`
-          : `${z.min}–${z.max}s`;
-      out[z.key] = {
-        ...zoneStats(z.min, hi),
-        label: z.label,
-        color: z.color,
-        desc,
-        system: SYSTEM_BY_ZONE[z.key],
-        tau: TAU_BY_ZONE[z.key],
-      };
-    }
-    return out;
-  }, [reps]);
-
-  // ── Personal response calibration ──
-  // Fits CF/W′ response rates per zone from the user's own history and
-  // shrinks toward PROTOCOL_RESPONSE. Used by the recommendation engine
-  // instead of the raw prior so the engine's "what grows AUC fastest"
-  // adapts to this climber's actual measured response.
-  const personalResponse = useMemo(
-    () => computePersonalResponse(history),
-    [history]
-  );
-
-  // ── Unified training recommendation ──
-  // Primary signal: marginal AUC gain. For each protocol (power /
-  // strength / capacity), take the PERSONAL response rates (prior if
-  // thin data, blended with observed otherwise), project ΔCF and ΔW′
-  // at current parameter values, and integrate to a projected ΔAUC
-  // over the climbing-relevant 10–120s window. Pick the protocol with
-  // the largest projected ΔAUC.
-  //
-  // Secondary: Monod cross-zone residual (limiter) and zone coverage,
-  // kept as diagnostics alongside the ΔAUC ranking so users can see
-  // where the curve is lopsided and which zones are under-trained.
-  const recommendation = useMemo(() => {
-    // Limiter (curve shape) — kept as secondary diagnostic
-    const limiter = computeLimiterZone(history);
-    const limiterKey  = limiter?.zone ?? null;
-    const limiterGrip = limiter?.grip ?? null;
-
-    // Coverage (training distribution) — kept as tertiary diagnostic
-    const coverage = computeZoneCoverage(history, activities);
-    const coverageKey = coverage.total > 0 ? coverage.recommended : null;
-
-    // Primary path: coaching engine v2 (gap × intensity × recency ×
-    // external) when a grip is selected. For the no-grip-selected case
-    // there's no meaningful single recommendation (gap requires a grip
-    // scope), so we fall back to the legacy ΔAUC ranking on liveEstimate.
-    if (selGrip) {
-      const coach = coachingRecommendation(history, selGrip, {
-        freshMap, threeExpPriors, activities,
-      });
-      if (coach) {
-        const d = ZONE_DETAILS[coach.zone];
-        // Compute per-zone gap landscape for the bars
-        const zones = ZONE_KEYS;
-        const zoneGaps = {};
-        for (const zoneKey of zones) {
-          const t = GOAL_CONFIG[zoneKey].refTime;
-          let bestGap = null;
-          for (const h of ["L", "R"]) {
-            const trainAt = empiricalPrescription(history, h, selGrip, t, { threeExpPriors })
-                         ?? prescribedLoad(history, h, selGrip, t, freshMap, { threeExpPriors });
-            const pot = prescriptionPotential(history, h, selGrip, t, { freshMap, threeExpPriors });
-            if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
-            const gap = (pot.value - trainAt) / trainAt;
-            if (bestGap == null || gap > bestGap) bestGap = gap;
-          }
-          zoneGaps[zoneKey] = bestGap;
-        }
-        return {
-          key: coach.zone, title: d.title, color: d.color,
-          rationale: coachingRationale(coach),
-          coach, zoneGaps,
-          limiterKey, limiterGrip, coverageKey,
-          agree: !limiterKey || limiterKey === coach.zone,
-          coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
-        };
-      }
-    }
-
-    // Fallback path: legacy ΔAUC ranking on the pooled / available fit.
-    // Used when no grip is selected (pooled recommendation across grips)
-    // or when the coaching engine has no scoreable zones for the picked
-    // grip yet (cold start with no recent reps at this scope).
-    const gripFit = selGrip ? gripEstimates[selGrip] : null;
-    const fitForRec = gripFit ?? liveEstimate ?? cfEstimate;
-    if (!fitForRec) {
-      const fallbackKey = limiterKey ?? coverageKey;
-      if (!fallbackKey) return null;
-      const d = ZONE_DETAILS[fallbackKey];
-      return {
-        key: fallbackKey,
-        title: d.title, color: d.color,
-        insight: `Need 2+ failures across different durations to rank protocols by projected AUC gain. For now: ${d.caption}`,
-        gains: null, aucGain: null, zoneGaps: null,
-        limiterKey, limiterGrip, coverageKey,
-        agree: true, responseSource: null,
-        coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
-      };
-    }
-    const base = buildRecFromFit(fitForRec, personalResponse, unit);
-    const agree = !limiterKey || limiterKey === base.key;
-    return {
-      ...base, zoneGaps: null,
-      limiterKey, limiterGrip, coverageKey, agree,
-      coverageZoneLabel: coverageKey ? ZONE_DETAILS[coverageKey].title.replace("Train ", "") : null,
-    };
-  }, [liveEstimate, gripEstimates, selGrip, history, activities, unit, personalResponse, freshMap, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Per-grip recommendations — one rec per grip with enough data for
-  // a coaching call. Uses the v2 coaching engine: gap × intensity ×
-  // recency × external_load. The card shows the recommended zone, the
-  // coaching rationale, and per-zone gap bars (so the user sees the
-  // full landscape of opportunities, not just the winner).
-  const gripRecs = useMemo(() => {
-    const zones = ["power", "strength", "endurance"];
-    const out = {};
-    for (const [grip, fit] of Object.entries(gripEstimates)) {
-      const coach = coachingRecommendation(history, grip, {
-        freshMap, threeExpPriors, activities,
-      });
-      if (!coach) continue;
-      // Compute per-zone gaps so the bars can show the whole landscape.
-      const zoneGaps = {};
-      for (const zoneKey of zones) {
-        const t = GOAL_CONFIG[zoneKey].refTime;
-        let bestGap = null;
-        for (const h of ["L", "R"]) {
-          const trainAt = empiricalPrescription(history, h, grip, t, { threeExpPriors })
-                       ?? prescribedLoad(history, h, grip, t, freshMap, { threeExpPriors });
-          const pot = prescriptionPotential(history, h, grip, t, { freshMap, threeExpPriors });
-          if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
-          const gap = (pot.value - trainAt) / trainAt;
-          if (bestGap == null || gap > bestGap) bestGap = gap;
-        }
-        zoneGaps[zoneKey] = bestGap;
-      }
-      const d = ZONE_DETAILS[coach.zone];
-      out[grip] = {
-        grip,
-        key:       coach.zone,
-        title:     d.title,
-        color:     d.color,
-        rationale: coachingRationale(coach),
-        coach,
-        zoneGaps,
-        CF: fit.CF, W: fit.W, n: fit.n,
-      };
-    }
-    return out;
-  }, [gripEstimates, history, freshMap, threeExpPriors, activities, GOAL_CONFIG]);
-
-  const unexplored = Object.entries(zones)
-    .filter(([, z]) => z.total === 0)
-    .map(([, z]) => z.label);
+  // (Per-zone `zones` memo + personalResponse memo removed —
+  // both fed the now-gone Energy System Breakdown card and Train
+  // block. recommendation / gripRecs / unexplored also gone.
+  // The Setup tab's ContinuousPickCard is the prescription surface
+  // now; the F-D chart + Curve Improvement + Curve Coverage cover
+  // the diagnostic ground.)
 
   // Custom tooltip for scatter chart
   const ScatterTooltip = ({ active, payload, unit: tipUnit }) => {
@@ -1781,216 +1519,15 @@ export function AnalysisView({
             Total % (= AUC % gain) and CF & W' Over Time already shows
             the trajectory of the underlying fit parameters. */}
 
-        {/* ── Train block (Next Session Focus + Unexplored notice) ──
-            Moved up directly under Critical Force so the actionable
-            prescription sits above the fold. The Advanced metrics
-            section below holds the supporting detail (AUC absolute,
-            per-compartment dose, energy system breakdown). */}
-        {(() => {
-          // Helper — render per-zone gap bars. Replaces the old projected-ΔAUC
-          // bars to match the gap-driven coaching engine: the recommended zone
-          // is the one with the largest gap × intensity × recency × external,
-          // and the bars show each zone's gap so the user sees the full
-          // landscape of training opportunities, not just the winner.
-          const renderGainsBars = (rec) => rec.zoneGaps && (
-            <div style={{
-              background: C.bg, borderRadius: 8, padding: "8px 10px",
-              marginBottom: 10, fontSize: 11,
-            }}>
-              <div style={{ color: C.muted, letterSpacing: 0.4, textTransform: "uppercase", fontSize: 10, marginBottom: 6 }}>
-                Per-zone reading
-              </div>
-              {(() => {
-                // Find max absolute gap for bar scaling.
-                // Sign convention: gap > 0 = under potential (room to grow,
-                // training opportunity); gap < 0 = over potential (already
-                // exceeding the model — a good state). We render both as
-                // positive numbers with directional words ("room" / "ahead")
-                // so the page never has unsigned-negative numbers in zone
-                // colors that read as alarms when they actually mean wins.
-                const maxAbs = Math.max(0.05, ...Object.values(rec.zoneGaps).filter(v => v != null).map(v => Math.abs(v)));
-                // Iterate ZONE6 so all six zones render in physiological
-                // order. Short labels keep the row compact; the bar +
-                // value column tells the user which zone has room and
-                // which is ahead.
-                return ZONE6.map(z => {
-                  const v = rec.zoneGaps[z.key];
-                  const pct = v == null ? 0 : Math.min(100, Math.max(0, (Math.abs(v) / maxAbs) * 100));
-                  const isBest = z.key === rec.key;
-                  // Bar color: zone color for "room to grow" (action zone),
-                  // green for "ahead of model" (already exceeding — good).
-                  const barColor = v == null ? C.muted : (v >= 0 ? z.color : C.green);
-                  // Label: "X% room" if under potential (training opportunity);
-                  // "X% ahead" if over potential (outperforming the model).
-                  const label = v == null ? "—"
-                              : v >= 0 ? `${Math.round(v * 100)}% room`
-                              : `${Math.round(Math.abs(v) * 100)}% ahead`;
-                  const labelColor = v == null ? C.muted
-                                   : v < 0 ? C.green
-                                   : isBest ? z.color
-                                   : C.muted;
-                  return (
-                    <div key={z.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <span style={{ width: 70, color: z.color, fontWeight: isBest ? 700 : 400, fontSize: 10 }}>
-                        {z.short}
-                      </span>
-                      <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${pct}%`, background: barColor, borderRadius: 3, transition: "width 0.3s", opacity: v == null ? 0.4 : 1 }} />
-                      </div>
-                      <span style={{ width: 72, textAlign: "right", color: labelColor, fontWeight: isBest ? 700 : 400, fontSize: 10 }}>
-                        {label}
-                      </span>
-                    </div>
-                  );
-                });
-              })()}
-              {rec.responseSource && (() => {
-                const calibrated = Object.entries(rec.responseSource).filter(([, s]) => s.source === "blended");
-                if (calibrated.length === 0) {
-                  return (
-                    <div style={{ fontSize: 10, color: C.muted, marginTop: 6, fontStyle: "italic" }}>
-                      Using population prior. Response rates will calibrate to your own data after {PERSONAL_RESPONSE_MIN_SESSIONS}+ sessions per zone.
-                    </div>
-                  );
-                }
-                const labels = { power: "Power", strength: "Strength", endurance: "Endurance" };
-                const parts = calibrated.map(([k, s]) => `${labels[k]} (${Math.round(s.n)})`).join(", ");
-                return (
-                  <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
-                    <span style={{ color: C.green }}>●</span> Calibrated from your history: {parts}.
-                    {calibrated.length < 3 && " Others still on prior."}
-                  </div>
-                );
-              })()}
-            </div>
-          );
-
-          // Per-grip split mode: one card per grip with its own verdict.
-          // perGripMode triggers as soon as any grip has coaching data —
-          // even a single grip gets its own coaching card rather than
-          // falling through to the legacy ΔAUC engine in `recommendation`.
-          // Eliminates the inconsistency where a user with only one grip
-          // worth of data saw a Monod-driven recommendation while
-          // multi-grip users saw the gap-driven coaching engine.
-          const perGripMode = !selGrip && Object.keys(gripRecs).length >= 1;
-          if (perGripMode) {
-            return (
-              <>
-                {Object.values(gripRecs).map((rec, i, arr) => (
-                  <Card key={rec.grip} style={{ marginBottom: 16, border: `1px solid ${rec.color}40` }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                      <div style={{ fontSize: 11, color: rec.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                        Next Session Focus
-                      </div>
-                      <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>
-                        {rec.grip}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: rec.color, marginBottom: 10 }}>
-                      {rec.title}
-                    </div>
-                    <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
-                      {rec.rationale || `Largest gap to potential at ${GOAL_CONFIG[rec.key]?.label || rec.key} for ${rec.grip}.`}
-                    </div>
-                    {renderGainsBars(rec)}
-                    <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
-                      Based on {rec.n} failure{rec.n !== 1 ? "s" : ""} — see the F-D chart for the per-grip 3-min sustainable force.
-                    </div>
-                    {/* Footnote on the LAST card only — points back at
-                        Setup's Coaching prescription for the per-hand
-                        breakdown. Same data, two scopes; clarifying
-                        which is which keeps users from reading them as
-                        competing recommendations. */}
-                    {i === arr.length - 1 && (
-                      <div style={{ fontSize: 11, color: C.muted, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-                        Per-grip summary · the Setup tab's <b>Coaching prescription</b> shows the per-hand reference loads.
-                      </div>
-                    )}
-                  </Card>
-                ))}
-              </>
-            );
-          }
-
-          // Single-card mode — pooled fit, or user has picked a specific
-          // grip. Shows the full limiter/coverage diagnostics panel.
-          if (!recommendation) {
-            return (
-              <Card style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-                  🔬 Train close to your limit in at least one time domain so the auto-failure system can record a failure point. That unlocks personalized training recommendations.
-                </div>
-              </Card>
-            );
-          }
-          return (
-            <Card style={{ marginBottom: 16, border: `1px solid ${recommendation.color}40` }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                <div style={{ fontSize: 11, color: recommendation.color, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                  Next Session Focus
-                </div>
-                {selGrip && (
-                  <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{selGrip}</div>
-                )}
-              </div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: recommendation.color, marginBottom: 10 }}>
-                {recommendation.title}
-              </div>
-              <div style={{ fontSize: 13, color: C.text, marginBottom: 14, lineHeight: 1.6 }}>
-                {recommendation.rationale || recommendation.insight}
-              </div>
-              {renderGainsBars(recommendation)}
-              {/* Secondary diagnostics */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {recommendation.limiterKey && recommendation.agree && (
-                  <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                    <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Shape:</span>
-                    <span>
-                      Curve-shape diagnostic agrees — this zone also falls farthest below its own 3-exp curve
-                      {recommendation.limiterGrip ? <> on <b>{recommendation.limiterGrip}</b></> : null}.
-                    </span>
-                  </div>
-                )}
-                {recommendation.limiterKey && !recommendation.agree && (
-                  <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                    <span style={{ color: C.yellow, fontWeight: 700, flexShrink: 0 }}>⚡ Shape:</span>
-                    <span>
-                      Curve-shape diagnostic points elsewhere
-                      {recommendation.limiterGrip ? <> (<b>{recommendation.limiterGrip}</b>)</> : null},
-                      but AUC ranks this protocol as the biggest capacity win. Growing area dominates balancing shape.
-                    </span>
-                  </div>
-                )}
-                {recommendation.coverageKey && recommendation.coverageKey === recommendation.key && (
-                  <div style={{ fontSize: 11, color: C.muted, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                    <span style={{ color: C.green, fontWeight: 700, flexShrink: 0 }}>✓ Coverage:</span>
-                    <span>Session count agrees — this is also your least-trained zone in the last 30 days.</span>
-                  </div>
-                )}
-              </div>
-            </Card>
-          );
-        })()}
-
-        {/* Unexplored zones notice — kept with Train since it's an
-            actionable training hint, not a metric. */}
-        {unexplored.length > 0 && (
-          <Card style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 13, color: C.yellow, marginBottom: 6 }}>
-              📍 Unexplored: <b>{unexplored.join(", ")}</b>
-            </div>
-            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-              Data from {unexplored.join(" and ").toLowerCase()} hangs would complete your profile and reveal hidden limiters. A single session to failure in each zone is enough to start.
-            </div>
-          </Card>
-        )}
+        {/* (Train block — Next Session Focus per-grip cards + Unexplored
+            notice — removed under curve-trust. The Setup tab's
+            ContinuousPickCard is the prescription surface; Analysis
+            stays focused on diagnostics: F-D chart, AUC over time,
+            Curve Improvement, per-grip CF/W'.) */}
 
         {/* ── Advanced metrics section ──
             Below this divider sit the supporting / detail metrics that
-            most users won't engage with day-to-day: the absolute (kg·s)
-            view of AUC, the per-compartment training dose, and the
-            energy-system breakdown. They live below Train so the
-            actionable prescription sits above the fold. */}
+            most users won't engage with day-to-day. */}
         <div style={{
           marginTop: 32,
           marginBottom: 16,
