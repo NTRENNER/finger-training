@@ -314,11 +314,17 @@ CREATE POLICY "auth_all" ON reps
           <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
             <b>Force-Duration Model:</b> Phenomenological three-component
             decay — F(T) = a·exp(−T/τ₁) + b·exp(−T/τ₂) + c·exp(−T/τ₃),
-            with τ ≈ 10 s / 30 s / 180 s (depletion taus). The fast /
-            medium / slow components are named for the energy systems
-            they approximately align with (PCr, glycolytic, oxidative)
-            but they're regression components fit to your data, not
-            direct measurements of underlying tissue pools.
+            with τ ≈ 10 s / 30 s / 180 s as fixed basis functions
+            (depletion taus). The three amplitudes (a, b, c) are fit
+            per-grip to your data; Smax = a + b + c falls out as the
+            curve's prediction at T = 0. The fast / medium / slow
+            components are named for the energy systems they
+            approximately align with (PCr, glycolytic, oxidative) but
+            they're regression coefficients, not direct measurements
+            of underlying tissue pools. This is the only F-D model in
+            the app — the legacy Monod (CF + W'/T) curve was retired
+            in May 2026 after offline LOO-CV picked three-exp as the
+            empirical winner.
             <br /><br />
             <b>Continuous Coaching:</b> The engine sweeps target time
             from 5 s to 240 s and picks where the curve over-predicts
