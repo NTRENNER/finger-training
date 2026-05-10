@@ -358,3 +358,156 @@ export function coachingRationale(rec) {
   // truth; no user-configurable bias overrides it.
   return reasons.join("; ");
 }
+
+// ─────────────────────────────────────────────────────────────
+// CONTINUOUS COACHING ENGINE  (curve-trust, May 2026)
+// ─────────────────────────────────────────────────────────────
+// Treats the three-exp F-D curve as the source of truth and asks:
+// "Where on the continuous curve does training have the biggest
+// projected payoff?" The answer is a specific (T, load) pair —
+// not snapped to one of six zone reference times.
+//
+// Math:
+//   1. Fit three-exp per hand from all that hand's (T, F) data points
+//      under the train-to-failure model (every rep is a failure point
+//      regardless of the legacy r.failed flag).
+//   2. For each observed rep at (T_i, F_i): compute residual ratio
+//      r_i = F_actual / F_curve(T_i). r < 1 → curve over-predicts at
+//      that T (limiter signal); r > 1 → user exceeded the curve
+//      (strength signal); r ≈ 1 → curve well-calibrated locally.
+//   3. Sweep T from 5 to 240 in 5s steps. At each T, smooth the per-
+//      rep ratios via a Gaussian kernel (bandwidth ~30s) to get a
+//      local "is the curve over- or under-predicting near this T?"
+//      signal.
+//   4. score(T) = residualBoost(T) × stalenessBoost(zoneOf(T))
+//      where residualBoost = 1 + max(0, 1 − localRatio) × 3, so
+//      strong over-prediction (localRatio = 0.7) → boost ~1.9, and
+//      neutral / above-curve regions → boost = 1.0.
+//   5. Argmax over (hand, T). Returns { T_star, hand, loadKg,
+//      loadByHand, score, residualBoost, localRatio,
+//      stalenessBoost, zone } so the UI can explain WHY this T
+//      was picked.
+//
+// No focus weight — Training Focus was dropped under the curve-trust
+// philosophy. No reps/rest/sets — the protocol layer is the caller's
+// concern (defaults derived from T elsewhere). This function returns
+// only the (T, load) pick.
+//
+// In data-sparse regions, the smoothed kernel weights tend to zero
+// and localRatio defaults to 1.0 (neutral). The score there is just
+// stalenessBoost × 1.0, so never-trained / stale zones still get
+// recommended when there's no residual signal anywhere — which is
+// correct: anchoring the curve at unexplored durations is itself the
+// training opportunity.
+const CONTINUOUS_T_MIN = 5;     // s — shortest meaningful hold
+const CONTINUOUS_T_MAX = 240;   // s — longest meaningful hold
+const CONTINUOUS_T_STEP = 5;    // s — sweep granularity
+const CONTINUOUS_BANDWIDTH = 30; // s — Gaussian kernel σ for residual smoothing
+
+export function coachingRecommendationContinuous(history, grip, opts = {}) {
+  const {
+    freshMap = null,
+    threeExpPriors = null,
+    today = new Date(),
+    tMin = CONTINUOUS_T_MIN,
+    tMax = CONTINUOUS_T_MAX,
+    tStep = CONTINUOUS_T_STEP,
+    bandwidth = CONTINUOUS_BANDWIDTH,
+  } = opts;
+
+  if (!grip || !history || history.length === 0) return null;
+
+  const stalenessMap = getZoneStaleness(history, today);
+  const fmap = freshMap || buildFreshLoadMap(history);
+  const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
+  const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
+  const sigmaSq = bandwidth * bandwidth;
+
+  // Per-hand: fit curve, pre-compute residual ratios, sweep T.
+  const handFits = {};   // hand -> { amps, ratios }
+  for (const hand of ["L", "R"]) {
+    const handPts = (history || []).filter(r =>
+      r.hand === hand && r.grip === grip
+      && r.actual_time_s > 0 && effectiveLoad(r) > 0
+    );
+    if (handPts.length < 1) continue;
+
+    const fitPts = handPts.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
+    let amps;
+    if (hasPrior) {
+      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(fitPts.length, 1);
+      amps = fitThreeExpAmps(fitPts, { prior, lambda });
+    } else if (fitPts.length >= 2) {
+      amps = fitThreeExpAmps(fitPts);
+    } else {
+      continue;  // need ≥2 points without a prior
+    }
+    if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) continue;
+
+    // Residual ratios at observed (T_i, F_i)
+    const ratios = handPts.map(r => {
+      const F_curve = predForceThreeExp(amps, r.actual_time_s);
+      const F_actual = freshLoadFor(r, fmap);
+      return {
+        T: r.actual_time_s,
+        ratio: F_curve > 0 ? F_actual / F_curve : 1.0,
+      };
+    });
+    handFits[hand] = { amps, ratios };
+  }
+
+  if (Object.keys(handFits).length === 0) return null;
+
+  // Sweep T per hand, find argmax score across (hand, T).
+  let best = null;
+  for (const [hand, { amps, ratios }] of Object.entries(handFits)) {
+    for (let T = tMin; T <= tMax; T += tStep) {
+      // Gaussian-smoothed local residual ratio at T
+      let weightSum = 0;
+      let ratioSum = 0;
+      for (const p of ratios) {
+        const dt = p.T - T;
+        const w = Math.exp(-(dt * dt) / (2 * sigmaSq));
+        weightSum += w;
+        ratioSum += w * p.ratio;
+      }
+      // No nearby data → localRatio defaults to 1.0 (neutral signal,
+      // staleness drives the score in those regions).
+      const localRatio = weightSum > 1e-6 ? ratioSum / weightSum : 1.0;
+
+      // Boost rises as the curve over-predicts more (localRatio < 1).
+      // localRatio = 0.7 → boost ≈ 1.9; localRatio ≥ 1 → boost = 1.0.
+      const residualBoost = 1 + Math.max(0, 1 - localRatio) * 3;
+
+      const zoneKey = zoneOf(T);
+      const stale = stalenessBoost(zoneKey, stalenessMap);
+      const score = residualBoost * stale;
+
+      if (!best || score > best.score) {
+        best = {
+          T,
+          hand,
+          loadKg: predForceThreeExp(amps, T),
+          score,
+          residualBoost,
+          localRatio,
+          stalenessBoost: stale,
+          staleStatus: stalenessMap[zoneKey]?.status ?? "ok",
+          zone: zoneKey,
+        };
+      }
+    }
+  }
+
+  if (!best) return null;
+
+  // Augment with the OTHER hand's load at T_star for display
+  // ("Train at 92s · L 38 lbs / R 37 lbs").
+  const loadByHand = {};
+  for (const [hand, { amps }] of Object.entries(handFits)) {
+    const f = predForceThreeExp(amps, best.T);
+    loadByHand[hand] = f > 0 ? f : null;
+  }
+  best.loadByHand = loadByHand;
+  return best;
+}

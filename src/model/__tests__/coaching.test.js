@@ -11,6 +11,7 @@ import {
   COACH_RECOVERY_TAU_DAYS,
   recencyPenalty, externalLoadModifier,
   zoneResidualFactor, coachingRecommendation, coachingRationale,
+  coachingRecommendationContinuous,
 } from "../coaching.js";
 import { buildThreeExpPriors } from "../threeExp.js";
 
@@ -259,5 +260,140 @@ describe("coachingRationale", () => {
     const rec = { zone: "power", hand: "L", gap: 0.25, recency: 0.9, ext: 1, resFactor: 1 };
     const text = coachingRationale(rec);
     expect(text).toMatch(/\+25%/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// coachingRecommendationContinuous — curve-trust continuous engine
+// ─────────────────────────────────────────────────────────────
+// Sweeps T from 5 to 240 in 5s steps, scores via Gaussian-smoothed
+// residuals + staleness, returns the best (T, hand) with the load
+// at that point on the curve.
+describe("coachingRecommendationContinuous", () => {
+  const today = new Date();
+
+  // Build a synthetic history that follows a known three-exp curve.
+  // F(T) = 30·exp(-T/10) + 12·exp(-T/30) + 6·exp(-T/180)
+  const trueAmps = [30, 12, 6];
+  const tau = [10, 30, 180];
+  const F_curve = (T) => trueAmps[0]*Math.exp(-T/tau[0])
+                       + trueAmps[1]*Math.exp(-T/tau[1])
+                       + trueAmps[2]*Math.exp(-T/tau[2]);
+
+  const buildRep = (hand, T, F, daysAgo = 0) => ({
+    id: `r-${hand}-${T}-${daysAgo}`,
+    hand, grip: "Crusher",
+    target_duration: T, actual_time_s: T,
+    avg_force_kg: F,
+    rep_num: 1,
+    date: new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10),
+    session_id: `s-${daysAgo}-${T}`,
+  });
+
+  test("returns null with no history", () => {
+    expect(coachingRecommendationContinuous([], "Crusher", { today })).toBeNull();
+    expect(coachingRecommendationContinuous(null, "Crusher", { today })).toBeNull();
+  });
+
+  test("returns null with no grip", () => {
+    expect(coachingRecommendationContinuous([buildRep("L", 30, 22)], null, { today })).toBeNull();
+  });
+
+  test("returns a (T, hand, loadKg) pick with on-curve data", () => {
+    // Two L data points exactly on the curve → no residual signal,
+    // staleness drives the pick.
+    const history = [buildRep("L", 30, F_curve(30)), buildRep("L", 60, F_curve(60))];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    expect(rec.T).toBeGreaterThanOrEqual(5);
+    expect(rec.T).toBeLessThanOrEqual(240);
+    expect(rec.hand).toBe("L");
+    expect(rec.loadKg).toBeGreaterThan(0);
+    expect(rec.loadByHand).toBeDefined();
+  });
+
+  test("recommends near a duration where actuals fall below the curve", () => {
+    // Many on-curve data points anchor the fit, plus a single isolated
+    // under-perform at 90s creates a localized limiter signal that the
+    // smoothed residual picks up.
+    const history = [
+      buildRep("L", 5,  F_curve(5)),
+      buildRep("L", 10, F_curve(10)),
+      buildRep("L", 15, F_curve(15)),
+      buildRep("L", 20, F_curve(20)),
+      buildRep("L", 30, F_curve(30)),
+      buildRep("L", 45, F_curve(45)),
+      buildRep("L", 60, F_curve(60)),
+      buildRep("L", 120, F_curve(120)),
+      buildRep("L", 180, F_curve(180)),
+      buildRep("L", 90, F_curve(90) * 0.6),  // localized under-perform
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    // Should land near the limiter signal at 90s. Gaussian bandwidth
+    // is 30s so the smoothed peak should land somewhere in 50-140s.
+    // Note: shrinkage pulls the fit toward the (data-derived) prior,
+    // which dilutes the residual at any single outlier — so we don't
+    // assert on residualBoost magnitude, only on T_star location.
+    expect(rec.T).toBeGreaterThanOrEqual(50);
+    expect(rec.T).toBeLessThanOrEqual(140);
+  });
+
+  test("prefers hand with stronger limiter signal", () => {
+    // L is on-curve everywhere. R has a big under-perform at 60s.
+    const history = [
+      buildRep("L", 30, F_curve(30)),
+      buildRep("L", 60, F_curve(60)),
+      buildRep("L", 120, F_curve(120)),
+      buildRep("R", 30, F_curve(30)),
+      buildRep("R", 60, F_curve(60) * 0.5),  // R limiter
+      buildRep("R", 60, F_curve(60) * 0.55),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    expect(rec.hand).toBe("R");
+  });
+
+  test("respects T range limits", () => {
+    // Even with strong signal at T=300, sweep stops at tMax=240.
+    const history = [
+      buildRep("L", 5,  F_curve(5)),
+      buildRep("L", 30, F_curve(30)),
+      buildRep("L", 60, F_curve(60)),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec.T).toBeGreaterThanOrEqual(5);
+    expect(rec.T).toBeLessThanOrEqual(240);
+  });
+
+  test("loadByHand contains predicted load for both hands at T_star", () => {
+    const history = [
+      buildRep("L", 30, F_curve(30)),
+      buildRep("L", 60, F_curve(60)),
+      buildRep("R", 30, F_curve(30) * 0.9),
+      buildRep("R", 60, F_curve(60) * 0.9),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    expect(rec.loadByHand.L).toBeGreaterThan(0);
+    expect(rec.loadByHand.R).toBeGreaterThan(0);
+    // The picked hand's load should match loadKg
+    expect(rec.loadByHand[rec.hand]).toBeCloseTo(rec.loadKg, 4);
+  });
+
+  test("returns zone-of-T_star for context", () => {
+    const history = [
+      buildRep("L", 5, F_curve(5)),
+      buildRep("L", 30, F_curve(30)),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    expect(["max_strength", "power", "power_strength", "strength", "strength_endurance", "endurance"]).toContain(rec.zone);
   });
 });
