@@ -1,55 +1,60 @@
 // ─────────────────────────────────────────────────────────────
-// SETUP VIEW
+// SETUP VIEW — curve-trust layout (May 2026)
 // ─────────────────────────────────────────────────────────────
-// The "Setup" tab — pick a grip, see the coaching recommendation,
-// review prescribed loads per zone, set body weight, connect Tindeq,
-// and start the session.
+// The "Setup" tab. Under the curve-trust philosophy, the F-D curve
+// is the source of truth for what to train next. The continuous
+// engine (coachingRecommendationContinuous in src/model/coaching.js)
+// returns a specific (T, load) prescription rather than snapping to
+// one of six fixed zone reference times.
 //
-// Bundles the cards that only ever render here:
-//   BwPrompt           — stale-body-weight nudge.
-//   SessionPlannerCard — zone picker + within/between-set sliders +
-//                        predicted fatigue curve. Takes GOAL_CONFIG
-//                        as a prop so it doesn't reach back into App.js.
-//   ZoneCoverageCard   — rolling 30-day session count by zone.
+// Layout (top to bottom):
+//   • Adaptive Warm-up entry card
+//   • ClimbingRPEQuickLog (collapsed climbing logger)
+//   • Grip Type pills (still per-grip; the curve is grip-scoped)
+//   • ContinuousPickCard — the primary recommendation:
+//       "Train at 92s @ 38 lbs · L 38 / R 37" with optional
+//       protocol fine-tune (hangs + rest defaults derived from T).
+//       Auto-applies to session config so Start Session uses it.
+//   • CurveCoverageCard — per-zone data freshness (the soft lockout
+//       surface, reframed from "Training Balance" to "Curve
+//       Coverage" because it's about where data is fresh vs stale,
+//       not about prescriptive balance).
+//   • BwPrompt
+//   • Tindeq Connect slot
+//   • Start Session button (always 1 set under the new flow)
 //
-// Cross-cutting App config (GOAL_CONFIG, GRIP_PRESETS) is passed in
-// as props so this module stays decoupled from App.js's constant block.
+// Removed in this rewrite:
+//   • SessionPlannerCard — 6-zone picker + within/between-set
+//     sliders + fatigue chart. Replaced by ContinuousPick.
+//   • Coaching Prescription card (per-hand 6-zone L/R grid).
+//     Redundant with the F-D chart on Analysis for diagnostics
+//     and with ContinuousPick for prescription.
+//   • ZoneCoverageCard (Zone Workout Summary). Pure descriptive
+//     card not driven by the curve; cut under "all in on curve."
+//   • Training Focus inline picker (already gone in commit 73e2024).
+//
+// Multi-set machinery is left at sets=1, setRest=0 in the config so
+// the existing workout runner still accepts the shape; commit C will
+// fully remove sets/setRest from the data model + runner.
 
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  ResponsiveContainer, LineChart, Line,
-  XAxis, YAxis, Tooltip, CartesianGrid,
-  ReferenceLine,
-} from "recharts";
 
 import { C } from "../ui/theme.js";
-import { Card, Btn, Sect } from "../ui/components.js";
+import { Card, Btn } from "../ui/components.js";
 import { fmt0, fmtW, toDisp, fromDisp } from "../ui/format.js";
 
 import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 import { today } from "../util.js";
 import { WarmupView } from "./WarmupView.js";
 
-import { computeZoneCoverage, ZONE_KEYS } from "../model/zones.js";
+import { ZONE_KEYS } from "../model/zones.js";
 import { getZoneStaleness, getAnnualSessionPace, ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS } from "../model/lockout.js";
-import { computeLimiterZone } from "../model/limiter.js";
-import { predictRepTimes } from "../model/fatigue.js";
-import {
-  AUC_T_MIN, AUC_T_MAX, computePersonalResponse,
-} from "../model/personal-response.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
-import {
-  empiricalPrescription, prescribedLoad, prescriptionPotential,
-  estimateRefWeight,
-} from "../model/prescription.js";
-import {
-  coachingRecommendation, coachingRationale,
-} from "../model/coaching.js";
+import { coachingRecommendationContinuous } from "../model/coaching.js";
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
 // ─────────────────────────────────────────────────────────────
-
 // Inline body-weight prompt — shown in session setup when BW is stale
 // (>3 days). Exported because WorkoutTab also renders it before its
 // session log so users get the same nudge regardless of entry tab.
@@ -65,11 +70,9 @@ export function BwPrompt({ unit = "lbs", onSave }) {
     latest ? fmt0(toDisp(latest.kg, unit)) : ""
   );
 
-  // Only show if stale or never set
   if (daysSince < 3) return null;
 
   const save = () => {
-    // Integer precision — body weight doesn't need decimal accuracy
     const kg = fromDisp(Math.round(parseFloat(inputVal)), unit);
     if (!isNaN(kg) && kg > 0) { onSave(kg); setEditing(false); }
   };
@@ -132,260 +135,13 @@ export function BwPrompt({ unit = "lbs", onSave }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SESSION PLANNER CARD
-// ─────────────────────────────────────────────────────────────
-// Zone picker + within/between-set sliders + a small predicted
-// fatigue chart. Only consumed by SetupView, but kept as its own
-// component because it owns its own form state.
-
-function SessionPlannerCard({ liveEstimate, onApplyPlan, recommendedZone = null, recommendedGrip = null, recommendedLabel = "recommended", recommendedScope = null, recommendedRationale = "", GOAL_CONFIG = {} }) {
-  // Default goal to the recommended zone when we know it; fall back to strength
-  const initGoal = (recommendedZone && GOAL_CONFIG[recommendedZone]) ? recommendedZone : "strength";
-  const [goal,    setGoal]    = useState(initGoal);
-  const [numReps, setNumReps] = useState(GOAL_CONFIG[initGoal].repsDefault);
-  const [rest,    setRest]    = useState(GOAL_CONFIG[initGoal].restDefault);
-  const [numSets,  setNumSets]  = useState(GOAL_CONFIG[initGoal].setsDefault);
-  const [setRestS, setSetRestS] = useState(GOAL_CONFIG[initGoal].setRestDefault);
-
-  const handleGoal = (g) => {
-    setGoal(g);
-    setNumReps(GOAL_CONFIG[g].repsDefault);
-    setRest(GOAL_CONFIG[g].restDefault);
-    setNumSets(GOAL_CONFIG[g].setsDefault);
-    setSetRestS(GOAL_CONFIG[g].setRestDefault);
-  };
-
-  // Follow `recommendedZone` when it changes (e.g. user picked a
-  // different Training Focus in Settings, or switched grip). Without
-  // this, `goal` stayed stuck at whatever was recommended on first
-  // mount, and the "Why X" header drifted out of sync with the
-  // actually-recommended zone shown by the pill.
-  useEffect(() => {
-    if (recommendedZone && GOAL_CONFIG[recommendedZone] && recommendedZone !== goal) {
-      handleGoal(recommendedZone);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recommendedZone]);
-
-  const gc = GOAL_CONFIG[goal];
-  const firstRepTime = gc.refTime;
-
-  const repTimes = useMemo(
-    () => predictRepTimes({ numReps, firstRepTime, restSeconds: rest }),
-    [numReps, firstRepTime, rest]
-  );
-
-  const chartData = repTimes.map((t, i) => ({ rep: i + 1, time: t }));
-  const tail = repTimes.length > 1 ? Math.round((repTimes[repTimes.length - 1] / firstRepTime) * 100) : 100;
-
-  // Total session volume: sum of all predicted hold times across all sets
-  const totalVolume = Math.round(repTimes.reduce((s, t) => s + t, 0) * numSets);
-
-  return (
-    <Card style={{ marginBottom: 16, border: `1px solid ${gc.color}40` }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>🗓 Session Planner</div>
-          {recommendedScope && (
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>
-              Recommendation for <span style={{ color: C.text, fontWeight: 600 }}>{recommendedScope}</span>
-            </div>
-          )}
-        </div>
-        {recommendedGrip && (
-          <div style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
-            padding: "2px 8px", borderRadius: 10,
-            background: gc.color + "22", color: gc.color,
-          }}>
-            {recommendedGrip}
-          </div>
-        )}
-      </div>
-
-      {/* Goal picker — 3-column grid that wraps to two rows of three
-          on narrow screens. With 6 zones (post-migration), a single
-          flex row overflows the card on mobile, especially with the
-          longer hybrid labels (Power/Strength, Strength/Endurance).
-          The grid keeps every pill equal width and visible without
-          horizontal scroll. Top spacing bumped to make room for the
-          "limiter" badge that floats above the recommended pill. */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(3, 1fr)",
-        gap: 8,
-        marginTop: recommendedZone ? 12 : 0,
-        marginBottom: 14,
-      }}>
-        {Object.entries(GOAL_CONFIG).map(([key, g]) => {
-          const isRec = key === recommendedZone;
-          return (
-            <button key={key} onClick={() => handleGoal(key)} style={{
-              padding: "8px 4px", borderRadius: 10, cursor: "pointer",
-              background: goal === key ? g.color : C.border,
-              color: goal === key ? "#fff" : C.muted,
-              fontWeight: 700, fontSize: 11, transition: "all 0.15s",
-              border: isRec ? `2px solid ${g.color}` : "2px solid transparent",
-              position: "relative",
-              minWidth: 0, // allow grid cell to shrink without overflow
-            }}>
-              {isRec && (
-                <div style={{
-                  position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)",
-                  fontSize: 9, fontWeight: 700, background: g.color, color: "#fff",
-                  padding: "1px 5px", borderRadius: 6, whiteSpace: "nowrap",
-                }}>
-                  {recommendedLabel}
-                </div>
-              )}
-              <div style={{ fontSize: 16 }}>{g.emoji}</div>
-              <div style={{
-                marginTop: 2,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}>{g.label}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Coaching rationale — explains WHY this zone was recommended,
-          combining the gap diagnostic with recency/external-load/focus
-          context. Only shown when there's something meaningful to say
-          (rationale string non-empty). */}
-      {recommendedRationale && (
-        <div style={{
-          fontSize: 11, color: C.muted, marginBottom: 12,
-          padding: "8px 10px", background: C.bg, borderRadius: 8,
-          border: `1px solid ${gc.color}33`, lineHeight: 1.5,
-        }}>
-          <span style={{ color: gc.color, fontWeight: 700 }}>Why {gc.label}: </span>
-          {recommendedRationale}
-        </div>
-      )}
-
-      {/* Prescription summary strip */}
-      <div style={{
-        display: "flex", gap: 6, marginBottom: 14,
-        background: C.bg, borderRadius: 10, padding: "10px 14px", alignItems: "center",
-      }}>
-        {[
-          { label: "First rep",  value: `${firstRepTime}s` },
-          { label: "Reps",       value: numReps },
-          { label: "Sets",       value: numSets },
-          { label: "Rep rest",   value: `${rest}s` },
-          { label: "Set rest",   value: `${setRestS}s` },
-        ].map(({ label, value }, i, arr) => (
-          <React.Fragment key={label}>
-            <div style={{ textAlign: "center", flex: 1 }}>
-              <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: gc.color }}>{value}</div>
-            </div>
-            {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
-          </React.Fragment>
-        ))}
-      </div>
-
-      {/* Sliders — within-set structure */}
-      <Sect title="Within Set">
-        <div style={{ display: "flex", gap: 16, marginBottom: 4 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-              <span>Reps</span><span style={{ fontWeight: 700, color: C.text }}>{numReps}</span>
-            </div>
-            <input type="range" min={2} max={12} value={numReps} onChange={e => setNumReps(Number(e.target.value))}
-              style={{ width: "100%", accentColor: gc.color }} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-              <span>Rep rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
-            </div>
-            <input type="range" min={5} max={300} step={5} value={rest} onChange={e => setRest(Number(e.target.value))}
-              style={{ width: "100%", accentColor: gc.color }} />
-          </div>
-        </div>
-      </Sect>
-
-      {/* Sliders — between-set structure */}
-      <Sect title="Between Sets">
-        <div style={{ display: "flex", gap: 16, marginBottom: 4 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-              <span>Sets</span><span style={{ fontWeight: 700, color: C.text }}>{numSets}</span>
-            </div>
-            <input type="range" min={1} max={8} value={numSets} onChange={e => setNumSets(Number(e.target.value))}
-              style={{ width: "100%", accentColor: gc.color }} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-              <span>Set rest</span><span style={{ fontWeight: 700, color: C.text }}>{setRestS}s</span>
-            </div>
-            <input type="range" min={60} max={1800} step={60} value={setRestS} onChange={e => setSetRestS(Number(e.target.value))}
-              style={{ width: "100%", accentColor: gc.color }} />
-          </div>
-        </div>
-      </Sect>
-
-      {/* Sets rationale */}
-      <div style={{
-        background: gc.color + "12", borderLeft: `3px solid ${gc.color}`,
-        borderRadius: "0 8px 8px 0", padding: "8px 12px", marginBottom: 14,
-        fontSize: 12, color: C.muted, lineHeight: 1.6,
-      }}>
-        {gc.setsRationale}
-      </div>
-
-      {/* Predicted fatigue curve (within one set) */}
-      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>
-        Predicted hold time per rep · tail at <b style={{ color: gc.color }}>{tail}%</b>
-        &nbsp;· total volume ~<b style={{ color: gc.color }}>{totalVolume}s</b> across {numSets} set{numSets !== 1 ? "s" : ""}
-      </div>
-      <ResponsiveContainer width="100%" height={130}>
-        <LineChart data={chartData} margin={{ top: 4, right: 12, bottom: 24, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-          <XAxis dataKey="rep" tick={{ fill: C.muted, fontSize: 11 }}
-            label={{ value: "Rep (within set)", position: "insideBottom", offset: -14, fill: C.muted, fontSize: 11 }} />
-          <YAxis tick={{ fill: C.muted, fontSize: 10 }} unit="s" width={34} domain={[0, firstRepTime * 1.15]} />
-          <ReferenceLine y={firstRepTime} stroke={C.border} strokeDasharray="4 2" />
-          <Tooltip
-            contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-            formatter={(val) => [`${val}s`, "Hold"]}
-          />
-          <Line dataKey="time" stroke={gc.color} strokeWidth={2.5}
-            dot={{ fill: gc.color, r: 4, strokeWidth: 0 }} name="Hold" />
-        </LineChart>
-      </ResponsiveContainer>
-
-      {/* CTA */}
-      <Btn
-        onClick={() => onApplyPlan({
-          goal,
-          targetTime: firstRepTime, repsPerSet: numReps, restTime: rest,
-          numSets, setRestTime: setRestS,
-        })}
-        color={gc.color}
-        style={{ width: "100%", marginTop: 12, padding: "12px 0", borderRadius: 10, fontSize: 14, fontWeight: 700 }}
-      >
-        Use This Plan →
-      </Btn>
-    </Card>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
 // CLIMBING RPE QUICK-LOG
 // ─────────────────────────────────────────────────────────────
 // Inline expand/collapse on Setup. Discipline + RPE + Save. Lets
 // the user quickly log a climbing day without navigating to the
 // Climbing tab. The full Climbing tab still owns detailed logging
 // (grade, ascent style, wall) — this is just the minimum-viable
-// signal needed for the lockout system + future "climbing partially
-// resets zones" logic.
-//
-// Schema: { date, type:"climbing", discipline, rpe }. The full
-// Climbing tab logger creates entries with grade/ascent/wall too;
-// both shapes coexist (rpe + grade/ascent are independently optional).
+// signal needed for the lockout system.
 const RPE_DESCRIPTIONS = {
   1:  "Very easy — barely a workout",
   2:  "Easy — recovery-level",
@@ -413,7 +169,6 @@ function ClimbingRPEQuickLog({ activities = [], onLog }) {
     setTimeout(() => setLogged(false), 2500);
   };
 
-  // Collapsed state — single-row button with today's climb count.
   if (!open) {
     return (
       <Card style={{
@@ -445,7 +200,6 @@ function ClimbingRPEQuickLog({ activities = [], onLog }) {
     );
   }
 
-  // Expanded state — discipline picker + RPE slider + save/cancel.
   const DISCIPLINES = [
     { key: "boulder",      label: "Boulder",      emoji: "🪨" },
     { key: "sport",        label: "Sport",        emoji: "🧗" },
@@ -509,7 +263,7 @@ function ClimbingRPEQuickLog({ activities = [], onLog }) {
         />
         <div style={{
           fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.4,
-          minHeight: "1.4em", // reserve space so layout doesn't jump as user drags
+          minHeight: "1.4em",
         }}>
           {RPE_DESCRIPTIONS[rpe]}
         </div>
@@ -523,24 +277,258 @@ function ClimbingRPEQuickLog({ activities = [], onLog }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// TRAINING BALANCE CARD
-// Per-zone staleness + annual session pace. Soft lockout: surfaces
-// zones that are approaching or past their detraining window so the
-// user can see what they've been avoiding. Stale zones also get
-// score-boosted in the coaching engine, so the recommendation will
-// pick them up too — this card just gives the user the same picture.
+// CONTINUOUS PICK CARD — the new primary prescription surface
 // ─────────────────────────────────────────────────────────────
-function TrainingBalanceCard({ history }) {
+// The continuous engine returns a specific (T, load) pair anywhere
+// in [5s, 240s]. This card surfaces it and lets the user fine-tune
+// the protocol (number of hangs, rest between hangs) before starting.
+// Sets default to 1 and setRest to 0 — the workout flow assumes
+// single-set sessions.
+//
+// Defaults for hangs/rest are derived from zoneOf(T_star), so a
+// short-T pick (max strength territory) gets the longer-rest /
+// fewer-hangs profile, and a long-T pick (endurance) gets shorter
+// rest. The user can override via the customize toggle.
+//
+// onApplyPlan auto-fires whenever the recommendation changes, so the
+// session config below the card always reflects the current pick.
+// The Start Session button at the bottom of SetupView then launches
+// straight into the recommended session — single-tap go.
+function ContinuousPickCard({
+  history, grip, freshMap, threeExpPriors,
+  GOAL_CONFIG, unit, onApplyPlan,
+}) {
+  const rec = useMemo(
+    () => grip
+      ? coachingRecommendationContinuous(history, grip, { freshMap, threeExpPriors })
+      : null,
+    [history, grip, freshMap, threeExpPriors]
+  );
+
+  // Derive default protocol from zoneOf(T_star). The GOAL_CONFIG
+  // entry for that zone gives us repsDefault + restDefault. Falls
+  // back to a sensible mid-range default if the zone lookup misses.
+  const zoneCfg = rec ? GOAL_CONFIG[rec.zone] : null;
+  const defaultReps = zoneCfg?.repsDefault ?? 4;
+  const defaultRest = zoneCfg?.restDefault ?? 90;
+
+  const [reps, setReps] = useState(defaultReps);
+  const [rest, setRest] = useState(defaultRest);
+  const [customizing, setCustomizing] = useState(false);
+
+  // When the recommendation changes (new grip, new history), reset
+  // reps/rest to the new zone's defaults — but don't clobber the
+  // user's choice if they've explicitly customized in this session.
+  useEffect(() => {
+    if (!customizing) {
+      setReps(defaultReps);
+      setRest(defaultRest);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec?.T, rec?.zone]);
+
+  // Auto-apply to session config so Start Session uses the pick.
+  // Fires whenever the resolved plan changes (T, reps, rest, grip).
+  useEffect(() => {
+    if (!rec) return;
+    onApplyPlan({
+      goal: rec.zone,
+      targetTime: rec.T,
+      repsPerSet: reps,
+      restTime: rest,
+      // Multi-set machinery temporarily kept at 1/0 for backward
+      // compatibility with the workout runner. Commit C drops it
+      // entirely.
+      numSets: 1,
+      setRestTime: 0,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec?.T, rec?.zone, reps, rest]);
+
+  if (!grip) {
+    return (
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Recommended Session</div>
+        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          Pick a grip above to see your continuous prescription.
+        </div>
+      </Card>
+    );
+  }
+
+  if (!rec) {
+    return (
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Recommended Session</div>
+        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          Need at least 2 reps on this grip to fit a curve. Run a
+          probe session at any duration to get started — the engine
+          will pick a target as soon as the curve has data to anchor.
+        </div>
+      </Card>
+    );
+  }
+
+  const cfg = zoneCfg ?? { color: C.blue, label: "—", emoji: "🎯" };
+
+  // Why-text: combines residual signal + staleness into a one-liner.
+  // residualBoost > 1.1 → curve over-predicts here (limiter signal).
+  // staleStatus stale/never → unexplored, anchor the curve.
+  const whyParts = [];
+  if (rec.residualBoost > 1.15) {
+    const pct = Math.round((1 - rec.localRatio) * 100);
+    whyParts.push(`reps near here fall ~${pct}% below the curve — biggest training opportunity`);
+  } else if (rec.residualBoost > 1.05) {
+    whyParts.push("reps near here sit slightly below the curve");
+  }
+  if (rec.staleStatus === "stale") {
+    whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is past its detraining window — re-anchor the curve here`);
+  } else if (rec.staleStatus === "never") {
+    whyParts.push(`never trained at this duration — exploring it anchors the curve`);
+  } else if (rec.staleStatus === "warning") {
+    whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is approaching stale — keep it fresh`);
+  }
+  if (whyParts.length === 0) {
+    whyParts.push("curve is well-calibrated locally; this T scores best on staleness × residual");
+  }
+  const whyText = whyParts.join(" · ");
+
+  const loadL = rec.loadByHand?.L;
+  const loadR = rec.loadByHand?.R;
+  const zoneLabel = zoneCfg?.label ?? rec.zone;
+
+  return (
+    <Card style={{ marginBottom: 16, border: `1px solid ${cfg.color}66` }}>
+      {/* Header — recommendation summary */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>
+          Recommended Session · {grip}
+        </div>
+        <div style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+          padding: "2px 8px", borderRadius: 10,
+          background: cfg.color + "22", color: cfg.color,
+        }}>
+          {cfg.emoji} {zoneLabel} range
+        </div>
+      </div>
+
+      {/* The big number — T_star + load */}
+      <div style={{
+        display: "flex", alignItems: "baseline", gap: 16,
+        padding: "14px 16px", marginTop: 8, marginBottom: 10,
+        background: C.bg, borderRadius: 10,
+      }}>
+        <div style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: cfg.color, lineHeight: 1 }}>
+            {rec.T}<span style={{ fontSize: 14, color: C.muted, marginLeft: 2 }}>s</span>
+          </div>
+        </div>
+        <div style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Load</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+            {fmtW(rec.loadKg, unit)}<span style={{ fontSize: 12, color: C.muted, marginLeft: 4 }}>{unit}</span>
+          </div>
+          {(loadL != null || loadR != null) && (
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
+              {loadL != null && <>L {fmtW(loadL, unit)}</>}
+              {loadL != null && loadR != null && " · "}
+              {loadR != null && <>R {fmtW(loadR, unit)}</>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Why-text */}
+      <div style={{
+        fontSize: 12, color: C.muted, lineHeight: 1.5,
+        padding: "8px 10px", background: cfg.color + "0d",
+        border: `1px solid ${cfg.color}33`, borderRadius: 8,
+        marginBottom: 12,
+      }}>
+        <span style={{ color: cfg.color, fontWeight: 700 }}>Why: </span>
+        {whyText}
+      </div>
+
+      {/* Protocol summary strip — current reps/rest at a glance */}
+      <div style={{
+        display: "flex", gap: 6, marginBottom: 12,
+        background: C.bg, borderRadius: 10, padding: "10px 14px", alignItems: "center",
+      }}>
+        {[
+          { label: "Hangs", value: reps },
+          { label: "Rest",  value: `${rest}s` },
+          { label: "Total", value: `~${reps * rec.T + (reps - 1) * rest}s` },
+        ].map(({ label, value }, i, arr) => (
+          <React.Fragment key={label}>
+            <div style={{ textAlign: "center", flex: 1 }}>
+              <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: cfg.color }}>{value}</div>
+            </div>
+            {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* Customize toggle — collapsed by default */}
+      <button
+        onClick={() => setCustomizing(c => !c)}
+        style={{
+          width: "100%", background: "none", border: `1px dashed ${C.border}`,
+          borderRadius: 8, padding: "8px", cursor: "pointer",
+          color: C.muted, fontSize: 11, fontWeight: 600,
+        }}
+      >
+        {customizing ? "Hide protocol options ▲" : "Customize protocol ▼"}
+      </button>
+
+      {customizing && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 16, marginBottom: 6 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+                <span>Hangs</span><span style={{ fontWeight: 700, color: C.text }}>{reps}</span>
+              </div>
+              <input type="range" min={2} max={12} value={reps}
+                onChange={e => setReps(Number(e.target.value))}
+                style={{ width: "100%", accentColor: cfg.color }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+                <span>Rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
+              </div>
+              <input type="range" min={5} max={300} step={5} value={rest}
+                onChange={e => setRest(Number(e.target.value))}
+                style={{ width: "100%", accentColor: cfg.color }} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 6, fontStyle: "italic" }}>
+            Defaults derived from the {zoneLabel} zone profile. Reset by tapping a different grip or letting the engine pick a new T.
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// CURVE COVERAGE CARD
+// (renamed from TrainingBalanceCard — May 2026)
+// ─────────────────────────────────────────────────────────────
+// Per-zone data freshness + annual session pace. Under the curve-
+// trust philosophy, this card isn't about "balanced training" as
+// a goal in itself — it's about where the curve has fresh data vs
+// where it's extrapolating from old measurements. Stale zones get
+// score-boosted in the coaching engine because re-sampling those
+// durations tightens the curve fit; never-trained zones are shown
+// because the curve can't be trusted there at all.
+function CurveCoverageCard({ history }) {
   const staleness = useMemo(() => getZoneStaleness(history), [history]);
   const pace = useMemo(() => getAnnualSessionPace(history), [history]);
 
-  // Don't render until there's at least one rep — the empty state of
-  // "everything is `never`" doesn't help a brand-new user.
   if (pace.current === 0) return null;
 
-  // Order: stale first (red), then warning (yellow), then never
-  // (gray, since the user hasn't tried that zone yet), then ok (green).
-  // Within each group, keep ZONE_KEYS physiological order.
   const STATUS_ORDER = { stale: 0, warning: 1, never: 2, ok: 3 };
   const STATUS_LABEL = {
     stale:   { color: C.red,    text: "stale"   },
@@ -555,7 +543,6 @@ function TrainingBalanceCard({ history }) {
     return ZONE_KEYS.indexOf(a) - ZONE_KEYS.indexOf(b);
   });
 
-  // Headline status: count of zones in each bucket.
   const counts = sortedZones.reduce((acc, k) => {
     acc[staleness[k].status] = (acc[staleness[k].status] || 0) + 1;
     return acc;
@@ -564,7 +551,6 @@ function TrainingBalanceCard({ history }) {
   const warningCount = counts.warning || 0;
   const neverCount   = counts.never   || 0;
 
-  // Pace text — give the user a feel for whether they're on track.
   const onPace = pace.paceYearEnd >= ANNUAL_SESSION_GOAL;
   const paceLabel = onPace
     ? `on pace for ${pace.paceYearEnd}`
@@ -574,16 +560,18 @@ function TrainingBalanceCard({ history }) {
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Training Balance</div>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Coverage</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+            Where your data is fresh
+          </div>
+        </div>
         <div style={{ fontSize: 11, color: C.muted, textAlign: "right" }}>
           <div><b style={{ color: C.text }}>{pace.current}</b> / {ANNUAL_SESSION_GOAL} this year</div>
           <div style={{ color: paceColor, marginTop: 2 }}>{paceLabel}</div>
         </div>
       </div>
 
-      {/* Soft-lockout banner — only appears when zones are stale or
-          warning. Lists which zones are overdue so the user can see
-          what's pulling the recommendation. */}
       {(staleCount > 0 || warningCount > 0 || neverCount > 0) && (
         <div style={{
           padding: "8px 10px", marginBottom: 12,
@@ -593,35 +581,34 @@ function TrainingBalanceCard({ history }) {
         }}>
           {staleCount > 0 && (
             <div>
-              <span style={{ color: C.red, fontWeight: 700 }}>● {staleCount} stale</span>
+              <span style={{ color: C.red, fontWeight: 700 }}>● {staleCount} stale data</span>
               {warningCount > 0 || neverCount > 0 ? " · " : ""}
             </div>
           )}
           {warningCount > 0 && (
             <div>
-              <span style={{ color: C.orange, fontWeight: 700 }}>● {warningCount} approaching</span>
+              <span style={{ color: C.orange, fontWeight: 700 }}>● {warningCount} aging</span>
               {neverCount > 0 ? " · " : ""}
             </div>
           )}
           {neverCount > 0 && (
             <div>
-              <span style={{ color: C.muted, fontWeight: 700 }}>● {neverCount} never trained</span>
+              <span style={{ color: C.muted, fontWeight: 700 }}>● {neverCount} never sampled</span>
             </div>
           )}
           <div style={{ marginTop: 4, fontStyle: "italic" }}>
-            The recommendation engine prioritizes stale zones so your training stays balanced.
+            The curve extrapolates where data is stale or missing. The engine prioritizes those durations to keep the fit honest.
           </div>
         </div>
       )}
 
-      {/* Per-zone rows — sorted with stale first */}
       <div>
         {sortedZones.map(k => {
           const s = staleness[k];
           const cfg = STATUS_LABEL[s.status];
           const window = LOCKOUT_WINDOW_DAYS[k];
           const daysText = s.days == null
-            ? "never trained"
+            ? "never sampled"
             : s.days === 0
               ? "today"
               : s.days === 1
@@ -634,7 +621,6 @@ function TrainingBalanceCard({ history }) {
               borderBottom: `1px solid ${C.border}`,
             }}>
               <div style={{ fontSize: 12, color: C.text }}>
-                {/* Use the GOAL_CONFIG label if available — fallback to the key */}
                 {k.replace(/_/g, " · ").replace(/\b\w/g, c => c.toUpperCase())}
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -660,134 +646,26 @@ function TrainingBalanceCard({ history }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// ZONE COVERAGE CARD
-// Rolling 30-day count of Power / Strength / Endurance sessions.
-// ─────────────────────────────────────────────────────────────
-
-// Zone Workout Summary — neutral 30-day volume breakdown. Does NOT
-// prescribe training: the SessionPlanner owns the recommendation
-// (per-grip Monod cross-zone residual). This card is purely a log.
-// computeZoneCoverage still returns .recommended because the planner
-// uses it as a fallback when there's too little failure data for the
-// curve-residual signal; we just don't display that prescription here.
-function ZoneCoverageCard({ history, activities = [] }) {
-  const coverage = useMemo(() => computeZoneCoverage(history, activities),
-    [history, activities]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (coverage.total === 0) return null;
-
-  // Zones list mirrors src/model/zones.js ZONE6 in the same display
-  // order. Coverage counts come back from computeZoneCoverage with
-  // matching keys.
-  const zones = [
-    { key: "max_strength",       label: "💥 Max Strength",       val: coverage.max_strength,       color: "#c83838" },
-    { key: "power",              label: "⚡ Power",               val: coverage.power,              color: "#e05560" },
-    { key: "power_strength",     label: "🔶 Power/Strength",      val: coverage.power_strength,     color: "#e68a48" },
-    { key: "strength",           label: "💪 Strength",            val: coverage.strength,           color: "#e07a30" },
-    { key: "strength_endurance", label: "🟦 Strength/Endurance",  val: coverage.strength_endurance, color: "#7aa0d8" },
-    { key: "endurance",          label: "🏔️ Endurance",           val: coverage.endurance,          color: "#3b82f6" },
-  ];
-  const maxVal = Math.max(...zones.map(z => z.val), 1);
-
-  return (
-    <Card style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Zone Workout Summary</div>
-        <div style={{ fontSize: 11, color: C.muted }}>last 30 days · {coverage.total} sessions</div>
-      </div>
-      {zones.map(({ key, label, val, color }) => (
-        <div key={key} style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-            <div style={{ fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 6 }}>
-              {label}
-            </div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>{val}</div>
-          </div>
-          <div style={{ height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
-            <div style={{
-              height: "100%", borderRadius: 3,
-              width: `${(val / maxVal) * 100}%`,
-              background: color,
-              opacity: 0.85,
-            }} />
-          </div>
-        </div>
-      ))}
-    </Card>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 
-export function SetupView({ config, setConfig, onStart, history, freshMap = null, unit = "lbs", onBwSave = () => {}, liveEstimate = null, gripEstimates = {}, activities = [], onLogActivity = () => {}, connectSlot = null, GOAL_CONFIG = {}, GRIP_PRESETS = [], bodyWeight = null, tindeq = null }) {
-
-  // Warm-up sub-state — when true, the entire SetupView is replaced by
-  // the WarmupView until the user closes it. Adaptive Warm-up lives on
-  // the Fingers tab because it's a finger-training prep tool (uses the
-  // grippers and your force curves), not a strength-training session.
+export function SetupView({
+  config, setConfig, onStart, history,
+  freshMap = null,
+  unit = "lbs",
+  onBwSave = () => {},
+  activities = [], onLogActivity = () => {},
+  connectSlot = null,
+  GOAL_CONFIG = {}, GRIP_PRESETS = [],
+  bodyWeight = null, tindeq = null,
+}) {
   const [warmupActive, setWarmupActive] = useState(false);
 
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
 
-  // Note: model-prescribed first-rep loads are computed inline in the
-  // Prescribed Load card below, where we show all three zones at once
-  // (F = CF + W'/refTime(zone)). The fallback chain there is:
-  //   1. per-hand × per-grip failure fit (most specific)
-  //   2. per-hand, any-grip failure fit (more data, less specific)
-  //   3. historical weighted-average weight at similar target time
+  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
 
-  // (Level/journey progress vars removed — the Setup-page summary card
-  // that consumed these now lives on the Journey tab. nextLevelTarget,
-  // calcLevel, getBestLoad are still used elsewhere in the app.)
-
-  // Fatigue-adjusted load index for the prescribed-load card (computed once
-  // per history change, then reused across the multiple prescribedLoad calls
-  // in the card below). Uses the user's back-fit dose constant when there's
-  // enough within-set data; otherwise falls back to the population prior.
-  // Stable fingerprint so the 60-step grid search inside fitDoseK
-  // doesn't re-run on every history reference change (Supabase syncs,
-  // unrelated state updates that touch the App-level history array).
-  // Keyed on length + last rep's id + last rep's date — captures the
-  // dominant "new rep added" case. Edits to old reps will use the
-  // stale k until the next session, which is fine since k varies
-  // gently with sample size and the fatigue model isn't sensitive to
-  // small k shifts (CV² minimum is broad — see fitDoseK).
-  // freshMap is now provided by App via prop so the in-workout
-  // startSession path uses the SAME memoized fatigue map (with the
-  // user-fitted doseK) — without that sharing, the Setup-card
-  // prescription and the in-workout "Rep 1 suggested weight" disagreed
-  // by 1-2 lbs because startSession was falling back to DEF_DOSE_K.
-  // Three-exp prior memo stays local to SetupView since it isn't
-  // currently consumed elsewhere.
-  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Engine recommendation, computed once and shared between the
-  // Session Planner card (which uses it for the recommended-zone
-  // pill + Why box) and the Coaching Prescription card (which
-  // contrasts it with the raw curve gap so the two views read as
-  // complementary information instead of competing claims).
-  const coachRec = useMemo(
-    () => (config.grip
-      ? coachingRecommendation(history, config.grip, {
-          freshMap, threeExpPriors,
-          activities,
-        })
-      : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [history, config.grip, freshMap, threeExpPriors, activities]
-  );
-
-  // (Training Focus removed May 2026 — under the curve-trust philosophy
-  // the curve is the single source of truth; no user-configurable bias
-  // overrides it.)
-
-  // ── Adaptive Warm-up takeover ──
-  // When the user taps "Generate" on the warm-up entry card below, the
-  // entire SetupView is replaced by WarmupView until they close it.
-  // wLog is read fresh from localStorage rather than threaded through
-  // App state — keeps the warm-up decoupled from WorkoutTab's lifecycle.
+  // Adaptive Warm-up takeover — replaces SetupView until closed.
   if (warmupActive) {
     const wLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
     return (
@@ -808,11 +686,7 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
 
-      {/* ── Adaptive Warm-up entry point ──
-          Force-curve-derived hangs + cross-loaded pullups generated on
-          the fly. Lives on Fingers (not Workout) because it's a finger-
-          training prep tool, not a strength-training session. Nothing
-          here gets logged as training data — pure prescription. */}
+      {/* Adaptive Warm-up entry point */}
       <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -834,20 +708,10 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
         </div>
       </Card>
 
-      {/* Climbing RPE quick-log — minimum-viable signal for the lockout
-          system. Lives near the top so logging a climbing day is a
-          one-tap action when the user opens the app to set up a finger
-          session. The full Climbing tab still owns detailed logging. */}
+      {/* Climbing RPE quick-log */}
       <ClimbingRPEQuickLog activities={activities} onLog={onLogActivity} />
 
-      {/* (Training Focus picker removed May 2026 — under the curve-trust
-          philosophy, the curve is the single source of truth for what
-          to train. Adding a user-configurable bias overrides the curve
-          based on preference rather than physiology, which contradicts
-          the model. The coaching engine no longer accepts a focus
-          weight; recommendations are driven entirely by the curve fit
-          + staleness + recency + external load.) */}
-
+      {/* Grip Type — still per-grip, the curve is grip-scoped */}
       <Card>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Grip Type</div>
         <div>
@@ -859,11 +723,6 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
                 style={{
                   padding: "6px 14px", borderRadius: 20, fontSize: 13,
                   cursor: "pointer", fontWeight: 500,
-                  // C.blue (app's primary-accent color) for the selected
-                  // grip pill — orange is reserved for the gap-color
-                  // semantics (negative gap = "you're outpacing the
-                  // curve") and using it here as a generic "active"
-                  // marker leaked that meaning into an unrelated UI.
                   background: config.grip === g ? C.blue : C.border,
                   color: config.grip === g ? "#fff" : C.muted,
                   border: "none",
@@ -876,423 +735,20 @@ export function SetupView({ config, setConfig, onStart, history, freshMap = null
         </div>
       </Card>
 
-      {/* Training Balance — staleness + annual pace. The soft-lockout
-          card. Recommendation engine reads the same staleness signal
-          and boosts stale zones; this surface gives the user the same
-          picture so the recommendation isn't a black box. */}
-      {history.length > 0 && <TrainingBalanceCard history={history} />}
+      {/* Continuous Pick — the new primary recommendation surface.
+          Auto-applies to session config so Start Session uses it. */}
+      <ContinuousPickCard
+        history={history}
+        grip={config.grip}
+        freshMap={freshMap}
+        threeExpPriors={threeExpPriors}
+        GOAL_CONFIG={GOAL_CONFIG}
+        unit={unit}
+        onApplyPlan={(plan) => setConfig(c => ({ ...c, ...plan }))}
+      />
 
-      {/* Zone Workout Summary — neutral 30-day volume breakdown (no prescription) */}
-      {/* (Level / journey card removed from setup — lives on the Journey tab now.) */}
-
-      {(history.length > 0 || activities.length > 0) && <ZoneCoverageCard history={history} activities={activities} />}
-
-      {/* Session Planner — always shown; defaults to the limiter zone
-          (Monod cross-zone residual: the zone that falls farthest
-          below the curve fit on the other two zones' rep-1 failures
-          in the last 30 days), falling back to coverage when failure
-          data is too sparse for the cross-zone fit. Matches the
-          Analysis tab's precedence so the two views never disagree. */}
-      {(() => {
-        // Coaching engine v2: pick the next zone based on
-        //   gap × intensity_match × recency × external_load
-        // Falls back to the legacy heuristic chain when there's no grip
-        // selected or no scoreable zones (cold start with no data).
-        const gripFit = config.grip && gripEstimates[config.grip];
-        const fitForRec = gripFit ?? liveEstimate;
-        const scopeLabel = gripFit ? config.grip : (config.grip ? `${config.grip} (pooled)` : "overall");
-
-        let zone = null;
-        let label = "recommended";
-        let rationale = "";
-        let recommendedGrip = null;
-
-        // coachRec lifted above the JSX so the Coaching Prescription
-        // card below can also read it for the balanced-vs-goal-adjusted
-        // contrast in its widestGap callout.
-        if (coachRec) {
-          zone = coachRec.zone;
-          recommendedGrip = config.grip;
-          // Label captures the dominant reason (gap > 10% → "biggest gap",
-          // else fall through to "recommended" as a neutral default).
-          label = coachRec.gap > 0.10 ? "biggest gap" : "recommended";
-          rationale = coachingRationale(coachRec);
-        } else {
-          // Legacy fallback: limiter → coverage → ΔAUC.
-          const limiter = computeLimiterZone(history);
-          recommendedGrip = limiter?.grip ?? null;
-          if (fitForRec && fitForRec.CF > 0) {
-            const { CF, W } = fitForRec;
-            const response = computePersonalResponse(history);
-            let bestKey = null, bestGain = -Infinity;
-            for (const [key, resp] of Object.entries(response)) {
-              const gain = CF * resp.cf * (AUC_T_MAX - AUC_T_MIN)
-                         + W  * resp.w  * Math.log(AUC_T_MAX / AUC_T_MIN);
-              if (gain > bestGain) { bestGain = gain; bestKey = key; }
-            }
-            zone = bestKey;
-            label = "biggest gain (cold start)";
-          } else if (limiter?.zone) {
-            zone = limiter.zone;
-            label = "limiter";
-          } else {
-            const cov = computeZoneCoverage(history, activities);
-            if (cov.total > 0) {
-              zone = cov.recommended;
-              label = "least trained";
-            }
-          }
-        }
-
-        return (
-          <SessionPlannerCard
-            GOAL_CONFIG={GOAL_CONFIG}
-            liveEstimate={fitForRec}
-            recommendedZone={zone}
-            recommendedGrip={recommendedGrip}
-            recommendedLabel={label}
-            recommendedScope={scopeLabel}
-            recommendedRationale={rationale}
-            onApplyPlan={({ goal, targetTime, repsPerSet, restTime, numSets, setRestTime }) =>
-              setConfig(c => ({ ...c, goal, targetTime, repsPerSet, restTime, numSets, setRestTime }))
-            }
-          />
-        );
-      })()}
-
-      {/* Prescribed load — appears once a grip is selected. Shows loads
-          for ALL THREE zones side-by-side so the user doesn't have to
-          guess which target time the card is reflecting. Load for each
-          zone = CF + W'/refTime(zone). Load is CONSTANT across all reps
-          of a set: rep 1 hits target, rep 2+ fall short as compartments
-          drain. Source label reflects whichever fit (per-grip / cross-
-          grip / history) backs the primary zone column. */}
-      {config.grip && (() => {
-        // Coaching prescription: empirical-first (anchored to user's
-        // most recent rep 1 outcome at this exact scope), with the
-        // curve-derived "potential" shown alongside as a diagnostic
-        // ceiling. The GAP between train-at and potential is the
-        // training opportunity — biggest gap = weakest compartment
-        // relative to the rest of the user's physiology.
-        //
-        // Three sources of truth per cell:
-        //   - TRAIN AT: empirical or curve-fallback (the load to use)
-        //   - POTENTIAL: curve ceiling (Monod or three-exp consensus)
-        //   - GAP: (potential − train_at) / train_at as percentage
-        //
-        // Reliability tiers gate the potential display:
-        //   well-supported → show numeric potential confidently
-        //   marginal → show potential with "models disagree" caveat
-        //   extrapolation → don't show numeric, suggest training the zone
-
-        const cellFor = (hand, t) => {
-          // Empirical-first: anchored to user's most recent rep 1
-          const emp = empiricalPrescription(history, hand, config.grip, t, { threeExpPriors });
-          let trainAt, source;
-          if (emp != null) {
-            trainAt = emp;
-            source = "empirical";
-          } else {
-            // Cold start: fall back to the curve. Try per-grip first,
-            // then cross-grip, then historical average.
-            const v1 = prescribedLoad(history, hand, config.grip, t, freshMap, { threeExpPriors });
-            if (v1 != null) { trainAt = v1; source = "curve-grip"; }
-            else {
-              const v2 = prescribedLoad(history, hand, null, t, freshMap, { threeExpPriors });
-              if (v2 != null) { trainAt = v2; source = "curve-global"; }
-              else {
-                const v3 = estimateRefWeight(history, hand, config.grip, t);
-                if (v3 != null) { trainAt = v3; source = "history"; }
-                else return { trainAt: null, source: null, potential: null };
-              }
-            }
-          }
-          // Potential ceiling — curve-derived, with reliability tier.
-          const potential = prescriptionPotential(history, hand, config.grip, t, {
-            freshMap, threeExpPriors,
-          });
-          return { trainAt, source, potential };
-        };
-
-        // Iterate ZONE_KEYS so all 6 zones get a card. The display
-        // grid below (changed from 3-col to 3×2) lays them out in two
-        // rows to keep cards readable on phones.
-        const zones = ZONE_KEYS.map(zoneKey => {
-          const t = GOAL_CONFIG[zoneKey].refTime;
-          const L = cellFor("L", t);
-          const R = cellFor("R", t);
-          return { key: zoneKey, cfg: GOAL_CONFIG[zoneKey], t, L, R };
-        });
-        const anyLoaded = zones.some(z => z.L.trainAt != null || z.R.trainAt != null);
-        if (!anyLoaded) return null;
-
-        // Find the widest reliable gap across all (zone, hand) cells —
-        // that's the recommendation engine's "biggest leverage" pointer.
-        let widestGap = null;
-        for (const z of zones) {
-          for (const [handLabel, cell] of [["L", z.L], ["R", z.R]]) {
-            if (!cell.potential || !cell.trainAt) continue;
-            if (cell.potential.reliability === "extrapolation") continue;
-            const gap = (cell.potential.value - cell.trainAt) / cell.trainAt;
-            if (widestGap == null || gap > widestGap.gap) {
-              widestGap = { zoneKey: z.key, zoneLabel: z.cfg.label, hand: handLabel, gap, cell };
-            }
-          }
-        }
-
-        // Label + color helpers.
-        //
-        // gap = (potential − train_at) / train_at. We render it not
-        // as a signed number (which made "-12%" read like a warning)
-        // but as one of two phrased badges:
-        //
-        //   "room +X%"  → positive gap: curve thinks you can lift more
-        //                 than you're being prescribed. Action: push
-        //                 harder here. Color escalates with magnitude:
-        //                 muted → yellow → orange → red as the gap
-        //                 widens, because a big room-to-grow signal is
-        //                 a clear "do something about this" prompt.
-        //   "ahead +X%" → negative gap: your demonstrated work is
-        //                 already exceeding the curve's prediction.
-        //                 This is the win state — your physiology
-        //                 has outpaced what the failure-driven fit
-        //                 has captured. Color: green (positive signal).
-        //   "on target" → |gap| < 5%. Well-calibrated. Muted.
-        //
-        // Earlier convention used signed text ("gap -12%") and inverted
-        // the color logic (green for positive room-to-grow, orange for
-        // "ahead"). That was technically defensible — green = "training
-        // opportunity direction" — but read backwards to most users
-        // because negative numbers in orange feel like alarms. New
-        // version flips both: positive numbers + words on every cell,
-        // green for the genuinely-good "ahead" state.
-        // Signed-percent — kept for the widestGap callout above the
-        // cells, which reads as a sentence ("Power — +12% headroom").
-        const fmtPct = (g) => `${g >= 0 ? "+" : ""}${Math.round(g * 100)}%`;
-        const labelFor = (g) => {
-          if (Math.abs(g) < 0.05) return "on target";
-          const pct = Math.round(Math.abs(g) * 100);
-          return g > 0 ? `room +${pct}%` : `ahead +${pct}%`;
-        };
-        const gapColor = (g) => {
-          if (Math.abs(g) < 0.05) return C.muted;
-          if (g >= 0.20) return C.red;
-          if (g >= 0.10) return C.orange;
-          if (g >  0)    return C.yellow;
-          return C.green;  // any negative gap = ahead of curve = good
-        };
-
-        // All-zones-exceeding detector: when every (zone × hand) cell
-        // has reliable potential AND actual > potential by ≥3%, the
-        // model's curve has collectively been outpaced and the per-cell
-        // numbers stop being useful as individual training prompts.
-        // Surface a single recalibration-pending banner instead.
-        let allCells = 0;
-        let exceedingCells = 0;
-        for (const z of zones) {
-          for (const cell of [z.L, z.R]) {
-            if (!cell.potential || !cell.trainAt) continue;
-            if (cell.potential.reliability === "extrapolation") continue;
-            allCells++;
-            const g = (cell.potential.value - cell.trainAt) / cell.trainAt;
-            if (g < -0.03) exceedingCells++;
-          }
-        }
-        const allZonesExceeding = allCells >= 4 && exceedingCells === allCells;
-
-        return (
-          <Card style={{ borderColor: C.blue }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>
-              Coaching prescription · {config.grip}
-            </div>
-            {/* Subtitle clarifies this card is the DETAILED per-hand
-                reference — the Analysis tab's "Next Session Focus"
-                cards show the actionable per-grip summary. Same data,
-                two scopes; the headers now state which is which so
-                users don't read them as competing recommendations. */}
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
-              Per-hand reference · the Analysis tab's <b>Next Session Focus</b> shows the per-grip summary.
-            </div>
-
-            {/* All-zones-exceeding banner: when every reliable cell
-                is meaningfully above its modeled potential, individual
-                "ahead +X%" badges stop being actionable signals (they
-                just say "everything is great" everywhere). One banner
-                tells the real story — your physiology has outrun the
-                model and the curve needs new failure data to catch up. */}
-            {allZonesExceeding && (
-              <div style={{
-                padding: "10px 12px", marginBottom: 12,
-                background: C.green + "1a",
-                border: `1px solid ${C.green}80`,
-                borderRadius: 8, fontSize: 12, lineHeight: 1.5, color: C.text,
-              }}>
-                <div style={{ fontWeight: 700, color: C.green, marginBottom: 3 }}>
-                  Curve recalibration pending
-                </div>
-                Your performance has outpaced the model in every zone.
-                The curve will catch up as new failure data comes in —
-                push to genuine failure on a probe session to give the
-                fit a fresh ceiling to work with.
-              </div>
-            )}
-
-            {widestGap && widestGap.gap > 0.10 && (() => {
-              // Two complementary perspectives shown side by side:
-              //   1. Largest raw curve gap — what a "balanced athlete"
-              //      view of the data points at. Pure (potential − train_at)
-              //      / train_at across all (zone × hand) cells.
-              //   2. Engine recommendation — what the engine actually picks,
-              //      which factors in staleness, recency, residual fit, and
-              //      external load (no Training Focus weight; that was
-              //      removed under the curve-trust philosophy).
-              //
-              // When they agree, the second line collapses to "matches
-              // above" for brevity. When they differ, the user sees both
-              // signals + understands why they diverge instead of treating
-              // them as competing claims.
-              const recZone = coachRec?.zone;
-              const recLabel = recZone ? GOAL_CONFIG[recZone]?.label : null;
-              const matches = recZone && recZone === widestGap.zoneKey;
-              return (
-                <div style={{ fontSize: 12, color: C.text, background: widestGap.cell.cfg?.color + "20" || C.bg,
-                              border: `1px solid ${gapColor(widestGap.gap)}66`, borderRadius: 8,
-                              padding: "10px 12px", marginBottom: 10 }}>
-                  <div>
-                    <span style={{ fontWeight: 700, color: gapColor(widestGap.gap) }}>Largest curve gap:</span>{" "}
-                    {widestGap.zoneLabel} — <b>{fmtPct(widestGap.gap)}</b> headroom{" "}
-                    ({
-                      widestGap.zoneKey === "max_strength"       ? "neural / fast (PCr-aligned)" :
-                      widestGap.zoneKey === "power"              ? "fast (PCr-aligned)" :
-                      widestGap.zoneKey === "power_strength"     ? "fast / middle (PCr-glycolytic-aligned)" :
-                      widestGap.zoneKey === "strength"           ? "middle (glycolytic-aligned)" :
-                      widestGap.zoneKey === "strength_endurance" ? "middle / slow (glycolytic-aerobic-aligned)" :
-                                                                   "slow (oxidative-aligned)"
-                    } component).
-                  </div>
-                  {recZone && (
-                    <div style={{ marginTop: 6 }}>
-                      <span style={{ fontWeight: 700, color: GOAL_CONFIG[recZone]?.color }}>
-                        Engine pick:
-                      </span>{" "}
-                      {matches
-                        ? <>matches above — the Session Planner picks <b>{recLabel}</b>.</>
-                        : <>Session Planner picks <b>{recLabel}</b>: factoring in staleness, recency, and residual fit shifts the choice from the raw widest gap.</>}
-                    </div>
-                  )}
-                  {!recZone && (
-                    <div style={{ marginTop: 6, fontStyle: "italic", color: C.muted }}>
-                      The Session Planner above weighs this against recency, residual fit, and zone staleness before picking — see its Why box for the final call.
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-            {/* 3-column grid that wraps to 2 rows of 3 for the 6-zone
-                schema. Each card shows the per-hand (L/R) prescribed
-                load + curve potential for that zone's reference time. */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-              {zones.map(({ key, cfg, t, L, R }) => {
-                const isActive = config.goal === key;
-                return (
-                  <div
-                    key={key}
-                    style={{
-                      padding: "10px 12px",
-                      background: isActive ? cfg.color + "22" : C.bg,
-                      border: `1px solid ${isActive ? cfg.color : C.border}`,
-                      borderRadius: 10,
-                    }}
-                  >
-                    <div style={{ fontSize: 11, fontWeight: 700, color: cfg.color, marginBottom: 2 }}>
-                      {cfg.emoji} {cfg.label}
-                    </div>
-                    <div style={{ fontSize: 10, color: C.muted, marginBottom: 8 }}>
-                      target {t}s
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      {[["L", L], ["R", R]].map(([handLabel, cell]) => {
-                        const sourceMark = cell.source === "curve-global" ? "°"
-                                         : cell.source === "history" ? "ʰ"
-                                         : cell.source === "curve-grip" ? "*"
-                                         : "";
-                        const sourceTitle = cell.source === "curve-global"
-                            ? `Cold start: not enough recent ${config.grip} data on ${handLabel} at ${t}s, falling back to cross-grip curve.`
-                          : cell.source === "history"
-                            ? `Cold start: no model fit available, using historical average on ${handLabel} ${config.grip} at ${t}s.`
-                          : cell.source === "curve-grip"
-                            ? `Cold start: no recent rep 1 at this target, using ${config.grip} curve fit on ${handLabel}.`
-                            : `Empirical: anchored to your most recent rep 1 on ${handLabel} ${config.grip} at ${t}s, with RPE 10 progression.`;
-                        const pot = cell.potential;
-                        const gap = (pot && cell.trainAt && pot.reliability !== "extrapolation")
-                          ? (pot.value - cell.trainAt) / cell.trainAt : null;
-                        return (
-                          <div key={handLabel} style={{ flex: 1 }}>
-                            <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>{handLabel}</div>
-                            <div style={{ fontSize: 16, fontWeight: 700, color: C.blue }} title={sourceTitle}>
-                              {cell.trainAt != null ? `${fmtW(cell.trainAt, unit)}` : "—"}
-                              {sourceMark && (
-                                <span style={{ fontSize: 11, color: C.yellow, marginLeft: 2 }}>
-                                  {sourceMark}
-                                </span>
-                              )}
-                            </div>
-                            {pot && pot.reliability !== "extrapolation" && (
-                              <div style={{ fontSize: 9, color: C.muted, marginTop: 3 }}>
-                                pot {pot.reliability === "marginal"
-                                  ? `${fmtW(pot.lower, unit)}–${fmtW(pot.upper, unit)}`
-                                  : fmtW(pot.value, unit)}
-                                {pot.reliability === "marginal" && (
-                                  <span title="Monod and three-exp models disagree at this duration — treat the range as the credible band, not a precise number." style={{ color: C.yellow, marginLeft: 2 }}>
-                                    ?
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {pot && pot.reliability === "extrapolation" && (
-                              <div style={{ fontSize: 9, color: C.muted, marginTop: 3, fontStyle: "italic" }} title={`No failure data within ±50% of ${t}s — the curve is extrapolating. Train this zone to anchor it.`}>
-                                pot ?
-                              </div>
-                            )}
-                            {gap != null && (
-                              <div style={{ fontSize: 9, fontWeight: 600, color: gapColor(gap), marginTop: 2 }}
-                                   title={`train-at ${fmtW(cell.trainAt, unit)} vs potential ${fmtW(pot.value, unit)}. ${gap > 0.10 ? "Push harder here — the curve says you have room." : gap < -0.03 ? "You're outperforming the curve at this zone — model will catch up as new failure data comes in." : "Well-calibrated."}`}>
-                                {labelFor(gap)}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {/* Potential/Gap key — placed below the cells so the data
-                lands first and the labels read as a confirming legend.
-                Each term gets its own row so the bolded label always
-                starts a fresh line at the left margin instead of
-                tucking in after the previous sentence's period. */}
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 10, fontStyle: "italic", lineHeight: 1.5 }}>
-              <div>
-                <b style={{ color: C.text, fontStyle: "normal" }}>Potential</b> = what the curve says you could support if your physiology were balanced.
-              </div>
-              <div style={{ marginTop: 4 }}>
-                <b style={{ color: C.text, fontStyle: "normal" }}>Room +X%</b> = the curve says you can lift more — a training opportunity worth pushing into.
-              </div>
-              <div style={{ marginTop: 4 }}>
-                <b style={{ color: C.green, fontStyle: "normal" }}>Ahead +X%</b> = your demonstrated work is exceeding the curve's prediction. The model will catch up as you generate more failure data.
-              </div>
-            </div>
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-              <span>
-                <span style={{ color: C.muted }}>* = curve fallback (no recent rep 1) · ° = cross-grip · ʰ = historical avg · ? = uncertain potential</span>
-              </span>
-              <span>values in {unit}</span>
-            </div>
-          </Card>
-        );
-      })()}
+      {/* Curve Coverage — data freshness per zone */}
+      {history.length > 0 && <CurveCoverageCard history={history} />}
 
       <BwPrompt unit={unit} onSave={onBwSave} />
 
