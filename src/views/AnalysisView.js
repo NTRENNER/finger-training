@@ -163,8 +163,13 @@ export function AnalysisView({
     r.actual_time_s > 0
   ), [history, selHand, selGrip]);
 
-  const failures  = reps.filter(r => r.failed);
-  const successes = reps.filter(r => !r.failed);
+  // Train-to-failure model (May 2026): every rep with a valid
+  // actual_time_s is a failure data point. The legacy success/failure
+  // dichotomy is kept here only for backward compat with downstream
+  // consumers that destructure both names — the chart's red/green
+  // visual distinction will be retired in a follow-up UX commit.
+  const failures  = reps;
+  const successes = [];
 
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
@@ -240,8 +245,18 @@ export function AnalysisView({
 
   // Reusable: compute per-zone Δ% from a current set of three-exp
   // amps vs a reference set. Returns one key per ZONE_KEY plus a
-  // `total` field that's the simple average across zones. Operating
-  // on amps arrays instead of {CF, W} fit objects.
+  // `total` field that uses the AUC ratio — the integrated area
+  // under the curve from 5s to 180s.
+  //
+  // The `total` was previously a simple average of the per-zone
+  // deltas, which evaluated F(T) at six discrete sample points
+  // and averaged them. That gave a different headline number from
+  // the Total Capacity (AUC) chart (which integrates over the
+  // continuous curve), and the discrepancy was confusing — same
+  // curves, two summary numbers, two different answers.
+  // Switching `total` to the AUC ratio makes the headline match
+  // the chart. Per-zone Δ% remains a useful landscape view of
+  // where the curve grew vs shrunk.
   const improvementForAmps = (curAmps, refAmps) => {
     if (!curAmps || !refAmps) return null;
     const pct = (t) => {
@@ -256,8 +271,17 @@ export function AnalysisView({
       if (v == null) return null;
       result[k] = v;
     }
-    const sum = ZONE_KEYS.reduce((s, k) => s + result[k], 0);
-    result.total = Math.round(sum / ZONE_KEYS.length);
+    // AUC-based total — matches the Total Capacity (AUC) chart's
+    // headline metric. Falls back to the zone-average if either
+    // AUC is non-positive (degenerate fit).
+    const curAUC = computeAUCThreeExp(curAmps);
+    const refAUC = computeAUCThreeExp(refAmps);
+    if (curAUC > 0 && refAUC > 0) {
+      result.total = Math.round((curAUC / refAUC - 1) * 100);
+    } else {
+      const sum = ZONE_KEYS.reduce((s, k) => s + result[k], 0);
+      result.total = Math.round(sum / ZONE_KEYS.length);
+    }
     return result;
   };
 
@@ -276,8 +300,10 @@ export function AnalysisView({
   // App.js Monod snapshot so the comparison is purely three-exp on
   // both sides; the two halves of the Δ% live in the same model.
   const global3xBaseline = useMemo(() => {
+    // Train-to-failure model: every rep with valid actual_time_s is a
+    // (T, F) data point. Drop the legacy r.failed filter.
     const allFails = (history || [])
-      .filter(r => r.failed && r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
+      .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     const acc = [];
     const durs = new Set();
@@ -310,10 +336,12 @@ export function AnalysisView({
   // anchors the fast amplitude, which under Monod was the main source
   // of phantom Power regressions at low N.
   const gripBaselines = useMemo(() => {
+    // Train-to-failure model: every rep with valid actual_time_s is a
+    // (T, F) data point. Drop the legacy r.failed filter.
     const out = {};
     const byGrip = {};
     for (const r of history) {
-      if (!r.failed || !r.grip) continue;
+      if (!r.grip) continue;
       if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
       if (!(r.actual_time_s > 0)) continue;
       if (!byGrip[r.grip]) byGrip[r.grip] = [];
@@ -345,10 +373,12 @@ export function AnalysisView({
   // was App.js's `gripEstimates`, but we want both sides of the Δ%
   // to live in the same model.)
   const grip3xEstimates = useMemo(() => {
+    // Train-to-failure model: every rep with valid actual_time_s is a
+    // (T, F) data point. Drop the legacy r.failed filter.
     const out = {};
     const byGrip = {};
     for (const r of history) {
-      if (!r.failed || !r.grip) continue;
+      if (!r.grip) continue;
       if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
       if (!(r.actual_time_s > 0)) continue;
       if (!byGrip[r.grip]) byGrip[r.grip] = [];
@@ -377,10 +407,12 @@ export function AnalysisView({
   // of phantom Power regressions on whichever combo started above
   // the pooled mean.
   const perHandGripBaselines = useMemo(() => {
+    // Train-to-failure model: every rep with valid actual_time_s is a
+    // (T, F) data point. Drop the legacy r.failed filter.
     const out = {};
     const byKey = {};
     for (const r of history) {
-      if (!r.failed || !r.grip || !r.hand || r.hand === "Both") continue;
+      if (!r.grip || !r.hand || r.hand === "Both") continue;
       if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
       if (!(r.actual_time_s > 0)) continue;
       const key = `${r.grip}|${r.hand}`;
@@ -429,8 +461,10 @@ export function AnalysisView({
       const rBase = perHandGripBaselines[`${grip}|R`];
       const pooledRef = gripBaselines[grip];
       if (lBase && rBase) {
+        // Train-to-failure model: every rep with valid actual_time_s is
+        // a (T, F) data point. Drop the legacy r.failed filter.
         const buildHandPts = (hand) => history
-          .filter(r => r.failed && r.grip === grip && r.hand === hand)
+          .filter(r => r.grip === grip && r.hand === hand)
           .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
           .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
         const lAmps = fitAmpsForPts(buildHandPts("L"), grip);
@@ -468,10 +502,12 @@ export function AnalysisView({
   const FAIL_THRESHOLD = 5;
   const DUR_THRESHOLD  = 3;
   const baselineProgress = (grip, hand = null) => {
+    // Train-to-failure model: every rep with valid actual_time_s is a
+    // (T, F) failure data point. Drop the legacy r.failed filter.
     let failures = 0;
     const durs = new Set();
     for (const r of history) {
-      if (!r.failed || r.grip !== grip) continue;
+      if (r.grip !== grip) continue;
       if (hand && r.hand !== hand) continue;
       if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
       if (!(r.actual_time_s > 0)) continue;
@@ -497,9 +533,11 @@ export function AnalysisView({
   // Estimate cards' per-grip view.
   // eslint-disable-next-line no-unused-vars
   const perHandImprovement = useMemo(() => {
+    // Train-to-failure model: every rep with valid actual_time_s is a
+    // (T, F) data point. Drop the legacy r.failed filter.
     const groups = {};
     for (const r of history) {
-      if (!r.failed || !r.grip || !r.hand || r.hand === "Both") continue;
+      if (!r.grip || !r.hand || r.hand === "Both") continue;
       if (r.avg_force_kg <= 0 || r.actual_time_s <= 0) continue;
       const key = `${r.grip}|${r.hand}`;
       if (!groups[key]) groups[key] = [];
@@ -687,8 +725,10 @@ export function AnalysisView({
     const baselineByGrip = {};     // grip -> baseline AUC
     const datesUnion = new Set();
     for (const g of grips) {
+      // Train-to-failure model: every rep with valid actual_time_s is a
+      // (T, F) data point. Drop the legacy r.failed filter.
       const gripFails = (history || []).filter(r =>
-        r.grip === g && r.failed &&
+        r.grip === g &&
         r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0
       );
       if (gripFails.length < 3) continue;
@@ -1256,8 +1296,10 @@ export function AnalysisView({
                   // mode shows the same overlays as single-grip mode.
                   if (threeExpPriors && threeExpPriors.get) {
                     const prior = threeExpPriors.get(grip);
+                    // Train-to-failure model: every rep with valid
+                    // actual_time_s is a (T, F) data point.
                     const failures = (history || []).filter(r =>
-                      r.failed && r.grip === grip
+                      r.grip === grip
                       && r.actual_time_s > 0 && r.avg_force_kg > 0 && r.avg_force_kg < 500
                     );
                     if (prior && failures.length >= 2) {
@@ -1523,8 +1565,10 @@ export function AnalysisView({
             // amounts). The average is the user's intuitive reading
             // ("what's my typical improvement across both hands") and
             // is internally consistent with the per-hand cells.
+            // Train-to-failure model: every rep with valid actual_time_s
+            // is a (T, F) data point. Drop the legacy r.failed filter.
             const buildHandPts = (hand) => history
-              .filter(r => r.failed && r.grip === selGrip && r.hand === hand)
+              .filter(r => r.grip === selGrip && r.hand === hand)
               .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
               .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
             const lAmps = fitAmpsForPts(buildHandPts("L"), selGrip);
