@@ -43,10 +43,8 @@ import {
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
 import { today, uid } from "./util.js";
-import { zoneOf } from "./model/zones.js";
 import {
-  fitCF,
-  computeAUC, fitAdaptiveHandCurve,
+  fitCF, fitAdaptiveHandCurve,
 } from "./model/monod.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -98,7 +96,6 @@ const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
 // "ft_readiness" are orphaned but harmless; nothing reads them.
 const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-calibration snapshot
 const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }]
-const LS_GENESIS_KEY   = "ft_genesis";   // { date, CF, W, auc } — snapshot when first all-zone coverage earned
 const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — user-configurable target date
 
 // Small App-local helpers.
@@ -263,26 +260,31 @@ export default function App() {
   // ── Live CF/W′ estimate (all failure reps, both hands, all grips) ─────────────
   // Used by SessionPlannerCard and AnalysisView. Updates as training data grows.
   // All-grip adaptive fit — used as the overall curve when no single
-  // grip is in focus (e.g. Badges view, fallback when user hasn't yet
-  // picked a grip in Setup).
+  // grip is in focus (fallback when user hasn't yet picked a grip in
+  // Setup).
+  //
+  // Train-to-failure model: every rep with valid actual_time_s is a
+  // (T, F) data point. Drop the legacy r.failed filter.
   //
   // Depends on freshMapFp (length+lastId+lastDate) instead of [history]
   // directly, same as freshMap, so unrelated state churn (cloud syncs
   // that touch the array reference without changing data) doesn't
   // re-fire the O(N) fit.
   const liveEstimate = useMemo(() => {
-    const allFails = history.filter(r => r.failed && r.avg_force_kg > 0 && r.actual_time_s > 0);
+    const allFails = history.filter(r => r.avg_force_kg > 0 && r.actual_time_s > 0);
     return fitAdaptiveHandCurve(allFails);
   }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Per-grip adaptive fits. FDP and FDS are different muscles (pinch /
-  // open-hand roller vs crush roller) with separate force-duration
-  // curves; pooling them hides per-muscle training decisions. Each
-  // grip gets its own Monod fit so the recommendation engine can pick
-  // the right zone for the specific muscle being trained. Same
-  // freshMapFp memoization rationale as liveEstimate above.
+  // Per-grip adaptive fits. Different grips exercise different muscles
+  // (e.g. Micro pinch vs Crusher crush), so pooling them hides per-grip
+  // training decisions. Each grip gets its own fit so the curve and
+  // recommendation engine see one grip at a time. Same freshMapFp
+  // memoization rationale as liveEstimate above.
+  //
+  // Train-to-failure model: every rep with valid actual_time_s is a
+  // (T, F) data point. Drop the legacy r.failed filter.
   const gripEstimates = useMemo(() => {
-    const fails = history.filter(r => r.failed && r.grip && r.avg_force_kg > 0 && r.actual_time_s > 0);
+    const fails = history.filter(r => r.grip && r.avg_force_kg > 0 && r.actual_time_s > 0);
     const byGrip = {};
     for (const r of fails) {
       if (!byGrip[r.grip]) byGrip[r.grip] = [];
@@ -304,22 +306,24 @@ export default function App() {
 
   // ── Auto-baseline ─────────────────────────────────────────
   // Seed the CF/W′ reference point from real training data instead of
-  // requiring a formal calibration session. Fires once we have ≥3 failure
-  // reps spanning ≥2 distinct target durations (so the Monod-Scherrer fit
-  // has some spread to work with). The snapshot is dated to the earliest
-  // rep in the seed set so "improvement" counts from when you started.
+  // requiring a formal calibration session. Fires once we have ≥3 reps
+  // spanning ≥2 distinct target durations (so the Monod fit has some
+  // spread to work with). The snapshot is dated to the earliest rep
+  // in the seed set so "improvement" counts from when you started.
+  //
+  // Train-to-failure model: every rep with valid actual_time_s is a
+  // (T, F) data point. Drop the legacy r.failed filter.
   useEffect(() => {
     if (baseline) return;
-    const failures = history
+    const reps = history
       .filter(r =>
-        r.failed &&
         r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
         r.actual_time_s > 0
       )
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     const acc = [];
     const durs = new Set();
-    for (const r of failures) {
+    for (const r of reps) {
       acc.push(r);
       durs.add(r.target_duration);
       if (acc.length >= 3 && durs.size >= 2) {
@@ -335,40 +339,10 @@ export default function App() {
     }
   }, [history, baseline]);
 
-  // Genesis badge snapshot — saved the first time all 3 zones have a session.
-  // Must be declared BEFORE the detection useEffect below.
-  const [genesisSnap, setGenesisSnap] = useState(() => loadLS(LS_GENESIS_KEY));
-
-  // ── Genesis badge detection ───────────────────────────────
-  // Snapshot CF/W′ the first time the user has logged at least one session
-  // in each of the three major energy-system FAMILIES:
-  //   PCr        : max_strength OR power
-  //   Glycolytic : power_strength OR strength
-  //   Aerobic    : strength_endurance OR endurance
-  //
-  // Family-level (not zone-level) gate after the 6-zone migration so users
-  // with historical 7s reps (now classified as max_strength under the new
-  // boundaries) still register as having trained the PCr family — instead
-  // of failing the gate because nothing happened to land in the exact
-  // "power" bucket. Same idea for the other two families.
-  //
-  // The snapshot is the immutable baseline for all subsequent badge
-  // progress calculations, so we want the trigger to behave the same way
-  // it did in the 3-zone era from the user's perspective: "you've trained
-  // all three energy systems at least once."
-  useEffect(() => {
-    if (genesisSnap) return;           // already earned
-    if (!liveEstimate) return;         // no curve yet
-    const hasPCr        = history.some(r => ["max_strength", "power"].includes(zoneOf(r.target_duration)));
-    const hasGlycolytic = history.some(r => ["power_strength", "strength"].includes(zoneOf(r.target_duration)));
-    const hasAerobic    = history.some(r => ["strength_endurance", "endurance"].includes(zoneOf(r.target_duration)));
-    if (hasPCr && hasGlycolytic && hasAerobic) {
-      const auc  = computeAUC(liveEstimate.CF, liveEstimate.W);
-      const snap = { date: today(), CF: liveEstimate.CF, W: liveEstimate.W, auc };
-      saveLS(LS_GENESIS_KEY, snap);
-      setGenesisSnap(snap);
-    }
-  }, [history, liveEstimate, genesisSnap]);
+  // (Genesis badge snapshot + detection effect removed — the Journey /
+  // BadgesView surface that consumed it was deleted in commit caf7d2a.
+  // The localStorage entry under LS_GENESIS_KEY is orphaned but
+  // harmless; nothing reads it. The constant is also deleted below.)
 
   const addActivity = useCallback((act) => {
     setActivities(prev => {
