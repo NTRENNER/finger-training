@@ -97,9 +97,10 @@ export function AnalysisView({
   // actual_time_s is a failure data point. The legacy success/failure
   // dichotomy is kept here only for backward compat with downstream
   // consumers that destructure both names — the chart's red/green
-  // visual distinction will be retired in a follow-up UX commit.
-  const failures  = reps;
-  const successes = [];
+  // visual distinction was retired when we switched the F-D chart to
+  // hand-based coloring (commit pending) — `successes` is gone, all
+  // reps flow through `failures` as (T, F) data points.
+  const failures = reps;
 
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
@@ -859,17 +860,22 @@ export function AnalysisView({
   };
   const forceUnit = useRel ? "× BW" : unit;
 
-  // Scatter data — recalculated when relMode toggles
-  const successDotsRel = successes.map(r => ({
+  // Scatter data — split by hand under the train-to-failure model.
+  // The previous green/red split (Completed / Auto-failed) was a
+  // vestige of the success/failure dichotomy that the data model
+  // no longer carries. Coloring by hand (L = blue, R = yellow)
+  // adds a useful per-hand signal at a glance and pairs with the
+  // Hand Asymmetry card below the chart. Reps with no hand or
+  // hand="Both" (legacy data) drop into the L bucket as a quiet
+  // default — rare and not worth a third bar.
+  const HAND_COLORS = { L: C.blue, R: C.yellow };
+  const buildDot = (r) => ({
     x: r.actual_time_s,
     y: useRel ? r.avg_force_kg / bodyWeight : toDisp(r.avg_force_kg, unit),
-    date: r.date, grip: r.grip,
-  }));
-  const failureDotsRel = failures.map(r => ({
-    x: r.actual_time_s,
-    y: useRel ? r.avg_force_kg / bodyWeight : toDisp(r.avg_force_kg, unit),
-    date: r.date, grip: r.grip,
-  }));
+    date: r.date, grip: r.grip, hand: r.hand,
+  });
+  const leftDotsRel  = failures.filter(r => r.hand !== "R").map(buildDot);
+  const rightDotsRel = failures.filter(r => r.hand === "R").map(buildDot);
   const threeExpCurveDataRel = threeExpCurveData.map(d => ({
     x: d.x,
     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
@@ -975,8 +981,8 @@ export function AnalysisView({
             const splitMode = !!fdSplitData;
             return (
               <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
-                <span><span style={{ color: C.green }}>●</span> Completed</span>
-                <span><span style={{ color: C.red }}>●</span> Auto-failed</span>
+                <span><span style={{ color: HAND_COLORS.L }}>●</span> Left</span>
+                <span><span style={{ color: HAND_COLORS.R }}>●</span> Right</span>
                 {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Phenomenological sum of three exponentials with depletion-tau basis; the fast / middle / slow components approximately align with PCr / glycolytic / oxidative timescales but are not direct tissue measurements."><span style={{ color: C.purple }}>―</span> F-D curve (3-exp)</span>}
                 {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow component dominates here, broadly aligned with sustainable / oxidative-driven work in the climbing literature. The closest model analog to a 'sustainable force' reference."><span style={{ color: C.purple }}>╌</span> 3-min sustainable</span>}
                 {splitMode && Object.keys(fdSplitData).map(g => (
@@ -1051,10 +1057,10 @@ export function AnalysisView({
                       legendType="none" isAnimationActive={false} />
               )}
               {!fdSplitData && (
-                <Scatter data={successDotsRel} dataKey="y" fill={C.green} opacity={0.85} name="Completed" />
+                <Scatter data={leftDotsRel} dataKey="y" fill={HAND_COLORS.L} opacity={0.9} name="Left" />
               )}
               {!fdSplitData && (
-                <Scatter data={failureDotsRel} dataKey="y" fill={C.red} opacity={0.95} name="Auto-failed" />
+                <Scatter data={rightDotsRel} dataKey="y" fill={HAND_COLORS.R} opacity={0.9} name="Right" />
               )}
               {/* Per-grip split mode: one curve + one set of dots per grip.
                   Avoids the cross-muscle mudding (Micro FDP pinch ~5-10kg vs
@@ -1067,7 +1073,9 @@ export function AnalysisView({
                 const tMax = Math.max(maxDur, F_D_T_MIN + 10);
                 for (const grip of grips) {
                   const color = GRIP_COLORS[grip] || C.blue;
-                  const data = fdSplitData[grip];
+                  // (Per-grip dot data is now built from `history` directly
+                  // below — fdSplitData[grip] is only consumed for the
+                  // per-grip curve fits, not the dots.)
                   // Three-exp PRIMARY curve — bold solid grip color. This
                   // is the curve the engine optimizes against; Monod
                   // (above) is just for visual comparison. Also emits a
@@ -1120,26 +1128,32 @@ export function AnalysisView({
                       }
                     }
                   }
-                  // Dots: red fill for failures, green for completes — same
-                  // semantic as single-fit mode. The grip identity is read
-                  // from position relative to its own colored curve.
-                  const failRel = data.failures.map(d => ({
-                    x: d.x,
-                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
-                    grip, date: d.date,
-                  }));
-                  const succRel = data.successes.map(d => ({
-                    x: d.x,
-                    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
-                    grip, date: d.date,
-                  }));
+                  // Dots: fill by hand (L = blue, R = yellow), outline
+                  // by grip color. Two-dimensional encoding — fill tells
+                  // you the hand, outline tells you the grip.
+                  // (Replaces the legacy red/green outcome encoding now
+                  // that every rep is a failure data point.)
+                  const gripReps = (history || []).filter(r =>
+                    r.grip === grip
+                    && r.actual_time_s > 0
+                    && r.avg_force_kg > 0 && r.avg_force_kg < 500
+                  );
+                  const toDot = (r) => ({
+                    x: r.actual_time_s,
+                    y: useRel && bodyWeight > 0
+                      ? r.avg_force_kg / bodyWeight
+                      : toDisp(r.avg_force_kg, unit),
+                    grip, date: r.date, hand: r.hand,
+                  });
+                  const lDots = gripReps.filter(r => r.hand !== "R").map(toDot);
+                  const rDots = gripReps.filter(r => r.hand === "R").map(toDot);
                   elements.push(
-                    <Scatter key={`${grip}-fail`} data={failRel} dataKey="y"
-                      fill={C.red} stroke={color} strokeWidth={1.5} opacity={0.95} />
+                    <Scatter key={`${grip}-L`} data={lDots} dataKey="y"
+                      fill={HAND_COLORS.L} stroke={color} strokeWidth={1.5} opacity={0.9} />
                   );
                   elements.push(
-                    <Scatter key={`${grip}-succ`} data={succRel} dataKey="y"
-                      fill={C.green} stroke={color} strokeWidth={1.5} opacity={0.85} />
+                    <Scatter key={`${grip}-R`} data={rDots} dataKey="y"
+                      fill={HAND_COLORS.R} stroke={color} strokeWidth={1.5} opacity={0.9} />
                   );
                 }
                 return elements;
