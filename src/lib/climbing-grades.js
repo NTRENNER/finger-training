@@ -30,13 +30,28 @@ export const ASCENT_STYLES = [
 
 // Boulder wall types — V-grades on a MoonBoard / Kilter are notably
 // stiffer than the same number on a commercial set, so we capture the
-// surface alongside the grade. Only meaningful for discipline=boulder;
-// rope routes don't get a wall annotation.
+// surface alongside the grade. Only meaningful for indoor boulders;
+// outdoor boulders + all rope routes don't get a wall annotation.
 export const BOULDER_WALLS = [
   { key: "commercial", label: "Commercial set", emoji: "🧱" },
   { key: "moonboard",  label: "MoonBoard",      emoji: "🌙" },
   { key: "kilter",     label: "Kilter Board",   emoji: "🎯" },
 ];
+
+// Venue — orthogonal axis to discipline. A 5.10c onsight at the local
+// crag is meaningfully different data from a 5.10c onsight in the gym
+// even at the same grade (route-reading, exposure, gear, rock quality).
+// Captured on every climb entry; legacy entries without `venue` default
+// to "indoor" since that was the historical assumption.
+export const VENUES = [
+  { key: "indoor",  label: "Indoor",  emoji: "🏢" },
+  { key: "outdoor", label: "Outdoor", emoji: "🪨" },
+];
+
+export function venueMeta(key) {
+  return VENUES.find(v => v.key === key)
+      || (key ? { key, label: key, emoji: "" } : null);
+}
 
 export function wallMeta(key) {
   return BOULDER_WALLS.find(w => w.key === key)
@@ -57,15 +72,19 @@ export function ascentMeta(key) {
 
 // Pretty one-liner for a single climb entry. Handles legacy
 // intensity/duration entries so old data still renders. The wall is
-// boulder-only and may be missing on legacy boulder entries; we elide
-// it when absent rather than rendering an "—".
+// indoor-boulder-only and may be missing on legacy boulder entries; we
+// elide it when absent rather than rendering an "—". Venue is shown
+// only when explicitly outdoor — indoor stays implicit since it's the
+// historical default and is the dominant case.
 export function describeClimb(a) {
   if (a.discipline || a.grade || a.ascent) {
     const d = disciplineMeta(a.discipline).label;
     const g = a.grade || "—";
     const s = a.ascent ? ascentMeta(a.ascent).label : "";
     const w = a.discipline === "boulder" && a.wall ? wallMeta(a.wall)?.label : "";
+    const v = a.venue === "outdoor" ? "Outdoor" : "";
     const parts = [d];
+    if (v) parts.push(v);
     if (w) parts.push(w);
     parts.push(g);
     if (s) parts.push(s);

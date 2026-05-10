@@ -50,7 +50,7 @@ import { today } from "../util.js";
 import { WarmupView } from "./WarmupView.js";
 
 import {
-  CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS,
+  CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS, VENUES,
   gradesFor, defaultGradeFor,
 } from "../lib/climbing-grades.js";
 
@@ -169,6 +169,7 @@ const RPE_DESCRIPTIONS = {
 function ClimbingLogCard({ activities = [], onLog }) {
   const [open, setOpen]             = useState(false);
   const [discipline, setDiscipline] = useState("boulder");
+  const [venue, setVenue]           = useState("indoor");
   const [grade, setGrade]           = useState(defaultGradeFor("boulder"));
   const [ascent, setAscent]         = useState("flash");
   const [wall, setWall]             = useState("commercial");
@@ -185,12 +186,17 @@ function ClimbingLogCard({ activities = [], onLog }) {
     if (!valid.includes(grade)) setGrade(defaultGradeFor(key));
   };
 
+  // Wall surface only applies to indoor boulders. Commercial sets,
+  // MoonBoards, and Kilters are all gym walls; outdoor boulders are
+  // real rock with no comparable categorisation.
+  const showWall = venue === "indoor" && discipline === "boulder";
+
   const handleSave = () => {
     const entry = {
       date: today(), type: "climbing",
-      discipline, grade, ascent, rpe,
+      discipline, venue, grade, ascent, rpe,
     };
-    if (discipline === "boulder") entry.wall = wall;
+    if (showWall) entry.wall = wall;
     onLog(entry);
     setLogged(true);
     setOpen(false);
@@ -268,9 +274,35 @@ function ClimbingLogCard({ activities = [], onLog }) {
         ))}
       </div>
 
-      {/* Wall surface — boulder only. V4 on a MoonBoard ≠ V4 on a
-          commercial set. */}
-      {discipline === "boulder" && (
+      {/* Venue — orthogonal to discipline. A 5.10c onsight at the local
+          crag is meaningfully different data from a 5.10c onsight in
+          the gym (route-reading, exposure, gear, rock quality). */}
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Venue
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {VENUES.map(({ key, label, emoji }) => (
+          <button
+            key={key}
+            onClick={() => setVenue(key)}
+            style={{
+              flex: "1 1 45%", padding: "8px 4px", borderRadius: 8, cursor: "pointer",
+              background: venue === key ? C.purple : C.bg,
+              color: venue === key ? "#fff" : C.muted,
+              border: `1px solid ${venue === key ? C.purple : C.border}`,
+              fontSize: 12, fontWeight: 600, textAlign: "center",
+            }}
+          >
+            <div style={{ fontSize: 14 }}>{emoji}</div>
+            <div style={{ marginTop: 2 }}>{label}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* Wall surface — indoor boulder only. V4 on a MoonBoard ≠ V4 on
+          a commercial set. Outdoor boulders are real rock with no
+          comparable surface categorisation, so the picker hides. */}
+      {showWall && (
         <>
           <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
             Wall
