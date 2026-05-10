@@ -82,7 +82,7 @@ export function AnalysisContainer(props) {
       <div style={{ display: "flex", gap: 6, padding: "12px 16px 0" }}>
         {pill("Fingers", "fingers")}
         {pill("Lifts", "lifts")}
-        {pill("Climbing", "climbing")}
+        {pill("Climbs", "climbing")}
       </div>
 
       {sub === "fingers" && (
