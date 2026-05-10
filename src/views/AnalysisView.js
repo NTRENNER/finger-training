@@ -880,19 +880,17 @@ export function AnalysisView({
         Where failures fall on the fatigue curve reveals which energy system is your limiter — and what to train next.
       </p>
 
-      {/* Bodyweight pill + × BW normalize toggle. Sits above the
-          filter card because it changes the units the entire page
-          renders in — so it's worth surfacing before the user
-          digests any of the data below. The pill is interactive:
-          click to expand into an inline kg/lbs editor (calls saveBW
-          which pushes to the cloud + updates LS). */}
-      <BWPillRow
+      {/* Weight status pill — current BW + last-logged date with an
+          inline editor on tap. The × BW normalize toggle that used to
+          live alongside this pill has been moved into the filter card
+          below so all view-mode controls (grip filter + units) sit in
+          one row. Pill stays standalone because it's a status display
+          plus a quick-entry surface, not a filter. */}
+      <BWPill
         bwLog={bwLog}
         bodyWeight={bodyWeight}
         unit={unit}
         onBWSave={onBWSave}
-        normalizeOn={normalizeOn}
-        onToggleNormalize={toggleNormalize}
       />
 
       {/* Filters */}
@@ -908,17 +906,31 @@ export function AnalysisView({
             default hid Micro reps logged as R) without losing any
             actionable per-hand information. */}
         {grips.length > 0 && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={() => setSelGrip("")} style={{
-              padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
-              background: !selGrip ? C.orange : C.border, color: !selGrip ? "#fff" : C.muted,
-            }}>All Grips</button>
-            {grips.map(g => (
-              <button key={g} onClick={() => setSelGrip(g)} style={{
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => setSelGrip("")} style={{
                 padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
-                background: selGrip === g ? C.orange : C.border, color: selGrip === g ? "#fff" : C.muted,
-              }}>{g}</button>
-            ))}
+                background: !selGrip ? C.orange : C.border, color: !selGrip ? "#fff" : C.muted,
+              }}>All Grips</button>
+              {grips.map(g => (
+                <button key={g} onClick={() => setSelGrip(g)} style={{
+                  padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
+                  background: selGrip === g ? C.orange : C.border, color: selGrip === g ? "#fff" : C.muted,
+                }}>{g}</button>
+              ))}
+            </div>
+            {/* × BW global normalize toggle. Lives next to the grip
+                pills since both are view-mode controls — keeping them
+                in one card eliminates a stacked second pill row above.
+                Hidden when no BW is set, since the toggle would be
+                inert without a divisor. */}
+            {bodyWeight > 0 && (
+              <button onClick={toggleNormalize} style={{
+                padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
+                background: normalizeOn ? C.purple : C.border,
+                color:      normalizeOn ? "#fff"   : C.muted,
+              }}>× BW</button>
+            )}
           </div>
         )}
       </Card>
@@ -1637,18 +1649,15 @@ export function AnalysisView({
 }
 
 // ─────────────────────────────────────────────────────────────
-// BWPillRow
+// BWPill
 // ─────────────────────────────────────────────────────────────
-// Two-pill row at the top of the Analysis tab.
-//   • Left pill: current BW + last-logged date. Tap to expand into
-//     a kg/lbs editor (writes via onBWSave → App.js saveBW → cloud
-//     push + LS log).
-//   • Right pill: × BW global normalize toggle. Driven by the
-//     normalizeOn state in AnalysisView; affects all four metric
-//     surfaces (F-D chart, AUC trajectory, Curve Improvement,
-//     Hand Asymmetry) in lockstep. Hidden when no BW is set, since
-//     the toggle would be inert without a divisor.
-function BWPillRow({ bwLog, bodyWeight, unit, onBWSave, normalizeOn, onToggleNormalize }) {
+// Compact bodyweight status pill at the top of the Analysis tab.
+// Shows current BW + last-logged date; tap to expand into an inline
+// kg/lbs editor that writes via onBWSave → App.js saveBW → cloud
+// push + LS log entry. The × BW normalize toggle that originally
+// lived alongside this pill has been promoted into the grip filter
+// card below — both are view-mode controls and live together there.
+function BWPill({ bwLog, bodyWeight, unit, onBWSave }) {
   const [editing, setEditing] = useState(false);
   const latest = (bwLog && bwLog.length) ? bwLog[bwLog.length - 1] : null;
   const [inputVal, setInputVal] = useState(() =>
@@ -1664,20 +1673,14 @@ function BWPillRow({ bwLog, bodyWeight, unit, onBWSave, normalizeOn, onToggleNor
     }
   };
 
-  const labelStyle = {
-    display: "inline-flex", alignItems: "center", gap: 6,
-    padding: "6px 12px", borderRadius: 18, fontSize: 12, fontWeight: 600,
-    cursor: "pointer", border: "none",
-  };
-
   return (
-    <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-      {/* Weight pill */}
+    <div style={{ display: "flex", marginBottom: 12 }}>
       {!editing ? (
         <button onClick={() => setEditing(true)} style={{
-          ...labelStyle,
+          display: "inline-flex", alignItems: "center", gap: 6,
+          padding: "6px 12px", borderRadius: 18, fontSize: 12, fontWeight: 600,
+          cursor: "pointer", border: `1px solid ${C.border}`,
           background: C.card, color: C.text,
-          border: `1px solid ${C.border}`,
         }}>
           <span style={{ fontSize: 13 }}>⚖️</span>
           {bodyWeight
@@ -1713,17 +1716,6 @@ function BWPillRow({ bwLog, bodyWeight, unit, onBWSave, normalizeOn, onToggleNor
             background: "none", color: C.muted, border: "none", cursor: "pointer",
           }}>×</button>
         </div>
-      )}
-
-      {/* × BW normalize toggle — only meaningful when BW is set. */}
-      {bodyWeight > 0 && (
-        <button onClick={onToggleNormalize} style={{
-          ...labelStyle,
-          background: normalizeOn ? C.purple : C.border,
-          color:      normalizeOn ? "#fff"   : C.muted,
-        }}>
-          × BW
-        </button>
       )}
     </div>
   );
