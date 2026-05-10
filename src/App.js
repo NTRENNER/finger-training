@@ -9,7 +9,6 @@ import { Card, Btn } from "./ui/components.js";
 import { fmtW } from "./ui/format.js";
 
 // Top-level views extracted from this file. See src/views/.
-import { BadgesView } from "./views/BadgesView.js";
 import { ClimbingTab } from "./views/ClimbingTab.js";
 import { HistoryView } from "./views/HistoryView.js";
 import { SettingsView } from "./views/SettingsView.js";
@@ -177,7 +176,7 @@ const GOAL_CONFIG = {
 // activity entries to Power.
 const RM_GRIPS = ["Micro", "Crusher", "Prime"];
 
-const TABS = ["Fingers", "Analysis", "Journey", "Workout", "Lifts", "Climbing", "History", "Settings"];
+const TABS = ["Fingers", "Analysis", "Workout", "Lifts", "Climbing", "History", "Settings"];
 
 export default function App() {
   // ── Auth + OTP login (see src/hooks/useAuth.js) ──────────
@@ -704,11 +703,13 @@ export default function App() {
           RM_GRIPS={RM_GRIPS}
         />
       )}
-      {tab === 2 && <BadgesView history={history} threeExpPriors={threeExpPriors} />}
-      {tab === 3 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
-      {tab === 4 && <WorkoutAnalysisView unit={unit} bodyWeight={bodyWeight} defaultWorkouts={DEFAULT_WORKOUTS} />}
-      {tab === 5 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
-      {tab === 6 && (
+      {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
+          was gamification on top of AUC % growth, which Curve
+          Improvement on Analysis already shows directly.) */}
+      {tab === 2 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
+      {tab === 3 && <WorkoutAnalysisView unit={unit} bodyWeight={bodyWeight} defaultWorkouts={DEFAULT_WORKOUTS} />}
+      {tab === 4 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
+      {tab === 5 && (
         <HistoryView
           history={history}
           onDownload={() => downloadCSV(history)}
@@ -733,7 +734,7 @@ export default function App() {
           Climbing tab; finger trends already shown on Analysis as
           Total Capacity AUC over time. Body weight and lifts have
           their own homes too.) */}
-      {tab === 7 && (
+      {tab === 6 && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}

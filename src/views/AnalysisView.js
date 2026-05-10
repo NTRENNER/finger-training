@@ -1525,34 +1525,14 @@ export function AnalysisView({
             stays focused on diagnostics: F-D chart, AUC over time,
             Curve Improvement, per-grip CF/W'.) */}
 
-        {/* ── Advanced metrics section ──
-            Below this divider sit the supporting / detail metrics that
-            most users won't engage with day-to-day. */}
-        <div style={{
-          marginTop: 32,
-          marginBottom: 16,
-          paddingTop: 20,
-          borderTop: `1px solid ${C.border}`,
-        }}>
-          <div style={{
-            fontSize: 20,
-            fontWeight: 800,
-            color: C.text,
-            textTransform: "uppercase",
-            letterSpacing: "0.10em",
-            marginBottom: 6,
-          }}>
-            Advanced Metrics
-          </div>
-          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-            Detail-level views of the same data the cards above summarize. Useful for sanity-checking and physiology drill-down.
-          </div>
-        </div>
-
         {/* ── Total Capacity (AUC) — absolute (kg·s) ──
             Same metric as the % vs baseline chart at the top of the
             page, but in raw physical units. Useful when you want to
-            sanity-check the headline % against the underlying area. */}
+            sanity-check the headline % against the underlying area.
+            The "Advanced Metrics" section divider that used to wrap
+            this card was removed once the per-compartment dose + energy
+            system breakdown cards were dropped — with only one card
+            left below it, the divider was overhead for nothing. */}
         {aucHistoryByGrip && (
           <Card style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (Area Under the Curve) — absolute</div>
