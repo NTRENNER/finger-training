@@ -267,8 +267,15 @@ export function WorkoutHistoryView({
               </div>
             )}
 
-            {/* Exercises — render all that have actual data, regardless of workout definition */}
-            {Object.entries(session.exercises || {}).map(([id, data]) => {
+            {/* Exercises — render all that have actual data, regardless
+                of workout definition. When an exercise filter pill is
+                active, narrow each session card to JUST that exercise so
+                the history reads as "every bench press I've done" rather
+                than "every session that contained a bench press, with
+                all the other lifts still in view." */}
+            {Object.entries(session.exercises || {})
+              .filter(([id]) => !filterEx || id === filterEx)
+              .map(([id, data]) => {
               const exName = exNames[id] || id.replace(/_/g, " ");
               const exDef  = exDefs[id];
 
