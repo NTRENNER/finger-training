@@ -1,17 +1,19 @@
 // ─────────────────────────────────────────────────────────────
 // ANALYSIS CONTAINER
 // ─────────────────────────────────────────────────────────────
-// Top-level "Analysis" tab. Hosts a Fingers / Lifts / Climbing pill
-// bar and renders one of three underlying views:
-//   * AnalysisView          — Tindeq finger training (F-D curve, AUC,
-//                             Hand Asymmetry, Critical Force).
-//   * WorkoutAnalysisView   — gym lifting progression (per-exercise top
-//                             weight + volume over time).
-//   * ClimbingAnalysisView  — climbing log analytics (grade pyramid,
-//                             v-sum session volume, hardest-send line,
-//                             ascent style mix).
+// Top-level "Analysis" tab. Hosts a Fingers / Lifts / Climbs / Weight
+// pill bar and renders one of four underlying views:
+//   * AnalysisView            — Tindeq finger training (F-D curve, AUC,
+//                               Hand Asymmetry, Critical Force).
+//   * WorkoutAnalysisView     — gym lifting progression (per-exercise
+//                               top weight + volume over time).
+//   * ClimbingAnalysisView    — climbing log analytics (grade pyramid,
+//                               v-sum session volume, hardest-send
+//                               line, ascent style mix).
+//   * BodyWeightAnalysisView  — bodyweight log over time + 30/90-day
+//                               deltas + 7-day rolling average.
 //
-// Why one tab. All three surfaces are "look back at what I've done";
+// Why one tab. All four surfaces are "look back at what I've done";
 // they belong in the same conceptual space. Pairing them under a
 // single Analysis tab also frees the top-level nav to put the two
 // "doing the work" tabs (Fingers + Workout) next to each other where
@@ -30,8 +32,9 @@ import { loadLS, saveLS, LS_ANALYSIS_SUBTAB_KEY } from "../lib/storage.js";
 import { AnalysisView } from "./AnalysisView.js";
 import { WorkoutAnalysisView } from "./WorkoutAnalysisView.js";
 import { ClimbingAnalysisView } from "./ClimbingAnalysisView.js";
+import { BodyWeightAnalysisView } from "./BodyWeightAnalysisView.js";
 
-const VALID_SUBS = new Set(["fingers", "lifts", "climbing"]);
+const VALID_SUBS = new Set(["fingers", "lifts", "climbing", "weight"]);
 
 export function AnalysisContainer(props) {
   const {
@@ -83,6 +86,7 @@ export function AnalysisContainer(props) {
         {pill("Fingers", "fingers")}
         {pill("Lifts", "lifts")}
         {pill("Climbs", "climbing")}
+        {pill("Weight", "weight")}
       </div>
 
       {sub === "fingers" && (
@@ -105,6 +109,9 @@ export function AnalysisContainer(props) {
       )}
       {sub === "climbing" && (
         <ClimbingAnalysisView activities={activities} />
+      )}
+      {sub === "weight" && (
+        <BodyWeightAnalysisView unit={unit} />
       )}
     </div>
   );
