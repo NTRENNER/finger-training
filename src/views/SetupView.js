@@ -353,11 +353,6 @@ function ContinuousPickCard({
       targetTime: rec.T,
       repsPerSet: reps,
       restTime: rest,
-      // Multi-set machinery temporarily kept at 1/0 for backward
-      // compatibility with the workout runner. Commit C drops it
-      // entirely.
-      numSets: 1,
-      setRestTime: 0,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rec?.T, rec?.zone, reps, rest]);

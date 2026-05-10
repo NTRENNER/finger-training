@@ -13,10 +13,16 @@
 //                   auto-detect (BLE mode)
 //   rep_active    — rep in progress
 //   resting       — countdown between reps
-//   between_sets  — countdown between sets
 //   switch_hands  — Both-mode prompt to swap to the other hand
 //   alt_switch    — alternating-mode quick L↔R prompt
 //   done          — SessionSummaryView is rendered
+//
+// Multi-set machinery removed (May 2026, curve-trust commit C):
+// every session is one set of N hangs. The user trains a single set
+// to failure, end of session. The legacy `between_sets` phase, the
+// numSets / setRestTime config fields, and currentSet bookkeeping
+// are gone. set_num is kept on rep records (always 1 going forward)
+// for backward compat with the Supabase schema and existing data.
 //
 // Config split: `rawConfig` is what setConfig() writes into;
 // `config` is what consumers read, augmented with derived
@@ -61,15 +67,15 @@ export function useSessionRunner({
   onSessionStart,
 }) {
   // ── Session config (see comment at top) ─────────────────────
+  // Multi-set fields (numSets, setRestTime) removed — every session
+  // is single-set under the curve-trust model.
   const [rawConfig, setConfig] = useState(() => ({
     hand:       "Both",
     grip:       "",
-    goal:       "",  // "power" | "strength" | "endurance" — set when SessionPlanner plan is applied
+    goal:       "",  // zone key (e.g., "power") set when ContinuousPickCard applies its plan
     repsPerSet: 5,
-    numSets:    3,
     targetTime: 45,
     restTime:   20,
-    setRestTime: 180,
   }));
 
   const config = useMemo(() => ({
@@ -78,8 +84,12 @@ export function useSessionRunner({
   }), [rawConfig]);
 
   // ── Phase machine + per-rep counters ────────────────────────
+  // currentSet is always 0 going forward (single-set model). Kept
+  // in state only because it gets persisted into rep records as
+  // set_num = currentSet + 1 = 1, for backward compat with the
+  // existing Supabase schema. Will likely become a const later.
   const [phase,       setPhase]       = useState("idle");
-  const [currentSet,  setCurrentSet]  = useState(0);
+  const [currentSet]                  = useState(0);
   const [currentRep,  setCurrentRep]  = useState(0);
   const [fatigue,     setFatigue]     = useState(0);
   const [sessionReps, setSessionReps] = useState([]);
@@ -126,7 +136,6 @@ export function useSessionRunner({
     setSessionStartedAt(startedAt);
     setRefWeights(rw);
     setSessionReps([]);
-    setCurrentSet(0);
     setCurrentRep(0);
     setFatigue(0);
     setLeveledUp(false);
@@ -204,6 +213,11 @@ export function useSessionRunner({
     const dose = fatigueDose(weight, actualTime, sMax);
     setFatigue(f => Math.min(f + dose, 0.95));
 
+    // Single-set model (curve-trust commit C). All set-completion /
+    // between-sets logic has been removed — every session is one set
+    // of N hangs; when reps fill the set, the session ends (or
+    // switches to the other hand in Both-mode).
+
     // ── Alternating mode: interleave both hands rep-by-rep ────
     if (config.altMode && config.hand === "Both") {
       if (!altHandRep) {
@@ -219,15 +233,9 @@ export function useSessionRunner({
         setAltRestTime(rest);
         const nextRep = currentRep + 1;
         if (nextRep >= config.repsPerSet) {
-          const nextSet = currentSet + 1;
-          if (nextSet >= config.numSets) {
-            finishSession([...sessionReps, repRecord]);
-          } else {
-            setCurrentSet(nextSet);
-            setCurrentRep(0);
-            setFatigue(0);
-            setPhase("between_sets");
-          }
+          // Set complete — alternating mode trains both hands
+          // simultaneously, so the session ends here.
+          finishSession([...sessionReps, repRecord]);
         } else {
           setCurrentRep(nextRep);
           setPhase("resting");
@@ -239,25 +247,15 @@ export function useSessionRunner({
     // ── Standard mode ─────────────────────────────────────────
     const nextRep = currentRep + 1;
     if (nextRep >= config.repsPerSet) {
-      // Set complete
-      const nextSet = currentSet + 1;
-      if (nextSet >= config.numSets) {
-        // All sets done for this hand
-        if (config.hand === "Both" && activeHand === "L") {
-          // Switch to right hand
-          setCurrentSet(0);
-          setCurrentRep(0);
-          setFatigue(0);
-          setActiveHand("R");
-          setPhase("switch_hands");
-        } else {
-          finishSession([...sessionReps, repRecord]);
-        }
-      } else {
-        setCurrentSet(nextSet);
+      // Set complete. In Both-mode, switch to the other hand for
+      // its set; otherwise finish.
+      if (config.hand === "Both" && activeHand === "L") {
         setCurrentRep(0);
         setFatigue(0);
-        setPhase("between_sets");
+        setActiveHand("R");
+        setPhase("switch_hands");
+      } else {
+        finishSession([...sessionReps, repRecord]);
       }
     } else {
       setCurrentRep(nextRep);
@@ -275,10 +273,7 @@ export function useSessionRunner({
     setPhase(tindeqConnected ? "rep_ready" : "rep_active");
   }, [config.altMode, config.hand, config.restTime, altRestTime, tindeqConnected]);
 
-  const handleNextSet = useCallback(() => {
-    setFatigue(0);
-    setPhase("rep_ready");
-  }, []);
+  // handleNextSet removed (curve-trust commit C — single-set only).
 
   const handleAbort = useCallback(() => {
     if (sessionReps.length > 0) finishSession(sessionReps);
@@ -303,6 +298,6 @@ export function useSessionRunner({
     activeHand, altRestTime,
     nextWeight,
     startSession, handleRepDone,
-    handleRestDone, handleNextSet, handleAbort,
+    handleRestDone, handleAbort,
   };
 }

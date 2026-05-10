@@ -19,7 +19,7 @@ import { SetupView } from "./views/SetupView.js";
 import {
   ActiveSessionView, AutoRepSessionView,
   RestView, SwitchHandsView, AltSwitchView,
-  BetweenSetsView, SessionSummaryView,
+  SessionSummaryView,
 } from "./views/ActiveSessionViews.js";
 import { WorkoutTab, DEFAULT_WORKOUTS } from "./views/WorkoutTab.js";
 import { WorkoutAnalysisView } from "./views/WorkoutAnalysisView.js";
@@ -405,7 +405,7 @@ export default function App() {
     activeHand, altRestTime,
     nextWeight,
     startSession, handleRepDone,
-    handleRestDone, handleNextSet, handleAbort,
+    handleRestDone, handleAbort,
   } = useSessionRunner({
     history, freshMap, threeExpPriors, addReps,
     tindeqConnected: tindeq.connected,
@@ -674,8 +674,6 @@ export default function App() {
               nextWeight={nextWeight}
               restSeconds={restSecs}
               onRestDone={handleRestDone}
-              setNum={currentSet + 1}
-              numSets={config.numSets}
               repNum={currentRep}
               repsPerSet={config.repsPerSet}
               unit={unit}
@@ -683,16 +681,7 @@ export default function App() {
           );
         }
 
-        if (phase === "between_sets") {
-          return (
-            <BetweenSetsView
-              completedSet={currentSet}
-              totalSets={config.numSets}
-              onNextSet={handleNextSet}
-              setRestTime={config.setRestTime}
-            />
-          );
-        }
+        // (between_sets phase removed — single-set only under curve-trust commit C)
 
         if (phase === "done") {
           return (
