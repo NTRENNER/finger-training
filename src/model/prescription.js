@@ -3,9 +3,9 @@
 // ─────────────────────────────────────────────────────────────
 // All the load-prescription logic — what weight to train at next
 // session, what your potential ceiling is, what the gap diagnostic
-// says. This module sits on top of the model layer (threeExp as the
-// governing model, monod as the cold-start fallback, fatigue for the
-// freshMap adjustment) and is what the React views call.
+// says. This module sits on top of the model layer (three-exp as the
+// governing model, fatigue for the freshMap adjustment) and is what
+// the React views call.
 //
 // DATA MODEL (May 2026 — train-to-failure migration):
 // Every rep with a valid actual_time_s is a clean failure data point
@@ -19,42 +19,31 @@
 // points at that duration (the user might have held longer if pushed,
 // but we accept the approximation rather than re-collecting history).
 //
-// Consequence: the success-floor fit variants
-// (fitCFWithSuccessFloor / fitThreeExpAmpsWithSuccessFloor) are no
-// longer called from production paths. They remain exported from
-// monod.js / threeExp.js for backward compatibility with any external
-// callers but are deprecated; new code uses the plain fits.
-//
-// HIERARCHY (post May 2026 migration; three-exp is governing):
+// HIERARCHY (post Monod-removal, May 2026):
 //   - empiricalPrescription = anchor to most recent rep 1; PRIMARY
 //     prescription path (what to train at today). Uses three-exp
 //     scale-by-residual (curve shape from per-grip fit, amplitude
-//     anchored to most recent rep). Falls back to Monod CF/W' update
-//     if no per-grip three-exp prior exists yet.
+//     anchored to most recent rep). Falls back to a linear-scale
+//     heuristic when no per-grip three-exp prior exists yet.
 //   - prescribedLoad = curve-derived FALLBACK when no recent rep 1
-//     exists. Uses fitThreeExpAmps on freshMap-adjusted loads. Cold-
-//     start path falls back to fitCF (Monod) when no per-grip
-//     three-exp prior is available.
+//     exists. Uses fitThreeExpAmps on freshMap-adjusted loads with
+//     the per-grip prior. Returns null if no prior is available
+//     (caller falls back to estimateRefWeight).
 //   - prescriptionPotential = three-exp ceiling for the gap diagnostic.
-//     Monod is computed alongside but only as the lower-bracket of the
-//     reliability range; the .value field is three-exp-primary.
+//     Pure three-exp; returns null if no prior is available.
 //   - estimateRefWeight = historical weighted-average emergency fallback
 //     (no model fit at all; last-resort cold start).
 //
 // The gap between empirical (what you do) and potential (what you
 // could) is the training opportunity. See model/coaching.js for
 // the engine that scores zones using gap × intensity × recency ×
-// external × residual (residual is computed against the three-exp
-// curve, not Monod).
+// external × residual against the three-exp curve.
 
 import { clamp, ymdLocal } from "../util.js";
 import {
   PHYS_MODEL_DEFAULT, DEF_FAT,
   fatigueDose, fatigueAfterRest, availFrac,
 } from "./fatigue.js";
-import {
-  fitCF,
-} from "./monod.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT,
   fitThreeExpAmps, predForceThreeExp,
@@ -111,8 +100,8 @@ export function isShortfall(actualTime, targetDuration) {
 // FATIGUE-ADJUSTED LOAD INDEX  (freshMap)
 // ─────────────────────────────────────────────────────────────
 // Within a set, the same posted load gets HARDER each rep as the
-// muscle fatigues. Plain Monod fits will then misread later reps
-// as "you were weaker than this" and pull CF/W' down. The fix:
+// muscle fatigues. Plain F-D fits will then misread later reps as
+// "you were weaker than this" and pull the curve down. The fix:
 // walk each session/hand/set chronologically, accumulating fatigue
 // via the same model the live workout uses (fatigueDose + fatigueAfterRest),
 // and divide each rep's load by availFrac to get its FRESH-EQUIVALENT
@@ -301,7 +290,7 @@ export function rpeProgressionMultiplier(history, hand, grip, targetDuration) {
 // ─────────────────────────────────────────────────────────────
 // Returns the weighted-recent-average weight at which the user
 // achieved close to targetDuration seconds to failure. Used as the
-// last-resort emergency fallback when no Monod fit is available.
+// last-resort emergency fallback when no curve fit is available.
 export function estimateRefWeight(history, hand, grip, targetDuration) {
   if (!history || history.length === 0) return null;
   const tol = targetDuration * 0.40;
@@ -334,11 +323,10 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
 // prediction of when that failure will occur). The success-floor
 // iteration is therefore unnecessary.
 //
-// Three-exp is the governing model (post tauD-fix LOO-CV: ~7% RMSE
-// improvement over Monod). Per-grip prior is required for the three-
-// exp shrinkage to mean anything; without it the fit is unstable at
-// small N. When no per-grip prior exists yet (cold start), falls back
-// to plain Monod fitCF on the same fresh-adjusted loads.
+// Three-exp is the only F-D model. Per-grip prior is required for
+// the three-exp shrinkage to mean anything; without it the fit is
+// unstable at small N. When no per-grip prior exists yet (cold start),
+// returns null and the caller falls back to estimateRefWeight.
 export function prescribedLoad(history, hand, grip, targetDuration, freshMap = null, opts = {}) {
   if (!history || !targetDuration) return null;
   const { threeExpPriors = null } = opts;
@@ -369,14 +357,12 @@ export function prescribedLoad(history, hand, grip, targetDuration, freshMap = n
     }
   }
 
-  // Cold-start fallback: plain Monod fit on freshMap-adjusted loads.
-  // Used when no per-grip three-exp prior exists yet (early data) or
-  // when the three-exp fit collapsed to all-zero amps.
-  const monodPts = points.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
-  const fit = fitCF(monodPts);
-  if (!fit) return null;
-  const baseLoad = fit.CF + fit.W / targetDuration;
-  return Math.round(baseLoad * 10) / 10;
+  // No per-grip prior available — return null. Caller falls back to
+  // estimateRefWeight (historical weighted average) for the genuine
+  // cold-start case. We don't fit three-exp without a prior because
+  // small-N unconstrained fits can collapse onto degenerate mixes
+  // (most amplitude in one component) that don't generalize.
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -466,21 +452,11 @@ export function empiricalPrescription(history, hand, grip, targetDuration, opts 
     }
   }
 
-  // Path 2 (cold start): Monod CF/W' update — kept as the fallback
-  // when no three-exp prior exists yet for this grip. Same math as
-  // before the migration: assume CF stable, solve for new W' from
-  // the recent rep, prescribe at T_target.
-  const monodPts = points.map(r => ({ x: 1 / r.actual_time_s, y: effectiveLoad(r) }));
-  if (monodPts.length >= 2) {
-    const fit = fitCF(monodPts);
-    if (fit && F_actual > fit.CF) {
-      const newWprime = (F_actual - fit.CF) * T_actual;
-      const next = fit.CF + newWprime / T_target;
-      return Math.round(Math.max(next, fit.CF) * 10) / 10;
-    }
-  }
-
-  // Path 3 (no fit at all): linear scale by duration ratio.
+  // Path 2 (cold start): linear scale by duration ratio. Used only
+  // when no per-grip three-exp prior exists yet — the user just
+  // started training this grip. As soon as enough data accumulates
+  // for buildThreeExpPriors() to seed a per-grip prior, Path 1 takes
+  // over and the curve shape kicks in.
   const scale = Math.max(0.7, T_actual / T_target);
   return Math.round(F_actual * scale * 10) / 10;
 }
@@ -492,26 +468,46 @@ export function empiricalPrescription(history, hand, grip, targetDuration, opts 
 // what the model thinks the user's physiology could support if
 // balanced. Used as the diagnostic ceiling for the gap calculation.
 //
-// Returns { value, lower, upper, reliability, monodValue, threeExpValue }
-// or null. `value` is three-exp-primary (with Monod fallback), and the
-// function returns a result if EITHER model produced a value — Monod
-// is no longer required.
+// Returns { value, reliability } or null.
 //
-// Both fits use freshLoadFor() so loads are fatigue-adjusted to their
-// fresh-equivalents (within-set fatigue removed). Under the train-to-
-// failure data model (May 2026), every rep with valid actual_time_s
-// is a data point — the success-floor enforcement is no longer needed
-// because there are no "successes" in the lower-bound sense.
+// `value` is the three-exp curve's prediction at (hand, grip, T) using
+// fresh-adjusted loads (within-set fatigue removed via freshLoadFor()).
+// Returns null if no per-grip three-exp prior is available — there's
+// no fallback model anymore, just no answer.
+//
+// Reliability classifies how much the prediction is interpolation vs.
+// extrapolation:
+//   well-supported — at least one failure within ±20% of target T
+//   marginal       — at least one failure within ±50% of target T
+//   extrapolation  — no nearby failures; the curve is reaching past
+//                    the data
+//
+// Under the train-to-failure data model (May 2026), every rep with
+// valid actual_time_s is a data point — the success-floor enforcement
+// is no longer needed because there are no "successes" in the lower-
+// bound sense.
 export function prescriptionPotential(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
   const { freshMap = null, threeExpPriors = null } = opts;
 
-  // Every valid rep is a failure data point under the train-to-failure
-  // model. Drop the success/failure dichotomy at the fit level.
   const points = history.filter(r =>
     r.hand === hand && r.grip === grip
     && r.actual_time_s > 0 && effectiveLoad(r) > 0
   );
+  if (points.length < 1) return null;
+  if (!threeExpPriors || !threeExpPriors.get) return null;
+
+  const prior = threeExpPriors.get(grip);
+  if (!prior || (prior[0] + prior[1] + prior[2]) <= 0) return null;
+
+  const fmap = freshMap || buildFreshLoadMap(history);
+  const tePts = points.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
+  const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(points.length, 1);
+  const amps = fitThreeExpAmps(tePts, { prior, lambda });
+  if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) return null;
+
+  const value = predForceThreeExp(amps, targetDuration);
+  if (!(value > 0)) return null;
 
   const within20 = points.filter(r =>
     Math.abs(r.actual_time_s - targetDuration) / targetDuration <= 0.20
@@ -520,57 +516,14 @@ export function prescriptionPotential(history, hand, grip, targetDuration, opts 
     Math.abs(r.actual_time_s - targetDuration) / targetDuration <= 0.50
   ).length;
 
-  const fmap = freshMap || buildFreshLoadMap(history);
-
-  // Monod path — fresh-adjusted loads, plain fit.
-  const monodPts = points.map(r => ({ x: 1 / r.actual_time_s, y: freshLoadFor(r, fmap) }));
-  const monodFit = monodPts.length >= 2 ? fitCF(monodPts) : null;
-  const monodValue = monodFit ? monodFit.CF + monodFit.W / targetDuration : null;
-
-  // Three-exp path — also uses fresh-adjusted loads. Per-grip prior +
-  // shrinkage; falls through gracefully when the prior is absent.
-  let threeExpValue = null;
-  if (threeExpPriors && threeExpPriors.get && points.length >= 1) {
-    const prior = threeExpPriors.get(grip);
-    if (prior && (prior[0] + prior[1] + prior[2]) > 0) {
-      const tePts = points.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
-      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(points.length, 1);
-      const amps = fitThreeExpAmps(tePts, { prior, lambda });
-      if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
-        const v = predForceThreeExp(amps, targetDuration);
-        if (v > 0) threeExpValue = v;
-      }
-    }
-  }
-
-  // Three-exp can stand on its own — return a result if EITHER model
-  // produced a value. Only bail when both failed.
-  if (monodValue == null && threeExpValue == null) return null;
-
-  const values = [monodValue, threeExpValue].filter(v => v != null);
-  const lower = Math.min(...values);
-  const upper = Math.max(...values);
-
   let reliability;
-  if (within20 >= 1 && monodValue != null && threeExpValue != null
-      && Math.abs(monodValue - threeExpValue) / monodValue < 0.15) {
-    // Both models agree within 15% AND there's a near-target failure.
-    reliability = "well-supported";
-  } else if (within50 >= 1) {
-    reliability = "marginal";
-  } else {
-    reliability = "extrapolation";
-  }
+  if (within20 >= 1)      reliability = "well-supported";
+  else if (within50 >= 1) reliability = "marginal";
+  else                    reliability = "extrapolation";
 
-  // Three-exp is the primary value when available; Monod when not.
-  const primary = threeExpValue != null ? threeExpValue : monodValue;
   return {
-    value: Math.round(primary * 10) / 10,
-    lower: Math.round(lower * 10) / 10,
-    upper: Math.round(upper * 10) / 10,
+    value: Math.round(value * 10) / 10,
     reliability,
-    monodValue:    monodValue    != null ? Math.round(monodValue * 10) / 10    : null,
-    threeExpValue: threeExpValue != null ? Math.round(threeExpValue * 10) / 10 : null,
   };
 }
 

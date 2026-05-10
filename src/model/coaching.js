@@ -38,9 +38,9 @@
 // migration). The residual factor uses the same three-exp fit that
 // drives the F-D chart, so the "below the curve" rationale text
 // matches the literal purple curve the user is looking at. The gap
-// uses prescriptionPotential (three-exp-primary) and the trainAt
-// uses empiricalPrescription / prescribedLoad (both three-exp with
-// Monod cold-start fallback, see prescription.js).
+// uses prescriptionPotential (three-exp) and the trainAt uses
+// empiricalPrescription / prescribedLoad (also three-exp, with a
+// linear-scale fallback when no per-grip prior exists yet).
 
 import { ymdLocal } from "../util.js";
 import { ZONE_REF_T, ZONE_KEYS, zoneOf } from "./zones.js";

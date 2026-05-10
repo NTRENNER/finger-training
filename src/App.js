@@ -1,7 +1,7 @@
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-Compartment Fatigue Model · Tindeq Progressor BLE · Gamification
 import React, {
-  useCallback, useEffect, useMemo, useState,
+  useCallback, useState,
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
@@ -45,16 +45,13 @@ import {
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
 import { today, uid } from "./util.js";
-import {
-  fitCF, fitAdaptiveHandCurve,
-} from "./model/monod.js";
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS / UTILITIES
 // ─────────────────────────────────────────────────────────────
 // Most code that App.js used to inline now lives in extracted
 // modules — see the imports above:
-//   src/model/  pure JS math (Monod, three-exp, fatigue, prescription,
+//   src/model/  pure JS math (three-exp, fatigue, prescription,
 //               coaching, zones, levels, personal-response, limiter,
 //               training-focus)
 //   src/views/  React tabs + the active-session flow (BadgesView,
@@ -96,7 +93,8 @@ const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
 // score that briefly replaced it have been removed — coaching now
 // uses a constant neutral readiness=5. Old stored ratings under
 // "ft_readiness" are orphaned but harmless; nothing reads them.
-const LS_BASELINE_KEY  = "ft_baseline";  // { date, CF, W } — permanent first-calibration snapshot
+// (LS_BASELINE_KEY removed — was a Monod CF/W' snapshot, now obsolete.
+// The localStorage entry "ft_baseline" is orphaned but harmless.)
 const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }]
 const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — user-configurable target date
 
@@ -245,7 +243,7 @@ export default function App() {
   // (see src/hooks/useRepHistory.js)
   const {
     history,
-    freshMap, freshMapFp, threeExpPriors,
+    freshMap, threeExpPriors,
     pendingCount, refreshPending,
     addReps, updateRep, deleteRep, updateSession, deleteSession,
     replaceHistory,
@@ -266,87 +264,17 @@ export default function App() {
   // now uses the engine's default readiness=5 (neutral). Old subjective
   // ratings under LS_READINESS_KEY are orphaned but harmless.
 
-  // ── Live CF/W′ estimate (all failure reps, both hands, all grips) ─────────────
-  // Used by SessionPlannerCard and AnalysisView. Updates as training data grows.
-  // All-grip adaptive fit — used as the overall curve when no single
-  // grip is in focus (fallback when user hasn't yet picked a grip in
-  // Setup).
-  //
-  // Train-to-failure model: every rep with valid actual_time_s is a
-  // (T, F) data point. Drop the legacy r.failed filter.
-  //
-  // Depends on freshMapFp (length+lastId+lastDate) instead of [history]
-  // directly, same as freshMap, so unrelated state churn (cloud syncs
-  // that touch the array reference without changing data) doesn't
-  // re-fire the O(N) fit.
-  const liveEstimate = useMemo(() => {
-    const allFails = history.filter(r => r.avg_force_kg > 0 && r.actual_time_s > 0);
-    return fitAdaptiveHandCurve(allFails);
-  }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
+  // (liveEstimate / gripEstimates Monod useMemos removed in the
+  // Monod-removal pass — App.js no longer imports any Monod code.
+  // The three-exp curve is the only F-D model now; per-grip fits
+  // happen on-demand inside AnalysisView via fitThreeExpAmps.)
 
-  // Per-grip adaptive fits. Different grips exercise different muscles
-  // (e.g. Micro pinch vs Crusher crush), so pooling them hides per-grip
-  // training decisions. Each grip gets its own fit so the curve and
-  // recommendation engine see one grip at a time. Same freshMapFp
-  // memoization rationale as liveEstimate above.
-  //
-  // Train-to-failure model: every rep with valid actual_time_s is a
-  // (T, F) data point. Drop the legacy r.failed filter.
-  const gripEstimates = useMemo(() => {
-    const fails = history.filter(r => r.grip && r.avg_force_kg > 0 && r.actual_time_s > 0);
-    const byGrip = {};
-    for (const r of fails) {
-      if (!byGrip[r.grip]) byGrip[r.grip] = [];
-      byGrip[r.grip].push(r);
-    }
-    const out = {};
-    for (const [grip, rows] of Object.entries(byGrip)) {
-      const fit = fitAdaptiveHandCurve(rows);
-      if (fit) out[grip] = fit;
-    }
-    return out;
-  }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Permanent baseline snapshot — set once from the earliest training data,
-  // never overwritten. Seeded automatically (below) from the first few
-  // failure reps spanning ≥2 zones.
-  const [baseline, setBaseline] = useState(() => loadLS(LS_BASELINE_KEY));
+  // (Baseline-snapshot Monod CF/W' state + auto-baseline effect removed
+  // in the same pass. The snapshot was stored to LS_BASELINE_KEY but
+  // never read by anything downstream — pure dead code under the
+  // three-exp model. Per-grip baselines for the Curve Improvement card
+  // are derived live in AnalysisView from the three-exp fit.)
   const [activities, setActivities] = useState(() => loadLS(LS_ACTIVITY_KEY) || []);
-
-  // ── Auto-baseline ─────────────────────────────────────────
-  // Seed the CF/W′ reference point from real training data instead of
-  // requiring a formal calibration session. Fires once we have ≥3 reps
-  // spanning ≥2 distinct target durations (so the Monod fit has some
-  // spread to work with). The snapshot is dated to the earliest rep
-  // in the seed set so "improvement" counts from when you started.
-  //
-  // Train-to-failure model: every rep with valid actual_time_s is a
-  // (T, F) data point. Drop the legacy r.failed filter.
-  useEffect(() => {
-    if (baseline) return;
-    const reps = history
-      .filter(r =>
-        r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
-        r.actual_time_s > 0
-      )
-      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    const acc = [];
-    const durs = new Set();
-    for (const r of reps) {
-      acc.push(r);
-      durs.add(r.target_duration);
-      if (acc.length >= 3 && durs.size >= 2) {
-        const pts = acc.map(x => ({ x: 1 / x.actual_time_s, y: x.avg_force_kg }));
-        const fit = fitCF(pts);
-        if (fit) {
-          const snap = { date: acc[0].date, CF: fit.CF, W: fit.W };
-          saveLS(LS_BASELINE_KEY, snap);
-          setBaseline(snap);
-        }
-        return;
-      }
-    }
-  }, [history, baseline]);
 
   // (Genesis badge snapshot + detection effect removed — the Journey /
   // BadgesView surface that consumed it was deleted in commit caf7d2a.
@@ -590,8 +518,6 @@ export default function App() {
               freshMap={freshMap}
               unit={unit}
               onBwSave={saveBW}
-              liveEstimate={liveEstimate}
-              gripEstimates={gripEstimates}
               activities={activities}
               onLogActivity={addActivity}
               connectSlot={tindeqConnectCard}
@@ -679,8 +605,6 @@ export default function App() {
           unit={unit}
           bodyWeight={bodyWeight}
           activities={activities}
-          liveEstimate={liveEstimate}
-          gripEstimates={gripEstimates}
           freshMap={freshMap}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}

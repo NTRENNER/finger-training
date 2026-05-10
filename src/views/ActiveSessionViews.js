@@ -663,8 +663,9 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   // Program-recommended target weight for the active hand.
   // Held CONSTANT within a set — the user hangs the same load each rep and
   // we record how actual_time_s changes. Those rep-time curves then feed
-  // the next session's prescription via the Monod fit. We intentionally do
-  // NOT discount the suggested weight by within-set fatigue.
+  // the next session's prescription via the three-exp curve fit. We
+  // intentionally do NOT discount the suggested weight by within-set
+  // fatigue.
   const suggestedKg = useMemo(
     () => suggestWeight(refWeights?.[activeHand] ?? null, 0),
     [refWeights, activeHand]

@@ -26,9 +26,6 @@ import { Card } from "../ui/components.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
 import { STRENGTH_MAX, ZONE_REF_T, ZONE_KEYS, ZONE6 } from "../model/zones.js";
 import {
-  fitCF,
-} from "../model/monod.js";
-import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
   buildThreeExpPriors, computeAUCThreeExp,
 } from "../model/threeExp.js";
@@ -61,7 +58,7 @@ const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 
 export function AnalysisView({
   history, unit = "lbs", bodyWeight = null,
-  activities = [], liveEstimate = null, gripEstimates = {},
+  activities = [],
   freshMap = null,
   // Cross-cutting App config — passed in rather than imported so this
   // module doesn't reach back into App.js for view-level constants.
@@ -110,30 +107,15 @@ export function AnalysisView({
   // SetupView; could be lifted to App if it becomes hot.
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
 
-  // ── Critical Force estimation via Monod-Scherrer linearization ──
-  // Failure-only fit on RAW force (no freshMap, no success-floor). This
-  // is intentionally the "what your failures actually show" curve, not
-  // the "what your prescription engine wants to push you to" curve.
-  //
-  // Why not use the prescription fit (with success-floor + freshMap)?
-  // We tried it. Hard success-floor constraints + Monod's hyperbolic
-  // shape can't satisfy both "your high-force short-duration successes"
-  // AND "your moderate-force middle-duration failures" because Monod
-  // doesn't have enough flexibility — the success-floor wins and the
-  // resulting curve overshoots the failure cluster by 5-30 kg in the
-  // middle, making the chart misleading. The failure-only fit shows
-  // the data honestly; the prescription engine separately uses the
-  // empirical-first path (anchored to recent rep 1) which produces
-  // the right next-session loads without forcing the chart to lie.
-  //
-  // The dots above the curve = above-curve performance (strong zone).
-  // Dots below the curve = below-curve performance (limiter zone).
-  // That's the visual diagnosis Nathan called out as "where the magic
-  // happens" — and it only works if the curve is honest about the data.
-  // (cfEstimate Monod fit removed — was only consumed by the now-deleted
-  // modelRMSE diagnostic. The pooled Monod fit isn't used anywhere else
-  // in the view; per-grip / per-hand fits are computed locally where
-  // needed via fitCF.)
+  // ── F-D curve fit (three-exp on raw force) ──
+  // Per-grip three-exp curves are computed inside the chart's render
+  // path (and on demand in handAsymmetry / hand-scoped improvement
+  // sections). The fit is failure-only on RAW force (no freshMap,
+  // no success-floor): "what your reps actually show" rather than
+  // "what your prescription engine wants to push you to." Above the
+  // curve = above-curve performance (strong zone); below the curve =
+  // below-curve performance (limiter zone). The visual diagnosis only
+  // works if the curve is honest about the data.
 
   // ── Curve improvement % vs baseline ──
   // Reference durations for each zone come from ZONE_REF_T (the
@@ -495,48 +477,10 @@ export function AnalysisView({
     };
   };
 
-  // ── Per-hand / per-grip CF & W' breakdown ──
-  // Groups failure reps by grip × hand, fits Monod (F = CF + W'/T) for
-  // each group, and reports CF and W' alongside their delta vs that
-  // same (grip,hand)'s own baseline snapshot (see perHandGripBaselines
-  // above for why per-hand-per-grip, not pooled). When a combo doesn't
-  // yet qualify for a stable baseline, we still emit the row but with
-  // cfPct=null so the UI can show current CF without a misleading Δ%.
-  // Kept for future per-hand diagnostic use; the Per-Hand CF card that
-  // consumed this was removed because it duplicated the Critical Force
-  // Estimate cards' per-grip view.
-  // eslint-disable-next-line no-unused-vars
-  const perHandImprovement = useMemo(() => {
-    // Train-to-failure model: every rep with valid actual_time_s is a
-    // (T, F) data point. Drop the legacy r.failed filter.
-    const groups = {};
-    for (const r of history) {
-      if (!r.grip || !r.hand || r.hand === "Both") continue;
-      if (r.avg_force_kg <= 0 || r.actual_time_s <= 0) continue;
-      const key = `${r.grip}|${r.hand}`;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(r);
-    }
-    const result = {};
-    for (const [key, reps] of Object.entries(groups)) {
-      if (reps.length < 2) continue;
-      const curPts = reps.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
-      const cur    = fitCF(curPts);
-      if (!cur) continue;
-      const [grip, hand] = key.split("|");
-      const ref = perHandGripBaselines[key];
-      const cfPct = ref && ref.CF > 0 ? Math.round((cur.CF / ref.CF - 1) * 100) : null;
-      const wPct  = ref && ref.W  > 0 ? Math.round((cur.W  / ref.W  - 1) * 100) : null;
-      result[key] = {
-        grip, hand, n: reps.length,
-        cf: cur.CF, w: cur.W,
-        cfPct, wPct,
-        baselineDate: ref?.date ?? null,
-        hasBaseline: !!ref,
-      };
-    }
-    return Object.keys(result).length > 0 ? result : null;
-  }, [history, perHandGripBaselines]); // eslint-disable-line react-hooks/exhaustive-deps
+  // (perHandImprovement Monod useMemo removed — was eslint-disabled
+  // dead code from the deleted Per-Hand CF card. Its modern analog
+  // is the Hand Asymmetry rows below the F-D chart, which compute
+  // per-grip L/R gaps from three-exp fits at T=30s.)
 
   // Note: 120s capacity over time chart removed — superseded by
   // aucHistoryByGrip (Total Capacity over time), which integrates the
@@ -555,12 +499,19 @@ export function AnalysisView({
   // Fitted force-duration curve points for overlay.
   const F_D_T_MIN = 5;
 
-  // Per-grip Monod curves + dots, used in the F-D chart when no grip
-  // filter is active. Pooling Micro and Crusher onto one chart conflates
-  // two different muscles (FDP pinch vs FDS crush) — the cross-muscle
-  // amplitude difference dominates and the user can't see what's
-  // happening to each grip individually. When ≥2 grips have ≥2
-  // failures (and no selGrip), splitMode renders both.
+  // Per-grip split-mode flag for the F-D chart. When no grip filter
+  // is active and ≥2 grips have ≥2 data points each, we render per-
+  // grip three-exp curves + dots side-by-side. Pooling Micro and
+  // Crusher onto one chart conflates two different muscles (FDP pinch
+  // vs FDS crush) — the cross-muscle amplitude difference dominates
+  // and the user can't see what's happening to each grip individually.
+  //
+  // Output is `{ [grip]: true }` for grips that qualify, or null. The
+  // shape used to be `{ [grip]: { fit, curve, failures, successes } }`
+  // back when this also computed a per-grip Monod fit for the chart;
+  // the actual curves drawn are now three-exp via fitThreeExpAmps in
+  // the chart render block, so all this hook needs to do is gate
+  // splitMode on/off.
   const fdSplitData = useMemo(() => {
     if (selGrip) return null;
     const byGrip = {};
@@ -569,38 +520,14 @@ export function AnalysisView({
       if (selHand && r.hand !== selHand) continue;
       if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
       if (!(r.actual_time_s > 0)) continue;
-      if (!byGrip[r.grip]) byGrip[r.grip] = { points: [] };
-      // Train-to-failure model: every rep with a valid actual_time_s
-      // is a (T, F) data point. The legacy failed/successes split is
-      // gone; the curve fits to all data points uniformly.
-      byGrip[r.grip].points.push(r);
+      byGrip[r.grip] = (byGrip[r.grip] || 0) + 1;
     }
-    const grips = Object.keys(byGrip).filter(g => byGrip[g].points.length >= 2);
-    if (grips.length < 2) return null;
-    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
-    const out = {};
-    for (const grip of grips) {
-      const points = byGrip[grip].points;
-      const fit = fitCF(
-        points.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }))
-      );
-      if (!fit) continue;
-      const curve = Array.from({ length: 80 }, (_, i) => {
-        const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
-        return { x: t, y: toDisp(Math.max(fit.CF + fit.W / t, fit.CF), unit) };
-      });
-      out[grip] = {
-        fit,
-        curve,
-        // Legacy field shape preserved (consumers expect 'failures' /
-        // 'successes' keys for chart series). Under the new model
-        // every point is a 'failure' data point; 'successes' is empty.
-        failures: points.map(r => ({ x: r.actual_time_s, y: toDisp(r.avg_force_kg, unit), date: r.date, grip: r.grip })),
-        successes: [],
-      };
-    }
-    return Object.keys(out).length >= 2 ? out : null;
-  }, [history, selHand, selGrip, maxDur, unit]); // eslint-disable-line react-hooks/exhaustive-deps
+    const qualifyingGrips = Object.entries(byGrip)
+      .filter(([, count]) => count >= 2)
+      .map(([grip]) => grip);
+    if (qualifyingGrips.length < 2) return null;
+    return Object.fromEntries(qualifyingGrips.map(g => [g, true]));
+  }, [history, selHand, selGrip]);
 
   // ── Gap-narrowing tracker over time ──
   // For each session date, compute the gap between empirical (what user
@@ -1334,7 +1261,7 @@ export function AnalysisView({
         // muscle artifact (Crusher's high-CF reps inflating Micro's
         // baseline) that motivated the per-grip split in the first
         // place.
-        const perGripMode = !selGrip && Object.keys(gripEstimates).length >= 2;
+        const perGripMode = !selGrip && Object.keys(grip3xEstimates).length >= 2;
         const gripImpEntries = Object.entries(gripImprovement);
 
         // When a grip filter is active, cfEstimate is scoped to that
@@ -1451,7 +1378,7 @@ export function AnalysisView({
                       current fit but no qualifying per-grip baseline yet,
                       so the user knows we're aware of it and waiting on
                       more data rather than silently dropping it. */}
-                  {Object.keys(gripEstimates).filter(g => !gripImprovement[g]).map(grip => {
+                  {Object.keys(grip3xEstimates).filter(g => !gripImprovement[g]).map(grip => {
                     const p = baselineProgress(grip);
                     return (
                       <div key={grip} style={{
@@ -1583,26 +1510,15 @@ export function AnalysisView({
         </Card>
       ) : (<>
 
-        {/* The Critical Force Estimate card lived here. Removed because
-            CF / W' are Monod-derived but the rest of the Analysis surface
-            (AUC, Performance vs. Model, Coaching, the F-D curve overlay
-            itself) all moved to the three-exp basis — keeping a Monod-only
-            headline card created two competing models on the same page.
-            The "sustainable force ceiling" number CF used to give isn't
-            lost: the F-D chart's dashed "X-min" reference lines already
-            show F(180s) per grip from the three-exp curve, in honest
-            three-exp units. */}
-
-        {/* The Climbing Endurance chart card lived here. Removed because
-            the Endurance Improvement card below already shows each grip's
-            Total % (= AUC % gain) and CF & W' Over Time already shows
-            the trajectory of the underlying fit parameters. */}
-
-        {/* (Train block — Next Session Focus per-grip cards + Unexplored
-            notice — removed under curve-trust. The Setup tab's
-            ContinuousPickCard is the prescription surface; Analysis
-            stays focused on diagnostics: F-D chart, AUC over time,
-            Curve Improvement, per-grip CF/W'.) */}
+        {/* (Critical Force Estimate, Climbing Endurance chart, and
+            Train block — Next Session Focus per-grip cards — all
+            removed under the three-exp / curve-trust direction. The
+            Setup tab's ContinuousPickCard is the prescription surface;
+            Analysis stays focused on diagnostics: F-D chart, AUC over
+            time, Curve Improvement, Hand Asymmetry. The "sustainable
+            force ceiling" the old CF card showed isn't lost — the
+            F-D chart's dashed "3-min" reference lines show F(180s)
+            per grip from the three-exp curve.) */}
 
         {/* ── Total Capacity (AUC) — absolute (kg·s) ──
             Same metric as the % vs baseline chart at the top of the

@@ -5,15 +5,14 @@
 //
 // IMPORTANT: this model is PHENOMENOLOGICAL, not mechanistic.
 // It's a sum of three exponentials with fixed time constants fit to
-// force-duration data. It predicts well (~7% RMSE improvement over
-// Monod in offline LOO-CV) but the math doesn't require the three
-// terms to map to literal PCr / glycolytic / oxidative tissue pools.
-// The amplitudes (a, b, c) are regression coefficients that *behave*
-// like compartment amplitudes given the chosen time constants — not
-// strict tissue probes. We name the components fast / medium / slow
-// for the energy systems they approximately align with in the
-// climbing-physiology literature; downstream UI uses the "-aligned"
-// suffix to keep that distinction visible to users.
+// force-duration data. The math doesn't require the three terms to
+// map to literal PCr / glycolytic / oxidative tissue pools. The
+// amplitudes (a, b, c) are regression coefficients that *behave* like
+// compartment amplitudes given the chosen time constants — not strict
+// tissue probes. We name the components fast / medium / slow for the
+// energy systems they approximately align with in the climbing-
+// physiology literature; downstream UI uses the "-aligned" suffix to
+// keep that distinction visible to users.
 //
 // τ₁, τ₂, τ₃ are the DEPLETION time constants (PHYS_MODEL_DEFAULT.tauD)
 // of the three model components — fast (≈10s, PCr-aligned), medium
@@ -22,37 +21,21 @@
 // hold, which is depletion physics, so the basis is the depletion
 // taus, not the recovery taus.
 //
-// (Earlier versions of this model used tauR as the basis by accident —
-// inherited from the rest-period fatigue decay model where tauR is the
-// correct choice. Switching to tauD is both conceptually correct and
-// empirically better: leak-free LOO-CV on pooled history shows tauD
-// reduces RMSE by an additional ~3-4% over tauR at λ=100, doubling the
-// improvement over Monod from ~4% to ~7%. See validate_taur_vs_taud.js.)
+// Amplitude parameterization (a, b, c ≥ 0 in kg) — Smax = a+b+c falls
+// out as the model's prediction at T=0 (i.e. MVC / fresh max).
 //
-// Amplitude parameterization (a, b, c ≥ 0 in kg) — equivalent to the
-// Smax × {weights} form but easier to fit because the constraint is
-// just non-negativity instead of "weights sum to 1." Smax = a+b+c
-// falls out as the model's prediction at T=0 (i.e. MVC / fresh max).
-//
-// Role in the app's hierarchy (post Phase A-C migration):
-//   THREE-EXP IS THE GOVERNING MODEL across the entire app:
+// THIS IS THE ONLY F-D MODEL IN THE APP. The legacy Monod-Scherrer
+// (CF + W'/T) model was retired entirely in May 2026 — see the
+// validate_taur_vs_taud.js script for the leak-free LOO-CV that
+// established three-exp as the empirical winner across every λ tested
+// at the time. Three-exp is now used for:
 //     - F-D chart primary curve (bold purple solid line)
 //     - prescriptionPotential.value (the gap-diagnostic ceiling)
-//     - prescribedLoad (curve-derived prescription fallback, with
-//       success-floor enforcement via fitThreeExpAmpsWithSuccessFloor)
-//     - empiricalPrescription failure case (scale-by-residual against
-//       the per-grip three-exp curve)
+//     - prescribedLoad (curve-derived prescription)
+//     - empiricalPrescription (scale-by-residual against the per-grip
+//       three-exp curve)
 //     - coaching.js residual signal (zoneResidualFactor)
-//
-//   Monod (see monod.js) has been demoted to two narrow jobs: a "second
-//   opinion" overlay on the F-D chart and a cold-start fallback for
-//   prescriptions when no per-grip three-exp prior exists yet.
-//
-//   Validated offline (leak-free LOO-CV on pooled history) to beat
-//   Monod by ~7% RMSE at λ=100 with per-grip prior + shrinkage.
-//   Especially valuable at the extremes (Power, Endurance) where
-//   Monod's hyperbolic shape is provably too rigid to fit both
-//   short-T successes and middle-T failures simultaneously.
+//     - limiter.js cross-zone leave-one-out residual
 
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 
@@ -160,17 +143,20 @@ export function fitThreeExpAmps(pts, opts = {}) {
   return best;
 }
 
-// Three-exp fit with success-floor enforcement — the three-exp analog
-// of fitCFWithSuccessFloor in monod.js. Failures anchor the curve;
-// successes act as LOWER BOUNDS (you held F for T without failing →
-// the curve at T must be ≥ F). Without this, prescriptions lag actual
-// capacity whenever the user clears a target instead of pushing to true
-// failure.
+// Three-exp fit with success-floor enforcement. Failures anchor the
+// curve; successes act as LOWER BOUNDS (you held F for T without
+// failing → the curve at T must be ≥ F). Without this, prescriptions
+// lag actual capacity whenever the user clears a target instead of
+// pushing to true failure.
 //
 // Algorithm: start with a failure-only fit, iteratively bump weights of
 // any success points that violate the lower bound, refit until no more
-// violations or maxIter reached. Same shape as the Monod success-floor
-// iteration, just operating on three-exp amps instead of (CF, W').
+// violations or maxIter reached.
+//
+// NOTE: Under the train-to-failure data model (May 2026), every rep is
+// a failure data point, so this success-floor variant is no longer
+// called from production paths. Kept exported for any external callers
+// or future re-introduction; the production fit is fitThreeExpAmps.
 //
 // failurePts: [{T, F}]
 // successPts: [{T, F}]

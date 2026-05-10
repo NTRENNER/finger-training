@@ -1,11 +1,12 @@
 // ─────────────────────────────────────────────────────────────
 // LIMITER ZONE DETECTION
 // ─────────────────────────────────────────────────────────────
-// Picks a single limiting zone (power / strength / endurance) for a
-// recommended grip, based on a leave-one-out Monod cross-zone
-// residual: fit Monod on two of the three zones' rep-1 failures,
-// predict the held-out zone, take the gap. The zone with the largest
-// positive (under-the-curve) gap is the limiter.
+// Picks a single limiting zone for a recommended grip, based on a
+// leave-one-out three-exp cross-zone residual: fit three-exp on all
+// OTHER zones' rep-1 failures, predict the held-out zone's points,
+// take the gap. The zone with the largest positive (under-the-curve)
+// gap is the limiter — that's where your actuals fall most short of
+// what the rest of your curve would predict.
 //
 // Per-grip evaluation: force scales aren't comparable across grips
 // (FDP pinch vs FDS crush), so we segment by grip and try each grip
@@ -19,20 +20,19 @@
 // grip is on-curve and a different grip should be considered.
 //
 // Returns { zone, grip } or null. Used by the F-D chart's saturated
-// zone-background highlight and the legacy ΔAUC recommendation
-// fallback path. The Phase 3 coaching engine in coaching.js uses
-// per-zone gap × intensity × recency × external × residual instead;
+// zone-background highlight. The Phase 3 coaching engine in coaching.js
+// uses per-zone gap × intensity × recency × external × residual instead;
 // computeLimiterZone is kept around for the Analysis chart's visual
-// limiter highlight and for the legacy recommendation fallback.
+// limiter highlight.
 
 import { ZONE_KEYS, zoneOf } from "./zones.js";
-import { fitCF, predForce } from "./monod.js";
+import { fitThreeExpAmps, predForceThreeExp, buildThreeExpPriors, THREE_EXP_LAMBDA_DEFAULT } from "./threeExp.js";
 import { ymdLocal } from "../util.js";
 
 const LIMITER_WINDOW_DAYS         = 30;
 const LIMITER_MIN_FAILURES        = 3;    // total within a grip before we trust the signal
 const LIMITER_MIN_PTS_HELDOUT     = 1;    // the held-out zone needs at least this many
-const LIMITER_MIN_TRAIN_ZONES     = 2;    // need at least 2 OTHER zones with data to fit a Monod cross-zone curve
+const LIMITER_MIN_TRAIN_ZONES     = 2;    // need at least 2 OTHER zones with data to fit
 const LIMITER_MIN_PTS_PER_TRAIN   = 1;    // each contributing training zone needs this many points
 const LIMITER_RESIDUAL_KG         = 0.5;  // smallest gap we'll call a limiter — below this the curve is balanced
 
@@ -53,7 +53,12 @@ export function computeLimiterZone(history) {
   );
   if (allFailures.length < LIMITER_MIN_FAILURES) return null;
 
-  // Segment by grip. Force scales aren't comparable across grips.
+  // Per-grip three-exp priors, built from full history (not just the
+  // recent window) so the LOO fits have a stable shrinkage anchor.
+  const priors = buildThreeExpPriors(history);
+
+  // Segment the recent window by grip. Force scales aren't comparable
+  // across grips.
   const byGrip = {};
   for (const r of allFailures) (byGrip[r.grip] ||= []).push(r);
 
@@ -67,20 +72,19 @@ export function computeLimiterZone(history) {
   for (const [grip, failures] of rankedGrips) {
     if (failures.length < LIMITER_MIN_FAILURES) continue;
 
-    // 6-zone bucketing. Some buckets will be empty for most users —
-    // that's expected; the CV step requires only ≥2 OTHER zones to
-    // have data, not all of them.
+    // Zone-bucket the recent failures.
     const byZone = Object.fromEntries(ZONE_KEYS.map(k => [k, []]));
     for (const r of failures) {
       const k = zoneOf(r.target_duration);
       if (byZone[k]) byZone[k].push(r);
     }
 
-    // ── Primary: Monod cross-zone residual (per grip) ──
-    // For each zone with ≥1 point, fit Monod on the OTHER zones'
+    // ── Primary: three-exp cross-zone residual (per grip) ──
+    // For each zone with ≥1 point, fit three-exp on the OTHER zones'
     // data and predict the held-out zone. The largest positive gap
     // (held-out actual force fell shortest of the cross-zone fit's
     // prediction) is the limiter.
+    const prior = priors && priors.get ? priors.get(grip) : null;
     const residuals = {};
     let anyResidualComputed = false;
     for (const Z of ZONE_KEYS) {
@@ -90,13 +94,14 @@ export function computeLimiterZone(history) {
       if (others.length < LIMITER_MIN_TRAIN_ZONES) continue;
       const trainPts = others
         .flatMap(z => byZone[z])
-        .map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
-      const fit = fitCF(trainPts);
-      if (!fit) continue;
+        .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(trainPts.length, 1);
+      const amps = fitThreeExpAmps(trainPts, prior ? { prior, lambda } : { lambda });
+      if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) continue;
 
       // Average predicted − actual across all held-out rep-1 failures.
       // Positive = actual fell short of the cross-zone prediction.
-      const gaps = heldOut.map(r => predForce(fit, r.actual_time_s) - r.avg_force_kg);
+      const gaps = heldOut.map(r => predForceThreeExp(amps, r.actual_time_s) - r.avg_force_kg);
       residuals[Z] = gaps.reduce((a, b) => a + b, 0) / gaps.length;
       anyResidualComputed = true;
     }

@@ -113,7 +113,8 @@ export function useSessionRunner({
   // and the weight that gets recorded against each rep. Same prescription
   // chain as the Setup card's "Train at" cell so the two views match
   // to the kg: empirical-first (anchored to user's most recent rep 1),
-  // then per-grip Monod, then cross-grip Monod, then historical average.
+  // then per-grip three-exp curve, then cross-grip three-exp, then
+  // historical weighted average as the last-resort fallback.
   const startSession = useCallback(() => {
     const sid = uid();
     const rw = {};
@@ -160,7 +161,7 @@ export function useSessionRunner({
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
     // Weight is constant across the set — no within-set fatigue discount.
     // The rep-time curve (actual_time_s) is what reflects fatigue and feeds
-    // the next session's prescription via Monod.
+    // the next session's prescription via the three-exp curve fit.
     const weight = (() => {
       const ws = [suggestWeight(refWeights[effectiveHand], 0)].filter(Boolean);
       return ws.length > 0 ? ws[0] : 0;
