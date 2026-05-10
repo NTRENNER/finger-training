@@ -1,22 +1,26 @@
 // ─────────────────────────────────────────────────────────────
 // ANALYSIS CONTAINER
 // ─────────────────────────────────────────────────────────────
-// Top-level "Analysis" tab. Hosts a Fingers / Lifts pill bar and
-// renders one of two underlying views:
+// Top-level "Analysis" tab. Hosts a Fingers / Lifts / Climbing pill
+// bar and renders one of three underlying views:
 //   * AnalysisView          — Tindeq finger training (F-D curve, AUC,
 //                             Hand Asymmetry, Critical Force).
 //   * WorkoutAnalysisView   — gym lifting progression (per-exercise top
 //                             weight + volume over time).
+//   * ClimbingAnalysisView  — climbing log analytics (grade pyramid,
+//                             v-sum session volume, hardest-send line,
+//                             ascent style mix).
 //
-// Why one tab. Both surfaces are "look back at what I've done"; they
-// belong in the same conceptual space. Pairing them under a single
-// Analysis tab also frees the top-level nav to put the two "doing the
-// work" tabs (Fingers + Workout) next to each other where they belong.
+// Why one tab. All three surfaces are "look back at what I've done";
+// they belong in the same conceptual space. Pairing them under a
+// single Analysis tab also frees the top-level nav to put the two
+// "doing the work" tabs (Fingers + Workout) next to each other where
+// they belong.
 //
 // The pill choice is persisted to localStorage so re-entering the tab
 // lands the user on whichever side they last looked at.
 //
-// All props for both child views are passed through here — this is a
+// All props for the child views are passed through here — this is a
 // thin wrapper, not a smart component, so App.js stays the single
 // source of truth for hook state.
 
@@ -25,6 +29,9 @@ import { C } from "../ui/theme.js";
 import { loadLS, saveLS, LS_ANALYSIS_SUBTAB_KEY } from "../lib/storage.js";
 import { AnalysisView } from "./AnalysisView.js";
 import { WorkoutAnalysisView } from "./WorkoutAnalysisView.js";
+import { ClimbingAnalysisView } from "./ClimbingAnalysisView.js";
+
+const VALID_SUBS = new Set(["fingers", "lifts", "climbing"]);
 
 export function AnalysisContainer(props) {
   const {
@@ -38,7 +45,7 @@ export function AnalysisContainer(props) {
 
   const [sub, setSub] = useState(() => {
     const saved = loadLS(LS_ANALYSIS_SUBTAB_KEY);
-    return saved === "lifts" ? "lifts" : "fingers";
+    return VALID_SUBS.has(saved) ? saved : "fingers";
   });
 
   const pickSub = (key) => {
@@ -62,6 +69,7 @@ export function AnalysisContainer(props) {
           fontWeight: 700, fontSize: 15,
           border: "2px solid transparent",
           transition: "all 0.15s",
+          minWidth: 0,  // lets text truncate cleanly on narrow screens
         }}
       >
         {label}
@@ -74,6 +82,7 @@ export function AnalysisContainer(props) {
       <div style={{ display: "flex", gap: 6, padding: "12px 16px 0" }}>
         {pill("Fingers", "fingers")}
         {pill("Lifts", "lifts")}
+        {pill("Climbing", "climbing")}
       </div>
 
       {sub === "fingers" && (
@@ -95,6 +104,9 @@ export function AnalysisContainer(props) {
           bodyWeight={bodyWeight}
           defaultWorkouts={defaultWorkouts}
         />
+      )}
+      {sub === "climbing" && (
+        <ClimbingAnalysisView activities={activities} />
       )}
     </div>
   );
