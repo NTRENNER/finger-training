@@ -321,10 +321,7 @@ CREATE POLICY "auth_all" ON reps
             components are named for the energy systems they
             approximately align with (PCr, glycolytic, oxidative) but
             they're regression coefficients, not direct measurements
-            of underlying tissue pools. This is the only F-D model in
-            the app — the legacy Monod (CF + W'/T) curve was retired
-            in May 2026 after offline LOO-CV picked three-exp as the
-            empirical winner.
+            of underlying tissue pools.
             <br /><br />
             <b>Continuous Coaching:</b> The engine sweeps target time
             from 5 s to 240 s and picks where the curve over-predicts
