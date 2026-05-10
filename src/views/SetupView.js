@@ -313,21 +313,21 @@ function ContinuousPickCard({
   //            T = 240s → 4 hangs (endurance). Mid-T (~70-180s) → 5.
   // Smooth function of T matches the curve-trust philosophy: a 29s
   // pick and a 31s pick give the same rep count; no surprise jumps
-  // at zone boundaries. Replaces the per-zone GOAL_CONFIG.repsDefault
-  // lookup which was non-monotonic and tied to the (now-deprecated)
-  // 6-zone quantization.
+  // at zone boundaries.
   //
-  // REST — still derived from zoneOf(T_star) via GOAL_CONFIG.restDefault.
-  // Rest depends on what's recovering (PCr vs glycolytic vs aerobic),
-  // not just on T, so the per-zone lookup is the right shape: long
-  // rest at Max Strength (full PCr refill for fresh max-effort
-  // attempts) and Endurance (load is at-CF, short rest is enough),
-  // shorter mid-zone rest. Not a simple function of T.
+  // REST — flat 20s between reps, always (user preference, May 2026).
+  // The earlier per-zone lookup gave 60-180s depending on the zone.
+  // The user trains short rests across the board (Grip Gains style),
+  // so the default is constant and simpler. Override via the
+  // Customize toggle if a longer rest is wanted for a specific
+  // session. Note: this means altMode (interleaved L↔R within a set)
+  // engages only for very short prescriptions (T ≤ 20s) under the
+  // restTime ≥ targetTime trigger in useSessionRunner.
   const zoneCfg = rec ? GOAL_CONFIG[rec.zone] : null;
   const defaultReps = rec
     ? Math.max(4, Math.min(6, Math.round(6 - (rec.T - 5) / 117.5)))
     : 5;
-  const defaultRest = zoneCfg?.restDefault ?? 90;
+  const defaultRest = 20;
 
   const [reps, setReps] = useState(defaultReps);
   const [rest, setRest] = useState(defaultRest);
