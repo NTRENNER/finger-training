@@ -18,14 +18,12 @@
 import React, { useMemo, useState } from "react";
 import {
   ResponsiveContainer, LineChart, Line, ComposedChart, Scatter,
-  BarChart, Bar,
-  XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  XAxis, YAxis, Tooltip, CartesianGrid,
   ReferenceLine, ReferenceArea,
 } from "recharts";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import {
-  ZONE5, classifyZone5, dominantZone5,
   computeZoneCoverage,
 } from "../model/zones.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
@@ -39,7 +37,6 @@ import {
   buildThreeExpPriors, computeAUCThreeExp,
 } from "../model/threeExp.js";
 import {
-  sessionCompartmentAUC,
   prescribedLoad,
   empiricalPrescription, prescriptionPotential,
 } from "../model/prescription.js";
@@ -51,7 +48,7 @@ import {
 } from "../model/personal-response.js";
 import { computeLimiterZone } from "../model/limiter.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
-import { EnergySystemBreakdownCard } from "./analysis/EnergySystemBreakdownCard.js";
+// (EnergySystemBreakdownCard import removed — card dropped under curve-trust)
 
 // ─────────────────────────────────────────────────────────────
 // ZONE_DETAILS — shared recommendation metadata used by both the
@@ -2050,124 +2047,14 @@ export function AnalysisView({
           </Card>
         )}
 
-        {/* ── Per-compartment AUC (dose delivered per energy system, per session) ── */}
-        {(() => {
-          // Group selected reps by session_id; fall back to date
-          const bySession = new Map();
-          for (const r of reps) {
-            const key = r.session_id || r.date;
-            if (!bySession.has(key)) bySession.set(key, { key, date: r.date, reps: [] });
-            bySession.get(key).reps.push(r);
-          }
-          const sessions = [...bySession.values()]
-            .sort((a, b) => a.date.localeCompare(b.date))
-            .slice(-10)
-            .map(s => {
-              const auc = sessionCompartmentAUC(s.reps);
-              const dom = dominantZone5(s.reps);
-              return {
-                label: s.date.slice(5), // "MM-DD"
-                Fast: Math.round(auc.fast),
-                Medium: Math.round(auc.medium),
-                Slow: Math.round(auc.slow),
-                total: Math.round(auc.total),
-                n: s.reps.length,
-                reps: s.reps,
-                dom,
-              };
-            });
-          if (sessions.length === 0) return null;
-          const last = sessions[sessions.length - 1];
-          const pct = (v) => last.total > 0 ? Math.round((v / last.total) * 100) : 0;
-          // Build the last-session zone distribution (count of reps per ZONE5 bucket)
-          const lastZoneCounts = ZONE5.map(z => ({
-            ...z,
-            count: last.reps.filter(r => classifyZone5(r.actual_time_s)?.key === z.key).length,
-          }));
-          const lastTotalReps = lastZoneCounts.reduce((s, z) => s + z.count, 0);
-          return (
-            <Card style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Per-Compartment Dose (Area Under the Curve)</div>
-              <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-                Training dose delivered to each energy system per session. Dose = load × A<sub>i</sub> × τ<sub>Di</sub> · (1 − e<sup>−t/τ<sub>Di</sub></sup>). Units: kg·s.
-              </div>
-              <div style={{ height: 180 }}>
-                <ResponsiveContainer>
-                  <BarChart data={sessions} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-                    <XAxis dataKey="label" stroke={C.muted} tick={{ fontSize: 10 }} />
-                    <YAxis stroke={C.muted} tick={{ fontSize: 10 }} />
-                    <Tooltip
-                      contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12 }}
-                      labelStyle={{ color: C.muted }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="Fast"   stackId="a" fill="#e05560" />
-                    <Bar dataKey="Medium" stackId="a" fill="#e07a30" />
-                    <Bar dataKey="Slow"   stackId="a" fill="#3b82f6" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              {/* Last-session breakdown */}
-              <div style={{
-                display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
-                gap: 8, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}`,
-              }}>
-                <div>
-                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>FAST · PCR</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#e05560" }}>{last.Fast}</div>
-                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Fast)}% · τ 15s</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>MEDIUM · GLYCO</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#e07a30" }}>{last.Medium}</div>
-                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Medium)}% · τ 90s</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5 }}>SLOW · OXID</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#3b82f6" }}>{last.Slow}</div>
-                  <div style={{ fontSize: 10, color: C.muted }}>{pct(last.Slow)}% · τ 600s</div>
-                </div>
-              </div>
-              <div style={{ fontSize: 11, color: C.muted, marginTop: 8, fontStyle: "italic" }}>
-                Last session: {last.n} rep{last.n !== 1 ? "s" : ""}, {last.total} kg·s total dose.
-                {last.dom && <> · landed in <span style={{ color: last.dom.color, fontWeight: 700, fontStyle: "normal" }}>{last.dom.label}</span></>}
-              </div>
-
-              {/* ── Last-session zone distribution (5-zone classifier) ── */}
-              {lastTotalReps > 0 && (
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
-                  <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, marginBottom: 6, textTransform: "uppercase" }}>
-                    Landed Zones · last session
-                  </div>
-                  <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: 6 }}>
-                    {lastZoneCounts.map(z => z.count > 0 && (
-                      <div
-                        key={z.key}
-                        title={`${z.label}: ${z.count} rep${z.count !== 1 ? "s" : ""}`}
-                        style={{
-                          flex: z.count,
-                          background: z.color,
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 10, color: C.muted }}>
-                    {lastZoneCounts.filter(z => z.count > 0).map(z => (
-                      <span key={z.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: 2, background: z.color, display: "inline-block" }} />
-                        {z.short} · {z.count}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </Card>
-          );
-        })()}
-
-        {/* ── Energy system breakdown ── */}
-        <EnergySystemBreakdownCard zones={zones} />
+        {/* (Per-Compartment Dose AUC chart + Energy System Breakdown
+            card removed under curve-trust — both were zone-keyed
+            descriptive surfaces that pre-dated the continuous engine.
+            The F-D chart, Total Capacity AUC over time, Curve
+            Improvement, and Curve Coverage cards all cover the same
+            diagnostic ground more cleanly. The dose-decomposition
+            math also leaned on mechanistic-flavored language that
+            doesn't survive the phenomenological-model framing.) */}
 
       </>)}
     </div>
