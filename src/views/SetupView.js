@@ -305,11 +305,28 @@ function ContinuousPickCard({
     [history, grip, freshMap, threeExpPriors]
   );
 
-  // Derive default protocol from zoneOf(T_star). The GOAL_CONFIG
-  // entry for that zone gives us repsDefault + restDefault. Falls
-  // back to a sensible mid-range default if the zone lookup misses.
+  // Derive default protocol from T_star.
+  //
+  // REPS — continuous linear interpolation in T:
+  //   reps(T) = round(6 - (T - 5) / 117.5), clamped to [4, 6]
+  // Endpoints: T = 5s → 6 hangs (max strength territory),
+  //            T = 240s → 4 hangs (endurance). Mid-T (~70-180s) → 5.
+  // Smooth function of T matches the curve-trust philosophy: a 29s
+  // pick and a 31s pick give the same rep count; no surprise jumps
+  // at zone boundaries. Replaces the per-zone GOAL_CONFIG.repsDefault
+  // lookup which was non-monotonic and tied to the (now-deprecated)
+  // 6-zone quantization.
+  //
+  // REST — still derived from zoneOf(T_star) via GOAL_CONFIG.restDefault.
+  // Rest depends on what's recovering (PCr vs glycolytic vs aerobic),
+  // not just on T, so the per-zone lookup is the right shape: long
+  // rest at Max Strength (full PCr refill for fresh max-effort
+  // attempts) and Endurance (load is at-CF, short rest is enough),
+  // shorter mid-zone rest. Not a simple function of T.
   const zoneCfg = rec ? GOAL_CONFIG[rec.zone] : null;
-  const defaultReps = zoneCfg?.repsDefault ?? 4;
+  const defaultReps = rec
+    ? Math.max(4, Math.min(6, Math.round(6 - (rec.T - 5) / 117.5)))
+    : 5;
   const defaultRest = zoneCfg?.restDefault ?? 90;
 
   const [reps, setReps] = useState(defaultReps);
