@@ -87,3 +87,8 @@ export const LS_REP_DELETED_KEY = "ft_rep_deleted";
 // bias multiplier in coachingRecommendation. Defaults to "balanced"
 // when unset so existing users see no behaviour change.
 export const LS_TRAINING_FOCUS_KEY = "ft_training_focus";
+
+// AnalysisContainer sub-tab selector ("fingers" | "lifts"). Persisted
+// so the user lands on whichever side they last looked at when they
+// re-enter the Analysis tab. Unset = defaults to "fingers".
+export const LS_ANALYSIS_SUBTAB_KEY = "ft_analysis_subtab";

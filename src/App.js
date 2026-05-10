@@ -11,7 +11,9 @@ import { fmtW } from "./ui/format.js";
 // Top-level views extracted from this file. See src/views/.
 import { HistoryView } from "./views/HistoryView.js";
 import { SettingsView } from "./views/SettingsView.js";
-import { AnalysisView } from "./views/AnalysisView.js";
+// AnalysisView is now imported by AnalysisContainer (see below) rather
+// than by App.js directly — the container hosts the Fingers / Lifts
+// pill toggle and renders one of two analysis views beneath it.
 import { SetupView } from "./views/SetupView.js";
 import {
   ActiveSessionView, AutoRepSessionView,
@@ -19,7 +21,7 @@ import {
   SessionSummaryView,
 } from "./views/ActiveSessionViews.js";
 import { WorkoutTab, DEFAULT_WORKOUTS } from "./views/WorkoutTab.js";
-import { WorkoutAnalysisView } from "./views/WorkoutAnalysisView.js";
+import { AnalysisContainer } from "./views/AnalysisContainer.js";
 
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
@@ -172,7 +174,14 @@ const GOAL_CONFIG = {
 // activity entries to Power.
 const RM_GRIPS = ["Micro", "Crusher", "Prime"];
 
-const TABS = ["Fingers", "Analysis", "Workout", "Lifts", "History", "Settings"];
+// Tab order. Fingers + Workout are the two "doing the work" tabs and
+// sit next to each other at the front. Analysis is the unified "look
+// back" tab — it hosts a Fingers / Lifts pill toggle internally so
+// per-exercise lift progression and Tindeq finger analysis live in
+// one place. History stays before Settings as the "everything that
+// ever happened" log. (Lifts as a top-level tab was retired May 2026
+// and folded into Analysis via AnalysisContainer.)
+const TABS = ["Fingers", "Workout", "Analysis", "History", "Settings"];
 
 export default function App() {
   // ── Auth + OTP login (see src/hooks/useAuth.js) ──────────
@@ -663,8 +672,9 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && (
-        <AnalysisView
+      {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
+      {tab === 2 && (
+        <AnalysisContainer
           history={history}
           unit={unit}
           bodyWeight={bodyWeight}
@@ -674,16 +684,17 @@ export default function App() {
           freshMap={freshMap}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
+          defaultWorkouts={DEFAULT_WORKOUTS}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
           was gamification on top of AUC % growth, which Curve
-          Improvement on Analysis already shows directly.) */}
-      {tab === 2 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
-      {tab === 3 && <WorkoutAnalysisView unit={unit} bodyWeight={bodyWeight} defaultWorkouts={DEFAULT_WORKOUTS} />}
-      {/* (Climbing tab removed May 2026 — full climb logger merged
-          into Fingers; climbing history viewed in History tab.) */}
-      {tab === 4 && (
+          Improvement on Analysis already shows directly. Lifts
+          retired as a top-level tab in May 2026 and folded into
+          Analysis via AnalysisContainer's Fingers / Lifts pill.
+          Climbing tab removed in the same wave — full climb logger
+          merged into Fingers; climbing history viewed in History tab.) */}
+      {tab === 3 && (
         <HistoryView
           history={history}
           onDownload={() => downloadCSV(history)}
@@ -708,7 +719,7 @@ export default function App() {
           Analysis as Total Capacity AUC over time; body weight and
           lifts have their own homes too. Climbing trends were also
           dropped when the Climbing tab was retired.) */}
-      {tab === 5 && (
+      {tab === 4 && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}
