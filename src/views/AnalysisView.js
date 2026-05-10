@@ -1212,7 +1212,16 @@ export function AnalysisView({
           never pooled. Same integration window the Journey badges use,
           so chart progress and badge progress read the same metric. The
           absolute (kg·s) view of the same metric lives in the Advanced
-          metrics section at the bottom. */}
+          metrics section at the bottom.
+
+          The Hand Asymmetry rows live below the chart in this same card
+          (consolidated May 2026): both surfaces are per-grip diagnostics
+          and the L/R gap pairs naturally with each grip's trajectory line.
+          Surfaces the L/R gap most prescription paths handle internally
+          but never tell the user about — below ~5% reads as 'symmetric',
+          above ~15% flags the weaker hand as the real climbing limiter.
+          Computed at T=30s (middle of curve, exercises fast + middle
+          components). */}
       {aucHistoryByGrip && aucHistoryByGrip.hasPct && (
         <Card style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (Area Under the Curve) — % vs baseline</div>
@@ -1243,60 +1252,52 @@ export function AnalysisView({
               <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
             ))}
           </div>
-        </Card>
-      )}
 
-      {/* ── Hand Asymmetry ──
-          Surfaces the L/R gap that most prescription paths already
-          handle internally but never tell the user about. For each
-          grip with both L and R fits, shows weaker hand load + the
-          asymmetry %. Below ~5% reads as 'symmetric'; above ~15%
-          flags the weaker hand as the real climbing limiter on this
-          grip. Computed at T=30s (middle of curve, exercises fast +
-          middle components). */}
-      {handAsymmetry.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Hand Asymmetry</div>
-          <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-            How far behind your weaker hand is at the {ASYM_REF_T}s reference. Most prescriptions are already per-hand, but on the wall the weaker hand is often the real limiter.
-          </div>
-          {handAsymmetry.map(({ grip, L, R, stronger, weaker, asymPct }) => {
-            const flagColor = asymPct >= 0.15 ? C.red
-                           : asymPct >= 0.05 ? C.orange
-                           : C.green;
-            const flagText  = asymPct >= 0.15 ? "limiter"
-                           : asymPct >= 0.05 ? "asymmetric"
-                           : "symmetric";
-            const pctRound  = Math.round(asymPct * 100);
-            return (
-              <div key={grip} style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "8px 0",
-                borderBottom: `1px solid ${C.border}`,
-              }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: GRIP_COLORS[grip] || C.text }}>
-                    {grip}
-                  </div>
-                  <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-                    L {fmtW(L, unit)} {unit} · R {fmtW(R, unit)} {unit}
-                    {pctRound > 0 && (
-                      <> · <b style={{ color: C.text }}>{weaker}</b> is {pctRound}% behind <b style={{ color: C.text }}>{stronger}</b></>
-                    )}
-                  </div>
-                </div>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, color: flagColor,
-                  background: `${flagColor}1a`,
-                  padding: "3px 8px", borderRadius: 4,
-                  textTransform: "uppercase", letterSpacing: 0.5,
-                  whiteSpace: "nowrap",
-                }}>
-                  {flagText}
-                </span>
+          {/* Per-grip Hand Asymmetry rows — folded in below the chart */}
+          {handAsymmetry.length > 0 && (
+            <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>
+                Hand asymmetry — L/R gap at the {ASYM_REF_T}s reference. The weaker hand is often the real climbing limiter.
               </div>
-            );
-          })}
+              {handAsymmetry.map(({ grip, L, R, stronger, weaker, asymPct }) => {
+                const flagColor = asymPct >= 0.15 ? C.red
+                               : asymPct >= 0.05 ? C.orange
+                               : C.green;
+                const flagText  = asymPct >= 0.15 ? "limiter"
+                               : asymPct >= 0.05 ? "asymmetric"
+                               : "symmetric";
+                const pctRound  = Math.round(asymPct * 100);
+                return (
+                  <div key={grip} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "8px 0",
+                    borderBottom: `1px solid ${C.border}`,
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: GRIP_COLORS[grip] || C.text }}>
+                        {grip}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                        L {fmtW(L, unit)} {unit} · R {fmtW(R, unit)} {unit}
+                        {pctRound > 0 && (
+                          <> · <b style={{ color: C.text }}>{weaker}</b> is {pctRound}% behind <b style={{ color: C.text }}>{stronger}</b></>
+                        )}
+                      </div>
+                    </div>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, color: flagColor,
+                      background: `${flagColor}1a`,
+                      padding: "3px 8px", borderRadius: 4,
+                      textTransform: "uppercase", letterSpacing: 0.5,
+                      whiteSpace: "nowrap",
+                    }}>
+                      {flagText}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       )}
 
