@@ -9,7 +9,9 @@
 //
 // Layout (top to bottom):
 //   • Adaptive Warm-up entry card
-//   • ClimbingRPEQuickLog (collapsed climbing logger)
+//   • ClimbingLogCard (collapsed full climb logger — discipline /
+//     grade / ascent / wall / RPE; merged here from the retired
+//     Climbing tab so all climbing capture lives on Fingers)
 //   • Grip Type pills (still per-grip; the curve is grip-scoped)
 //   • ContinuousPickCard — the primary recommendation:
 //       "Train at 92s @ 38 lbs · L 38 / R 37" with optional
@@ -46,6 +48,11 @@ import { fmt0, fmtW, toDisp, fromDisp } from "../ui/format.js";
 import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 import { today } from "../util.js";
 import { WarmupView } from "./WarmupView.js";
+
+import {
+  CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS,
+  gradesFor, defaultGradeFor,
+} from "../lib/climbing-grades.js";
 
 import { ZONE_KEYS } from "../model/zones.js";
 import { getZoneStaleness, getAnnualSessionPace, ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS } from "../model/lockout.js";
@@ -137,11 +144,15 @@ export function BwPrompt({ unit = "lbs", onSave }) {
 // ─────────────────────────────────────────────────────────────
 // CLIMBING RPE QUICK-LOG
 // ─────────────────────────────────────────────────────────────
-// Inline expand/collapse on Setup. Discipline + RPE + Save. Lets
-// the user quickly log a climbing day without navigating to the
-// Climbing tab. The full Climbing tab still owns detailed logging
-// (grade, ascent style, wall) — this is just the minimum-viable
-// signal needed for the lockout system.
+// Single-card climb logger — captures everything the user might
+// want for one climbing entry: discipline + grade + ascent style
+// + wall (boulder only) + RPE.
+//
+// Merged from the legacy split between ClimbingTab's full logger
+// (discipline / grade / ascent / wall) and SetupView's RPE quick-
+// log into one card on the Fingers tab when the standalone
+// Climbing tab was retired (May 2026). RPE is preserved because
+// the lockout system reads it as a climbing-dose signal.
 const RPE_DESCRIPTIONS = {
   1:  "Very easy — barely a workout",
   2:  "Easy — recovery-level",
@@ -155,20 +166,38 @@ const RPE_DESCRIPTIONS = {
   10: "Maximum — true RPE 10, full effort",
 };
 
-function ClimbingRPEQuickLog({ activities = [], onLog }) {
+function ClimbingLogCard({ activities = [], onLog }) {
   const [open, setOpen]             = useState(false);
   const [discipline, setDiscipline] = useState("boulder");
+  const [grade, setGrade]           = useState(defaultGradeFor("boulder"));
+  const [ascent, setAscent]         = useState("flash");
+  const [wall, setWall]             = useState("commercial");
   const [rpe, setRpe]               = useState(7);
   const [logged, setLogged]         = useState(false);
 
   const todayClimbing = activities.filter(a => a.date === today() && a.type === "climbing");
+
+  const handleDiscipline = (key) => {
+    setDiscipline(key);
+    // Reset grade to the new default so we never end up with a V-grade
+    // on a lead route or vice versa.
+    const valid = gradesFor(key);
+    if (!valid.includes(grade)) setGrade(defaultGradeFor(key));
+  };
+
   const handleSave = () => {
-    onLog({ date: today(), type: "climbing", discipline, rpe });
+    const entry = {
+      date: today(), type: "climbing",
+      discipline, grade, ascent, rpe,
+    };
+    if (discipline === "boulder") entry.wall = wall;
+    onLog(entry);
     setLogged(true);
     setOpen(false);
     setTimeout(() => setLogged(false), 2500);
   };
 
+  // Collapsed state — single-row tappable button.
   if (!open) {
     return (
       <Card style={{
@@ -188,28 +217,23 @@ function ClimbingRPEQuickLog({ activities = [], onLog }) {
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 16 }}>🧗</span>
-            <span>{logged ? "Logged ✓" : "Log climbing session"}</span>
+            <span>{logged ? "Logged ✓" : "Log a climb"}</span>
           </div>
           <div style={{ fontSize: 11, color: C.muted, fontWeight: 400 }}>
             {todayClimbing.length > 0
               ? `${todayClimbing.length} logged today · tap to add another`
-              : "tap to expand"}
+              : "discipline · grade · style · effort"}
           </div>
         </button>
       </Card>
     );
   }
 
-  const DISCIPLINES = [
-    { key: "boulder",      label: "Boulder",      emoji: "🪨" },
-    { key: "sport",        label: "Sport",        emoji: "🧗" },
-    { key: "multi-pitch",  label: "Multi-pitch",  emoji: "⛰" },
-  ];
-
+  // Expanded form
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>🧗 Log Climbing Session</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>🧗 Log Climb</div>
         <button
           onClick={() => setOpen(false)}
           style={{
@@ -221,56 +245,122 @@ function ClimbingRPEQuickLog({ activities = [], onLog }) {
         </button>
       </div>
 
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Discipline
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          {DISCIPLINES.map(d => (
-            <button
-              key={d.key}
-              onClick={() => setDiscipline(d.key)}
-              style={{
-                flex: 1, padding: "8px 4px", borderRadius: 8, cursor: "pointer",
-                background: discipline === d.key ? C.purple : C.bg,
-                color: discipline === d.key ? "#fff" : C.muted,
-                border: `1px solid ${discipline === d.key ? C.purple : C.border}`,
-                fontSize: 12, fontWeight: 600,
-              }}
-            >
-              <div style={{ fontSize: 14 }}>{d.emoji}</div>
-              <div style={{ marginTop: 2 }}>{d.label}</div>
-            </button>
-          ))}
-        </div>
+      {/* Discipline */}
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Discipline
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {CLIMB_DISCIPLINES.map(({ key, label, emoji }) => (
+          <button
+            key={key}
+            onClick={() => handleDiscipline(key)}
+            style={{
+              flex: "1 1 30%", padding: "8px 4px", borderRadius: 8, cursor: "pointer",
+              background: discipline === key ? C.purple : C.bg,
+              color: discipline === key ? "#fff" : C.muted,
+              border: `1px solid ${discipline === key ? C.purple : C.border}`,
+              fontSize: 12, fontWeight: 600, textAlign: "center",
+            }}
+          >
+            <div style={{ fontSize: 14 }}>{emoji}</div>
+            <div style={{ marginTop: 2 }}>{label}</div>
+          </button>
+        ))}
       </div>
 
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-          <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
-            Effort (RPE)
+      {/* Wall surface — boulder only. V4 on a MoonBoard ≠ V4 on a
+          commercial set. */}
+      {discipline === "boulder" && (
+        <>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Wall
           </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: C.purple }}>
-            {rpe}<span style={{ fontSize: 12, color: C.muted, fontWeight: 400 }}>/10</span>
+          <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+            {BOULDER_WALLS.map(({ key, label, emoji }) => (
+              <button
+                key={key}
+                onClick={() => setWall(key)}
+                style={{
+                  flex: "1 1 30%", padding: "8px 4px", borderRadius: 8, cursor: "pointer",
+                  background: wall === key ? C.purple : C.bg,
+                  color: wall === key ? "#fff" : C.muted,
+                  border: `1px solid ${wall === key ? C.purple : C.border}`,
+                  fontSize: 12, fontWeight: 600, textAlign: "center",
+                }}
+              >
+                <div style={{ fontSize: 14 }}>{emoji}</div>
+                <div style={{ marginTop: 2 }}>{label}</div>
+              </button>
+            ))}
           </div>
+        </>
+      )}
+
+      {/* Grade */}
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Grade ({discipline === "boulder" ? "V-scale" : "YDS"})
+      </div>
+      <select
+        value={grade}
+        onChange={(e) => setGrade(e.target.value)}
+        style={{
+          width: "100%", padding: "8px 10px", marginBottom: 14, borderRadius: 8,
+          background: C.bg, color: C.text, border: `1px solid ${C.border}`, fontSize: 13,
+        }}
+      >
+        {gradesFor(discipline).map(g => (
+          <option key={g} value={g}>{g}</option>
+        ))}
+      </select>
+
+      {/* Ascent style */}
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Ascent
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {ASCENT_STYLES.map(({ key, label, desc }) => (
+          <button
+            key={key}
+            onClick={() => setAscent(key)}
+            style={{
+              flex: "1 1 40%", padding: "8px 6px", borderRadius: 8, cursor: "pointer",
+              background: ascent === key ? C.purple : C.bg,
+              color: ascent === key ? "#fff" : C.muted,
+              border: `1px solid ${ascent === key ? C.purple : C.border}`,
+              fontSize: 12, fontWeight: 600, textAlign: "left",
+            }}
+          >
+            <div style={{ fontSize: 13 }}>{label}</div>
+            <div style={{ fontSize: 10, color: ascent === key ? "#fff" : C.muted, opacity: 0.85 }}>{desc}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* RPE */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+          Effort (RPE)
         </div>
-        <input
-          type="range"
-          min="1" max="10" step="1"
-          value={rpe}
-          onChange={(e) => setRpe(Number(e.target.value))}
-          style={{ width: "100%", accentColor: C.purple }}
-        />
-        <div style={{
-          fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.4,
-          minHeight: "1.4em",
-        }}>
-          {RPE_DESCRIPTIONS[rpe]}
+        <div style={{ fontSize: 22, fontWeight: 800, color: C.purple }}>
+          {rpe}<span style={{ fontSize: 12, color: C.muted, fontWeight: 400 }}>/10</span>
         </div>
+      </div>
+      <input
+        type="range"
+        min="1" max="10" step="1"
+        value={rpe}
+        onChange={(e) => setRpe(Number(e.target.value))}
+        style={{ width: "100%", accentColor: C.purple }}
+      />
+      <div style={{
+        fontSize: 11, color: C.muted, marginTop: 6, marginBottom: 14, lineHeight: 1.4,
+        minHeight: "1.4em",
+      }}>
+        {RPE_DESCRIPTIONS[rpe]}
       </div>
 
       <Btn onClick={handleSave} color={C.green} style={{ width: "100%" }}>
-        Save
+        Log Climb
       </Btn>
     </Card>
   );
@@ -331,18 +421,28 @@ function ContinuousPickCard({
 
   const [reps, setReps] = useState(defaultReps);
   const [rest, setRest] = useState(defaultRest);
-  const [customizing, setCustomizing] = useState(false);
+  // `userOverride` flips on any time the user touches a protocol
+  // slider. While true, the auto-reset on T/zone changes won't
+  // clobber the user's manual choice. (No UI toggle exposes this —
+  // it's purely state management for the always-visible sliders.)
+  const [userOverride, setUserOverride] = useState(false);
 
   // When the recommendation changes (new grip, new history), reset
-  // reps/rest to the new zone's defaults — but don't clobber the
-  // user's choice if they've explicitly customized in this session.
+  // reps/rest to the new zone's defaults — unless the user has
+  // explicitly overridden in this session.
   useEffect(() => {
-    if (!customizing) {
+    if (!userOverride) {
       setReps(defaultReps);
       setRest(defaultRest);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rec?.T, rec?.zone]);
+
+  // Switching grips clears the override so fresh defaults flow
+  // back in. Avoids carrying a stale Crusher rest into Micro.
+  useEffect(() => {
+    setUserOverride(false);
+  }, [grip]);
 
   // Auto-apply to session config so Start Session uses the pick.
   // Fires whenever the resolved plan changes (T, reps, rest, grip).
@@ -483,43 +583,27 @@ function ContinuousPickCard({
         ))}
       </div>
 
-      {/* Customize toggle — collapsed by default */}
-      <button
-        onClick={() => setCustomizing(c => !c)}
-        style={{
-          width: "100%", background: "none", border: `1px dashed ${C.border}`,
-          borderRadius: 8, padding: "8px", cursor: "pointer",
-          color: C.muted, fontSize: 11, fontWeight: 600,
-        }}
-      >
-        {customizing ? "Hide protocol options ▲" : "Customize protocol ▼"}
-      </button>
-
-      {customizing && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ display: "flex", gap: 16, marginBottom: 6 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-                <span>Hangs</span><span style={{ fontWeight: 700, color: C.text }}>{reps}</span>
-              </div>
-              <input type="range" min={2} max={12} value={reps}
-                onChange={e => setReps(Number(e.target.value))}
-                style={{ width: "100%", accentColor: cfg.color }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-                <span>Rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
-              </div>
-              <input type="range" min={5} max={300} step={5} value={rest}
-                onChange={e => setRest(Number(e.target.value))}
-                style={{ width: "100%", accentColor: cfg.color }} />
-            </div>
+      {/* Protocol options — always visible. Defaults track the
+          recommendation; sliders override locally and stick until
+          the user picks a different grip. */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 6 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Hangs</span><span style={{ fontWeight: 700, color: C.text }}>{reps}</span>
           </div>
-          <div style={{ fontSize: 10, color: C.muted, marginTop: 6, fontStyle: "italic" }}>
-            Defaults derived from the {zoneLabel} zone profile. Reset by tapping a different grip or letting the engine pick a new T.
-          </div>
+          <input type="range" min={2} max={12} value={reps}
+            onChange={e => { setReps(Number(e.target.value)); setUserOverride(true); }}
+            style={{ width: "100%", accentColor: cfg.color }} />
         </div>
-      )}
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
+          </div>
+          <input type="range" min={5} max={300} step={5} value={rest}
+            onChange={e => { setRest(Number(e.target.value)); setUserOverride(true); }}
+            style={{ width: "100%", accentColor: cfg.color }} />
+        </div>
+      </div>
     </Card>
   );
 }
@@ -721,7 +805,7 @@ export function SetupView({
       </Card>
 
       {/* Climbing RPE quick-log */}
-      <ClimbingRPEQuickLog activities={activities} onLog={onLogActivity} />
+      <ClimbingLogCard activities={activities} onLog={onLogActivity} />
 
       {/* Grip Type — still per-grip, the curve is grip-scoped */}
       <Card>

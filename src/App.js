@@ -9,7 +9,6 @@ import { Card, Btn } from "./ui/components.js";
 import { fmtW } from "./ui/format.js";
 
 // Top-level views extracted from this file. See src/views/.
-import { ClimbingTab } from "./views/ClimbingTab.js";
 import { HistoryView } from "./views/HistoryView.js";
 import { SettingsView } from "./views/SettingsView.js";
 import { AnalysisView } from "./views/AnalysisView.js";
@@ -176,7 +175,7 @@ const GOAL_CONFIG = {
 // activity entries to Power.
 const RM_GRIPS = ["Micro", "Crusher", "Prime"];
 
-const TABS = ["Fingers", "Analysis", "Workout", "Lifts", "Climbing", "History", "Settings"];
+const TABS = ["Fingers", "Analysis", "Workout", "Lifts", "History", "Settings"];
 
 export default function App() {
   // ── Auth + OTP login (see src/hooks/useAuth.js) ──────────
@@ -708,8 +707,9 @@ export default function App() {
           Improvement on Analysis already shows directly.) */}
       {tab === 2 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 3 && <WorkoutAnalysisView unit={unit} bodyWeight={bodyWeight} defaultWorkouts={DEFAULT_WORKOUTS} />}
-      {tab === 4 && <ClimbingTab activities={activities} onLogActivity={addActivity} onDeleteActivity={deleteActivity} />}
-      {tab === 5 && (
+      {/* (Climbing tab removed May 2026 — full climb logger merged
+          into Fingers; climbing history viewed in History tab.) */}
+      {tab === 4 && (
         <HistoryView
           history={history}
           onDownload={() => downloadCSV(history)}
@@ -730,11 +730,11 @@ export default function App() {
           gripPresets={GRIP_PRESETS}
         />
       )}
-      {/* (Trends tab removed May 2026 — climbing trends moved to the
-          Climbing tab; finger trends already shown on Analysis as
-          Total Capacity AUC over time. Body weight and lifts have
-          their own homes too.) */}
-      {tab === 6 && (
+      {/* (Trends tab removed May 2026 — finger trends shown on
+          Analysis as Total Capacity AUC over time; body weight and
+          lifts have their own homes too. Climbing trends were also
+          dropped when the Climbing tab was retired.) */}
+      {tab === 5 && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}
