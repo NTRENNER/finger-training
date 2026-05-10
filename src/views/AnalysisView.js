@@ -423,6 +423,50 @@ export function AnalysisView({
     return out;
   }, [gripBaselines, perHandGripBaselines, grip3xEstimates, history]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Per-grip hand asymmetry diagnostic ──
+  // For each grip with both L and R three-exp fits, compute the
+  // asymmetry between hands at a representative duration (30s — middle
+  // of the curve, exercises both fast + middle components). The point
+  // of this card is to surface the limiter you don't normally see:
+  // most prescription paths are already per-hand, but the user has no
+  // single number telling them "your weaker hand is X% behind your
+  // stronger hand on grip Y." That's the gap this fills.
+  const ASYM_REF_T = 30;
+  const handAsymmetry = useMemo(() => {
+    const out = [];
+    for (const grip of Object.keys(grip3xEstimates)) {
+      // Build per-hand three-exp current fits using the same
+      // train-to-failure data path everyone else uses.
+      const buildHandPts = (hand) => history
+        .filter(r => r.grip === grip && r.hand === hand)
+        .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
+        .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+      const lPts = buildHandPts("L");
+      const rPts = buildHandPts("R");
+      if (lPts.length < 2 || rPts.length < 2) continue;
+      const lAmps = fitAmpsForPts(lPts, grip);
+      const rAmps = fitAmpsForPts(rPts, grip);
+      if (!lAmps || !rAmps) continue;
+
+      const lForce = predForceThreeExp(lAmps, ASYM_REF_T);
+      const rForce = predForceThreeExp(rAmps, ASYM_REF_T);
+      if (!(lForce > 0) || !(rForce > 0)) continue;
+
+      const stronger = lForce >= rForce ? "L" : "R";
+      const weaker   = stronger === "L" ? "R" : "L";
+      const strongerForce = Math.max(lForce, rForce);
+      const weakerForce   = Math.min(lForce, rForce);
+      const asymPct = (strongerForce - weakerForce) / strongerForce;
+
+      out.push({
+        grip,
+        L: lForce, R: rForce,
+        stronger, weaker, asymPct,
+      });
+    }
+    return out.sort((a, b) => b.asymPct - a.asymPct);
+  }, [history, grip3xEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Progress toward unlocking a per-grip (or per-grip × hand) baseline.
   // Returns {failures, distinctDurations, ready} so UI placeholders can
   // show "3 of 5 failures · 2 of 3 durations" instead of the static
@@ -1185,6 +1229,60 @@ export function AnalysisView({
               <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
             ))}
           </div>
+        </Card>
+      )}
+
+      {/* ── Hand Asymmetry ──
+          Surfaces the L/R gap that most prescription paths already
+          handle internally but never tell the user about. For each
+          grip with both L and R fits, shows weaker hand load + the
+          asymmetry %. Below ~5% reads as 'symmetric'; above ~15%
+          flags the weaker hand as the real climbing limiter on this
+          grip. Computed at T=30s (middle of curve, exercises fast +
+          middle components). */}
+      {handAsymmetry.length > 0 && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Hand Asymmetry</div>
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+            How far behind your weaker hand is at the {ASYM_REF_T}s reference. Most prescriptions are already per-hand, but on the wall the weaker hand is often the real limiter.
+          </div>
+          {handAsymmetry.map(({ grip, L, R, stronger, weaker, asymPct }) => {
+            const flagColor = asymPct >= 0.15 ? C.red
+                           : asymPct >= 0.05 ? C.orange
+                           : C.green;
+            const flagText  = asymPct >= 0.15 ? "limiter"
+                           : asymPct >= 0.05 ? "asymmetric"
+                           : "symmetric";
+            const pctRound  = Math.round(asymPct * 100);
+            return (
+              <div key={grip} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "8px 0",
+                borderBottom: `1px solid ${C.border}`,
+              }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: GRIP_COLORS[grip] || C.text }}>
+                    {grip}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                    L {fmtW(L, unit)} {unit} · R {fmtW(R, unit)} {unit}
+                    {pctRound > 0 && (
+                      <> · <b style={{ color: C.text }}>{weaker}</b> is {pctRound}% behind <b style={{ color: C.text }}>{stronger}</b></>
+                    )}
+                  </div>
+                </div>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, color: flagColor,
+                  background: `${flagColor}1a`,
+                  padding: "3px 8px", borderRadius: 4,
+                  textTransform: "uppercase", letterSpacing: 0.5,
+                  whiteSpace: "nowrap",
+                }}>
+                  {flagText}
+                </span>
+              </div>
+            );
+          })}
         </Card>
       )}
 
