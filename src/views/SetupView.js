@@ -852,8 +852,15 @@ export function SetupView({
         </div>
       </Card>
 
-      {/* Climbing RPE quick-log */}
+      {/* Quick-log row: climbing entry + bodyweight side-by-side.
+          Both are session-adjacent inputs that don't belong in the
+          main session-config flow but want easy access from Setup
+          (climbing for the lockout system, BW for the Analysis tab's
+          × BW normalization). BwPrompt has its own staleness guard
+          (returns null if logged within the last 3 days) so it auto-
+          collapses when the log is fresh. */}
       <ClimbingLogCard activities={activities} onLog={onLogActivity} />
+      <BwPrompt unit={unit} onSave={onBwSave} />
 
       {/* Grip Type — still per-grip, the curve is grip-scoped */}
       <Card>
@@ -894,7 +901,8 @@ export function SetupView({
       {/* Curve Coverage — data freshness per zone */}
       {history.length > 0 && <CurveCoverageCard history={history} />}
 
-      <BwPrompt unit={unit} onSave={onBwSave} />
+      {/* (BwPrompt moved up to live alongside the climb logger so all
+          quick-log inputs sit together near the top of Setup.) */}
 
       {/* Tindeq Connect slot — rendered just above the Start button */}
       {connectSlot}

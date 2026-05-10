@@ -23,7 +23,7 @@ import {
 } from "recharts";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
-import { KG_TO_LBS, fmt1, fmtW, toDisp, fromDisp, bwOnDate } from "../ui/format.js";
+import { KG_TO_LBS, fmt1, fmtW, toDisp, bwOnDate } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
 import { STRENGTH_MAX, ZONE_REF_T, ZONE_KEYS, ZONE6 } from "../model/zones.js";
 import {
@@ -58,7 +58,7 @@ const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 // prescription surface now.)
 
 export function AnalysisView({
-  history, unit = "lbs", bodyWeight = null, onBWSave = () => {},
+  history, unit = "lbs", bodyWeight = null,
   activities = [],
   freshMap = null,
   // Cross-cutting App config — passed in rather than imported so this
@@ -880,18 +880,10 @@ export function AnalysisView({
         Where failures fall on the fatigue curve reveals which energy system is your limiter — and what to train next.
       </p>
 
-      {/* Weight status pill — current BW + last-logged date with an
-          inline editor on tap. The × BW normalize toggle that used to
-          live alongside this pill has been moved into the filter card
-          below so all view-mode controls (grip filter + units) sit in
-          one row. Pill stays standalone because it's a status display
-          plus a quick-entry surface, not a filter. */}
-      <BWPill
-        bwLog={bwLog}
-        bodyWeight={bodyWeight}
-        unit={unit}
-        onBWSave={onBWSave}
-      />
+      {/* Bodyweight logging lives on the Setup tab now (next to the
+          climb logger). Analysis stays focused on viewing — the only
+          BW-related control here is the Absolute / × BW units toggle
+          inside the filter card below. */}
 
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
@@ -919,17 +911,20 @@ export function AnalysisView({
                 }}>{g}</button>
               ))}
             </div>
-            {/* × BW global normalize toggle. Lives next to the grip
-                pills since both are view-mode controls — keeping them
-                in one card eliminates a stacked second pill row above.
-                Hidden when no BW is set, since the toggle would be
-                inert without a divisor. */}
+            {/* Absolute / × BW units toggle. Two-pill segmented
+                control next to the grip filter so all view-mode
+                controls live in one row. Hidden when no BW is set,
+                since × BW would be inert without a divisor. */}
             {bodyWeight > 0 && (
-              <button onClick={toggleNormalize} style={{
-                padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
-                background: normalizeOn ? C.purple : C.border,
-                color:      normalizeOn ? "#fff"   : C.muted,
-              }}>× BW</button>
+              <div style={{ display: "flex", gap: 4 }}>
+                {[{ key: false, label: "Absolute" }, { key: true, label: "× BW" }].map(opt => (
+                  <button key={String(opt.key)} onClick={() => normalizeOn !== opt.key && toggleNormalize()} style={{
+                    padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
+                    background: normalizeOn === opt.key ? C.purple : C.border,
+                    color:      normalizeOn === opt.key ? "#fff"   : C.muted,
+                  }}>{opt.label}</button>
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -1644,79 +1639,6 @@ export function AnalysisView({
             doesn't survive the phenomenological-model framing.) */}
 
       </>)}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// BWPill
-// ─────────────────────────────────────────────────────────────
-// Compact bodyweight status pill at the top of the Analysis tab.
-// Shows current BW + last-logged date; tap to expand into an inline
-// kg/lbs editor that writes via onBWSave → App.js saveBW → cloud
-// push + LS log entry. The × BW normalize toggle that originally
-// lived alongside this pill has been promoted into the grip filter
-// card below — both are view-mode controls and live together there.
-function BWPill({ bwLog, bodyWeight, unit, onBWSave }) {
-  const [editing, setEditing] = useState(false);
-  const latest = (bwLog && bwLog.length) ? bwLog[bwLog.length - 1] : null;
-  const [inputVal, setInputVal] = useState(() =>
-    bodyWeight ? String(Math.round(toDisp(bodyWeight, unit))) : ""
-  );
-
-  const save = () => {
-    const num = parseFloat(inputVal);
-    if (!isNaN(num) && num > 0) {
-      const kg = fromDisp(num, unit);
-      onBWSave(kg);
-      setEditing(false);
-    }
-  };
-
-  return (
-    <div style={{ display: "flex", marginBottom: 12 }}>
-      {!editing ? (
-        <button onClick={() => setEditing(true)} style={{
-          display: "inline-flex", alignItems: "center", gap: 6,
-          padding: "6px 12px", borderRadius: 18, fontSize: 12, fontWeight: 600,
-          cursor: "pointer", border: `1px solid ${C.border}`,
-          background: C.card, color: C.text,
-        }}>
-          <span style={{ fontSize: 13 }}>⚖️</span>
-          {bodyWeight
-            ? <>BW: <b>{Math.round(toDisp(bodyWeight, unit))} {unit}</b>{latest?.date && <span style={{ color: C.muted, fontWeight: 400 }}> · {latest.date}</span>}</>
-            : <span style={{ color: C.muted, fontWeight: 400 }}>Set bodyweight</span>}
-        </button>
-      ) : (
-        <div style={{
-          display: "inline-flex", alignItems: "center", gap: 6,
-          padding: "4px 8px", borderRadius: 18,
-          background: C.card, border: `1px solid ${C.purple}`,
-        }}>
-          <span style={{ fontSize: 13 }}>⚖️</span>
-          <input
-            type="number" inputMode="numeric" step={1} min={30} max={500}
-            value={inputVal}
-            onChange={e => setInputVal(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
-            autoFocus
-            style={{
-              width: 60, background: C.bg, color: C.text,
-              border: `1px solid ${C.border}`, borderRadius: 6,
-              padding: "3px 6px", fontSize: 13, textAlign: "right",
-            }}
-          />
-          <span style={{ fontSize: 11, color: C.muted }}>{unit}</span>
-          <button onClick={save} style={{
-            padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700,
-            background: C.green, color: "#fff", border: "none", cursor: "pointer",
-          }}>Save</button>
-          <button onClick={() => setEditing(false)} style={{
-            padding: "3px 8px", fontSize: 11,
-            background: "none", color: C.muted, border: "none", cursor: "pointer",
-          }}>×</button>
-        </div>
-      )}
     </div>
   );
 }

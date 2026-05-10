@@ -25,7 +25,11 @@ import { Card, Sect } from "../ui/components.js";
 import {
   sessionExerciseTopWeight, sessionExerciseVolume, isBodyweightAdditive,
 } from "../model/workout-volume.js";
-import { loadLS, LS_WORKOUT_LOG_KEY, ROTATION_PIN_KEY } from "../lib/storage.js";
+import {
+  loadLS, saveLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY,
+  ROTATION_PIN_KEY,
+} from "../lib/storage.js";
+import { bwOnDate } from "../ui/format.js";
 
 // Locally re-declared to match WorkoutTab's storage key (which is
 // defined inline there, not exported). Keeping the string literal
@@ -54,15 +58,20 @@ function buildExDefIndex(plan) {
 }
 
 // For one exercise id, walk wLog chronologically and produce
-// [{date, top, volume}] points, one per session that contained the
-// exercise with at least one done set. Skips rotation-pin marker
-// sessions and skips sessions where the exercise had no usable data.
-function buildExerciseSeries(wLog, exId, exDef, bw) {
+// [{date, top, volume, sessionBw}] points, one per session that
+// contained the exercise with at least one done set. Skips rotation-
+// pin marker sessions and skips sessions where the exercise had no
+// usable data.
+//
+// `sessionBw` is the bodyweight that prevailed on that session's
+// date (via bwOnDate over the BW log). Falls back to `currentBw`
+// when no on-or-before entry exists. Stored on each point so the
+// × BW chart view divides each session's value by the BW from THAT
+// session — a March top-set at 165 lb is normalized by 165, even
+// if the user weighs 175 today.
+function buildExerciseSeries(wLog, exId, exDef, currentBw, bwLog) {
   if (!Array.isArray(wLog)) return [];
   const out = [];
-  // Sort by date ASC (then completedAt ASC) so the chart reads
-  // left-to-right oldest-to-newest. wLog can be in any order in
-  // localStorage; we never rely on insertion order.
   const sorted = [...wLog].sort((a, b) => {
     const ad = a?.date || "";
     const bd = b?.date || "";
@@ -74,27 +83,59 @@ function buildExerciseSeries(wLog, exId, exDef, bw) {
     const sets = s?.exercises?.[exId]?.sets;
     if (!Array.isArray(sets) || sets.length === 0) continue;
     if (!sets.some(set => set && set.done)) continue;
-    const top = sessionExerciseTopWeight(sets, bw, exDef);
-    const vol = sessionExerciseVolume(sets, bw, exDef);
+    // Per-session BW: prefer the log entry on or before this date,
+    // fall back to the user's current BW (so brand-new BW logs that
+    // postdate old sessions still produce sane numerators).
+    const sessionBw = bwOnDate(bwLog, s.date)?.kg ?? currentBw ?? null;
+    const top = sessionExerciseTopWeight(sets, sessionBw, exDef);
+    const vol = sessionExerciseVolume(sets, sessionBw, exDef);
     if (top <= 0 && vol <= 0) continue;
-    out.push({ date: s.date, top, volume: vol, workout: s.workout });
+    out.push({ date: s.date, top, volume: vol, workout: s.workout, sessionBw });
   }
   return out;
 }
 
 // One Card for one exercise. Header shows current top weight + Δ
 // vs first session. Body is a dual-axis line chart.
-function ExerciseCard({ ex, series, unit }) {
+//
+// When `normalizeOn`, every numeric value (chart points, header,
+// Δ vs first, footer volume) is divided by the per-session BW
+// stored on each series point. Falls back to absolute units for
+// any series point missing sessionBw — the chart and the unit
+// labels still render coherently.
+function ExerciseCard({ ex, series, unit, normalizeOn }) {
   if (series.length === 0) return null;
-  const first = series[0];
-  const last  = series[series.length - 1];
+
+  // Decide effective values per point. In × BW mode we render the
+  // series as multiples of the session's BW (e.g. 1.21x); in
+  // Absolute mode we render raw lbs/kg.
+  const norm = (v, bw) => (normalizeOn && bw > 0) ? v / bw : v;
+  const dispUnit = normalizeOn ? "× BW" : unit;
+  // Tooltip / header formatting: ratios get a single decimal,
+  // absolutes round to nearest integer (matches the prior look).
+  const fmt = (v) => normalizeOn ? v.toFixed(2) : Math.round(v).toString();
+
+  const projected = series.map(p => ({
+    ...p,
+    top:    norm(p.top, p.sessionBw),
+    volume: norm(p.volume, p.sessionBw),
+  }));
+
+  const first = projected[0];
+  const last  = projected[projected.length - 1];
   const dTop  = last.top - first.top;
   const dVol  = last.volume - first.volume;
   const additive = isBodyweightAdditive(ex);
-  const sessionCount = series.length;
+  const sessionCount = projected.length;
 
-  // Recharts wants numeric Y values. Use rounded ints for nicer ticks.
-  const data = series.map(p => ({ ...p, top: Math.round(p.top), volume: Math.round(p.volume) }));
+  // Recharts data: in absolute mode round to ints for nicer ticks;
+  // in × BW mode preserve two decimals so the curve doesn't snap
+  // to flat lines on small ratio differences.
+  const data = projected.map(p => ({
+    ...p,
+    top:    normalizeOn ? Math.round(p.top * 100) / 100    : Math.round(p.top),
+    volume: normalizeOn ? Math.round(p.volume * 100) / 100 : Math.round(p.volume),
+  }));
 
   return (
     <Card style={{ marginBottom: 14 }}>
@@ -110,11 +151,11 @@ function ExerciseCard({ ex, series, unit }) {
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 11, color: C.muted }}>top</div>
           <div style={{ fontSize: 17, fontWeight: 700, color: C.blue }}>
-            {Math.round(last.top)} <span style={{ fontSize: 11, color: C.muted, fontWeight: 400 }}>{unit}</span>
+            {fmt(last.top)} <span style={{ fontSize: 11, color: C.muted, fontWeight: 400 }}>{dispUnit}</span>
           </div>
           {sessionCount > 1 && (
             <div style={{ fontSize: 11, color: dTop > 0 ? C.green : dTop < 0 ? C.red : C.muted }}>
-              {dTop > 0 ? "+" : ""}{Math.round(dTop)} {unit} since {first.date}
+              {dTop > 0 ? "+" : ""}{fmt(dTop)} {dispUnit} since {first.date}
             </div>
           )}
         </div>
@@ -147,8 +188,8 @@ function ExerciseCard({ ex, series, unit }) {
               contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
               labelStyle={{ color: C.muted }}
               formatter={(value, name) => {
-                if (name === "Top weight") return [`${value} ${unit}`, name];
-                if (name === "Volume")     return [`${value} ${unit}·reps`, name];
+                if (name === "Top weight") return [`${value} ${dispUnit}`, name];
+                if (name === "Volume")     return [`${value} ${normalizeOn ? "× BW·reps" : `${unit}·reps`}`, name];
                 return [value, name];
               }}
             />
@@ -186,10 +227,10 @@ function ExerciseCard({ ex, series, unit }) {
         <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 11, color: C.muted }}>
           <div>
             <span style={{ color: C.orange }}>● </span>
-            volume: {Math.round(last.volume)} {unit}·reps
+            volume: {fmt(last.volume)} {normalizeOn ? "× BW·reps" : `${unit}·reps`}
             {dVol !== 0 && (
               <span style={{ color: dVol > 0 ? C.green : C.red, marginLeft: 6 }}>
-                ({dVol > 0 ? "+" : ""}{Math.round(dVol)})
+                ({dVol > 0 ? "+" : ""}{fmt(dVol)})
               </span>
             )}
           </div>
@@ -200,6 +241,23 @@ function ExerciseCard({ ex, series, unit }) {
 }
 
 export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWorkouts = {} }) {
+  // Absolute / × BW units toggle — shared LS key with the Fingers
+  // sub-tab, so flipping it on either side stays consistent when
+  // the user switches between them via the AnalysisContainer pills.
+  const [normalizeOn, setNormalizeOn] = useState(() => loadLS(LS_BW_NORMALIZE_KEY) === true);
+  const toggleNormalize = () => {
+    setNormalizeOn(v => {
+      const next = !v;
+      saveLS(LS_BW_NORMALIZE_KEY, next);
+      return next;
+    });
+  };
+
+  // BW log — read once on mount; cloud-reconcile in App.js hydrates
+  // localStorage on sign-in, so by the time the view mounts the log
+  // reflects every device's history.
+  const [bwLog] = useState(() => loadLS(LS_BW_LOG_KEY) || []);
+
   // Load wLog + plan once on mount. Each tab navigation away unmounts
   // this view, so on next mount we re-read fresh from localStorage —
   // no need for a sync effect or shared App-level state.
@@ -252,16 +310,32 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
     const items = [];
     for (const [exId, exDef] of Object.entries(exIndex)) {
       if (!exDef?.logWeight) continue;
-      const series = buildExerciseSeries(wLog, exId, exDef, bodyWeight);
+      const series = buildExerciseSeries(wLog, exId, exDef, bodyWeight, bwLog);
       if (series.length === 0) continue;
       items.push({ exDef, series, lastDate: series[series.length - 1].date });
     }
     items.sort((a, b) => (b.lastDate || "").localeCompare(a.lastDate || ""));
     return items;
-  }, [exIndex, wLog, bodyWeight]);
+  }, [exIndex, wLog, bodyWeight, bwLog]);
 
   return (
     <div style={{ padding: "16px 20px", maxWidth: 720, margin: "0 auto" }}>
+      {/* Absolute / × BW units toggle. Same two-pill segmented
+          control as the Fingers sub-tab; both share LS_BW_NORMALIZE_KEY
+          so the choice flows between them. Hidden when no BW is set,
+          since the × BW divisor would be missing. */}
+      {bodyWeight > 0 && (
+        <div style={{ display: "flex", gap: 4, marginBottom: 12, justifyContent: "flex-end" }}>
+          {[{ key: false, label: "Absolute" }, { key: true, label: "× BW" }].map(opt => (
+            <button key={String(opt.key)} onClick={() => normalizeOn !== opt.key && toggleNormalize()} style={{
+              padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
+              background: normalizeOn === opt.key ? C.purple : C.border,
+              color:      normalizeOn === opt.key ? "#fff"   : C.muted,
+            }}>{opt.label}</button>
+          ))}
+        </div>
+      )}
+
       <Sect title="Lift Progression">
         {cards.length === 0 ? (
           <Card>
@@ -272,7 +346,7 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
           </Card>
         ) : (
           cards.map(({ exDef, series }) => (
-            <ExerciseCard key={exDef.id} ex={exDef} series={series} unit={unit} />
+            <ExerciseCard key={exDef.id} ex={exDef} series={series} unit={unit} normalizeOn={normalizeOn} />
           ))
         )}
       </Sect>
