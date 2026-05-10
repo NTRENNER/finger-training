@@ -61,6 +61,20 @@
 //   CREATE POLICY "auth_all" ON body_weights
 //     FOR ALL USING (auth.uid() IS NOT NULL);
 //   CREATE INDEX body_weights_date_idx ON body_weights (date DESC);
+//
+//   CREATE TABLE activities (
+//     id          text PRIMARY KEY,
+//     type        text NOT NULL,
+//     date        text NOT NULL,
+//     discipline  text, venue text, grade text, ascent text,
+//     wall        text, rpe integer,
+//     created_at  timestamptz DEFAULT now()
+//   );
+//   ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
+//   CREATE POLICY "auth_all" ON activities
+//     FOR ALL USING (auth.uid() IS NOT NULL);
+//   CREATE INDEX activities_date_idx ON activities (date DESC);
+//   CREATE INDEX activities_type_idx ON activities (type);
 
 import { supabase } from "./supabase.js";
 import { loadLS, saveLS } from "./storage.js";
@@ -211,6 +225,76 @@ export async function fetchReps() {
     failed: r.failed ?? false,
     session_started_at: r.session_started_at ?? null,
   }));
+}
+
+// ─────────────────────────────────────────────────────────────
+// ACTIVITY HELPERS (activities table)
+// ─────────────────────────────────────────────────────────────
+// Climbing log entries (and any future activity types) live here.
+// id is the client-generated uid() string, so upsert(onConflict: id)
+// replaces an entry on its origin device after edits without
+// duplicating across devices. Same-id collisions across devices
+// resolve to last-writer-wins, which is fine for this domain
+// (climb entries don't get edited; if they do, the latest write
+// is the right answer).
+
+export async function pushActivity(act) {
+  if (!act?.id) return false;
+  try {
+    const { error } = await supabase.from("activities").upsert({
+      id:         act.id,
+      type:       act.type ?? "climbing",
+      date:       act.date,
+      discipline: act.discipline ?? null,
+      venue:      act.venue      ?? null,
+      grade:      act.grade      ?? null,
+      ascent:     act.ascent     ?? null,
+      wall:       act.wall       ?? null,
+      rpe:        Number.isFinite(act.rpe) ? act.rpe : null,
+    }, { onConflict: "id" });
+    if (error) { console.warn("Supabase activity push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase activity push exception:", e.message);
+    return false;
+  }
+}
+
+export async function deleteActivityCloud(id) {
+  if (!id) return false;
+  try {
+    const { error } = await supabase.from("activities").delete().eq("id", id);
+    if (error) { console.warn("Supabase activity delete:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase activity delete exception:", e.message);
+    return false;
+  }
+}
+
+export async function fetchActivities() {
+  try {
+    const { data, error } = await supabase
+      .from("activities")
+      .select("*")
+      .order("date", { ascending: false });
+    if (error) { console.warn("Supabase activities fetch:", error.message); return null; }
+    return (data || []).map(a => {
+      const out = { id: a.id, type: a.type, date: a.date };
+      // Only attach optional fields when present so the local shape
+      // stays minimal for non-climbing types or older entries.
+      if (a.discipline != null) out.discipline = a.discipline;
+      if (a.venue      != null) out.venue      = a.venue;
+      if (a.grade      != null) out.grade      = a.grade;
+      if (a.ascent     != null) out.ascent     = a.ascent;
+      if (a.wall       != null) out.wall       = a.wall;
+      if (a.rpe        != null) out.rpe        = a.rpe;
+      return out;
+    });
+  } catch (e) {
+    console.warn("Supabase activities fetch exception:", e.message);
+    return null;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -42,6 +42,7 @@ import {
   pushRep, fetchReps, enqueueReps, flushQueue,
   fetchWorkoutSessions, deleteWorkoutSession,
   pushBW, fetchBWLog,
+  pushActivity, deleteActivityCloud, fetchActivities,
 } from "./lib/sync.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
@@ -275,6 +276,40 @@ export default function App() {
     return () => { cancelled = true; };
   }, [user]);
 
+  // ── Activities cloud reconcile ───────────────────────────
+  // Same shape as the BW reconcile above. Activities are id-keyed
+  // (the local uid()), so the merge dedupes on id rather than date —
+  // a user can log multiple climbs in one day and each gets its own
+  // record. Cloud-only entries get added to the local set; local-only
+  // entries get pushed up. No tombstone tracking yet, so a deleted-
+  // on-phone climb might come back on next sign-in if the cloud delete
+  // hadn't reached the server before the device went offline; rare
+  // enough to not be worth the LS_ACTIVITY_DELETED_KEY plumbing yet.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const cloud = await fetchActivities();
+      if (cancelled || !cloud) return;
+      const local = loadLS(LS_ACTIVITY_KEY) || [];
+      const byId = new Map();
+      for (const a of cloud) byId.set(a.id, a);
+      // Local writes are most recent on this device — same convention
+      // as the BW reconcile. If the user edited a climb on this device
+      // between sign-ins, the local copy wins.
+      for (const a of local) byId.set(a.id, a);
+      const merged = [...byId.values()];
+      saveLS(LS_ACTIVITY_KEY, merged);
+      setActivities(merged);
+      // Backfill any local-only entries to the cloud.
+      const cloudIds = new Set(cloud.map(a => a.id));
+      for (const a of local) {
+        if (a?.id && !cloudIds.has(a.id)) pushActivity(a);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
   // ── Trip (user-editable target trip) ──────────────────────
   const [trip, setTrip] = useState(() => {
     const stored = loadLS(LS_TRIP_KEY);
@@ -349,11 +384,16 @@ export default function App() {
   // harmless; nothing reads it. The constant is also deleted below.)
 
   const addActivity = useCallback((act) => {
+    const stamped = { ...act, id: uid() };
     setActivities(prev => {
-      const next = [...prev, { ...act, id: uid() }];
+      const next = [...prev, stamped];
       saveLS(LS_ACTIVITY_KEY, next);
       return next;
     });
+    // Best-effort cloud push (fire-and-forget). Failures are silent —
+    // local write is durable and the next sign-in reconcile backfills
+    // anything that didn't make it. Mirrors the saveBW pattern.
+    pushActivity(stamped);
   }, []);
 
   const deleteActivity = useCallback((id) => {
@@ -362,6 +402,12 @@ export default function App() {
       saveLS(LS_ACTIVITY_KEY, next);
       return next;
     });
+    // Cloud delete by id. If it fails, the next reconcile will resurrect
+    // the entry from the cloud — that's acceptable for now (no tombstone
+    // tracking yet for activities; rep deletes use LS_REP_DELETED_KEY,
+    // and we can add the same pattern here if delete-resurrection
+    // becomes a real problem).
+    deleteActivityCloud(id);
   }, []);
 
 
