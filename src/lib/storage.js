@@ -92,3 +92,11 @@ export const LS_TRAINING_FOCUS_KEY = "ft_training_focus";
 // so the user lands on whichever side they last looked at when they
 // re-enter the Analysis tab. Unset = defaults to "fingers".
 export const LS_ANALYSIS_SUBTAB_KEY = "ft_analysis_subtab";
+
+// AnalysisView × BW normalize toggle. When true, all metric surfaces
+// (F-D chart, AUC trajectory, Curve Improvement, Hand Asymmetry)
+// render in bodyweight-relative units rather than absolute force.
+// Per-session-date BW is used so historical points get divided by
+// the BW from THAT date, not just current BW. Persisted across
+// navigations.
+export const LS_BW_NORMALIZE_KEY = "ft_bw_normalize";

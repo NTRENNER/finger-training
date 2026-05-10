@@ -36,7 +36,7 @@ const VALID_SUBS = new Set(["fingers", "lifts", "climbing"]);
 export function AnalysisContainer(props) {
   const {
     // AnalysisView (fingers) props
-    history, unit, bodyWeight, activities,
+    history, unit, bodyWeight, onBWSave, activities,
     freshMap,
     GOAL_CONFIG, RM_GRIPS,
     // WorkoutAnalysisView (lifts) props
@@ -90,6 +90,7 @@ export function AnalysisContainer(props) {
           history={history}
           unit={unit}
           bodyWeight={bodyWeight}
+          onBWSave={onBWSave}
           activities={activities}
           freshMap={freshMap}
           GOAL_CONFIG={GOAL_CONFIG}

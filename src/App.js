@@ -671,6 +671,7 @@ export default function App() {
           history={history}
           unit={unit}
           bodyWeight={bodyWeight}
+          onBWSave={saveBW}
           activities={activities}
           freshMap={freshMap}
           GOAL_CONFIG={GOAL_CONFIG}

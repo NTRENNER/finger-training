@@ -23,7 +23,8 @@ import {
 } from "recharts";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
-import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
+import { KG_TO_LBS, fmt1, fmtW, toDisp, fromDisp, bwOnDate } from "../ui/format.js";
+import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
 import { STRENGTH_MAX, ZONE_REF_T, ZONE_KEYS, ZONE6 } from "../model/zones.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
@@ -57,7 +58,7 @@ const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 // prescription surface now.)
 
 export function AnalysisView({
-  history, unit = "lbs", bodyWeight = null,
+  history, unit = "lbs", bodyWeight = null, onBWSave = () => {},
   activities = [],
   freshMap = null,
   // Cross-cutting App config — passed in rather than imported so this
@@ -73,7 +74,28 @@ export function AnalysisView({
   // is a minimum-diff change that's trivially reversible.
   const selHand = "";
   const [selGrip,   setSelGrip]   = useState("");
-  const [relMode,   setRelMode]   = useState(false); // relative strength toggle
+
+  // BW normalization toggle. When ON, every metric surface (F-D chart,
+  // AUC trajectory, Curve Improvement, Hand Asymmetry) renders in
+  // bodyweight-relative units. Per-session-date BW (via bwOnDate +
+  // bwLog) is used so historical points get divided by the BW from
+  // THAT date, not just current BW — the honest comparison. The
+  // per-chart relMode that used to live on the F-D card has been
+  // promoted to this single global state.
+  const [normalizeOn, setNormalizeOn] = useState(() => loadLS(LS_BW_NORMALIZE_KEY) === true);
+  const toggleNormalize = () => {
+    setNormalizeOn(v => {
+      const next = !v;
+      saveLS(LS_BW_NORMALIZE_KEY, next);
+      return next;
+    });
+  };
+  const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
+
+  // BW log loaded once on mount; the cloud-reconcile path in App.js
+  // hydrates this from Supabase on sign-in, so by the time the view
+  // mounts the log reflects every device's history.
+  const bwLog = useMemo(() => loadLS(LS_BW_LOG_KEY) || [], []);
 
   const grips = useMemo(() =>
     [...new Set(history.map(r => r.grip).filter(Boolean))].sort(),
@@ -622,26 +644,38 @@ export function AnalysisView({
   // grips, with each grip's column filled where it has a fit.
   const aucHistoryByGrip = useMemo(() => {
     // Per-grip date-keyed map of AUC values (and % vs baseline).
-    const perGrip = {};            // grip -> Map<date, { abs, pct }>
-    const baselineByGrip = {};     // grip -> baseline AUC
+    // We compute BOTH the raw % and the BW-normalized % in one pass
+    // and let the render pick which to show based on normalizeOn —
+    // toggling the pill should not retrigger the expensive curve fits.
+    //
+    // BW-normalized math: dividing both numerator and denominator by
+    // their respective BWs gives
+    //   pct_bw = (abs/sessionBW) / (baseAUC/baseBW) − 1
+    //          = (abs/baseAUC) × (baseBW/sessionBW) − 1
+    // which collapses to pct_raw whenever sessionBW == baseBW.
+    const perGrip = {};            // grip -> Map<date, { abs, pct, pctBW }>
+    const baselineByGrip = {};     // grip -> { auc, bw }
     const datesUnion = new Set();
     for (const g of grips) {
-      // Train-to-failure model: every rep with valid actual_time_s is a
-      // (T, F) data point. Drop the legacy r.failed filter.
       const gripFails = (history || []).filter(r =>
         r.grip === g &&
         r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0
       );
       if (gripFails.length < 3) continue;
-      // Distinct training dates for this grip — sparse but representative.
       const datesSet = new Set();
       for (const r of gripFails) if (r.date) datesSet.add(r.date);
       const dates = [...datesSet].sort();
       if (dates.length < 2) continue;
-      // Baseline AUC for the % view — same per-grip baseline the Curve
-      // Improvement card uses (≥5 failures across ≥3 distinct durations).
-      const baseAmps = gripBaselines[g]?.amps;
-      if (baseAmps) baselineByGrip[g] = computeAUCThreeExp(baseAmps);
+      // Baseline AUC + the BW that prevailed at the baseline date.
+      // bwOnDate returns the most-recent-on-or-before entry, so a
+      // baseline dated before the first BW log just yields null and
+      // pctBW falls back to the raw pct in the render.
+      const base = gripBaselines[g];
+      if (base?.amps) {
+        const baseAUC = computeAUCThreeExp(base.amps);
+        const baseBwEntry = base.date ? bwOnDate(bwLog, base.date) : null;
+        baselineByGrip[g] = { auc: baseAUC, bw: baseBwEntry?.kg ?? null };
+      }
       const seriesMap = new Map();
       for (const date of dates) {
         const upToFails = gripFails.filter(r => (r.date || "") <= date);
@@ -653,38 +687,47 @@ export function AnalysisView({
         if (!amps) continue;
         const abs = computeAUCThreeExp(amps);
         if (!(abs > 0)) continue;
-        const baseAUC = baselineByGrip[g];
+        const baseAUC = baselineByGrip[g]?.auc;
+        const baseBW  = baselineByGrip[g]?.bw;
+        const sessionBW = bwOnDate(bwLog, date)?.kg ?? null;
         const pct = baseAUC && baseAUC > 0
           ? Math.round((abs / baseAUC - 1) * 100)
           : null;
-        seriesMap.set(date, { abs: Math.round(abs), pct });
+        const pctBW = (baseAUC && baseAUC > 0 && baseBW > 0 && sessionBW > 0)
+          ? Math.round((abs / baseAUC * baseBW / sessionBW - 1) * 100)
+          : pct;  // fall back to raw pct if any BW is missing
+        seriesMap.set(date, { abs: Math.round(abs), pct, pctBW });
         datesUnion.add(date);
       }
       if (seriesMap.size >= 2) perGrip[g] = seriesMap;
     }
     if (Object.keys(perGrip).length === 0) return null;
-    // Flatten to row-per-date with one column per grip per metric.
     const dates = [...datesUnion].sort();
     const absRows = [];
     const pctRows = [];
+    const pctRowsBW = [];
     for (const date of dates) {
       const aRow = { date };
       const pRow = { date };
+      const pBwRow = { date };
       for (const g of Object.keys(perGrip)) {
         const v = perGrip[g].get(date);
-        aRow[`${g}_abs`] = v ? v.abs : null;
-        pRow[`${g}_pct`] = v ? v.pct : null;
+        aRow[`${g}_abs`]   = v ? v.abs   : null;
+        pRow[`${g}_pct`]   = v ? v.pct   : null;
+        pBwRow[`${g}_pct`] = v ? v.pctBW : null;
       }
       absRows.push(aRow);
       pctRows.push(pRow);
+      pctRowsBW.push(pBwRow);
     }
     return {
       grips: Object.keys(perGrip),
       absRows,
       pctRows,
-      hasPct: Object.values(baselineByGrip).some(v => v > 0),
+      pctRowsBW,
+      hasPct: Object.values(baselineByGrip).some(v => v.auc > 0),
     };
-  }, [history, grips, gripBaselines, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [history, grips, gripBaselines, threeExpPriors, bwLog]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Three-exp F-D fit (governing model — see src/model/threeExp.js) ──
   // threeExpPriors memoized earlier in AnalysisView so gapHistory,
@@ -837,6 +880,21 @@ export function AnalysisView({
         Where failures fall on the fatigue curve reveals which energy system is your limiter — and what to train next.
       </p>
 
+      {/* Bodyweight pill + × BW normalize toggle. Sits above the
+          filter card because it changes the units the entire page
+          renders in — so it's worth surfacing before the user
+          digests any of the data below. The pill is interactive:
+          click to expand into an inline kg/lbs editor (calls saveBW
+          which pushes to the cloud + updates LS). */}
+      <BWPillRow
+        bwLog={bwLog}
+        bodyWeight={bodyWeight}
+        unit={unit}
+        onBWSave={onBWSave}
+        normalizeOn={normalizeOn}
+        onToggleNormalize={toggleNormalize}
+      />
+
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
         {/* Hand selector removed: per-hand data already lives in the
@@ -869,24 +927,13 @@ export function AnalysisView({
           visual on this view. Empty-state placeholder still appears
           below in the {reps.length === 0 ? ...} block. */}
       {reps.length > 0 && (<>
-        {/* ── Force-Duration scatter ── */}
+        {/* ── Force-Duration scatter ──
+            Display mode (Absolute vs × BW) is now driven by the global
+            normalize toggle in the page header — the per-card pill that
+            used to live here was retired so all four metric surfaces
+            switch in lockstep. */}
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 6 }}>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>Force vs. Duration</div>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {/* Grip selection lives on the filter card above (All Grips /
-                  Micro / Crusher) — no duplicate toggle here. Only the
-                  display-mode (Absolute / × Bodyweight) toggle stays in
-                  the chart header since it's chart-specific. */}
-              {bodyWeight != null && ["Absolute", "Relative"].map(mode => (
-                <button key={mode} onClick={() => setRelMode(mode === "Relative")} style={{
-                  padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
-                  background: (mode === "Relative") === relMode ? C.purple : C.border,
-                  color: (mode === "Relative") === relMode ? "#fff" : C.muted,
-                }}>{mode}</button>
-              ))}
-            </div>
-          </div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Force vs. Duration</div>
           {(() => {
             const splitMode = !!fdSplitData;
             return (
@@ -1110,6 +1157,17 @@ export function AnalysisView({
                                : asymPct >= 0.05 ? "asymmetric"
                                : "symmetric";
                 const pctRound  = Math.round(asymPct * 100);
+                // L and R are in kg from the asymmetry useMemo. When
+                // normalizeOn, render both as % of current bodyweight
+                // so the per-grip strength reads in climbing units
+                // (a 35% BW micro-pinch means more to a climber than
+                // an absolute kg figure).
+                const renderForce = (kg) => {
+                  if (normalizeOn && bodyWeight > 0) {
+                    return `${Math.round((kg / bodyWeight) * 100)}% BW`;
+                  }
+                  return `${fmtW(kg, unit)} ${unit}`;
+                };
                 return (
                   <div key={grip} style={{
                     display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -1121,7 +1179,7 @@ export function AnalysisView({
                         {grip}
                       </div>
                       <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-                        L {fmtW(L, unit)} {unit} · R {fmtW(R, unit)} {unit}
+                        L {renderForce(L)} · R {renderForce(R)}
                         {pctRound > 0 && (
                           <> · <b style={{ color: C.text }}>{weaker}</b> is {pctRound}% behind <b style={{ color: C.text }}>{stronger}</b></>
                         )}
@@ -1163,12 +1221,17 @@ export function AnalysisView({
           metrics section at the bottom. */}
       {aucHistoryByGrip && aucHistoryByGrip.hasPct && (
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (Area Under the Curve) — % vs baseline</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
+            Total Capacity (Area Under the Curve) — % vs baseline
+            {normalizeOn && <span style={{ color: C.purple, fontSize: 12, marginLeft: 6 }}>· × BW</span>}
+          </div>
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-            Same metric as a percentage above each grip's baseline. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have.
+            {normalizeOn
+              ? "Same metric, normalized to bodyweight at each session date. Rising lines mean your CLIMBING-relevant capacity is growing — strength gains that come with matching weight gains flatten here."
+              : "Same metric as a percentage above each grip's baseline. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have."}
           </div>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={aucHistoryByGrip.pctRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+            <LineChart data={normalizeOn ? aucHistoryByGrip.pctRowsBW : aucHistoryByGrip.pctRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
                 label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
@@ -1569,6 +1632,99 @@ export function AnalysisView({
             doesn't survive the phenomenological-model framing.) */}
 
       </>)}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// BWPillRow
+// ─────────────────────────────────────────────────────────────
+// Two-pill row at the top of the Analysis tab.
+//   • Left pill: current BW + last-logged date. Tap to expand into
+//     a kg/lbs editor (writes via onBWSave → App.js saveBW → cloud
+//     push + LS log).
+//   • Right pill: × BW global normalize toggle. Driven by the
+//     normalizeOn state in AnalysisView; affects all four metric
+//     surfaces (F-D chart, AUC trajectory, Curve Improvement,
+//     Hand Asymmetry) in lockstep. Hidden when no BW is set, since
+//     the toggle would be inert without a divisor.
+function BWPillRow({ bwLog, bodyWeight, unit, onBWSave, normalizeOn, onToggleNormalize }) {
+  const [editing, setEditing] = useState(false);
+  const latest = (bwLog && bwLog.length) ? bwLog[bwLog.length - 1] : null;
+  const [inputVal, setInputVal] = useState(() =>
+    bodyWeight ? String(Math.round(toDisp(bodyWeight, unit))) : ""
+  );
+
+  const save = () => {
+    const num = parseFloat(inputVal);
+    if (!isNaN(num) && num > 0) {
+      const kg = fromDisp(num, unit);
+      onBWSave(kg);
+      setEditing(false);
+    }
+  };
+
+  const labelStyle = {
+    display: "inline-flex", alignItems: "center", gap: 6,
+    padding: "6px 12px", borderRadius: 18, fontSize: 12, fontWeight: 600,
+    cursor: "pointer", border: "none",
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+      {/* Weight pill */}
+      {!editing ? (
+        <button onClick={() => setEditing(true)} style={{
+          ...labelStyle,
+          background: C.card, color: C.text,
+          border: `1px solid ${C.border}`,
+        }}>
+          <span style={{ fontSize: 13 }}>⚖️</span>
+          {bodyWeight
+            ? <>BW: <b>{Math.round(toDisp(bodyWeight, unit))} {unit}</b>{latest?.date && <span style={{ color: C.muted, fontWeight: 400 }}> · {latest.date}</span>}</>
+            : <span style={{ color: C.muted, fontWeight: 400 }}>Set bodyweight</span>}
+        </button>
+      ) : (
+        <div style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          padding: "4px 8px", borderRadius: 18,
+          background: C.card, border: `1px solid ${C.purple}`,
+        }}>
+          <span style={{ fontSize: 13 }}>⚖️</span>
+          <input
+            type="number" inputMode="numeric" step={1} min={30} max={500}
+            value={inputVal}
+            onChange={e => setInputVal(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+            autoFocus
+            style={{
+              width: 60, background: C.bg, color: C.text,
+              border: `1px solid ${C.border}`, borderRadius: 6,
+              padding: "3px 6px", fontSize: 13, textAlign: "right",
+            }}
+          />
+          <span style={{ fontSize: 11, color: C.muted }}>{unit}</span>
+          <button onClick={save} style={{
+            padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700,
+            background: C.green, color: "#fff", border: "none", cursor: "pointer",
+          }}>Save</button>
+          <button onClick={() => setEditing(false)} style={{
+            padding: "3px 8px", fontSize: 11,
+            background: "none", color: C.muted, border: "none", cursor: "pointer",
+          }}>×</button>
+        </div>
+      )}
+
+      {/* × BW normalize toggle — only meaningful when BW is set. */}
+      {bodyWeight > 0 && (
+        <button onClick={onToggleNormalize} style={{
+          ...labelStyle,
+          background: normalizeOn ? C.purple : C.border,
+          color:      normalizeOn ? "#fff"   : C.muted,
+        }}>
+          × BW
+        </button>
+      )}
     </div>
   );
 }
