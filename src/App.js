@@ -1,7 +1,7 @@
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-Compartment Fatigue Model · Tindeq Progressor BLE · Gamification
 import React, {
-  useCallback, useState,
+  useCallback, useEffect, useState,
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
@@ -41,6 +41,7 @@ import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
   fetchWorkoutSessions, deleteWorkoutSession,
+  pushBW, fetchBWLog,
 } from "./lib/sync.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
@@ -227,8 +228,52 @@ export default function App() {
       // Replace existing entry for today if present, otherwise append
       const updated = log.filter(e => e.date !== d);
       saveLS(LS_BW_LOG_KEY, [...updated, { date: d, kg }].sort((a, b) => a.date < b.date ? -1 : 1));
+      // Best-effort cloud push (fire-and-forget). Failures are
+      // logged but otherwise silent — the local write is already
+      // durable, and the next sign-in reconcile will catch any
+      // entries that didn't make it to the server.
+      pushBW(d, kg);
     }
   };
+
+  // ── BW cloud reconcile ───────────────────────────────────
+  // Runs when `user` flips from null → signed-in. Mirrors the
+  // useRepHistory reconcile pattern: fetch cloud log, union with
+  // local log on date-key (later-write wins for same-day collisions —
+  // we trust local since the user just opened the app there), save
+  // the merged set back to LS, and re-derive the scalar from the
+  // latest entry. Also fires a push for any local-only entries the
+  // cloud doesn't yet know about, so a previously-offline device's
+  // BW history gets backfilled on first sign-in.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const cloud = await fetchBWLog();
+      if (cancelled || !cloud) return;
+      const local = loadLS(LS_BW_LOG_KEY) || [];
+      // Merge: same-date local wins (assumption: local is the device
+      // the user is actively using, so its writes are most recent).
+      const byDate = new Map();
+      for (const e of cloud) byDate.set(e.date, e);
+      for (const e of local) byDate.set(e.date, e);
+      const merged = [...byDate.values()].sort((a, b) => a.date < b.date ? -1 : 1);
+      saveLS(LS_BW_LOG_KEY, merged);
+      // Hydrate the scalar from the latest merged entry.
+      const latest = merged.at(-1);
+      if (latest?.kg > 0) {
+        setBodyWeight(latest.kg);
+        saveLS(LS_BW_KEY, latest.kg);
+      }
+      // Backfill any local-only entries to the cloud (one push per
+      // missing date). Fire-and-forget; same as saveBW's push path.
+      const cloudDates = new Set(cloud.map(e => e.date));
+      for (const e of local) {
+        if (!cloudDates.has(e.date) && e.kg > 0) pushBW(e.date, e.kg);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   // ── Trip (user-editable target trip) ──────────────────────
   const [trip, setTrip] = useState(() => {

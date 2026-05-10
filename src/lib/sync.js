@@ -50,6 +50,17 @@
 //   ALTER TABLE reps ENABLE ROW LEVEL SECURITY;
 //   CREATE POLICY "auth_all" ON reps
 //     FOR ALL USING (auth.uid() IS NOT NULL);
+//
+//   CREATE TABLE body_weights (
+//     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+//     date        text NOT NULL UNIQUE,
+//     kg          real NOT NULL,
+//     created_at  timestamptz DEFAULT now()
+//   );
+//   ALTER TABLE body_weights ENABLE ROW LEVEL SECURITY;
+//   CREATE POLICY "auth_all" ON body_weights
+//     FOR ALL USING (auth.uid() IS NOT NULL);
+//   CREATE INDEX body_weights_date_idx ON body_weights (date DESC);
 
 import { supabase } from "./supabase.js";
 import { loadLS, saveLS } from "./storage.js";
@@ -200,4 +211,49 @@ export async function fetchReps() {
     failed: r.failed ?? false,
     session_started_at: r.session_started_at ?? null,
   }));
+}
+
+// ─────────────────────────────────────────────────────────────
+// BODY-WEIGHT HELPERS (body_weights table)
+// ─────────────────────────────────────────────────────────────
+// BW lives in two places locally — LS_BW_KEY (scalar current weight,
+// what every consumer reads) and LS_BW_LOG_KEY (per-date history
+// the trends + per-session-date normalization consume). The cloud
+// table is the per-date log; the scalar is derived from the latest
+// log entry on boot (see App.js bodyWeight init). Same-day re-logs
+// upsert via the UNIQUE date constraint, so logging twice in one
+// day overwrites cleanly across devices.
+
+export async function pushBW(date, kg) {
+  if (!date || !(kg > 0)) return false;
+  try {
+    const { error } = await supabase.from("body_weights").upsert(
+      { date, kg },
+      { onConflict: "date" }
+    );
+    if (error) { console.warn("Supabase BW push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase BW push exception:", e.message);
+    return false;
+  }
+}
+
+// Returns array of { date, kg } sorted ascending by date, or null on
+// error. Shape matches the local LS_BW_LOG_KEY contents so the merge
+// path can union the two and dedupe by date trivially.
+export async function fetchBWLog() {
+  try {
+    const { data, error } = await supabase
+      .from("body_weights")
+      .select("date, kg")
+      .order("date", { ascending: true });
+    if (error) { console.warn("Supabase BW fetch:", error.message); return null; }
+    return (data || [])
+      .filter(r => r?.date && Number(r.kg) > 0)
+      .map(r => ({ date: r.date, kg: Number(r.kg) }));
+  } catch (e) {
+    console.warn("Supabase BW fetch exception:", e.message);
+    return null;
+  }
 }
