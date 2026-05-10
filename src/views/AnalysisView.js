@@ -897,13 +897,19 @@ export function AnalysisView({
             silent-filter bugs (e.g., 5581094 where selHand="L"
             default hid Micro reps logged as R) without losing any
             actionable per-hand information. */}
-        {grips.length > 0 && (
+        {/* Filter card row: grip pills (left) + Absolute / × BW units
+            toggle (right). Renders if EITHER grips exist OR a BW is
+            set — previously gated on grips alone, which hid the units
+            toggle for users with BW but no Tindeq reps. */}
+        {(grips.length > 0 || bodyWeight > 0) && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button onClick={() => setSelGrip("")} style={{
-                padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
-                background: !selGrip ? C.orange : C.border, color: !selGrip ? "#fff" : C.muted,
-              }}>All Grips</button>
+              {grips.length > 0 && (
+                <button onClick={() => setSelGrip("")} style={{
+                  padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
+                  background: !selGrip ? C.orange : C.border, color: !selGrip ? "#fff" : C.muted,
+                }}>All Grips</button>
+              )}
               {grips.map(g => (
                 <button key={g} onClick={() => setSelGrip(g)} style={{
                   padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
@@ -911,9 +917,7 @@ export function AnalysisView({
                 }}>{g}</button>
               ))}
             </div>
-            {/* Absolute / × BW units toggle. Two-pill segmented
-                control next to the grip filter so all view-mode
-                controls live in one row. Hidden when no BW is set,
+            {/* Absolute / × BW units toggle. Hidden when no BW is set,
                 since × BW would be inert without a divisor. */}
             {bodyWeight > 0 && (
               <div style={{ display: "flex", gap: 4 }}>
