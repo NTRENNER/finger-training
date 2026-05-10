@@ -314,11 +314,11 @@ CREATE POLICY "auth_all" ON reps
           <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
             <b>Force-Duration Model:</b> Phenomenological three-component
             decay — F(T) = a·exp(−T/τ₁) + b·exp(−T/τ₂) + c·exp(−T/τ₃),
-            with τ ≈ 15 s / 90 s / 600 s. The fast / medium / slow
-            components are named for the energy systems they
-            approximately align with (PCr, glycolytic, oxidative) but
-            they're regression components fit to your data, not direct
-            measurements of underlying tissue pools.
+            with τ ≈ 10 s / 30 s / 180 s (depletion taus). The fast /
+            medium / slow components are named for the energy systems
+            they approximately align with (PCr, glycolytic, oxidative)
+            but they're regression components fit to your data, not
+            direct measurements of underlying tissue pools.
             <br /><br />
             <b>Continuous Coaching:</b> The engine sweeps target time
             from 5 s to 240 s and picks where the curve over-predicts
