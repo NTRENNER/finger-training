@@ -1,64 +1,41 @@
-# Post-Lockout Backlog
+# Backlog
 
-Structural improvements deliberately deferred until the lockout system
-ships. Each entry is correct in spirit and worth doing — the timing is
-the issue. Current feature work touches files these refactors would
-restructure, so doing both at once invites merge pain and silent
-regressions.
+Structural work tracked across sessions. Items shipped under the
+curve-trust direction are marked SHIPPED with the commit hash;
+remaining items are sized + scoped against the post-curve-trust
+codebase, which is materially leaner than when most of these were
+first written (Journey/BadgesView gone, TrendsView gone, ClimbingTab
+merged into Fingers, Per-Compartment Dose / Energy System Breakdown
+gone, Next Session Focus per-grip cards gone, AnalysisView shrunk
+~40%).
 
-Ordering inside this file is rough priority, not strict sequencing.
-Each item is independently shippable once the lockout is in place.
+Ordering is rough priority, not strict sequencing.
 
 ---
 
-## 1. Extract domain hooks from `App.js`
+## 1. Extract domain hooks from `App.js` (RE-SCOPED)
 
-**Problem.** `App.js` still owns auth, sync, settings, derived model
-state (gripEstimates, freshMap, baseline), badge triggers, tab routing,
-and the rendering gate machine. The `useAuth` / `useTindeq` /
-`useSessionRunner` hooks already prove the codebase responds well to
-extraction; pulling more out is good hygiene and makes the file scan-
-able again.
+**Status before curve-trust.** Originally proposed splitting App.js
+state into `useUserSettings`, `useCloudSync`, `useFingerHistory`,
+`useActivities`. The `useFingerHistory` hook was the centerpiece
+because it would dedupe `gripBaselines` + `perHandGripBaselines`
+between AnalysisView and BadgesView.
 
-**Proposed decomposition** (declined the original "useAppState() does
-everything" framing because it just relocates the centralization):
+**What changed.** BadgesView is gone (commit caf7d2a). The duplicate
+consumer of those baselines no longer exists; lifting them into a
+shared hook is now pure code-organization work, not dedup work.
 
-- `useUserSettings()` — bodyWeight, unit, trainingFocus, trip, bwLog.
-  All localStorage-backed simple values with the same lifecycle.
-  Returns `{settings, updateSetting}`. Easy win, low risk.
-- `useCloudSync()` — auth + Supabase pull/push, dirty-flag tracking,
-  last-pulled-at, sync status. Takes data setters as deps; doesn't
-  own the data itself.
-- `useFingerHistory()` — rep history + baseline + gripEstimates +
-  threeExpPriors + freshMap, **PLUS the structurally-shared model
-  derivations**: `gripBaselines` (≥5-failure per-grip seed window)
-  and `perHandGripBaselines` (hand-scoped variant). These are
-  currently duplicated between `AnalysisView` (Curve Improvement
-  card, Performance vs. Model chart) and `BadgesView` (per-grip
-  AUC growth). Lifting them into the hook unifies the computation
-  + saves work since both views currently pay the O(N) baseline
-  scan independently. Other AnalysisView-specific chart prep
-  (gripRecs, gapHistory, aucHistoryByGrip, F-D chart series)
-  stays in the view — those have only one consumer.
+**What's still real.**
 
-  Does NOT include a single `useModelSelectors()` mega-hook that
-  returns every derived value at once. That just hides the
-  dependency graph one layer down and forces views to pay for
-  derivations they don't need. Per-concern composition is the
-  better pattern.
-- `useActivities()` — climbing log + 1RM activities. Small, isolated.
+- `useUserSettings()` — bodyWeight, unit, trip, bwLog. Still
+  cleanly carve-able. Easy win.
+- `useCloudSync()` — auth + Supabase pull/push, dirty-flag
+  tracking, last-pulled-at, sync status. Still self-contained.
+- `useActivities()` — climbing log + 1RM activities. Small.
 
-**What stays in `App.js`.** Phase machine, tab routing, top-level
-rendering decisions. That's where the rendering decisions belong.
+`useFingerHistory()` becomes optional cleanup, not dedup work.
 
-**What we do NOT do.** Spread the entire world via
-`<AppShell {...app} />` — that just hides the dependency graph one
-layer down. If consumers genuinely need to read multiple hook outputs,
-introduce React Context at that specific consumer's layer rather than
-at the shell.
-
-**Effort.** Medium. Touches App.js extensively. Regression surface is
-the rendering tree, so smoke-test every tab after extraction.
+**Effort.** Small-medium. Pure code organization at this point.
 
 ---
 
@@ -117,91 +94,31 @@ discards.
 fatigue, and UI. The schema migration is the linchpin — most of the
 risk concentrates there.
 
-**Zero-cost mitigations to consider in the meantime** (don't ship,
-just be aware):
+---
 
-- When Tindeq returns a valid `avg_force_kg`, `handleRepDone` could
-  write `weight_kg = avg_force_kg` instead of the suggested load.
-  Makes the existing field reflect "what happened" for Tindeq sessions
-  but loses the prescription signal entirely. Trade-off worth thinking
-  about, not worth shipping ad-hoc.
-- Document the current dual semantics in the schema comment so future
-  readers don't misread the field.
+## 3. ~~Decompose `AnalysisView`~~ (OBSOLETE)
+
+Originally a ~2,000-line file that mixed model derivation, chart
+prep, and rendering. Post curve-trust the file is ~1,400 lines:
+- gripRecs / per-grip Train cards: deleted (commit 74f18ea)
+- Per-Compartment Dose AUC chart: deleted (commit c246834)
+- EnergySystemBreakdownCard: deleted (commit c246834)
+- recommendation / personalResponse / zones memos: deleted (74f18ea)
+
+What remains is mostly view code with a few useMemos. Decomposition
+no longer earns its complexity. Drop from backlog unless
+AnalysisView grows again.
 
 ---
 
-## 3. Decompose `AnalysisView`
+## 4. Hedge model-precision language ✓ SHIPPED (commit 6243d3f)
 
-**Problem.** `AnalysisView.js` is ~2,000 lines and mixes three concerns
-(model derivation, chart prep, rendering) in one file. After the
-6-zone migration it grew further. Even with the per-section comments
-it's hard to navigate — especially for someone returning to the file
-after a few weeks. `EnergySystemBreakdownCard` was extracted earlier
-as a precedent; the pattern just stopped at one component.
-
-**Proposed component decomposition:**
-
-- `ForceDurationChart` — F-D scatter + curve overlays + zone bands
-- `GapTrackerCard` — Performance vs. Model time series (per-grip)
-- `CapacityCards` — AUC % vs baseline + AUC absolute + Curve
-  Improvement (the headline progress trio)
-- `RecommendationCards` — Train cards + per-grip Train + Unexplored
-
-`AnalysisView` shrinks to a top-level layout that wires the cards
-together with shared filter state (selGrip, relMode) and shared
-model derivations from the hooks below.
-
-**Proposed hook decomposition** (declined the
-"useAnalysisModel() returns everything" framing — same anti-pattern
-as the spread-everything AppShell, just one layer down):
-
-- `useGripImprovements(...)` — Δ% deltas for Curve Improvement
-- `useGapHistory(...)` — Performance vs. Model series, per-grip
-- `useAucHistoryByGrip(...)` — AUC % + absolute time series
-- `useCoachingRecs(...)` — recommendation + gripRecs
-
-Each consumer pulls only what it needs. No giant model-bag hook.
-
-**Important overlap with item #1.** The two heaviest model derivations
-currently in AnalysisView — `gripBaselines` and `perHandGripBaselines`
-— are already in scope for `useFingerHistory` (item #1) because
-`BadgesView` also computes the same baseline seed window for its
-per-grip AUC growth. So those move out of AnalysisView as part of #1,
-not as part of this item. The hooks above all consume those baselines
-as inputs.
-
-**Sequencing.** Do this AFTER #1, not before. If we decompose
-AnalysisView while gripBaselines is still local, we'd extract it into
-an Analysis-local hook only to move it again to useFingerHistory.
-Wrong order means moving the same code twice. Correct order:
-
-  1. Lockout system ships.
-  2. App.js domain hook extraction (item #1) lands. gripBaselines and
-     perHandGripBaselines move to useFingerHistory.
-  3. AnalysisView decomposition (this item) builds on top — splits
-     the remaining view-specific derivations into focused hooks and
-     the rendering into focused components.
-
-**Effort.** Medium-large. Each component extraction is mechanical, but
-there are 4 of them, and the prop wiring needs care to avoid
-regression in the chart filters and the cross-card recommendation echo
-(Curve Improvement banner ↔ Train card).
-
----
-
-## 4. Hedge model-precision language ✓ SHIPPED
-
-Delivered: `GOAL_CONFIG` rationales softened (literal "refills 75% of
-PCr" / "PCr-glycolytic crossover" claims rephrased as fast/medium/slow
-component framing aligned with the energy-system literature), Energy
-System Breakdown card now leads with a hedging caption (labels reflect
-curve-fit components, not direct measurements), `coachingRationale`
-and the `widestGap` callout in SetupView use "-aligned" suffix
-("fast (PCr-aligned)" instead of "fast (PCr)"), AnalysisView system
-labels and F-D chart legend tooltips updated, SettingsView About panel
-reframes the fatigue model as phenomenological, and `threeExp.js`
-header now states the phenomenological-not-mechanistic caveat
-explicitly. No math changes; tests still 130/130 green.
+Delivered: `GOAL_CONFIG` rationales softened, Energy System
+Breakdown card hedging caption (now removed entirely with the
+card), `coachingRationale` + SetupView callouts use "-aligned"
+suffix, AnalysisView system labels updated, SettingsView About
+panel reframes the model as phenomenological, `threeExp.js`
+header states the phenomenological-not-mechanistic caveat.
 
 ---
 
@@ -211,28 +128,23 @@ explicitly. No math changes; tests still 130/130 green.
 when L/R CF diverges >20%. For climbing the weaker hand is often the
 actual limiter, so an "always-stronger" pooled fit is biased optimistic.
 
-**Impact in current code is smaller than it sounds.** Most modern
-code paths are already per-hand:
+**Impact in current code.** Most modern code paths are already
+per-hand: `perHandGripBaselines`, `prescribedLoad`,
+`empiricalPrescription`, the coaching engine, and the F-D chart's
+L-vs-R split all work per-hand. The bias leaks only into pooled
+views (`liveEstimate`, `gripEstimates` no-filter, Curve Improvement
+pooled-fit fallback).
 
-- `perHandGripBaselines`, `prescribedLoad`, `empiricalPrescription`,
-  the coaching engine, and the F-D chart's L-vs-R split all work
-  per-hand and aren't affected.
-- The bias leaks only into the pooled views: `liveEstimate`,
-  `gripEstimates` (when no hand filter), and the Curve Improvement
-  card's pooled-fit fallback.
+**Three-bucket fix.**
 
-**Three-bucket fix** (matching the audit recommendation):
-
-- *Global ceiling* (e.g., F-D chart with no hand filter, headline
-  AUC card) — stronger hand is fine. No change.
-- *Prescription / recommendation* — already per-hand. Audit the
-  call sites to confirm none accidentally use the pooled fit when
-  a per-hand fit was available.
-- *Limiter diagnosis* — currently we don't surface "your weaker
-  hand is X% behind your stronger hand" anywhere. Adding a
-  per-hand asymmetry diagnostic (small banner on Curve Improvement
-  or the F-D chart) is the real gap. Not a refactor — a small new
-  feature.
+- *Global ceiling* (F-D chart no-hand-filter, headline AUC card):
+  stronger hand is fine. No change.
+- *Prescription / recommendation*: already per-hand. Audit the call
+  sites to confirm none accidentally use the pooled fit when a
+  per-hand fit was available.
+- *Limiter diagnosis*: surface "your weaker hand is X% behind your
+  stronger hand" — currently absent. Small banner on the F-D chart
+  or as a row in Curve Coverage.
 
 **Effort.** Small for the audit pass; small-medium for the new
 diagnostic surface.
