@@ -130,11 +130,10 @@ export function AnalysisView({
   // Dots below the curve = below-curve performance (limiter zone).
   // That's the visual diagnosis Nathan called out as "where the magic
   // happens" — and it only works if the curve is honest about the data.
-  const cfEstimate = useMemo(() => {
-    if (failures.length < 2) return null;
-    const pts = failures.map(r => ({ x: 1 / r.actual_time_s, y: r.avg_force_kg }));
-    return fitCF(pts);
-  }, [failures]);
+  // (cfEstimate Monod fit removed — was only consumed by the now-deleted
+  // modelRMSE diagnostic. The pooled Monod fit isn't used anywhere else
+  // in the view; per-grip / per-hand fits are computed locally where
+  // needed via fitCF.)
 
   // ── Curve improvement % vs baseline ──
   // Reference durations for each zone come from ZONE_REF_T (the
@@ -803,27 +802,11 @@ export function AnalysisView({
     return predForceThreeExp(threeExpFit.amps, 180);
   }, [threeExpFit]);
 
-  // Train RMSE on the failure points for both models — directional
-  // signal of fit quality. NOTE: this is training RMSE not holdout, so
-  // it's biased optimistic for both; the relative comparison between
-  // the two models on the SAME data is still meaningful. Holdout
-  // validation lives in the offline sim (validate_three_exp_v3.js).
-  const modelRMSE = useMemo(() => {
-    if (failures.length < 2 || !cfEstimate || !threeExpFit) return null;
-    let mErr = 0, eErr = 0;
-    for (const r of failures) {
-      const T = r.actual_time_s, F = r.avg_force_kg;
-      const mPred = cfEstimate.CF + cfEstimate.W / T;
-      const ePred = predForceThreeExp(threeExpFit.amps, T);
-      mErr += (mPred - F) ** 2;
-      eErr += (ePred - F) ** 2;
-    }
-    return {
-      monod:    Math.sqrt(mErr / failures.length),
-      threeExp: Math.sqrt(eErr / failures.length),
-      n:        failures.length,
-    };
-  }, [failures, cfEstimate, threeExpFit]);
+  // (modelRMSE training-RMSE diagnostic was here. Removed — vestigial
+  // from the three-exp-vs-Monod validation phase. Training RMSE is
+  // biased optimistic and the curve quality is judged by eye on the
+  // F-D scatter anyway. Honest holdout validation still lives in the
+  // offline sim (validate_three_exp_v3.js).)
 
   // (Per-hand L vs R overlay curves were here. Removed — added visual
   // noise to the F-D chart without enough insight to justify it. Per-
@@ -1232,23 +1215,9 @@ export function AnalysisView({
             </div>
           )}
 
-          {/* Model-fit diagnostic — training RMSE for the three-exp curve.
-              Biased optimistic (training not holdout) but useful for
-              tracking whether the fit is degrading over time. */}
-          {modelRMSE && (
-            <div style={{ marginTop: 8, padding: "6px 8px", background: C.bg, borderRadius: 6, fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
-              <span style={{ color: C.purple, fontWeight: 600 }}>Fit diagnostic</span>
-              {" · 3-exp RMSE "}
-              <span style={{ color: C.text, fontWeight: 600 }}>
-                {modelRMSE.threeExp.toFixed(2)} kg
-              </span>
-              {" · N="}{modelRMSE.n}
-              {" · "}
-              <span style={{ fontStyle: "italic" }}>
-                training fit, not holdout
-              </span>
-            </div>
-          )}
+          {/* (Fit diagnostic line removed — was a vestigial training-RMSE
+              readout from the three-exp validation phase. Curve quality
+              is judged by eye on the scatter above.) */}
         </Card>
       </>)}
 
