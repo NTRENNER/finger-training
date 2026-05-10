@@ -4,7 +4,7 @@
 // Picks the next training zone using a multi-factor score:
 //
 //   score = (gap + 0.30) × recency_penalty × external_load
-//                       × residual_factor × focus_weight
+//                       × residual_factor × staleness_boost
 //
 // where:
 //   gap             — potential − current, normalized. Largest gap =
@@ -19,17 +19,25 @@
 //   residual_factor — F-D chart "dots vs three-exp curve" alignment
 //                     for this (zone, hand). Boosts limiter zones,
 //                     depresses above-curve zones. See zoneResidualFactor.
-//   focus_weight    — per-zone bias from the user's Training Focus
-//                     setting (Balanced / Bouldering / etc.). Default
-//                     1.0 across all zones for "Balanced".
+//   staleness_boost — soft-lockout multiplier from the per-zone
+//                     freshness window (model/lockout.js). Stale or
+//                     never-trained zones get 2.0×; aging gets 1.4×;
+//                     fresh stays at 1.0×. Scales the entire composite
+//                     so a stale zone with weak gap still gets
+//                     promoted, and a fresh zone with strong gap
+//                     still wins on merit.
 //
-// An earlier version of the engine multiplied in an `intensity_match`
-// factor that aligned the zone's neural/metabolic intensity with a
-// 1-10 readiness score. That whole pathway has been removed: the
-// readiness score was no longer displayed or settable, so the factor
-// silently collapsed into a fixed per-zone weighting that biased
-// against Power without any user-visible reason. Better to leave
-// readiness out of scoring entirely than to keep a hidden lever.
+// Two earlier factors that have since been removed:
+//   * intensity_match aligned zone intensity with a 1-10 readiness
+//     score. The readiness UI was retired; without a settable input
+//     the factor collapsed to a fixed per-zone bias against Power
+//     for no user-visible reason.
+//   * focus_weight came from a "Training Focus" setting (Balanced /
+//     Bouldering / Routes / etc.) that biased zones up or down. The
+//     whole Training Focus surface was dropped under the curve-trust
+//     direction (May 2026, see commit history) — once the F-D curve
+//     became the single source of truth for what's lacking, a
+//     manual focus override was just noise on top of the data.
 //
 // Returns the zone (and hand) with the highest score, plus the
 // component scores so the UI can explain WHY this was picked.

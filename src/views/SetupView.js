@@ -440,11 +440,12 @@ function ContinuousPickCard({
   // REST — flat 20s between reps, always (user preference, May 2026).
   // The earlier per-zone lookup gave 60-180s depending on the zone.
   // The user trains short rests across the board (Grip Gains style),
-  // so the default is constant and simpler. Override via the
-  // Customize toggle if a longer rest is wanted for a specific
-  // session. Note: this means altMode (interleaved L↔R within a set)
-  // engages only for very short prescriptions (T ≤ 20s) under the
-  // restTime ≥ targetTime trigger in useSessionRunner.
+  // so the default is constant and simpler. Override via the always-
+  // visible rest slider if a longer rest is wanted for a specific
+  // session. (The altMode L↔R interleaving the runner used to support
+  // when restTime ≥ targetTime was retired with the multi-set model
+  // in the same May 2026 wave — Both-mode now does the full L set
+  // first, then the full R set. See useSessionRunner.)
   const zoneCfg = rec ? GOAL_CONFIG[rec.zone] : null;
   const defaultReps = rec
     ? Math.max(4, Math.min(6, Math.round(6 - (rec.T - 5) / 117.5)))

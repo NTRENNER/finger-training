@@ -192,6 +192,16 @@ export function useSessionRunner({
       rep_num:         currentRep + 1,
       rest_s:             config.restTime,
       session_id:         sessionId,
+      // LEGACY FIELD — kept for backward compatibility with old
+      // rep records and the existing Supabase schema. Under the
+      // train-to-failure data model (May 2026) every rep ends in
+      // physical failure regardless of how actual_time_s compares
+      // to target_duration, so this flag no longer carries
+      // information the model uses. The F-D fit, prescription
+      // engine, coaching engine, and limiter all treat every rep
+      // as a (T, F) data point and ignore `failed`. Still written
+      // here so historic reads + the History view's per-rep edit
+      // surface stay consistent.
       failed:             derivedFailed,
       session_started_at: sessionStartedAt || null,
     };
