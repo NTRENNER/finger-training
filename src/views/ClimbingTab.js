@@ -17,12 +17,17 @@
 // from the grip-training zones it stimulates in a finger-specific way.
 
 import React, { useMemo, useState } from "react";
+import {
+  ResponsiveContainer, BarChart, Bar, LineChart, Line,
+  XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+} from "recharts";
 import { C } from "../ui/theme.js";
-import { Card, Btn, Sect } from "../ui/components.js";
+import { Card, Btn, Sect, Label } from "../ui/components.js";
 import { today, ymdLocal } from "../util.js";
 import {
   CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS,
   gradesFor, defaultGradeFor,
+  gradeRank, weekKey,
 } from "../lib/climbing-grades.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
 
@@ -172,6 +177,187 @@ function ClimbingLogWidget({ activities = [], onLog = () => {} }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// CLIMBING TRENDS sub-view
+// ─────────────────────────────────────────────────────────────
+// Weekly volume (stacked by discipline) + hardest-send line for
+// boulder (V-scale) and rope (YDS). Attempts drop off the hardest-
+// send line because they aren't sends.
+//
+// Moved here from the now-gone TrendsView (May 2026) — climbing
+// trends live next to the climbing log + history rather than in a
+// generic trends container.
+function ClimbingTrendsView({ climbs }) {
+  // Weekly aggregate: volume by discipline + hardest send per family.
+  const weekly = useMemo(() => {
+    const weeks = new Map(); // weekKey -> aggregate
+    for (const c of climbs) {
+      if (!c.date) continue;
+      const wk = weekKey(c.date);
+      if (!weeks.has(wk)) {
+        weeks.set(wk, {
+          week: wk,
+          boulder: 0, top_rope: 0, lead: 0,
+          hardestV: null, hardestYDS: null,
+          sends: 0, total: 0,
+        });
+      }
+      const w = weeks.get(wk);
+      w.total += 1;
+      const isSend = c.ascent && c.ascent !== "attempt";
+      if (isSend) w.sends += 1;
+      if (c.discipline === "boulder")  w.boulder  += 1;
+      if (c.discipline === "top_rope") w.top_rope += 1;
+      if (c.discipline === "lead")     w.lead     += 1;
+
+      // Only sends count toward the hardest-grade line.
+      if (isSend) {
+        const rank = gradeRank(c.grade);
+        if (c.discipline === "boulder" && rank >= 0) {
+          if (w.hardestV == null || rank > w.hardestV.rank) {
+            w.hardestV = { rank, label: c.grade };
+          }
+        } else if ((c.discipline === "top_rope" || c.discipline === "lead") && rank >= 0) {
+          if (w.hardestYDS == null || rank > w.hardestYDS.rank) {
+            w.hardestYDS = { rank, label: c.grade };
+          }
+        }
+      }
+    }
+    return [...weeks.values()].sort((a, b) => (a.week < b.week ? -1 : 1));
+  }, [climbs]);
+
+  const chart = useMemo(() => weekly.map(w => ({
+    week:          w.week,
+    boulder:       w.boulder,
+    top_rope:      w.top_rope,
+    lead:          w.lead,
+    hardestV:      w.hardestV?.rank ?? null,
+    hardestVLbl:   w.hardestV?.label ?? "",
+    hardestYDS:    w.hardestYDS?.rank ?? null,
+    hardestYDSLbl: w.hardestYDS?.label ?? "",
+    sendRate:      w.total > 0 ? Math.round((w.sends / w.total) * 100) : 0,
+  })), [weekly]);
+
+  const totals = useMemo(() => {
+    const sends = climbs.filter(c => c.ascent && c.ascent !== "attempt");
+    const maxV   = sends
+      .filter(c => c.discipline === "boulder")
+      .map(c => ({ rank: gradeRank(c.grade), label: c.grade }))
+      .filter(x => x.rank >= 0)
+      .sort((a, b) => b.rank - a.rank)[0];
+    const maxYDS = sends
+      .filter(c => c.discipline === "top_rope" || c.discipline === "lead")
+      .map(c => ({ rank: gradeRank(c.grade), label: c.grade }))
+      .filter(x => x.rank >= 0)
+      .sort((a, b) => b.rank - a.rank)[0];
+    return { total: climbs.length, sends: sends.length, maxV, maxYDS };
+  }, [climbs]);
+
+  if (climbs.length === 0) return null;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <Card style={{ flex: "1 1 120px" }}>
+          <Label>Total climbs</Label>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>{totals.total}</div>
+          <div style={{ fontSize: 11, color: C.muted }}>{totals.sends} sends</div>
+        </Card>
+        {totals.maxV && (
+          <Card style={{ flex: "1 1 120px" }}>
+            <Label>Hardest boulder</Label>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.orange }}>{totals.maxV.label}</div>
+            <div style={{ fontSize: 11, color: C.muted }}>send PR</div>
+          </Card>
+        )}
+        {totals.maxYDS && (
+          <Card style={{ flex: "1 1 120px" }}>
+            <Label>Hardest rope</Label>
+            <div style={{ fontSize: 22, fontWeight: 800, color: C.blue }}>{totals.maxYDS.label}</div>
+            <div style={{ fontSize: 11, color: C.muted }}>send PR</div>
+          </Card>
+        )}
+      </div>
+
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>Weekly volume by discipline</div>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={chart}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+            <XAxis dataKey="week" tick={{ fill: C.muted, fontSize: 10 }} />
+            <YAxis tick={{ fill: C.muted, fontSize: 11 }} allowDecimals={false} />
+            <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: C.muted }} />
+            <Bar dataKey="boulder"  stackId="v" name="Boulder"  fill={C.orange} />
+            <Bar dataKey="lead"     stackId="v" name="Lead"     fill={C.purple} />
+            <Bar dataKey="top_rope" stackId="v" name="Top rope" fill={C.blue}   />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      <Card>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 10 }}>Hardest send per week</div>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={chart}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+            <XAxis dataKey="week" tick={{ fill: C.muted, fontSize: 10 }} />
+            <YAxis
+              yAxisId="v"
+              orientation="left"
+              tick={{ fill: C.orange, fontSize: 11 }}
+              tickFormatter={(v) => v == null ? "" : `V${v}`}
+              domain={["auto", "auto"]}
+            />
+            <YAxis
+              yAxisId="yds"
+              orientation="right"
+              tick={{ fill: C.blue, fontSize: 11 }}
+              tickFormatter={(v) => {
+                if (v == null) return "";
+                const n    = Math.floor(v);
+                const frac = v - n;
+                const sub  = ["a", "b", "c", "d"][Math.round(frac * 4)] || "";
+                return `5.${n}${sub}`;
+              }}
+              domain={["auto", "auto"]}
+            />
+            <Tooltip
+              contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }}
+              formatter={(val, name, entry) => {
+                if (name === "Boulder") return [entry.payload.hardestVLbl || "—", name];
+                if (name === "Rope")    return [entry.payload.hardestYDSLbl || "—", name];
+                return [val, name];
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11, color: C.muted }} />
+            <Line
+              yAxisId="v"
+              type="monotone"
+              dataKey="hardestV"
+              stroke={C.orange}
+              strokeWidth={2}
+              name="Boulder"
+              connectNulls
+              dot={{ r: 4, fill: C.orange }}
+            />
+            <Line
+              yAxisId="yds"
+              type="monotone"
+              dataKey="hardestYDS"
+              stroke={C.blue}
+              strokeWidth={2}
+              name="Rope"
+              connectNulls
+              dot={{ r: 4, fill: C.blue }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </Card>
+    </div>
+  );
+}
+
 export function ClimbingTab({ activities = [], onLogActivity = () => {}, onDeleteActivity = () => {} }) {
   const climbs = useMemo(
     () => activities
@@ -235,6 +421,12 @@ export function ClimbingTab({ activities = [], onLogActivity = () => {}, onDelet
               ))}
             </div>
           </Card>
+        </Sect>
+      )}
+
+      {climbs.length > 0 && (
+        <Sect title="Trends">
+          <ClimbingTrendsView climbs={climbs} />
         </Sect>
       )}
 

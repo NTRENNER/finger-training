@@ -10,7 +10,6 @@ import { fmtW } from "./ui/format.js";
 
 // Top-level views extracted from this file. See src/views/.
 import { BadgesView } from "./views/BadgesView.js";
-import { TrendsView } from "./views/TrendsView.js";
 import { ClimbingTab } from "./views/ClimbingTab.js";
 import { HistoryView } from "./views/HistoryView.js";
 import { SettingsView } from "./views/SettingsView.js";
@@ -178,7 +177,7 @@ const GOAL_CONFIG = {
 // activity entries to Power.
 const RM_GRIPS = ["Micro", "Crusher", "Prime"];
 
-const TABS = ["Fingers", "Analysis", "Journey", "Workout", "Lifts", "Climbing", "History", "Trends", "Settings"];
+const TABS = ["Fingers", "Analysis", "Journey", "Workout", "Lifts", "Climbing", "History", "Settings"];
 
 export default function App() {
   // ── Auth + OTP login (see src/hooks/useAuth.js) ──────────
@@ -730,8 +729,11 @@ export default function App() {
           gripPresets={GRIP_PRESETS}
         />
       )}
-      {tab === 7 && <TrendsView history={history} unit={unit} activities={activities} defaultWorkouts={DEFAULT_WORKOUTS} />}
-      {tab === 8 && (
+      {/* (Trends tab removed May 2026 — climbing trends moved to the
+          Climbing tab; finger trends already shown on Analysis as
+          Total Capacity AUC over time. Body weight and lifts have
+          their own homes too.) */}
+      {tab === 7 && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}
