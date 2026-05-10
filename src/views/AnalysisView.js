@@ -1180,80 +1180,13 @@ export function AnalysisView({
               );
             })}
           </div>
-          {/* Model-fit diagnostic — training RMSE for the three-exp curve.
-              Biased optimistic (training not holdout) but useful for
-              tracking whether the fit is degrading over time. */}
-          {modelRMSE && (
-            <div style={{ marginTop: 8, padding: "6px 8px", background: C.bg, borderRadius: 6, fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
-              <span style={{ color: C.purple, fontWeight: 600 }}>Fit diagnostic</span>
-              {" · 3-exp RMSE "}
-              <span style={{ color: C.text, fontWeight: 600 }}>
-                {modelRMSE.threeExp.toFixed(2)} kg
-              </span>
-              {" · N="}{modelRMSE.n}
-              {" · "}
-              <span style={{ fontStyle: "italic" }}>
-                training fit, not holdout
-              </span>
-            </div>
-          )}
-        </Card>
-      </>)}
-
-      {/* ── 1RM PR tracker ── */}
-      <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
-
-      {/* ── Total Capacity (Area Under the Curve) over time — % vs baseline ──
-          Headline trajectory card: single-number capacity tracker per grip
-          showing ∫ F(t) dt over [5,180]s under the three-exp curve refit
-          each training date, expressed as % above each grip's baseline.
-          Lives at the top because the trajectory is the whole-page story
-          ("am I growing?") in one rising-line visual. Per-grip lines,
-          never pooled. Same integration window the Journey badges use,
-          so chart progress and badge progress read the same metric. The
-          absolute (kg·s) view of the same metric lives in the Advanced
-          metrics section at the bottom.
-
-          The Hand Asymmetry rows live below the chart in this same card
-          (consolidated May 2026): both surfaces are per-grip diagnostics
-          and the L/R gap pairs naturally with each grip's trajectory line.
-          Surfaces the L/R gap most prescription paths handle internally
-          but never tell the user about — below ~5% reads as 'symmetric',
-          above ~15% flags the weaker hand as the real climbing limiter.
-          Computed at T=30s (middle of curve, exercises fast + middle
-          components). */}
-      {aucHistoryByGrip && aucHistoryByGrip.hasPct && (
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (Area Under the Curve) — % vs baseline</div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-            Same metric as a percentage above each grip's baseline. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have.
-          </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={aucHistoryByGrip.pctRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-                label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-              <ReferenceLine y={0} stroke={C.muted} strokeWidth={2}
-                label={{ value: "baseline", position: "insideRight", fill: C.muted, fontSize: 10 }} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit="%"
-                label={{ value: "vs baseline", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
-              />
-              {aucHistoryByGrip.grips.map(g => (
-                <Line key={g} dataKey={`${g}_pct`} stroke={GRIP_COLORS[g] || C.blue}
-                  strokeWidth={2} dot={{ r: 3 }} connectNulls name={g} />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
-            {aucHistoryByGrip.grips.map(g => (
-              <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
-            ))}
-          </div>
-
-          {/* Per-grip Hand Asymmetry rows — folded in below the chart */}
+          {/* Per-grip Hand Asymmetry rows — folded in below the chart.
+              Tabular companion to the L/R dot scatter above: for each
+              grip with both L and R fits, shows weaker hand load + the
+              asymmetry %. Below ~5% reads as 'symmetric'; above ~15%
+              flags the weaker hand as the real climbing limiter on this
+              grip. Computed at T=30s (middle of curve, exercises fast +
+              middle components). */}
           {handAsymmetry.length > 0 && (
             <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
               <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>
@@ -1298,6 +1231,70 @@ export function AnalysisView({
               })}
             </div>
           )}
+
+          {/* Model-fit diagnostic — training RMSE for the three-exp curve.
+              Biased optimistic (training not holdout) but useful for
+              tracking whether the fit is degrading over time. */}
+          {modelRMSE && (
+            <div style={{ marginTop: 8, padding: "6px 8px", background: C.bg, borderRadius: 6, fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
+              <span style={{ color: C.purple, fontWeight: 600 }}>Fit diagnostic</span>
+              {" · 3-exp RMSE "}
+              <span style={{ color: C.text, fontWeight: 600 }}>
+                {modelRMSE.threeExp.toFixed(2)} kg
+              </span>
+              {" · N="}{modelRMSE.n}
+              {" · "}
+              <span style={{ fontStyle: "italic" }}>
+                training fit, not holdout
+              </span>
+            </div>
+          )}
+        </Card>
+      </>)}
+
+      {/* ── 1RM PR tracker ── */}
+      <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
+
+      {/* ── Total Capacity (Area Under the Curve) over time — % vs baseline ──
+          Headline trajectory card: single-number capacity tracker per grip
+          showing ∫ F(t) dt over [5,180]s under the three-exp curve refit
+          each training date, expressed as % above each grip's baseline.
+          Lives at the top because the trajectory is the whole-page story
+          ("am I growing?") in one rising-line visual. Per-grip lines,
+          never pooled. Same integration window the Journey badges use,
+          so chart progress and badge progress read the same metric. The
+          absolute (kg·s) view of the same metric lives in the Advanced
+          metrics section at the bottom. */}
+      {aucHistoryByGrip && aucHistoryByGrip.hasPct && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (Area Under the Curve) — % vs baseline</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+            Same metric as a percentage above each grip's baseline. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have.
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={aucHistoryByGrip.pctRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
+                label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
+              <ReferenceLine y={0} stroke={C.muted} strokeWidth={2}
+                label={{ value: "baseline", position: "insideRight", fill: C.muted, fontSize: 10 }} />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit="%"
+                label={{ value: "vs baseline", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
+              />
+              {aucHistoryByGrip.grips.map(g => (
+                <Line key={g} dataKey={`${g}_pct`} stroke={GRIP_COLORS[g] || C.blue}
+                  strokeWidth={2} dot={{ r: 3 }} connectNulls name={g} />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
+            {aucHistoryByGrip.grips.map(g => (
+              <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
+            ))}
+          </div>
         </Card>
       )}
 
