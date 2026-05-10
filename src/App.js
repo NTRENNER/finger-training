@@ -200,7 +200,24 @@ export default function App() {
   const saveUnit = (u) => { setUnit(u); saveLS("unit_pref", u); };
 
   // ── Body weight ───────────────────────────────────────────
-  const [bodyWeight, setBodyWeight] = useState(() => loadLS(LS_BW_KEY) ?? null);
+  // Two storage keys: LS_BW_KEY is the scalar current weight that
+  // every consumer reads, LS_BW_LOG_KEY is the per-date history that
+  // the trends + per-session-date normalization paths consume. saveBW
+  // writes to both. On boot we hydrate the scalar from the latest log
+  // entry when it's missing — handles the case where cloud sync only
+  // restored the log (or the scalar got cleared independently). Without
+  // this guard the F-D chart's BW-relative toggle and any future BW
+  // normalization stay silently hidden even though the data is present.
+  const [bodyWeight, setBodyWeight] = useState(() => {
+    const scalar = loadLS(LS_BW_KEY);
+    if (scalar != null) return scalar;
+    const log = loadLS(LS_BW_LOG_KEY) || [];
+    if (log.length === 0) return null;
+    const latest = [...log].sort((a, b) => a.date < b.date ? -1 : 1).at(-1);
+    const kg = latest?.kg ?? null;
+    if (kg != null) saveLS(LS_BW_KEY, kg);  // hydrate so subsequent loads are O(1)
+    return kg;
+  });
   const saveBW = (kg) => {
     setBodyWeight(kg);
     saveLS(LS_BW_KEY, kg);
