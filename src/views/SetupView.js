@@ -68,16 +68,17 @@ import { coachingRecommendationContinuous } from "../model/coaching.js";
 export function BwPrompt({ unit = "lbs", onSave }) {
   const bwLog  = loadLS(LS_BW_LOG_KEY) || [];
   const latest = bwLog.length ? bwLog[bwLog.length - 1] : null;
-  const daysSince = latest
-    ? Math.floor((Date.now() - new Date(latest.date).getTime()) / 864e5)
-    : Infinity;
 
   const [editing,  setEditing]  = useState(false);
   const [inputVal, setInputVal] = useState(() =>
     latest ? fmt0(toDisp(latest.kg, unit)) : ""
   );
 
-  if (daysSince < 3) return null;
+  // Always render — used to auto-hide when the last log was within
+  // the past 3 days, but the card now sits next to ClimbingLogCard
+  // as a permanent quick-log surface. The Update button (or ✓ Yes
+  // confirm-current shortcut) is the right call to action whether
+  // the log is fresh or stale.
 
   const save = () => {
     const kg = fromDisp(Math.round(parseFloat(inputVal)), unit);
