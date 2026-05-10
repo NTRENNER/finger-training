@@ -6,20 +6,15 @@
 //   Units             — lbs / kg toggle
 //   Body Weight       — input field, drives relative-strength display
 //   Training Goal     — trip name + date; powers the WorkoutTab
-//                       countdown ("days until __"). The "what are
-//                       you training FOR" — an event/date.
-//   Training Focus    — Balanced / Bouldering / Power-endurance /
-//                       Endurance routes. Mild zone-bias weighting
-//                       fed into the coaching engine. The "how
-//                       should this season's mix be shaped".
+//                       countdown ("days until __").
 //   Cloud Sync        — Supabase OTP auth + manual pull
 //   Tindeq Progressor — informational text about BLE
 //   Developer options — collapsible setup-SQL display
+//   About             — model + version
 //
-// Note the deliberate Goal-vs-Focus split: Goal = WHEN (target
-// date), Focus = HOW (zone weighting). Both surface as "Training __"
-// but they answer different questions, so don't let the labels
-// drift into each other.
+// (Training Focus card removed in commit 73e2024 under the curve-
+// trust philosophy — the curve is the single source of truth, no
+// user-configurable bias overrides it.)
 //
 // Pure props/callbacks shape — no localStorage reads, no module-level
 // state. All side effects (auth, BW change, trip change, pull) come
@@ -317,15 +312,19 @@ CREATE POLICY "auth_all" ON reps
       <Card>
         <Sect title="About">
           <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
-            <b>Fatigue Model:</b> Phenomenological three-component decay
-            (sum of three exponentials, fast ≈15 s / medium ≈90 s / slow ≈600 s).
-            The components are named for the energy systems they approximately
-            align with — phosphocreatine replenishment, glycolytic clearance,
-            and aerobic / metabolic byproduct removal — but they're regression
-            components fit to your data, not direct measurements of underlying
-            tissue pools.
+            <b>Force-Duration Model:</b> Phenomenological three-component
+            decay — F(T) = a·exp(−T/τ₁) + b·exp(−T/τ₂) + c·exp(−T/τ₃),
+            with τ ≈ 15 s / 90 s / 600 s. The fast / medium / slow
+            components are named for the energy systems they
+            approximately align with (PCr, glycolytic, oxidative) but
+            they're regression components fit to your data, not direct
+            measurements of underlying tissue pools.
             <br /><br />
-            <b>Level System:</b> Each 5% improvement in your best load at a target duration = +1 level.
+            <b>Continuous Coaching:</b> The engine sweeps target time
+            from 5 s to 240 s and picks where the curve over-predicts
+            your actuals most consistently — anchored by data
+            freshness so unexplored durations get sampled too. The
+            recommendation is one specific (T, load) pair per session.
             <br /><br />
             <b>Version:</b> Finger Training v3
           </div>
