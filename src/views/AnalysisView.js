@@ -1172,8 +1172,8 @@ export function AnalysisView({
               middle components). */}
           {handAsymmetry.length > 0 && (
             <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>
-                Hand asymmetry — L/R gap at the {ASYM_REF_T}s reference. The weaker hand is often the real climbing limiter.
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
+                Hand Asymmetry
               </div>
               {handAsymmetry.map(({ grip, L, R, stronger, weaker, asymPct }) => {
                 const flagColor = asymPct >= 0.15 ? C.red
