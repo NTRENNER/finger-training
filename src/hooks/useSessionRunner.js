@@ -79,12 +79,11 @@ export function useSessionRunner({
   const config = rawConfig;
 
   // ── Phase machine + per-rep counters ────────────────────────
-  // currentSet is always 0 going forward (single-set model). Kept
-  // in state only because it gets persisted into rep records as
-  // set_num = currentSet + 1 = 1, for backward compat with the
-  // existing Supabase schema. Will likely become a const later.
+  // currentSet is always 0 under the single-set model — persisted
+  // into rep records as set_num = currentSet + 1 = 1 for backward
+  // compat with the existing Supabase schema. No state, no setter.
+  const currentSet = 0;
   const [phase,       setPhase]       = useState("idle");
-  const [currentSet]                  = useState(0);
   const [currentRep,  setCurrentRep]  = useState(0);
   const [fatigue,     setFatigue]     = useState(0);
   const [sessionReps, setSessionReps] = useState([]);
