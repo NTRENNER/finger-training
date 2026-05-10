@@ -18,7 +18,7 @@ import { AnalysisView } from "./views/AnalysisView.js";
 import { SetupView } from "./views/SetupView.js";
 import {
   ActiveSessionView, AutoRepSessionView,
-  RestView, SwitchHandsView, AltSwitchView,
+  RestView, SwitchHandsView,
   SessionSummaryView,
 } from "./views/ActiveSessionViews.js";
 import { WorkoutTab, DEFAULT_WORKOUTS } from "./views/WorkoutTab.js";
@@ -402,7 +402,7 @@ export default function App() {
     sessionId, refWeights,
     sessionReps, lastRepResult,
     leveledUp, newLevel,
-    activeHand, altRestTime,
+    activeHand,
     nextWeight,
     startSession, handleRepDone,
     handleRestDone, handleAbort,
@@ -656,23 +656,16 @@ export default function App() {
           return <SwitchHandsView onReady={() => setPhase("rep_ready")} />;
         }
 
-        if (phase === "alt_switch") {
-          // Brief 3-second countdown before the interleaved alt-hand rep
-          return (
-            <AltSwitchView
-              toHand={activeHand}
-              onReady={() => setPhase(tindeq.connected ? "rep_ready" : "rep_active")}
-            />
-          );
-        }
+        // (alt_switch phase removed — alternating-hand mode is gone with
+        // the flat 20s rest; Both-mode now does all hangs on one hand
+        // then switches to the other.)
 
         if (phase === "resting") {
-          const restSecs = config.altMode && config.hand === "Both" ? altRestTime : config.restTime;
           return (
             <RestView
               lastRep={lastRepResult}
               nextWeight={nextWeight}
-              restSeconds={restSecs}
+              restSeconds={config.restTime}
               onRestDone={handleRestDone}
               repNum={currentRep}
               repsPerSet={config.repsPerSet}

@@ -14,7 +14,6 @@
 //   rep_active    — rep in progress
 //   resting       — countdown between reps
 //   switch_hands  — Both-mode prompt to swap to the other hand
-//   alt_switch    — alternating-mode quick L↔R prompt
 //   done          — SessionSummaryView is rendered
 //
 // Multi-set machinery removed (May 2026, curve-trust commit C):
@@ -24,14 +23,12 @@
 // are gone. set_num is kept on rep records (always 1 going forward)
 // for backward compat with the Supabase schema and existing data.
 //
-// Config split: `rawConfig` is what setConfig() writes into;
-// `config` is what consumers read, augmented with derived
-// `altMode` (true when restTime ≥ targetTime). Storing altMode
-// as state directly was a footgun — any caller passing
-// {...altMode: true} into setConfig would have it silently
-// overwritten by the next derive pass. Compute-on-read removes
-// that race entirely. setConfig still operates on rawConfig so
-// any altMode key in a partial update is silently no-oped.
+// Multi-set machinery removed in commit C; alternating-hand mode
+// (interleave L↔R within a set, restTime ≥ targetTime trigger)
+// removed in the follow-up — with the flat 20s rest the efficiency
+// gain from interleaving is minimal, and "do all your L hangs,
+// then all your R hangs" is simpler to reason about. config now
+// equals rawConfig (no derived fields).
 //
 // Inputs:
 //   history         — the rep array (for sMax + level-up check)
@@ -78,10 +75,8 @@ export function useSessionRunner({
     restTime:   20,
   }));
 
-  const config = useMemo(() => ({
-    ...rawConfig,
-    altMode: rawConfig.restTime >= rawConfig.targetTime,
-  }), [rawConfig]);
+  // No derived fields anymore — config is rawConfig.
+  const config = rawConfig;
 
   // ── Phase machine + per-rep counters ────────────────────────
   // currentSet is always 0 going forward (single-set model). Kept
@@ -100,8 +95,6 @@ export function useSessionRunner({
   const [leveledUp,   setLeveledUp]   = useState(false);
   const [newLevel,    setNewLevel]    = useState(1);
   const [activeHand,  setActiveHand]  = useState("L"); // tracks current hand in Both mode
-  const [altHandRep,  setAltHandRep]  = useState(false); // true while doing the interleaved alt-hand rep
-  const [altRestTime, setAltRestTime] = useState(0);     // rest after alt rep = restTime − actual alt rep time
 
   // ── sMax (for fatigue dose calculation) ─────────────────────
   // Use post-session-1 best; fall back to baseline (first session); then 20 kg if no data.
@@ -141,7 +134,6 @@ export function useSessionRunner({
     setLeveledUp(false);
     setLastRepResult(null);
     setActiveHand(config.hand === "Both" ? "L" : config.hand);
-    setAltHandRep(false);
     setPhase("rep_ready");
     onSessionStart?.();
   }, [history, config, freshMap, threeExpPriors, onSessionStart]);
@@ -217,34 +209,11 @@ export function useSessionRunner({
     // between-sets logic has been removed — every session is one set
     // of N hangs; when reps fill the set, the session ends (or
     // switches to the other hand in Both-mode).
-
-    // ── Alternating mode: interleave both hands rep-by-rep ────
-    if (config.altMode && config.hand === "Both") {
-      if (!altHandRep) {
-        // Just finished primary hand — immediately switch to alt hand (no rest yet)
-        setAltHandRep(true);
-        setActiveHand(h => h === "L" ? "R" : "L");
-        setPhase("alt_switch");
-      } else {
-        // Just finished alt hand — rest for (restTime − actual alt rep time), then back to primary
-        setAltHandRep(false);
-        setActiveHand(h => h === "L" ? "R" : "L"); // back to primary
-        const rest = Math.max(5, config.restTime - Math.round(repRecord.actual_time_s));
-        setAltRestTime(rest);
-        const nextRep = currentRep + 1;
-        if (nextRep >= config.repsPerSet) {
-          // Set complete — alternating mode trains both hands
-          // simultaneously, so the session ends here.
-          finishSession([...sessionReps, repRecord]);
-        } else {
-          setCurrentRep(nextRep);
-          setPhase("resting");
-        }
-      }
-      return;
-    }
-
-    // ── Standard mode ─────────────────────────────────────────
+    //
+    // Alternating-hand interleaving (the legacy altMode) was removed
+    // in the follow-up — with the flat 20s rest the efficiency gain
+    // from interleaving is minimal. Both-mode now always does all
+    // hangs on the primary hand, then switches to the other.
     const nextRep = currentRep + 1;
     if (nextRep >= config.repsPerSet) {
       // Set complete. In Both-mode, switch to the other hand for
@@ -265,13 +234,12 @@ export function useSessionRunner({
   }, [config, currentRep, currentSet, fatigue, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, sMaxL, sMaxR, activeHand]);
 
   const handleRestDone = useCallback(() => {
-    const restUsed = config.altMode && config.hand === "Both" ? altRestTime : config.restTime;
-    setFatigue(f => fatigueAfterRest(f, restUsed));
+    setFatigue(f => fatigueAfterRest(f, config.restTime));
     // When Tindeq is connected, go to rep_ready so AutoRepSessionView can arm
     // auto-detection and wait for the next pull. When not connected, auto-start
     // the countdown so the user doesn't need to tap Start Rep.
     setPhase(tindeqConnected ? "rep_ready" : "rep_active");
-  }, [config.altMode, config.hand, config.restTime, altRestTime, tindeqConnected]);
+  }, [config.restTime, tindeqConnected]);
 
   // handleNextSet removed (curve-trust commit C — single-set only).
 
@@ -295,7 +263,7 @@ export function useSessionRunner({
     sessionId, sessionStartedAt, refWeights,
     sessionReps, lastRepResult,
     leveledUp, newLevel,
-    activeHand, altRestTime,
+    activeHand,
     nextWeight,
     startSession, handleRepDone,
     handleRestDone, handleAbort,
