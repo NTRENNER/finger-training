@@ -59,6 +59,12 @@ const ASCENT_COLORS = {
 const CLEAN_SEND_STYLES = new Set(["onsight", "flash", "redpoint"]);
 const isCleanSend = (a) => CLEAN_SEND_STYLES.has(a.ascent);
 
+// Ordered list of clean-send styles for the Max-sends card. Order is
+// hardest-style-first (onsight = most impressive, redpoint = gritty
+// projecting). Module-level so the maxByStyle useMemo's dep list
+// stays stable across renders.
+const MAX_STYLES = ["onsight", "flash", "redpoint"];
+
 // "Sent" = clean send OR a completion that took weight. Used by the
 // session-volume (v-sum) chart so a session where you actually finished
 // every route gets credit even if you took rests; only attempts are
@@ -97,6 +103,20 @@ export function ClimbingAnalysisView({ activities = [] }) {
   useEffect(() => {
     if (!wallFilterActive && pyramidWall !== "all") setPyramidWall("all");
   }, [wallFilterActive, pyramidWall]);
+
+  // ── Max sends card state ────────────────────────────────────
+  // Independent filter set from the pyramid (above) so the user can
+  // look at "all-time max sends on lead" while the pyramid stays
+  // narrowed to "boulder, last 90 days." Default window is "All"
+  // because max-grade is naturally a lifetime PR question.
+  const [maxDiscipline, setMaxDiscipline] = useState("boulder");
+  const [maxVenue,      setMaxVenue]      = useState("all");
+  const [maxWall,       setMaxWall]       = useState("all");
+  const [maxWindow,     setMaxWindow]     = useState("all");
+  const maxWallActive = maxDiscipline === "boulder" && maxVenue !== "outdoor";
+  useEffect(() => {
+    if (!maxWallActive && maxWall !== "all") setMaxWall("all");
+  }, [maxWallActive, maxWall]);
 
   const allClimbs = useMemo(
     () => activities.filter(a => a.type === "climbing"),
@@ -201,6 +221,52 @@ export function ClimbingAnalysisView({ activities = [] }) {
       .sort((a, b) => a.rank - b.rank);
     return { rows, total: climbs.length };
   }, [allClimbs, pyramidDiscipline, pyramidVenue, pyramidWall, wallFilterActive, pyramidWindow]);
+
+  // ── Max sends by ascent style ──
+  // For each clean-send style (onsight / flash / redpoint), find the
+  // hardest grade you've achieved within the current filter set and
+  // surface it alongside its date and venue/wall context. Lifetime PRs
+  // when the window is "All"; window-bounded PRs otherwise. Returns
+  // null entries for styles with no qualifying sends so the UI can
+  // render placeholder rows rather than dropping them silently.
+  const maxByStyle = useMemo(() => {
+    const windowDef = WINDOWS.find(w => w.key === maxWindow);
+    const filtered = clamberFilter(allClimbs, windowDef.days)
+      .filter(c => c.discipline === maxDiscipline)
+      .filter(c => {
+        if (maxVenue === "all") return true;
+        const v = c.venue || "indoor";
+        return v === maxVenue;
+      })
+      .filter(c => {
+        if (!maxWallActive || maxWall === "all") return true;
+        return c.wall === maxWall;
+      });
+    const out = {};
+    for (const style of MAX_STYLES) {
+      const matches = filtered.filter(c => c.ascent === style && c.grade);
+      if (matches.length === 0) {
+        out[style] = { grade: null, count: 0, date: null, climb: null };
+        continue;
+      }
+      // Pick the climb with the highest gradeRank — ties broken by
+      // most recent date so the "when did you do it" caption favors
+      // the freshest send.
+      const sorted = [...matches].sort((a, b) => {
+        const dr = gradeRank(b.grade) - gradeRank(a.grade);
+        if (dr !== 0) return dr;
+        return (b.date || "").localeCompare(a.date || "");
+      });
+      const top = sorted[0];
+      out[style] = {
+        grade: top.grade,
+        count: matches.length,
+        date: top.date,
+        climb: top,
+      };
+    }
+    return out;
+  }, [allClimbs, maxDiscipline, maxVenue, maxWall, maxWallActive, maxWindow]);
 
   // ── Hardest send over time ──
   // For each ISO Monday week-key, find the max grade rank among clean
@@ -424,6 +490,104 @@ export function ClimbingAnalysisView({ activities = [] }) {
               </div>
             </>
           )}
+        </Card>
+
+        {/* Max sends — hardest grade per ascent style. Same filter
+            shape as the pyramid (discipline / venue / wall / window)
+            but independent state so a "lifetime max on lead" view
+            can co-exist with "boulder pyramid, last 90 days" above. */}
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>Max sends</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {WINDOWS.map(w => (
+                <button key={w.key} onClick={() => setMaxWindow(w.key)} style={{
+                  padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  background: maxWindow === w.key ? C.purple : C.border,
+                  color:      maxWindow === w.key ? "#fff" : C.muted,
+                }}>{w.label}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+            Hardest clean-send grade by ascent style within the current filter. Lifetime PR when the window is All; window-bounded PR otherwise.
+          </div>
+
+          {/* Discipline */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
+            {CLIMB_DISCIPLINES.map(d => (
+              <button key={d.key} onClick={() => setMaxDiscipline(d.key)} style={{
+                padding: "4px 10px", borderRadius: 12, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
+                background: maxDiscipline === d.key ? DISCIPLINE_COLORS[d.key] : C.border,
+                color:      maxDiscipline === d.key ? "#fff" : C.muted,
+              }}>{d.emoji} {d.label}</button>
+            ))}
+          </div>
+
+          {/* Venue */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
+            {[{ key: "all", label: "All venues", emoji: "" }, ...VENUES].map(v => {
+              const active = maxVenue === v.key;
+              return (
+                <button key={v.key} onClick={() => setMaxVenue(v.key)} style={{
+                  padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  background: active ? C.purple : C.border,
+                  color:      active ? "#fff" : C.muted,
+                }}>{v.emoji ? `${v.emoji} ` : ""}{v.label}</button>
+              );
+            })}
+          </div>
+
+          {/* Wall — indoor boulder only */}
+          {maxWallActive && (
+            <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
+              {[{ key: "all", label: "All walls", emoji: "" }, ...BOULDER_WALLS].map(w => {
+                const active = maxWall === w.key;
+                return (
+                  <button key={w.key} onClick={() => setMaxWall(w.key)} style={{
+                    padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                    background: active ? C.purple : C.border,
+                    color:      active ? "#fff" : C.muted,
+                  }}>{w.emoji ? `${w.emoji} ` : ""}{w.label}</button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Per-style rows — onsight / flash / redpoint. Empty styles
+              render as muted placeholders rather than disappearing so
+              the user can see "no onsights yet on this discipline." */}
+          {MAX_STYLES.map((style, i) => {
+            const entry = maxByStyle[style];
+            const meta = ASCENT_STYLES.find(s => s.key === style);
+            const has = entry.grade != null;
+            return (
+              <div key={style} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "10px 0",
+                borderTop: i === 0 ? `1px solid ${C.border}` : `1px solid ${C.border}`,
+              }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: has ? C.text : C.muted }}>
+                    {meta?.label || style}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                    {has
+                      ? `${entry.count} send${entry.count === 1 ? "" : "s"}${entry.date ? " · last on " + entry.date : ""}`
+                      : "No sends yet in this filter"}
+                  </div>
+                </div>
+                <div style={{
+                  fontSize: 22, fontWeight: 800,
+                  color: has ? C.text : C.muted,
+                  fontFamily: "'Courier New', monospace",
+                  letterSpacing: 0.5,
+                }}>
+                  {entry.grade || "—"}
+                </div>
+              </div>
+            );
+          })}
         </Card>
 
         {/* Hardest send over time */}
