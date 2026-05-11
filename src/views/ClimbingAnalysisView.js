@@ -21,7 +21,7 @@
 // prescriptive. The Tindeq side has the model and the prescription
 // chain; this view just shows the climber what they've actually done.
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -29,7 +29,7 @@ import {
 import { C } from "../ui/theme.js";
 import { Card, Sect } from "../ui/components.js";
 import {
-  CLIMB_DISCIPLINES, ASCENT_STYLES,
+  CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS, VENUES,
   V_GRADES, YDS_GRADES,
   gradeRank, weekKey,
   disciplineMeta,
@@ -86,7 +86,17 @@ function clamberFilter(activities, days) {
 
 export function ClimbingAnalysisView({ activities = [] }) {
   const [pyramidDiscipline, setPyramidDiscipline] = useState("boulder");
+  const [pyramidVenue,      setPyramidVenue]      = useState("all");  // "all" | "indoor" | "outdoor"
+  const [pyramidWall,       setPyramidWall]       = useState("all");  // "all" | "commercial" | "moonboard" | "kilter"
   const [pyramidWindow,     setPyramidWindow]     = useState("90");
+
+  // Wall filter only applies to indoor boulders. For everything else
+  // the row hides and the filter auto-resets to "all" so a hidden
+  // selection can't silently exclude data.
+  const wallFilterActive = pyramidDiscipline === "boulder" && pyramidVenue !== "outdoor";
+  useEffect(() => {
+    if (!wallFilterActive && pyramidWall !== "all") setPyramidWall("all");
+  }, [wallFilterActive, pyramidWall]);
 
   const allClimbs = useMemo(
     () => activities.filter(a => a.type === "climbing"),
@@ -159,13 +169,25 @@ export function ClimbingAnalysisView({ activities = [] }) {
   }, [allClimbs]);
 
   // ── Grade pyramid ──
-  // Group clean sends by grade for the selected discipline + window.
-  // Returns rows ordered easiest→hardest so the bar chart reads as a
-  // visual pyramid (lots at the bottom, fewer at the top).
+  // Group clean sends by grade for the selected discipline + window
+  // + venue + wall. Returns rows ordered easiest→hardest so the bar
+  // chart reads as a visual pyramid (lots at the bottom, fewer at the
+  // top). Venue/wall default to "all"; legacy entries without a venue
+  // field are treated as indoor (the historical default before the
+  // venue picker existed) so they still show up under indoor filters.
   const pyramid = useMemo(() => {
     const windowDef = WINDOWS.find(w => w.key === pyramidWindow);
     const climbs = clamberFilter(allClimbs, windowDef.days)
       .filter(c => c.discipline === pyramidDiscipline)
+      .filter(c => {
+        if (pyramidVenue === "all") return true;
+        const v = c.venue || "indoor";  // legacy fallback
+        return v === pyramidVenue;
+      })
+      .filter(c => {
+        if (!wallFilterActive || pyramidWall === "all") return true;
+        return c.wall === pyramidWall;
+      })
       .filter(isCleanSend);
     const counts = {};
     for (const c of climbs) {
@@ -178,7 +200,7 @@ export function ClimbingAnalysisView({ activities = [] }) {
       .map(g => ({ grade: g, count: counts[g], rank: gradeRank(g) }))
       .sort((a, b) => a.rank - b.rank);
     return { rows, total: climbs.length };
-  }, [allClimbs, pyramidDiscipline, pyramidWindow]);
+  }, [allClimbs, pyramidDiscipline, pyramidVenue, pyramidWall, wallFilterActive, pyramidWindow]);
 
   // ── Hardest send over time ──
   // For each ISO Monday week-key, find the max grade rank among clean
@@ -327,7 +349,8 @@ export function ClimbingAnalysisView({ activities = [] }) {
               ))}
             </div>
           </div>
-          <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
+          {/* Discipline (boulder / top rope / lead) — sticky single-select. */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
             {CLIMB_DISCIPLINES.map(d => (
               <button key={d.key} onClick={() => setPyramidDiscipline(d.key)} style={{
                 padding: "4px 10px", borderRadius: 12, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
@@ -336,10 +359,48 @@ export function ClimbingAnalysisView({ activities = [] }) {
               }}>{d.emoji} {d.label}</button>
             ))}
           </div>
+
+          {/* Venue (all / indoor / outdoor) — defaults to "all" so the
+              filter is opt-in. Legacy entries without a venue field
+              are treated as indoor by the pyramid useMemo so they
+              don't disappear when the indoor filter is on. */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
+            {[{ key: "all", label: "All venues", emoji: "" }, ...VENUES].map(v => {
+              const active = pyramidVenue === v.key;
+              return (
+                <button key={v.key} onClick={() => setPyramidVenue(v.key)} style={{
+                  padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  background: active ? C.purple : C.border,
+                  color:      active ? "#fff" : C.muted,
+                }}>{v.emoji ? `${v.emoji} ` : ""}{v.label}</button>
+              );
+            })}
+          </div>
+
+          {/* Wall (commercial / moonboard / kilter) — only meaningful
+              for indoor boulders. Hidden otherwise; the useEffect
+              above auto-resets pyramidWall to "all" when this row
+              disappears so a hidden selection can't silently exclude
+              data on a later visit. */}
+          {wallFilterActive && (
+            <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
+              {[{ key: "all", label: "All walls", emoji: "" }, ...BOULDER_WALLS].map(w => {
+                const active = pyramidWall === w.key;
+                return (
+                  <button key={w.key} onClick={() => setPyramidWall(w.key)} style={{
+                    padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                    background: active ? C.purple : C.border,
+                    color:      active ? "#fff" : C.muted,
+                  }}>{w.emoji ? `${w.emoji} ` : ""}{w.label}</button>
+                );
+              })}
+            </div>
+          )}
+
           {pyramid.rows.length === 0 ? (
             <div style={{ color: C.muted, fontSize: 12, padding: "12px 0" }}>
-              No clean sends in this discipline + window. Switch the discipline
-              or widen the window above.
+              No clean sends match these filters. Widen the window or
+              loosen the venue / wall filter above.
             </div>
           ) : (
             <>
