@@ -410,6 +410,25 @@ export default function App() {
     deleteActivityCloud(id);
   }, []);
 
+  // Edit an existing activity. Same id → same Supabase row → upsert
+  // replaces the cloud copy on conflict. Used by the History tab's
+  // climb editor so you can fix a mis-typed grade or wrong date
+  // without deleting + re-logging.
+  const updateActivity = useCallback((id, updates) => {
+    let updated = null;
+    setActivities(prev => {
+      const next = prev.map(a => {
+        if (a.id !== id) return a;
+        const merged = { ...a, ...updates, id: a.id };
+        updated = merged;
+        return merged;
+      });
+      saveLS(LS_ACTIVITY_KEY, next);
+      return next;
+    });
+    if (updated) pushActivity(updated);
+  }, []);
+
 
   // ── Tindeq ────────────────────────────────────────────────
   const tindeq = useTindeq();
@@ -746,6 +765,7 @@ export default function App() {
           onNoteChange={handleNoteChange}
           activities={activities}
           onDeleteActivity={deleteActivity}
+          onUpdateActivity={updateActivity}
           defaultWorkouts={DEFAULT_WORKOUTS}
           onDeleteWorkoutSession={deleteWorkoutSession}
           onDownloadWorkoutCSV={downloadWorkoutCSV}

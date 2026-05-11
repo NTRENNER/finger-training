@@ -39,7 +39,7 @@ export function HistoryView({
   onDeleteSession, onUpdateSession,
   onDeleteRep, onUpdateRep, onAddRep,
   notes = {}, onNoteChange,
-  activities = [], onDeleteActivity = () => {},
+  activities = [], onDeleteActivity = () => {}, onUpdateActivity = () => {},
   defaultWorkouts = {},
   onDeleteWorkoutSession = () => {},
   onDownloadWorkoutCSV = () => {},
@@ -361,6 +361,7 @@ export function HistoryView({
             .slice()
             .sort((a, b) => (b.date || "").localeCompare(a.date || ""))}
           onDeleteActivity={onDeleteActivity}
+          onUpdateActivity={onUpdateActivity}
         />
       )}
       {domain === "fingers" && <>
