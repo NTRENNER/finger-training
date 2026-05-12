@@ -420,6 +420,7 @@ function ClimbingLogCard({ activities = [], onLog }) {
 function ContinuousPickCard({
   history, grip, freshMap, threeExpPriors,
   GOAL_CONFIG, unit, onApplyPlan,
+  hand = "Both",  // session config's selected hand — drives the total-time math
 }) {
   const rec = useMemo(
     () => grip
@@ -597,7 +598,20 @@ function ContinuousPickCard({
         {whyText}
       </div>
 
-      {/* Protocol summary strip — current reps/rest at a glance */}
+      {/* Protocol summary strip — current reps/rest at a glance.
+          The "Time" cell is elapsed clock time including rests
+          (formerly labeled "Total" in seconds, which read as
+          time-under-tension). Doubled for Both-mode since the
+          runner does the full L set then the full R set; suffix
+          " (both)" makes the doubling visible at a glance. */}
+      {(() => {
+        const perHandSec = reps * rec.T + (reps - 1) * rest;
+        const both = hand === "Both";
+        const totalSec = both ? perHandSec * 2 : perHandSec;
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
+        return (
       <div style={{
         display: "flex", gap: 6, marginBottom: 12,
         background: C.bg, borderRadius: 10, padding: "10px 14px", alignItems: "center",
@@ -605,7 +619,7 @@ function ContinuousPickCard({
         {[
           { label: "Hangs", value: reps },
           { label: "Rest",  value: `${rest}s` },
-          { label: "Total", value: `~${reps * rec.T + (reps - 1) * rest}s` },
+          { label: "Time",  value: timeStr },
         ].map(({ label, value }, i, arr) => (
           <React.Fragment key={label}>
             <div style={{ textAlign: "center", flex: 1 }}>
@@ -616,6 +630,8 @@ function ContinuousPickCard({
           </React.Fragment>
         ))}
       </div>
+        );
+      })()}
 
       {/* Protocol options — always visible. Defaults track the
           recommendation; sliders override locally and stick until
@@ -892,6 +908,7 @@ export function SetupView({
       <ContinuousPickCard
         history={history}
         grip={config.grip}
+        hand={config.hand}
         freshMap={freshMap}
         threeExpPriors={threeExpPriors}
         GOAL_CONFIG={GOAL_CONFIG}
