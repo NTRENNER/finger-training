@@ -78,18 +78,53 @@ describe("externalLoadModifier", () => {
   });
 
   test("recent climbing depresses power more than endurance", () => {
-    // Use yesterday — avoids TZ edge case where today-as-UTC parses to
-    // the future relative to local "now" inside the function.
+    // Yesterday avoids TZ edge cases. RPE drives session fatigue under
+    // the new logic, so we put a moderate session in to get a signal.
     const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const acts = [{ type: "climbing", date: yday }];
+    const acts = [
+      { type: "climbing", date: yday, rpe: 8 },
+      { type: "climbing", date: yday, rpe: 7 },
+      { type: "climbing", date: yday, rpe: 7 },
+      { type: "climbing", date: yday, rpe: 8 },
+    ];
     const power = externalLoadModifier("power", acts);
     const end   = externalLoadModifier("endurance", acts);
     expect(power).toBeLessThan(end);
+    // Both should be < 1 — climbing happened recently with real load.
+    expect(power).toBeLessThan(1.0);
+    expect(end).toBeLessThan(1.0);
+  });
+
+  test("low-RPE warmup day barely impacts the engine", () => {
+    const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const warmupActs = [
+      { type: "climbing", date: yday, rpe: 3 },
+      { type: "climbing", date: yday, rpe: 3 },
+    ];
+    const power = externalLoadModifier("power", warmupActs);
+    // Fatigue floor = 1, decayed by ~50% (yesterday ≈ 24h ago) →
+    // ~0.5 effective fatigue. Power suppression at 10 is 0.60 — so
+    // at effective 0.5 we expect only ~3% scale-down.
+    expect(power).toBeGreaterThan(0.95);
+  });
+
+  test("high-volume RPE-7 session crushes more than single RPE-9 attempt", () => {
+    // The whole point of the RPE-aware refactor. 1 climb at RPE 9 vs
+    // 8 climbs at RPE 7. The 8x7 session should leave you more cooked
+    // → smaller modifier (more suppression).
+    const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const oneMaxEffort = [{ type: "climbing", date: yday, rpe: 9 }];
+    const volumeSlogfest = Array.from({ length: 8 }, () => ({
+      type: "climbing", date: yday, rpe: 7,
+    }));
+    const oneAttemptMod = externalLoadModifier("power", oneMaxEffort);
+    const volumeMod = externalLoadModifier("power", volumeSlogfest);
+    expect(volumeMod).toBeLessThan(oneAttemptMod);
   });
 
   test("ignores non-climbing activities", () => {
     const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const acts = [{ type: "rest", date: yday }];
+    const acts = [{ type: "rest", date: yday, rpe: 9 }];
     expect(externalLoadModifier("power", acts)).toBe(1.0);
   });
 });

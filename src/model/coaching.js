@@ -54,6 +54,9 @@ import { ymdLocal } from "../util.js";
 import { ZONE_REF_T, ZONE_KEYS, zoneOf } from "./zones.js";
 import { getZoneStaleness, stalenessBoost } from "./lockout.js";
 import {
+  computeSessionFatigue, mostRecentClimbDate, fatigueToModifier,
+} from "./climbingFatigue.js";
+import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
 import {
@@ -99,36 +102,24 @@ export function recencyPenalty(zone, history, grip) {
 }
 
 // External load (climbing) adds systemic fatigue that the in-session
-// rep timing alone doesn't fully capture. Recent climbing biases
-// against Power most heavily, Endurance least.
+// rep timing alone doesn't fully capture. Now RPE-aware: the most
+// recent climbing session's per-climb RPEs aggregate into a 1-10
+// session fatigue scalar (climbingFatigue.js), which combines with
+// hours-ago to scale per-zone prescriptions. One max-effort attempt
+// at RPE 9 (low session fatigue) and an hour of moderate RPE 7
+// volume (high session fatigue) used to look identical here — they
+// shouldn't.
 export function externalLoadModifier(zone, activities) {
   if (!activities || activities.length === 0) return 1.0;
-  const today = ymdLocal();
-  const todayMs = new Date(today).getTime();
-  let mostRecentClimbHoursAgo = Infinity;
-  for (const a of activities) {
-    if (a.type !== "climbing") continue;
-    if (!a.date) continue;
-    const aMs = new Date(a.date).getTime();
-    const hoursAgo = (todayMs - aMs) / 3600000;
-    if (hoursAgo >= 0 && hoursAgo < mostRecentClimbHoursAgo) {
-      mostRecentClimbHoursAgo = hoursAgo;
-    }
-  }
-  if (mostRecentClimbHoursAgo > 48) return 1.0;
-  // Per-zone post-climb readiness: the more PCr/short-duration the
-  // zone, the more it benefits from (and tolerates) climbing residual
-  // fatigue. Long-duration aerobic work is most affected by a fresh
-  // climbing session because it taxes the same recovery systems.
-  const baseReduction =
-      zone === "max_strength"        ? 0.3  // can train Max Strength surprisingly soon — neural drive recovers fast
-    : zone === "power"               ? 0.4
-    : zone === "power_strength"      ? 0.55
-    : zone === "strength"            ? 0.7
-    : zone === "strength_endurance"  ? 0.8
-    :                                  0.9; // endurance — wants the most recovery
-  const recoveryFraction = mostRecentClimbHoursAgo / 48;
-  return baseReduction + (1 - baseReduction) * recoveryFraction;
+  const todayDate = new Date();
+  const todayMs = todayDate.getTime();
+  // Find the most recent climbing date within the last 3 days.
+  const recentDate = mostRecentClimbDate(activities, todayDate, 3);
+  if (!recentDate) return 1.0;
+  const hoursAgo = (todayMs - Date.parse(recentDate)) / 3600000;
+  if (hoursAgo < 0 || hoursAgo > 48) return 1.0;
+  const fatigue = computeSessionFatigue(activities, recentDate);
+  return fatigueToModifier(zone, fatigue, hoursAgo);
 }
 
 // For (hand, grip, target T), compute mean residual between the three-exp
