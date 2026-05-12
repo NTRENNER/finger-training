@@ -50,8 +50,7 @@ import { fatigueDose, fatigueAfterRest } from "../model/fatigue.js";
 import {
   isShortfall,
   estimateRefWeight,
-  prescribedLoad,
-  empiricalPrescription,
+  prescription,
   suggestWeight,
 } from "../model/prescription.js";
 
@@ -111,18 +110,16 @@ export function useSessionRunner({
   // ── Start session ───────────────────────────────────────────
   // refWeights drives the in-workout "Rep 1 suggested weight" display
   // and the weight that gets recorded against each rep. Same prescription
-  // chain as the Setup card's "Train at" cell so the two views match
-  // to the kg: empirical-first (anchored to user's most recent rep 1),
-  // then per-grip three-exp curve, then cross-grip three-exp, then
-  // historical weighted average as the last-resort fallback.
+  // chain as the Setup card's "Train at" cell — single unified call to
+  // prescription() which internally walks anchored-curve → unanchored-curve
+  // → anchored-linear → historical, returning whichever path has data.
   const startSession = useCallback(() => {
     const sid = uid();
     const rw = {};
     ["L", "R"].forEach(h => {
-      rw[h] = empiricalPrescription(history, h, config.grip, config.targetTime, { threeExpPriors })
-           ?? prescribedLoad(history, h, config.grip, config.targetTime, freshMap, { threeExpPriors })
-           ?? prescribedLoad(history, h, null,        config.targetTime, freshMap, { threeExpPriors })
-           ?? estimateRefWeight(history, h, config.grip, config.targetTime);
+      const p = prescription(history, h, config.grip, config.targetTime,
+        { freshMap, threeExpPriors });
+      rw[h] = p ? p.value : estimateRefWeight(history, h, config.grip, config.targetTime);
     });
     const startedAt = nowISO();
     setSessionId(sid);

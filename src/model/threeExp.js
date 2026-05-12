@@ -30,10 +30,8 @@
 // established three-exp as the empirical winner across every λ tested
 // at the time. Three-exp is now used for:
 //     - F-D chart primary curve (bold purple solid line)
-//     - prescriptionPotential.value (the gap-diagnostic ceiling)
-//     - prescribedLoad (curve-derived prescription)
-//     - empiricalPrescription (scale-by-residual against the per-grip
-//       three-exp curve)
+//     - prescription() value AND potential (anchored + unanchored
+//       evaluations of the same per-grip three-exp fit)
 //     - coaching.js residual signal (zoneResidualFactor)
 //     - limiter.js cross-zone leave-one-out residual
 

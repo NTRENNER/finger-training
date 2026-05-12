@@ -19,25 +19,24 @@
 // points at that duration (the user might have held longer if pushed,
 // but we accept the approximation rather than re-collecting history).
 //
-// HIERARCHY (post Monod-removal, May 2026):
-//   - empiricalPrescription = anchor to most recent rep 1; PRIMARY
-//     prescription path (what to train at today). Uses three-exp
-//     scale-by-residual (curve shape from per-grip fit, amplitude
-//     anchored to most recent rep). Falls back to a linear-scale
-//     heuristic when no per-grip three-exp prior exists yet.
-//   - prescribedLoad = curve-derived FALLBACK when no recent rep 1
-//     exists. Uses fitThreeExpAmps on freshMap-adjusted loads with
-//     the per-grip prior. Returns null if no prior is available
-//     (caller falls back to estimateRefWeight).
-//   - prescriptionPotential = three-exp ceiling for the gap diagnostic.
-//     Pure three-exp; returns null if no prior is available.
-//   - estimateRefWeight = historical weighted-average emergency fallback
-//     (no model fit at all; last-resort cold start).
-//
-// The gap between empirical (what you do) and potential (what you
-// could) is the training opportunity. See model/coaching.js for
-// the engine that scores zones using gap × intensity × recency ×
-// external × residual against the three-exp curve.
+// UNIFIED PRESCRIPTION (May 2026 — collapse of empirical/prescribed/
+// potential trichotomy):
+// One function, prescription(history, hand, grip, T, opts), answers
+// "what load at this T?" by combining curve_shape × amplitude_anchor:
+//   - curve_shape comes from the three-exp fit on this (hand, grip)
+//     with prior shrinkage. It's stable across sessions — the *shape*
+//     of the F-D curve doesn't move much with one new rep.
+//   - amplitude_anchor = F_actual / curve(T_actual) for the most
+//     recent rep 1 at any T. A great session at T=160s lifts the
+//     amplitude scalar; the curve shape projects that lift across
+//     every T proportionally. Cross-zone learning is intrinsic.
+// Returns { value, potential, scale, anchor, reliability, source }
+// so callers get both the anchored prescription (value) and the
+// unscaled curve ceiling (potential) from a single fit. The gap
+// diagnostic is just (potential - value) / value, equivalent to
+// 1/scale - 1.
+// Legacy estimateRefWeight remains as the last-resort fallback when
+// no per-grip prior exists yet AND no anchor is available.
 
 import { clamp, ymdLocal } from "../util.js";
 import {
@@ -309,88 +308,75 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// LOAD AUTO-PRESCRIPTION from fitted three-exp curve
+// UNIFIED PRESCRIPTION  (PRIMARY coaching path)
 // ─────────────────────────────────────────────────────────────
-// FALLBACK path: when no recent rep 1 exists at this exact scope (so
-// empiricalPrescription returns null), this gives a curve-derived
-// prescription using fitThreeExpAmps on freshMap-adjusted loads.
+// Returns the load to TRAIN AT for a given (hand, grip, T), plus the
+// unscaled curve "potential" for the gap diagnostic, derived from a
+// SINGLE three-exp fit. Replaces the prior empiricalPrescription /
+// prescribedLoad / prescriptionPotential trichotomy with one function.
 //
-// Train-to-failure data model (May 2026): every rep with valid
-// actual_time_s is a (T, F) data point at (actual_time_s, freshLoad).
-// The legacy `failed` filter is gone — successes and failures both
-// count as failure data points, since under train-to-failure every
-// rep ends in physical failure (the prescribed target is just our
-// prediction of when that failure will occur). The success-floor
-// iteration is therefore unnecessary.
+// Architecture (May 2026 — curve-trust collapse):
 //
-// Three-exp is the only F-D model. Per-grip prior is required for
-// the three-exp shrinkage to mean anything; without it the fit is
-// unstable at small N. When no per-grip prior exists yet (cold start),
-// returns null and the caller falls back to estimateRefWeight.
-export function prescribedLoad(history, hand, grip, targetDuration, freshMap = null, opts = {}) {
-  if (!history || !targetDuration) return null;
-  const { threeExpPriors = null } = opts;
-  const handMatch = r =>
-    r.hand === hand &&
-    (!grip || r.grip === grip) &&
-    r.actual_time_s > 0 &&
-    effectiveLoad(r) > 0;
-
-  // Every valid rep is a failure data point under the train-to-failure
-  // model. Drop the success/failure dichotomy at the fit level.
-  const points = history.filter(handMatch);
-  if (points.length < 2) return null;
-
-  const fmap = freshMap || buildFreshLoadMap(history);
-
-  // Try three-exp first (the governing model). Requires a per-grip prior
-  // for the shrinkage to be meaningful; without one the fit is unstable
-  // at small N.
-  const prior = (grip && threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
-  if (prior && (prior[0] + prior[1] + prior[2]) > 0) {
-    const tePts = points.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
-    const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(points.length, 1);
-    const amps = fitThreeExpAmps(tePts, { prior, lambda });
-    if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
-      const baseLoad = predForceThreeExp(amps, targetDuration);
-      if (baseLoad > 0) return Math.round(baseLoad * 10) / 10;
-    }
-  }
-
-  // No per-grip prior available — return null. Caller falls back to
-  // estimateRefWeight (historical weighted average) for the genuine
-  // cold-start case. We don't fit three-exp without a prior because
-  // small-N unconstrained fits can collapse onto degenerate mixes
-  // (most amplitude in one component) that don't generalize.
-  return null;
-}
-
-// ─────────────────────────────────────────────────────────────
-// EMPIRICAL PRESCRIPTION  (PRIMARY coaching path)
-// ─────────────────────────────────────────────────────────────
-// Returns the load to ACTUALLY TRAIN at next session, anchored to
-// the user's most recent rep 1 outcome at this exact scope rather
-// than a global curve extrapolation.
+//   value      = curve_shape(T) × amplitude_anchor
+//   potential  = curve_shape(T)                       (anchor = 1.0)
+//   scale      = F_anchor / curve_shape(T_anchor)
 //
-// Why empirical-first: the curve fit is a global model. At extreme
-// zones (Power, Endurance) it can extrapolate aggressively, prescribing
-// 2x what the user has actually proven they can do. The empirical
-// anchor keeps prescriptions grounded in real recent performance.
+// curve_shape comes from the three-exp fit on (hand, grip) with prior
+// shrinkage — it gives the *relative* force across all T values and
+// is stable across sessions.
 //
-// Returns null if no recent rep 1 exists; caller falls back to
-// prescribedLoad() in that case (cold start).
+// amplitude_anchor is the scalar shift derived from the user's MOST
+// RECENT rep 1 at ANY T, this (hand, grip), within the lookback
+// window. A great session at T=160s lifts the amplitude scalar; the
+// curve shape then projects that lift to every T proportionally —
+// cross-zone learning is intrinsic. No more "exact T match" gate.
+//
+// The gap diagnostic collapses to (potential − value) / value, which
+// is exactly 1/scale − 1. Positive gap = user is currently below the
+// curve's amplitude (limiter signal — adaptation room). Negative gap
+// = user is exceeding the curve's amplitude (strength signal — already
+// at or above modeled potential).
+//
+// Returns:
+//   {
+//     value:       <number>  anchored prescription, kg
+//     potential:   <number>  unscaled curve, kg
+//     scale:       <number>  amplitude anchor (1.0 if no anchor)
+//     anchor:      { T, F, date } | null
+//     reliability: "well-supported" | "marginal" | "extrapolation"
+//     source:      "anchored-curve"  | "unanchored-curve"
+//                | "anchored-linear" | "historical" | "none"
+//   }
+//   or null if there's not even a historical fallback.
+//
+// Sources, in priority order:
+//   anchored-curve    — per-grip prior available, recent rep 1 anchor
+//                       found. value = curve(T) × scale.
+//   unanchored-curve  — per-grip prior available, no recent anchor.
+//                       value = curve(T), scale = 1.0.
+//   anchored-linear   — no per-grip prior (cold start), recent rep 1
+//                       anchor found. value scales by duration ratio
+//                       (Path 2 of the old empiricalPrescription).
+//   historical        — no prior, no anchor. value = estimateRefWeight
+//                       (weighted-recent average near target T).
+//   none              — nothing usable; returns null.
+
 export const EMPIRICAL_LOOKBACK_DAYS = 30;
 
-export function empiricalPrescription(history, hand, grip, targetDuration, opts = {}) {
+export function prescription(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
-  const { threeExpPriors = null } = opts;
+  const { freshMap = null, threeExpPriors = null } = opts;
+
+  // Anchor: most recent rep 1 (any T) at this (hand, grip), within
+  // EMPIRICAL_LOOKBACK_DAYS. Earlier code matched on EXACT
+  // target_duration; the unified prescription deliberately drops that
+  // — a recent overshoot at any T is a legitimate amplitude signal
+  // for every T via the curve shape.
   const cutoffMs = Date.now() - EMPIRICAL_LOOKBACK_DAYS * 86400 * 1000;
   const cutoff = ymdLocal(new Date(cutoffMs));
-
   const sessionRep1 = new Map();
   for (const r of history) {
     if (r.hand !== hand || r.grip !== grip) continue;
-    if (r.target_duration !== targetDuration) continue;
     if ((r.rep_num || 1) !== 1) continue;
     if (!(r.actual_time_s > 0)) continue;
     if (!(loadedWeight(r) > 0)) continue;
@@ -398,133 +384,106 @@ export function empiricalPrescription(history, hand, grip, targetDuration, opts 
     const sid = r.session_id || r.date || "unknown";
     sessionRep1.set(sid, r);
   }
-  if (sessionRep1.size === 0) return null;
-
   const rep1s = [...sessionRep1.values()]
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  const last = rep1s[0];
-  const F_actual = loadedWeight(last);
-  const T_actual = last.actual_time_s;
-  const T_target = targetDuration;
+  const anchorRep = rep1s[0] || null;
+  const anchor = anchorRep ? {
+    T: anchorRep.actual_time_s,
+    F: loadedWeight(anchorRep),
+    date: anchorRep.date,
+  } : null;
 
-  // Train-to-failure model (May 2026): every rep ends in physical
-  // failure, so T_actual IS the time-to-failure regardless of how it
-  // compares to target. The single path below handles both directions:
-  //
-  //   T_actual > T_target → curve will scale UP (you held longer than
-  //                          predicted; your physiology exceeds the
-  //                          previous fit; bump load at T_target)
-  //   T_actual < T_target → curve will scale DOWN (you failed earlier
-  //                          than predicted; reduce load at T_target)
-  //   T_actual ≈ T_target → curve is well-calibrated; scale ≈ 1.0
-  //
-  // Three-exp scale-by-residual is the principled way to do this:
-  // fit per-grip curve shape, anchor amplitude to the most recent
-  // (T_actual, F_actual), evaluate at T_target.
-  //
-  // The success/failure dichotomy that previously gated this branch
-  // is gone — every rep is a data point regardless of its `failed`
-  // flag.
+  // Try the three-exp curve fit. Requires a per-grip prior to anchor
+  // the shrinkage; without one, small-N fits collapse onto degenerate
+  // mixes and we fall through to the cold-start paths.
   const points = history.filter(r =>
     r.hand === hand && r.grip === grip
     && r.actual_time_s > 0 && effectiveLoad(r) > 0
   );
-
-  // Path 1: three-exp scale-by-residual
   const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
-  if (prior && (prior[0] + prior[1] + prior[2]) > 0 && points.length >= 1) {
-    const tePts = points.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
+  const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
+
+  if (hasPrior && points.length >= 1) {
+    const fmap = freshMap || buildFreshLoadMap(history);
+    const tePts = points.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
     const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(points.length, 1);
     const amps = fitThreeExpAmps(tePts, { prior, lambda });
     if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
-      const F_pred_actual = predForceThreeExp(amps, T_actual);
-      if (F_pred_actual > 0) {
-        const scale = F_actual / F_pred_actual;
-        // Sanity bound: if the recent rep is more than 50% off the
-        // curve in either direction, the curve is likely a poor
-        // anchor — fall through to the linear scale instead.
-        if (scale >= 0.5 && scale <= 2.0) {
-          const F_pred_target = predForceThreeExp(amps, T_target);
-          const next = F_pred_target * scale;
-          if (next > 0) return Math.round(next * 10) / 10;
+      const potentialRaw = predForceThreeExp(amps, targetDuration);
+      if (potentialRaw > 0) {
+        // Compute amplitude anchor from the most recent rep 1, if any.
+        // No clamp on scale — per user direction (May 2026), freak reps
+        // are unlikely under the train-to-failure model and we want the
+        // engine to react to genuine recent performance.
+        let scale = 1.0;
+        let source = "unanchored-curve";
+        if (anchor) {
+          const F_pred_anchor = predForceThreeExp(amps, anchor.T);
+          if (F_pred_anchor > 0) {
+            scale = anchor.F / F_pred_anchor;
+            source = "anchored-curve";
+          }
         }
+        const valueRaw = potentialRaw * scale;
+
+        // Reliability of the curve PREDICTION at targetDuration —
+        // how interpolative vs extrapolative the (hand, grip) data
+        // is at that T. Independent of whether the anchor is present.
+        const within20 = points.filter(r =>
+          Math.abs(r.actual_time_s - targetDuration) / targetDuration <= 0.20
+        ).length;
+        const within50 = points.filter(r =>
+          Math.abs(r.actual_time_s - targetDuration) / targetDuration <= 0.50
+        ).length;
+        const reliability = within20 >= 1 ? "well-supported"
+                          : within50 >= 1 ? "marginal"
+                          :                 "extrapolation";
+
+        return {
+          value:       Math.round(valueRaw * 10) / 10,
+          potential:   Math.round(potentialRaw * 10) / 10,
+          scale,
+          anchor,
+          reliability,
+          source,
+        };
       }
     }
   }
 
-  // Path 2 (cold start): linear scale by duration ratio. Used only
-  // when no per-grip three-exp prior exists yet — the user just
-  // started training this grip. As soon as enough data accumulates
-  // for buildThreeExpPriors() to seed a per-grip prior, Path 1 takes
-  // over and the curve shape kicks in.
-  const scale = Math.max(0.7, T_actual / T_target);
-  return Math.round(F_actual * scale * 10) / 10;
-}
+  // Cold start: no per-grip prior or the curve fit failed. Fall back
+  // to the linear-scale path if we have an anchor — it's the same Path 2
+  // the old empiricalPrescription used: F_target = F_actual × T_actual/T_target,
+  // floor at 0.7 to keep prescriptions from collapsing on a short rep.
+  if (anchor) {
+    const linScale = Math.max(0.7, anchor.T / targetDuration);
+    const v = anchor.F * linScale;
+    return {
+      value:       Math.round(v * 10) / 10,
+      potential:   Math.round(v * 10) / 10,  // no curve to give a separate ceiling
+      scale:       linScale,
+      anchor,
+      reliability: "extrapolation",
+      source:      "anchored-linear",
+    };
+  }
 
-// ─────────────────────────────────────────────────────────────
-// PRESCRIPTION POTENTIAL  (the "what's possible" diagnostic)
-// ─────────────────────────────────────────────────────────────
-// Returns the curve-derived ceiling at a given (hand, grip, T):
-// what the model thinks the user's physiology could support if
-// balanced. Used as the diagnostic ceiling for the gap calculation.
-//
-// Returns { value, reliability } or null.
-//
-// `value` is the three-exp curve's prediction at (hand, grip, T) using
-// fresh-adjusted loads (within-set fatigue removed via freshLoadFor()).
-// Returns null if no per-grip three-exp prior is available — there's
-// no fallback model anymore, just no answer.
-//
-// Reliability classifies how much the prediction is interpolation vs.
-// extrapolation:
-//   well-supported — at least one failure within ±20% of target T
-//   marginal       — at least one failure within ±50% of target T
-//   extrapolation  — no nearby failures; the curve is reaching past
-//                    the data
-//
-// Under the train-to-failure data model (May 2026), every rep with
-// valid actual_time_s is a data point — the success-floor enforcement
-// is no longer needed because there are no "successes" in the lower-
-// bound sense.
-export function prescriptionPotential(history, hand, grip, targetDuration, opts = {}) {
-  if (!history || !hand || !grip || !targetDuration) return null;
-  const { freshMap = null, threeExpPriors = null } = opts;
+  // Last resort: historical weighted-recent average near targetDuration.
+  // No anchor, no curve fit — just give the user something reasonable
+  // based on what they've done historically near this T.
+  const hist = estimateRefWeight(history, hand, grip, targetDuration);
+  if (hist != null && hist > 0) {
+    return {
+      value:       Math.round(hist * 10) / 10,
+      potential:   Math.round(hist * 10) / 10,
+      scale:       1.0,
+      anchor:      null,
+      reliability: "extrapolation",
+      source:      "historical",
+    };
+  }
 
-  const points = history.filter(r =>
-    r.hand === hand && r.grip === grip
-    && r.actual_time_s > 0 && effectiveLoad(r) > 0
-  );
-  if (points.length < 1) return null;
-  if (!threeExpPriors || !threeExpPriors.get) return null;
-
-  const prior = threeExpPriors.get(grip);
-  if (!prior || (prior[0] + prior[1] + prior[2]) <= 0) return null;
-
-  const fmap = freshMap || buildFreshLoadMap(history);
-  const tePts = points.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
-  const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(points.length, 1);
-  const amps = fitThreeExpAmps(tePts, { prior, lambda });
-  if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) return null;
-
-  const value = predForceThreeExp(amps, targetDuration);
-  if (!(value > 0)) return null;
-
-  const within20 = points.filter(r =>
-    Math.abs(r.actual_time_s - targetDuration) / targetDuration <= 0.20
-  ).length;
-  const within50 = points.filter(r =>
-    Math.abs(r.actual_time_s - targetDuration) / targetDuration <= 0.50
-  ).length;
-
-  let reliability;
-  if (within20 >= 1)      reliability = "well-supported";
-  else if (within50 >= 1) reliability = "marginal";
-  else                    reliability = "extrapolation";
-
-  return {
-    value: Math.round(value * 10) / 10,
-    reliability,
-  };
+  return null;
 }
 
 // suggestWeight is a simple display helper used by the in-workout view —

@@ -46,9 +46,9 @@
 // migration). The residual factor uses the same three-exp fit that
 // drives the F-D chart, so the "below the curve" rationale text
 // matches the literal purple curve the user is looking at. The gap
-// uses prescriptionPotential (three-exp) and the trainAt uses
-// empiricalPrescription / prescribedLoad (also three-exp, with a
-// linear-scale fallback when no per-grip prior exists yet).
+// uses prescription().potential (the unscaled three-exp curve) and the
+// trainAt uses prescription().value (the same curve, anchored to the
+// most recent rep 1 via the amplitude scalar).
 
 import { ymdLocal } from "../util.js";
 import { ZONE_REF_T, ZONE_KEYS, zoneOf } from "./zones.js";
@@ -58,7 +58,7 @@ import {
 } from "./threeExp.js";
 import {
   effectiveLoad, freshLoadFor, buildFreshLoadMap,
-  empiricalPrescription, prescribedLoad, prescriptionPotential,
+  prescription,
 } from "./prescription.js";
 
 // Per-zone recovery time-constants (days). Larger tau = slower
@@ -262,10 +262,14 @@ export function coachingRecommendation(history, grip, opts = {}) {
     let bestTrainAt = null;
     let bestResFactor = null;
     for (const hand of ["L", "R"]) {
-      const trainAt = empiricalPrescription(history, hand, grip, t, { threeExpPriors })
-                    ?? prescribedLoad(history, hand, grip, t, freshMap, { threeExpPriors });
-      const pot = prescriptionPotential(history, hand, grip, t, { freshMap, threeExpPriors });
-      if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
+      // Single prescription() call gives both the anchored trainAt
+      // (value) and the unscaled curve ceiling (potential). Skip
+      // candidates where the curve at this T is pure extrapolation —
+      // we don't want to recommend a zone the user has zero data near.
+      const p = prescription(history, hand, grip, t, { freshMap, threeExpPriors });
+      if (!p || p.value == null || p.reliability === "extrapolation") continue;
+      const trainAt = p.value;
+      const pot = { value: p.potential, reliability: p.reliability };
       const gap = (pot.value - trainAt) / trainAt;
       const resFactor = zoneResidualFactor(history, hand, grip, t, ampsByHand[hand], fmap);
       const gapForScore = Math.max(gap, -0.30); // clamp at -30%
@@ -468,7 +472,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
 
   // Sweep T per hand, find argmax score across (hand, T).
   let best = null;
-  for (const [hand, { amps, ratios }] of Object.entries(handFits)) {
+  for (const [hand, { ratios }] of Object.entries(handFits)) {
     for (let T = tMin; T <= tMax; T += tStep) {
       // Gaussian-smoothed local residual ratio at T
       let weightSum = 0;
@@ -495,7 +499,12 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
         best = {
           T,
           hand,
-          loadKg: predForceThreeExp(amps, T),
+          // loadKg is filled in below via prescription() so it carries
+          // the amplitude anchor (most recent rep 1 scale-by-residual)
+          // — same shape the F-D chart shows but lifted to where the
+          // user actually is right now. Matters when the curve fit is
+          // running behind a strong recent session.
+          loadKg: null,
           score,
           residualBoost,
           localRatio,
@@ -509,12 +518,20 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
 
   if (!best) return null;
 
-  // Augment with the OTHER hand's load at T_star for display
-  // ("Train at 92s · L 38 lbs / R 37 lbs").
+  // Anchored loads via the unified prescription() — both the headline
+  // loadKg (for best.hand) and the per-hand display ("L 38 / R 37").
+  // This is the curve_shape × amplitude_anchor product, so a recent
+  // overshoot at any T immediately bumps the prescription at every T.
+  const presOpts = { freshMap: fmap, threeExpPriors };
+  const headPres = prescription(history, best.hand, grip, best.T, presOpts);
+  best.loadKg = headPres ? headPres.value : predForceThreeExp(handFits[best.hand].amps, best.T);
+  best.scale = headPres ? headPres.scale : 1.0;
+  best.anchor = headPres ? headPres.anchor : null;
+
   const loadByHand = {};
-  for (const [hand, { amps }] of Object.entries(handFits)) {
-    const f = predForceThreeExp(amps, best.T);
-    loadByHand[hand] = f > 0 ? f : null;
+  for (const hand of Object.keys(handFits)) {
+    const p = prescription(history, hand, grip, best.T, presOpts);
+    loadByHand[hand] = p && p.value > 0 ? p.value : null;
   }
   best.loadByHand = loadByHand;
   return best;

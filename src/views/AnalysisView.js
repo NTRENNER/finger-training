@@ -31,7 +31,7 @@ import {
   buildThreeExpPriors, computeAUCThreeExp,
 } from "../model/threeExp.js";
 import {
-  empiricalPrescription, prescriptionPotential,
+  prescription,
 } from "../model/prescription.js";
 // (computePersonalResponse import removed — fed the now-gone Train block)
 import { computeLimiterZone } from "../model/limiter.js";
@@ -592,11 +592,10 @@ export function AnalysisView({
         let bestGap = null;
         const handsToCheck = selHand ? [selHand] : ["L", "R"];
         for (const h of handsToCheck) {
-          const trainAt = empiricalPrescription(upTo, h, grip, T, { threeExpPriors });
-          const pot = prescriptionPotential(upTo, h, grip, T, { threeExpPriors });
-          if (trainAt == null || !pot || pot.reliability === "extrapolation") continue;
+          const p = prescription(upTo, h, grip, T, { threeExpPriors });
+          if (!p || p.value == null || p.reliability === "extrapolation") continue;
           // Flipped sign: positive = outperforming model, negative = headroom to grow
-          const gap = (trainAt - pot.value) / pot.value;
+          const gap = (p.value - p.potential) / p.potential;
           if (bestGap == null || gap > bestGap) bestGap = gap;
         }
         row[`${key}_gap`] = bestGap != null ? Math.round(bestGap * 100) : null;
@@ -731,7 +730,7 @@ export function AnalysisView({
 
   // ── Three-exp F-D fit (governing model — see src/model/threeExp.js) ──
   // threeExpPriors memoized earlier in AnalysisView so gapHistory,
-  // prescriptionPotential, and the chart curve all share one fit basis.
+  // prescription(), and the chart curve all share one fit basis.
 
   // Three-exp fit for the current (selHand, selGrip) scope. Uses the
   // same `failures` array that backs cfEstimate, so the fits are
