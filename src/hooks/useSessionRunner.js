@@ -225,7 +225,13 @@ export function useSessionRunner({
     // matching the same preference order effectiveLoad uses for the
     // historical fit pipeline. Keeps live and post-hoc fatigue math
     // looking at the same primitive.
-    const sMax = config.hand === "R" ? sMaxR : sMaxL;
+    //
+    // sMax keys off effectiveHand (the hand that just hung), not
+    // config.hand. In Both mode config.hand === "Both", which would
+    // otherwise fall through to sMaxL even on the right side and
+    // distort the dose calculation against the wrong physiology
+    // — see handleRepDone's effectiveHand resolution above.
+    const sMax = effectiveHand === "R" ? sMaxR : sMaxL;
     const liveLoad = (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
       ? avgForce
       : weight;
