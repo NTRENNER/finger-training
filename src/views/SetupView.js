@@ -58,6 +58,8 @@ import { ZONE_KEYS } from "../model/zones.js";
 import { getZoneStaleness, getRollingSessionPace, ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS } from "../model/lockout.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { coachingRecommendationContinuous } from "../model/coaching.js";
+import { computeSessionFatigue } from "../model/climbingFatigue.js";
+import { ymdLocal } from "../util.js";
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
@@ -395,6 +397,87 @@ function ClimbingLogCard({ activities = [], onLog }) {
       <Btn onClick={handleSave} color={C.green} style={{ width: "100%" }}>
         Log Climb
       </Btn>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// SESSION RPE CARD — confirm/override the derived session fatigue
+// ─────────────────────────────────────────────────────────────
+// Appears when today has ≥1 climb logged. Shows the per-climb-RPE
+// derived session fatigue 1-10 (model/climbingFatigue.js formula)
+// and lets the user override with a single slider. Confirming
+// writes the override to every today's climb row via onSetSessionRPE,
+// which App.js fans out as a session_rpe update + cloud push.
+//
+// Why the override matters: one max-effort attempt at RPE 9 leaves
+// you fresh, an hour of moderate RPE 7 volume leaves you cooked.
+// The formula handles the obvious cases but human judgment captures
+// things the math can't (sleep, food, route reading load).
+function SessionRPECard({ activities, onSetSessionRPE }) {
+  const today = ymdLocal();
+  const todaysClimbs = useMemo(
+    () => (activities || []).filter(a => a?.type === "climbing" && a.date === today),
+    [activities, today]
+  );
+
+  // Existing override (Phase B) on any of today's rows wins over
+  // the derived value, mirroring how the engine reads them.
+  const existingOverride = useMemo(() => {
+    for (const a of todaysClimbs) {
+      const sr = Number(a.session_rpe);
+      if (Number.isFinite(sr) && sr >= 1 && sr <= 10) return Math.round(sr);
+    }
+    return null;
+  }, [todaysClimbs]);
+
+  const derived = useMemo(
+    () => computeSessionFatigue(activities, today),
+    [activities, today]
+  );
+
+  // User's working value while editing. Starts at the existing
+  // override if set, otherwise the derived default.
+  const initial = existingOverride ?? derived ?? 5;
+  const [val, setVal] = useState(initial);
+  // Reset working value when today's climbs change (new climb logged,
+  // override committed, etc.). Cheap to just re-pin to the latest.
+  useEffect(() => { setVal(initial); }, [initial]);
+
+  if (todaysClimbs.length === 0) return null;
+
+  const dirty = val !== initial;
+  const status = existingOverride != null
+    ? `Set to ${existingOverride}`
+    : `Derived from ${todaysClimbs.length} climb${todaysClimbs.length === 1 ? "" : "s"}`;
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Session RPE — today</div>
+        <div style={{ fontSize: 32, fontWeight: 800, color: C.purple, lineHeight: 1 }}>
+          {val}<span style={{ fontSize: 12, color: C.muted, fontWeight: 400, marginLeft: 2 }}>/10</span>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+        {status}. How shot are you now? Drives how much the engine scales finger
+        training in the next 48h.
+      </div>
+      <input
+        type="range" min="1" max="10" step="1"
+        value={val}
+        onChange={e => setVal(Number(e.target.value))}
+        style={{ width: "100%", accentColor: C.purple, marginBottom: 8 }}
+      />
+      {dirty && (
+        <Btn
+          onClick={() => onSetSessionRPE(today, val)}
+          color={C.green}
+          style={{ width: "100%" }}
+        >
+          {existingOverride != null ? "Update" : "Confirm"} Session RPE
+        </Btn>
+      )}
     </Card>
   );
 }
@@ -823,6 +906,7 @@ export function SetupView({
   unit = "lbs",
   onBwSave = () => {},
   activities = [], onLogActivity = () => {},
+  onSetSessionRPE = () => {},
   connectSlot = null,
   GOAL_CONFIG = {}, GRIP_PRESETS = [],
   bodyWeight = null, tindeq = null,
@@ -884,6 +968,7 @@ export function SetupView({
           (returns null if logged within the last 3 days) so it auto-
           collapses when the log is fresh. */}
       <ClimbingLogCard activities={activities} onLog={onLogActivity} />
+      <SessionRPECard activities={activities} onSetSessionRPE={onSetSessionRPE} />
       <BwPrompt unit={unit} onSave={onBwSave} />
 
       {/* Grip Type — still per-grip, the curve is grip-scoped */}

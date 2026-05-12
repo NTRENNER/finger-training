@@ -250,7 +250,8 @@ export async function pushActivity(act) {
       grade:      act.grade      ?? null,
       ascent:     act.ascent     ?? null,
       wall:       act.wall       ?? null,
-      rpe:        Number.isFinite(act.rpe) ? act.rpe : null,
+      rpe:         Number.isFinite(act.rpe) ? act.rpe : null,
+      session_rpe: Number.isFinite(act.session_rpe) ? act.session_rpe : null,
     }, { onConflict: "id" });
     if (error) { console.warn("Supabase activity push:", error.message); return false; }
     return true;
@@ -288,7 +289,8 @@ export async function fetchActivities() {
       if (a.grade      != null) out.grade      = a.grade;
       if (a.ascent     != null) out.ascent     = a.ascent;
       if (a.wall       != null) out.wall       = a.wall;
-      if (a.rpe        != null) out.rpe        = a.rpe;
+      if (a.rpe         != null) out.rpe         = a.rpe;
+      if (a.session_rpe != null) out.session_rpe = a.session_rpe;
       return out;
     });
   } catch (e) {
