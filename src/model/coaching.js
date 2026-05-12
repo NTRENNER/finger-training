@@ -235,12 +235,15 @@ export function coachingRecommendation(history, grip, opts = {}) {
   // avoiding. Computed once outside the loop since it's the same map
   // for every (zone, hand) pair. Soft lockout: 1.0 / 1.4 / 2.0 for
   // ok / warning / stale (and stale-or-never gets the same firm 2×).
-  // Computed across all of `history`, not per-grip, so all-grips
-  // training counts toward keeping a zone fresh — a Crusher Endurance
-  // session keeps Endurance unlocked even if Micro Endurance hasn't
-  // been touched. Aligns with the soft-nag spirit: we want users to
-  // train the zone, not necessarily the (zone, grip) cell.
-  const stalenessMap = getZoneStaleness(history);
+  // Computed PER-GRIP (filter history before the staleness call) since
+  // Crusher and Micro are independent physiological systems with
+  // independent F-D curves — training Crusher endurance does not give
+  // Micro endurance any stimulus, so it shouldn't drop Micro endurance's
+  // staleness boost. The standalone Curve Coverage card on Setup still
+  // uses the all-grips view of getZoneStaleness for its "are you balanced
+  // across zones this year" framing — that's a separate question.
+  const gripHistory = (history || []).filter(r => r?.grip === grip);
+  const stalenessMap = getZoneStaleness(gripHistory);
 
   // Iterate all 6 zones in physiological order. ZONE_KEYS comes from
   // src/model/zones.js so the order stays in sync with the rest of
@@ -435,7 +438,13 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
 
   if (!grip || !history || history.length === 0) return null;
 
-  const stalenessMap = getZoneStaleness(history, today);
+  // PER-GRIP staleness: a Crusher endurance session shouldn't reduce
+  // Micro endurance's staleness boost — they're independent F-D curves.
+  // The Setup tab's Curve Coverage card uses the all-grips view of
+  // getZoneStaleness for its zone-balance framing; here we want the
+  // grip-scoped view so the engine recommends what THIS grip needs.
+  const gripHistory = history.filter(r => r?.grip === grip);
+  const stalenessMap = getZoneStaleness(gripHistory, today);
   const fmap = freshMap || buildFreshLoadMap(history);
   const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
   const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;

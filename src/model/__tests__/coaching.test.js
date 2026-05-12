@@ -454,4 +454,45 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec).not.toBeNull();
     expect(rec.residualBoost).toBe(rec.adaptBoost);
   });
+
+  test("staleness is per-grip — Crusher endurance training doesn't refresh Micro endurance", () => {
+    // Helper: same as buildRep but lets us pick the grip
+    const rep = (hand, grip, T, F, daysAgo = 0) => ({
+      id: `r-${grip}-${hand}-${T}-${daysAgo}`,
+      hand, grip,
+      target_duration: T, actual_time_s: T,
+      avg_force_kg: F,
+      rep_num: 1,
+      date: new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10),
+      session_id: `s-${grip}-${daysAgo}-${T}`,
+    });
+    // History: Crusher trained across all zones recently (none stale on
+    // Crusher), AND Micro trained at short Ts only (50 days ago) so Micro
+    // endurance is genuinely stale. Under pooled staleness the Crusher
+    // endurance training would mask Micro endurance's staleness; under
+    // per-grip staleness Micro endurance still flags as stale and the
+    // engine should pick endurance for Micro.
+    const history = [
+      // Crusher: full coverage today
+      rep("L", "Crusher", 10,  F_curve(10),  0),
+      rep("L", "Crusher", 30,  F_curve(30),  0),
+      rep("L", "Crusher", 70,  F_curve(70),  0),
+      rep("L", "Crusher", 115, F_curve(115), 0),
+      rep("L", "Crusher", 160, F_curve(160), 0),
+      rep("L", "Crusher", 220, F_curve(220), 0),
+      // Micro: short-T only, 50 days ago — endurance window is 35d so
+      // Micro endurance is well past stale.
+      rep("L", "Micro", 10, F_curve(10), 50),
+      rep("L", "Micro", 30, F_curve(30), 50),
+      rep("L", "Micro", 70, F_curve(70), 50),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Micro",
+      { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    // Engine should see Micro endurance as stale and prefer it. Pick
+    // should land in the endurance bucket (T ≥ 180s).
+    expect(rec.zone).toBe("endurance");
+    expect(rec.staleStatus).not.toBe("ok");
+  });
 });
