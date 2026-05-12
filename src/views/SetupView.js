@@ -59,6 +59,10 @@ import { buildThreeExpPriors } from "../model/threeExp.js";
 import { coachingRecommendationContinuous } from "../model/coaching.js";
 import { computeSessionFatigue } from "../model/climbingFatigue.js";
 import { ymdLocal } from "../util.js";
+// PrescribedLoadCard lives in AnalysisView so both Analysis and Setup
+// can render it from a single source. Cross-view import is the smallest
+// diff; if more cards end up shared we can extract to src/views/cards/.
+import { PrescribedLoadCard } from "./AnalysisView.js";
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
@@ -858,6 +862,22 @@ export function SetupView({
         unit={unit}
         onApplyPlan={(plan) => setConfig(c => ({ ...c, ...plan }))}
       />
+
+      {/* Prescribed Load — all 6 zones, both hands, for the selected
+          grip. Same component / data Analysis renders; surfaced here
+          too so you can see the suggestion in context across the
+          whole curve before starting. Hidden until a grip is picked
+          (cross-grip pooled prescriptions aren't meaningful). */}
+      {config.grip && (
+        <PrescribedLoadCard
+          history={history}
+          grip={config.grip}
+          freshMap={freshMap}
+          threeExpPriors={threeExpPriors}
+          unit={unit}
+          GOAL_CONFIG={GOAL_CONFIG}
+        />
+      )}
 
       {/* Curve Coverage moved to Analysis tab — it's a per-zone
           reference view, not a session-prep input, so it lives with

@@ -71,7 +71,9 @@ const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 //
 // Replaces the historical CF+W'/T card retired with the Monod removal
 // (May 2026). Three-exp is the only model now, so no shadow column.
-function PrescribedLoadCard({
+// Exported so SetupView can render the same card under the
+// Recommended Session pick — same data, two render sites.
+export function PrescribedLoadCard({
   history, grip, freshMap, threeExpPriors, unit, GOAL_CONFIG,
 }) {
   const rec = useMemo(
