@@ -144,7 +144,10 @@ export function stalenessBoost(zoneKey, stalenessMap) {
 //                 month one.
 //
 // Session identity comes from `session_id` when available, falling
-// back to `date` for older reps without a session_id.
+// back to `date` for older reps without a session_id. Multiple grips
+// on the same day each get their own session_id and count separately —
+// that's intentional, since Crusher and Micro work load different
+// physiological systems and each "counts" as its own training event.
 export function getRollingSessionPace(history, today = new Date()) {
   const todayMs = today instanceof Date ? today.getTime() : Date.parse(today);
   const ms       = 24 * 60 * 60 * 1000;
