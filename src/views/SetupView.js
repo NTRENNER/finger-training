@@ -54,8 +54,7 @@ import {
   gradesFor, defaultGradeFor,
 } from "../lib/climbing-grades.js";
 
-import { ZONE_KEYS } from "../model/zones.js";
-import { getZoneStaleness, getRollingSessionPace, ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS } from "../model/lockout.js";
+// (ZONE_KEYS + lockout imports removed — CurveCoverageCard moved to Analysis.)
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { coachingRecommendationContinuous } from "../model/coaching.js";
 import { computeSessionFatigue } from "../model/climbingFatigue.js";
@@ -749,154 +748,6 @@ function ContinuousPickCard({
 }
 
 // ─────────────────────────────────────────────────────────────
-// CURVE COVERAGE CARD
-// (renamed from TrainingBalanceCard — May 2026)
-// ─────────────────────────────────────────────────────────────
-// Per-zone data freshness + annual session pace. Under the curve-
-// trust philosophy, this card isn't about "balanced training" as
-// a goal in itself — it's about where the curve has fresh data vs
-// where it's extrapolating from old measurements. Stale zones get
-// score-boosted in the coaching engine because re-sampling those
-// durations tightens the curve fit; never-trained zones are shown
-// because the curve can't be trusted there at all.
-function CurveCoverageCard({ history }) {
-  const staleness = useMemo(() => getZoneStaleness(history), [history]);
-  const pace = useMemo(() => getRollingSessionPace(history), [history]);
-
-  if (pace.current === 0) return null;
-
-  const STATUS_ORDER = { stale: 0, warning: 1, never: 2, ok: 3 };
-  const STATUS_LABEL = {
-    stale:   { color: C.red,    text: "stale"   },
-    warning: { color: C.orange, text: "soon"    },
-    never:   { color: C.muted,  text: "never"   },
-    ok:      { color: C.green,  text: "fresh"   },
-  };
-  const sortedZones = [...ZONE_KEYS].sort((a, b) => {
-    const sa = STATUS_ORDER[staleness[a].status];
-    const sb = STATUS_ORDER[staleness[b].status];
-    if (sa !== sb) return sa - sb;
-    return ZONE_KEYS.indexOf(a) - ZONE_KEYS.indexOf(b);
-  });
-
-  const counts = sortedZones.reduce((acc, k) => {
-    acc[staleness[k].status] = (acc[staleness[k].status] || 0) + 1;
-    return acc;
-  }, {});
-  const staleCount   = counts.stale   || 0;
-  const warningCount = counts.warning || 0;
-  const neverCount   = counts.never   || 0;
-
-  // Pace = projection over the next 365 days at the current rate. For
-  // mature users (≥1 year of history) this equals `pace.current` and
-  // the second line is just confirmation; for newer users it's the
-  // extrapolated forecast. We hide the projection line when the two
-  // numbers match to avoid the redundant "26 of 100 next 12 months"
-  // restating "26 / 100 last 12 months."
-  const onPace      = pace.paceYearEnd >= ANNUAL_SESSION_GOAL;
-  const paceColor   = onPace ? C.green
-                    : pace.paceYearEnd >= ANNUAL_SESSION_GOAL * 0.8 ? C.orange
-                    : C.red;
-  const showPaceLine = pace.paceYearEnd !== pace.current;
-
-  return (
-    <Card style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Coverage</div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-            Where your data is fresh
-          </div>
-        </div>
-        <div style={{ fontSize: 11, color: C.muted, textAlign: "right" }}>
-          <div>
-            <b style={{ color: showPaceLine ? C.text : paceColor }}>
-              {pace.current}
-            </b>
-            {" / "}{ANNUAL_SESSION_GOAL} last 12 months
-          </div>
-          {showPaceLine && (
-            <div style={{ color: paceColor, marginTop: 2 }}>
-              on pace for {pace.paceYearEnd} next 12 months
-            </div>
-          )}
-        </div>
-      </div>
-
-      {(staleCount > 0 || warningCount > 0 || neverCount > 0) && (
-        <div style={{
-          padding: "8px 10px", marginBottom: 12,
-          background: C.bg, borderRadius: 8,
-          border: `1px solid ${staleCount > 0 ? C.red : warningCount > 0 ? C.orange : C.border}40`,
-          fontSize: 11, color: C.muted, lineHeight: 1.5,
-        }}>
-          {staleCount > 0 && (
-            <div>
-              <span style={{ color: C.red, fontWeight: 700 }}>● {staleCount} stale data</span>
-              {warningCount > 0 || neverCount > 0 ? " · " : ""}
-            </div>
-          )}
-          {warningCount > 0 && (
-            <div>
-              <span style={{ color: C.orange, fontWeight: 700 }}>● {warningCount} aging</span>
-              {neverCount > 0 ? " · " : ""}
-            </div>
-          )}
-          {neverCount > 0 && (
-            <div>
-              <span style={{ color: C.muted, fontWeight: 700 }}>● {neverCount} never sampled</span>
-            </div>
-          )}
-          <div style={{ marginTop: 4, fontStyle: "italic" }}>
-            The curve extrapolates where data is stale or missing. The engine prioritizes those durations to keep the fit honest.
-          </div>
-        </div>
-      )}
-
-      <div>
-        {sortedZones.map(k => {
-          const s = staleness[k];
-          const cfg = STATUS_LABEL[s.status];
-          const window = LOCKOUT_WINDOW_DAYS[k];
-          const daysText = s.days == null
-            ? "never sampled"
-            : s.days === 0
-              ? "today"
-              : s.days === 1
-                ? "1 day ago"
-                : `${s.days} days ago`;
-          return (
-            <div key={k} style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              padding: "6px 0",
-              borderBottom: `1px solid ${C.border}`,
-            }}>
-              <div style={{ fontSize: 12, color: C.text }}>
-                {k.replace(/_/g, " · ").replace(/\b\w/g, c => c.toUpperCase())}
-              </div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ fontSize: 11, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
-                  {daysText}
-                </span>
-                <span style={{
-                  fontSize: 9, fontWeight: 700, color: cfg.color,
-                  background: `${cfg.color}1a`,
-                  padding: "2px 6px", borderRadius: 4,
-                  textTransform: "uppercase", letterSpacing: 0.5,
-                  whiteSpace: "nowrap",
-                }}>
-                  {cfg.text} · {window}d
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
 // SETUP VIEW
 // ─────────────────────────────────────────────────────────────
 
@@ -1008,8 +859,10 @@ export function SetupView({
         onApplyPlan={(plan) => setConfig(c => ({ ...c, ...plan }))}
       />
 
-      {/* Curve Coverage — data freshness per zone */}
-      {history.length > 0 && <CurveCoverageCard history={history} />}
+      {/* Curve Coverage moved to Analysis tab — it's a per-zone
+          reference view, not a session-prep input, so it lives with
+          the F-D chart and Prescribed Load card instead of bloating
+          the Setup flow. */}
 
       {/* (BwPrompt moved up to live alongside the climb logger so all
           quick-log inputs sit together near the top of Setup.) */}
