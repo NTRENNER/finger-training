@@ -46,6 +46,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { today, uid, nowISO } from "../util.js";
 import { getBaseline, getBestLoad, calcLevel } from "../model/levels.js";
+import { zoneOf } from "../model/zones.js";
 import { fatigueDose, fatigueAfterRest } from "../model/fatigue.js";
 import {
   isShortfall,
@@ -96,16 +97,21 @@ export function useSessionRunner({
 
   // ── sMax (for fatigue dose calculation) ─────────────────────
   // Use post-session-1 best; fall back to baseline (first session); then 20 kg if no data.
+  // Levels now bucket by zone (not exact target T) — see model/levels.js.
+  // The continuous engine recommends arbitrary T values, so a per-zone
+  // bucket lets sMax pull from the broadest pool of past reps for the
+  // physiological compartment we're about to load.
+  const targetZone = useMemo(() => zoneOf(config.targetTime), [config.targetTime]);
   const sMaxL = useMemo(() => {
-    const best = getBestLoad(history, "L", config.grip, config.targetTime)
-               || getBaseline(history, "L", config.grip, config.targetTime);
+    const best = getBestLoad(history, "L", config.grip, targetZone)
+               || getBaseline(history, "L", config.grip, targetZone);
     return best ? best * 1.2 : 20;
-  }, [history, config.grip, config.targetTime]);
+  }, [history, config.grip, targetZone]);
   const sMaxR = useMemo(() => {
-    const best = getBestLoad(history, "R", config.grip, config.targetTime)
-               || getBaseline(history, "R", config.grip, config.targetTime);
+    const best = getBestLoad(history, "R", config.grip, targetZone)
+               || getBaseline(history, "R", config.grip, targetZone);
     return best ? best * 1.2 : 20;
-  }, [history, config.grip, config.targetTime]);
+  }, [history, config.grip, targetZone]);
 
   // ── Start session ───────────────────────────────────────────
   // refWeights drives the in-workout "Rep 1 suggested weight" display
@@ -142,10 +148,13 @@ export function useSessionRunner({
     const hands = config.hand === "Both" ? ["L","R"] : [config.hand];
     let leveled = false;
     let maxNewLevel = 1;
+    // Zone bucket of the prescribed T — the level cell this session
+    // contributes to. See model/levels.js for the curve-trust grouping.
+    const zone = zoneOf(config.targetTime);
     for (const h of hands) {
       const combined = [...history, ...allReps.filter(r => r.hand === h || r.hand === "B")];
-      const oldLevel = calcLevel(history, h, config.grip, config.targetTime);
-      const newLvl   = calcLevel(combined, h, config.grip, config.targetTime);
+      const oldLevel = calcLevel(history, h, config.grip, zone);
+      const newLvl   = calcLevel(combined, h, config.grip, zone);
       if (newLvl > oldLevel) { leveled = true; maxNewLevel = Math.max(maxNewLevel, newLvl); }
     }
     setLeveledUp(leveled);
