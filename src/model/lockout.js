@@ -54,13 +54,19 @@ export const LOCKOUT_WINDOW_DAYS = {
 export const ANNUAL_SESSION_GOAL = 100;
 
 // Find the most recent training date per zone. Buckets each rep by
-// its target_duration (via zoneOf) and keeps the latest date in each
-// bucket. Returns { zoneKey: "YYYY-MM-DD" | null }.
+// the ACTUAL time-to-failure (zoneOf(actual_time_s)) — under train-to-
+// failure the actual hold IS the duration physiology delivered against,
+// which is what "training a zone" should mean. The prescribed
+// target_duration is just intent; if you target strength_endurance
+// (140s) and hold 222s, you trained endurance, not strength_endurance.
+// Falls back to target_duration only when actual is missing (legacy
+// rows or manual entries without an actual time recorded).
+// Returns { zoneKey: "YYYY-MM-DD" | null }.
 export function getLastZoneTrainedDates(history) {
   const out = Object.fromEntries(ZONE_KEYS.map(k => [k, null]));
   for (const r of history || []) {
     if (!r?.date) continue;
-    const td = r.target_duration > 0 ? r.target_duration : r.actual_time_s;
+    const td = r.actual_time_s > 0 ? r.actual_time_s : r.target_duration;
     if (!(td > 0)) continue;
     const k = zoneOf(td);
     if (!out[k] || r.date > out[k]) out[k] = r.date;
