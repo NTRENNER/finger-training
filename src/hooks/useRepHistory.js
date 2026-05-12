@@ -191,11 +191,60 @@ export function useRepHistory({ user }) {
     saveLS(LS_WORKOUT_SYNCED_KEY, [...s]);
   };
 
+  // Push any local workout sessions whose id isn't marked synced.
+  // Sister-helper to flushQueue for reps — workout sessions don't have
+  // their own persistent retry queue (unlike reps), so we piggyback on
+  // every save attempt to retry stragglers. Returns the number of
+  // sessions successfully pushed during this call (mostly diagnostic).
+  const flushUnsyncedWorkoutSessions = useCallback(async () => {
+    if (!user) return 0;
+    const local = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
+    const deleted = new Set(loadLS(LS_WORKOUT_DELETED_KEY) || []);
+    let pushed = 0;
+    let touched = false;
+    for (const s of local) {
+      if (!s?.id) continue;
+      if (synced.has(s.id)) continue;
+      if (deleted.has(s.id)) continue;
+      const ok = await pushWorkoutSession(s);
+      if (ok) { synced.add(s.id); pushed++; touched = true; }
+    }
+    if (touched) saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
+    return pushed;
+  }, [user]);
+
+  // Push the just-saved session, then opportunistically retry any older
+  // unsynced ones. Before this retry, a single failed push (network
+  // blip, transient auth, etc.) would orphan the session in localStorage
+  // until the next sign-in event re-ran the reconcile useEffect — long
+  // enough that the rotation pointer would drift between devices.
+  // Reps don't have this problem because their failed pushes hit
+  // enqueueReps/flushQueue. Workout sessions piggyback on saves instead.
   const handleWorkoutSessionSaved = useCallback(async (session) => {
     if (!user) return;
     const ok = await pushWorkoutSession(session);
     if (ok) markSynced(session.id);
-  }, [user]);
+    await flushUnsyncedWorkoutSessions();
+  }, [user, flushUnsyncedWorkoutSessions]);
+
+  // Retry on tab refocus + network online. Both are cheap "we might
+  // have just come back from being unreachable" signals — exactly when
+  // a queued push deserves another shot. The reconcile useEffect below
+  // already covers the sign-in path.
+  useEffect(() => {
+    if (!user) return;
+    const retry = () => { flushUnsyncedWorkoutSessions(); };
+    window.addEventListener("online", retry);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") retry();
+    });
+    return () => {
+      window.removeEventListener("online", retry);
+      // visibilitychange listener intentionally not removed — anonymous
+      // closure means the de-dup happens via the user-gate above.
+    };
+  }, [user, flushUnsyncedWorkoutSessions]);
 
   useEffect(() => {
     if (!user) return;
