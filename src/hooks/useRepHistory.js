@@ -232,17 +232,22 @@ export function useRepHistory({ user }) {
   // have just come back from being unreachable" signals — exactly when
   // a queued push deserves another shot. The reconcile useEffect below
   // already covers the sign-in path.
+  //
+  // Both handlers are named (not anonymous arrows) so the cleanup
+  // can pass the same reference to removeEventListener. An earlier
+  // version used an inline arrow on visibilitychange and silently
+  // accumulated a new listener on every user transition.
   useEffect(() => {
     if (!user) return;
     const retry = () => { flushUnsyncedWorkoutSessions(); };
-    window.addEventListener("online", retry);
-    document.addEventListener("visibilitychange", () => {
+    const onVisible = () => {
       if (document.visibilityState === "visible") retry();
-    });
+    };
+    window.addEventListener("online", retry);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.removeEventListener("online", retry);
-      // visibilitychange listener intentionally not removed — anonymous
-      // closure means the de-dup happens via the user-gate above.
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [user, flushUnsyncedWorkoutSessions]);
 
