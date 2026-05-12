@@ -216,9 +216,20 @@ export function useSessionRunner({
     setSessionReps(reps => [...reps, repRecord]);
     addReps([repRecord]);
 
-    // Update fatigue
+    // Update runtime fatigue. Prefer the Tindeq-measured avgForce
+    // when it's valid — actual force delivered is what taxed
+    // physiology, not the prescribed weight. If the user pulled at
+    // 80% of prescription the rep was lighter than the load suggests;
+    // if they overshoot, it was harder. Falls back to the prescribed
+    // weight when avgForce is missing (manual entry, BLE drop, etc.),
+    // matching the same preference order effectiveLoad uses for the
+    // historical fit pipeline. Keeps live and post-hoc fatigue math
+    // looking at the same primitive.
     const sMax = config.hand === "R" ? sMaxR : sMaxL;
-    const dose = fatigueDose(weight, actualTime, sMax);
+    const liveLoad = (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
+      ? avgForce
+      : weight;
+    const dose = fatigueDose(liveLoad, actualTime, sMax);
     setFatigue(f => Math.min(f + dose, 0.95));
 
     // Single-set model (curve-trust commit C). All set-completion /
