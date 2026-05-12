@@ -12,32 +12,38 @@
 //   • ClimbingLogCard (collapsed full climb logger — discipline /
 //     grade / ascent / wall / RPE; merged here from the retired
 //     Climbing tab so all climbing capture lives on Fingers)
+//   • SessionRPECard (appears when today has ≥1 climb logged; lets
+//     the user confirm or override the derived session fatigue from
+//     per-climb RPEs — drives the externalLoadModifier on the
+//     next finger-training prescription)
+//   • BwPrompt
 //   • Grip Type pills (still per-grip; the curve is grip-scoped)
 //   • ContinuousPickCard — the primary recommendation:
 //       "Train at 92s @ 38 lbs · L 38 / R 37" with optional
 //       protocol fine-tune (hangs + rest defaults derived from T).
 //       Auto-applies to session config so Start Session uses it.
-//   • CurveCoverageCard — per-zone data freshness (the soft lockout
-//       surface, reframed from "Training Balance" to "Curve
-//       Coverage" because it's about where data is fresh vs stale,
-//       not about prescriptive balance).
-//   • BwPrompt
+//   • PrescribedLoadCard — all 6 zones, L/R, anchored prescription
+//       (shared with Analysis via src/views/cards/PrescribedLoadCard.js;
+//       gated on a grip being selected)
 //   • Tindeq Connect slot
-//   • Start Session button (always 1 set under the new flow)
+//   • Start Session button (single set; multi-set was retired)
+//
+// Moved to Analysis (May 2026):
+//   • CurveCoverageCard — per-zone data freshness. Reference view
+//     now lives alongside the F-D chart and PrescribedLoadCard.
 //
 // Removed in this rewrite:
 //   • SessionPlannerCard — 6-zone picker + within/between-set
 //     sliders + fatigue chart. Replaced by ContinuousPick.
 //   • Coaching Prescription card (per-hand 6-zone L/R grid).
-//     Redundant with the F-D chart on Analysis for diagnostics
-//     and with ContinuousPick for prescription.
+//     Replaced by PrescribedLoadCard's unified single-source layout.
 //   • ZoneCoverageCard (Zone Workout Summary). Pure descriptive
 //     card not driven by the curve; cut under "all in on curve."
-//   • Training Focus inline picker (already gone in commit 73e2024).
+//   • Training Focus inline picker.
 //
-// Multi-set machinery is left at sets=1, setRest=0 in the config so
-// the existing workout runner still accepts the shape; commit C will
-// fully remove sets/setRest from the data model + runner.
+// Multi-set machinery is fully removed from the data model + runner
+// (May 2026). Sessions are single-set; the runner reads
+// config.targetTime / config.repsPerSet / config.restTime directly.
 
 import React, { useEffect, useMemo, useState } from "react";
 
@@ -59,10 +65,7 @@ import { buildThreeExpPriors } from "../model/threeExp.js";
 import { coachingRecommendationContinuous } from "../model/coaching.js";
 import { computeSessionFatigue } from "../model/climbingFatigue.js";
 import { ymdLocal } from "../util.js";
-// PrescribedLoadCard lives in AnalysisView so both Analysis and Setup
-// can render it from a single source. Cross-view import is the smallest
-// diff; if more cards end up shared we can extract to src/views/cards/.
-import { PrescribedLoadCard } from "./AnalysisView.js";
+import { PrescribedLoadCard } from "./cards/PrescribedLoadCard.js";
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
