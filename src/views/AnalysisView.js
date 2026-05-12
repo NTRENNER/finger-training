@@ -30,9 +30,7 @@ import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
   buildThreeExpPriors, computeAUCThreeExp,
 } from "../model/threeExp.js";
-import {
-  prescription,
-} from "../model/prescription.js";
+// (prescription imports removed — Performance vs. Model card retired)
 // (computePersonalResponse import removed — fed the now-gone Train block)
 import { computeLimiterZone } from "../model/limiter.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
@@ -552,83 +550,6 @@ export function AnalysisView({
   }, [history, selHand, selGrip]);
 
   // ── Gap-narrowing tracker over time ──
-  // For each session date, compute the gap between empirical (what user
-  // actually trained at) and potential (curve-derived ceiling) per zone,
-  // using only data UP TO that date. Series shows whether the user is
-  // closing the gap in each compartment over time — the real "am I
-  // building toward potential" progress signal, much more actionable
-  // than absolute CF over time.
-  //
-  // Scope: requires a grip filter (cross-grip gap is meaningless).
-  // When selHand is set, computes per-hand. When unset, pools both hands
-  // (the curve fit is grip-scoped, the empirical anchor is most-recent
-  // rep 1 across both hands).
-  // Pure helper: compute the gap-vs-model time series for one grip.
-  // Returns an array of rows (one per training date for that grip) or
-  // null if there aren't enough usable points. Pulled out of the
-  // gapHistory memo so we can reuse it for the All-Grips view that
-  // renders one chart per grip.
-  const computeGapHistoryFor = (grip) => {
-    if (!grip) return null;
-    const targets = [
-      { key: "power",     T: GOAL_CONFIG.power.refTime,     color: GOAL_CONFIG.power.color },
-      { key: "strength",  T: GOAL_CONFIG.strength.refTime,  color: GOAL_CONFIG.strength.color },
-      { key: "endurance", T: GOAL_CONFIG.endurance.refTime, color: GOAL_CONFIG.endurance.color },
-    ];
-    const handFn = (r) => !selHand || r.hand === selHand;
-    const datesSet = new Set();
-    for (const r of history) {
-      if (r.grip !== grip || !handFn(r) || !r.date) continue;
-      if (!(r.actual_time_s > 0)) continue;
-      datesSet.add(r.date);
-    }
-    const dates = [...datesSet].sort();
-    if (dates.length < 2) return null;
-    const rows = [];
-    for (const date of dates) {
-      const upTo = history.filter(r => (r.date || "") <= date);
-      const row = { date };
-      for (const { key, T } of targets) {
-        let bestGap = null;
-        const handsToCheck = selHand ? [selHand] : ["L", "R"];
-        for (const h of handsToCheck) {
-          const p = prescription(upTo, h, grip, T, { threeExpPriors });
-          if (!p || p.value == null || p.reliability === "extrapolation") continue;
-          // Flipped sign: positive = outperforming model, negative = headroom to grow
-          const gap = (p.value - p.potential) / p.potential;
-          if (bestGap == null || gap > bestGap) bestGap = gap;
-        }
-        row[`${key}_gap`] = bestGap != null ? Math.round(bestGap * 100) : null;
-      }
-      if (targets.some(({key}) => row[`${key}_gap`] != null)) rows.push(row);
-    }
-    return rows.length >= 2 ? rows : null;
-  };
-
-  // Single-grip series — used when a grip filter is active.
-  // Snapshot dates: every distinct date the user trained this grip
-  // (with the active hand filter applied if any). Keeps the chart
-  // sparse but representative.
-  const gapHistory = useMemo(() => {
-    if (!selGrip) return null;
-    return computeGapHistoryFor(selGrip);
-  }, [history, selHand, selGrip, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Per-grip series for the All-Grips view. Mirrors the per-grip Curve
-  // Improvement card pattern: one chart per grip stacked vertically so
-  // each muscle's progress is read independently (cross-grip pooling
-  // is meaningless since FDP-pinch and FDS-crush adapt on different
-  // schedules and against different baselines).
-  const gapHistoryByGrip = useMemo(() => {
-    if (selGrip) return null;
-    const out = {};
-    for (const g of grips) {
-      const series = computeGapHistoryFor(g);
-      if (series && series.length >= 2) out[g] = series;
-    }
-    return Object.keys(out).length > 0 ? out : null;
-  }, [history, selHand, selGrip, grips, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── Total AUC over time, per-grip ──
   // Single number per grip per training date: ∫ F(t) dt over [5, 180]s
   // under the three-exp curve fit on that grip's failures up to that
@@ -729,8 +650,8 @@ export function AnalysisView({
   }, [history, grips, gripBaselines, threeExpPriors, bwLog]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Three-exp F-D fit (governing model — see src/model/threeExp.js) ──
-  // threeExpPriors memoized earlier in AnalysisView so gapHistory,
-  // prescription(), and the chart curve all share one fit basis.
+  // threeExpPriors memoized earlier in AnalysisView so the F-D chart
+  // curve and any per-grip three-exp consumers share one fit basis.
 
   // Three-exp fit for the current (selHand, selGrip) scope. Uses the
   // same `failures` array that backs cfEstimate, so the fits are
@@ -1514,63 +1435,6 @@ export function AnalysisView({
             ) : null}
           </Card>
         );
-      })()}
-
-      {/* ── Performance vs. Model, over time ──
-          Flipped-sign gap chart: positive = outperforming the model's
-          prediction, negative = headroom still to capture. Rising lines
-          mean adaptation is delivering. Zones persistently below zero
-          have room to grow — focus there.
-
-          When a grip filter is active, render one chart for that grip.
-          When no grip is selected (All Grips), render one chart per
-          grip stacked vertically — pooling across grips is meaningless
-          since FDP-pinch and FDS-crush adapt on different schedules
-          against different baselines. */}
-      {(() => {
-        // Shared renderer so the single-grip and All-Grips views stay
-        // visually identical except for the title.
-        const renderGapChart = (data, title) => (
-          <Card key={title} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{title}</div>
-            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-              How much you're outperforming (+) or underperforming (−) the model's prediction per zone. Rising lines mean adaptation is delivering. Zones below zero have headroom left — focus there.
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={data} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-                  label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-                <ReferenceLine y={0} stroke={C.muted} strokeWidth={2}
-                  label={{ value: "model", position: "insideRight", fill: C.muted, fontSize: 10 }} />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={42} unit="%"
-                  label={{ value: "vs. model", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                  formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
-                />
-                <Line dataKey="power_gap"     stroke={GOAL_CONFIG.power.color}     strokeWidth={2} dot={{ r: 3 }} connectNulls name="⚡ Power" />
-                <Line dataKey="strength_gap"  stroke={GOAL_CONFIG.strength.color}  strokeWidth={2} dot={{ r: 3 }} connectNulls name="💪 Strength" />
-                <Line dataKey="endurance_gap" stroke={GOAL_CONFIG.endurance.color} strokeWidth={2} dot={{ r: 3 }} connectNulls name="🏔️ Endurance" />
-              </LineChart>
-            </ResponsiveContainer>
-            <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
-              <span style={{ color: GOAL_CONFIG.power.color }}>⚡ Power</span>
-              <span style={{ color: GOAL_CONFIG.strength.color }}>💪 Strength</span>
-              <span style={{ color: GOAL_CONFIG.endurance.color }}>🏔️ Endurance</span>
-            </div>
-          </Card>
-        );
-        if (selGrip && gapHistory && gapHistory.length >= 2) {
-          const handSuffix = selHand ? ` · ${selHand === "L" ? "Left" : "Right"}` : "";
-          return renderGapChart(gapHistory, `Performance vs. Model — ${selGrip}${handSuffix}`);
-        }
-        if (!selGrip && gapHistoryByGrip) {
-          return Object.entries(gapHistoryByGrip).map(([grip, series]) =>
-            renderGapChart(series, `Performance vs. Model — ${grip}`)
-          );
-        }
-        return null;
       })()}
 
       {reps.length === 0 ? (
