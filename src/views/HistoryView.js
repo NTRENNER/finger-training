@@ -207,12 +207,19 @@ export function HistoryView({
     (!target || r.target_duration === target)
   ), [history, grip, hand, target]);
 
-  // Group by session_id then date. Derive `hand` from the union of rep hands,
-  // so a Both-mode session with L and R reps shows "Both" (not just the first rep's hand).
+  // Group by (session_id, date) so a session_id that spans multiple dates
+  // renders as separate cards per date. Backfilled sessions and Both-mode
+  // runs that cross midnight can legitimately have the same session_id on
+  // two different dates; under a session_id-only key the second date's
+  // reps would be hidden inside the first date's card and the displayed
+  // date would depend on iteration order. Keying on the pair keeps each
+  // date visible and the group's displayed date honest.
+  // Derive `hand` from the union of rep hands so a Both-mode session
+  // with L and R reps shows "Both" (not just the first rep's hand).
   const grouped = useMemo(() => {
     const map = {};
     for (const r of filtered) {
-      const key = r.session_id || r.date;
+      const key = `${r.session_id || r.date}|${r.date}`;
       if (!map[key]) map[key] = { date: r.date, grip: r.grip, hand: r.hand, target_duration: r.target_duration, reps: [] };
       map[key].reps.push(r);
     }
