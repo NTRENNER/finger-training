@@ -396,4 +396,62 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec).not.toBeNull();
     expect(["max_strength", "power", "power_strength", "strength", "strength_endurance", "endurance"]).toContain(rec.zone);
   });
+
+  // ── AUC-gain pick (Reading B) — symmetric adaptBoost ───────────
+  test("adaptBoost penalizes zones where actuals sit ABOVE the curve", () => {
+    // Many on-curve points anchor the fit, plus a strong above-curve
+    // signal at T=30s. The engine should NOT pick T near 30s — adaptBoost
+    // there is < 1 because the user is at/above ceiling.
+    const history = [
+      buildRep("L", 5,  F_curve(5)),
+      buildRep("L", 10, F_curve(10)),
+      buildRep("L", 60, F_curve(60)),
+      buildRep("L", 90, F_curve(90)),
+      buildRep("L", 120, F_curve(120)),
+      buildRep("L", 180, F_curve(180)),
+      // Outperform at 30s: actual is 1.4× the curve
+      buildRep("L", 30, F_curve(30) * 1.4),
+      buildRep("L", 30, F_curve(30) * 1.4),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    // Strength signal zone (around 30s) shouldn't be the pick. Allow
+    // some kernel bleed — assert pick is NOT inside the obvious peak.
+    expect(rec.T < 15 || rec.T > 60).toBe(true);
+  });
+
+  test("recency penalty steers away from a just-trained zone", () => {
+    // Two zones with identical limiter strength: strength_endurance
+    // (T=160, in zone bounds [140, 180)) trained TODAY, vs power
+    // (T=30, in zone bounds [12, 50)) trained 21 days ago. With
+    // zone-based recency the strength_endurance zone's penalty drops
+    // to ~0 today, so the rested power limiter wins on score.
+    const history = [
+      // Today: strength_endurance limiter at T=160 (in-zone)
+      buildRep("L", 160, F_curve(160) * 0.5, 0),
+      buildRep("L", 160, F_curve(160) * 0.5, 0),
+      // 21 days ago: power limiter at T=30 (in-zone)
+      buildRep("L", 30, F_curve(30) * 0.5, 21),
+      buildRep("L", 30, F_curve(30) * 0.5, 21),
+      // 21 days ago: anchors so the curve has a sane shape
+      buildRep("L", 60, F_curve(60), 21),
+      buildRep("L", 90, F_curve(90), 21),
+      buildRep("L", 120, F_curve(120), 21),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    // Just-trained strength_endurance is crushed by recency ≈ 0.
+    // The pick should not land inside [140, 180).
+    expect(rec.T < 140 || rec.T >= 180).toBe(true);
+  });
+
+  test("residualBoost field is preserved as alias for adaptBoost (back-compat)", () => {
+    const history = [buildRep("L", 30, F_curve(30)), buildRep("L", 60, F_curve(60))];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    expect(rec.residualBoost).toBe(rec.adaptBoost);
+  });
 });

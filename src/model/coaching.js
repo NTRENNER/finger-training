@@ -77,13 +77,16 @@ export const COACH_RECOVERY_TAU_DAYS = {
 // Recovery curve: returns 0 immediately after training the zone, rising
 // asymptotically to 1.0 as days_ago grows. Zone-specific tau means
 // Power recovers faster than Endurance. Returns 1.0 if zone never trained.
+//
+// Matches reps by ZONE bucket (zoneOf), not exact target_duration. Under
+// the continuous engine the user can train at any T in the zone's range
+// (e.g. T=145s is strength_endurance even though ZONE_REF_T is 160s) —
+// the rep should still count as recently training that zone.
 export function recencyPenalty(zone, history, grip) {
   if (!grip || !history || history.length === 0) return 1.0;
   const tau = COACH_RECOVERY_TAU_DAYS[zone] ?? 2;
-  const targetT = ZONE_REF_T[zone];
-  if (!targetT) return 1.0;
   const matchingDates = history
-    .filter(r => r.grip === grip && r.target_duration === targetT)
+    .filter(r => r.grip === grip && r.target_duration > 0 && zoneOf(r.target_duration) === zone)
     .map(r => r.date)
     .filter(Boolean);
   if (matchingDates.length === 0) return 1.0;
@@ -372,45 +375,48 @@ export function coachingRationale(rec) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// CONTINUOUS COACHING ENGINE  (curve-trust, May 2026)
+// CONTINUOUS COACHING ENGINE  (AUC-gain pick, May 2026)
 // ─────────────────────────────────────────────────────────────
-// Treats the three-exp F-D curve as the source of truth and asks:
-// "Where on the continuous curve does training have the biggest
-// projected payoff?" The answer is a specific (T, load) pair —
-// not snapped to one of six zone reference times.
+// Picks the (hand, T) where training will most improve the user's
+// physical AUC over the F-D curve. Reading B from the architectural
+// review: the engine optimizes for the user's fitness, not the model's
+// calibration. The model is just instrumentation — a side-effect of
+// training the limiter is that the curve gets more accurate too, but
+// that's downstream.
 //
 // Math:
 //   1. Fit three-exp per hand from all that hand's (T, F) data points
-//      under the train-to-failure model (every rep is a failure point
-//      regardless of the legacy r.failed flag).
+//      under the train-to-failure model.
 //   2. For each observed rep at (T_i, F_i): compute residual ratio
 //      r_i = F_actual / F_curve(T_i). r < 1 → curve over-predicts at
-//      that T (limiter signal); r > 1 → user exceeded the curve
-//      (strength signal); r ≈ 1 → curve well-calibrated locally.
+//      that T (you fall below — adaptation room HERE); r > 1 → curve
+//      under-predicts (you exceed — already strong, less room).
 //   3. Sweep T from 5 to 240 in 5s steps. At each T, smooth the per-
 //      rep ratios via a Gaussian kernel (bandwidth ~30s) to get a
-//      local "is the curve over- or under-predicting near this T?"
-//      signal.
-//   4. score(T) = residualBoost(T) × stalenessBoost(zoneOf(T))
-//      where residualBoost = 1 + max(0, 1 − localRatio) × 3, so
-//      strong over-prediction (localRatio = 0.7) → boost ~1.9, and
-//      neutral / above-curve regions → boost = 1.0.
-//   5. Argmax over (hand, T). Returns { T_star, hand, loadKg,
-//      loadByHand, score, residualBoost, localRatio,
-//      stalenessBoost, zone } so the UI can explain WHY this T
-//      was picked.
-//
-// No focus weight — Training Focus was dropped under the curve-trust
-// philosophy. No reps/rest/sets — the protocol layer is the caller's
-// concern (defaults derived from T elsewhere). This function returns
-// only the (T, load) pick.
+//      local "where on the curve do you fall vs the model" signal.
+//   4. score(T) = adaptBoost(T) × stalenessBoost(zoneOf(T))
+//                                × recencyPenalty(zoneOf(T))
+//      adaptBoost is SYMMETRIC (vs. the earlier residualBoost which
+//      only rewarded limiters):
+//        room = 1 − localRatio   (positive = below curve, room to grow;
+//                                 negative = above curve, at ceiling)
+//        adaptBoost = clamp(1 + room × 3, 0.2, 3.0)
+//      So localRatio = 0.7 → adaptBoost ≈ 1.9 (limiter, train here),
+//         localRatio = 1.0 → adaptBoost = 1.0 (calibrated, neutral),
+//         localRatio = 1.2 → adaptBoost ≈ 0.4 (strength signal, skip).
+//      stalenessBoost preserves curve coverage incentive.
+//      recencyPenalty crushes just-trained zones with the same per-zone
+//      tau the discrete engine uses (max_strength fast → endurance slow).
+//   5. Argmax over (hand, T). The headline loadKg is the anchored
+//      prescription at T_star (curve_shape × amplitude_anchor from
+//      prescription()), so a great recent session lifts the whole
+//      load surface — see Step 1 commit for the prescription unification.
 //
 // In data-sparse regions, the smoothed kernel weights tend to zero
-// and localRatio defaults to 1.0 (neutral). The score there is just
-// stalenessBoost × 1.0, so never-trained / stale zones still get
-// recommended when there's no residual signal anywhere — which is
-// correct: anchoring the curve at unexplored durations is itself the
-// training opportunity.
+// and localRatio defaults to 1.0 (neutral). The score is then driven
+// by stalenessBoost — never-trained zones still get recommended when
+// no residual signal exists, which is correct: anchoring the curve
+// at unexplored durations IS the training opportunity.
 const CONTINUOUS_T_MIN = 5;     // s — shortest meaningful hold
 const CONTINUOUS_T_MAX = 240;   // s — longest meaningful hold
 const CONTINUOUS_T_STEP = 5;    // s — sweep granularity
@@ -487,13 +493,22 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // staleness drives the score in those regions).
       const localRatio = weightSum > 1e-6 ? ratioSum / weightSum : 1.0;
 
-      // Boost rises as the curve over-predicts more (localRatio < 1).
-      // localRatio = 0.7 → boost ≈ 1.9; localRatio ≥ 1 → boost = 1.0.
-      const residualBoost = 1 + Math.max(0, 1 - localRatio) * 3;
+      // SYMMETRIC adaptation room: positive when below curve (limiter,
+      // adaptation headroom), negative when above curve (already strong,
+      // less room to grow). The earlier residualBoost only rewarded
+      // limiters; under Reading B (train where AUC will most improve),
+      // we ALSO actively skip strength zones since training there
+      // contributes less marginal AUC than training a limiter.
+      const room = 1 - localRatio;
+      const adaptBoost = Math.max(0.2, Math.min(3.0, 1 + room * 3));
 
       const zoneKey = zoneOf(T);
       const stale = stalenessBoost(zoneKey, stalenessMap);
-      const score = residualBoost * stale;
+      // Recency: just-trained zones get crushed (~0 immediately after
+      // training, recovering to 1.0 over the zone's tau). Same per-zone
+      // tau map the discrete engine uses — see COACH_RECOVERY_TAU_DAYS.
+      const recency = recencyPenalty(zoneKey, history, grip);
+      const score = adaptBoost * stale * recency;
 
       if (!best || score > best.score) {
         best = {
@@ -506,9 +521,14 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
           // running behind a strong recent session.
           loadKg: null,
           score,
-          residualBoost,
+          adaptBoost,
+          // residualBoost retained as alias for backward-compat with
+          // any UI string template still reading the old field name.
+          residualBoost: adaptBoost,
+          room,
           localRatio,
           stalenessBoost: stale,
+          recency,
           staleStatus: stalenessMap[zoneKey]?.status ?? "ok",
           zone: zoneKey,
         };

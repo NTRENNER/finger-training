@@ -518,15 +518,19 @@ function ContinuousPickCard({
 
   const cfg = zoneCfg ?? { color: C.blue, label: "—", emoji: "🎯" };
 
-  // Why-text: combines residual signal + staleness into a one-liner.
-  // residualBoost > 1.1 → curve over-predicts here (limiter signal).
-  // staleStatus stale/never → unexplored, anchor the curve.
+  // Why-text: explain the AUC-gain pick. Three axes drive the score —
+  // adaptation room (limiter / at ceiling), staleness, and recency.
+  // Surface whichever is doing the heavy lifting for this T so the
+  // user can see the rationale matches the F-D chart visually.
   const whyParts = [];
-  if (rec.residualBoost > 1.15) {
-    const pct = Math.round((1 - rec.localRatio) * 100);
-    whyParts.push(`reps near here fall ~${pct}% below the curve — biggest training opportunity`);
-  } else if (rec.residualBoost > 1.05) {
+  const room = rec.room ?? (1 - (rec.localRatio ?? 1));
+  if (rec.adaptBoost != null && rec.adaptBoost > 1.15) {
+    const pct = Math.round(room * 100);
+    whyParts.push(`reps near here fall ~${pct}% below the curve — biggest AUC-gain opportunity`);
+  } else if (rec.adaptBoost != null && rec.adaptBoost > 1.05) {
     whyParts.push("reps near here sit slightly below the curve");
+  } else if (rec.adaptBoost != null && rec.adaptBoost < 0.85) {
+    whyParts.push("you're at or above the curve everywhere — picked here on staleness alone");
   }
   if (rec.staleStatus === "stale") {
     whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is past its detraining window — re-anchor the curve here`);
@@ -535,8 +539,11 @@ function ContinuousPickCard({
   } else if (rec.staleStatus === "warning") {
     whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is approaching stale — keep it fresh`);
   }
+  if (rec.recency != null && rec.recency < 0.5) {
+    whyParts.push("zone partially recovered — lighter dose is fine");
+  }
   if (whyParts.length === 0) {
-    whyParts.push("curve is well-calibrated locally; this T scores best on staleness × residual");
+    whyParts.push("curve is well-calibrated locally; this T scores best on staleness × recency");
   }
   const whyText = whyParts.join(" · ");
 
