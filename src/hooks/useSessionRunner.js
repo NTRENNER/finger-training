@@ -2,10 +2,11 @@
 // useSessionRunner — in-workout finite state machine
 // ─────────────────────────────────────────────────────────────
 // Owns everything the user sees once they hit "Start Session" —
-// the rep/set counters, the fatigue accumulator, the phase
-// machine that drives which view renders, and all the callbacks
-// the active-session views call on rep completion / rest finish /
-// abort.
+// the rep counter, the phase machine that drives which view
+// renders, and all the callbacks the active-session views call on
+// rep completion / rest finish / abort. Fatigue is post-hoc only
+// now (see model/fatigue.js + prescription.js freshMap); the
+// runtime accumulator was retired in May 2026.
 //
 // State machine phases:
 //   idle          — pre-session, SetupView is rendered
@@ -31,7 +32,7 @@
 // equals rawConfig (no derived fields).
 //
 // Inputs:
-//   history         — the rep array (for sMax + level-up check)
+//   history         — the rep array (for the level-up check)
 //   freshMap        — fatigue-adjusted load lookup (for startSession's
 //                     prescription chain)
 //   threeExpPriors  — three-exp per-grip priors (same)
@@ -45,9 +46,13 @@
 import { useCallback, useMemo, useState } from "react";
 
 import { today, uid, nowISO } from "../util.js";
-import { getBaseline, getBestLoad, calcLevel } from "../model/levels.js";
+import { calcLevel } from "../model/levels.js";
 import { zoneOf } from "../model/zones.js";
-import { fatigueDose, fatigueAfterRest } from "../model/fatigue.js";
+// Runtime fatigue accumulator was retired — no view ever consumed it
+// and the historical pipeline (freshMap / three-exp fit / prescription
+// anchor) handles every analysis-time fatigue concern. fatigueDose +
+// fatigueAfterRest still live in src/model/fatigue.js and are used
+// post-hoc by the freshMap builder.
 import {
   isShortfall,
   estimateRefWeight,
@@ -85,7 +90,6 @@ export function useSessionRunner({
   const currentSet = 0;
   const [phase,       setPhase]       = useState("idle");
   const [currentRep,  setCurrentRep]  = useState(0);
-  const [fatigue,     setFatigue]     = useState(0);
   const [sessionReps, setSessionReps] = useState([]);
   const [sessionId,        setSessionId]        = useState("");
   const [sessionStartedAt, setSessionStartedAt] = useState("");
@@ -95,23 +99,9 @@ export function useSessionRunner({
   const [newLevel,    setNewLevel]    = useState(1);
   const [activeHand,  setActiveHand]  = useState("L"); // tracks current hand in Both mode
 
-  // ── sMax (for fatigue dose calculation) ─────────────────────
-  // Use post-session-1 best; fall back to baseline (first session); then 20 kg if no data.
-  // Levels now bucket by zone (not exact target T) — see model/levels.js.
-  // The continuous engine recommends arbitrary T values, so a per-zone
-  // bucket lets sMax pull from the broadest pool of past reps for the
-  // physiological compartment we're about to load.
-  const targetZone = useMemo(() => zoneOf(config.targetTime), [config.targetTime]);
-  const sMaxL = useMemo(() => {
-    const best = getBestLoad(history, "L", config.grip, targetZone)
-               || getBaseline(history, "L", config.grip, targetZone);
-    return best ? best * 1.2 : 20;
-  }, [history, config.grip, targetZone]);
-  const sMaxR = useMemo(() => {
-    const best = getBestLoad(history, "R", config.grip, targetZone)
-               || getBaseline(history, "R", config.grip, targetZone);
-    return best ? best * 1.2 : 20;
-  }, [history, config.grip, targetZone]);
+  // (sMax memos retired with the runtime fatigue accumulator — they
+  // were the only consumer. Per-grip baseline data is still available
+  // through model/levels.js for any future runtime feature that needs it.)
 
   // ── Start session ───────────────────────────────────────────
   // refWeights drives the in-workout "Rep 1 suggested weight" display
@@ -133,7 +123,6 @@ export function useSessionRunner({
     setRefWeights(rw);
     setSessionReps([]);
     setCurrentRep(0);
-    setFatigue(0);
     setLeveledUp(false);
     setLastRepResult(null);
     setActiveHand(config.hand === "Both" ? "L" : config.hand);
@@ -216,27 +205,9 @@ export function useSessionRunner({
     setSessionReps(reps => [...reps, repRecord]);
     addReps([repRecord]);
 
-    // Update runtime fatigue. Prefer the Tindeq-measured avgForce
-    // when it's valid — actual force delivered is what taxed
-    // physiology, not the prescribed weight. If the user pulled at
-    // 80% of prescription the rep was lighter than the load suggests;
-    // if they overshoot, it was harder. Falls back to the prescribed
-    // weight when avgForce is missing (manual entry, BLE drop, etc.),
-    // matching the same preference order effectiveLoad uses for the
-    // historical fit pipeline. Keeps live and post-hoc fatigue math
-    // looking at the same primitive.
-    //
-    // sMax keys off effectiveHand (the hand that just hung), not
-    // config.hand. In Both mode config.hand === "Both", which would
-    // otherwise fall through to sMaxL even on the right side and
-    // distort the dose calculation against the wrong physiology
-    // — see handleRepDone's effectiveHand resolution above.
-    const sMax = effectiveHand === "R" ? sMaxR : sMaxL;
-    const liveLoad = (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
-      ? avgForce
-      : weight;
-    const dose = fatigueDose(liveLoad, actualTime, sMax);
-    setFatigue(f => Math.min(f + dose, 0.95));
+    // (Runtime fatigue accumulator removed — was dead state, no view
+    // consumed the value. The historical pipeline handles all fatigue
+    // analysis via effectiveLoad → freshMap → three-exp fit.)
 
     // Single-set model (curve-trust commit C). All set-completion /
     // between-sets logic has been removed — every session is one set
@@ -253,7 +224,6 @@ export function useSessionRunner({
       // its set; otherwise finish.
       if (config.hand === "Both" && activeHand === "L") {
         setCurrentRep(0);
-        setFatigue(0);
         setActiveHand("R");
         setPhase("switch_hands");
       } else {
@@ -264,15 +234,14 @@ export function useSessionRunner({
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentRep, currentSet, fatigue, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, sMaxL, sMaxR, activeHand]);
+  }, [config, currentRep, currentSet, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, activeHand]);
 
   const handleRestDone = useCallback(() => {
-    setFatigue(f => fatigueAfterRest(f, config.restTime));
     // When Tindeq is connected, go to rep_ready so AutoRepSessionView can arm
     // auto-detection and wait for the next pull. When not connected, auto-start
     // the countdown so the user doesn't need to tap Start Rep.
     setPhase(tindeqConnected ? "rep_ready" : "rep_active");
-  }, [config.restTime, tindeqConnected]);
+  }, [tindeqConnected]);
 
   // handleNextSet removed (curve-trust commit C — single-set only).
 
@@ -292,7 +261,7 @@ export function useSessionRunner({
   return {
     config, setConfig,
     phase, setPhase,
-    currentSet, currentRep, fatigue,
+    currentSet, currentRep,
     sessionId, sessionStartedAt, refWeights,
     sessionReps, lastRepResult,
     leveledUp, newLevel,

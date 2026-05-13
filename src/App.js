@@ -461,7 +461,7 @@ export default function App() {
   const {
     config, setConfig,
     phase, setPhase,
-    currentSet, currentRep, fatigue,
+    currentSet, currentRep,
     sessionId, refWeights,
     sessionReps, lastRepResult,
     leveledUp, newLevel,
@@ -693,7 +693,7 @@ export default function App() {
             return (
               <AutoRepSessionView
                 key={`auto-${activeHand}-${currentSet}-${currentRep}`}
-                session={{ config, currentSet, currentRep, fatigue, sessionId, refWeights, activeHand }}
+                session={{ config, currentSet, currentRep, sessionId, refWeights, activeHand }}
                 onRepDone={handleRepDone}
                 onAbort={handleAbort}
                 tindeq={tindeq}
@@ -704,7 +704,7 @@ export default function App() {
           return (
             <ActiveSessionView
               key={`${activeHand}-${currentSet}-${currentRep}-${phase}`}
-              session={{ config, currentSet, currentRep, fatigue, sessionId, refWeights, activeHand }}
+              session={{ config, currentSet, currentRep, sessionId, refWeights, activeHand }}
               onRepDone={handleRepDone}
               onAbort={handleAbort}
               tindeq={tindeq}

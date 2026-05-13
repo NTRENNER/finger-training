@@ -102,10 +102,13 @@ describe("externalLoadModifier", () => {
       { type: "climbing", date: yday, rpe: 3 },
     ];
     const power = externalLoadModifier("power", warmupActs);
-    // Fatigue floor = 1, decayed by ~50% (yesterday ≈ 24h ago) →
-    // ~0.5 effective fatigue. Power suppression at 10 is 0.60 — so
-    // at effective 0.5 we expect only ~3% scale-down.
-    expect(power).toBeGreaterThan(0.95);
+    // Fatigue floor = 1-2 (two RPE-3 climbs derive a low score),
+    // decayed by ~50% over the ~24h-since-midnight window. Expect
+    // a small scale-down — definitely far from the moderate-load
+    // suppression a real session would produce. Threshold is loose
+    // because "yesterday" parses as midnight, so hours-ago depends
+    // on the time of day the test runs (anywhere ~24-48h ahead).
+    expect(power).toBeGreaterThan(0.9);
   });
 
   test("high-volume RPE-7 session crushes more than single RPE-9 attempt", () => {

@@ -9,7 +9,7 @@
 // is connected.
 //
 // Coupling to App.js is only via props:
-//   session    — { config, currentSet, currentRep, fatigue,
+//   session    — { config, currentSet, currentRep,
 //                  sessionId, refWeights, activeHand }
 //   tindeq     — the BLE hook return (connected, force, peak,
 //                avg, tare, startMeasuring, stopMeasuring)
