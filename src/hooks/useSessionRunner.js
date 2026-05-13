@@ -84,10 +84,9 @@ export function useSessionRunner({
   const config = rawConfig;
 
   // ── Phase machine + per-rep counters ────────────────────────
-  // currentSet is always 0 under the single-set model — persisted
-  // into rep records as set_num = currentSet + 1 = 1 for backward
-  // compat with the existing Supabase schema. No state, no setter.
-  const currentSet = 0;
+  // (currentSet removed — single-set model. Rep records still write
+  // set_num: 1 as a constant for backward compat with the existing
+  // Supabase schema; the column is otherwise unused going forward.)
   const [phase,       setPhase]       = useState("idle");
   const [currentRep,  setCurrentRep]  = useState(0);
   const [sessionReps, setSessionReps] = useState([]);
@@ -183,7 +182,7 @@ export function useSessionRunner({
       peak_force_kg:   (isFinite(peakForce) && peakForce > 0 && peakForce < 500)
                          ? Math.round(peakForce * 10) / 10
                          : null,
-      set_num:         currentSet + 1,
+      set_num:         1,
       rep_num:         currentRep + 1,
       rest_s:             config.restTime,
       session_id:         sessionId,
@@ -234,7 +233,7 @@ export function useSessionRunner({
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentRep, currentSet, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, activeHand]);
+  }, [config, currentRep, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, activeHand]);
 
   const handleRestDone = useCallback(() => {
     // When Tindeq is connected, go to rep_ready so AutoRepSessionView can arm
@@ -261,7 +260,7 @@ export function useSessionRunner({
   return {
     config, setConfig,
     phase, setPhase,
-    currentSet, currentRep,
+    currentRep,
     sessionId, sessionStartedAt, refWeights,
     sessionReps, lastRepResult,
     leveledUp, newLevel,

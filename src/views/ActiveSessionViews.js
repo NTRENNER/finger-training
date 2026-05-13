@@ -9,7 +9,7 @@
 // is connected.
 //
 // Coupling to App.js is only via props:
-//   session    — { config, currentSet, currentRep,
+//   session    — { config, currentRep,
 //                  sessionId, refWeights, activeHand }
 //   tindeq     — the BLE hook return (connected, force, peak,
 //                avg, tare, startMeasuring, stopMeasuring)
@@ -485,41 +485,10 @@ export function SwitchHandsView({ onReady }) {
   );
 }
 
-export function AltSwitchView({ toHand, onReady }) {
-  const handName  = toHand === "L" ? "Left" : "Right";
-  const handEmoji = toHand === "L" ? "🤚" : "✋";
-  const [remaining, setRemaining] = useState(3);
-  const intervalRef = useRef(null);
-
-  useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setRemaining(r => {
-        if (r <= 1) { clearInterval(intervalRef.current); onReady(); return 0; }
-        return r - 1;
-      });
-    }, 1000);
-    return () => clearInterval(intervalRef.current);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "40px 16px", textAlign: "center" }}>
-      <div style={{ fontSize: 64 }}>{handEmoji}</div>
-      <h2 style={{ margin: "16px 0 8px" }}>Switch to {handName} Hand</h2>
-      <p style={{ color: C.muted, marginBottom: 24 }}>Get in position — rep starts in…</p>
-      <div style={{ fontSize: 80, fontWeight: 900, color: remaining > 1 ? C.green : C.orange, lineHeight: 1, marginBottom: 32 }}>
-        {remaining}
-      </div>
-      <Btn
-        onClick={() => { clearInterval(intervalRef.current); onReady(); }}
-        style={{ padding: "14px 40px", fontSize: 16, borderRadius: 12 }}
-      >
-        Ready →
-      </Btn>
-    </div>
-  );
-}
-
+// (AltSwitchView removed — alternating-hand mode was retired with
+// the flat-20s-rest workout flow; Both-mode now does all L hangs then
+// all R hangs, with the existing HandSwitchView prompt covering the
+// single switch.)
 // (BetweenSetsView removed — single-set under curve-trust commit C.)
 
 export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = "lbs" }) {

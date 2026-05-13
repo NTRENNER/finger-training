@@ -452,7 +452,7 @@ export default function App() {
   const {
     config, setConfig,
     phase, setPhase,
-    currentSet, currentRep,
+    currentRep,
     sessionId, refWeights,
     sessionReps, lastRepResult,
     leveledUp, newLevel,
@@ -683,8 +683,8 @@ export default function App() {
           if (tindeq.connected && phase === "rep_ready") {
             return (
               <AutoRepSessionView
-                key={`auto-${activeHand}-${currentSet}-${currentRep}`}
-                session={{ config, currentSet, currentRep, sessionId, refWeights, activeHand }}
+                key={`auto-${activeHand}-${currentRep}`}
+                session={{ config, currentRep, sessionId, refWeights, activeHand }}
                 onRepDone={handleRepDone}
                 onAbort={handleAbort}
                 tindeq={tindeq}
@@ -694,8 +694,8 @@ export default function App() {
           }
           return (
             <ActiveSessionView
-              key={`${activeHand}-${currentSet}-${currentRep}-${phase}`}
-              session={{ config, currentSet, currentRep, sessionId, refWeights, activeHand }}
+              key={`${activeHand}-${currentRep}-${phase}`}
+              session={{ config, currentRep, sessionId, refWeights, activeHand }}
               onRepDone={handleRepDone}
               onAbort={handleAbort}
               tindeq={tindeq}
