@@ -697,6 +697,14 @@ export function AnalysisView({
     return Object.fromEntries(qualifyingGrips.map(g => [g, true]));
   }, [history, selHand, selGrip]);
 
+  // F-D curve stroke color. When a grip is selected (single-curve mode)
+  // we tint the curve and its 3-min sustainable reference with the
+  // grip's own color so the chart palette stays consistent with the
+  // All-Grips split-mode view (where each grip already has its own
+  // colored curve). Falls back to the neutral purple when no grip is
+  // selected — there's no single grip to tint to.
+  const curveColor = selGrip ? (GRIP_COLORS[selGrip] || C.purple) : C.purple;
+
   // ── Gap-narrowing tracker over time ──
   // ── Total AUC over time, per-grip ──
   // Single number per grip per training date: ∫ F(t) dt over [5, 180]s
@@ -1019,8 +1027,8 @@ export function AnalysisView({
               <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
                 <span><span style={{ color: HAND_COLORS.L }}>●</span> Left</span>
                 <span><span style={{ color: HAND_COLORS.R }}>●</span> Right</span>
-                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Phenomenological sum of three exponentials with depletion-tau basis; the fast / middle / slow components approximately align with PCr / glycolytic / oxidative timescales but are not direct tissue measurements."><span style={{ color: C.purple }}>―</span> F-D curve (3-exp)</span>}
-                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow component dominates here, broadly aligned with sustainable / oxidative-driven work in the climbing literature. The closest model analog to a 'sustainable force' reference."><span style={{ color: C.purple }}>╌</span> 3-min sustainable</span>}
+                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Phenomenological sum of three exponentials with depletion-tau basis; the fast / middle / slow components approximately align with PCr / glycolytic / oxidative timescales but are not direct tissue measurements."><span style={{ color: curveColor }}>―</span> F-D curve (3-exp)</span>}
+                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow component dominates here, broadly aligned with sustainable / oxidative-driven work in the climbing literature. The closest model analog to a 'sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
                 {splitMode && Object.keys(fdSplitData).map(g => (
                   <span key={g}>
                     <span style={{ color: GRIP_COLORS[g] || C.blue }}>―</span> {g}
@@ -1081,14 +1089,16 @@ export function AnalysisView({
               {!fdSplitData && threeExpRef180 != null && (
                 <ReferenceLine
                   y={useRel ? threeExpRef180 / bodyWeight : toDisp(threeExpRef180, unit)}
-                  stroke={C.purple} strokeDasharray="6 3" strokeWidth={1.5}
-                  label={{ value: `3-min ${fmtForce(threeExpRef180)} ${forceUnit}`, position: "insideTopRight", fill: C.purple, fontSize: 10 }}
+                  stroke={curveColor} strokeDasharray="6 3" strokeWidth={1.5}
+                  label={{ value: `3-min ${fmtForce(threeExpRef180)} ${forceUnit}`, position: "insideTopRight", fill: curveColor, fontSize: 10 }}
                 />
               )}
-              {/* Primary curve — three-exp F-D. Bold purple solid; this
-                  is the curve the rest of the engine optimizes against. */}
+              {/* Primary curve — three-exp F-D. Solid line, tinted to the
+                  selected grip's color when one is filtered (matches the
+                  per-grip palette the All-Grips split-mode view uses);
+                  falls back to neutral purple in unfiltered mode. */}
               {!fdSplitData && threeExpCurveDataRel.length > 0 && (
-                <Line data={threeExpCurveDataRel} dataKey="y" stroke={C.purple}
+                <Line data={threeExpCurveDataRel} dataKey="y" stroke={curveColor}
                       strokeWidth={2} dot={false}
                       legendType="none" isAnimationActive={false} />
               )}
