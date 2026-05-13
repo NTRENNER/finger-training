@@ -82,11 +82,9 @@ export const LS_HISTORY_DOMAIN_KEY = "ft_history_domain";
 // to be resurrected from.
 export const LS_REP_DELETED_KEY = "ft_rep_deleted";
 
-// Current training focus key — one of TRAINING_FOCUS (balanced /
-// bouldering / power_sport / endurance_sport). Drives the per-zone
-// bias multiplier in coachingRecommendation. Defaults to "balanced"
-// when unset so existing users see no behaviour change.
-export const LS_TRAINING_FOCUS_KEY = "ft_training_focus";
+// (LS_TRAINING_FOCUS_KEY retired May 2026 with the Training Focus
+// feature itself. The "ft_training_focus" entries on existing devices
+// are orphaned but harmless; the key isn't read anywhere.)
 
 // AnalysisContainer sub-tab selector ("fingers" | "lifts"). Persisted
 // so the user lands on whichever side they last looked at when they

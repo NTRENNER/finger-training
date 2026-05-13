@@ -316,9 +316,7 @@ export default function App() {
 
   // (Training Focus removed May 2026 — under the curve-trust model the
   // curve is the single source of truth; no user-configurable bias
-  // overrides it. Old localStorage entries under LS_TRAINING_FOCUS_KEY
-  // are orphaned but harmless. See coaching.js for the unweighted
-  // score function.)
+  // overrides it. See coaching.js for the unweighted score function.)
 
   // ── Session notes ─────────────────────────────────────────
   const [notes, setNotes] = useState(() => loadLS(LS_NOTES_KEY) || {});
