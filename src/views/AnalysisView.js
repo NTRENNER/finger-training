@@ -42,14 +42,6 @@ import { computeLimiterZone } from "../model/limiter.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 // (EnergySystemBreakdownCard import removed — card dropped under curve-trust)
 
-// ─────────────────────────────────────────────────────────────
-// ZONE_DETAILS — shared recommendation metadata used by both the
-// pooled/selGrip-scoped `recommendation` useMemo and the per-grip
-// `gripRecs` useMemo so the title/color/caption stay consistent
-// between scopes. One entry per ZONE_KEY (6 total after the
-// May 2026 6-zone migration) so coachingRecommendation can return
-// (ZONE_DETAILS removed — only consumed by the now-gone Train block.)
-
 // Per-grip color used wherever Micro and Crusher are charted side-by-
 // side (F-D scatter overlays, AUC-PR cards, CF-over-time chart).
 // Single source of truth so the legend, scatter dots, line strokes,

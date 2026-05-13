@@ -1,57 +1,35 @@
 // ─────────────────────────────────────────────────────────────
-// COACHING RECOMMENDATION ENGINE v2
+// COACHING RECOMMENDATION ENGINE  (continuous, AUC-gain)
 // ─────────────────────────────────────────────────────────────
-// Picks the next training zone using a multi-factor score:
+// Picks the (hand, T) where training will most improve the user's
+// physical AUC over the F-D curve. The model is just instrumentation
+// — a side-effect of training the limiter is that the curve gets
+// more accurate too, but that's downstream.
 //
-//   score = (gap + 0.30) × recency_penalty × external_load
-//                       × residual_factor × staleness_boost
+//   score(T) = adaptBoost(T)
+//            × stalenessBoost(zoneOf(T))
+//            × recencyPenalty(zoneOf(T))
+//            × externalLoadModifier(zoneOf(T), activities)
 //
-// where:
-//   gap             — potential − current, normalized. Largest gap =
-//                     biggest training leverage (the physiological
-//                     weak compartment). Clamped at -30% so the engine
-//                     never falls through on all-negative-gap zones.
-//   recency_penalty — exponential recovery curve since last session
-//                     on this zone. Power recovers fast (~1.5d),
-//                     Endurance slow (~3.5d).
-//   external_load   — recent climbing reduces stimulus tolerance,
-//                     especially Power. No-climbing baseline = 1.0.
-//   residual_factor — F-D chart "dots vs three-exp curve" alignment
-//                     for this (zone, hand). Boosts limiter zones,
-//                     depresses above-curve zones. See zoneResidualFactor.
-//   staleness_boost — soft-lockout multiplier from the per-zone
-//                     freshness window (model/lockout.js). Stale or
-//                     never-trained zones get 2.0×; aging gets 1.4×;
-//                     fresh stays at 1.0×. Scales the entire composite
-//                     so a stale zone with weak gap still gets
-//                     promoted, and a fresh zone with strong gap
-//                     still wins on merit.
+// adaptBoost is SYMMETRIC: room = 1 − localRatio, where localRatio is
+// the Gaussian-smoothed F_actual / F_curve at T. Below-curve → boost,
+// above-curve → penalty. See coachingRecommendationContinuous() for
+// the full math.
 //
-// Two earlier factors that have since been removed:
-//   * intensity_match aligned zone intensity with a 1-10 readiness
-//     score. The readiness UI was retired; without a settable input
-//     the factor collapsed to a fixed per-zone bias against Power
-//     for no user-visible reason.
-//   * focus_weight came from a "Training Focus" setting (Balanced /
-//     Bouldering / Routes / etc.) that biased zones up or down. The
-//     whole Training Focus surface was dropped under the curve-trust
-//     direction (May 2026, see commit history) — once the F-D curve
-//     became the single source of truth for what's lacking, a
-//     manual focus override was just noise on top of the data.
+// The earlier discrete (zone × hand, gap-shifted) engine and its
+// human-readable rationale formatter were retired in May 2026 along
+// with the SessionPlannerCard surface they backed — the continuous
+// engine is the single live picker now and Setup builds its own why-
+// text from the returned components.
 //
-// Returns the zone (and hand) with the highest score, plus the
-// component scores so the UI can explain WHY this was picked.
-//
-// Three-exp is the governing model throughout (post Phase A-C
-// migration). The residual factor uses the same three-exp fit that
-// drives the F-D chart, so the "below the curve" rationale text
-// matches the literal purple curve the user is looking at. The gap
-// uses prescription().potential (the unscaled three-exp curve) and the
-// trainAt uses prescription().value (the same curve, anchored to the
-// most recent rep 1 via the amplitude scalar).
+// Three-exp is the governing F-D model (post Phase A-C migration).
+// Prescriptions are anchored to the most recent rep 1 via
+// prescription().value; the score is built on the same three-exp fit
+// the F-D chart renders, so the recommendation matches the literal
+// purple curve the user is looking at.
 
 import { ymdLocal } from "../util.js";
-import { ZONE_REF_T, ZONE_KEYS, zoneOf } from "./zones.js";
+import { zoneOf } from "./zones.js";
 import { getZoneStaleness, stalenessBoost } from "./lockout.js";
 import {
   computeSessionFatigue, mostRecentClimbDate, fatigueToModifier,
@@ -120,252 +98,6 @@ export function externalLoadModifier(zone, activities) {
   if (hoursAgo < 0 || hoursAgo > 48) return 1.0;
   const fatigue = computeSessionFatigue(activities, recentDate);
   return fatigueToModifier(zone, fatigue, hoursAgo);
-}
-
-// For (hand, grip, target T), compute mean residual between the three-exp
-// F-D curve and the actual achieved force on failures in the same zone.
-// Positive mean residual = curve over-predicts (your reps fall BELOW the
-// curve in that zone) = limiter signal. Negative = you're outperforming
-// the curve in that zone.
-//
-// Returns a multiplier for the coaching score:
-//   factor > 1: limiter zone — boost score (train this)
-//   factor = 1: at curve — neutral
-//   factor < 1: above curve — depress score (other zones have more room)
-//
-// Uses `amps` (three-exp [a, b, c] for this (hand, grip)) passed in by
-// caller so we don't refit per-zone. The same fit drives the F-D chart
-// curve, so the residual signal matches the visual "dots vs curve" the
-// user sees. `amps` may be null when the (hand, grip) doesn't have
-// enough data to fit three-exp, in which case we return 1.0 (neutral).
-//
-// freshMap: when present, both the curve (which was fit on fresh-
-// equivalent loads upstream) and the per-rep actual values use
-// freshLoadFor — apples-to-apples comparison. When absent, falls back
-// to raw effectiveLoad on both sides so the comparison is still
-// internally consistent (just both raw, not both fresh).
-export function zoneResidualFactor(history, hand, grip, targetT, amps, freshMap = null) {
-  if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) return 1.0;
-  const targetZone = zoneOf(targetT);
-  // Train-to-failure model: every rep with valid actual_time_s is a
-  // (T, F) data point. Drop the legacy r.failed filter.
-  const fails = (history || []).filter(r =>
-    r.hand === hand && r.grip === grip
-    && r.target_duration > 0
-    && zoneOf(r.target_duration) === targetZone
-    && r.actual_time_s > 0 && effectiveLoad(r) > 0
-  );
-  if (fails.length === 0) return 1.0;
-  const loadOf = freshMap
-    ? (r) => freshLoadFor(r, freshMap)
-    : (r) => effectiveLoad(r);
-  let sumRes = 0, sumActual = 0;
-  for (const r of fails) {
-    const pred = predForceThreeExp(amps, r.actual_time_s);
-    const actual = loadOf(r);
-    sumRes += pred - actual;
-    sumActual += actual;
-  }
-  const meanActual = sumActual / fails.length;
-  if (meanActual <= 0) return 1.0;
-  const meanResPct = (sumRes / fails.length) / meanActual;
-  // Map mean residual % to a 0.5x–~3x multiplier. 10% under-curve → 2x;
-  // at curve → 1.0x; 5% over-curve → 0.5x. Clamped to keep extreme
-  // outliers from dominating the score.
-  return Math.max(0.5, Math.min(3.0, 1 + meanResPct * 10));
-}
-
-// Main coaching recommendation. Returns the highest-scoring (zone, hand)
-// with all component factors so the UI can explain the rationale.
-//
-// Train-to-failure / curve-trust philosophy (May 2026): the curve is
-// the source of truth. The score function is gap × intensity × recency
-// × external × residual × staleness. Training Focus has been removed
-// — there is no user-configurable bias overriding the curve's
-// recommendation.
-//
-// opts: { freshMap, threeExpPriors, activities }
-export function coachingRecommendation(history, grip, opts = {}) {
-  const {
-    freshMap = null, threeExpPriors = null, activities = [],
-  } = opts;
-  if (!grip) return null;
-  // Pre-compute per-hand three-exp fits so zoneResidualFactor doesn't
-  // refit on every (zone, hand) loop iteration. This matches the F-D
-  // chart's primary curve (post-Phase-A promotion of three-exp), so the
-  // residual factor reflects what the user sees visually ("dots above
-  // or below the purple curve in this zone").
-  //
-  // Both the fit and the residual computation use freshLoadFor — same
-  // basis as prescriptionPotential and the chart, so the curves are
-  // directly comparable. Allow a single failure when the per-grip prior
-  // exists (matches prescriptionPotential's behavior; with a strong
-  // prior the basis is anchored and one observation is enough to
-  // adjust amplitudes).
-  const fmap = freshMap || buildFreshLoadMap(history);
-  const ampsByHand = {};
-  const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
-  const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
-  for (const h of ["L", "R"]) {
-    // Train-to-failure model: every rep with valid actual_time_s is a
-    // (T, F) data point. Drop the legacy r.failed filter.
-    const failPts = (history || []).filter(r =>
-      r.hand === h && r.grip === grip
-      && r.actual_time_s > 0 && effectiveLoad(r) > 0
-    ).map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
-    if (failPts.length >= 1 && hasPrior) {
-      const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(failPts.length, 1);
-      const amps = fitThreeExpAmps(failPts, { prior, lambda });
-      ampsByHand[h] = (amps && (amps[0] + amps[1] + amps[2]) > 0) ? amps : null;
-    } else {
-      ampsByHand[h] = null;
-    }
-  }
-
-  // Per-zone staleness — bumps the score for zones the user has been
-  // avoiding. Computed once outside the loop since it's the same map
-  // for every (zone, hand) pair. Soft lockout: 1.0 / 1.4 / 2.0 for
-  // ok / warning / stale (and stale-or-never gets the same firm 2×).
-  // Computed PER-GRIP (filter history before the staleness call) since
-  // Crusher and Micro are independent physiological systems with
-  // independent F-D curves — training Crusher endurance does not give
-  // Micro endurance any stimulus, so it shouldn't drop Micro endurance's
-  // staleness boost. The standalone Curve Coverage card on Setup still
-  // uses the all-grips view of getZoneStaleness for its "are you balanced
-  // across zones this year" framing — that's a separate question.
-  const gripHistory = (history || []).filter(r => r?.grip === grip);
-  const stalenessMap = getZoneStaleness(gripHistory);
-
-  // Iterate all 6 zones in physiological order. ZONE_KEYS comes from
-  // src/model/zones.js so the order stays in sync with the rest of
-  // the model layer.
-  const candidates = [];
-  for (const zoneKey of ZONE_KEYS) {
-    const t = ZONE_REF_T[zoneKey];
-    if (!t) continue;
-    const recency = recencyPenalty(zoneKey, history, grip);
-    const ext     = externalLoadModifier(zoneKey, activities);
-    const stale   = stalenessBoost(zoneKey, stalenessMap);
-
-    // Score per (zone, hand) so the residual factor (which is hand-
-    // specific) gets included properly. Pick the highest-scoring hand
-    // for this zone. Negative gaps still produce candidates so the
-    // engine never falls through; the "shifted gap" gives positive-gap
-    // zones priority but doesn't zero out negatives.
-    let bestScore = -Infinity;
-    let bestHand = null;
-    let bestGap = null;
-    let bestPotential = null;
-    let bestTrainAt = null;
-    let bestResFactor = null;
-    for (const hand of ["L", "R"]) {
-      // Single prescription() call gives both the anchored trainAt
-      // (value) and the unscaled curve ceiling (potential). Skip
-      // candidates where the curve at this T is pure extrapolation —
-      // we don't want to recommend a zone the user has zero data near.
-      const p = prescription(history, hand, grip, t, { freshMap, threeExpPriors });
-      if (!p || p.value == null || p.reliability === "extrapolation") continue;
-      const trainAt = p.value;
-      const pot = { value: p.potential, reliability: p.reliability };
-      const gap = (pot.value - trainAt) / trainAt;
-      const resFactor = zoneResidualFactor(history, hand, grip, t, ampsByHand[hand], fmap);
-      const gapForScore = Math.max(gap, -0.30); // clamp at -30%
-      // Staleness multiplier last so it scales the entire composite —
-      // a stale zone with weak gap still gets meaningfully promoted,
-      // and a fresh zone with strong gap still wins on merit.
-      const handScore = (gapForScore + 0.30) * recency * ext * resFactor * stale;
-      if (handScore > bestScore) {
-        bestScore = handScore;
-        bestHand = hand;
-        bestGap = gap;
-        bestPotential = pot;
-        bestTrainAt = trainAt;
-        bestResFactor = resFactor;
-      }
-    }
-    if (!bestHand) continue;
-    candidates.push({
-      zone: zoneKey,
-      hand: bestHand,
-      gap: bestGap,
-      potential: bestPotential.value,
-      trainAt: bestTrainAt,
-      recency, ext,
-      resFactor: bestResFactor,
-      stale,
-      staleStatus: stalenessMap[zoneKey]?.status ?? "ok",
-      score: bestScore,
-    });
-  }
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0];
-}
-
-// Build a human-readable rationale string from a coachingRecommendation
-// result. Used by SessionPlannerCard so the user sees WHY this zone was
-// picked, not just THAT it was picked.
-export function coachingRationale(rec) {
-  if (!rec) return "";
-  // Energy-system label per zone for the rationale text. Names the
-  // curve-fit components — fast / middle / slow — for the time
-  // domains they sit in. Energy-system tags (PCr / glycolytic /
-  // oxidative) are kept in parentheses as the systems each component
-  // approximately aligns with in the climbing-physiology literature,
-  // not as direct measurements of underlying tissue pools. Hybrids
-  // name both crossover components since neither dominates.
-  const compName =
-      rec.zone === "max_strength"       ? "neural / fast (PCr-aligned)"
-    : rec.zone === "power"              ? "fast (PCr-aligned)"
-    : rec.zone === "power_strength"     ? "fast / middle (PCr-glycolytic-aligned)"
-    : rec.zone === "strength"           ? "middle (glycolytic-aligned)"
-    : rec.zone === "strength_endurance" ? "middle / slow (glycolytic-aerobic-aligned)"
-    :                                     "slow (oxidative-aligned)";
-  // Note: rec.hand still tracks the better-scoring hand internally for
-  // the per-zone score, but we don't surface it in the rationale text.
-  // Most users train both hands per session, so saying "on Left" /
-  // "on Right" at the recommendation level adds noise without
-  // changing what they'd do. Per-hand info still appears in the
-  // per-zone prescription cells (L 48.7 / R 46.3 etc.).
-  const reasons = [];
-  if (rec.gap > 0.10) {
-    const pct = Math.round(rec.gap * 100);
-    reasons.push(`+${pct}% gap (your ${compName} component is your widest opportunity)`);
-  } else if (rec.gap > -0.05) {
-    // Near-zero gap: user is essentially AT potential here. Maintain.
-    reasons.push(`at potential (your ${compName} component is balanced — best zone among balanced options)`);
-  } else {
-    // Negative gap: user is exceeding the model's view of potential.
-    // The model is running behind your real fitness here.
-    const pct = Math.round(-rec.gap * 100);
-    reasons.push(`exceeding modeled potential by ${pct}% (the model is conservative here — pick this zone to maintain or push the ceiling further)`);
-  }
-  // Residual signal — visible on the F-D chart as dots-vs-three-exp-curve.
-  // Strong limiter signal when the user's actuals fall systematically below
-  // the three-exp curve in this zone (the curve over-predicts → physiology
-  // can't keep up → limiter component).
-  if (rec.resFactor != null) {
-    if (rec.resFactor >= 1.5) {
-      const pct = Math.round((rec.resFactor - 1) * 10); // approx mean residual %
-      reasons.push(`reps fall ~${pct}% below the 3-exp curve here — limiter signal from the F-D chart`);
-    } else if (rec.resFactor >= 1.15) {
-      reasons.push("reps fall slightly below the 3-exp curve here — mild limiter signal");
-    } else if (rec.resFactor < 0.85) {
-      reasons.push("reps sit above the 3-exp curve here — strong-zone signal");
-    }
-  }
-  if (rec.recency >= 0.85) {
-    reasons.push("zone fully recovered since last session");
-  } else if (rec.recency < 0.5) {
-    reasons.push("zone is partially recovered, lighter dose is fine");
-  }
-  if (rec.ext < 0.7) {
-    reasons.push("recent climbing biased away from harder zones");
-  }
-  // Training Focus bias text removed — focus has been deprecated
-  // under the curve-trust philosophy. The curve is the source of
-  // truth; no user-configurable bias overrides it.
-  return reasons.join("; ");
 }
 
 // ─────────────────────────────────────────────────────────────

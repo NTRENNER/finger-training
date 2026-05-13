@@ -32,7 +32,8 @@
 //     - F-D chart primary curve (bold purple solid line)
 //     - prescription() value AND potential (anchored + unanchored
 //       evaluations of the same per-grip three-exp fit)
-//     - coaching.js residual signal (zoneResidualFactor)
+//     - coaching.js continuous engine: per-T residual ratios drive the
+//       Gaussian-smoothed adaptBoost in coachingRecommendationContinuous
 //     - limiter.js cross-zone leave-one-out residual
 
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";

@@ -1,16 +1,15 @@
-// Tests for src/model/coaching.js — coaching recommendation engine v2.
-// Covers recencyPenalty, externalLoadModifier, zoneResidualFactor,
-// coachingRecommendation, coachingRationale.
+// Tests for src/model/coaching.js — continuous coaching engine.
+// Covers recencyPenalty, externalLoadModifier, and the
+// coachingRecommendationContinuous AUC-gain picker.
 //
-// The earlier intensityMatch / readiness pathway has been removed
-// (the readiness score was no longer displayed or settable, so the
-// factor silently collapsed into a hidden per-zone bias). Tests for
-// it were dropped along with the function.
+// The earlier discrete (zone × hand) engine and its rationale formatter
+// were retired May 2026 along with the SessionPlannerCard surface they
+// backed; the tests for coachingRecommendation, coachingRationale, and
+// zoneResidualFactor were dropped at the same time.
 
 import {
   COACH_RECOVERY_TAU_DAYS,
   recencyPenalty, externalLoadModifier,
-  zoneResidualFactor, coachingRecommendation, coachingRationale,
   coachingRecommendationContinuous,
 } from "../coaching.js";
 import { buildThreeExpPriors } from "../threeExp.js";
@@ -129,175 +128,6 @@ describe("externalLoadModifier", () => {
     const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     const acts = [{ type: "rest", date: yday, rpe: 9 }];
     expect(externalLoadModifier("power", acts)).toBe(1.0);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// zoneResidualFactor — three-exp dots-vs-curve signal (post Phase C)
-// ─────────────────────────────────────────────────────────────
-describe("zoneResidualFactor", () => {
-  test("returns 1.0 (neutral) when amps is null", () => {
-    expect(zoneResidualFactor([], "L", "Crusher", 45, null)).toBe(1.0);
-  });
-
-  test("returns 1.0 when amps are all zero", () => {
-    expect(zoneResidualFactor([], "L", "Crusher", 45, [0, 0, 0])).toBe(1.0);
-  });
-
-  test("returns 1.0 when no failures in target zone", () => {
-    const amps = [25, 12, 5];
-    expect(zoneResidualFactor([], "L", "Crusher", 45, amps)).toBe(1.0);
-  });
-
-  test("dots below the curve → factor > 1 (limiter signal)", () => {
-    // amps = [80, 40, 20] gives F(45) ≈ 80*exp(-4.5) + 40*exp(-1.5) + 20*exp(-0.25)
-    //                              ≈ 0.89 + 8.93 + 15.58 ≈ 25.4
-    // User fails at 18 / 16 (well below the curve) → positive residual,
-    // factor > 1 (limiter signal).
-    const amps = [80, 40, 20];
-    const history = [
-      { failed: true, hand: "L", grip: "Crusher", target_duration: 45,
-        actual_time_s: 45, avg_force_kg: 18 },
-      { failed: true, hand: "L", grip: "Crusher", target_duration: 45,
-        actual_time_s: 45, avg_force_kg: 16 },
-    ];
-    const f = zoneResidualFactor(history, "L", "Crusher", 45, amps);
-    expect(f).toBeGreaterThan(1);
-  });
-
-  test("dots above the curve → factor < 1 (strong-zone signal)", () => {
-    // amps = [10, 5, 2] gives F(45) ≈ 10*exp(-4.5) + 5*exp(-1.5) + 2*exp(-0.25)
-    //                            ≈ 0.11 + 1.12 + 1.56 ≈ 2.79
-    // User overperforms at 30/28 → negative residual, factor < 1.
-    const amps = [10, 5, 2];
-    const history = [
-      { failed: true, hand: "L", grip: "Crusher", target_duration: 45,
-        actual_time_s: 45, avg_force_kg: 30 },
-      { failed: true, hand: "L", grip: "Crusher", target_duration: 45,
-        actual_time_s: 45, avg_force_kg: 28 },
-    ];
-    const f = zoneResidualFactor(history, "L", "Crusher", 45, amps);
-    expect(f).toBeLessThan(1);
-  });
-
-  test("clamped to [0.5, 3.0]", () => {
-    const amps = [50, 25, 10];
-    const wayBelow = [
-      { failed: true, hand: "L", grip: "Crusher", target_duration: 45,
-        actual_time_s: 45, avg_force_kg: 1 },
-    ];
-    expect(zoneResidualFactor(wayBelow, "L", "Crusher", 45, amps)).toBeLessThanOrEqual(3.0);
-
-    const wayAbove = [
-      { failed: true, hand: "L", grip: "Crusher", target_duration: 45,
-        actual_time_s: 45, avg_force_kg: 999 },
-    ];
-    expect(zoneResidualFactor(wayAbove, "L", "Crusher", 45, amps)).toBeGreaterThanOrEqual(0.5);
-  });
-
-  test("uses freshLoadFor when freshMap is passed", () => {
-    // Build a within-set sequence: posted load 20 throughout, but the
-    // freshMap will say later reps are equivalent to higher fresh loads.
-    // Without the fmap, the function compares curve to raw 20.
-    // With the fmap, the function compares curve to fresh-equivalent
-    // (which is > 20 for later reps). Same amps and same actual reps.
-    const baseRep = (id, repNum) => ({
-      id, hand: "L", grip: "Crusher", failed: true,
-      session_id: "s1", set_num: 1, rep_num: repNum,
-      target_duration: 45, actual_time_s: 45,
-      avg_force_kg: 20, rest_s: 30,
-      date: "2026-04-01",
-    });
-    const history = [baseRep("r1", 1), baseRep("r2", 2), baseRep("r3", 3)];
-    // amps with predicted F(45) ≈ 25.4 (above raw 20, above fresh ~22)
-    const amps = [80, 40, 20];
-    const noFmap = zoneResidualFactor(history, "L", "Crusher", 45, amps);
-    // Build the freshMap: late-set reps will have fresh > 20.
-    // (We import buildFreshLoadMap from prescription.js for the test.)
-    // eslint-disable-next-line global-require
-    const { buildFreshLoadMap } = require("../prescription.js");
-    const fmap = buildFreshLoadMap(history);
-    const withFmap = zoneResidualFactor(history, "L", "Crusher", 45, amps, fmap);
-    // With the fmap, actual loads are higher, so residual (pred - actual)
-    // is smaller, so factor is closer to 1.0 (or smaller). It must
-    // differ from the no-fmap value.
-    expect(withFmap).not.toBe(noFmap);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// coachingRecommendation — full smoke test
-// ─────────────────────────────────────────────────────────────
-describe("coachingRecommendation", () => {
-  // Build a synthetic history with failures across all three zones
-  const buildHistory = () => {
-    const Ts = [7, 10, 30, 45, 60, 90, 120];
-    const trueAmps = [30, 12, 6];
-    const tau = [10, 30, 180];
-    const today = new Date().toISOString().slice(0, 10);
-    return Ts.flatMap((T, i) =>
-      ["L", "R"].map(h => ({
-        id: `${h}-${i}`, hand: h, grip: "Crusher", target_duration: T, rep_num: 1,
-        actual_time_s: T, failed: true,
-        avg_force_kg:
-          trueAmps[0]*Math.exp(-T/tau[0])
-        + trueAmps[1]*Math.exp(-T/tau[1])
-        + trueAmps[2]*Math.exp(-T/tau[2]),
-        date: today, session_id: `s${i}`,
-      }))
-    );
-  };
-
-  test("returns null with no grip", () => {
-    expect(coachingRecommendation([], null)).toBeNull();
-    expect(coachingRecommendation([], "")).toBeNull();
-  });
-
-  test("returns a candidate with required fields when data is sufficient", () => {
-    const history = buildHistory();
-    const priors = buildThreeExpPriors(history);
-    const rec = coachingRecommendation(history, "Crusher", { threeExpPriors: priors });
-    expect(rec).not.toBeNull();
-    expect([
-      "max_strength", "power", "power_strength",
-      "strength", "strength_endurance", "endurance",
-    ]).toContain(rec.zone);
-    expect(["L", "R"]).toContain(rec.hand);
-    expect(typeof rec.gap).toBe("number");
-    expect(typeof rec.score).toBe("number");
-    expect(typeof rec.recency).toBe("number");
-    expect(typeof rec.ext).toBe("number");
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// coachingRationale — formats human text from a rec
-// ─────────────────────────────────────────────────────────────
-describe("coachingRationale", () => {
-  test("returns empty string for null rec", () => {
-    expect(coachingRationale(null)).toBe("");
-  });
-
-  test("includes zone-compartment language but not hand-side", () => {
-    // hand-side intentionally omitted from rationale: most users train
-    // both hands per session so "on Left" / "on Right" at the
-    // recommendation level adds noise without changing what they'd do.
-    const rec = { zone: "power", hand: "L", gap: 0.20, recency: 0.9, ext: 1, resFactor: 1 };
-    const text = coachingRationale(rec);
-    expect(text).toMatch(/fast|PCr/i);
-    expect(text).not.toMatch(/Left|Right/);
-  });
-
-  test("calls out the 3-exp curve in residual signal", () => {
-    const rec = { zone: "strength", hand: "R", gap: 0.10, recency: 0.9, ext: 1, resFactor: 1.6 };
-    const text = coachingRationale(rec);
-    expect(text).toMatch(/3-exp curve/);
-  });
-
-  test("formats positive gap with explicit percentage", () => {
-    const rec = { zone: "power", hand: "L", gap: 0.25, recency: 0.9, ext: 1, resFactor: 1 };
-    const text = coachingRationale(rec);
-    expect(text).toMatch(/\+25%/);
   });
 });
 
