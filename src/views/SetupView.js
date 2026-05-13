@@ -508,14 +508,15 @@ function SessionRPECard({ activities, onSetSessionRPE }) {
 // straight into the recommended session — single-tap go.
 function ContinuousPickCard({
   history, grip, freshMap, threeExpPriors,
+  activities = [],
   GOAL_CONFIG, unit, onApplyPlan,
   hand = "Both",  // session config's selected hand — drives the total-time math
 }) {
   const rec = useMemo(
     () => grip
-      ? coachingRecommendationContinuous(history, grip, { freshMap, threeExpPriors })
+      ? coachingRecommendationContinuous(history, grip, { freshMap, threeExpPriors, activities })
       : null,
-    [history, grip, freshMap, threeExpPriors]
+    [history, grip, freshMap, threeExpPriors, activities]
   );
 
   // Derive default protocol from T_star.
@@ -630,6 +631,10 @@ function ContinuousPickCard({
   }
   if (rec.recency != null && rec.recency < 0.5) {
     whyParts.push("zone partially recovered — lighter dose is fine");
+  }
+  if (rec.ext != null && rec.ext < 0.85) {
+    const pct = Math.round((1 - rec.ext) * 100);
+    whyParts.push(`recent climbing ~${pct}% scale-down on this zone`);
   }
   if (whyParts.length === 0) {
     whyParts.push("curve is well-calibrated locally; this T scores best on staleness × recency");
@@ -861,6 +866,7 @@ export function SetupView({
         hand={config.hand}
         freshMap={freshMap}
         threeExpPriors={threeExpPriors}
+        activities={activities}
         GOAL_CONFIG={GOAL_CONFIG}
         unit={unit}
         onApplyPlan={(plan) => setConfig(c => ({ ...c, ...plan }))}
@@ -877,6 +883,7 @@ export function SetupView({
           grip={config.grip}
           freshMap={freshMap}
           threeExpPriors={threeExpPriors}
+          activities={activities}
           unit={unit}
           GOAL_CONFIG={GOAL_CONFIG}
         />

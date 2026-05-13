@@ -24,13 +24,13 @@ import { prescription } from "../../model/prescription.js";
 import { coachingRecommendationContinuous } from "../../model/coaching.js";
 
 export function PrescribedLoadCard({
-  history, grip, freshMap, threeExpPriors, unit, GOAL_CONFIG,
+  history, grip, freshMap, threeExpPriors, activities = [], unit, GOAL_CONFIG,
 }) {
   const rec = useMemo(
     () => grip
-      ? coachingRecommendationContinuous(history, grip, { freshMap, threeExpPriors })
+      ? coachingRecommendationContinuous(history, grip, { freshMap, threeExpPriors, activities })
       : null,
-    [history, grip, freshMap, threeExpPriors]
+    [history, grip, freshMap, threeExpPriors, activities]
   );
   const recommendedZone = rec?.zone;
 

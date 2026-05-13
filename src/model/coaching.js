@@ -390,6 +390,7 @@ export function coachingRationale(rec) {
 //      local "where on the curve do you fall vs the model" signal.
 //   4. score(T) = adaptBoost(T) × stalenessBoost(zoneOf(T))
 //                                × recencyPenalty(zoneOf(T))
+//                                × externalLoadModifier(zoneOf(T), activities)
 //      adaptBoost is SYMMETRIC (vs. the earlier residualBoost which
 //      only rewarded limiters):
 //        room = 1 − localRatio   (positive = below curve, room to grow;
@@ -401,6 +402,10 @@ export function coachingRationale(rec) {
 //      stalenessBoost preserves curve coverage incentive.
 //      recencyPenalty crushes just-trained zones with the same per-zone
 //      tau the discrete engine uses (max_strength fast → endurance slow).
+//      externalLoadModifier scales prescriptions down after recent hard
+//      climbing — RPE-aware session fatigue from climbingFatigue.js
+//      pushes Power down hardest, Endurance least. Returns 1.0 when no
+//      recent climb session is found within 48h.
 //   5. Argmax over (hand, T). The headline loadKg is the anchored
 //      prescription at T_star (curve_shape × amplitude_anchor from
 //      prescription()), so a great recent session lifts the whole
@@ -420,6 +425,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const {
     freshMap = null,
     threeExpPriors = null,
+    activities = [],
     today = new Date(),
     tMin = CONTINUOUS_T_MIN,
     tMax = CONTINUOUS_T_MAX,
@@ -508,7 +514,12 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // training, recovering to 1.0 over the zone's tau). Same per-zone
       // tau map the discrete engine uses — see COACH_RECOVERY_TAU_DAYS.
       const recency = recencyPenalty(zoneKey, history, grip);
-      const score = adaptBoost * stale * recency;
+      // External climbing load: RPE-aware session fatigue from
+      // src/model/climbingFatigue.js, scaled by zone (max_strength
+      // most sensitive, endurance least). 1.0 when no recent climb
+      // session is found within 48h — see externalLoadModifier above.
+      const ext = externalLoadModifier(zoneKey, activities);
+      const score = adaptBoost * stale * recency * ext;
 
       if (!best || score > best.score) {
         best = {
@@ -529,6 +540,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
           localRatio,
           stalenessBoost: stale,
           recency,
+          ext,
           staleStatus: stalenessMap[zoneKey]?.status ?? "ok",
           zone: zoneKey,
         };

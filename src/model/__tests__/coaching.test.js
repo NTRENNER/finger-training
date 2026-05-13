@@ -493,6 +493,31 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.residualBoost).toBe(rec.adaptBoost);
   });
 
+  test("activities (recent climbing) suppress the recommendation score", () => {
+    // Same history both runs; the only difference is whether activities
+    // include a recent hard climbing session. With it, the score should
+    // be lower (activities multiply through ext < 1.0 within 48h).
+    const history = [
+      buildRep("L", 30, F_curve(30)),
+      buildRep("L", 60, F_curve(60)),
+      buildRep("L", 120, F_curve(120)),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const hardClimb = Array.from({ length: 6 }, () => ({
+      type: "climbing", date: yday, rpe: 8,
+    }));
+    const noClimbs   = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    const withClimbs = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today, activities: hardClimb });
+    expect(noClimbs).not.toBeNull();
+    expect(withClimbs).not.toBeNull();
+    // ext is exposed on the result for transparency
+    expect(withClimbs.ext).toBeLessThan(1.0);
+    expect(noClimbs.ext).toBe(1.0);
+    // Score should drop when climbing fatigue is in play
+    expect(withClimbs.score).toBeLessThan(noClimbs.score);
+  });
+
   test("staleness is per-grip — Crusher endurance training doesn't refresh Micro endurance", () => {
     // Helper: same as buildRep but lets us pick the grip
     const rep = (hand, grip, T, F, daysAgo = 0) => ({

@@ -1303,6 +1303,7 @@ export function AnalysisView({
             grip={selGrip}
             freshMap={freshMap}
             threeExpPriors={threeExpPriors}
+            activities={activities}
             unit={unit}
             GOAL_CONFIG={GOAL_CONFIG}
           />
