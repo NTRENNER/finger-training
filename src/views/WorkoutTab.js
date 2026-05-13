@@ -44,13 +44,12 @@ import { BwPrompt } from "./SetupView.js";
 // WORKOUT PLAN
 // ─────────────────────────────────────────────────────────────
 const LS_WORKOUT_PLAN_KEY    = "ft_workout_plan";
-// LS_WORKOUT_STATE_KEY ("ft_workout_state") used to store the
-// rotation index + sessionCount as local state. It is no longer
-// read or written — rotation is now derived from wLog (which
-// syncs across devices via fetchWorkoutSessions) so that two
-// devices for the same user can't drift on what's "next up".
-// Existing values under "ft_workout_state" are orphaned but
-// harmless; nothing reads them.
+// "ft_workout_state" used to store the rotation index + session
+// count as local state. Rotation is now derived from wLog (synced
+// across devices) so the local state is unused. The first
+// saveLog() call below opportunistically clears any stale value
+// from users' localStorage as a one-shot cleanup.
+const LS_LEGACY_WORKOUT_STATE_KEY = "ft_workout_state";
 //
 // LS_WORKOUT_LOG_KEY now lives in src/lib/storage.js (imported above).
 // LS_TRIP_KEY stays in App.js — that's where the trip-load/save lives;
@@ -742,7 +741,15 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   const [editingKey, setEditingKey] = useState(null);          // "A"|"B"|"C"|null
 
   const savePlan  = (p) => { setPlan(p);  saveLS(LS_WORKOUT_PLAN_KEY,  p); };
-  const saveLog   = (l) => { setWLog(l);  saveLS(LS_WORKOUT_LOG_KEY,   l); };
+  const saveLog   = (l) => {
+    setWLog(l);
+    saveLS(LS_WORKOUT_LOG_KEY, l);
+    // One-shot cleanup: drop the orphaned legacy "ft_workout_state"
+    // key from users' localStorage so it doesn't sit around forever.
+    // No-op when already absent. Removing on every save is cheaper
+    // than a useEffect-scoped one-time migration.
+    try { window.localStorage.removeItem(LS_LEGACY_WORKOUT_STATE_KEY); } catch {}
+  };
 
   // ── Derive rotation state from the synced workout log ─────
   // Previously this lived in LS_WORKOUT_STATE_KEY (`ft_workout_state`)
@@ -771,8 +778,9 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   // sync gaps drift the rotation, and also the "start a fresh cycle"
   // gesture going forward.
   //
-  // The old LS_WORKOUT_STATE_KEY is left in place (orphaned, harmless)
-  // — nothing reads it anymore.
+  // The legacy LS key ("ft_workout_state") is opportunistically
+  // removed by saveLog() on every workout save so it doesn't sit
+  // forever in users' localStorage.
   const { rotationIndex, sessionCount } = useMemo(() => {
     // Sort by date+completedAt so out-of-order arrivals from the
     // cloud reconcile (legacy sessions without completedAt) still

@@ -1,13 +1,11 @@
 // Tests for src/model/prescription.js — the prescription layer.
 // Covers effectiveLoad/loadedWeight/repKey, freshMap building, fitDoseK,
-// rpeProgressionMultiplier, the unified prescription() function, and
-// suggestWeight.
+// the unified prescription() function, and suggestWeight.
 
 import {
   effectiveLoad, loadedWeight, repKey,
   isShortfall, SHORTFALL_TOL,
   buildSMaxIndex, buildFreshLoadMap, freshLoadFor, fitDoseK,
-  BUMP_PER_SUCCESS, MAX_BUMP_MULT, rpeProgressionMultiplier,
   estimateRefWeight,
   EMPIRICAL_LOOKBACK_DAYS, prescription,
   suggestWeight,
@@ -181,36 +179,8 @@ describe("fitDoseK", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────
-// rpeProgressionMultiplier — DEPRECATED no-op under train-to-failure
-// ─────────────────────────────────────────────────────────────
-// Under the train-to-failure data model (May 2026), every rep ends
-// in physical failure regardless of how it compares to the prescribed
-// target. There is no "success" to streak-bump, so the multiplier is
-// now a no-op that always returns 1.0. The function is kept exported
-// for backward compat with anything that imported it; new code should
-// not call it. See prescription.js for the deprecation note.
-describe("rpeProgressionMultiplier (deprecated no-op)", () => {
-  const today = new Date().toISOString().slice(0, 10);
-
-  test("returns 1.0 with no history", () => {
-    expect(rpeProgressionMultiplier([], "L", "Crusher", 45)).toBe(1);
-    expect(rpeProgressionMultiplier(null, "L", "Crusher", 45)).toBe(1);
-  });
-
-  test("returns 1.0 with success history (no longer bumps)", () => {
-    const history = [{
-      hand: "L", grip: "Crusher", target_duration: 45, rep_num: 1,
-      actual_time_s: 45, failed: false, date: today, session_id: "s1",
-    }];
-    expect(rpeProgressionMultiplier(history, "L", "Crusher", 45)).toBe(1);
-  });
-
-  test("BUMP_PER_SUCCESS and MAX_BUMP_MULT constants kept for compat", () => {
-    expect(BUMP_PER_SUCCESS).toBeCloseTo(0.05, 6);
-    expect(MAX_BUMP_MULT).toBeCloseTo(1.30, 6);
-  });
-});
+// (rpeProgressionMultiplier + BUMP_PER_SUCCESS + MAX_BUMP_MULT tests
+// removed alongside the symbols themselves — May 2026 cleanup.)
 
 // ─────────────────────────────────────────────────────────────
 // estimateRefWeight — historical average emergency fallback

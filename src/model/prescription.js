@@ -259,30 +259,11 @@ export function sessionCompartmentAUC(reps, physModel = PHYS_MODEL_DEFAULT) {
   return out;
 }
 
-// ─────────────────────────────────────────────────────────────
-// RPE 10 PROGRESSION BUMP — DEPRECATED (May 2026)
-// ─────────────────────────────────────────────────────────────
-// Under the train-to-failure data model, every rep ends in physical
-// failure regardless of how it compares to the prescribed target_
-// duration. A "success" — actual_time_s ≥ target — is no longer a
-// real category, so the success-streak bump no longer applies.
-// The curve scale-by-residual path in empiricalPrescription handles
-// the same job intrinsically: if you've been failing later than the
-// curve predicts, the curve gets pulled up automatically and the
-// next prescription bumps without an explicit streak multiplier.
-//
-// rpeProgressionMultiplier is kept as a no-op (returns 1.0 always)
-// so any external caller that imported it doesn't break, but it's
-// deprecated and will be removed in a future cleanup.
-export const BUMP_PER_SUCCESS = 0.05;  // deprecated — kept for compat
-export const MAX_BUMP_MULT = 1.30;     // deprecated — kept for compat
-
-// eslint-disable-next-line no-unused-vars
-export function rpeProgressionMultiplier(history, hand, grip, targetDuration) {
-  // No-op under train-to-failure model. The curve handles progression
-  // via the residual scale in empiricalPrescription's three-exp path.
-  return 1;
-}
+// (RPE-10 progression bump retired in May 2026: rpeProgressionMultiplier,
+// BUMP_PER_SUCCESS, MAX_BUMP_MULT all gone. The train-to-failure model
+// + curve scale-by-residual in prescription() handle the same job
+// intrinsically — overshoots pull the amplitude anchor up, undershoots
+// down, no explicit streak multiplier needed.)
 
 // ─────────────────────────────────────────────────────────────
 // HISTORICAL ESTIMATION  (fallback path, no curve)

@@ -127,44 +127,35 @@ const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — use
 //
 // Multi-set fields (setsDefault, setRestDefault) were dropped May 2026
 // when the workout runner moved to single-set sessions only. The
-// `setsRationale` text is preserved as it explains the protocol's
-// physiological intent, not its set structure.
+// `setsRationale` + `intensity` text fields followed shortly after:
+// no consumer rendered them. The continuous engine derives reps/rest
+// from T_star directly, so the protocol-description strings were dead
+// text. Reference times, labels, colors, and emojis are still consumed
+// across SetupView, AnalysisView's PrescribedLoadCard, and elsewhere.
 const GOAL_CONFIG = {
   max_strength: {
     label: "Max Strength", emoji: "💥", color: "#c83838",
     refTime: 5, restDefault: 180, repsDefault: 5,
-    intensity: "5 × 5s near-max · 3min rest",
-    setsRationale: "Max Strength protocol: 5 hangs of ~5s at near-MVC load with full 3-minute rest between. The long rest aligns with the fast-component recovery window (τ₁≈15s — most of the model's fast amplitude has reset by 3min) so each hang is essentially a fresh max-effort attempt. Targets neural drive, motor unit recruitment, and intramuscular coordination — adaptations that the longer-duration zones don't load directly. Use sparingly: high CNS cost, ~1 session per week tops. Best done warm and well-rested.",
   },
   power: {
     label: "Power", emoji: "⚡", color: "#e05560",
     refTime: 30, restDefault: 60, repsDefault: 5,
-    intensity: "5 × 30s · 60s rest",
-    setsRationale: "Power protocol: 5 hangs of ~30s at the load that takes you to failure around that duration, with 60s rest between. The 30s mark sits where the fast model component is largely depleted and the medium component starts to dominate — the fast/medium crossover the curve fit identifies as power. 60s rest is enough for fast-component recovery but only partial medium-component recovery (τ₂≈90s), so successive hangs drift shorter and the rep-time curve becomes a personal medium-component recovery probe.",
   },
   power_strength: {
     label: "Power/Strength", emoji: "🔶", color: "#e68a48",
     refTime: 70, restDefault: 90, repsDefault: 4,
-    intensity: "4 × 70s · 90s rest",
-    setsRationale: "Power/Strength protocol: 4 hangs of ~70s with 90s rest. Sits inside the medium-component dominant window — broadly aligned with lactate accumulation and buffering capacity in the literature. Bridges the gap between Power and Strength so you're not skipping the 50–90s window where many hard route cruxes actually live.",
   },
   strength: {
     label: "Strength", emoji: "💪", color: "#e07a30",
     refTime: 115, restDefault: 120, repsDefault: 4,
-    intensity: "4 × ~115s · 2min rest",
-    setsRationale: "Strength protocol: 4 hangs targeting ~115s with 2-minute rest between. Sits at the medium/slow-component crossover in the curve fit — broadly aligned with lactate tolerance and clearance work in the climbing literature, with rising contribution from longer-time-constant aerobic processes. Watch hold-time decay across hangs as a personal recovery probe.",
   },
   strength_endurance: {
     label: "Strength/Endurance", emoji: "🟦", color: "#7aa0d8",
     refTime: 160, restDefault: 120, repsDefault: 3,
-    intensity: "3 × ~160s · 2min rest",
-    setsRationale: "Strength/Endurance protocol: 3 hangs of ~160s with 2-minute rest. Inside the slow-component dominant window — broadly aligned in the literature with lactate clearance and aerobic engagement. Catches the 140–180s window between pure strength and aerobic-dominant endurance.",
   },
   endurance: {
     label: "Endurance", emoji: "🏔️", color: "#3b82f6",
     refTime: 220, restDefault: 60, repsDefault: 3,
-    intensity: "3 × ~220s · 60s rest · near CF",
-    setsRationale: "Endurance protocol at load ≈ CF (just above Critical Force). 3 hangs targeting ~220s with 60s rest. The slow component dominates the curve fit at this duration — broadly aligned in the literature with capillarization, mitochondrial density, and fat oxidation adaptations. Hold-time drops fast across hangs as the slow component drains; trust the curve, the load is calibrated to fail you on the tail.",
   },
 };
 
