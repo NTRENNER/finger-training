@@ -1,19 +1,20 @@
 // ─────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
 // ─────────────────────────────────────────────────────────────
-// The "Analysis" tab — Force-Duration chart, Critical Force estimate
-// cards, Endurance Improvement % vs baseline, gap-narrowing tracker,
-// CF Over Time chart, and the per-grip Next Session Focus
-// recommendations driven by the v2 coaching engine.
+// The "Analysis" tab — Force-Duration chart, Total Capacity (AUC)
+// trajectory, Critical Force estimate cards, per-grip Curve
+// Improvement, the shared PrescribedLoadCard, and CurveCoverageCard
+// (per-zone data freshness + annual session pace).
 //
-// All state comes in via props: history, freshMap, threeExpPriors,
-// liveEstimate, gripEstimates, etc. No localStorage access, no BLE,
-// no live session state — pure read-and-render.
+// All state comes in via props: history, freshMap (built in
+// useRepHistory), activities, bodyWeight. threeExpPriors are
+// memoized locally from history. No localStorage access for primary
+// state, no BLE, no live session state — pure read-and-render
+// over the rep array.
 //
 // Cross-cutting App config (GOAL_CONFIG, RM_GRIPS) is passed in as
 // props so this module stays decoupled from App.js's constant block;
-// pure model helpers (ZONE5, classifyZone5, dominantZone5,
-// computeZoneCoverage) are imported directly from the model layer.
+// pure model helpers are imported directly from the model layer.
 
 import React, { useMemo, useState } from "react";
 import {

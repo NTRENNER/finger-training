@@ -1,5 +1,5 @@
 // src/App.js  — Finger Training v3
-// Rep-based sessions · Three-Compartment Fatigue Model · Tindeq Progressor BLE · Gamification
+// Rep-based sessions · Three-exp F-D / curve-trust prescription · Tindeq Progressor BLE
 import React, {
   useCallback, useEffect, useState,
 } from "react";
@@ -54,12 +54,14 @@ import { today, uid } from "./util.js";
 // Most code that App.js used to inline now lives in extracted
 // modules — see the imports above:
 //   src/model/  pure JS math (three-exp, fatigue, prescription,
-//               coaching, zones, levels, personal-response, limiter,
-//               training-focus)
-//   src/views/  React tabs + the active-session flow (BadgesView,
-//               TrendsView, HistoryView, ClimbingTab, SetupView,
-//               AnalysisView, SettingsView, WorkoutTab,
-//               ActiveSessionViews, etc.)
+//               coaching, climbingFatigue, zones, levels, lockout,
+//               limiter, warmup, workout-progression, workout-volume)
+//   src/views/  React tabs + the active-session flow (SetupView,
+//               AnalysisContainer, AnalysisView, HistoryView,
+//               SettingsView, WorkoutTab, ActiveSessionViews,
+//               WarmupView, ClimbingHistoryList, plus shared cards
+//               under src/views/cards/ and analysis-specific ones
+//               under src/views/analysis/)
 //   src/lib/    side-effecting infrastructure (storage, csv, supabase,
 //               sync, tindeq, trip, climbing-grades)
 //   src/ui/     theme, formatters, shared components
@@ -546,8 +548,9 @@ export default function App() {
   // ── Render ────────────────────────────────────────────────
   return (
     <div style={base}>
-      {/* Top nav — horizontally scrollable. With 9 tabs the row
-          overflows the viewport on phones; rather than hide tabs in
+      {/* Top nav — horizontally scrollable. Even with the 5-tab row
+          ("Fingers · Workout · Analysis · History · Settings") the
+          phone viewport overflows; rather than hide tabs in
           a hamburger or wrap to two rows (which loses the sticky-
           single-line shape), let the row scroll horizontally and
           hide the scrollbar. flexShrink: 0 on each button keeps

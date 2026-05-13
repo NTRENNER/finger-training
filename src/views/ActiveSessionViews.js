@@ -2,11 +2,12 @@
 // ACTIVE-SESSION VIEWS
 // ─────────────────────────────────────────────────────────────
 // Everything the user sees once they hit "Start Session" — the
-// big-timer / force-gauge active rep, the rest screen, the
-// switch-hands and between-set transitions, the post-session
+// big-timer / force-gauge active rep, the rest screen between
+// reps, the switch-hands prompt in Both-mode, and the post-session
 // summary. Plus the auto-detect Tindeq-driven flow
 // (AutoRepSessionView) that replaces ActiveSessionView when BLE
-// is connected.
+// is connected. Sessions are single-set under the curve-trust
+// flow; the between-sets and alt-hand-switch transitions are gone.
 //
 // Coupling to App.js is only via props:
 //   session    — { config, currentRep,
