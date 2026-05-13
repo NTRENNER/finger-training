@@ -141,65 +141,11 @@ export function fitThreeExpAmps(pts, opts = {}) {
   return best;
 }
 
-// Three-exp fit with success-floor enforcement. Failures anchor the
-// curve; successes act as LOWER BOUNDS (you held F for T without
-// failing → the curve at T must be ≥ F). Without this, prescriptions
-// lag actual capacity whenever the user clears a target instead of
-// pushing to true failure.
-//
-// Algorithm: start with a failure-only fit, iteratively bump weights of
-// any success points that violate the lower bound, refit until no more
-// violations or maxIter reached.
-//
-// NOTE: Under the train-to-failure data model (May 2026), every rep is
-// a failure data point, so this success-floor variant is no longer
-// called from production paths. Kept exported for any external callers
-// or future re-introduction; the production fit is fitThreeExpAmps.
-//
-// failurePts: [{T, F}]
-// successPts: [{T, F}]
-// opts: { taus?, prior?, lambda?, maxIter?, tol?, weightStep? }
-//
-// Returns [a, b, c] all ≥ 0, or null if not enough data.
-export function fitThreeExpAmpsWithSuccessFloor(failurePts, successPts, opts = {}) {
-  const { maxIter = 60, tol = 0.1, weightStep = 4.0, ...fitOpts } = opts;
-  const failures = (failurePts || []).map(p => ({ T: p.T, F: p.F, w: 1 }));
-  const successes = successPts || [];
-  if (failures.length + successes.length < 2) return null;
-
-  let amps = failures.length >= 1 ? fitThreeExpAmps(failures, fitOpts) : null;
-  if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) {
-    // Seed with successes too if failures alone produced nothing
-    const seed = [...failures, ...successes.map(p => ({ T: p.T, F: p.F, w: 1 }))];
-    amps = fitThreeExpAmps(seed, fitOpts);
-  }
-  if (!amps) return null;
-  if (successes.length === 0) return amps;
-
-  const succWeights = successes.map(() => 0);
-  for (let iter = 0; iter < maxIter; iter++) {
-    let anyViolation = false;
-    for (let i = 0; i < successes.length; i++) {
-      const s = successes[i];
-      const pred = predForceThreeExp(amps, s.T, fitOpts.taus);
-      if (pred < s.F - tol) {
-        succWeights[i] += weightStep;
-        anyViolation = true;
-      }
-    }
-    if (!anyViolation) break;
-    const augmented = [...failures];
-    for (let i = 0; i < successes.length; i++) {
-      if (succWeights[i] > 0) {
-        augmented.push({ T: successes[i].T, F: successes[i].F, w: succWeights[i] });
-      }
-    }
-    const next = fitThreeExpAmps(augmented, fitOpts);
-    if (!next) break;
-    amps = next;
-  }
-  return amps;
-}
+// (fitThreeExpAmpsWithSuccessFloor retired May 2026. Successes were
+// lower-bound constraints when the data model distinguished success
+// vs. failure; under train-to-failure every rep is a (T, F) point so
+// the success-floor iteration was a no-op. The plain fitThreeExpAmps
+// is the only fit path now — see prescription.js + AnalysisView.)
 
 // Predict force at duration T given fitted amplitudes [a, b, c].
 // Uses PHYS_MODEL_DEFAULT.tauD by default — see header for why this is

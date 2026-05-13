@@ -1,12 +1,6 @@
 // Tests for src/model/threeExp.js — three-exponential F-D model.
 // Covers fitThreeExpAmps (with and without prior + weights),
 // predForceThreeExp, buildThreeExpPriors.
-//
-// Note: fitThreeExpAmpsWithSuccessFloor remains exported for backward
-// compatibility but is DEPRECATED under the train-to-failure data
-// model (May 2026) — every rep is treated as a failure data point,
-// so the success-floor lower-bound iteration is a no-op in practice.
-// Its behavior is no longer tested here.
 
 import {
   THREE_EXP_LAMBDA_DEFAULT,
@@ -131,8 +125,6 @@ describe("fitThreeExpAmps", () => {
     expect(errD).toBeLessThan(errR);
   });
 });
-
-// (fitThreeExpAmpsWithSuccessFloor is deprecated — see header note. No tests.)
 
 // ─────────────────────────────────────────────────────────────
 // predForceThreeExp — analytical evaluation
