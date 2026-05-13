@@ -200,12 +200,18 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     const actualTime = (Date.now() - startTimeRef.current) / 1000;
     startTimeRef.current = null;
     setRepPhase("ready");
-    // Capture peak BEFORE stopMeasuring — Tindeq's peak ref isn't
-    // cleared until the next startMeasuring, but reading it here
-    // alongside avgForce keeps the rep payload internally consistent.
-    const peakForce = tindeq.peak;
-    if (tindeq.connected) await tindeq.stopMeasuring();
-    onRepDone({ actualTime, avgForce: tindeq.avgForce, peakForce, failed });
+    // stopMeasuring returns the rep's plateau-trimmed avg and peak
+    // directly — no reliance on stale React state. Falls back to
+    // tindeq.peak / tindeq.avgForce when BLE was disconnected and
+    // there are no samples to trim (manual / no-Tindeq sessions).
+    let avgForce = tindeq.avgForce;
+    let peakForce = tindeq.peak;
+    if (tindeq.connected) {
+      const stats = await tindeq.stopMeasuring();
+      avgForce = stats.avgForce;
+      peakForce = stats.peakForce;
+    }
+    onRepDone({ actualTime, avgForce, peakForce, failed });
   }, [tindeq, onRepDone]);
 
   // Wire auto-failure → endRep for the duration of an active rep only.
