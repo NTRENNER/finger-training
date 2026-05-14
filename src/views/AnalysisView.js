@@ -785,6 +785,37 @@ export function AnalysisView({
       if (seriesMap.size >= 2) perGrip[g] = seriesMap;
     }
     if (Object.keys(perGrip).length === 0) return null;
+    // Per-grip 3-point centered rolling mean over each grip's own
+    // ordered session-date series (NOT over the union — gaps between
+    // grips' training days should not smear one grip into another's
+    // schedule). Endpoints fall back to 2-point means. Grips with <3
+    // sessions skip smoothing entirely; their smoothed series stays
+    // null so the line simply doesn't render.
+    const smoothedByGrip = {};  // grip -> Map<date, { pctSm, pctBWSm }>
+    for (const g of Object.keys(perGrip)) {
+      const entries = [...perGrip[g].entries()].sort(
+        (a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)
+      );
+      const sm = new Map();
+      const n = entries.length;
+      if (n >= 3) {
+        for (let i = 0; i < n; i++) {
+          const lo = Math.max(0, i - 1);
+          const hi = Math.min(n - 1, i + 1);
+          let pSum = 0, pCnt = 0, bSum = 0, bCnt = 0;
+          for (let j = lo; j <= hi; j++) {
+            const v = entries[j][1];
+            if (v.pct   != null) { pSum += v.pct;   pCnt++; }
+            if (v.pctBW != null) { bSum += v.pctBW; bCnt++; }
+          }
+          sm.set(entries[i][0], {
+            pctSm:   pCnt > 0 ? Math.round(pSum / pCnt) : null,
+            pctBWSm: bCnt > 0 ? Math.round(bSum / bCnt) : null,
+          });
+        }
+      }
+      smoothedByGrip[g] = sm;
+    }
     const dates = [...datesUnion].sort();
     const absRows = [];
     const pctRows = [];
@@ -795,9 +826,12 @@ export function AnalysisView({
       const pBwRow = { date };
       for (const g of Object.keys(perGrip)) {
         const v = perGrip[g].get(date);
-        aRow[`${g}_abs`]   = v ? v.abs   : null;
-        pRow[`${g}_pct`]   = v ? v.pct   : null;
-        pBwRow[`${g}_pct`] = v ? v.pctBW : null;
+        const sv = smoothedByGrip[g]?.get(date);
+        aRow[`${g}_abs`]      = v ? v.abs   : null;
+        pRow[`${g}_pct`]      = v ? v.pct   : null;
+        pRow[`${g}_pct_sm`]   = sv ? sv.pctSm   : null;
+        pBwRow[`${g}_pct`]    = v ? v.pctBW : null;
+        pBwRow[`${g}_pct_sm`] = sv ? sv.pctBWSm : null;
       }
       absRows.push(aRow);
       pctRows.push(pRow);
@@ -1335,8 +1369,8 @@ export function AnalysisView({
           </div>
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
             {normalizeOn
-              ? "Same metric, normalized to bodyweight at each session date. Rising lines mean your CLIMBING-relevant capacity is growing — strength gains that come with matching weight gains flatten here."
-              : "Same metric as a percentage above each grip's baseline. Rising lines mean your overall curve is growing — the cleanest single-number progress signal you have."}
+              ? "Same metric, normalized to bodyweight at each session date. Bold line is a 3-session rolling mean to read trend through noise; dots are the raw per-session values."
+              : "Same metric as a percentage above each grip's baseline. Bold line is a 3-session rolling mean to read trend through noise; dots are the raw per-session values."}
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={normalizeOn ? aucHistoryByGrip.pctRowsBW : aucHistoryByGrip.pctRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
@@ -1351,10 +1385,19 @@ export function AnalysisView({
                 contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
                 formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
               />
-              {aucHistoryByGrip.grips.map(g => (
-                <Line key={g} dataKey={`${g}_pct`} stroke={GRIP_COLORS[g] || C.blue}
-                  strokeWidth={2} dot={{ r: 3 }} connectNulls name={g} />
-              ))}
+              {aucHistoryByGrip.grips.flatMap(g => {
+                const color = GRIP_COLORS[g] || C.blue;
+                return [
+                  // Raw values: dots only, no connecting line.
+                  <Line key={`${g}_raw`} dataKey={`${g}_pct`} stroke="none"
+                    dot={{ r: 3, fill: color, stroke: color }} activeDot={{ r: 4 }}
+                    legendType="none" name={`${g} (raw)`} isAnimationActive={false} />,
+                  // Smoothed trend: bold line, no dots.
+                  <Line key={`${g}_sm`} dataKey={`${g}_pct_sm`} stroke={color}
+                    strokeWidth={3} dot={false} connectNulls name={g}
+                    isAnimationActive={false} />,
+                ];
+              })}
             </LineChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
