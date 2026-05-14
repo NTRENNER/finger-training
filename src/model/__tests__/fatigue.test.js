@@ -146,11 +146,12 @@ describe("sessionCompartmentAUC", () => {
     const longRep  = [{ actual_time_s: 180, avg_force_kg: 20 }];
     const sOut = sessionCompartmentAUC(shortRep);
     const lOut = sessionCompartmentAUC(longRep);
-    // The long rep should deliver more slow-compartment dose than the
-    // short rep does (a 180s hold reaches deep into the oxidative pool).
+    // The long rep should deliver more slow-component dose than the
+    // short rep does (a 180s hold sustains long enough to drive the
+    // slow-timescale component).
     expect(lOut.slow).toBeGreaterThan(sOut.slow);
     // Both should have non-zero fast dose, but the long rep saturates
-    // the fast pool too.
+    // the fast component too.
     expect(sOut.fast).toBeGreaterThan(0);
     expect(lOut.fast).toBeGreaterThan(0);
   });

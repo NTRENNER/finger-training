@@ -92,9 +92,9 @@ export function mostRecentClimbDate(activities, today = new Date(), withinDays =
 
 // Map a session fatigue score and zone to a load-modifier multiplier.
 // 1.0 = no impact; <1.0 = scale prescription down. Slope is steeper
-// for fast / neural zones (PCr recovers quickly but is more sensitive
-// to acute fatigue) than for endurance (aerobic adaptation tolerates
-// stacking better).
+// for short-T near-MVC zones (more sensitive to acute systemic
+// fatigue) than for long-T sustained zones (which tolerate stacked
+// load better).
 //
 //   fatigue 1-3 (warmup day)       → ~no impact (0.95 - 1.0)
 //   fatigue 4-6 (moderate session) → 0.80 - 0.95 depending on zone

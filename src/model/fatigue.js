@@ -1,25 +1,30 @@
 // ─────────────────────────────────────────────────────────────
-// CANONICAL THREE-COMPARTMENT PHYSIOLOGICAL MODEL  +  FATIGUE
+// THREE-TIMESCALE FORCE MODEL  +  FATIGUE
 // ─────────────────────────────────────────────────────────────
 // PHYS_MODEL_DEFAULT is the single source of truth for the three-
-// compartment model used by every downstream calculation: fatigue
+// timescale model used by every downstream calculation: fatigue
 // accumulation, rep-time prediction, AUC dose attribution, capacity-
 // zone labels, and the three-exp force-duration curve target.
 //
-// Compartments map to bioenergetic systems:
-//   fast   → phosphocreatine (PCr)
-//   medium → glycolytic
-//   slow   → oxidative
+// The model is a sum of three exponentials with progressively longer
+// decay constants. Components are labeled fast / medium / slow,
+// ordered by depletion tau. The labels describe the math (timescale
+// ordering); they should NOT be treated as identifications of specific
+// tissue compartments. The literature draws metaphors to PCr / glycolytic
+// / oxidative pools at these timescales, but the model is a regression
+// fit to force-duration data, not a tissue measurement. Treating it
+// as the latter would be an overclaim the math doesn't support.
 //
-// Two distinct tau triples per compartment:
-//   tauD — depletion time constant during a hang (faster systems
-//          deplete faster as load draws down their substrate)
+// Two distinct tau triples per component:
+//   tauD — depletion time constant during a hang (faster timescales
+//          deplete faster as load draws down their effective capacity)
 //   tauR — recovery time constant during rest between hangs
-//          (slower systems recover slower)
+//          (slower timescales recover slower)
 //
-// Weights sum to 1.0 and represent each compartment's contribution
+// Weights sum to 1.0 and represent each component's contribution
 // to fresh maximal force. They are population priors; per-user
-// personalization happens in fitThreeExpAmps via shrinkage.
+// personalization happens in fitThreeExpAmps via shrinkage and in
+// recoveryFit.js for the recovery taus.
 //
 // sMax is per-(hand, grip) and gets filled in by getPhysModel() from
 // the user's actual history; it isn't a population constant.

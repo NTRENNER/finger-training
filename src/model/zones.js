@@ -12,12 +12,12 @@
 // catch climbers who avoid those specific durations.
 //
 // Six zones, in order:
-//   max_strength       —   5s (near-MVC, neural drive, type IIx)
-//   power              —  30s (PCr-glycolytic crossover)
-//   power_strength     —  70s (mid-glycolytic, lactate buffering)
-//   strength           — 115s (glycolytic-aerobic crossover)
-//   strength_endurance — 160s (aerobic-glycolytic blend)
-//   endurance          — 220s (aerobic-dominant)
+//   max_strength       —   5s (near-MVC; fast component dominates)
+//   power              —  30s (fast → medium component crossover)
+//   power_strength     —  70s (mid-T; medium component dominates)
+//   strength           — 115s (medium → slow component crossover)
+//   strength_endurance — 160s (long-T; medium + slow components blend)
+//   endurance          — 220s (long-T; slow component carries)
 //
 // Reference times match Grip Gains observed bin centers; max_strength
 // added below their shortest reference because we want the lockout

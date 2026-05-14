@@ -113,9 +113,9 @@ const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — use
 // Per-zone defaults the SessionPlanner card surfaces (rep count,
 // rest, target time, intensity copy). Set counts are tuned so per-
 // hang hold-time converges to its asymptote for that protocol —
-// power needs ~6 hangs (PCr-only drain, ~75% refill in 20s),
-// capacity ~4 (all three pools drained, 20s only refills the fast
-// one), strength sits in between.
+// power needs ~6 hangs (only the fast-timescale component drains,
+// ~75% refill in 20s), capacity ~4 (all three components drained,
+// 20s only refills the fast one), strength sits in between.
 // 6-zone scheme (May 2026) — Grip Gains community time domains plus
 // an added Max Strength zone for near-MVC work. ZONE_REF_T in
 // src/model/zones.js is the source of truth for refTime values; this

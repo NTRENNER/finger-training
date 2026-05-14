@@ -43,16 +43,18 @@ import {
 } from "./prescription.js";
 
 // Per-zone recovery time-constants (days). Larger tau = slower
-// recovery from a session of that zone. PCr/neural recovers fast,
-// glycolytic middle, aerobic adaptations need the most time. Hybrids
-// interpolate between their bordering pure zones.
+// recovery from a session of that zone. Short-T near-MVC work
+// recovers fastest; long-T sustained work needs the most time.
+// Hybrids interpolate between their bordering pure zones. Values
+// are population priors informed by the climbing-physiology
+// literature, not personally fit (yet).
 export const COACH_RECOVERY_TAU_DAYS = {
-  max_strength:       1.0,   // neural recovers fastest
-  power:              1.5,   // PCr / fast-twitch
+  max_strength:       1.0,   // near-MVC, neural-dominated — recovers fastest
+  power:              1.5,   // short-T, mostly fast component
   power_strength:     2.0,   // crossover
-  strength:           2.5,   // glycolytic
+  strength:           2.5,   // mid-T
   strength_endurance: 3.0,   // crossover
-  endurance:          3.5,   // oxidative — slowest adaptation cycle
+  endurance:          3.5,   // long-T sustained — slowest adaptation cycle
 };
 
 // Recovery curve: returns 0 immediately after training the zone, rising

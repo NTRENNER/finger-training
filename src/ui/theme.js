@@ -7,10 +7,10 @@
 // Conventions: bg = page background, card = elevated surface, border =
 // hairlines, text = primary, muted = secondary. Accent colors map to
 // semantic roles in chart/badge code:
-//   blue   = informational / Endurance zone / Critical Force
+//   blue   = informational / Endurance zone
 //   green  = positive (success, gains, completed reps)
 //   red    = negative / Power zone / failure
-//   orange = warning / Strength zone / W' (anaerobic capacity)
+//   orange = warning / Strength zone
 //   purple = primary brand accent / three-exp curve / brand badges
 //   yellow = highlight / diagnostic accents
 export const C = {

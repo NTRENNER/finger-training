@@ -841,12 +841,12 @@ export function AnalysisView({
   }, [threeExpFit, maxDur, unit]);
 
   // Three-exp doesn't have a true asymptote (decays to 0), so there is
-  // no direct analog to Monod's CF. The closest physiologically meaningful
-  // "long-duration sustainable force" reference is F(180s) — well past
-  // the glycolytic dominance window (τ₂=30s drained 6× over) where the
-  // slow oxidative compartment carries essentially the whole load. Used
-  // as the dashed horizontal reference on the F-D chart, replacing the
-  // CF line that came from Monod.
+  // no direct analog to Monod's CF. The closest "long-duration
+  // sustainable force" reference is F(180s) — well past the medium
+  // component's dominance window (τ₂=30s drained 6× over) where the
+  // slow component carries essentially the whole load. Used as the
+  // dashed horizontal reference on the F-D chart, replacing the CF
+  // line that came from Monod.
   const threeExpRef180 = useMemo(() => {
     if (!threeExpFit) return null;
     return predForceThreeExp(threeExpFit.amps, 180);
@@ -1031,8 +1031,8 @@ export function AnalysisView({
               <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
                 <span><span style={{ color: HAND_COLORS.L }}>●</span> Left</span>
                 <span><span style={{ color: HAND_COLORS.R }}>●</span> Right</span>
-                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-exp model: governing F-D curve. Phenomenological sum of three exponentials with depletion-tau basis; the fast / middle / slow components approximately align with PCr / glycolytic / oxidative timescales but are not direct tissue measurements."><span style={{ color: curveColor }}>―</span> F-D curve (3-exp)</span>}
-                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — the slow component dominates here, broadly aligned with sustainable / oxidative-driven work in the climbing literature. The closest model analog to a 'sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
+                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model: a regression fit summing three exponentials with progressively longer decay constants (≈10s / 30s / 180s). The components are labeled fast / medium / slow by timescale; treating them as specific tissue compartments would be an overclaim the fit doesn't support."><span style={{ color: curveColor }}>―</span> F-D curve (3-exp)</span>}
+                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — well past the medium component's decay, where the slow component carries essentially the whole load. The closest model analog to a 'long-duration sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
                 {splitMode && Object.keys(fdSplitData).map(g => (
                   <span key={g}>
                     <span style={{ color: GRIP_COLORS[g] || C.blue }}>―</span> {g}
@@ -1086,10 +1086,10 @@ export function AnalysisView({
               {/* 3-min sustainable reference from three-exp at T=180s
                   (replaces the Monod CF asymptote, since three-exp has
                   no true asymptote — it decays to 0). At 180s the slow
-                  curve-fit component dominates; this is the closest
-                  model analog to "what you can sustain", broadly
-                  aligned with sustainable / oxidative-driven force in
-                  the climbing-physiology literature. */}
+                  curve-fit component carries essentially the whole
+                  load; this is the closest model analog to "what you
+                  can sustain for a long hold" the three-timescale
+                  fit can produce. */}
               {!fdSplitData && threeExpRef180 != null && (
                 <ReferenceLine
                   y={useRel ? threeExpRef180 / bodyWeight : toDisp(threeExpRef180, unit)}

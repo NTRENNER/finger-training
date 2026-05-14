@@ -13,10 +13,10 @@
 // avoiding zones despite the soft signal, hard lockout becomes a v2
 // option to consider.
 //
-// Per-zone detraining windows: shorter for fast-twitch / neural zones
-// (Max Strength, Power) which decondition quickly; longer for aerobic
-// zones (Endurance, Strength/Endurance) which are more stable. These
-// are calibrated against general resistance-training detraining
+// Per-zone detraining windows: shorter for short-T near-MVC zones
+// (Max Strength, Power) which decondition quickly; longer for long-T
+// sustained zones (Endurance, Strength/Endurance) which are more
+// stable. Calibrated against general resistance-training detraining
 // research, not climbing-specific (the literature there is sparse).
 // Tune as personal experience dictates.
 //
@@ -33,12 +33,12 @@ import { ZONE_KEYS, zoneOf } from "./zones.js";
 // the score for that zone and the Setup banner surfaces it.
 //
 // Calibration:
-//   max_strength   — neural adaptations decay fast; 2 weeks
-//   power          — type IIx fiber + PCr adaptations; 3 weeks
-//   power_strength — crossover; ~3.5 weeks
-//   strength       — mid-glycolytic; 1 month
+//   max_strength       — near-MVC, neural-dominated; 2 weeks
+//   power              — short-T, fast-component-dominated; 3 weeks
+//   power_strength     — crossover; ~3.5 weeks
+//   strength           — mid-T; 1 month
 //   strength_endurance — crossover; ~1 month
-//   endurance      — aerobic / capillarization; most stable
+//   endurance          — long-T sustained; most stable
 export const LOCKOUT_WINDOW_DAYS = {
   max_strength:        14,
   power:               21,

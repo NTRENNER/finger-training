@@ -3,23 +3,22 @@
 // ─────────────────────────────────────────────────────────────
 // F(T) = a·exp(-T/τ₁) + b·exp(-T/τ₂) + c·exp(-T/τ₃)
 //
-// IMPORTANT: this model is PHENOMENOLOGICAL, not mechanistic.
-// It's a sum of three exponentials with fixed time constants fit to
-// force-duration data. The math doesn't require the three terms to
-// map to literal PCr / glycolytic / oxidative tissue pools. The
-// amplitudes (a, b, c) are regression coefficients that *behave* like
-// compartment amplitudes given the chosen time constants — not strict
-// tissue probes. We name the components fast / medium / slow for the
-// energy systems they approximately align with in the climbing-
-// physiology literature; downstream UI uses the "-aligned" suffix to
-// keep that distinction visible to users.
+// IMPORTANT: this is a three-timescale regression model, not a tissue
+// measurement. F(T) is a sum of three decaying exponentials with fixed
+// time constants chosen so the components separate cleanly across the
+// 5–240s prescription range. The amplitudes (a, b, c) are regression
+// coefficients fit per (hand, grip). The literature draws metaphors to
+// PCr / glycolytic / oxidative tissue pools at these timescales, but
+// we don't validate compartment identification — calling the components
+// fast / medium / slow is honest about what the math is doing
+// (timescale ordering); calling them by tissue names would be an
+// overclaim the fit doesn't support.
 //
 // τ₁, τ₂, τ₃ are the DEPLETION time constants (PHYS_MODEL_DEFAULT.tauD)
-// of the three model components — fast (≈10s, PCr-aligned), medium
-// (≈30s, glycolytic-aligned), slow (≈180s, oxidative-aligned). The
-// model describes how max sustainable force decays during a sustained
-// hold, which is depletion physics, so the basis is the depletion
-// taus, not the recovery taus.
+// of the three model components — fast (≈10s), medium (≈30s), slow
+// (≈180s). The model describes how max sustainable force decays during
+// a sustained hold, which is depletion physics, so the basis is the
+// depletion taus, not the recovery taus.
 //
 // Amplitude parameterization (a, b, c ≥ 0 in kg) — Smax = a+b+c falls
 // out as the model's prediction at T=0 (i.e. MVC / fresh max).
@@ -162,10 +161,11 @@ export function predForceThreeExp(amps, T, taus = null) {
 //
 // Used as a single "total capacity" scalar for the Journey/AUC tracker
 // — captures the area beneath the user's whole curve from the Power
-// boundary out into deep Endurance, so growth in any compartment
-// contributes proportionally to how much that compartment dominates
+// boundary out into deep Endurance, so growth in any component
+// contributes proportionally to how much that component dominates
 // in its zone. Default range [5, 180] covers the meaningful training
-// span (post-fast-spike at 5s, well into oxidative steady-state at 3min).
+// span (post-fast-spike at 5s, well into the slow-component plateau
+// at 3min where the medium component has decayed 6× over).
 export function computeAUCThreeExp(amps, tMin = 5, tMax = 180, taus = null) {
   if (!Array.isArray(amps) || amps.length !== 3) return 0;
   const tau = taus || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
