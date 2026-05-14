@@ -23,13 +23,24 @@ import { ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
 import { coachingRecommendationContinuous } from "../../model/coaching.js";
 import { fatigueToModifier } from "../../model/climbingFatigue.js";
+import { applyPersonalGain } from "../../model/perceivedFatigueLearning.js";
 
 export function PrescribedLoadCard({
   history, grip, freshMap, threeExpPriors, activities = [], unit, GOAL_CONFIG,
+  // Controlled-mode props: when both are passed (Setup, where the
+  // slider value drives the actual workout), state lives in the
+  // parent so the runner can stamp perceived_rpe onto every rep.
+  // When omitted (Analysis, pure what-if exploration) we fall back
+  // to local state.
+  perceivedRpe: perceivedRpeProp,
+  onPerceivedRpeChange,
+  // Per-zone learned gains from perceivedFatigueLearning. Adapts
+  // the population fatigue curve to the user's actual response.
+  // Null/undefined = use population curve unmodified.
+  personalGains = null,
 }) {
   // "How cooked do you feel today?" slider. 1 = totally fresh
-  // (no scaling); 10 = destroyed. Pure in-the-moment what-if — not
-  // persisted, doesn't log a session. Two coupled effects:
+  // (no scaling); 10 = destroyed. Two coupled effects:
   //   * each tile's L/R load is multiplied by fatigueToModifier(zone, rpe, 0)
   //     so the user sees the scale-down per zone.
   //   * the same value is fed to coachingRecommendationContinuous as
@@ -37,16 +48,20 @@ export function PrescribedLoadCard({
   //     toward less intense work as the user dials it up — Power gets
   //     the hardest hit, Endurance the lightest, matching the
   //     per-zone curve in climbingFatigue.fatigueToModifier.
-  const [perceivedRpe, setPerceivedRpe] = useState(1);
+  const [perceivedRpeLocal, setPerceivedRpeLocal] = useState(1);
+  const isControlled = perceivedRpeProp != null && typeof onPerceivedRpeChange === "function";
+  const perceivedRpe = isControlled ? perceivedRpeProp : perceivedRpeLocal;
+  const setPerceivedRpe = isControlled ? onPerceivedRpeChange : setPerceivedRpeLocal;
 
   const rec = useMemo(
     () => grip
       ? coachingRecommendationContinuous(history, grip, {
           freshMap, threeExpPriors, activities,
           perceivedFatigue: perceivedRpe > 1 ? perceivedRpe : 0,
+          personalGains,
         })
       : null,
-    [history, grip, freshMap, threeExpPriors, activities, perceivedRpe]
+    [history, grip, freshMap, threeExpPriors, activities, perceivedRpe, personalGains]
   );
   const recommendedZone = rec?.zone;
 
@@ -60,9 +75,14 @@ export function PrescribedLoadCard({
       const pR = prescription(history, "R", grip, T, { freshMap, threeExpPriors });
       // hoursAgo=0 so the slider lands at full strength. Same per-zone
       // curve the engine uses, so the displayed load matches what the
-      // recommendation is scoring against.
+      // recommendation is scoring against. The personal gain (learned
+      // from past actual-vs-predicted reps under known RPE conditions)
+      // adapts the population suppression curve to this user.
       const fatigueMod = perceivedRpe > 1
-        ? fatigueToModifier(key, perceivedRpe, 0)
+        ? applyPersonalGain(
+            fatigueToModifier(key, perceivedRpe, 0),
+            personalGains?.[key],
+          )
         : 1.0;
       return {
         key, label: cfg.label, emoji: cfg.emoji, color: cfg.color, T,
@@ -79,7 +99,7 @@ export function PrescribedLoadCard({
           : "well-supported",
       };
     }).filter(Boolean);
-  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, perceivedRpe]);
+  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, perceivedRpe, personalGains]);
 
   if (!grip) return null;
   if (!rows || rows.every(r => r.L == null && r.R == null)) return null;
@@ -108,6 +128,19 @@ export function PrescribedLoadCard({
           </div>
           <div style={{ fontSize: 10, color: C.muted }}>
             {perceivedRpe === 1 ? "fresh — no scale-down" : `RPE ${perceivedRpe}`}
+            {personalGains && perceivedRpe > 1 && (() => {
+              // Show a tiny "calibrated" tag when the recommended-zone's
+              // gain has drifted meaningfully from the population curve.
+              const zoneKey = recommendedZone;
+              const g = zoneKey ? personalGains[zoneKey] : null;
+              if (g == null || Math.abs(g - 1) < 0.1) return null;
+              const direction = g < 1 ? "less cooked than avg" : "more cooked than avg";
+              return (
+                <span style={{ marginLeft: 6, color: C.purple, fontStyle: "italic" }}>
+                  · calibrated ({direction})
+                </span>
+              );
+            })()}
           </div>
         </div>
         <input

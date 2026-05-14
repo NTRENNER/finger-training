@@ -34,6 +34,7 @@ import { getZoneStaleness, stalenessBoost } from "./lockout.js";
 import {
   computeSessionFatigue, mostRecentClimbDate, fatigueToModifier,
 } from "./climbingFatigue.js";
+import { applyPersonalGain } from "./perceivedFatigueLearning.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
@@ -172,6 +173,10 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     // can suppress the same zone if the user has logged climbing AND
     // says they feel additionally fried.
     perceivedFatigue = 0,
+    // Per-zone learned gains from perceivedFatigueLearning. Adapts
+    // the population fatigue curve to the user's actual response.
+    // Null = use the population curve as-is.
+    personalGains = null,
   } = opts;
 
   if (!grip || !history || history.length === 0) return null;
@@ -263,8 +268,15 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // Perceived in-the-moment fatigue (slider on PrescribedLoadCard).
       // Same per-zone curve as activity-derived fatigue, evaluated at
       // hoursAgo=0 so it lands at full strength. Composes multiplicatively.
+      // The per-zone learned gain (perceivedFatigueLearning) adapts the
+      // population curve to the user's actual response — gain < 1 means
+      // the user is less cooked than population at this RPE, gain > 1
+      // means more.
       const extPerceived = perceivedFatigue > 0
-        ? fatigueToModifier(zoneKey, perceivedFatigue, 0)
+        ? applyPersonalGain(
+            fatigueToModifier(zoneKey, perceivedFatigue, 0),
+            personalGains?.[zoneKey],
+          )
         : 1.0;
       const ext = extActivities * extPerceived;
       const score = adaptBoost * stale * recency * ext;

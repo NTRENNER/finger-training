@@ -1,7 +1,7 @@
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-exp F-D / curve-trust prescription · Tindeq Progressor BLE
 import React, {
-  useCallback, useEffect, useState,
+  useCallback, useEffect, useMemo, useState,
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
@@ -47,6 +47,7 @@ import {
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
 import { today, uid } from "./util.js";
+import { computePersonalGains } from "./model/perceivedFatigueLearning.js";
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS / UTILITIES
@@ -343,6 +344,18 @@ export default function App() {
     handleWorkoutSessionSaved,
   } = useRepHistory({ user });
 
+  // Per-zone learned fatigue gains (Bayesian-shrunk personal scalars
+  // on top of climbingFatigue.fatigueToModifier). Drives the adaptive
+  // half of the PrescribedLoadCard slider — population curve until the
+  // user has accumulated RPE-tagged reps, then adapts to their actual
+  // suppression. Memoized on history.length so we re-fit only when reps
+  // actually change. See model/perceivedFatigueLearning.js.
+  const personalGains = useMemo(
+    () => computePersonalGains(history).gains,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [history.length, history[history.length - 1]?.id]
+  );
+
   // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
 
@@ -462,6 +475,7 @@ export default function App() {
     handleRestDone, handleAbort,
   } = useSessionRunner({
     history, freshMap, threeExpPriors, addReps,
+    personalGains,
     tindeqConnected: tindeq.connected,
     onSessionStart: () => setTab(0),
   });
@@ -663,6 +677,7 @@ export default function App() {
               onStart={startSession}
               history={history}
               freshMap={freshMap}
+              personalGains={personalGains}
               unit={unit}
               onBwSave={saveBW}
               activities={activities}
@@ -754,6 +769,7 @@ export default function App() {
           bodyWeight={bodyWeight}
           activities={activities}
           freshMap={freshMap}
+          personalGains={personalGains}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
           defaultWorkouts={DEFAULT_WORKOUTS}

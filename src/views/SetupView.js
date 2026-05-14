@@ -766,6 +766,10 @@ function ContinuousPickCard({
 export function SetupView({
   config, setConfig, onStart, history,
   freshMap = null,
+  // Per-zone learned fatigue gains (App-level memo). Passed straight
+  // through to PrescribedLoadCard so the slider's scale-down matches
+  // what the runner will actually prescribe.
+  personalGains = null,
   unit = "lbs",
   onBwSave = () => {},
   activities = [], onLogActivity = () => {},
@@ -886,6 +890,14 @@ export function SetupView({
           activities={activities}
           unit={unit}
           GOAL_CONFIG={GOAL_CONFIG}
+          // Controlled-mode: the slider's value lives on session config
+          // so the workout runner reads it (scales rep-1 prescription,
+          // stamps perceived_rpe onto every rep, feeds the learning
+          // module). Default 1 if config hasn't initialized that field
+          // yet (legacy state shape).
+          perceivedRpe={config.perceivedRpe ?? 1}
+          onPerceivedRpeChange={(v) => setConfig(c => ({ ...c, perceivedRpe: v }))}
+          personalGains={personalGains}
         />
       )}
 

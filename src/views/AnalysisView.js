@@ -207,6 +207,10 @@ export function AnalysisView({
   history, unit = "lbs", bodyWeight = null,
   activities = [],
   freshMap = null,
+  // Per-zone learned fatigue gains (App-level memo). Passed through
+  // to PrescribedLoadCard so the analysis what-if slider reflects the
+  // same calibration the live workout will use.
+  personalGains = null,
   // Cross-cutting App config — passed in rather than imported so this
   // module doesn't reach back into App.js for view-level constants.
   GOAL_CONFIG = {},
@@ -1306,6 +1310,7 @@ export function AnalysisView({
             freshMap={freshMap}
             threeExpPriors={threeExpPriors}
             activities={activities}
+            personalGains={personalGains}
             unit={unit}
             GOAL_CONFIG={GOAL_CONFIG}
           />

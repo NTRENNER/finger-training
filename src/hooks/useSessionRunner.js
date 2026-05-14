@@ -59,12 +59,18 @@ import {
   prescription,
   suggestWeight,
 } from "../model/prescription.js";
+import { fatigueToModifier } from "../model/climbingFatigue.js";
+import { applyPersonalGain } from "../model/perceivedFatigueLearning.js";
 
 export function useSessionRunner({
   history,
   freshMap,
   threeExpPriors,
   addReps,
+  // Per-zone learned fatigue gains. Used when scaling rep-1
+  // prescription by perceivedRpe — adapts the population suppression
+  // curve to the user's actual response. Null = use population curve.
+  personalGains = null,
   tindeqConnected,
   onSessionStart,
 }) {
@@ -78,6 +84,16 @@ export function useSessionRunner({
     repsPerSet: 5,
     targetTime: 45,
     restTime:   20,
+    // Perceived in-the-moment fatigue scalar (1-10). Set by the
+    // PrescribedLoadCard slider on Setup; flows through here so:
+    //   1. startSession scales the rep-1 prescription by the per-zone
+    //      fatigue modifier — what the runner asks for matches what
+    //      the card showed.
+    //   2. handleRepDone stamps it onto each rep so the learning
+    //      module (perceivedFatigueLearning.js) can compute
+    //      actual-vs-predicted suppression after the fact.
+    // 1 = fresh (no scaling, default).
+    perceivedRpe: 1,
   }));
 
   // No derived fields anymore — config is rawConfig.
@@ -111,10 +127,23 @@ export function useSessionRunner({
   const startSession = useCallback(() => {
     const sid = uid();
     const rw = {};
+    // Apply the perceived-fatigue scale-down to the prescription so
+    // what the runner asks for matches what the PrescribedLoadCard
+    // slider showed. fatigueToModifier returns 1.0 when perceivedRpe
+    // is 1 (no effect), so the no-slider path is unchanged. The
+    // personal gain (if available) adapts the population suppression
+    // curve to this user's actual response — same modifier the card
+    // and the coaching engine apply.
+    const targetZone = zoneOf(config.targetTime);
+    const fatigueMod = applyPersonalGain(
+      fatigueToModifier(targetZone, config.perceivedRpe || 1, 0),
+      personalGains?.[targetZone],
+    );
     ["L", "R"].forEach(h => {
       const p = prescription(history, h, config.grip, config.targetTime,
         { freshMap, threeExpPriors });
-      rw[h] = p ? p.value : estimateRefWeight(history, h, config.grip, config.targetTime);
+      const base = p ? p.value : estimateRefWeight(history, h, config.grip, config.targetTime);
+      rw[h] = base != null ? base * fatigueMod : base;
     });
     const startedAt = nowISO();
     setSessionId(sid);
@@ -127,7 +156,7 @@ export function useSessionRunner({
     setActiveHand(config.hand === "Both" ? "L" : config.hand);
     setPhase("rep_ready");
     onSessionStart?.();
-  }, [history, config, freshMap, threeExpPriors, onSessionStart]);
+  }, [history, config, freshMap, threeExpPriors, personalGains, onSessionStart]);
 
   // Forward-declared so handleRepDone can call it before its
   // own useCallback identity is materialised.
@@ -198,6 +227,15 @@ export function useSessionRunner({
       // surface stay consistent.
       failed:             derivedFailed,
       session_started_at: sessionStartedAt || null,
+      // Session-level perceived fatigue (1-10). Same value across
+      // every rep in the session. Drives perceivedFatigueLearning's
+      // per-zone gain computation: actual avg_force_kg vs three-exp
+      // curve under known RPE conditions teaches us how cooked the
+      // user actually is at each RPE level. Null when the slider was
+      // left at fresh (1) — those reps don't carry a learning signal.
+      perceived_rpe:      (config.perceivedRpe && config.perceivedRpe > 1)
+                            ? config.perceivedRpe
+                            : null,
     };
 
     setLastRepResult({ actualTime, avgForce, peakForce, targetTime: config.targetTime });

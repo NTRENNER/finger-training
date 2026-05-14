@@ -29,6 +29,14 @@
 // editor; safe to re-run because of IF NOT EXISTS):
 //   ALTER TABLE workout_sessions
 //     ADD COLUMN IF NOT EXISTS was_recommended boolean;
+//   ALTER TABLE reps
+//     ADD COLUMN IF NOT EXISTS perceived_rpe integer;
+//
+// `perceived_rpe` is the session-level "how cooked do you feel today"
+// scalar (1-10) the user dials on the PrescribedLoadCard slider. Same
+// value is stamped onto every rep in the session. Null when the
+// slider was left at fresh (1) — those reps don't carry a learning
+// signal for perceivedFatigueLearning.computePersonalGains.
 //
 // `was_recommended` carries the WorkoutTab rotation signal across
 // devices. WorkoutTab derives "next workout" from the synced log,
@@ -160,6 +168,10 @@ export function repPayload(rep) {
     rest_s: rep.rest_s, session_id: rep.session_id,
     failed: rep.failed ?? false,
     session_started_at: rep.session_started_at ?? null,
+    // Session-level perceived fatigue (1-10) when the user dialed
+    // the PrescribedLoadCard slider. Null when fresh — those reps
+    // don't carry a learning signal for perceivedFatigueLearning.
+    perceived_rpe: rep.perceived_rpe ?? null,
   };
 }
 
@@ -224,6 +236,9 @@ export async function fetchReps() {
     session_id: r.session_id ?? "",
     failed: r.failed ?? false,
     session_started_at: r.session_started_at ?? null,
+    // Null for legacy rows / sessions where the user didn't dial the
+    // RPE slider. Numbers > 1 carry a learning signal.
+    perceived_rpe: r.perceived_rpe ?? null,
   }));
 }
 
