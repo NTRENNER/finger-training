@@ -6,20 +6,25 @@
 //   * PrescribedLoadCard's role on Setup (six zone tiles)
 //   * SessionRPECard ("Session RPE — today")
 //
-// The unified flow:
-//   1. RPE slider at the very top — drives both the per-zone scale-down
-//      AND the engine's recommended pick. The same value is stamped on
-//      every rep at session start so perceivedFatigueLearning can adapt
-//      the modifier curve to the user's actual response.
-//   2. Six selectable zone tiles (clickable). The engine's recommended
-//      zone is highlighted by default; tapping any other tile makes it
-//      the active session — useful when the user wants to override the
-//      pick for the day. A "← back to recommended" link appears once
-//      a manual override is in effect.
-//   3. Session details panel for the active zone — TARGET, LOAD, why,
-//      hangs/rest sliders. The reps and rest values default from the
-//      active zone's T (matching ContinuousPickCard's old behavior) and
-//      stick once touched.
+// The unified flow (top → bottom):
+//   1. Recommended Session — pure-math curve pick (TARGET / LOAD / Why).
+//      Always shows the engine's unscaled output regardless of slider
+//      position or tile override. The recommendation answers "what
+//      stimulus does the curve want next" — staleness × recency ×
+//      adaptBoost × climbing fatigue. NOT influenced by perceivedRpe.
+//   2. RPE slider — "How cooked today?" Scales the prescribed LOAD
+//      (active session below + tiles + workout runner) without
+//      changing which zone the engine picks. Stamped on every rep at
+//      session start so perceivedFatigueLearning can adapt the
+//      modifier curve to the user's actual response.
+//   3. Active session block — TARGET / LOAD (RPE-scaled), Why text
+//      (only when on the recommended zone), hangs/rest/time strip,
+//      hangs and rest sliders. This is what the runner will use when
+//      Start Session is tapped.
+//   4. Six zone tiles — alternatives. Tap any to override the
+//      recommendation; the active session block above updates to
+//      reflect the new target T and load. The recommended tile shows
+//      a ★; the active (selected) tile gets the brighter highlight.
 //
 // All three sections share state, so flipping the slider flows through
 // the tiles and the details simultaneously, and clicking a tile drives
@@ -336,68 +341,6 @@ export function SessionPlanCard({
         )}
       </div>
 
-      {/* Six zone tiles — clickable. Recommended is highlighted with the
-          double-strength border + tinted background; the user-overridden
-          tile (if any) gets a brighter highlight. Hover/active feedback
-          via cursor:pointer + slight scale-down on the inactive tiles. */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-        {rows.map(r => {
-          const isActive = r.key === activeZone;
-          const isRec = r.key === recommendedZone;
-          const dim = r.reliability === "extrapolation";
-          const scalePct = r.fatigueMod < 0.999 ? Math.round((1 - r.fatigueMod) * 100) : 0;
-          return (
-            <button
-              key={r.key}
-              onClick={() => setOverrideZone(r.key === recommendedZone ? null : r.key)}
-              style={{
-                textAlign: "left", cursor: "pointer", font: "inherit",
-                padding: "10px 12px", borderRadius: 8,
-                background: isActive ? r.color + "22" : C.bg,
-                border: isActive
-                  ? `2px solid ${r.color}`
-                  : `1px solid ${C.border}`,
-                opacity: dim ? 0.55 : 1,
-                // Compensate the active border thickness so tiles stay aligned
-                margin: isActive ? 0 : 1,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: r.color }}>
-                  {r.emoji} {r.label}
-                  {isRec && (
-                    <span style={{ marginLeft: 4, fontSize: 9, color: C.muted, fontWeight: 500 }}>★</span>
-                  )}
-                </div>
-                <div style={{ fontSize: 10, color: C.muted }}>
-                  {scalePct > 0 && <span style={{ marginRight: 6, color: C.orange }}>−{scalePct}%</span>}
-                  {r.T}s
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>L</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
-                    {r.L != null ? fmtW(r.L, unit) : "—"}
-                  </div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>R</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
-                    {r.R != null ? fmtW(r.R, unit) : "—"}
-                  </div>
-                </div>
-              </div>
-              {r.reliability === "extrapolation" && (
-                <div style={{ fontSize: 9, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
-                  extrapolating
-                </div>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
       {/* Override indicator — shows up when the user has selected a tile
           other than the recommended one. Click to revert. */}
       {isOverridden && (
@@ -494,6 +437,71 @@ export function SessionPlanCard({
             onChange={e => { setRest(Number(e.target.value)); setUserOverride(true); }}
             style={{ width: "100%", accentColor: activeColor }} />
         </div>
+      </div>
+
+      {/* Six zone tiles — alternatives. Tap any tile to override the
+          recommended pick for this session; the active session block
+          above updates immediately to reflect the new target T and
+          load. The recommended tile gets a ★ + double-strength border;
+          the active (selected) tile gets the bright background tint.
+          Loads on every tile reflect the RPE slider's per-zone scale-
+          down so the user sees the trade-off across the full curve. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+        {rows.map(r => {
+          const isActive = r.key === activeZone;
+          const isRec = r.key === recommendedZone;
+          const dim = r.reliability === "extrapolation";
+          const scalePct = r.fatigueMod < 0.999 ? Math.round((1 - r.fatigueMod) * 100) : 0;
+          return (
+            <button
+              key={r.key}
+              onClick={() => setOverrideZone(r.key === recommendedZone ? null : r.key)}
+              style={{
+                textAlign: "left", cursor: "pointer", font: "inherit",
+                padding: "10px 12px", borderRadius: 8,
+                background: isActive ? r.color + "22" : C.bg,
+                border: isActive
+                  ? `2px solid ${r.color}`
+                  : `1px solid ${C.border}`,
+                opacity: dim ? 0.55 : 1,
+                // Compensate the active border thickness so tiles stay aligned
+                margin: isActive ? 0 : 1,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: r.color }}>
+                  {r.emoji} {r.label}
+                  {isRec && (
+                    <span style={{ marginLeft: 4, fontSize: 9, color: C.muted, fontWeight: 500 }}>★</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 10, color: C.muted }}>
+                  {scalePct > 0 && <span style={{ marginRight: 6, color: C.orange }}>−{scalePct}%</span>}
+                  {r.T}s
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>L</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+                    {r.L != null ? fmtW(r.L, unit) : "—"}
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>R</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+                    {r.R != null ? fmtW(r.R, unit) : "—"}
+                  </div>
+                </div>
+              </div>
+              {r.reliability === "extrapolation" && (
+                <div style={{ fontSize: 9, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
+                  extrapolating
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
     </Card>
   );
