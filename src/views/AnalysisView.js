@@ -1454,14 +1454,24 @@ export function AnalysisView({
             tabular per-zone view lives on Setup where it informs the
             actual session pick.) */}
 
-        {/* ── Strength Balance — Crusher vs Micro at short-T ──
-            Single-number grip-pair diagnostic. F_Crusher(10s) /
-            F_Micro(10s), per hand when both hands have fits, pooled
-            otherwise. Climbers want this near 1.0 — Crusher-dominant
-            means Micros (small-edge grip) are the trainable weakness;
-            Micro-dominant is rare and points at open-hand under-
-            training. Reference T=10s sits in the Max Strength /
-            early-Power zone where both grips peak. */}
+        {/* ── Open-hand vs Crimp dominance (FDP / FDS) ──
+            Single-number diagnostic for which finger flexor system
+            the climber is leaning on. The Tindeq Crusher implement
+            (open hand on a large rounded edge) is biomechanically
+            FDP-dominant; the Micro (small edge that has to be half-
+            or closed-crimped) is FDS-dominant — well-supported by
+            Schweizer / Vigouroux climbing biomechanics. So F_Crusher
+            / F_Micro at a short-T reference is a usable proxy for
+            FDP / FDS strength balance.
+            Thresholds anchored to fingerboard-literature norms:
+              <1.0   → FDS-leaning   (crimp-dominant — rare)
+              1.0–1.6 → balanced     (elite-fingerboarder band)
+              1.6–2.5 → FDP-leaning  (open-hand favored)
+              >2.5   → FDP-dominant  (small-edge strength is the
+                                       climbing limiter)
+            Per-hand when both hands have fits; pooled otherwise.
+            Reference T=10s sits in the Max Strength / early-Power
+            zone where both grips peak. */}
         {gripHandFits.Crusher && gripHandFits.Micro && (() => {
           const BAL_T = 10;
           const rows = [];
@@ -1489,22 +1499,25 @@ export function AnalysisView({
           }
           if (rows.length === 0) return null;
 
-          // Color/flag thresholds — balanced 0.85–1.20; mild crusher-
-          // dominant 1.20–1.50; heavy >1.50; micro-dominant <0.85.
+          // Literature-anchored bands. Elite fingerboarders cluster in
+          // the 1.0–1.6 range; developing climbers who came up on jugs
+          // and slopers often sit 2–3+ × (FDP carries them, small
+          // edges expose the FDS gap). Below 1.0 is rare and usually
+          // means heavy crimp-specific training history.
           const classify = (r) => {
-            if (r > 1.50) return { color: C.orange, text: "Crusher-heavy" };
-            if (r > 1.20) return { color: C.yellow, text: "Crusher-dominant" };
-            if (r < 0.85) return { color: C.blue,   text: "Micro-dominant" };
-            return { color: C.green, text: "Balanced" };
+            if (r > 2.50) return { color: C.orange, text: "FDP-dominant"  };
+            if (r > 1.60) return { color: C.yellow, text: "FDP-leaning"   };
+            if (r < 1.00) return { color: C.blue,   text: "FDS-leaning"   };
+            return            { color: C.green,  text: "Balanced"      };
           };
 
           return (
             <Card style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
-                Strength Balance — Crusher vs Micro
+                Open-hand vs Crimp dominance
               </div>
               <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-                Ratio of your <span style={{ color: GRIP_COLORS.Crusher }}>Crusher</span> force to your <span style={{ color: GRIP_COLORS.Micro }}>Micro</span> force at {BAL_T}s. Near 1.0 is balanced; well above 1.0 means small-edge strength is the trainable gap.
+                Force ratio of <span style={{ color: GRIP_COLORS.Crusher }}>Crusher</span> (open hand — FDP-dominant) to <span style={{ color: GRIP_COLORS.Micro }}>Micro</span> (small edge — FDS-dominant) at {BAL_T}s. Elite fingerboarders sit ~1.0–1.6×. Above 2.5× means FDP is carrying you — small-edge strength is the climbing limiter.
               </div>
               {rows.map(({ label, ratio, cF, mF }) => {
                 const flag = classify(ratio);
