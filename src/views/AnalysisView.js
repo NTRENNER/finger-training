@@ -245,6 +245,18 @@ export function AnalysisView({
   };
   const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
 
+  // ── Force Curves History overlay state ──
+  // Two-snapshot comparison card lower in the page. `historyGrip` is
+  // the grip whose curve evolution we're comparing (one at a time —
+  // 4 curves at once gets busy). `historyPastIdx` / `historyNowIdx`
+  // are indices into the per-grip sorted training-date list. We
+  // intentionally keep these UNCONSTRAINED to one another (pastIdx
+  // can exceed nowIdx) so the user can scrub freely; deltas just
+  // invert sign.
+  const [historyGrip, setHistoryGrip] = useState(null);
+  const [historyPastIdx, setHistoryPastIdx] = useState(null);
+  const [historyNowIdx,  setHistoryNowIdx]  = useState(null);
+
   // BW log loaded once on mount; the cloud-reconcile path in App.js
   // hydrates this from Supabase on sign-in, so by the time the view
   // mounts the log reflects every device's history.
@@ -976,6 +988,73 @@ export function AnalysisView({
   // now; the F-D chart + Curve Improvement + Curve Coverage cover
   // the diagnostic ground.)
 
+  // ── Force Curves History overlay data ──
+  // For each grip with ≥2 dates that have a usable cumulative fit,
+  // expose the sorted date list plus a getAmps(date) cache so render
+  // can pull two snapshots cheaply when the user moves the sliders.
+  // Cumulative fits use the same `up-to-date` logic as the AUC
+  // history chart so the curves move forward in time monotonically
+  // as more reps come in — i.e. each snapshot is "what your fit
+  // looked like the day you finished that session," not a
+  // local-window fit.
+  const historyOverlay = useMemo(() => {
+    const byGrip = {};   // grip -> { dates: [], ampsByDate: Map<date, [a,b,c]> }
+    for (const g of grips) {
+      const gripReps = (history || []).filter(r =>
+        r.grip === g &&
+        r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0
+      );
+      if (gripReps.length < 3) continue;
+      const datesSet = new Set();
+      for (const r of gripReps) if (r.date) datesSet.add(r.date);
+      const allDates = [...datesSet].sort();
+      const ampsByDate = new Map();
+      const validDates = [];
+      for (const date of allDates) {
+        const upTo = gripReps.filter(r => (r.date || "") <= date);
+        if (upTo.length < 3) continue;
+        const amps = fitAmpsForPts(
+          upTo.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+          g
+        );
+        if (!amps) continue;
+        ampsByDate.set(date, amps);
+        validDates.push(date);
+      }
+      if (validDates.length >= 2) {
+        byGrip[g] = { dates: validDates, ampsByDate };
+      }
+    }
+    return byGrip;
+  // fitAmpsForPts closes over threeExpPriors; explicit dep here keeps
+  // memo honest. eslint can't see through the closure.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, grips, threeExpPriors]);
+
+  // Resolve the active grip for the history overlay. Priority:
+  //   1) explicit user pick (historyGrip)
+  //   2) selGrip when the global filter is set and that grip has overlay data
+  //   3) first overlay-eligible grip alphabetically
+  const overlayActiveGrip = useMemo(() => {
+    const eligible = Object.keys(historyOverlay);
+    if (eligible.length === 0) return null;
+    if (historyGrip && eligible.includes(historyGrip)) return historyGrip;
+    if (selGrip && eligible.includes(selGrip)) return selGrip;
+    return eligible[0];
+  }, [historyOverlay, historyGrip, selGrip]);
+
+  // Active grip's date list + clamped indices. Initialize indices to
+  // (0, last) the first time we see a grip; thereafter respect user
+  // scrub but clamp into range when the underlying list grows.
+  const overlayDates = overlayActiveGrip ? historyOverlay[overlayActiveGrip].dates : [];
+  const overlayLast = Math.max(0, overlayDates.length - 1);
+  const overlayPastI = historyPastIdx == null
+    ? 0
+    : Math.max(0, Math.min(overlayLast, historyPastIdx));
+  const overlayNowI = historyNowIdx == null
+    ? overlayLast
+    : Math.max(0, Math.min(overlayLast, historyNowIdx));
+
   // Custom tooltip for scatter chart
   const ScatterTooltip = ({ active, payload, unit: tipUnit }) => {
     if (!active || !payload?.[0]) return null;
@@ -1341,6 +1420,192 @@ export function AnalysisView({
             the F-D chart for the visual prescription story; the
             tabular per-zone view lives on Setup where it informs the
             actual session pick.) */}
+
+        {/* ── Force Curves History — past vs now overlay ──
+            Two three-exp curves at two date snapshots, slider-scrubbable
+            across each grip's own training-day history. Past curve is
+            dashed and muted; now curve is solid in the grip's color.
+            Per-T deltas underneath surface where on the curve the gains
+            (or losses) actually live. Per-grip toggle because four
+            curves on one chart gets unreadable. */}
+        {overlayActiveGrip && overlayDates.length >= 2 && (() => {
+          const overlay = historyOverlay[overlayActiveGrip];
+          const eligibleGrips = Object.keys(historyOverlay);
+          const pastDate = overlayDates[overlayPastI];
+          const nowDate  = overlayDates[overlayNowI];
+          const pastAmps = overlay.ampsByDate.get(pastDate);
+          const nowAmps  = overlay.ampsByDate.get(nowDate);
+          const gripColor = GRIP_COLORS[overlayActiveGrip] || C.blue;
+
+          // Curve sampling — 80 points from 5s to STRENGTH_MAX+60s
+          // covers the same range the F-D chart uses (≥5s rule + a
+          // little headroom past the long endurance reps).
+          const tMin = 5;
+          const tMaxLocal = Math.max(180, maxDur);
+          const samples = [];
+          for (let i = 0; i < 80; i++) {
+            const t = tMin + ((tMaxLocal - tMin) / 79) * i;
+            const fp = pastAmps ? predForceThreeExp(pastAmps, t) : null;
+            const fn = nowAmps  ? predForceThreeExp(nowAmps,  t) : null;
+            samples.push({
+              x: t,
+              past: fp != null ? toDisp(Math.max(fp, 0), unit) : null,
+              now:  fn != null ? toDisp(Math.max(fn, 0), unit) : null,
+            });
+          }
+          const yMax = Math.max(...samples.flatMap(s => [s.past || 0, s.now || 0]));
+          const yDomain = [0, Math.ceil(yMax * 1.1 / 10) * 10];
+
+          // Per-T delta table — fixed reference durations spanning
+          // power → endurance. Deltas are signed (negative = lost
+          // capacity at that timescale).
+          const refTs = [10, 30, 60, 120, 180];
+          const deltas = refTs.map(t => {
+            const fp = pastAmps ? predForceThreeExp(pastAmps, t) : null;
+            const fn = nowAmps  ? predForceThreeExp(nowAmps,  t) : null;
+            const pct = (fp && fp > 0 && fn != null)
+              ? Math.round((fn / fp - 1) * 100)
+              : null;
+            return { t, fp, fn, pct };
+          });
+
+          // Slider styling — pulled into vars to keep markup readable
+          // and consistent between the two sliders.
+          const sliderStyle = {
+            width: "100%",
+            accentColor: gripColor,
+            cursor: "pointer",
+          };
+
+          return (
+            <Card style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  Force Curves — past vs now
+                </div>
+                {eligibleGrips.length > 1 && (
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {eligibleGrips.map(g => {
+                      const active = g === overlayActiveGrip;
+                      return (
+                        <button key={g}
+                          onClick={() => {
+                            setHistoryGrip(g);
+                            // Reset slider indices when switching grips
+                            // so we don't carry a stale past/now into a
+                            // grip with a different date list.
+                            setHistoryPastIdx(null);
+                            setHistoryNowIdx(null);
+                          }}
+                          style={{
+                            background: active ? GRIP_COLORS[g] || C.blue : "transparent",
+                            color: active ? "#fff" : C.muted,
+                            border: `1px solid ${active ? GRIP_COLORS[g] || C.blue : C.border}`,
+                            borderRadius: 4,
+                            padding: "4px 10px",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                          }}>
+                          {g}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+                Slide the two markers to compare your force-duration curve at any two training dates. The deltas below show where on the curve the change actually happened.
+              </div>
+
+              {/* Slider controls — two range inputs that snap to the
+                  index list. Live labels above each slider show the
+                  date being selected so the user can scrub without
+                  losing context. */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+                  <span>Past: <b style={{ color: C.muted }}>{pastDate}</b></span>
+                  <span style={{ color: C.muted }}>{overlayDates.length} sessions</span>
+                </div>
+                <input type="range"
+                  min={0} max={overlayLast} step={1}
+                  value={overlayPastI}
+                  onChange={(e) => setHistoryPastIdx(parseInt(e.target.value, 10))}
+                  style={sliderStyle}
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: gripColor, marginBottom: 4 }}>
+                  <span>Now: <b>{nowDate}</b></span>
+                </div>
+                <input type="range"
+                  min={0} max={overlayLast} step={1}
+                  value={overlayNowI}
+                  onChange={(e) => setHistoryNowIdx(parseInt(e.target.value, 10))}
+                  style={sliderStyle}
+                />
+              </div>
+
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={samples} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                  <XAxis type="number" dataKey="x"
+                    domain={[tMin, tMaxLocal]}
+                    tick={{ fill: C.muted, fontSize: 11 }}
+                    label={{ value: "Duration (s)", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
+                  />
+                  <YAxis domain={yDomain}
+                    tick={{ fill: C.muted, fontSize: 11 }}
+                    width={44} unit={` ${unit}`}
+                  />
+                  <Tooltip
+                    contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+                    formatter={(val, name) => [val == null ? "—" : `${fmtW(val, unit)} ${unit}`, name]}
+                    labelFormatter={(t) => `${fmt1(t)}s`}
+                  />
+                  <Line dataKey="past" stroke={C.muted} strokeWidth={2}
+                    strokeDasharray="6 4" dot={false} connectNulls
+                    name={`Past (${pastDate})`} isAnimationActive={false} />
+                  <Line dataKey="now" stroke={gripColor} strokeWidth={3}
+                    dot={false} connectNulls
+                    name={`Now (${nowDate})`} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+
+              {/* Per-T delta strip — 5 reference durations from power
+                  to long endurance. Positive = capacity grew at that
+                  timescale; negative = curve dropped there. */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${refTs.length}, 1fr)`,
+                gap: 6, marginTop: 12,
+              }}>
+                {deltas.map(({ t, pct }) => {
+                  const color = pct == null ? C.muted
+                              : pct > 0     ? C.green
+                              : pct < 0     ? C.red
+                                            : C.muted;
+                  const sign  = pct == null ? ""
+                              : pct > 0     ? "+"
+                                            : "";
+                  return (
+                    <div key={t} style={{
+                      background: C.bg, border: `1px solid ${C.border}`,
+                      borderRadius: 6, padding: "6px 8px", textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 10, color: C.muted, marginBottom: 2 }}>
+                        {t}s
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color }}>
+                        {pct == null ? "—" : `${sign}${pct}%`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          );
+        })()}
 
         {/* Curve Coverage — per-zone data freshness + annual pace.
             Moved here from Setup so both per-zone reference cards
