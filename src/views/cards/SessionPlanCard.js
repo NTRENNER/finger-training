@@ -429,7 +429,16 @@ export function SessionPlanCard({
           down so the user sees the trade-off across the full curve. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
         {rows.map(r => {
-          const isActive = r.key === activeZone;
+          // Tile is "active" only when it's the user's override pick.
+          // When no override is in effect, the Recommended button above
+          // is the active selection — even though that pick lives in
+          // the same zone as one of these tiles, the two represent
+          // different things: the Recommended button shows the
+          // continuous-engine T (e.g. 50s with curve-fitted load), the
+          // matching tile shows the zone's reference T (e.g. 70s with
+          // T-anchored load). Highlighting both would imply they're
+          // interchangeable, which they aren't.
+          const isActive = isOverridden && r.key === activeZone;
           const isRec = r.key === recommendedZone;
           const dim = r.reliability === "extrapolation";
           const scalePct = r.fatigueMod < 0.999 ? Math.round((1 - r.fatigueMod) * 100) : 0;
