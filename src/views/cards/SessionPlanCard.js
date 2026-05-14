@@ -7,24 +7,33 @@
 //   * SessionRPECard ("Session RPE — today")
 //
 // The unified flow (top → bottom):
-//   1. Recommended Session — pure-math curve pick (TARGET / LOAD / Why).
-//      Always shows the engine's unscaled output regardless of slider
-//      position or tile override. The recommendation answers "what
-//      stimulus does the curve want next" — staleness × recency ×
-//      adaptBoost × climbing fatigue. NOT influenced by perceivedRpe.
+//   1. Recommended button — the primary tile. Pure-math curve pick
+//      (TARGET / LOAD / L·R / Why). Always shows the engine's unscaled
+//      output regardless of slider position. Clickable: tapping it
+//      clears any tile override and makes the recommendation the
+//      active selection (highlighted bright). When the user has
+//      overridden via an alternative tile, this button dims to
+//      indicate "not the active pick" but still surfaces what the
+//      curve wanted.
 //   2. RPE slider — "How cooked today?" Scales the prescribed LOAD
-//      (active session below + tiles + workout runner) without
-//      changing which zone the engine picks. Stamped on every rep at
-//      session start so perceivedFatigueLearning can adapt the
-//      modifier curve to the user's actual response.
-//   3. Active session block — TARGET / LOAD (RPE-scaled), Why text
-//      (only when on the recommended zone), hangs/rest/time strip,
-//      hangs and rest sliders. This is what the runner will use when
-//      Start Session is tapped.
+//      (workout runner + per-zone tiles below) without changing which
+//      zone the engine picks. Stamped on every rep at session start
+//      so perceivedFatigueLearning can adapt the modifier curve to
+//      the user's actual response.
+//   3. Override indicator + protocol controls — hangs/rest/time strip,
+//      hangs and rest sliders. Defaults track the active selection's
+//      T but stick once touched.
 //   4. Six zone tiles — alternatives. Tap any to override the
-//      recommendation; the active session block above updates to
-//      reflect the new target T and load. The recommended tile shows
-//      a ★; the active (selected) tile gets the brighter highlight.
+//      recommendation; the recommended button above dims and the
+//      tapped tile gets the bright highlight. Loads on every tile
+//      reflect the RPE slider's per-zone scale-down.
+//
+// One TARGET/LOAD display total. Pre-merge there was a duplicate big-
+// numbers panel below the slider — Recommended panel now serves both
+// "what did the curve recommend" and "what's selected" since it's the
+// primary tile. The bright highlight on whichever tile is active (the
+// big Recommended button OR one of the small alternatives) is the
+// single source of truth for the active selection.
 //
 // All three sections share state, so flipping the slider flows through
 // the tiles and the details simultaneously, and clicking a tile drives
@@ -122,16 +131,12 @@ export function SessionPlanCard({
   const activeT = isOverridden
     ? activeRow?.T
     : (rec?.T ?? activeRow?.T);
-  const activeLoadL = isOverridden
-    ? activeRow?.L
-    : (rec?.loadByHand?.L != null && activeRow?.fatigueMod != null
-        ? rec.loadByHand.L * activeRow.fatigueMod
-        : activeRow?.L);
-  const activeLoadR = isOverridden
-    ? activeRow?.R
-    : (rec?.loadByHand?.R != null && activeRow?.fatigueMod != null
-        ? rec.loadByHand.R * activeRow.fatigueMod
-        : activeRow?.R);
+  // Per-hand load values used to feed a separate "active TARGET/LOAD"
+  // big-numbers panel — that panel was retired May 2026 since the
+  // Recommended button (above) and the highlighted alternative tile
+  // (below) already make the active selection visually obvious.
+  // activeT is still used by the protocol controls (hangs/rest defaults
+  // + total-time math).
   const activeColor = activeRow?.color ?? C.blue;
   const activeEmoji = activeRow?.emoji ?? "🎯";
   const activeLabel = activeRow?.label ?? activeZone;
@@ -257,8 +262,27 @@ export function SessionPlanCard({
         const recCfg = GOAL_CONFIG[rec.zone] ?? { color: C.blue, label: rec.zone, emoji: "🎯" };
         const recL = rec.loadByHand?.L;
         const recR = rec.loadByHand?.R;
+        // Recommended is the primary "tile" — clickable like the small
+        // alternatives below. Tapping it clears any override (back to
+        // the engine's pick). Active when no override is in effect.
+        const recActive = !isOverridden;
         return (
-          <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 10, background: C.bg, border: `1px solid ${recCfg.color}66` }}>
+          <button
+            onClick={() => setOverrideZone(null)}
+            style={{
+              display: "block", width: "100%", textAlign: "left",
+              cursor: "pointer", font: "inherit",
+              marginBottom: 12, padding: "12px 14px", borderRadius: 10,
+              background: recActive ? recCfg.color + "22" : C.bg,
+              border: recActive
+                ? `2px solid ${recCfg.color}`
+                : `1px solid ${recCfg.color}66`,
+              opacity: recActive ? 1 : 0.7,
+              // Compensate the 2px active border so the card height
+              // doesn't jump when toggling override on/off.
+              margin: recActive ? "0 0 12px 0" : "1px 1px 13px 1px",
+            }}
+          >
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: recCfg.color, textTransform: "uppercase", letterSpacing: 0.5 }}>
                 ★ Recommended
@@ -292,7 +316,7 @@ export function SessionPlanCard({
               <span style={{ color: recCfg.color, fontWeight: 700 }}>Why: </span>
               {whyText}
             </div>
-          </div>
+          </button>
         );
       })()}
 
@@ -354,49 +378,6 @@ export function SessionPlanCard({
         </div>
       )}
 
-      {/* Selected-session big-numbers — TARGET / LOAD */}
-      <div style={{
-        display: "flex", alignItems: "baseline", gap: 16,
-        padding: "14px 16px", marginBottom: 10,
-        background: C.bg, borderRadius: 10,
-      }}>
-        <div style={{ flex: 1, textAlign: "center" }}>
-          <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>
-          <div style={{ fontSize: 32, fontWeight: 800, color: activeColor, lineHeight: 1 }}>
-            {activeT}<span style={{ fontSize: 14, color: C.muted, marginLeft: 2 }}>s</span>
-          </div>
-        </div>
-        <div style={{ flex: 1, textAlign: "center" }}>
-          <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Load</div>
-          <div style={{ fontSize: 32, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
-            {activeLoadL != null || activeLoadR != null
-              ? fmtW(((activeLoadL ?? 0) + (activeLoadR ?? 0)) / ((activeLoadL != null ? 1 : 0) + (activeLoadR != null ? 1 : 0) || 1), unit)
-              : "—"}
-            <span style={{ fontSize: 12, color: C.muted, marginLeft: 4 }}>{unit}</span>
-          </div>
-          {(activeLoadL != null || activeLoadR != null) && (
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
-              {activeLoadL != null && <>L {fmtW(activeLoadL, unit)}</>}
-              {activeLoadL != null && activeLoadR != null && " · "}
-              {activeLoadR != null && <>R {fmtW(activeLoadR, unit)}</>}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Why-text — only shown for the recommended zone (the engine's
-          rationale doesn't apply to a manual override). */}
-      {!isOverridden && (
-        <div style={{
-          fontSize: 12, color: C.muted, lineHeight: 1.5,
-          padding: "8px 10px", background: activeColor + "0d",
-          border: `1px solid ${activeColor}33`, borderRadius: 8,
-          marginBottom: 12,
-        }}>
-          <span style={{ color: activeColor, fontWeight: 700 }}>Why: </span>
-          {whyText}
-        </div>
-      )}
 
       {/* Hangs / Rest / Time strip */}
       <div style={{
