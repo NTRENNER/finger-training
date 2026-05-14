@@ -485,10 +485,19 @@ export default function App() {
       const remoteReps = await fetchReps();
       if (remoteReps) {
         const localReps = loadLS(LS_HISTORY_KEY) || [];
-        const keyFor = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
+        // Prefer id-based matching so a local rep whose hand (or any
+        // other field) was edited cloud-side doesn't get re-pushed as a
+        // duplicate row. Fall back to the composite key only for reps
+        // that have never been synced and therefore have no Supabase id.
+        // Without this, the previous (session_id|set|rep|hand) keyFor
+        // produced duplicate cloud rows whenever local and remote
+        // disagreed on hand — see May 2026 Both-button corruption thread.
+        const keyFor = r => r.id ? `id:${r.id}` : `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
+        const remoteIds  = new Set(remoteReps.map(r => r.id).filter(Boolean));
         const remoteKeys = new Set(remoteReps.map(keyFor));
         const tombstoned = new Set(loadLS(LS_REP_DELETED_KEY) || []);
         const toSync = localReps.filter(r =>
+          !(r.id && remoteIds.has(r.id)) &&
           !remoteKeys.has(keyFor(r)) &&
           !(r.id && tombstoned.has(r.id))
         );

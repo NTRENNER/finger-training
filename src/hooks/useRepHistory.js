@@ -149,10 +149,16 @@ export function useRepHistory({ user }) {
         // state update) leaves stale entries in localStorage that the
         // reconcile would helpfully resurrect.
         const localReps = loadLS(LS_HISTORY_KEY) || [];
-        const keyFor = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
+        // Prefer id-based matching so a local rep whose fields were
+        // edited cloud-side doesn't get re-pushed as a duplicate row.
+        // Composite key only for reps that lack an id (never synced).
+        // (Same fix as App.js's pullFromCloud — see comment there.)
+        const keyFor = r => r.id ? `id:${r.id}` : `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
+        const remoteIds  = new Set(remote.map(r => r.id).filter(Boolean));
         const remoteKeys = new Set(remote.map(keyFor));
         const tombstoned = new Set(loadLS(LS_REP_DELETED_KEY) || []);
         const toSync = localReps.filter(r =>
+          !(r.id && remoteIds.has(r.id)) &&
           !remoteKeys.has(keyFor(r)) &&
           !(r.id && tombstoned.has(r.id))
         );
