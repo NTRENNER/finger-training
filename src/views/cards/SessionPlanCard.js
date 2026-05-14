@@ -1,0 +1,448 @@
+// ─────────────────────────────────────────────────────────────
+// SESSION PLAN CARD — single-box session picker for Setup
+// ─────────────────────────────────────────────────────────────
+// Replaces three previously-separate Setup surfaces:
+//   * ContinuousPickCard ("Recommended Session" big-numbers card)
+//   * PrescribedLoadCard's role on Setup (six zone tiles)
+//   * SessionRPECard ("Session RPE — today")
+//
+// The unified flow:
+//   1. RPE slider at the very top — drives both the per-zone scale-down
+//      AND the engine's recommended pick. The same value is stamped on
+//      every rep at session start so perceivedFatigueLearning can adapt
+//      the modifier curve to the user's actual response.
+//   2. Six selectable zone tiles (clickable). The engine's recommended
+//      zone is highlighted by default; tapping any other tile makes it
+//      the active session — useful when the user wants to override the
+//      pick for the day. A "← back to recommended" link appears once
+//      a manual override is in effect.
+//   3. Session details panel for the active zone — TARGET, LOAD, why,
+//      hangs/rest sliders. The reps and rest values default from the
+//      active zone's T (matching ContinuousPickCard's old behavior) and
+//      stick once touched.
+//
+// All three sections share state, so flipping the slider flows through
+// the tiles and the details simultaneously, and clicking a tile drives
+// what the workout runner gets via onApplyPlan({goal, targetTime, ...}).
+//
+// PrescribedLoadCard still exists in src/views/cards/ — Analysis renders
+// it standalone for retrospective what-if exploration, where the slider
+// is purely local (no workout to drive). The two components share the
+// same per-zone fatigue math through climbingFatigue + applyPersonalGain.
+
+import React, { useEffect, useMemo, useState } from "react";
+import { C } from "../../ui/theme.js";
+import { Card } from "../../ui/components.js";
+import { fmtW } from "../../ui/format.js";
+import { ZONE_KEYS } from "../../model/zones.js";
+import { prescription } from "../../model/prescription.js";
+import { coachingRecommendationContinuous } from "../../model/coaching.js";
+import { fatigueToModifier } from "../../model/climbingFatigue.js";
+import { applyPersonalGain } from "../../model/perceivedFatigueLearning.js";
+
+export function SessionPlanCard({
+  history, grip, freshMap, threeExpPriors, activities = [],
+  GOAL_CONFIG, unit, hand = "Both",
+  // onApplyPlan flows the active session config (zone, T, reps, rest)
+  // back up so the workout runner uses it. Auto-fires whenever any of
+  // those change.
+  onApplyPlan,
+  // Slider state — controlled by SetupView so config.perceivedRpe
+  // carries through to the runner and gets stamped on every rep.
+  perceivedRpe,
+  onPerceivedRpeChange,
+  // Per-zone learned gains from perceivedFatigueLearning. Multiplied
+  // through the population fatigue curve so the scale-down adapts to
+  // this user's actual response.
+  personalGains = null,
+}) {
+  // ── Recommendation from the continuous engine ──────────────
+  const rec = useMemo(
+    () => grip
+      ? coachingRecommendationContinuous(history, grip, {
+          freshMap, threeExpPriors, activities,
+          perceivedFatigue: perceivedRpe > 1 ? perceivedRpe : 0,
+          personalGains,
+        })
+      : null,
+    [history, grip, freshMap, threeExpPriors, activities, perceivedRpe, personalGains]
+  );
+  const recommendedZone = rec?.zone;
+
+  // ── Active zone — defaults to recommended, user can override via tiles ──
+  // Stored as the zone key (e.g. "power") or null = "follow recommendation"
+  const [overrideZone, setOverrideZone] = useState(null);
+  const activeZone = overrideZone || recommendedZone;
+  const isOverridden = overrideZone && overrideZone !== recommendedZone;
+
+  // Reset the override when the grip changes — a Crusher pick shouldn't
+  // carry into Micro silently.
+  useEffect(() => { setOverrideZone(null); }, [grip]);
+
+  // ── Per-zone tiles (with personal-gain-adjusted scale-down) ─────────
+  const rows = useMemo(() => {
+    if (!grip) return null;
+    return ZONE_KEYS.map(key => {
+      const cfg = GOAL_CONFIG[key];
+      if (!cfg) return null;
+      const T = cfg.refTime;
+      const pL = prescription(history, "L", grip, T, { freshMap, threeExpPriors });
+      const pR = prescription(history, "R", grip, T, { freshMap, threeExpPriors });
+      const fatigueMod = perceivedRpe > 1
+        ? applyPersonalGain(
+            fatigueToModifier(key, perceivedRpe, 0),
+            personalGains?.[key],
+          )
+        : 1.0;
+      return {
+        key, label: cfg.label, emoji: cfg.emoji, color: cfg.color, T,
+        L: pL?.value != null ? pL.value * fatigueMod : null,
+        R: pR?.value != null ? pR.value * fatigueMod : null,
+        fatigueMod,
+        // Reliability dimming — same logic as PrescribedLoadCard.
+        reliability:
+          !pL && !pR ? null
+          : pL?.reliability === "extrapolation" || pR?.reliability === "extrapolation" ? "extrapolation"
+          : pL?.reliability === "marginal" || pR?.reliability === "marginal" ? "marginal"
+          : "well-supported",
+      };
+    }).filter(Boolean);
+  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, perceivedRpe, personalGains]);
+
+  // ── Active row — drives the bottom session-details panel ─────────────
+  const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
+  // T comes from rec (the engine's argmax in the continuous sweep) when
+  // we're on the recommended zone; from the zone's refTime when the user
+  // has overridden. Either way the load comes from prescription() at that T.
+  const activeT = isOverridden
+    ? activeRow?.T
+    : (rec?.T ?? activeRow?.T);
+  const activeLoadL = isOverridden
+    ? activeRow?.L
+    : (rec?.loadByHand?.L != null && activeRow?.fatigueMod != null
+        ? rec.loadByHand.L * activeRow.fatigueMod
+        : activeRow?.L);
+  const activeLoadR = isOverridden
+    ? activeRow?.R
+    : (rec?.loadByHand?.R != null && activeRow?.fatigueMod != null
+        ? rec.loadByHand.R * activeRow.fatigueMod
+        : activeRow?.R);
+  const activeColor = activeRow?.color ?? C.blue;
+  const activeEmoji = activeRow?.emoji ?? "🎯";
+  const activeLabel = activeRow?.label ?? activeZone;
+
+  // ── Reps / Rest defaults from the active T ─────────────────────────
+  const defaultReps = activeT
+    ? Math.max(4, Math.min(6, Math.round(6 - (activeT - 5) / 117.5)))
+    : 5;
+  const defaultRest = 20;
+  const [reps, setReps] = useState(defaultReps);
+  const [rest, setRest] = useState(defaultRest);
+  const [userOverride, setUserOverride] = useState(false);
+  // Reset to defaults when the active zone / T changes, unless the user
+  // has manually touched the sliders this session.
+  useEffect(() => {
+    if (!userOverride) {
+      setReps(defaultReps);
+      setRest(defaultRest);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeZone, activeT]);
+  useEffect(() => { setUserOverride(false); }, [grip]);
+
+  // ── Push to session config ─────────────────────────────────────────
+  useEffect(() => {
+    if (!activeZone || !activeT) return;
+    onApplyPlan?.({
+      goal: activeZone,
+      targetTime: activeT,
+      repsPerSet: reps,
+      restTime: rest,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeZone, activeT, reps, rest]);
+
+  // ── Empty / loading states ──────────────────────────────────────────
+  if (!grip) {
+    return (
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Session Plan</div>
+        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          Pick a grip above to see your continuous prescription.
+        </div>
+      </Card>
+    );
+  }
+  if (!rec || !rows) {
+    return (
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Session Plan</div>
+        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          Need at least 2 reps on this grip to fit a curve. Run a probe
+          session at any duration to get started.
+        </div>
+      </Card>
+    );
+  }
+
+  // ── Why-text for the recommended zone ───────────────────────────────
+  const whyParts = [];
+  const room = rec.room ?? (1 - (rec.localRatio ?? 1));
+  if (rec.adaptBoost != null && rec.adaptBoost > 1.15) {
+    const pct = Math.round(room * 100);
+    whyParts.push(`reps near here fall ~${pct}% below the curve — biggest AUC-gain opportunity`);
+  } else if (rec.adaptBoost != null && rec.adaptBoost > 1.05) {
+    whyParts.push("reps near here sit slightly below the curve");
+  } else if (rec.adaptBoost != null && rec.adaptBoost < 0.85) {
+    whyParts.push("you're at or above the curve everywhere — picked here on staleness alone");
+  }
+  if (rec.staleStatus === "stale") {
+    whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is past its detraining window`);
+  } else if (rec.staleStatus === "never") {
+    whyParts.push(`never trained at this duration — exploring it anchors the curve`);
+  } else if (rec.staleStatus === "warning") {
+    whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is approaching stale`);
+  }
+  if (rec.recency != null && rec.recency < 0.5) {
+    whyParts.push("zone partially recovered — lighter dose is fine");
+  }
+  if (rec.ext != null && rec.ext < 0.85) {
+    const pct = Math.round((1 - rec.ext) * 100);
+    whyParts.push(`recent climbing / RPE ~${pct}% scale-down`);
+  }
+  if (whyParts.length === 0) {
+    whyParts.push("curve is well-calibrated locally; this T scores best on staleness × recency");
+  }
+  const whyText = whyParts.join(" · ");
+
+  // Total session time (per-hand × 2 if Both)
+  const perHandSec = (reps || 0) * (activeT || 0) + Math.max(0, (reps || 1) - 1) * (rest || 0);
+  const both = hand === "Both";
+  const totalSec = both ? perHandSec * 2 : perHandSec;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
+
+  // ── Render ──────────────────────────────────────────────────────────
+  return (
+    <Card style={{ marginBottom: 16, border: `1px solid ${activeColor}66` }}>
+
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>
+          Session Plan · {grip}
+        </div>
+        <div style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+          padding: "2px 8px", borderRadius: 10,
+          background: activeColor + "22", color: activeColor,
+        }}>
+          {activeEmoji} {activeLabel}
+        </div>
+      </div>
+
+      {/* RPE slider — top of the card */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 12,
+        padding: "10px 12px", marginBottom: 12,
+        borderRadius: 8, background: C.bg, border: `1px solid ${C.border}`,
+      }}>
+        <div style={{ flex: "0 0 auto" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>
+            How cooked today?
+          </div>
+          <div style={{ fontSize: 10, color: C.muted }}>
+            {perceivedRpe === 1 ? "fresh — no scale-down" : `RPE ${perceivedRpe}`}
+            {personalGains && perceivedRpe > 1 && (() => {
+              const g = activeZone ? personalGains[activeZone] : null;
+              if (g == null || Math.abs(g - 1) < 0.1) return null;
+              const direction = g < 1 ? "less cooked than avg" : "more cooked than avg";
+              return (
+                <span style={{ marginLeft: 6, color: C.purple, fontStyle: "italic" }}>
+                  · calibrated ({direction})
+                </span>
+              );
+            })()}
+          </div>
+        </div>
+        <input
+          type="range" min={1} max={10} step={1}
+          value={perceivedRpe}
+          onChange={e => onPerceivedRpeChange?.(Number(e.target.value))}
+          style={{ flex: 1, accentColor: C.orange }}
+          aria-label="Perceived fatigue (1 fresh, 10 cooked)"
+        />
+        {perceivedRpe > 1 && (
+          <button
+            onClick={() => onPerceivedRpeChange?.(1)}
+            style={{
+              flex: "0 0 auto", fontSize: 10, padding: "2px 8px",
+              borderRadius: 4, border: `1px solid ${C.border}`,
+              background: "transparent", color: C.muted, cursor: "pointer",
+            }}
+          >reset</button>
+        )}
+      </div>
+
+      {/* Six zone tiles — clickable. Recommended is highlighted with the
+          double-strength border + tinted background; the user-overridden
+          tile (if any) gets a brighter highlight. Hover/active feedback
+          via cursor:pointer + slight scale-down on the inactive tiles. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+        {rows.map(r => {
+          const isActive = r.key === activeZone;
+          const isRec = r.key === recommendedZone;
+          const dim = r.reliability === "extrapolation";
+          const scalePct = r.fatigueMod < 0.999 ? Math.round((1 - r.fatigueMod) * 100) : 0;
+          return (
+            <button
+              key={r.key}
+              onClick={() => setOverrideZone(r.key === recommendedZone ? null : r.key)}
+              style={{
+                textAlign: "left", cursor: "pointer", font: "inherit",
+                padding: "10px 12px", borderRadius: 8,
+                background: isActive ? r.color + "22" : C.bg,
+                border: isActive
+                  ? `2px solid ${r.color}`
+                  : `1px solid ${C.border}`,
+                opacity: dim ? 0.55 : 1,
+                // Compensate the active border thickness so tiles stay aligned
+                margin: isActive ? 0 : 1,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: r.color }}>
+                  {r.emoji} {r.label}
+                  {isRec && (
+                    <span style={{ marginLeft: 4, fontSize: 9, color: C.muted, fontWeight: 500 }}>★</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 10, color: C.muted }}>
+                  {scalePct > 0 && <span style={{ marginRight: 6, color: C.orange }}>−{scalePct}%</span>}
+                  {r.T}s
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>L</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+                    {r.L != null ? fmtW(r.L, unit) : "—"}
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>R</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+                    {r.R != null ? fmtW(r.R, unit) : "—"}
+                  </div>
+                </div>
+              </div>
+              {r.reliability === "extrapolation" && (
+                <div style={{ fontSize: 9, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
+                  extrapolating
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Override indicator — shows up when the user has selected a tile
+          other than the recommended one. Click to revert. */}
+      {isOverridden && (
+        <div style={{ marginBottom: 10, fontSize: 11, color: C.muted, textAlign: "center" }}>
+          overriding the recommendation ({rec.zone.replace(/_/g, " ")} →{" "}
+          {activeZone.replace(/_/g, " ")}) ·{" "}
+          <button
+            onClick={() => setOverrideZone(null)}
+            style={{ background: "none", border: "none", color: C.purple, cursor: "pointer", fontSize: 11, padding: 0, textDecoration: "underline" }}
+          >back to recommended</button>
+        </div>
+      )}
+
+      {/* Selected-session big-numbers — TARGET / LOAD */}
+      <div style={{
+        display: "flex", alignItems: "baseline", gap: 16,
+        padding: "14px 16px", marginBottom: 10,
+        background: C.bg, borderRadius: 10,
+      }}>
+        <div style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: activeColor, lineHeight: 1 }}>
+            {activeT}<span style={{ fontSize: 14, color: C.muted, marginLeft: 2 }}>s</span>
+          </div>
+        </div>
+        <div style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Load</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+            {activeLoadL != null || activeLoadR != null
+              ? fmtW(((activeLoadL ?? 0) + (activeLoadR ?? 0)) / ((activeLoadL != null ? 1 : 0) + (activeLoadR != null ? 1 : 0) || 1), unit)
+              : "—"}
+            <span style={{ fontSize: 12, color: C.muted, marginLeft: 4 }}>{unit}</span>
+          </div>
+          {(activeLoadL != null || activeLoadR != null) && (
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
+              {activeLoadL != null && <>L {fmtW(activeLoadL, unit)}</>}
+              {activeLoadL != null && activeLoadR != null && " · "}
+              {activeLoadR != null && <>R {fmtW(activeLoadR, unit)}</>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Why-text — only shown for the recommended zone (the engine's
+          rationale doesn't apply to a manual override). */}
+      {!isOverridden && (
+        <div style={{
+          fontSize: 12, color: C.muted, lineHeight: 1.5,
+          padding: "8px 10px", background: activeColor + "0d",
+          border: `1px solid ${activeColor}33`, borderRadius: 8,
+          marginBottom: 12,
+        }}>
+          <span style={{ color: activeColor, fontWeight: 700 }}>Why: </span>
+          {whyText}
+        </div>
+      )}
+
+      {/* Hangs / Rest / Time strip */}
+      <div style={{
+        display: "flex", gap: 6, marginBottom: 12,
+        background: C.bg, borderRadius: 10, padding: "10px 14px", alignItems: "center",
+      }}>
+        {[
+          { label: "Hangs", value: reps },
+          { label: "Rest",  value: `${rest}s` },
+          { label: "Time",  value: timeStr },
+        ].map(({ label, value }, i, arr) => (
+          <React.Fragment key={label}>
+            <div style={{ textAlign: "center", flex: 1 }}>
+              <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: activeColor }}>{value}</div>
+            </div>
+            {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* Hangs + Rest sliders — always visible; defaults track the
+          active zone, sliders override locally. */}
+      <div style={{ display: "flex", gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Hangs</span><span style={{ fontWeight: 700, color: C.text }}>{reps}</span>
+          </div>
+          <input type="range" min={2} max={12} value={reps}
+            onChange={e => { setReps(Number(e.target.value)); setUserOverride(true); }}
+            style={{ width: "100%", accentColor: activeColor }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
+            <span>Rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
+          </div>
+          <input type="range" min={5} max={300} step={5} value={rest}
+            onChange={e => { setRest(Number(e.target.value)); setUserOverride(true); }}
+            style={{ width: "100%", accentColor: activeColor }} />
+        </div>
+      </div>
+    </Card>
+  );
+}

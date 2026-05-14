@@ -433,28 +433,11 @@ export default function App() {
     if (updated) pushActivity(updated);
   }, []);
 
-  // Set the session-RPE override for an entire climbing session (date).
-  // Writes the same session_rpe to every climb row on that date so the
-  // engine's computeSessionFatigue picks it up regardless of which row
-  // gets read. Phase B of the climbing-fatigue system; see
-  // src/model/climbingFatigue.js for the consumer.
-  const setSessionRPE = useCallback((date, rpe) => {
-    if (!date) return;
-    const v = Number(rpe);
-    const value = Number.isFinite(v) && v >= 1 && v <= 10 ? Math.round(v) : null;
-    const toPush = [];
-    setActivities(prev => {
-      const next = prev.map(a => {
-        if (a.type !== "climbing" || a.date !== date) return a;
-        const merged = { ...a, session_rpe: value };
-        toPush.push(merged);
-        return merged;
-      });
-      saveLS(LS_ACTIVITY_KEY, next);
-      return next;
-    });
-    for (const a of toPush) pushActivity(a);
-  }, []);
+  // (setSessionRPE removed May 2026 — the UI that drove it
+  // (SessionRPECard) was retired alongside the unified SessionPlanCard.
+  // The session_rpe column on activities is still respected by
+  // climbingFatigue.computeSessionFatigue if it shows up via cloud sync,
+  // we just no longer write to it from Setup.)
 
 
   // ── Tindeq ────────────────────────────────────────────────
@@ -682,7 +665,6 @@ export default function App() {
               onBwSave={saveBW}
               activities={activities}
               onLogActivity={addActivity}
-              onSetSessionRPE={setSessionRPE}
               connectSlot={tindeqConnectCard}
               GOAL_CONFIG={GOAL_CONFIG}
               GRIP_PRESETS={GRIP_PRESETS}

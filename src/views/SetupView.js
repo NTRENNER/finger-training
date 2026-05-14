@@ -45,11 +45,11 @@
 // (May 2026). Sessions are single-set; the runner reads
 // config.targetTime / config.repsPerSet / config.restTime directly.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
 import { C } from "../ui/theme.js";
 import { Card, Btn } from "../ui/components.js";
-import { fmt0, fmtW, toDisp, fromDisp } from "../ui/format.js";
+import { fmt0, toDisp, fromDisp } from "../ui/format.js";
 
 import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 import { today } from "../util.js";
@@ -61,11 +61,12 @@ import {
 } from "../lib/climbing-grades.js";
 
 // (ZONE_KEYS + lockout imports removed — CurveCoverageCard moved to Analysis.)
+// (coachingRecommendationContinuous, computeSessionFatigue, ymdLocal moved
+// into SessionPlanCard with the recommended-pick / per-zone-tile
+// consolidation. buildThreeExpPriors stays — SetupView still memoizes the
+// per-grip priors and threads them through to SessionPlanCard.)
 import { buildThreeExpPriors } from "../model/threeExp.js";
-import { coachingRecommendationContinuous } from "../model/coaching.js";
-import { computeSessionFatigue } from "../model/climbingFatigue.js";
-import { ymdLocal } from "../util.js";
-import { PrescribedLoadCard } from "./cards/PrescribedLoadCard.js";
+import { SessionPlanCard } from "./cards/SessionPlanCard.js";
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
@@ -407,357 +408,6 @@ function ClimbingLogCard({ activities = [], onLog }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// SESSION RPE CARD — confirm/override the derived session fatigue
-// ─────────────────────────────────────────────────────────────
-// Appears when today has ≥1 climb logged. Shows the per-climb-RPE
-// derived session fatigue 1-10 (model/climbingFatigue.js formula)
-// and lets the user override with a single slider. Confirming
-// writes the override to every today's climb row via onSetSessionRPE,
-// which App.js fans out as a session_rpe update + cloud push.
-//
-// Why the override matters: one max-effort attempt at RPE 9 leaves
-// you fresh, an hour of moderate RPE 7 volume leaves you cooked.
-// The formula handles the obvious cases but human judgment captures
-// things the math can't (sleep, food, route reading load).
-function SessionRPECard({ activities, onSetSessionRPE }) {
-  const today = ymdLocal();
-  const todaysClimbs = useMemo(
-    () => (activities || []).filter(a => a?.type === "climbing" && a.date === today),
-    [activities, today]
-  );
-
-  // Existing override (Phase B) on any of today's rows wins over
-  // the derived value, mirroring how the engine reads them.
-  const existingOverride = useMemo(() => {
-    for (const a of todaysClimbs) {
-      const sr = Number(a.session_rpe);
-      if (Number.isFinite(sr) && sr >= 1 && sr <= 10) return Math.round(sr);
-    }
-    return null;
-  }, [todaysClimbs]);
-
-  const derived = useMemo(
-    () => computeSessionFatigue(activities, today),
-    [activities, today]
-  );
-
-  // User's working value while editing. Starts at the existing
-  // override if set, otherwise the derived default.
-  const initial = existingOverride ?? derived ?? 5;
-  const [val, setVal] = useState(initial);
-  // Reset working value when today's climbs change (new climb logged,
-  // override committed, etc.). Cheap to just re-pin to the latest.
-  useEffect(() => { setVal(initial); }, [initial]);
-
-  if (todaysClimbs.length === 0) return null;
-
-  const dirty = val !== initial;
-  const status = existingOverride != null
-    ? `Set to ${existingOverride}`
-    : `Derived from ${todaysClimbs.length} climb${todaysClimbs.length === 1 ? "" : "s"}`;
-
-  return (
-    <Card style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Session RPE — today</div>
-        <div style={{ fontSize: 32, fontWeight: 800, color: C.purple, lineHeight: 1 }}>
-          {val}<span style={{ fontSize: 12, color: C.muted, fontWeight: 400, marginLeft: 2 }}>/10</span>
-        </div>
-      </div>
-      <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
-        {status}. How shot are you now? Drives how much the engine scales finger
-        training in the next 48h.
-      </div>
-      <input
-        type="range" min="1" max="10" step="1"
-        value={val}
-        onChange={e => setVal(Number(e.target.value))}
-        style={{ width: "100%", accentColor: C.purple, marginBottom: 8 }}
-      />
-      {dirty && (
-        <Btn
-          onClick={() => onSetSessionRPE(today, val)}
-          color={C.green}
-          style={{ width: "100%" }}
-        >
-          {existingOverride != null ? "Update" : "Confirm"} Session RPE
-        </Btn>
-      )}
-    </Card>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// CONTINUOUS PICK CARD — the new primary prescription surface
-// ─────────────────────────────────────────────────────────────
-// The continuous engine returns a specific (T, load) pair anywhere
-// in [5s, 240s]. This card surfaces it and lets the user fine-tune
-// the protocol (number of hangs, rest between hangs) before starting.
-// Sets default to 1 and setRest to 0 — the workout flow assumes
-// single-set sessions.
-//
-// Defaults for hangs/rest are derived from zoneOf(T_star), so a
-// short-T pick (max strength territory) gets the longer-rest /
-// fewer-hangs profile, and a long-T pick (endurance) gets shorter
-// rest. The user can override via the customize toggle.
-//
-// onApplyPlan auto-fires whenever the recommendation changes, so the
-// session config below the card always reflects the current pick.
-// The Start Session button at the bottom of SetupView then launches
-// straight into the recommended session — single-tap go.
-function ContinuousPickCard({
-  history, grip, freshMap, threeExpPriors,
-  activities = [],
-  GOAL_CONFIG, unit, onApplyPlan,
-  hand = "Both",  // session config's selected hand — drives the total-time math
-}) {
-  const rec = useMemo(
-    () => grip
-      ? coachingRecommendationContinuous(history, grip, { freshMap, threeExpPriors, activities })
-      : null,
-    [history, grip, freshMap, threeExpPriors, activities]
-  );
-
-  // Derive default protocol from T_star.
-  //
-  // REPS — continuous linear interpolation in T:
-  //   reps(T) = round(6 - (T - 5) / 117.5), clamped to [4, 6]
-  // Endpoints: T = 5s → 6 hangs (max strength territory),
-  //            T = 240s → 4 hangs (endurance). Mid-T (~70-180s) → 5.
-  // Smooth function of T matches the curve-trust philosophy: a 29s
-  // pick and a 31s pick give the same rep count; no surprise jumps
-  // at zone boundaries.
-  //
-  // REST — flat 20s between reps, always (user preference, May 2026).
-  // The earlier per-zone lookup gave 60-180s depending on the zone.
-  // The user trains short rests across the board (Grip Gains style),
-  // so the default is constant and simpler. Override via the always-
-  // visible rest slider if a longer rest is wanted for a specific
-  // session. (The altMode L↔R interleaving the runner used to support
-  // when restTime ≥ targetTime was retired with the multi-set model
-  // in the same May 2026 wave — Both-mode now does the full L set
-  // first, then the full R set. See useSessionRunner.)
-  const zoneCfg = rec ? GOAL_CONFIG[rec.zone] : null;
-  const defaultReps = rec
-    ? Math.max(4, Math.min(6, Math.round(6 - (rec.T - 5) / 117.5)))
-    : 5;
-  const defaultRest = 20;
-
-  const [reps, setReps] = useState(defaultReps);
-  const [rest, setRest] = useState(defaultRest);
-  // `userOverride` flips on any time the user touches a protocol
-  // slider. While true, the auto-reset on T/zone changes won't
-  // clobber the user's manual choice. (No UI toggle exposes this —
-  // it's purely state management for the always-visible sliders.)
-  const [userOverride, setUserOverride] = useState(false);
-
-  // When the recommendation changes (new grip, new history), reset
-  // reps/rest to the new zone's defaults — unless the user has
-  // explicitly overridden in this session.
-  useEffect(() => {
-    if (!userOverride) {
-      setReps(defaultReps);
-      setRest(defaultRest);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rec?.T, rec?.zone]);
-
-  // Switching grips clears the override so fresh defaults flow
-  // back in. Avoids carrying a stale Crusher rest into Micro.
-  useEffect(() => {
-    setUserOverride(false);
-  }, [grip]);
-
-  // Auto-apply to session config so Start Session uses the pick.
-  // Fires whenever the resolved plan changes (T, reps, rest, grip).
-  useEffect(() => {
-    if (!rec) return;
-    onApplyPlan({
-      goal: rec.zone,
-      targetTime: rec.T,
-      repsPerSet: reps,
-      restTime: rest,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rec?.T, rec?.zone, reps, rest]);
-
-  if (!grip) {
-    return (
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Recommended Session</div>
-        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-          Pick a grip above to see your continuous prescription.
-        </div>
-      </Card>
-    );
-  }
-
-  if (!rec) {
-    return (
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Recommended Session</div>
-        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-          Need at least 2 reps on this grip to fit a curve. Run a
-          probe session at any duration to get started — the engine
-          will pick a target as soon as the curve has data to anchor.
-        </div>
-      </Card>
-    );
-  }
-
-  const cfg = zoneCfg ?? { color: C.blue, label: "—", emoji: "🎯" };
-
-  // Why-text: explain the AUC-gain pick. Three axes drive the score —
-  // adaptation room (limiter / at ceiling), staleness, and recency.
-  // Surface whichever is doing the heavy lifting for this T so the
-  // user can see the rationale matches the F-D chart visually.
-  const whyParts = [];
-  const room = rec.room ?? (1 - (rec.localRatio ?? 1));
-  if (rec.adaptBoost != null && rec.adaptBoost > 1.15) {
-    const pct = Math.round(room * 100);
-    whyParts.push(`reps near here fall ~${pct}% below the curve — biggest AUC-gain opportunity`);
-  } else if (rec.adaptBoost != null && rec.adaptBoost > 1.05) {
-    whyParts.push("reps near here sit slightly below the curve");
-  } else if (rec.adaptBoost != null && rec.adaptBoost < 0.85) {
-    whyParts.push("you're at or above the curve everywhere — picked here on staleness alone");
-  }
-  if (rec.staleStatus === "stale") {
-    whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is past its detraining window — re-anchor the curve here`);
-  } else if (rec.staleStatus === "never") {
-    whyParts.push(`never trained at this duration — exploring it anchors the curve`);
-  } else if (rec.staleStatus === "warning") {
-    whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is approaching stale — keep it fresh`);
-  }
-  if (rec.recency != null && rec.recency < 0.5) {
-    whyParts.push("zone partially recovered — lighter dose is fine");
-  }
-  if (rec.ext != null && rec.ext < 0.85) {
-    const pct = Math.round((1 - rec.ext) * 100);
-    whyParts.push(`recent climbing ~${pct}% scale-down on this zone`);
-  }
-  if (whyParts.length === 0) {
-    whyParts.push("curve is well-calibrated locally; this T scores best on staleness × recency");
-  }
-  const whyText = whyParts.join(" · ");
-
-  const loadL = rec.loadByHand?.L;
-  const loadR = rec.loadByHand?.R;
-  const zoneLabel = zoneCfg?.label ?? rec.zone;
-
-  return (
-    <Card style={{ marginBottom: 16, border: `1px solid ${cfg.color}66` }}>
-      {/* Header — recommendation summary */}
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>
-          Recommended Session · {grip}
-        </div>
-        <div style={{
-          fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
-          padding: "2px 8px", borderRadius: 10,
-          background: cfg.color + "22", color: cfg.color,
-        }}>
-          {cfg.emoji} {zoneLabel} range
-        </div>
-      </div>
-
-      {/* The big number — T_star + load */}
-      <div style={{
-        display: "flex", alignItems: "baseline", gap: 16,
-        padding: "14px 16px", marginTop: 8, marginBottom: 10,
-        background: C.bg, borderRadius: 10,
-      }}>
-        <div style={{ flex: 1, textAlign: "center" }}>
-          <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>
-          <div style={{ fontSize: 32, fontWeight: 800, color: cfg.color, lineHeight: 1 }}>
-            {rec.T}<span style={{ fontSize: 14, color: C.muted, marginLeft: 2 }}>s</span>
-          </div>
-        </div>
-        <div style={{ flex: 1, textAlign: "center" }}>
-          <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Load</div>
-          <div style={{ fontSize: 32, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
-            {fmtW(rec.loadKg, unit)}<span style={{ fontSize: 12, color: C.muted, marginLeft: 4 }}>{unit}</span>
-          </div>
-          {(loadL != null || loadR != null) && (
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
-              {loadL != null && <>L {fmtW(loadL, unit)}</>}
-              {loadL != null && loadR != null && " · "}
-              {loadR != null && <>R {fmtW(loadR, unit)}</>}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Why-text */}
-      <div style={{
-        fontSize: 12, color: C.muted, lineHeight: 1.5,
-        padding: "8px 10px", background: cfg.color + "0d",
-        border: `1px solid ${cfg.color}33`, borderRadius: 8,
-        marginBottom: 12,
-      }}>
-        <span style={{ color: cfg.color, fontWeight: 700 }}>Why: </span>
-        {whyText}
-      </div>
-
-      {/* Protocol summary strip — current reps/rest at a glance.
-          The "Time" cell is elapsed clock time including rests
-          (formerly labeled "Total" in seconds, which read as
-          time-under-tension). Doubled for Both-mode since the
-          runner does the full L set then the full R set; suffix
-          " (both)" makes the doubling visible at a glance. */}
-      {(() => {
-        const perHandSec = reps * rec.T + (reps - 1) * rest;
-        const both = hand === "Both";
-        const totalSec = both ? perHandSec * 2 : perHandSec;
-        const m = Math.floor(totalSec / 60);
-        const s = totalSec % 60;
-        const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
-        return (
-      <div style={{
-        display: "flex", gap: 6, marginBottom: 12,
-        background: C.bg, borderRadius: 10, padding: "10px 14px", alignItems: "center",
-      }}>
-        {[
-          { label: "Hangs", value: reps },
-          { label: "Rest",  value: `${rest}s` },
-          { label: "Time",  value: timeStr },
-        ].map(({ label, value }, i, arr) => (
-          <React.Fragment key={label}>
-            <div style={{ textAlign: "center", flex: 1 }}>
-              <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: cfg.color }}>{value}</div>
-            </div>
-            {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
-          </React.Fragment>
-        ))}
-      </div>
-        );
-      })()}
-
-      {/* Protocol options — always visible. Defaults track the
-          recommendation; sliders override locally and stick until
-          the user picks a different grip. */}
-      <div style={{ display: "flex", gap: 16, marginBottom: 6 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Hangs</span><span style={{ fontWeight: 700, color: C.text }}>{reps}</span>
-          </div>
-          <input type="range" min={2} max={12} value={reps}
-            onChange={e => { setReps(Number(e.target.value)); setUserOverride(true); }}
-            style={{ width: "100%", accentColor: cfg.color }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
-          </div>
-          <input type="range" min={5} max={300} step={5} value={rest}
-            onChange={e => { setRest(Number(e.target.value)); setUserOverride(true); }}
-            style={{ width: "100%", accentColor: cfg.color }} />
-        </div>
-      </div>
-    </Card>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────
 // SETUP VIEW
@@ -773,7 +423,6 @@ export function SetupView({
   unit = "lbs",
   onBwSave = () => {},
   activities = [], onLogActivity = () => {},
-  onSetSessionRPE = () => {},
   connectSlot = null,
   GOAL_CONFIG = {}, GRIP_PRESETS = [],
   bodyWeight = null, tindeq = null,
@@ -835,7 +484,12 @@ export function SetupView({
           (returns null if logged within the last 3 days) so it auto-
           collapses when the log is fresh. */}
       <ClimbingLogCard activities={activities} onLog={onLogActivity} />
-      <SessionRPECard activities={activities} onSetSessionRPE={onSetSessionRPE} />
+      {/* SessionRPECard ("Session RPE — today") removed May 2026 — its
+          only purpose was overriding the per-climb RPE aggregation, and
+          the new "How cooked today?" slider on SessionPlanCard captures
+          the same intent in a more general / persisted-for-learning way.
+          The session_rpe field on activities is still respected by
+          climbingFatigue.computeSessionFatigue if it's set elsewhere. */}
       <BwPrompt unit={unit} onSave={onBwSave} />
 
       {/* Grip Type — still per-grip, the curve is grip-scoped */}
@@ -862,9 +516,14 @@ export function SetupView({
         </div>
       </Card>
 
-      {/* Continuous Pick — the new primary recommendation surface.
-          Auto-applies to session config so Start Session uses it. */}
-      <ContinuousPickCard
+      {/* Single unified session-pick surface — RPE slider on top, six
+          clickable zone tiles, session details below. Replaces the
+          previously-separate ContinuousPickCard + PrescribedLoadCard
+          renders. The PrescribedLoadCard component still exists for
+          Analysis (retrospective what-if), but Setup goes through this
+          consolidated path so the slider, the recommended pick, and the
+          per-zone tiles all live in one box and stay in sync. */}
+      <SessionPlanCard
         history={history}
         grip={config.grip}
         hand={config.hand}
@@ -874,32 +533,11 @@ export function SetupView({
         GOAL_CONFIG={GOAL_CONFIG}
         unit={unit}
         onApplyPlan={(plan) => setConfig(c => ({ ...c, ...plan }))}
+        perceivedRpe={config.perceivedRpe ?? 1}
+        onPerceivedRpeChange={(v) => setConfig(c => ({ ...c, perceivedRpe: v }))}
+        personalGains={personalGains}
       />
 
-      {/* Prescribed Load — all 6 zones, both hands, for the selected
-          grip. Same component / data Analysis renders; surfaced here
-          too so you can see the suggestion in context across the
-          whole curve before starting. Hidden until a grip is picked
-          (cross-grip pooled prescriptions aren't meaningful). */}
-      {config.grip && (
-        <PrescribedLoadCard
-          history={history}
-          grip={config.grip}
-          freshMap={freshMap}
-          threeExpPriors={threeExpPriors}
-          activities={activities}
-          unit={unit}
-          GOAL_CONFIG={GOAL_CONFIG}
-          // Controlled-mode: the slider's value lives on session config
-          // so the workout runner reads it (scales rep-1 prescription,
-          // stamps perceived_rpe onto every rep, feeds the learning
-          // module). Default 1 if config hasn't initialized that field
-          // yet (legacy state shape).
-          perceivedRpe={config.perceivedRpe ?? 1}
-          onPerceivedRpeChange={(v) => setConfig(c => ({ ...c, perceivedRpe: v }))}
-          personalGains={personalGains}
-        />
-      )}
 
       {/* Curve Coverage moved to Analysis tab — it's a per-zone
           reference view, not a session-prep input, so it lives with
