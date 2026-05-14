@@ -493,6 +493,39 @@ export function AnalysisView({
     return out;
   }, [history, threeExpPriors]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Per-grip × per-hand three-exp fits. Used by the Strength Balance
+  // and Endurance Ceiling cards below. Falls back to a pooled fit on
+  // the grip when a hand doesn't have enough samples. Doubles as a
+  // grip-level "is this grip fitable at all?" gate (≥3 total reps).
+  const gripHandFits = useMemo(() => {
+    const out = {};
+    for (const grip of grips) {
+      const gripReps = (history || []).filter(r =>
+        r.grip === grip &&
+        r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
+        r.actual_time_s > 0
+      );
+      if (gripReps.length < 3) continue;
+      const entry = {};
+      for (const hand of ["L", "R"]) {
+        const pts = gripReps.filter(r => r.hand === hand)
+          .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+        if (pts.length >= 2) {
+          const amps = fitAmpsForPts(pts, grip);
+          if (amps) entry[hand] = amps;
+        }
+      }
+      const pooledAmps = fitAmpsForPts(
+        gripReps.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+        grip
+      );
+      if (pooledAmps) entry.pooled = pooledAmps;
+      if (entry.pooled || entry.L || entry.R) out[grip] = entry;
+    }
+    return out;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, grips, threeExpPriors]);
+
   // gripImprovement is defined AFTER perHandGripBaselines (below)
   // because it now depends on per-hand baselines for the averaged
   // delta path. See the const further down for the actual definition.
@@ -1420,6 +1453,185 @@ export function AnalysisView({
             the F-D chart for the visual prescription story; the
             tabular per-zone view lives on Setup where it informs the
             actual session pick.) */}
+
+        {/* ── Strength Balance — Crusher vs Micro at short-T ──
+            Single-number grip-pair diagnostic. F_Crusher(10s) /
+            F_Micro(10s), per hand when both hands have fits, pooled
+            otherwise. Climbers want this near 1.0 — Crusher-dominant
+            means Micros (small-edge grip) are the trainable weakness;
+            Micro-dominant is rare and points at open-hand under-
+            training. Reference T=10s sits in the Max Strength /
+            early-Power zone where both grips peak. */}
+        {gripHandFits.Crusher && gripHandFits.Micro && (() => {
+          const BAL_T = 10;
+          const rows = [];
+          // Per-hand rows when both grips have that hand's fit.
+          for (const hand of ["L", "R"]) {
+            const cAmps = gripHandFits.Crusher[hand];
+            const mAmps = gripHandFits.Micro[hand];
+            if (!cAmps || !mAmps) continue;
+            const cF = predForceThreeExp(cAmps, BAL_T);
+            const mF = predForceThreeExp(mAmps, BAL_T);
+            if (!(cF > 0) || !(mF > 0)) continue;
+            rows.push({ label: hand === "L" ? "Left hand" : "Right hand", ratio: cF / mF, cF, mF });
+          }
+          // Pooled fallback if neither per-hand row materialized.
+          if (rows.length === 0) {
+            const cAmps = gripHandFits.Crusher.pooled;
+            const mAmps = gripHandFits.Micro.pooled;
+            if (cAmps && mAmps) {
+              const cF = predForceThreeExp(cAmps, BAL_T);
+              const mF = predForceThreeExp(mAmps, BAL_T);
+              if (cF > 0 && mF > 0) {
+                rows.push({ label: "Pooled", ratio: cF / mF, cF, mF });
+              }
+            }
+          }
+          if (rows.length === 0) return null;
+
+          // Color/flag thresholds — balanced 0.85–1.20; mild crusher-
+          // dominant 1.20–1.50; heavy >1.50; micro-dominant <0.85.
+          const classify = (r) => {
+            if (r > 1.50) return { color: C.orange, text: "Crusher-heavy" };
+            if (r > 1.20) return { color: C.yellow, text: "Crusher-dominant" };
+            if (r < 0.85) return { color: C.blue,   text: "Micro-dominant" };
+            return { color: C.green, text: "Balanced" };
+          };
+
+          return (
+            <Card style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
+                Strength Balance — Crusher vs Micro
+              </div>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+                Ratio of your <span style={{ color: GRIP_COLORS.Crusher }}>Crusher</span> force to your <span style={{ color: GRIP_COLORS.Micro }}>Micro</span> force at {BAL_T}s. Near 1.0 is balanced; well above 1.0 means small-edge strength is the trainable gap.
+              </div>
+              {rows.map(({ label, ratio, cF, mF }) => {
+                const flag = classify(ratio);
+                return (
+                  <div key={label} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "8px 0", borderBottom: `1px solid ${C.border}`,
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{label}</div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                        Crusher {fmtW(cF, unit)} {unit} · Micro {fmtW(mF, unit)} {unit}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: flag.color }}>
+                        {fmt1(ratio)}×
+                      </div>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, color: flag.color,
+                        background: `${flag.color}1a`,
+                        padding: "3px 8px", borderRadius: 4,
+                        textTransform: "uppercase", letterSpacing: 0.5,
+                        whiteSpace: "nowrap",
+                      }}>{flag.text}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+          );
+        })()}
+
+        {/* ── Endurance Ceiling — % of peak sustainable for 3 min ──
+            Per-grip × per-hand readout of F(180s) / F(5s). Maps to the
+            climbing question "what fraction of my crimp peak can I
+            hold long enough to finish a route?" — same intuition CMF/
+            peak gave with Monod, but pulled from the three-exp curve
+            so the metric matches what every other surface here uses.
+            Benchmarks (climbing literature, ballpark):
+              <30%  needs endurance work
+              30–40 typical
+              40–50 strong
+              >50   elite */}
+        {Object.keys(gripHandFits).length > 0 && (() => {
+          const CEIL_PEAK_T = 5;
+          const CEIL_HOLD_T = 180;
+          const rows = [];
+          for (const grip of Object.keys(gripHandFits)) {
+            const entry = gripHandFits[grip];
+            // Prefer per-hand when both hands have fits; else use pooled
+            // labeled "pooled".
+            const scopes = [];
+            if (entry.L) scopes.push({ scope: "L", amps: entry.L });
+            if (entry.R) scopes.push({ scope: "R", amps: entry.R });
+            if (scopes.length === 0 && entry.pooled) scopes.push({ scope: "pooled", amps: entry.pooled });
+            for (const { scope, amps } of scopes) {
+              const peak = predForceThreeExp(amps, CEIL_PEAK_T);
+              const hold = predForceThreeExp(amps, CEIL_HOLD_T);
+              if (!(peak > 0) || !(hold > 0)) continue;
+              rows.push({ grip, scope, peak, hold, ratio: hold / peak });
+            }
+          }
+          if (rows.length === 0) return null;
+
+          const classify = (r) => {
+            if (r >= 0.50) return { color: C.green,  text: "Elite" };
+            if (r >= 0.40) return { color: C.green,  text: "Strong" };
+            if (r >= 0.30) return { color: C.yellow, text: "Typical" };
+            return { color: C.orange, text: "Needs work" };
+          };
+          const scopeLabel = (scope) =>
+            scope === "L" ? "Left" : scope === "R" ? "Right" : "Pooled";
+
+          // Group rows by grip for cleaner presentation.
+          const grouped = {};
+          for (const r of rows) {
+            if (!grouped[r.grip]) grouped[r.grip] = [];
+            grouped[r.grip].push(r);
+          }
+
+          return (
+            <Card style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
+                Endurance Ceiling — % of peak sustainable for 3 min
+              </div>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+                F({CEIL_HOLD_T}s) ÷ F({CEIL_PEAK_T}s) from the three-exp curve. Higher = more of your max strength carries into long climbing-relevant durations.
+              </div>
+              {Object.keys(grouped).map(grip => (
+                <div key={grip} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: GRIP_COLORS[grip] || C.text, marginBottom: 4 }}>
+                    {grip}
+                  </div>
+                  {grouped[grip].map(({ scope, peak, hold, ratio }) => {
+                    const flag = classify(ratio);
+                    return (
+                      <div key={`${grip}-${scope}`} style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "6px 0", borderBottom: `1px solid ${C.border}`,
+                      }}>
+                        <div>
+                          <div style={{ fontSize: 12, color: C.text }}>{scopeLabel(scope)}</div>
+                          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                            Peak {fmtW(peak, unit)} · 3-min {fmtW(hold, unit)} {unit}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: flag.color }}>
+                            {Math.round(ratio * 100)}%
+                          </div>
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, color: flag.color,
+                            background: `${flag.color}1a`,
+                            padding: "3px 8px", borderRadius: 4,
+                            textTransform: "uppercase", letterSpacing: 0.5,
+                            whiteSpace: "nowrap",
+                          }}>{flag.text}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </Card>
+          );
+        })()}
 
         {/* ── Force Curves History — past vs now overlay ──
             Two three-exp curves at two date snapshots, slider-scrubbable
