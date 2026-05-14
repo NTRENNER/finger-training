@@ -163,6 +163,15 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     tMax = CONTINUOUS_T_MAX,
     tStep = CONTINUOUS_T_STEP,
     bandwidth = CONTINUOUS_BANDWIDTH,
+    // Perceived in-the-moment fatigue scalar (1-10). Distinct from
+    // activity-derived climbing fatigue: this is what the user sees
+    // a slider for ("how cooked do you feel today?") and lets them
+    // override the recommendation without having to log a synthetic
+    // climbing session. 0 = no effect (default). Composes
+    // multiplicatively with externalLoadModifier(activities) — both
+    // can suppress the same zone if the user has logged climbing AND
+    // says they feel additionally fried.
+    perceivedFatigue = 0,
   } = opts;
 
   if (!grip || !history || history.length === 0) return null;
@@ -250,7 +259,14 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // src/model/climbingFatigue.js, scaled by zone (max_strength
       // most sensitive, endurance least). 1.0 when no recent climb
       // session is found within 48h — see externalLoadModifier above.
-      const ext = externalLoadModifier(zoneKey, activities);
+      const extActivities = externalLoadModifier(zoneKey, activities);
+      // Perceived in-the-moment fatigue (slider on PrescribedLoadCard).
+      // Same per-zone curve as activity-derived fatigue, evaluated at
+      // hoursAgo=0 so it lands at full strength. Composes multiplicatively.
+      const extPerceived = perceivedFatigue > 0
+        ? fatigueToModifier(zoneKey, perceivedFatigue, 0)
+        : 1.0;
+      const ext = extActivities * extPerceived;
       const score = adaptBoost * stale * recency * ext;
 
       if (!best || score > best.score) {

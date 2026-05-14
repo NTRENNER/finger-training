@@ -323,6 +323,27 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.residualBoost).toBe(rec.adaptBoost);
   });
 
+  test("perceivedFatigue suppresses the score (slider on PrescribedLoadCard)", () => {
+    // No activities — only difference between runs is the perceivedFatigue
+    // opt. RPE 1 = no scaling; RPE 10 = worst-case scaling. Score must
+    // drop and ext must be < 1.0 with the slider engaged.
+    const history = [
+      buildRep("L", 30, F_curve(30)),
+      buildRep("L", 60, F_curve(60)),
+      buildRep("L", 120, F_curve(120)),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const fresh  = coachingRecommendationContinuous(history, "Crusher",
+      { threeExpPriors: priors, today, perceivedFatigue: 0 });
+    const cooked = coachingRecommendationContinuous(history, "Crusher",
+      { threeExpPriors: priors, today, perceivedFatigue: 10 });
+    expect(fresh).not.toBeNull();
+    expect(cooked).not.toBeNull();
+    expect(fresh.ext).toBe(1.0);
+    expect(cooked.ext).toBeLessThan(1.0);
+    expect(cooked.score).toBeLessThan(fresh.score);
+  });
+
   test("activities (recent climbing) suppress the recommendation score", () => {
     // Same history both runs; the only difference is whether activities
     // include a recent hard climbing session. With it, the score should
