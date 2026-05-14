@@ -50,7 +50,6 @@ export function HistoryView({
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
-  const [confirmKey,  setConfirmKey]  = useState(null);
   const [editKey,     setEditKey]     = useState(null);
   const [editHand,    setEditHand]    = useState("L");
   const [editGrip,    setEditGrip]    = useState("");
@@ -406,7 +405,6 @@ export function HistoryView({
 
       {grouped.slice(0, 30).map((sess, i) => {
         const sessKey = sess.reps[0]?.session_id || sess.date;
-        const isConfirming = confirmKey === sessKey;
         const isEditing    = editKey    === sessKey;
         return (
           <Card key={i} style={{ marginBottom: 10 }}>
@@ -429,7 +427,7 @@ export function HistoryView({
                   {sess.date}{sess.reps[0]?.session_started_at ? " · " + fmtClock(sess.reps[0].session_started_at) : ""}
                   {(() => { const e = bwOnDate(bwLog, sess.date); return e ? " · " + fmt1(toDisp(e.kg, unit)) + " " + unit : ""; })()}
                 </span>
-                {!isConfirming && !isEditing && (
+                {!isEditing && (
                   <>
                     <button
                       onClick={() => setNoteKey(noteKey === sessKey ? null : sessKey)}
@@ -446,29 +444,30 @@ export function HistoryView({
                       setEditGrip(sess.grip);
                       setEditTarget(sess.target_duration);
                       setRepEditMode(sessKey);   // also enable per-rep editing
-                      setConfirmKey(null);
                       setNoteKey(null);
                       closeRepEdit();
                     }} style={{
                       background: "none", border: "none", color: C.muted,
                       fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1,
                     }} title="Edit session & reps">✏️</button>
-                    <button onClick={() => { setConfirmKey(sessKey); setEditKey(null); setNoteKey(null); }} style={{
+                    {/* Trash → native confirm dialog. The previous inline
+                        two-step (tap trash, then tap red Delete) had both
+                        buttons in roughly the same thumb zone, so a quick
+                        double-tap on a phone could wipe a session before
+                        you noticed. Native confirm forces a deliberate
+                        OK/Cancel choice on a clearly separated dialog —
+                        much harder to dismiss by accident. */}
+                    <button onClick={() => {
+                      const n = sess.reps?.length ?? 0;
+                      const msg = `Delete this session?\n\n${n} rep${n === 1 ? "" : "s"} · ${sess.grip || ""} · ${sess.date}\n\nThis cannot be undone.`;
+                      // eslint-disable-next-line no-alert
+                      if (window.confirm(msg)) {
+                        onDeleteSession(sessKey);
+                      }
+                    }} style={{
                       background: "none", border: "none", color: C.muted,
                       fontSize: 14, cursor: "pointer", padding: "0 2px", lineHeight: 1,
                     }} title="Delete session">🗑</button>
-                  </>
-                )}
-                {isConfirming && (
-                  <>
-                    <button onClick={() => { onDeleteSession(sessKey); setConfirmKey(null); }} style={{
-                      background: C.red, border: "none", borderRadius: 6, color: "#fff",
-                      fontSize: 11, fontWeight: 700, padding: "3px 8px", cursor: "pointer",
-                    }}>Delete</button>
-                    <button onClick={() => setConfirmKey(null)} style={{
-                      background: C.border, border: "none", borderRadius: 6, color: C.muted,
-                      fontSize: 11, padding: "3px 8px", cursor: "pointer",
-                    }}>Cancel</button>
                   </>
                 )}
               </div>
