@@ -551,6 +551,13 @@ export function HistoryView({
               const renderChip = (r, j) => {
                 const isRepEditing = editingRep?.sessKey === sessKey && editingRep?.repIdx === j;
                 const passed = r.actual_time_s >= sess.target_duration;
+                // Per-rep hand letter — same color scheme as the F-D
+                // chart's L/R dots (L=blue, R=orange). Always shown,
+                // including on single-hand sessions, so the hand is
+                // unambiguous from the chip alone instead of having to
+                // read it off the session header.
+                const handLetter = r.hand === "L" ? "L" : r.hand === "R" ? "R" : null;
+                const handColor  = r.hand === "L" ? C.blue : r.hand === "R" ? C.orange : C.muted;
                 return (
                   <div key={j} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 0 }}>
                     <div
@@ -563,6 +570,11 @@ export function HistoryView({
                         paddingRight: repEditMode === sessKey ? 22 : 10,
                       }}
                     >
+                      {handLetter && (
+                        <span style={{ color: handColor, fontWeight: 700, marginRight: 6 }}>
+                          {handLetter}
+                        </span>
+                      )}
                       <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
                       {/* Rest interval — small muted suffix so it's
                           visible at a glance for verifying edits and
