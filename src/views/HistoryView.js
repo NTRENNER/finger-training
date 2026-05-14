@@ -477,14 +477,24 @@ export function HistoryView({
             {isEditing && (
               <div style={{ marginBottom: 10, padding: 10, background: C.bg, borderRadius: 8 }}>
                 {/* Row 1: hand + grip */}
+                {/* "B" is INTENTIONALLY not in the picker — it's a session-
+                    level derived classification (computed from the union of
+                    rep hands in the grouped memo), not a valid per-rep
+                    value. Tapping "Both" here used to write hand="B" to
+                    every rep, which then failed the renderChip filter in
+                    the Both-mode two-column layout (which only matches
+                    r.hand === "L" || r.hand === "R") and made the entire
+                    session disappear from view. The session-edit hand
+                    picker now mass-converts every rep to L or R; the rep
+                    editor handles per-rep L/R changes for mixed sessions. */}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
                   <div style={{ display: "flex", gap: 4 }}>
-                    {["L","R","B"].map(h => (
+                    {["L","R"].map(h => (
                       <button key={h} onClick={() => setEditHand(h)} style={{
                         padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
                         background: editHand === h ? C.purple : C.border,
                         color: editHand === h ? "#fff" : C.muted,
-                      }}>{h === "L" ? "Left" : h === "R" ? "Right" : "Both"}</button>
+                      }}>{h === "L" ? "Left" : "Right"}</button>
                     ))}
                   </div>
                   {/* Grip selector — pills matching the Hand and Zone
@@ -522,7 +532,15 @@ export function HistoryView({
                 {/* Row 3: save / cancel */}
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={() => {
-                    onUpdateSession(sessKey, { hand: editHand, grip: editGrip, target_duration: editTarget });
+                    // Defense in depth: never write hand="B" to per-rep
+                    // rows. The picker no longer exposes "B", but we
+                    // leave editHand fall-back-equal-to-sess.hand on
+                    // open, which can be "B" for Both-mode sessions. If
+                    // the user taps Done without touching the picker,
+                    // skip the hand field — leave per-rep hands intact.
+                    const updates = { grip: editGrip, target_duration: editTarget };
+                    if (editHand === "L" || editHand === "R") updates.hand = editHand;
+                    onUpdateSession(sessKey, updates);
                     setEditKey(null);
                     setRepEditMode(null);
                     closeRepEdit();
@@ -601,22 +619,38 @@ export function HistoryView({
                   </div>
                 );
               };
-              // Both-mode session → two-column layout (Left | Right).
-              // Single-hand session → existing flex-wrap row.
+              // Both-mode session → two-column layout (Left | Right) plus
+              // a fallback row for any reps stamped hand="B" by the
+              // legacy session-edit-Done bug. Without the fallback those
+              // reps silently filter out of both columns and the session
+              // looks empty. Use the rep editor to flip them to L/R.
               if (sess.hand === "B") {
+                const orphans = sortedReps.filter(r => r.hand !== "L" && r.hand !== "R");
                 return (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    {["L", "R"].map(handKey => (
-                      <div key={handKey}>
-                        <div style={{
-                          fontSize: 10, fontWeight: 700, letterSpacing: 1,
-                          color: handKey === "L" ? C.blue : C.orange, marginBottom: 6,
-                        }}>{handKey === "L" ? "LEFT" : "RIGHT"}</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
-                          {sortedReps.map((r, j) => r.hand === handKey ? renderChip(r, j) : null)}
+                  <div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      {["L", "R"].map(handKey => (
+                        <div key={handKey}>
+                          <div style={{
+                            fontSize: 10, fontWeight: 700, letterSpacing: 1,
+                            color: handKey === "L" ? C.blue : C.orange, marginBottom: 6,
+                          }}>{handKey === "L" ? "LEFT" : "RIGHT"}</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                            {sortedReps.map((r, j) => r.hand === handKey ? renderChip(r, j) : null)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {orphans.length > 0 && (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: C.muted, marginBottom: 6 }}>
+                          UNASSIGNED HAND ({orphans.length}) · open the rep editor to set L or R
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {sortedReps.map((r, j) => r.hand !== "L" && r.hand !== "R" ? renderChip(r, j) : null)}
                         </div>
                       </div>
-                    ))}
+                    )}
                   </div>
                 );
               }
