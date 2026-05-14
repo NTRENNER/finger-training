@@ -42,6 +42,7 @@ import {
   LS_QUEUE_KEY,
 } from "../lib/sync.js";
 import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
+import { computePersonalRecoveryTaus } from "../model/recoveryFit.js";
 import { buildFreshLoadMap, fitDoseK } from "../model/prescription.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
 
@@ -109,10 +110,21 @@ export function useRepHistory({ user }) {
     ].join(":")).join("|");
   }, [history]);
 
+  // Per-grip personal recovery taus (fast + medium; slow stays at
+  // population — see recoveryFit.js header for the identifiability
+  // rationale). Fit on within-set decay sequences with Bayesian
+  // shrinkage toward the population prior. Engine-only personalization:
+  // feeds buildFreshLoadMap, which feeds the F-D curve fit, which
+  // feeds prescription. No user-facing surface.
+  const personalRecoveryTaus = useMemo(
+    () => computePersonalRecoveryTaus(history),
+    [freshMapFp] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const freshMap = useMemo(() => {
     const k = fitDoseK(history) ?? PHYS_MODEL_DEFAULT.doseK;
-    return buildFreshLoadMap(history, { doseK: k });
-  }, [freshMapFp]); // eslint-disable-line react-hooks/exhaustive-deps
+    return buildFreshLoadMap(history, { doseK: k, personalTausByGrip: personalRecoveryTaus });
+  }, [freshMapFp, personalRecoveryTaus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const threeExpPriors = useMemo(
     () => buildThreeExpPriors(history),

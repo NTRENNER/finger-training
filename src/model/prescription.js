@@ -126,7 +126,16 @@ export function buildSMaxIndex(history) {
 }
 
 export function buildFreshLoadMap(history, opts = {}) {
-  const { fatParams = DEF_FAT, doseK = PHYS_MODEL_DEFAULT.doseK, sMaxIndex = null } = opts;
+  const {
+    fatParams = DEF_FAT,
+    doseK = PHYS_MODEL_DEFAULT.doseK,
+    sMaxIndex = null,
+    // Per-grip personal recovery taus from recoveryFit.computePersonalRecoveryTaus.
+    // Map<grip, { fast, medium, slow }> — when present, overrides fatParams
+    // per-rep based on the rep's grip. Falls back to fatParams when a grip
+    // isn't in the map (cold start, sparse data). Engine-only personalization.
+    personalTausByGrip = null,
+  } = opts;
   const out = new Map();
   if (!history || history.length === 0) return out;
 
@@ -140,6 +149,24 @@ export function buildFreshLoadMap(history, opts = {}) {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
   }
+
+  // Build a per-grip fatParams cache so we don't reconstruct the
+  // {A1,tau1,...} object inside the hot per-rep loop.
+  const gripFatParams = new Map();
+  const gripFatParamsFor = (grip) => {
+    if (!personalTausByGrip || !grip) return fatParams;
+    if (gripFatParams.has(grip)) return gripFatParams.get(grip);
+    const taus = personalTausByGrip.get?.(grip);
+    if (!taus) { gripFatParams.set(grip, fatParams); return fatParams; }
+    const w = PHYS_MODEL_DEFAULT.weights;
+    const personal = {
+      A1: w.fast,   tau1: taus.fast,
+      A2: w.medium, tau2: taus.medium,
+      A3: w.slow,   tau3: taus.slow,
+    };
+    gripFatParams.set(grip, personal);
+    return personal;
+  };
 
   for (const reps of groups.values()) {
     const sorted = [...reps].sort((a, b) => {
@@ -157,7 +184,7 @@ export function buildFreshLoadMap(history, opts = {}) {
       if (prevSetNum !== null && setNum !== prevSetNum) {
         F = 0;
       } else if (prevSetNum !== null) {
-        F = fatigueAfterRest(F, prevRest, fatParams);
+        F = fatigueAfterRest(F, prevRest, gripFatParamsFor(r.grip));
       }
 
       const af = availFrac(F);
