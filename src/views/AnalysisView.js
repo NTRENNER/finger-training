@@ -36,7 +36,10 @@ import {
   getZoneStaleness, getRollingSessionPace,
   ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS,
 } from "../model/lockout.js";
-import { PrescribedLoadCard } from "./cards/PrescribedLoadCard.js";
+// (PrescribedLoadCard removed May 2026 — Setup's SessionPlanCard
+// renders the same six-zone tile grid plus the active session pick,
+// so showing it again on Analysis was redundant. The component file
+// was deleted with this commit.)
 // (computePersonalResponse import removed — fed the now-gone Train block)
 import { computeLimiterZone } from "../model/limiter.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
@@ -1298,23 +1301,12 @@ export function AnalysisView({
               is judged by eye on the scatter above.) */}
         </Card>
 
-        {/* Prescribed Load — tabular sibling of the F-D chart. Six zones,
-            both hands, anchored to most recent rep 1. Highlights the zone
-            the continuous engine would currently pick. Renders when a
-            grip is selected — without one, the prescription is meaningless
-            (cross-grip pooled fits aren't a thing). */}
-        {selGrip && (
-          <PrescribedLoadCard
-            history={history}
-            grip={selGrip}
-            freshMap={freshMap}
-            threeExpPriors={threeExpPriors}
-            activities={activities}
-            personalGains={personalGains}
-            unit={unit}
-            GOAL_CONFIG={GOAL_CONFIG}
-          />
-        )}
+        {/* (PrescribedLoadCard removed from Analysis — was redundant
+            with the SessionPlanCard on Setup which renders the same
+            six-zone tile grid plus the recommendation. Analysis keeps
+            the F-D chart for the visual prescription story; the
+            tabular per-zone view lives on Setup where it informs the
+            actual session pick.) */}
 
         {/* Curve Coverage — per-zone data freshness + annual pace.
             Moved here from Setup so both per-zone reference cards
