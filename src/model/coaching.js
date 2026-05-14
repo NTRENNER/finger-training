@@ -34,7 +34,6 @@ import { getZoneStaleness, stalenessBoost } from "./lockout.js";
 import {
   computeSessionFatigue, mostRecentClimbDate, fatigueToModifier,
 } from "./climbingFatigue.js";
-import { applyPersonalGain } from "./perceivedFatigueLearning.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
@@ -164,20 +163,11 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     tMax = CONTINUOUS_T_MAX,
     tStep = CONTINUOUS_T_STEP,
     bandwidth = CONTINUOUS_BANDWIDTH,
-    // Perceived in-the-moment fatigue scalar (1-10). Distinct from
-    // activity-derived climbing fatigue: this is what the user sees
-    // a slider for ("how cooked do you feel today?") and lets them
-    // override the recommendation without having to log a synthetic
-    // climbing session. 0 = no effect (default). Composes
-    // multiplicatively with externalLoadModifier(activities) — both
-    // can suppress the same zone if the user has logged climbing AND
-    // says they feel additionally fried.
-    perceivedFatigue = 0,
-    // Per-zone learned gains from perceivedFatigueLearning. Adapts
-    // the population fatigue curve to the user's actual response.
-    // Null = use the population curve as-is.
-    personalGains = null,
   } = opts;
+  // perceivedFatigue + personalGains opts intentionally not consumed
+  // here — see the per-T loop below for the rationale. The recommendation
+  // is a pure-math curve question; how tired the user feels today is a
+  // separate display/runner overlay (SessionPlanCard tiles, useSessionRunner).
 
   if (!grip || !history || history.length === 0) return null;
 
@@ -264,21 +254,14 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // src/model/climbingFatigue.js, scaled by zone (max_strength
       // most sensitive, endurance least). 1.0 when no recent climb
       // session is found within 48h — see externalLoadModifier above.
-      const extActivities = externalLoadModifier(zoneKey, activities);
-      // Perceived in-the-moment fatigue (slider on PrescribedLoadCard).
-      // Same per-zone curve as activity-derived fatigue, evaluated at
-      // hoursAgo=0 so it lands at full strength. Composes multiplicatively.
-      // The per-zone learned gain (perceivedFatigueLearning) adapts the
-      // population curve to the user's actual response — gain < 1 means
-      // the user is less cooked than population at this RPE, gain > 1
-      // means more.
-      const extPerceived = perceivedFatigue > 0
-        ? applyPersonalGain(
-            fatigueToModifier(zoneKey, perceivedFatigue, 0),
-            personalGains?.[zoneKey],
-          )
-        : 1.0;
-      const ext = extActivities * extPerceived;
+      // NOTE: in-the-moment perceivedFatigue (the slider on Setup) is
+      // INTENTIONALLY NOT factored into the recommendation pick. The
+      // recommendation answers "what stimulus does the curve want next"
+      // — that's a pure-math question over staleness, recency, the F-D
+      // residual, and recent climbing. How tired the user feels today
+      // is a separate concern that scales the prescribed LOAD (in the
+      // runner / on the tiles), not which ZONE gets picked.
+      const ext = externalLoadModifier(zoneKey, activities);
       const score = adaptBoost * stale * recency * ext;
 
       if (!best || score > best.score) {

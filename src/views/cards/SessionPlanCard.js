@@ -241,7 +241,59 @@ export function SessionPlanCard({
         </div>
       </div>
 
-      {/* RPE slider — top of the card */}
+      {/* Recommended Session — pure-math curve pick. Always shows the
+          engine's unscaled output (TARGET / LOAD / why) regardless of
+          where the RPE slider is set or whether the user has overridden
+          via a tile click. The RPE slider scales the prescribed load
+          for the actual workout (in the runner) and on the per-zone
+          tiles below, but the recommendation itself stays anchored to
+          what the curve says. */}
+      {(() => {
+        const recCfg = GOAL_CONFIG[rec.zone] ?? { color: C.blue, label: rec.zone, emoji: "🎯" };
+        const recL = rec.loadByHand?.L;
+        const recR = rec.loadByHand?.R;
+        return (
+          <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 10, background: C.bg, border: `1px solid ${recCfg.color}66` }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: recCfg.color, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                ★ Recommended
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: recCfg.color }}>
+                {recCfg.emoji} {recCfg.label}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
+              <div style={{ flex: 1, textAlign: "center" }}>
+                <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: recCfg.color, lineHeight: 1 }}>
+                  {rec.T}<span style={{ fontSize: 13, color: C.muted, marginLeft: 2 }}>s</span>
+                </div>
+              </div>
+              <div style={{ flex: 1, textAlign: "center" }}>
+                <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Load</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+                  {fmtW(rec.loadKg, unit)}<span style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>{unit}</span>
+                </div>
+                {(recL != null || recR != null) && (
+                  <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
+                    {recL != null && <>L {fmtW(recL, unit)}</>}
+                    {recL != null && recR != null && " · "}
+                    {recR != null && <>R {fmtW(recR, unit)}</>}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+              <span style={{ color: recCfg.color, fontWeight: 700 }}>Why: </span>
+              {whyText}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* RPE slider — applies a per-zone scale-down to the prescribed
+          loads (display + runner) without changing which zone the engine
+          recommends. */}
       <div style={{
         display: "flex", alignItems: "center", gap: 12,
         padding: "10px 12px", marginBottom: 12,

@@ -323,10 +323,12 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.residualBoost).toBe(rec.adaptBoost);
   });
 
-  test("perceivedFatigue suppresses the score (slider on PrescribedLoadCard)", () => {
-    // No activities — only difference between runs is the perceivedFatigue
-    // opt. RPE 1 = no scaling; RPE 10 = worst-case scaling. Score must
-    // drop and ext must be < 1.0 with the slider engaged.
+  test("perceivedFatigue does NOT bias the recommendation (pure-math pick)", () => {
+    // The RPE slider is a display/runner overlay, not an engine input.
+    // What the curve wants next is a pure-math question over staleness,
+    // recency, the F-D residual, and recent climbing — how tired the
+    // user feels today shouldn't change which ZONE gets recommended,
+    // only how much LOAD they're prescribed. Pin that contract here.
     const history = [
       buildRep("L", 30, F_curve(30)),
       buildRep("L", 60, F_curve(60)),
@@ -339,9 +341,10 @@ describe("coachingRecommendationContinuous", () => {
       { threeExpPriors: priors, today, perceivedFatigue: 10 });
     expect(fresh).not.toBeNull();
     expect(cooked).not.toBeNull();
-    expect(fresh.ext).toBe(1.0);
-    expect(cooked.ext).toBeLessThan(1.0);
-    expect(cooked.score).toBeLessThan(fresh.score);
+    expect(cooked.zone).toBe(fresh.zone);
+    expect(cooked.T).toBe(fresh.T);
+    expect(cooked.score).toBe(fresh.score);
+    expect(cooked.ext).toBe(fresh.ext);
   });
 
   test("activities (recent climbing) suppress the recommendation score", () => {
