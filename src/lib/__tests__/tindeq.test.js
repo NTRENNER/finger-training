@@ -67,16 +67,35 @@ describe("computePlateauAvg", () => {
     expect(plateau).toBeLessThanOrEqual(25.5);
   });
 
-  test("falls back to peak when no sample clears 0.80×peak window", () => {
-    // Pathological: a single spike with no plateau. The threshold logic
-    // still finds a contiguous window, but the lead-in/tail trim collapses
-    // it to nothing → fallback to peak.
-    const samples = [
+  test("falls back to raw mean (then peak) when plateau window collapses", () => {
+    // Pathological case 1: single spike, no plateau-eligible neighbors,
+    // and no other positive samples — the fallback chain reaches peak.
+    const justAPeak = [
       { kg: 0,  ts: 0 },
-      { kg: 30, ts: 10 },   // single peak
+      { kg: 30, ts: 10 },
       { kg: 0,  ts: 20 },
     ];
-    expect(computePlateauAvg(samples)).toBe(30);
+    expect(computePlateauAvg(justAPeak)).toBe(30);
+
+    // Case 2: short rep with positive samples but the trim window
+    // collapses (lead-in 500ms + tail 200ms eat all 25 plateau samples
+    // crammed into 200ms). Now we should land on the raw mean of
+    // positive samples, NOT on the peak — peak overstates sustained
+    // force when the rep was barely a hold.
+    const shortMessy = [];
+    let t = 0;
+    // 200ms ramp 5 → 25 kg
+    for (let i = 0; i < 5; i++) { shortMessy.push({ kg: 5 + (20 * i / 4), ts: t }); t += 50; }
+    // 200ms "plateau" hovering 24-26 kg — too short to survive trim
+    for (let i = 0; i < 5; i++) { shortMessy.push({ kg: 24 + (i % 2) * 2, ts: t }); t += 40; }
+    // 200ms decay 25 → 5 kg
+    for (let i = 0; i < 5; i++) { shortMessy.push({ kg: 25 - (20 * i / 4), ts: t }); t += 50; }
+    const plateau = computePlateauAvg(shortMessy);
+    const peak = Math.max(...shortMessy.map(s => s.kg));
+    const rawMean = shortMessy.reduce((s, r) => s + r.kg, 0) / shortMessy.length;
+    // Should be the raw mean (about 17), not the peak (26).
+    expect(plateau).toBeCloseTo(rawMean, 1);
+    expect(plateau).toBeLessThan(peak - 5);
   });
 
   test("handles a sub-target attempt (no fixed reference required)", () => {

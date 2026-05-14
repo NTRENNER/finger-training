@@ -97,9 +97,22 @@ export function parseTindeqPacket(dataView, onSample) {
 //   4. Find last plateau-eligible sample → window end. Trim back
 //      PLATEAU_TAIL_MS to clip the brief release decay between
 //      "first dip" and the auto-detect end threshold.
-//   5. Average the surviving window. If the window collapsed (rep
-//      was too short, or never reached steady state), fall back to
-//      the rep peak so we don't persist a 0.
+//   5. Average the surviving window. Fallback chain (in order):
+//        a. Plateau-trimmed mean (the steady hold between lead-in
+//           and tail trim).
+//        b. Raw mean of all positive samples — when the trim window
+//           collapses (rep too short, or never settled into a real
+//           plateau), the unfiltered mean is still a reasonable
+//           central tendency for the rep. Includes ramp-up and
+//           release samples, but those are bounded by the rep's own
+//           decay shape so the average won't be wildly inflated.
+//        c. Peak as a last resort — only if there are no positive
+//           samples at all (effectively never; a plateau-eligible
+//           rep always has positive force at peak time).
+//      The intermediate (b) step matters for short / ugly reps —
+//      jumping straight from plateau to peak overstates sustained
+//      force on a 2-second hold where the trim window swallows the
+//      entire signal.
 //
 // All three conditions where the older 0.85×target gate fell short
 // are now handled uniformly:
@@ -111,6 +124,19 @@ export function parseTindeqPacket(dataView, onSample) {
 const PLATEAU_THRESHOLD_FRAC = 0.80; // fraction of rep-peak considered "on the plateau"
 const PLATEAU_LEAD_IN_MS     = 500;  // skip the first 0.5s after entering the plateau
 const PLATEAU_TAIL_MS        = 200;  // drop the last 0.2s before the final plateau-edge sample
+
+// Raw mean of all positive samples — fallback (b) in the chain above.
+// Used when the plateau trim collapses to an empty window (short or
+// ugly reps). Better than peak because peak is a single sample;
+// raw mean still reflects the rep's central tendency even when the
+// trim heuristics can't isolate a clean steady-hold region.
+function rawPositiveMean(samples) {
+  let sum = 0, count = 0;
+  for (const s of samples) {
+    if (s.kg > 0) { sum += s.kg; count += 1; }
+  }
+  return count > 0 ? sum / count : 0;
+}
 
 export function computePlateauAvg(samples) {
   if (!samples || samples.length === 0) return 0;
@@ -125,7 +151,8 @@ export function computePlateauAvg(samples) {
       lastIdx = i;
     }
   }
-  if (firstIdx === -1) return peak; // no sample ever cleared 0.80×peak — degenerate
+  // Fallback chain — see header comment for the rationale.
+  if (firstIdx === -1) return rawPositiveMean(samples) || peak;
   const startTs = samples[firstIdx].ts + PLATEAU_LEAD_IN_MS;
   const endTs   = samples[lastIdx].ts  - PLATEAU_TAIL_MS;
   let sum = 0, count = 0;
@@ -136,7 +163,12 @@ export function computePlateauAvg(samples) {
       count += 1;
     }
   }
-  return count > 0 ? sum / count : peak;
+  if (count > 0) return sum / count;
+  // Plateau window collapsed — fall back to raw positive mean before
+  // peak. For short/ugly reps this preserves the central tendency
+  // instead of overstating sustained force with a single max sample.
+  const raw = rawPositiveMean(samples);
+  return raw > 0 ? raw : peak;
 }
 
 // ─────────────────────────────────────────────────────────────
