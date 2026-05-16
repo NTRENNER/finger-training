@@ -246,16 +246,18 @@ export function AnalysisView({
   const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
 
   // ── Force Curves History overlay state ──
-  // Two-snapshot comparison card lower in the page. `historyGrip` is
-  // the grip whose curve evolution we're comparing (one at a time —
-  // 4 curves at once gets busy). `historyPastIdx` / `historyNowIdx`
-  // are indices into the per-grip sorted training-date list. We
-  // intentionally keep these UNCONSTRAINED to one another (pastIdx
-  // can exceed nowIdx) so the user can scrub freely; deltas just
-  // invert sign.
+  // Single-slider redesign (May 2026). `historyGrip` is the grip
+  // we're comparing (one at a time — multiple curves get unreadable).
+  // `historyNowIdx` is the index into the per-grip sorted training-
+  // date list for the "Now" curve. The "Past" curve is anchored
+  // to the SHARED baseline (gripBaselines[grip].amps) — same anchor
+  // the Capacity % vs baseline chart and the Curve Improvement card
+  // already use — so all three surfaces agree on what's-vs-what.
+  // (Previous two-slider design used the cumulative-fit-at-first-
+  // date as past, which fit on degenerate single-duration windows
+  // and disagreed wildly with Curve Improvement. Fixed here.)
   const [historyGrip, setHistoryGrip] = useState(null);
-  const [historyPastIdx, setHistoryPastIdx] = useState(null);
-  const [historyNowIdx,  setHistoryNowIdx]  = useState(null);
+  const [historyNowIdx, setHistoryNowIdx] = useState(null);
 
   // BW log loaded once on mount; the cloud-reconcile path in App.js
   // hydrates this from Supabase on sign-in, so by the time the view
@@ -1022,24 +1024,40 @@ export function AnalysisView({
   // the diagnostic ground.)
 
   // ── Force Curves History overlay data ──
-  // For each grip with ≥2 dates that have a usable cumulative fit,
-  // expose the sorted date list plus a getAmps(date) cache so render
-  // can pull two snapshots cheaply when the user moves the sliders.
+  // For each grip with a baseline AND ≥1 post-baseline fitable date,
+  // expose: the baseline amps (anchored, same as gripBaselines so
+  // this card agrees with Capacity % and Curve Improvement) plus
+  // a sorted post-baseline date list with cumulative amps per date.
+  //
   // Cumulative fits use the same `up-to-date` logic as the AUC
-  // history chart so the curves move forward in time monotonically
-  // as more reps come in — i.e. each snapshot is "what your fit
-  // looked like the day you finished that session," not a
-  // local-window fit.
+  // history chart so the "Now" curve moves forward in time
+  // monotonically as more reps come in.
+  //
+  // Why anchor on gripBaselines instead of "first fitable date":
+  // gripBaselines requires ≥5 reps spanning ≥3 distinct target
+  // durations, which avoids the degenerate single-duration window
+  // fit. Using "first fitable date" (≥3 cumulative reps) often gave
+  // a baseline fit on 3–4 long-hold-only reps, which extrapolates
+  // wildly at short T and made the deltas disagree with Curve
+  // Improvement by 10%+ in either direction.
   const historyOverlay = useMemo(() => {
-    const byGrip = {};   // grip -> { dates: [], ampsByDate: Map<date, [a,b,c]> }
+    const byGrip = {};   // grip -> { baselineAmps, baselineDate, dates: [], ampsByDate: Map<date, [a,b,c]> }
     for (const g of grips) {
+      const baseline = gripBaselines[g];
+      if (!baseline?.amps) continue;     // no baseline → can't anchor
       const gripReps = (history || []).filter(r =>
         r.grip === g &&
         r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0
       );
       if (gripReps.length < 3) continue;
+      // Restrict the Now slider to dates AT or AFTER the baseline
+      // date. Earlier dates produce a partial cumulative fit that
+      // would compare a single-duration window against the well-
+      // constrained baseline — apples-to-oranges deltas.
       const datesSet = new Set();
-      for (const r of gripReps) if (r.date) datesSet.add(r.date);
+      for (const r of gripReps) {
+        if (r.date && r.date >= baseline.date) datesSet.add(r.date);
+      }
       const allDates = [...datesSet].sort();
       const ampsByDate = new Map();
       const validDates = [];
@@ -1054,15 +1072,20 @@ export function AnalysisView({
         ampsByDate.set(date, amps);
         validDates.push(date);
       }
-      if (validDates.length >= 2) {
-        byGrip[g] = { dates: validDates, ampsByDate };
+      if (validDates.length >= 1) {
+        byGrip[g] = {
+          baselineAmps: baseline.amps,
+          baselineDate: baseline.date,
+          dates: validDates,
+          ampsByDate,
+        };
       }
     }
     return byGrip;
   // fitAmpsForPts closes over threeExpPriors; explicit dep here keeps
   // memo honest. eslint can't see through the closure.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, grips, threeExpPriors]);
+  }, [history, grips, gripBaselines, threeExpPriors]);
 
   // Resolve the active grip for the history overlay. Priority:
   //   1) explicit user pick (historyGrip)
@@ -1076,14 +1099,11 @@ export function AnalysisView({
     return eligible[0];
   }, [historyOverlay, historyGrip, selGrip]);
 
-  // Active grip's date list + clamped indices. Initialize indices to
-  // (0, last) the first time we see a grip; thereafter respect user
-  // scrub but clamp into range when the underlying list grows.
+  // Active grip's post-baseline date list + clamped Now index.
+  // Default to last (most-recent date) on first render; clamp into
+  // range when the list grows so user scrubs survive new sessions.
   const overlayDates = overlayActiveGrip ? historyOverlay[overlayActiveGrip].dates : [];
   const overlayLast = Math.max(0, overlayDates.length - 1);
-  const overlayPastI = historyPastIdx == null
-    ? 0
-    : Math.max(0, Math.min(overlayLast, historyPastIdx));
   const overlayNowI = historyNowIdx == null
     ? overlayLast
     : Math.max(0, Math.min(overlayLast, historyNowIdx));
@@ -1646,19 +1666,19 @@ export function AnalysisView({
           );
         })()}
 
-        {/* ── Force Curves History — past vs now overlay ──
-            Two three-exp curves at two date snapshots, slider-scrubbable
-            across each grip's own training-day history. Past curve is
-            dashed and muted; now curve is solid in the grip's color.
-            Per-T deltas underneath surface where on the curve the gains
-            (or losses) actually live. Per-grip toggle because four
-            curves on one chart gets unreadable. */}
-        {overlayActiveGrip && overlayDates.length >= 2 && (() => {
+        {/* ── Force Curves History — vs baseline overlay ──
+            Baseline three-exp curve (dashed, muted) overlaid against
+            the cumulative fit at any post-baseline date (solid, grip
+            color). Per-T deltas underneath show where on the curve
+            the gains/losses landed. Single slider for "Now";
+            "Baseline" is anchored to gripBaselines[grip] so this
+            card agrees with Capacity % and Curve Improvement. */}
+        {overlayActiveGrip && overlayDates.length >= 1 && (() => {
           const overlay = historyOverlay[overlayActiveGrip];
           const eligibleGrips = Object.keys(historyOverlay);
-          const pastDate = overlayDates[overlayPastI];
+          const pastDate = overlay.baselineDate;
           const nowDate  = overlayDates[overlayNowI];
-          const pastAmps = overlay.ampsByDate.get(pastDate);
+          const pastAmps = overlay.baselineAmps;
           const nowAmps  = overlay.ampsByDate.get(nowDate);
           const gripColor = GRIP_COLORS[overlayActiveGrip] || C.blue;
 
@@ -1706,7 +1726,7 @@ export function AnalysisView({
             <Card style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>
-                  Force Curves — past vs now
+                  Force Curves — vs baseline
                 </div>
                 {eligibleGrips.length > 1 && (
                   <div style={{ display: "flex", gap: 4 }}>
@@ -1716,10 +1736,9 @@ export function AnalysisView({
                         <button key={g}
                           onClick={() => {
                             setHistoryGrip(g);
-                            // Reset slider indices when switching grips
-                            // so we don't carry a stale past/now into a
-                            // grip with a different date list.
-                            setHistoryPastIdx(null);
+                            // Reset Now index when switching grips so we
+                            // don't carry a stale position into a grip
+                            // with a different date list.
                             setHistoryNowIdx(null);
                           }}
                           style={{
@@ -1740,28 +1759,18 @@ export function AnalysisView({
                 )}
               </div>
               <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-                Slide the two markers to compare your force-duration curve at any two training dates. The deltas below show where on the curve the change actually happened.
+                Dashed line is your baseline curve (anchored — same baseline the Capacity % and Curve Improvement cards use). Slide the marker to pick any training date since then and compare. Deltas below show where on the curve the change landed.
               </div>
 
-              {/* Slider controls — two range inputs that snap to the
-                  index list. Live labels above each slider show the
-                  date being selected so the user can scrub without
-                  losing context. */}
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-                  <span>Past: <b style={{ color: C.muted }}>{pastDate}</b></span>
-                  <span style={{ color: C.muted }}>{overlayDates.length} sessions</span>
-                </div>
-                <input type="range"
-                  min={0} max={overlayLast} step={1}
-                  value={overlayPastI}
-                  onChange={(e) => setHistoryPastIdx(parseInt(e.target.value, 10))}
-                  style={sliderStyle}
-                />
+              {/* Baseline label + Now slider. Past is anchored; only
+                  the Now date is user-scrubbable. */}
+              <div style={{ marginBottom: 10, fontSize: 11, color: C.muted }}>
+                Baseline: <b style={{ color: C.muted }}>{pastDate}</b>
               </div>
               <div style={{ marginBottom: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: gripColor, marginBottom: 4 }}>
                   <span>Now: <b>{nowDate}</b></span>
+                  <span style={{ color: C.muted }}>{overlayDates.length} sessions since baseline</span>
                 </div>
                 <input type="range"
                   min={0} max={overlayLast} step={1}
@@ -1790,7 +1799,7 @@ export function AnalysisView({
                   />
                   <Line dataKey="past" stroke={C.muted} strokeWidth={2}
                     strokeDasharray="6 4" dot={false} connectNulls
-                    name={`Past (${pastDate})`} isAnimationActive={false} />
+                    name={`Baseline (${pastDate})`} isAnimationActive={false} />
                   <Line dataKey="now" stroke={gripColor} strokeWidth={3}
                     dot={false} connectNulls
                     name={`Now (${nowDate})`} isAnimationActive={false} />
