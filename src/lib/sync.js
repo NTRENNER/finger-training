@@ -270,6 +270,52 @@ export async function fetchReps() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// REP TOMBSTONE HELPERS (rep_tombstones table)
+// ─────────────────────────────────────────────────────────────
+// Synced delete tracking. Previously LS_REP_DELETED_KEY was per-device,
+// which meant deleting a rep on Device A didn't tell Device B not to
+// re-push the same rep on its next reconcile. Result: deletes
+// resurrected. The rep_tombstones table is the synced authority.
+//
+// Schema migration `rep_tombstones` (May 2026) — see migration for
+// rationale. Just id + created_at, RLS gated on auth.uid().
+
+// Push N tombstones to cloud in a single batch. Returns true on
+// success. ON CONFLICT (id) DO NOTHING server-side, so re-pushing the
+// same id is harmless.
+export async function pushRepTombstones(ids) {
+  const valid = (ids || []).filter(Boolean);
+  if (valid.length === 0) return true;
+  try {
+    const { error } = await supabase
+      .from("rep_tombstones")
+      .upsert(valid.map(id => ({ id })), { onConflict: "id" });
+    if (error) { console.warn("Supabase tombstone push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase tombstone push exception:", e.message);
+    return false;
+  }
+}
+
+// Fetch every tombstoned id. Used by reconcile to union with the
+// local tombstone set before deciding which local reps to push.
+// Returns null on error so the caller can fall back to local-only
+// dedup rather than risk re-pushing.
+export async function fetchRepTombstoneIds() {
+  try {
+    const { data, error } = await supabase
+      .from("rep_tombstones")
+      .select("id");
+    if (error) { console.warn("Supabase tombstone fetch:", error.message); return null; }
+    return (data || []).map(r => r.id).filter(Boolean);
+  } catch (e) {
+    console.warn("Supabase tombstone fetch exception:", e.message);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // ACTIVITY HELPERS (activities table)
 // ─────────────────────────────────────────────────────────────
 // Climbing log entries (and any future activity types) live here.

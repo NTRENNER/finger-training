@@ -40,6 +40,7 @@ import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
+  fetchRepTombstoneIds,
   fetchWorkoutSessions, deleteWorkoutSession,
   pushBW, fetchBWLog,
   pushActivity, deleteActivityCloud, fetchActivities,
@@ -496,7 +497,20 @@ export default function App() {
         const compositeKey = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
         const remoteIds = new Set(remoteReps.map(r => r.id).filter(Boolean));
         const remoteCompositeKeys = new Set(remoteReps.map(compositeKey));
-        const tombstoned = new Set(loadLS(LS_REP_DELETED_KEY) || []);
+        // Pull synced tombstones so a delete on another device gets
+        // honored by this reconcile (without this, the resurrection
+        // bug — Device A deletes, Device B re-pushes — fires again).
+        const cloudTombstones = await fetchRepTombstoneIds();
+        const tombstoned = new Set([
+          ...(loadLS(LS_REP_DELETED_KEY) || []),
+          ...(cloudTombstones || []),
+        ]);
+        // Mirror cloud tombstones into local LS so subsequent
+        // CRUD operations on this device have the union without
+        // refetching.
+        if (cloudTombstones && cloudTombstones.length > 0) {
+          saveLS(LS_REP_DELETED_KEY, [...tombstoned]);
+        }
         const toSync = localReps.filter(r =>
           !(r.id && remoteIds.has(r.id)) &&
           !remoteCompositeKeys.has(compositeKey(r)) &&

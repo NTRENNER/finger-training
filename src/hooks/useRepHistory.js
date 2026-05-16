@@ -38,6 +38,7 @@ import {
 } from "../lib/storage.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
+  pushRepTombstones, fetchRepTombstoneIds,
   pushWorkoutSession, fetchWorkoutSessions,
   LS_QUEUE_KEY,
 } from "../lib/sync.js";
@@ -170,14 +171,22 @@ export function useRepHistory({ user }) {
       const remote = await fetchReps();
       if (cancelled) return;
 
+      // Fetch cloud tombstones BEFORE filtering. Synced delete history
+      // is what prevents another device's deleted reps from getting
+      // resurrected on this device's reconcile. We union it with the
+      // local tombstone set so a delete on EITHER device counts.
+      const cloudTombstones = await fetchRepTombstoneIds();
+      if (cancelled) return;
+
       if (remote) {
         // Reconcile local-only reps (offline sessions) up to the cloud.
-        // Tombstone filter: reps whose id is on LS_REP_DELETED_KEY were
-        // explicitly deleted on this device — never re-upload them, even
-        // if they're "missing" from cloud. Without this, deleting via
-        // direct DB access (or any path that bypasses deleteRep's local
-        // state update) leaves stale entries in localStorage that the
-        // reconcile would helpfully resurrect.
+        // Tombstone filter: reps whose id is in EITHER the local
+        // LS_REP_DELETED_KEY OR the synced cloud rep_tombstones table
+        // were explicitly deleted somewhere — never re-upload them,
+        // even if they're "missing" from cloud. Without the cloud
+        // tombstones the per-device LS would let a delete on Device A
+        // get undone on Device B's next reconcile (May 2026
+        // resurrection bug).
         const localReps = loadLS(LS_HISTORY_KEY) || [];
         // Dedup against cloud on BOTH id (when available) AND the
         // workout-slot composite key. The composite check is the
@@ -192,7 +201,19 @@ export function useRepHistory({ user }) {
         // (Same fix mirrored in App.js's pullFromCloud.)
         const remoteIds = new Set(remote.map(r => r.id).filter(Boolean));
         const remoteCompositeKeys = new Set(remote.map(compositeKey));
-        const tombstoned = new Set(loadLS(LS_REP_DELETED_KEY) || []);
+        // Union local + cloud tombstones. cloudTombstones is null when
+        // the fetch errored — in that case fall back to local-only
+        // (safer than silently re-pushing).
+        const tombstoned = new Set([
+          ...(loadLS(LS_REP_DELETED_KEY) || []),
+          ...(cloudTombstones || []),
+        ]);
+        // Mirror cloud tombstones into local LS so the per-device fast
+        // path stays in sync between reconciles (and so subsequent
+        // CRUD operations have the union without re-fetching).
+        if (cloudTombstones && cloudTombstones.length > 0) {
+          saveLS(LS_REP_DELETED_KEY, [...tombstoned]);
+        }
         const toSync = localReps.filter(r =>
           !(r.id && remoteIds.has(r.id)) &&
           !remoteCompositeKeys.has(compositeKey(r)) &&
@@ -377,11 +398,17 @@ export function useRepHistory({ user }) {
     const k = repMatchKey(rep);
     setHistory(h => h.filter(r => repMatchKey(r) !== k));
     // Tombstone the id so a future reconcile can't resurrect it from
-    // a stale local cache or from another device's mirror.
+    // a stale local cache or from another device's mirror. Both
+    // surfaces (local LS + cloud rep_tombstones table) get the id
+    // so deletes propagate across devices.
     if (rep.id) addRepTombstones([rep.id]);
     if (user && rep.id) {
       const { error } = await supabase.from("reps").delete().eq("id", rep.id);
       if (error) console.warn("Supabase deleteRep:", error.message);
+      // Fire-and-forget tombstone push — the local tombstone is
+      // durable, the cloud copy is what stops OTHER devices from
+      // re-pushing the rep.
+      pushRepTombstones([rep.id]).catch(() => {});
     }
   }, [user]);
 
@@ -395,20 +422,28 @@ export function useRepHistory({ user }) {
   }, [user]);
 
   const deleteSession = useCallback(async (sessionKey) => {
+    // Capture removed ids outside setHistory so we can also push
+    // them to the cloud tombstone table — setHistory's updater is
+    // called inside React's commit phase and we don't want to do
+    // network work from there.
+    const removedIds = (history || [])
+      .filter(r => (r.session_id || r.date) === sessionKey)
+      .map(r => r.id)
+      .filter(Boolean);
     setHistory(h => {
-      // Tombstone the ids of every rep we're about to drop. Ids that
-      // are missing (offline-only, never synced) can't be tombstoned
-      // — they have no cloud presence to resurrect.
-      const removed = h.filter(r => (r.session_id || r.date) === sessionKey);
-      addRepTombstones(removed.map(r => r.id));
+      // Local tombstone for the per-device fast path.
+      addRepTombstones(removedIds);
       return h.filter(r => (r.session_id || r.date) !== sessionKey);
     });
     if (user) {
       const { error } = await supabase.from("reps").delete()
         .or(`session_id.eq.${sessionKey},and(session_id.is.null,date.eq.${sessionKey})`);
       if (error) console.warn("Supabase delete:", error.message);
+      // Cloud tombstone push so other devices can't resurrect on
+      // their next reconcile. Fire-and-forget.
+      if (removedIds.length > 0) pushRepTombstones(removedIds).catch(() => {});
     }
-  }, [user]);
+  }, [user, history]);
 
   // Bulk replace — used by the manual cloud-pull path. Same
   // "only replace if you have rows" guard as the auth-driven
