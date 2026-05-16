@@ -52,6 +52,24 @@ import { buildThreeExpPriors } from "../model/threeExp.js";
 const repMatchKey = (r) =>
   r.id ? `id:${r.id}` : `${r.session_id || r.date}|${r.set_num}|${r.rep_num}`;
 
+// Composite identity used by reconcile to dedup local-no-id reps
+// against cloud rows. The reconcile dedup keys both sides off of
+// THIS function (not repMatchKey) so a local rep without an id and
+// a cloud rep WITH an id can still match when they describe the
+// same workout slot. Without this, the May 2026 duplicate-storm
+// bug fired every time auth re-initialized.
+const compositeKey = (r) =>
+  `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
+
+// Client-side UUID. Browsers have crypto.randomUUID; we fall back to
+// a timestamped random string for environments where it isn't
+// available (very old Safari, some test envs). Reps need a stable id
+// from creation time so cloud upsert(onConflict: "id") deduplicates.
+const genRepId = () => {
+  try { return crypto.randomUUID(); }
+  catch { return `rep_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`; }
+};
+
 // Append rep ids to the tombstone list (LS_REP_DELETED_KEY). The
 // reconcile pass reads this list to avoid re-uploading deleted reps
 // — see the comment on LS_REP_DELETED_KEY in src/lib/storage.js.
@@ -161,17 +179,23 @@ export function useRepHistory({ user }) {
         // state update) leaves stale entries in localStorage that the
         // reconcile would helpfully resurrect.
         const localReps = loadLS(LS_HISTORY_KEY) || [];
-        // Prefer id-based matching so a local rep whose fields were
-        // edited cloud-side doesn't get re-pushed as a duplicate row.
-        // Composite key only for reps that lack an id (never synced).
-        // (Same fix as App.js's pullFromCloud — see comment there.)
-        const keyFor = r => r.id ? `id:${r.id}` : `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
-        const remoteIds  = new Set(remote.map(r => r.id).filter(Boolean));
-        const remoteKeys = new Set(remote.map(keyFor));
+        // Dedup against cloud on BOTH id (when available) AND the
+        // workout-slot composite key. The composite check is the
+        // critical one: a local rep with no id (legacy offline
+        // session, manually-added row) would otherwise NEVER match
+        // any cloud row by id, because the previous keyFor preferred
+        // id when present — so every cloud row keyed as `id:UUID`,
+        // local-no-id reps keyed as composites, and the two sets
+        // never collided. That mismatch was the duplicate-storm
+        // bug: local reps got re-pushed as fresh rows on every
+        // auth-flip → sign-in reconcile → repeat.
+        // (Same fix mirrored in App.js's pullFromCloud.)
+        const remoteIds = new Set(remote.map(r => r.id).filter(Boolean));
+        const remoteCompositeKeys = new Set(remote.map(compositeKey));
         const tombstoned = new Set(loadLS(LS_REP_DELETED_KEY) || []);
         const toSync = localReps.filter(r =>
           !(r.id && remoteIds.has(r.id)) &&
-          !remoteKeys.has(keyFor(r)) &&
+          !remoteCompositeKeys.has(compositeKey(r)) &&
           !(r.id && tombstoned.has(r.id))
         );
 
@@ -314,13 +338,21 @@ export function useRepHistory({ user }) {
   // recoverable on next reconcile.
 
   const addReps = useCallback((newReps) => {
+    // Stamp a client-generated UUID on any rep that doesn't already
+    // carry one. The id is what makes pushRep idempotent (upsert
+    // on conflict). Without this, every retry / reconcile / tab-
+    // focus event re-pushed the rep as a fresh row — the May 2026
+    // duplicate-storm bug. We stamp BEFORE both state update and
+    // push so the cloud row and the local row share the same id
+    // from the first moment.
+    const stamped = (newReps || []).map(r => r.id ? r : { ...r, id: genRepId() });
     setHistory(h => {
       const existing = new Set(h.map(r => r.id));
-      const fresh    = newReps.filter(r => !existing.has(r.id));
+      const fresh    = stamped.filter(r => !existing.has(r.id));
       return [...fresh, ...h];
     });
     if (user) {
-      newReps.forEach(rep => {
+      stamped.forEach(rep => {
         pushRep(rep).then(ok => {
           if (!ok) { enqueueReps([rep]); refreshPending(); }
         });

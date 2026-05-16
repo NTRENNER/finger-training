@@ -158,8 +158,20 @@ export async function deleteWorkoutSession(id) {
 // Strip a local rep down to the columns Supabase expects. Defensive
 // `?? null` / `?? false` so a partial rep (e.g. mid-edit) doesn't
 // blow up the upsert with undefined values.
+//
+// IMPORTANT: `id` is included. Reps get a client-generated UUID at
+// creation time (see useRepHistory.addReps), so the same rep always
+// upserts onto the same cloud row regardless of how many times push
+// fires. Without this, `.insert` would let Postgres generate a fresh
+// UUID each time and every re-push (offline-queue flush, reconcile,
+// retry, tab-focus event) created a duplicate row. The May 2026
+// duplicate-storm bug across multiple workouts was exactly this.
 export function repPayload(rep) {
   return {
+    // Only included when present so legacy reps without ids still go
+    // through .insert-style path (Postgres assigns UUID). Modern reps
+    // always carry one, so upsert(onConflict: "id") deduplicates.
+    ...(rep.id ? { id: rep.id } : {}),
     date: rep.date, grip: rep.grip, hand: rep.hand,
     target_duration: rep.target_duration, weight_kg: rep.weight_kg,
     actual_time_s: rep.actual_time_s, avg_force_kg: rep.avg_force_kg,
@@ -176,9 +188,14 @@ export function repPayload(rep) {
 }
 
 // Returns true on success, false on failure (caller should queue the rep).
+// Uses upsert(onConflict: "id") so re-pushing the same rep is idempotent
+// (see repPayload comment above for the May 2026 duplicate-storm
+// context).
 export async function pushRep(rep) {
   try {
-    const { error } = await supabase.from("reps").insert([repPayload(rep)]);
+    const { error } = await supabase
+      .from("reps")
+      .upsert([repPayload(rep)], { onConflict: "id" });
     if (error) { console.warn("Supabase push:", error.message); return false; }
     return true;
   } catch (e) {
