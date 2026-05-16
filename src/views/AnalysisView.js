@@ -258,6 +258,12 @@ export function AnalysisView({
   // and disagreed wildly with Curve Improvement. Fixed here.)
   const [historyGrip, setHistoryGrip] = useState(null);
   const [historyNowIdx, setHistoryNowIdx] = useState(null);
+  // Pooled vs per-hand toggle. Pooled fits the whole grip's data into
+  // one curve (matches Capacity %); per-hand shows L and R separately
+  // so asymmetry shows up — useful when one hand is clearly leading
+  // the other. Default to pooled because (a) it matches the most-
+  // glanced page-level cards and (b) the curve is less busy.
+  const [historyViewMode, setHistoryViewMode] = useState("pooled");
 
   // BW log loaded once on mount; the cloud-reconcile path in App.js
   // hydrates this from Supabase on sign-in, so by the time the view
@@ -1072,20 +1078,52 @@ export function AnalysisView({
         ampsByDate.set(date, amps);
         validDates.push(date);
       }
-      if (validDates.length >= 1) {
-        byGrip[g] = {
-          baselineAmps: baseline.amps,
-          baselineDate: baseline.date,
-          dates: validDates,
-          ampsByDate,
+      if (validDates.length === 0) continue;
+
+      // Per-hand fits. For each hand with its own qualifying baseline
+      // (≥5 reps × ≥3 distinct durations from perHandGripBaselines),
+      // compute the cumulative hand-only fit at each pooled-valid
+      // date. Date entries where the hand doesn't have enough
+      // samples-up-to-that-date are skipped (handByDate just lacks
+      // that key); the render gracefully drops the line in that
+      // case.
+      const perHand = {};
+      for (const hand of ["L", "R"]) {
+        const handBaseline = perHandGripBaselines[`${g}|${hand}`];
+        if (!handBaseline?.amps) continue;
+        const handReps = gripReps.filter(r => r.hand === hand);
+        const handByDate = new Map();
+        for (const date of validDates) {
+          const upToHand = handReps.filter(r => (r.date || "") <= date);
+          // 2 is enough for a per-hand fit because the grip prior
+          // shrinks small-N runs (same gate as gripHandFits).
+          if (upToHand.length < 2) continue;
+          const amps = fitAmpsForPts(
+            upToHand.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+            g
+          );
+          if (amps) handByDate.set(date, amps);
+        }
+        perHand[hand] = {
+          baselineAmps: handBaseline.amps,
+          baselineDate: handBaseline.date,
+          ampsByDate: handByDate,
         };
       }
+
+      byGrip[g] = {
+        baselineAmps: baseline.amps,
+        baselineDate: baseline.date,
+        dates: validDates,
+        ampsByDate,
+        perHand,    // { L?: {...}, R?: {...} } — empty when no per-hand baselines
+      };
     }
     return byGrip;
   // fitAmpsForPts closes over threeExpPriors; explicit dep here keeps
   // memo honest. eslint can't see through the closure.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, grips, gripBaselines, threeExpPriors]);
+  }, [history, grips, gripBaselines, perHandGripBaselines, threeExpPriors]);
 
   // Resolve the active grip for the history overlay. Priority:
   //   1) explicit user pick (historyGrip)
@@ -1678,49 +1716,116 @@ export function AnalysisView({
           const eligibleGrips = Object.keys(historyOverlay);
           const pastDate = overlay.baselineDate;
           const nowDate  = overlayDates[overlayNowI];
-          const pastAmps = overlay.baselineAmps;
-          const nowAmps  = overlay.ampsByDate.get(nowDate);
           const gripColor = GRIP_COLORS[overlayActiveGrip] || C.blue;
 
-          // Curve sampling — 80 points from 5s to STRENGTH_MAX+60s
-          // covers the same range the F-D chart uses (≥5s rule + a
-          // little headroom past the long endurance reps).
+          // Per-hand only available when at least one hand has its
+          // own qualifying baseline AND has a fit at the selected
+          // "now" date. Falls back to pooled when toggle is "per-
+          // hand" but data doesn't support it (e.g. user just
+          // started training one of the hands).
+          const handsWithData = ["L", "R"].filter(h =>
+            overlay.perHand?.[h]?.baselineAmps &&
+            overlay.perHand[h].ampsByDate.size > 0
+          );
+          const perHandAvailable = handsWithData.length > 0;
+          const mode = (historyViewMode === "per-hand" && perHandAvailable)
+            ? "per-hand"
+            : "pooled";
+
+          // Series description: one entry per curve-pair to draw.
+          // Pooled mode: 1 entry (whole-grip pooled fit). Per-hand
+          // mode: 1 entry per hand that has both baseline + a fit
+          // at the selected Now date.
+          const series = mode === "pooled"
+            ? [{
+                key: "pooled",
+                label: "Pooled",
+                pastAmps: overlay.baselineAmps,
+                nowAmps:  overlay.ampsByDate.get(nowDate),
+                pastColor: C.muted,
+                nowColor:  gripColor,
+                pastName: `Baseline (${pastDate})`,
+                nowName:  `Now (${nowDate})`,
+              }]
+            : handsWithData
+                .filter(h => overlay.perHand[h].ampsByDate.get(nowDate))
+                .map(h => ({
+                  key: h,
+                  label: h === "L" ? "Left" : "Right",
+                  pastAmps: overlay.perHand[h].baselineAmps,
+                  nowAmps:  overlay.perHand[h].ampsByDate.get(nowDate),
+                  // Same hand color for both past + now; the dashed
+                  // pattern distinguishes baseline from current.
+                  pastColor: HAND_COLORS[h],
+                  nowColor:  HAND_COLORS[h],
+                  pastName: `${h} baseline`,
+                  nowName:  `${h} now`,
+                }));
+
+          // Curve sampling — 80 points from 5s to a reasonable max.
+          // Same range the F-D chart uses (≥5s + a little headroom
+          // past the long endurance reps).
           const tMin = 5;
           const tMaxLocal = Math.max(180, maxDur);
           const samples = [];
           for (let i = 0; i < 80; i++) {
             const t = tMin + ((tMaxLocal - tMin) / 79) * i;
-            const fp = pastAmps ? predForceThreeExp(pastAmps, t) : null;
-            const fn = nowAmps  ? predForceThreeExp(nowAmps,  t) : null;
-            samples.push({
-              x: t,
-              past: fp != null ? toDisp(Math.max(fp, 0), unit) : null,
-              now:  fn != null ? toDisp(Math.max(fn, 0), unit) : null,
-            });
+            const row = { x: t };
+            for (const s of series) {
+              const fp = s.pastAmps ? predForceThreeExp(s.pastAmps, t) : null;
+              const fn = s.nowAmps  ? predForceThreeExp(s.nowAmps,  t) : null;
+              row[`${s.key}_past`] = fp != null ? toDisp(Math.max(fp, 0), unit) : null;
+              row[`${s.key}_now`]  = fn != null ? toDisp(Math.max(fn, 0), unit) : null;
+            }
+            samples.push(row);
           }
-          const yMax = Math.max(...samples.flatMap(s => [s.past || 0, s.now || 0]));
+          const allYs = samples.flatMap(row => series.flatMap(s =>
+            [row[`${s.key}_past`] || 0, row[`${s.key}_now`] || 0]
+          ));
+          const yMax = Math.max(...allYs, 1);
           const yDomain = [0, Math.ceil(yMax * 1.1 / 10) * 10];
 
-          // Per-T delta table — fixed reference durations spanning
-          // power → endurance. Deltas are signed (negative = lost
-          // capacity at that timescale).
+          // Per-T delta strip — fixed reference durations spanning
+          // power → endurance. Deltas signed (negative = lost
+          // capacity). One row per series.
           const refTs = [10, 30, 60, 120, 180];
-          const deltas = refTs.map(t => {
-            const fp = pastAmps ? predForceThreeExp(pastAmps, t) : null;
-            const fn = nowAmps  ? predForceThreeExp(nowAmps,  t) : null;
-            const pct = (fp && fp > 0 && fn != null)
-              ? Math.round((fn / fp - 1) * 100)
-              : null;
-            return { t, fp, fn, pct };
-          });
+          const deltaRows = series.map(s => ({
+            key: s.key,
+            label: s.label,
+            color: s.nowColor,
+            cells: refTs.map(t => {
+              const fp = s.pastAmps ? predForceThreeExp(s.pastAmps, t) : null;
+              const fn = s.nowAmps  ? predForceThreeExp(s.nowAmps,  t) : null;
+              const pct = (fp && fp > 0 && fn != null)
+                ? Math.round((fn / fp - 1) * 100)
+                : null;
+              return { t, pct };
+            }),
+          }));
 
-          // Slider styling — pulled into vars to keep markup readable
-          // and consistent between the two sliders.
           const sliderStyle = {
             width: "100%",
             accentColor: gripColor,
             cursor: "pointer",
           };
+
+          // Toggle pill renderer — also used by the grip selector.
+          const Pill = ({ active, disabled, onClick, color, children }) => (
+            <button
+              onClick={() => !disabled && onClick()}
+              disabled={disabled}
+              style={{
+                background: active ? color : "transparent",
+                color: active ? "#fff" : disabled ? C.border : C.muted,
+                border: `1px solid ${active ? color : C.border}`,
+                borderRadius: 4,
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: disabled ? "not-allowed" : "pointer",
+                opacity: disabled ? 0.5 : 1,
+              }}>{children}</button>
+          );
 
           return (
             <Card style={{ marginBottom: 16 }}>
@@ -1728,42 +1833,44 @@ export function AnalysisView({
                 <div style={{ fontSize: 14, fontWeight: 700 }}>
                   Force Curves — vs baseline
                 </div>
-                {eligibleGrips.length > 1 && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  {/* View mode toggle: pooled / per-hand */}
                   <div style={{ display: "flex", gap: 4 }}>
-                    {eligibleGrips.map(g => {
-                      const active = g === overlayActiveGrip;
-                      return (
-                        <button key={g}
+                    <Pill active={mode === "pooled"} color={C.purple}
+                      onClick={() => setHistoryViewMode("pooled")}>
+                      Pooled
+                    </Pill>
+                    <Pill active={mode === "per-hand"} color={C.purple}
+                      disabled={!perHandAvailable}
+                      onClick={() => setHistoryViewMode("per-hand")}>
+                      Per-hand
+                    </Pill>
+                  </div>
+                  {/* Grip selector */}
+                  {eligibleGrips.length > 1 && (
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {eligibleGrips.map(g => (
+                        <Pill key={g}
+                          active={g === overlayActiveGrip}
+                          color={GRIP_COLORS[g] || C.blue}
                           onClick={() => {
                             setHistoryGrip(g);
-                            // Reset Now index when switching grips so we
-                            // don't carry a stale position into a grip
-                            // with a different date list.
                             setHistoryNowIdx(null);
-                          }}
-                          style={{
-                            background: active ? GRIP_COLORS[g] || C.blue : "transparent",
-                            color: active ? "#fff" : C.muted,
-                            border: `1px solid ${active ? GRIP_COLORS[g] || C.blue : C.border}`,
-                            borderRadius: 4,
-                            padding: "4px 10px",
-                            fontSize: 11,
-                            fontWeight: 600,
-                            cursor: "pointer",
                           }}>
                           {g}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                        </Pill>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-                Dashed line is your baseline curve (anchored — same baseline the Capacity % and Curve Improvement cards use). Slide the marker to pick any training date since then and compare. Deltas below show where on the curve the change landed.
+                {mode === "pooled"
+                  ? "Dashed line is your pooled baseline curve (anchored to gripBaselines — same baseline the Capacity % and Curve Improvement cards use). Slide to compare any post-baseline date."
+                  : "Per-hand mode: each hand's own baseline (dashed) vs current (solid). Reveals asymmetric progress — one hand growing while the other plateaus tells you where to spend your next session."}
               </div>
 
-              {/* Baseline label + Now slider. Past is anchored; only
-                  the Now date is user-scrubbable. */}
+              {/* Baseline label + Now slider. Past is anchored. */}
               <div style={{ marginBottom: 10, fontSize: 11, color: C.muted }}>
                 Baseline: <b style={{ color: C.muted }}>{pastDate}</b>
               </div>
@@ -1797,46 +1904,56 @@ export function AnalysisView({
                     formatter={(val, name) => [val == null ? "—" : `${fmtW(val, unit)} ${unit}`, name]}
                     labelFormatter={(t) => `${fmt1(t)}s`}
                   />
-                  <Line dataKey="past" stroke={C.muted} strokeWidth={2}
-                    strokeDasharray="6 4" dot={false} connectNulls
-                    name={`Baseline (${pastDate})`} isAnimationActive={false} />
-                  <Line dataKey="now" stroke={gripColor} strokeWidth={3}
-                    dot={false} connectNulls
-                    name={`Now (${nowDate})`} isAnimationActive={false} />
+                  {series.flatMap(s => [
+                    <Line key={`${s.key}_past`} dataKey={`${s.key}_past`}
+                      stroke={s.pastColor} strokeWidth={2}
+                      strokeDasharray="6 4" dot={false} connectNulls
+                      name={s.pastName} isAnimationActive={false} />,
+                    <Line key={`${s.key}_now`} dataKey={`${s.key}_now`}
+                      stroke={s.nowColor} strokeWidth={3}
+                      dot={false} connectNulls
+                      name={s.nowName} isAnimationActive={false} />,
+                  ])}
                 </LineChart>
               </ResponsiveContainer>
 
-              {/* Per-T delta strip — 5 reference durations from power
-                  to long endurance. Positive = capacity grew at that
-                  timescale; negative = curve dropped there. */}
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${refTs.length}, 1fr)`,
-                gap: 6, marginTop: 12,
-              }}>
-                {deltas.map(({ t, pct }) => {
-                  const color = pct == null ? C.muted
-                              : pct > 0     ? C.green
-                              : pct < 0     ? C.red
-                                            : C.muted;
-                  const sign  = pct == null ? ""
-                              : pct > 0     ? "+"
-                                            : "";
-                  return (
-                    <div key={t} style={{
-                      background: C.bg, border: `1px solid ${C.border}`,
-                      borderRadius: 6, padding: "6px 8px", textAlign: "center",
-                    }}>
-                      <div style={{ fontSize: 10, color: C.muted, marginBottom: 2 }}>
-                        {t}s
-                      </div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color }}>
-                        {pct == null ? "—" : `${sign}${pct}%`}
-                      </div>
+              {/* Per-T delta strip(s). One row in pooled mode; one
+                  per hand in per-hand mode with a small label. */}
+              {deltaRows.map(({ key, label, color, cells }) => (
+                <div key={key} style={{ marginTop: 12 }}>
+                  {deltaRows.length > 1 && (
+                    <div style={{ fontSize: 11, fontWeight: 600, color, marginBottom: 4 }}>
+                      {label}
                     </div>
-                  );
-                })}
-              </div>
+                  )}
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${refTs.length}, 1fr)`,
+                    gap: 6,
+                  }}>
+                    {cells.map(({ t, pct }) => {
+                      const tileColor = pct == null ? C.muted
+                                      : pct > 0     ? C.green
+                                      : pct < 0     ? C.red
+                                                    : C.muted;
+                      const sign = pct == null ? "" : pct > 0 ? "+" : "";
+                      return (
+                        <div key={t} style={{
+                          background: C.bg, border: `1px solid ${C.border}`,
+                          borderRadius: 6, padding: "6px 8px", textAlign: "center",
+                        }}>
+                          <div style={{ fontSize: 10, color: C.muted, marginBottom: 2 }}>
+                            {t}s
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: tileColor }}>
+                            {pct == null ? "—" : `${sign}${pct}%`}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </Card>
           );
         })()}
