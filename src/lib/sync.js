@@ -188,14 +188,24 @@ export function repPayload(rep) {
 }
 
 // Returns true on success, false on failure (caller should queue the rep).
-// Uses upsert(onConflict: "id") so re-pushing the same rep is idempotent
-// (see repPayload comment above for the May 2026 duplicate-storm
-// context).
+//
+// Uses upsert on the WORKOUT-SLOT unique constraint
+// (session_id, set_num, rep_num, hand) instead of the primary key.
+// Why: a legacy rep whose local `id` doesn't match its cloud id (the
+// pre-fix corruption pattern — pushRep used .insert() and Postgres
+// generated a server UUID the client never learned) will, on re-push,
+// collide on the workout-slot key instead of generating a fresh row.
+// Postgres treats it as an update of the existing slot, dedup happens
+// at the DB level, and the client-side reconcile races become safe.
+//
+// The DB-level UNIQUE constraint reps_workout_slot_unique was added
+// in migration `reps_unique_workout_slot` (May 2026) — see the
+// migration for the full rationale.
 export async function pushRep(rep) {
   try {
     const { error } = await supabase
       .from("reps")
-      .upsert([repPayload(rep)], { onConflict: "id" });
+      .upsert([repPayload(rep)], { onConflict: "session_id,set_num,rep_num,hand" });
     if (error) { console.warn("Supabase push:", error.message); return false; }
     return true;
   } catch (e) {
