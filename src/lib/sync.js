@@ -335,6 +335,60 @@ export async function fetchRepTombstoneIds() {
   }
 }
 
+// Slot-based tombstones (companion to rep_tombstones).
+// Id-based tombstones only catch re-pushes that re-use the same UUID.
+// Old clients running the broken pushRep(.insert) path get fresh
+// server-assigned UUIDs that aren't in the id table — so the
+// resurrection slips through. The slot table tracks the workout-slot
+// identity (session_id, set_num, rep_num, hand) which is stable
+// across re-pushes regardless of id, closing that last gap.
+
+// Build the workout-slot key string used as the local cache key
+// for slot tombstones in LS. Same shape as the reconcile dedup
+// compositeKey so the two sets unify cleanly.
+export const repSlotKey = (r) =>
+  `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
+
+// Push N slot tombstones to cloud. Each row is the workout-slot
+// tuple. ON CONFLICT DO NOTHING server-side (composite PK).
+export async function pushRepSlotTombstones(slots) {
+  const valid = (slots || []).filter(s =>
+    s && s.session_id && s.set_num != null && s.rep_num != null && s.hand
+  );
+  if (valid.length === 0) return true;
+  try {
+    const { error } = await supabase
+      .from("rep_slot_tombstones")
+      .upsert(valid.map(s => ({
+        session_id: s.session_id,
+        set_num:    s.set_num,
+        rep_num:    s.rep_num,
+        hand:       s.hand,
+      })), { onConflict: "session_id,set_num,rep_num,hand" });
+    if (error) { console.warn("Supabase slot tombstone push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase slot tombstone push exception:", e.message);
+    return false;
+  }
+}
+
+// Fetch every slot tombstone. Returns an array of slot-key strings
+// (built via repSlotKey) for cheap Set-membership checks. Null on
+// error so callers can fall back to id-only dedup.
+export async function fetchRepSlotTombstoneKeys() {
+  try {
+    const { data, error } = await supabase
+      .from("rep_slot_tombstones")
+      .select("session_id, set_num, rep_num, hand");
+    if (error) { console.warn("Supabase slot tombstone fetch:", error.message); return null; }
+    return (data || []).map(repSlotKey);
+  } catch (e) {
+    console.warn("Supabase slot tombstone fetch exception:", e.message);
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // ACTIVITY HELPERS (activities table)
 // ─────────────────────────────────────────────────────────────

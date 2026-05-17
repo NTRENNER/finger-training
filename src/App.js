@@ -40,7 +40,7 @@ import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
-  fetchRepTombstoneIds,
+  fetchRepTombstoneIds, fetchRepSlotTombstoneKeys,
   fetchWorkoutSessions, deleteWorkoutSession,
   pushBW, fetchBWLog,
   pushActivity, deleteActivityCloud, fetchActivities,
@@ -500,11 +500,17 @@ export default function App() {
         // Pull synced tombstones so a delete on another device gets
         // honored by this reconcile (without this, the resurrection
         // bug — Device A deletes, Device B re-pushes — fires again).
-        const cloudTombstones = await fetchRepTombstoneIds();
+        // Slot tombstones catch the fresh-UUID resurrection case the
+        // id tombstones miss.
+        const [cloudTombstones, cloudSlotKeys] = await Promise.all([
+          fetchRepTombstoneIds(),
+          fetchRepSlotTombstoneKeys(),
+        ]);
         const tombstoned = new Set([
           ...(loadLS(LS_REP_DELETED_KEY) || []),
           ...(cloudTombstones || []),
         ]);
+        const slotTombSet = new Set(cloudSlotKeys || []);
         // Mirror cloud tombstones into local LS so subsequent
         // CRUD operations on this device have the union without
         // refetching.
@@ -514,7 +520,8 @@ export default function App() {
         const toSync = localReps.filter(r =>
           !(r.id && remoteIds.has(r.id)) &&
           !remoteCompositeKeys.has(compositeKey(r)) &&
-          !(r.id && tombstoned.has(r.id))
+          !(r.id && tombstoned.has(r.id)) &&
+          !slotTombSet.has(compositeKey(r))
         );
         let pushedAny = false;
         for (const rep of toSync) {

@@ -39,6 +39,7 @@ import {
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
   pushRepTombstones, fetchRepTombstoneIds,
+  pushRepSlotTombstones, fetchRepSlotTombstoneKeys,
   pushWorkoutSession, fetchWorkoutSessions,
   LS_QUEUE_KEY,
 } from "../lib/sync.js";
@@ -173,21 +174,35 @@ export function useRepHistory({ user }) {
     if (!user) return;
     let cancelled = false;
     (async () => {
-      const cloudTombstones = await fetchRepTombstoneIds();
-      if (cancelled || !cloudTombstones || cloudTombstones.length === 0) return;
-      const tombSet = new Set(cloudTombstones);
-      // Merge cloud tombstones into local LS so subsequent operations
-      // see the union without re-fetching.
-      const localTombs = new Set(loadLS(LS_REP_DELETED_KEY) || []);
-      let lsChanged = false;
-      for (const id of tombSet) {
-        if (!localTombs.has(id)) { localTombs.add(id); lsChanged = true; }
+      // Fetch BOTH tombstone tables in parallel and filter local
+      // history on the union. Slot keys catch the case where the
+      // local rep has a fresh id (because old code stripped the
+      // server-assigned UUID and never round-tripped it) but its
+      // workout-slot matches a tombstoned slot.
+      const [cloudIds, cloudSlots] = await Promise.all([
+        fetchRepTombstoneIds(),
+        fetchRepSlotTombstoneKeys(),
+      ]);
+      if (cancelled) return;
+      const idSet   = new Set(cloudIds   || []);
+      const slotSet = new Set(cloudSlots || []);
+      if (idSet.size === 0 && slotSet.size === 0) return;
+      // Merge cloud id-tombstones into local LS so subsequent
+      // operations see the union without re-fetching.
+      if (idSet.size > 0) {
+        const localTombs = new Set(loadLS(LS_REP_DELETED_KEY) || []);
+        let lsChanged = false;
+        for (const id of idSet) {
+          if (!localTombs.has(id)) { localTombs.add(id); lsChanged = true; }
+        }
+        if (lsChanged) saveLS(LS_REP_DELETED_KEY, [...localTombs]);
       }
-      if (lsChanged) saveLS(LS_REP_DELETED_KEY, [...localTombs]);
-      // Drop tombstoned reps from history state. Save-on-change
-      // effect persists the filtered list to LS_HISTORY_KEY.
+      // Drop tombstoned reps from history state by id OR slot.
       setHistory(h => {
-        const filtered = h.filter(r => !(r.id && tombSet.has(r.id)));
+        const filtered = h.filter(r =>
+          !(r.id && idSet.has(r.id)) &&
+          !slotSet.has(compositeKey(r))
+        );
         return filtered.length === h.length ? h : filtered;
       });
     })();
@@ -213,8 +228,14 @@ export function useRepHistory({ user }) {
       // is what prevents another device's deleted reps from getting
       // resurrected on this device's reconcile. We union it with the
       // local tombstone set so a delete on EITHER device counts.
-      const cloudTombstones = await fetchRepTombstoneIds();
+      // Slot tombstones catch the resurrection-with-fresh-UUID case
+      // that id tombstones miss.
+      const [cloudTombstones, cloudSlotKeys] = await Promise.all([
+        fetchRepTombstoneIds(),
+        fetchRepSlotTombstoneKeys(),
+      ]);
       if (cancelled) return;
+      const slotTombSet = new Set(cloudSlotKeys || []);
 
       if (remote) {
         // Reconcile local-only reps (offline sessions) up to the cloud.
@@ -255,7 +276,8 @@ export function useRepHistory({ user }) {
         const toSync = localReps.filter(r =>
           !(r.id && remoteIds.has(r.id)) &&
           !remoteCompositeKeys.has(compositeKey(r)) &&
-          !(r.id && tombstoned.has(r.id))
+          !(r.id && tombstoned.has(r.id)) &&
+          !slotTombSet.has(compositeKey(r))
         );
 
         let pushedAny = false;
@@ -440,13 +462,25 @@ export function useRepHistory({ user }) {
     // surfaces (local LS + cloud rep_tombstones table) get the id
     // so deletes propagate across devices.
     if (rep.id) addRepTombstones([rep.id]);
-    if (user && rep.id) {
-      const { error } = await supabase.from("reps").delete().eq("id", rep.id);
-      if (error) console.warn("Supabase deleteRep:", error.message);
-      // Fire-and-forget tombstone push — the local tombstone is
-      // durable, the cloud copy is what stops OTHER devices from
-      // re-pushing the rep.
-      pushRepTombstones([rep.id]).catch(() => {});
+    if (user) {
+      if (rep.id) {
+        const { error } = await supabase.from("reps").delete().eq("id", rep.id);
+        if (error) console.warn("Supabase deleteRep:", error.message);
+        pushRepTombstones([rep.id]).catch(() => {});
+      }
+      // Slot tombstone catches the case where an old-bundle browser
+      // re-pushes the same workout-slot with a fresh UUID (the id
+      // tombstone wouldn't match because the UUID is new). Server-
+      // side trigger then refuses the insert at the DB level.
+      if (rep.session_id != null && rep.set_num != null
+          && rep.rep_num != null && rep.hand) {
+        pushRepSlotTombstones([{
+          session_id: rep.session_id,
+          set_num:    rep.set_num,
+          rep_num:    rep.rep_num,
+          hand:       rep.hand,
+        }]).catch(() => {});
+      }
     }
   }, [user]);
 
@@ -460,16 +494,23 @@ export function useRepHistory({ user }) {
   }, [user]);
 
   const deleteSession = useCallback(async (sessionKey) => {
-    // Capture removed ids outside setHistory so we can also push
-    // them to the cloud tombstone table — setHistory's updater is
-    // called inside React's commit phase and we don't want to do
-    // network work from there.
-    const removedIds = (history || [])
-      .filter(r => (r.session_id || r.date) === sessionKey)
-      .map(r => r.id)
-      .filter(Boolean);
+    // Capture removed reps outside setHistory so we can push their
+    // ids AND workout-slot tuples to the cloud tombstone tables.
+    // (setHistory's updater is called inside React's commit phase;
+    // we don't want to do network work from there.)
+    const removedReps = (history || [])
+      .filter(r => (r.session_id || r.date) === sessionKey);
+    const removedIds = removedReps.map(r => r.id).filter(Boolean);
+    const removedSlots = removedReps
+      .filter(r => r.session_id != null && r.set_num != null
+                   && r.rep_num != null && r.hand)
+      .map(r => ({
+        session_id: r.session_id,
+        set_num:    r.set_num,
+        rep_num:    r.rep_num,
+        hand:       r.hand,
+      }));
     setHistory(h => {
-      // Local tombstone for the per-device fast path.
       addRepTombstones(removedIds);
       return h.filter(r => (r.session_id || r.date) !== sessionKey);
     });
@@ -477,9 +518,10 @@ export function useRepHistory({ user }) {
       const { error } = await supabase.from("reps").delete()
         .or(`session_id.eq.${sessionKey},and(session_id.is.null,date.eq.${sessionKey})`);
       if (error) console.warn("Supabase delete:", error.message);
-      // Cloud tombstone push so other devices can't resurrect on
-      // their next reconcile. Fire-and-forget.
-      if (removedIds.length > 0) pushRepTombstones(removedIds).catch(() => {});
+      // Both tombstone tables: id table catches same-UUID re-pushes,
+      // slot table catches fresh-UUID resurrection. Fire-and-forget.
+      if (removedIds.length > 0)   pushRepTombstones(removedIds).catch(() => {});
+      if (removedSlots.length > 0) pushRepSlotTombstones(removedSlots).catch(() => {});
     }
   }, [user, history]);
 
