@@ -85,7 +85,7 @@
 //   CREATE INDEX activities_type_idx ON activities (type);
 
 import { supabase } from "./supabase.js";
-import { loadLS, saveLS } from "./storage.js";
+import { loadLS, saveLS, LS_REP_DELETED_KEY } from "./storage.js";
 import { today } from "../util.js";
 
 // localStorage key for the offline retry queue. Reps that failed an
@@ -226,12 +226,31 @@ export function enqueueReps(reps) {
 // Attempt to push every queued rep; remove each one on success.
 // Returns the count successfully flushed so the caller can show a
 // "synced N pending reps" toast.
+//
+// Honors the synced tombstone set: a queued rep whose id has been
+// tombstoned (deleted on this or another device since being queued)
+// gets dropped from the queue silently. Without this check the queue
+// would re-resurrect deleted reps the same way the May 2026 reconcile
+// bug did — both push paths need the same gate.
 export async function flushQueue() {
   const q = loadLS(LS_QUEUE_KEY) || [];
   if (q.length === 0) return 0;
+  const cloudTombstones = await fetchRepTombstoneIds();
+  const tombstoned = new Set([
+    ...(loadLS(LS_REP_DELETED_KEY) || []),
+    ...(cloudTombstones || []),
+  ]);
   let remaining = [...q];
   let flushed = 0;
+  let dropped = 0;
   for (const rep of q) {
+    // Skip tombstoned reps; treat them as "successfully processed"
+    // for queue-cleanup purposes (drop from queue, don't retry).
+    if (rep.id && tombstoned.has(rep.id)) {
+      remaining = remaining.filter(r => r.id !== rep.id);
+      dropped++;
+      continue;
+    }
     const ok = await pushRep(rep);
     if (ok) {
       remaining = remaining.filter(r => r.id !== rep.id);
@@ -239,6 +258,7 @@ export async function flushQueue() {
     }
   }
   saveLS(LS_QUEUE_KEY, remaining);
+  if (dropped > 0) console.info(`flushQueue: dropped ${dropped} tombstoned rep(s) from queue`);
   return flushed;
 }
 
