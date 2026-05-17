@@ -1137,6 +1137,60 @@ export function AnalysisView({
     return eligible[0];
   }, [historyOverlay, historyGrip, selGrip]);
 
+  // ── Open-hand vs Crimp dominance — personal-baseline calibration ──
+  // Per-hand Crusher:Micro ratio time series, plus the user's own
+  // median ratio (the "personal baseline"). The Strength Balance
+  // card classifies the CURRENT ratio by its deviation from the
+  // user's median, NOT against literature-anchored absolute bands.
+  // Anchoring on the user's own ratio sidesteps the edge-geometry
+  // problem: a very small Tindeq Micro implement pushes everyone's
+  // natural ratio higher than typical-edge literature suggests, so
+  // a 3.0× baseline is "your normal" for that gear — and the
+  // actionable signal is whether you're drifting down (FDS catching
+  // up) or up (gap widening) from YOUR normal, not from some
+  // external benchmark.
+  //
+  // Requires per-hand cumulative fits for BOTH Crusher and Micro on
+  // each date (intersection of the two grips' historyOverlay dates).
+  // Returns null when fewer than 1 shared date exists; the card
+  // gracefully falls back to a no-badge raw-ratio display below.
+  const balanceHistory = useMemo(() => {
+    const cOverlay = historyOverlay.Crusher;
+    const mOverlay = historyOverlay.Micro;
+    if (!cOverlay || !mOverlay) return null;
+    const BAL_T = 10;
+    const out = {};
+    for (const hand of ["L", "R"]) {
+      const cHand = cOverlay.perHand?.[hand];
+      const mHand = mOverlay.perHand?.[hand];
+      if (!cHand || !mHand) continue;
+      const sharedDates = [...cHand.ampsByDate.keys()]
+        .filter(d => mHand.ampsByDate.has(d))
+        .sort();
+      if (sharedDates.length === 0) continue;
+      const ratios = sharedDates.map(date => {
+        const cF = predForceThreeExp(cHand.ampsByDate.get(date), BAL_T);
+        const mF = predForceThreeExp(mHand.ampsByDate.get(date), BAL_T);
+        return cF > 0 && mF > 0 ? cF / mF : null;
+      }).filter(r => r != null);
+      if (ratios.length === 0) continue;
+      // Personal baseline = median (robust to outlier sessions —
+      // a bad-form Micro day shouldn't move your "normal" much).
+      const sorted = [...ratios].sort((a, b) => a - b);
+      const mid = sorted.length / 2;
+      const median = sorted.length % 2 === 0
+        ? (sorted[mid - 1] + sorted[mid]) / 2
+        : sorted[Math.floor(mid)];
+      out[hand] = {
+        current: ratios[ratios.length - 1],
+        median,
+        count: ratios.length,
+        delta: median > 0 ? (ratios[ratios.length - 1] - median) / median : null,
+      };
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  }, [historyOverlay]);
+
   // Active grip's post-baseline date list + clamped Now index.
   // Default to last (most-recent date) on first render; clamp into
   // range when the list grows so user scrubs survive new sessions.
@@ -1512,28 +1566,27 @@ export function AnalysisView({
             tabular per-zone view lives on Setup where it informs the
             actual session pick.) */}
 
-        {/* ── Open-hand vs Crimp dominance (FDP / FDS) ──
-            Single-number diagnostic for which finger flexor system
-            the climber is leaning on. The Tindeq Crusher implement
-            (open hand on a large rounded edge) is biomechanically
-            FDP-dominant; the Micro (small edge that has to be half-
-            or closed-crimped) is FDS-dominant — well-supported by
-            Schweizer / Vigouroux climbing biomechanics. So F_Crusher
-            / F_Micro at a short-T reference is a usable proxy for
-            FDP / FDS strength balance.
-            Thresholds anchored to fingerboard-literature norms:
-              <1.0   → FDS-leaning   (crimp-dominant — rare)
-              1.0–1.6 → balanced     (elite-fingerboarder band)
-              1.6–2.5 → FDP-leaning  (open-hand favored)
-              >2.5   → FDP-dominant  (small-edge strength is the
-                                       climbing limiter)
-            Per-hand when both hands have fits; pooled otherwise.
-            Reference T=10s sits in the Max Strength / early-Power
-            zone where both grips peak. */}
+        {/* ── Open-hand vs Crimp dominance — personal-baseline calibration ──
+            Same FDP / FDS framing (Crusher = open-hand, biomechanically
+            FDP-loaded; Micro = small edge, FDS-loaded — Schweizer /
+            Vigouroux), but the badge now classifies the CURRENT ratio
+            by its deviation from the user's own median ratio, NOT
+            against absolute literature bands.
+            Why: the Tindeq Micro implement is much smaller than the
+            ~8-10mm edge those bands implicitly assume — for very
+            small Micro probes the natural baseline ratio runs higher
+            than the literature suggests, just from contact-area
+            geometry. Anchoring on the user's own median makes the
+            metric robust across edge sizes and turns it into a
+            trend signal ("are you drifting toward small-edge
+            strength?") instead of a fixed-band judgment ("are you
+            below the elite cutoff?").
+            Falls back to no badge when the user has <2 shared
+            Crusher/Micro fit dates for that hand — not enough
+            history to compute a meaningful personal baseline. */}
         {gripHandFits.Crusher && gripHandFits.Micro && (() => {
           const BAL_T = 10;
           const rows = [];
-          // Per-hand rows when both grips have that hand's fit.
           for (const hand of ["L", "R"]) {
             const cAmps = gripHandFits.Crusher[hand];
             const mAmps = gripHandFits.Micro[hand];
@@ -1541,9 +1594,13 @@ export function AnalysisView({
             const cF = predForceThreeExp(cAmps, BAL_T);
             const mF = predForceThreeExp(mAmps, BAL_T);
             if (!(cF > 0) || !(mF > 0)) continue;
-            rows.push({ label: hand === "L" ? "Left hand" : "Right hand", ratio: cF / mF, cF, mF });
+            rows.push({
+              key: hand,
+              label: hand === "L" ? "Left hand" : "Right hand",
+              ratio: cF / mF, cF, mF,
+              history: balanceHistory?.[hand] || null,
+            });
           }
-          // Pooled fallback if neither per-hand row materialized.
           if (rows.length === 0) {
             const cAmps = gripHandFits.Crusher.pooled;
             const mAmps = gripHandFits.Micro.pooled;
@@ -1551,22 +1608,25 @@ export function AnalysisView({
               const cF = predForceThreeExp(cAmps, BAL_T);
               const mF = predForceThreeExp(mAmps, BAL_T);
               if (cF > 0 && mF > 0) {
-                rows.push({ label: "Pooled", ratio: cF / mF, cF, mF });
+                rows.push({ key: "pooled", label: "Pooled", ratio: cF / mF, cF, mF, history: null });
               }
             }
           }
           if (rows.length === 0) return null;
 
-          // Literature-anchored bands. Elite fingerboarders cluster in
-          // the 1.0–1.6 range; developing climbers who came up on jugs
-          // and slopers often sit 2–3+ × (FDP carries them, small
-          // edges expose the FDS gap). Below 1.0 is rare and usually
-          // means heavy crimp-specific training history.
-          const classify = (r) => {
-            if (r > 2.50) return { color: C.orange, text: "FDP-dominant"  };
-            if (r > 1.60) return { color: C.yellow, text: "FDP-leaning"   };
-            if (r < 1.00) return { color: C.blue,   text: "FDS-leaning"   };
-            return            { color: C.green,  text: "Balanced"      };
+          // Personal-baseline classification: flag by deviation from
+          // YOUR median. Negative delta = ratio dropping = small-edge
+          // strength catching up (good). Positive delta = gap widening.
+          // Need ≥2 shared dates before this becomes meaningful (a
+          // single data point makes "median" trivially equal to current).
+          const classify = (history) => {
+            if (!history || history.count < 2 || history.delta == null) return null;
+            const pct = history.delta * 100;
+            if (pct <= -10) return { color: C.green,  text: "Small-edge gaining" };
+            if (pct <=  -3) return { color: C.green,  text: "Trending good"      };
+            if (pct <    3) return { color: C.muted,  text: "At your baseline"   };
+            if (pct <   10) return { color: C.yellow, text: "Drifting up"        };
+            return            { color: C.orange, text: "Gap widening"      };
           };
 
           return (
@@ -1575,12 +1635,14 @@ export function AnalysisView({
                 Open-hand vs Crimp dominance
               </div>
               <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-                Force ratio of <span style={{ color: GRIP_COLORS.Crusher }}>Crusher</span> (open hand — FDP-dominant) to <span style={{ color: GRIP_COLORS.Micro }}>Micro</span> (small edge — FDS-dominant) at {BAL_T}s. Elite fingerboarders sit ~1.0–1.6×. Above 2.5× means FDP is carrying you — small-edge strength is the climbing limiter.
+                Ratio of <span style={{ color: GRIP_COLORS.Crusher }}>Crusher</span> (open hand) to <span style={{ color: GRIP_COLORS.Micro }}>Micro</span> (crimp) force at {BAL_T}s. Edge geometry sets the natural baseline — a smaller Micro probe runs higher absolute ratios. We compare your current ratio against <b>your own median</b> over time; a dropping number means small-edge strength is catching up.
               </div>
-              {rows.map(({ label, ratio, cF, mF }) => {
-                const flag = classify(ratio);
+              {rows.map(({ key, label, ratio, cF, mF, history }) => {
+                const flag = classify(history);
+                const deltaPct = history?.delta != null ? Math.round(history.delta * 100) : null;
+                const deltaSign = deltaPct == null ? "" : deltaPct > 0 ? "+" : "";
                 return (
-                  <div key={label} style={{
+                  <div key={key} style={{
                     display: "flex", alignItems: "center", justifyContent: "space-between",
                     padding: "8px 0", borderBottom: `1px solid ${C.border}`,
                   }}>
@@ -1588,19 +1650,31 @@ export function AnalysisView({
                       <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{label}</div>
                       <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
                         Crusher {fmtW(cF, unit)} {unit} · Micro {fmtW(mF, unit)} {unit}
+                        {history && history.count >= 1 && (
+                          <> · baseline <b style={{ color: C.text }}>{fmt1(history.median)}×</b> ({history.count} session{history.count === 1 ? "" : "s"})</>
+                        )}
                       </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: flag.color }}>
-                        {fmt1(ratio)}×
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: flag?.color || C.text }}>
+                          {fmt1(ratio)}×
+                        </div>
+                        {deltaPct != null && (
+                          <div style={{ fontSize: 10, color: flag?.color || C.muted, marginTop: 2 }}>
+                            {deltaSign}{deltaPct}% vs baseline
+                          </div>
+                        )}
                       </div>
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, color: flag.color,
-                        background: `${flag.color}1a`,
-                        padding: "3px 8px", borderRadius: 4,
-                        textTransform: "uppercase", letterSpacing: 0.5,
-                        whiteSpace: "nowrap",
-                      }}>{flag.text}</span>
+                      {flag && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, color: flag.color,
+                          background: `${flag.color}1a`,
+                          padding: "3px 8px", borderRadius: 4,
+                          textTransform: "uppercase", letterSpacing: 0.5,
+                          whiteSpace: "nowrap",
+                        }}>{flag.text}</span>
+                      )}
                     </div>
                   </div>
                 );
