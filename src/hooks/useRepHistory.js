@@ -157,6 +157,44 @@ export function useRepHistory({ user }) {
     setPendingCount((loadLS(LS_QUEUE_KEY) || []).length);
   }, []);
 
+  // Fast tombstone scrub. Fires alongside the full reconcile (below)
+  // but only does the cheap part: fetch synced tombstones, strip any
+  // local-history reps whose ids match. This lets the chart update
+  // within ~1 round trip instead of waiting for the full
+  // flushQueue + fetchReps + push-missing + refetch chain.
+  //
+  // Catches the May 2026 scenario where a server-side delete (or a
+  // delete on another device) left this device's LS holding ids
+  // that no longer exist in cloud — without this, those reps stay
+  // on the chart until the next manual pull or full reconcile
+  // setHistory(finalReps) ran. With this, opening the app on a
+  // device with the new bundle is sufficient to scrub local.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const cloudTombstones = await fetchRepTombstoneIds();
+      if (cancelled || !cloudTombstones || cloudTombstones.length === 0) return;
+      const tombSet = new Set(cloudTombstones);
+      // Merge cloud tombstones into local LS so subsequent operations
+      // see the union without re-fetching.
+      const localTombs = new Set(loadLS(LS_REP_DELETED_KEY) || []);
+      let lsChanged = false;
+      for (const id of tombSet) {
+        if (!localTombs.has(id)) { localTombs.add(id); lsChanged = true; }
+      }
+      if (lsChanged) saveLS(LS_REP_DELETED_KEY, [...localTombs]);
+      // Drop tombstoned reps from history state. Save-on-change
+      // effect persists the filtered list to LS_HISTORY_KEY.
+      setHistory(h => {
+        const filtered = h.filter(r => !(r.id && tombSet.has(r.id)));
+        return filtered.length === h.length ? h : filtered;
+      });
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   // Cloud reconcile: runs when `user` flips from null → signed-in
   // (and on every subsequent user change). The cancelled flag
   // guards the multi-step async chain so tab-switch unmounts
