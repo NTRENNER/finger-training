@@ -439,6 +439,25 @@ export async function fetchRepSlotTombstoneKeys() {
   }
 }
 
+// Session-level tombstones: nuke an entire bad session_id regardless
+// of id, slot, or hand. Catches the case where an old-bundle client
+// keeps re-pushing legacy data with fresh server-assigned UUIDs into
+// slots we didn't pre-tombstone. The server trigger enforces at the
+// DB level; this fetch lets the client filter local data + the
+// reconcile push list to match.
+export async function fetchSessionTombstoneIds() {
+  try {
+    const { data, error } = await supabase
+      .from("session_tombstones")
+      .select("session_id");
+    if (error) { console.warn("Supabase session tombstone fetch:", error.message); return null; }
+    return (data || []).map(r => r.session_id).filter(Boolean);
+  } catch (e) {
+    console.warn("Supabase session tombstone fetch exception:", e.message);
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // ACTIVITY HELPERS (activities table)
 // ─────────────────────────────────────────────────────────────

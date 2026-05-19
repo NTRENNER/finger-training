@@ -40,7 +40,7 @@ import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
-  fetchRepTombstoneIds, fetchRepSlotTombstoneKeys,
+  fetchRepTombstoneIds, fetchRepSlotTombstoneKeys, fetchSessionTombstoneIds,
   fetchWorkoutSessions, deleteWorkoutSession,
   pushBW, fetchBWLog,
   pushActivity, deleteActivityCloud, fetchActivities,
@@ -543,20 +543,21 @@ export default function App() {
         const compositeKey = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
         const remoteIds = new Set(remoteReps.map(r => r.id).filter(Boolean));
         const remoteCompositeKeys = new Set(remoteReps.map(compositeKey));
-        // Pull synced tombstones so a delete on another device gets
-        // honored by this reconcile (without this, the resurrection
-        // bug — Device A deletes, Device B re-pushes — fires again).
-        // Slot tombstones catch the fresh-UUID resurrection case the
-        // id tombstones miss.
-        const [cloudTombstones, cloudSlotKeys] = await Promise.all([
+        // Pull all three tombstone tables in parallel. id catches
+        // same-UUID re-pushes, slot catches fresh-UUID re-pushes from
+        // old clients, session catches re-pushes into fully-tombstoned
+        // legacy sessions regardless of slot.
+        const [cloudTombstones, cloudSlotKeys, cloudSessionIds] = await Promise.all([
           fetchRepTombstoneIds(),
           fetchRepSlotTombstoneKeys(),
+          fetchSessionTombstoneIds(),
         ]);
         const tombstoned = new Set([
           ...(loadLS(LS_REP_DELETED_KEY) || []),
           ...(cloudTombstones || []),
         ]);
-        const slotTombSet = new Set(cloudSlotKeys || []);
+        const slotTombSet    = new Set(cloudSlotKeys    || []);
+        const sessionTombSet = new Set(cloudSessionIds  || []);
         // Mirror cloud tombstones into local LS so subsequent
         // CRUD operations on this device have the union without
         // refetching.
@@ -567,7 +568,8 @@ export default function App() {
           !(r.id && remoteIds.has(r.id)) &&
           !remoteCompositeKeys.has(compositeKey(r)) &&
           !(r.id && tombstoned.has(r.id)) &&
-          !slotTombSet.has(compositeKey(r))
+          !slotTombSet.has(compositeKey(r)) &&
+          !(r.session_id && sessionTombSet.has(r.session_id))
         );
         let pushedAny = false;
         for (const rep of toSync) {

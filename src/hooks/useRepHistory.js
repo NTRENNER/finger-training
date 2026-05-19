@@ -40,6 +40,7 @@ import {
   pushRep, fetchReps, enqueueReps, flushQueue,
   pushRepTombstones, fetchRepTombstoneIds,
   pushRepSlotTombstones, fetchRepSlotTombstoneKeys,
+  fetchSessionTombstoneIds,
   pushWorkoutSession, fetchWorkoutSessions,
   LS_QUEUE_KEY,
 } from "../lib/sync.js";
@@ -174,19 +175,21 @@ export function useRepHistory({ user }) {
     if (!user) return;
     let cancelled = false;
     (async () => {
-      // Fetch BOTH tombstone tables in parallel and filter local
-      // history on the union. Slot keys catch the case where the
-      // local rep has a fresh id (because old code stripped the
-      // server-assigned UUID and never round-tripped it) but its
-      // workout-slot matches a tombstoned slot.
-      const [cloudIds, cloudSlots] = await Promise.all([
+      // Fetch all three tombstone tables in parallel and filter local
+      // history on the union. Slot keys catch fresh-UUID resurrection;
+      // session ids catch the case where bad legacy sessions keep
+      // re-pushing reps into slots we never tombstoned (extra rep_nums,
+      // hand=B variants, etc.) — the entire session is killable at once.
+      const [cloudIds, cloudSlots, cloudSessions] = await Promise.all([
         fetchRepTombstoneIds(),
         fetchRepSlotTombstoneKeys(),
+        fetchSessionTombstoneIds(),
       ]);
       if (cancelled) return;
-      const idSet   = new Set(cloudIds   || []);
-      const slotSet = new Set(cloudSlots || []);
-      if (idSet.size === 0 && slotSet.size === 0) return;
+      const idSet      = new Set(cloudIds      || []);
+      const slotSet    = new Set(cloudSlots    || []);
+      const sessionSet = new Set(cloudSessions || []);
+      if (idSet.size === 0 && slotSet.size === 0 && sessionSet.size === 0) return;
       // Merge cloud id-tombstones into local LS so subsequent
       // operations see the union without re-fetching.
       if (idSet.size > 0) {
@@ -197,11 +200,14 @@ export function useRepHistory({ user }) {
         }
         if (lsChanged) saveLS(LS_REP_DELETED_KEY, [...localTombs]);
       }
-      // Drop tombstoned reps from history state by id OR slot.
+      // Drop tombstoned reps from history state by id OR slot OR
+      // session. Session matches let us nuke an entire bad legacy
+      // session in one shot.
       setHistory(h => {
         const filtered = h.filter(r =>
           !(r.id && idSet.has(r.id)) &&
-          !slotSet.has(compositeKey(r))
+          !slotSet.has(compositeKey(r)) &&
+          !(r.session_id && sessionSet.has(r.session_id))
         );
         return filtered.length === h.length ? h : filtered;
       });
@@ -224,18 +230,21 @@ export function useRepHistory({ user }) {
       const remote = await fetchReps();
       if (cancelled) return;
 
-      // Fetch cloud tombstones BEFORE filtering. Synced delete history
-      // is what prevents another device's deleted reps from getting
-      // resurrected on this device's reconcile. We union it with the
-      // local tombstone set so a delete on EITHER device counts.
-      // Slot tombstones catch the resurrection-with-fresh-UUID case
-      // that id tombstones miss.
-      const [cloudTombstones, cloudSlotKeys] = await Promise.all([
+      // Fetch all three tombstone tables. The set together blocks
+      // any flavor of resurrection:
+      //   id      — same-UUID re-push from same client
+      //   slot    — fresh-UUID re-push from old client (strips id)
+      //   session — re-push into a previously-tombstoned session_id,
+      //             even if the (set, rep, hand) slot wasn't explicitly
+      //             tombstoned at cleanup time
+      const [cloudTombstones, cloudSlotKeys, cloudSessionIds] = await Promise.all([
         fetchRepTombstoneIds(),
         fetchRepSlotTombstoneKeys(),
+        fetchSessionTombstoneIds(),
       ]);
       if (cancelled) return;
-      const slotTombSet = new Set(cloudSlotKeys || []);
+      const slotTombSet    = new Set(cloudSlotKeys    || []);
+      const sessionTombSet = new Set(cloudSessionIds  || []);
 
       if (remote) {
         // Reconcile local-only reps (offline sessions) up to the cloud.
@@ -277,7 +286,8 @@ export function useRepHistory({ user }) {
           !(r.id && remoteIds.has(r.id)) &&
           !remoteCompositeKeys.has(compositeKey(r)) &&
           !(r.id && tombstoned.has(r.id)) &&
-          !slotTombSet.has(compositeKey(r))
+          !slotTombSet.has(compositeKey(r)) &&
+          !(r.session_id && sessionTombSet.has(r.session_id))
         );
 
         let pushedAny = false;
