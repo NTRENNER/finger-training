@@ -324,12 +324,11 @@ export function SessionPlanCard({
               <div style={{ marginTop: 6, fontSize: 10, color: C.muted, lineHeight: 1.4, fontFamily: "monospace" }}>
                 {Object.entries(rec.zoneScores)
                   .sort((a, b) => b[1].score - a[1].score)
-                  .slice(0, 4)
                   .map(([zone, z]) => {
                     const isWinner = zone === rec.zone;
                     return (
                       <div key={zone} style={{ color: isWinner ? recCfg.color : C.muted }}>
-                        {isWinner ? "★ " : "  "}{zone.padEnd(20)} {z.score.toFixed(2)} = {z.adaptBoost.toFixed(2)} × {z.stalenessBoost} × {z.recency.toFixed(2)} × {z.ext.toFixed(2)}  [{z.staleStatus}]
+                        {isWinner ? "★ " : "  "}{zone.padEnd(20)} T={String(z.T).padStart(3)} {z.score.toFixed(2)} = {z.adaptBoost.toFixed(2)} × {z.stalenessBoost} × {z.recency.toFixed(2)} × {z.ext.toFixed(2)}  [{z.staleStatus}]
                       </div>
                     );
                   })}
