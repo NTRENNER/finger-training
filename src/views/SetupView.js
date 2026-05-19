@@ -185,6 +185,14 @@ function ClimbingLogCard({ activities = [], onLog }) {
   const [wall, setWall]             = useState("commercial");
   const [rpe, setRpe]               = useState(7);
   const [logged, setLogged]         = useState(false);
+  // Outdoor-only metadata. Free text, all optional. Cleared after
+  // save so the next outdoor log starts blank rather than pre-
+  // populated with the previous climb's route name (which would
+  // produce weird duplicates if the user logged two climbs in a
+  // row at the same crag without re-typing).
+  const [routeName, setRouteName] = useState("");
+  const [crag,      setCrag]      = useState("");
+  const [area,      setArea]      = useState("");
 
   const todayClimbing = activities.filter(a => a.date === today() && a.type === "climbing");
 
@@ -200,6 +208,10 @@ function ClimbingLogCard({ activities = [], onLog }) {
   // MoonBoards, and Kilters are all gym walls; outdoor boulders are
   // real rock with no comparable categorisation.
   const showWall = venue === "indoor" && discipline === "boulder";
+  // Route/crag/area only meaningful outdoors. Gyms have named
+  // routes too, but their nomenclature changes every set so logging
+  // them rarely pays off; the field cluster stays outdoor-gated.
+  const showOutdoorMeta = venue === "outdoor";
 
   const handleSave = () => {
     const entry = {
@@ -207,9 +219,21 @@ function ClimbingLogCard({ activities = [], onLog }) {
       discipline, venue, grade, ascent, rpe,
     };
     if (showWall) entry.wall = wall;
+    if (showOutdoorMeta) {
+      // Trim and drop empties so we don't write whitespace-only
+      // values that look like data but break sort/filter.
+      const rn = routeName.trim();
+      const cr = crag.trim();
+      const ar = area.trim();
+      if (rn) entry.route_name = rn;
+      if (cr) entry.crag       = cr;
+      if (ar) entry.area       = ar;
+    }
     onLog(entry);
     setLogged(true);
     setOpen(false);
+    // Reset outdoor fields so the next log isn't pre-populated.
+    setRouteName(""); setCrag(""); setArea("");
     setTimeout(() => setLogged(false), 2500);
   };
 
@@ -308,6 +332,35 @@ function ClimbingLogCard({ activities = [], onLog }) {
           </button>
         ))}
       </div>
+
+      {/* Outdoor route metadata — only shown when venue=outdoor.
+          Three free-text inputs (route name, cliff/crag, area) so a
+          send at "Y-12 · Obed · The Journey" stays searchable later.
+          All optional — leaving blank just records the climb without
+          the location detail. */}
+      {showOutdoorMeta && (() => {
+        const inputStyle = {
+          width: "100%", padding: "8px 10px", borderRadius: 8,
+          background: C.bg, color: C.text, border: `1px solid ${C.border}`,
+          fontSize: 13, marginBottom: 8,
+        };
+        return (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+              Route (optional)
+            </div>
+            <input type="text" placeholder="Route name (e.g. The Journey)"
+              value={routeName} onChange={e => setRouteName(e.target.value)}
+              style={inputStyle} />
+            <input type="text" placeholder="Cliff / crag (e.g. Y-12)"
+              value={crag} onChange={e => setCrag(e.target.value)}
+              style={inputStyle} />
+            <input type="text" placeholder="Area (e.g. Obed)"
+              value={area} onChange={e => setArea(e.target.value)}
+              style={{ ...inputStyle, marginBottom: 0 }} />
+          </div>
+        );
+      })()}
 
       {/* Wall surface — indoor boulder only. V4 on a MoonBoard ≠ V4 on
           a commercial set. Outdoor boulders are real rock with no

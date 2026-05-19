@@ -412,6 +412,11 @@ export async function pushActivity(act) {
       grade:      act.grade      ?? null,
       ascent:     act.ascent     ?? null,
       wall:       act.wall       ?? null,
+      // Outdoor metadata — null on indoor climbs so cleared edits
+      // (e.g. switching outdoor → indoor) actually clear the column.
+      route_name: act.route_name ?? null,
+      crag:       act.crag       ?? null,
+      area:       act.area       ?? null,
       rpe:         Number.isFinite(act.rpe) ? act.rpe : null,
       session_rpe: Number.isFinite(act.session_rpe) ? act.session_rpe : null,
     }, { onConflict: "id" });
@@ -451,6 +456,9 @@ export async function fetchActivities() {
       if (a.grade      != null) out.grade      = a.grade;
       if (a.ascent     != null) out.ascent     = a.ascent;
       if (a.wall       != null) out.wall       = a.wall;
+      if (a.route_name != null) out.route_name = a.route_name;
+      if (a.crag       != null) out.crag       = a.crag;
+      if (a.area       != null) out.area       = a.area;
       if (a.rpe         != null) out.rpe         = a.rpe;
       if (a.session_rpe != null) out.session_rpe = a.session_rpe;
       return out;

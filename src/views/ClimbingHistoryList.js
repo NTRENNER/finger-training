@@ -88,6 +88,10 @@ function ClimbRow({ climb: c, onEdit, onDelete }) {
   const disc   = disciplineMeta(c.discipline);
   const wall   = c.discipline === "boulder" && c.wall ? wallMeta(c.wall) : null;
   const venueLabel = c.venue === "outdoor" ? "Outdoor" : null;
+  // Build the outdoor location label: "Route, Crag, Area" — only the
+  // pieces that exist. Renders as a third line under the main row
+  // when any are present (typically only on outdoor climbs).
+  const locationParts = [c.route_name, c.crag, c.area].filter(Boolean);
 
   return (
     <div style={{
@@ -109,6 +113,18 @@ function ClimbRow({ climb: c, onEdit, onDelete }) {
           {c.ascent ? ascentMeta(c.ascent).label : describeClimb(c)}
           {Number.isFinite(c.rpe) ? ` · RPE ${c.rpe}` : ""}
         </div>
+        {locationParts.length > 0 && (
+          <div style={{
+            fontSize: 11, color: C.text, marginTop: 2,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {c.route_name && <b>{c.route_name}</b>}
+            {c.route_name && (c.crag || c.area) ? " · " : ""}
+            <span style={{ color: C.muted }}>
+              {[c.crag, c.area].filter(Boolean).join(", ")}
+            </span>
+          </div>
+        )}
       </div>
       {onEdit && c.id && (
         <button
@@ -156,6 +172,9 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
   const [grade,      setGrade]      = useState(climb.grade || defaultGradeFor(climb.discipline || "boulder"));
   const [ascent,     setAscent]     = useState(climb.ascent || "flash");
   const [rpe,        setRpe]        = useState(Number.isFinite(climb.rpe) ? climb.rpe : 7);
+  const [routeName,  setRouteName]  = useState(climb.route_name || "");
+  const [crag,       setCrag]       = useState(climb.crag || "");
+  const [area,       setArea]       = useState(climb.area || "");
 
   const handleDiscipline = (key) => {
     setDiscipline(key);
@@ -164,12 +183,24 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
   };
 
   const showWall = venue === "indoor" && discipline === "boulder";
+  const showOutdoorMeta = venue === "outdoor";
 
   const save = () => {
     const updates = { date, discipline, venue, grade, ascent, rpe };
     // Drop wall when the new combination doesn't allow it. Setting to
     // null tells pushActivity to clear the column on the upserted row.
     updates.wall = showWall ? wall : null;
+    // Outdoor metadata: trim, then write — null clears the column
+    // when switching indoor/outdoor or deleting the value.
+    if (showOutdoorMeta) {
+      updates.route_name = routeName.trim() || null;
+      updates.crag       = crag.trim()      || null;
+      updates.area       = area.trim()      || null;
+    } else {
+      updates.route_name = null;
+      updates.crag       = null;
+      updates.area       = null;
+    }
     onSave(updates);
   };
 
@@ -241,6 +272,27 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
             pill(wall === key, label, emoji, () => setWall(key))
           )}
         </div>
+      </>}
+
+      {/* Outdoor route metadata — only when venue=outdoor. Free-text,
+          all optional. Same field set as ClimbingLogCard so creating
+          and editing share one mental model. */}
+      {showOutdoorMeta && <>
+        {sectionLabel("Route (optional)")}
+        {[
+          { val: routeName, set: setRouteName, ph: "Route name" },
+          { val: crag,      set: setCrag,      ph: "Cliff / crag" },
+          { val: area,      set: setArea,      ph: "Area" },
+        ].map(({ val, set, ph }) => (
+          <input key={ph} type="text" placeholder={ph}
+            value={val} onChange={e => set(e.target.value)}
+            style={{
+              width: "100%", padding: "6px 8px", marginBottom: 6,
+              borderRadius: 6, background: C.bg, color: C.text,
+              border: `1px solid ${C.border}`, fontSize: 12,
+            }} />
+        ))}
+        <div style={{ marginBottom: 4 }} />
       </>}
 
       {/* Grade */}
