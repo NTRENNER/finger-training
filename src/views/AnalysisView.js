@@ -604,52 +604,24 @@ export function AnalysisView({
   // a pooled-fit comparison (current pooled fit vs pooled baseline)
   // for grips that don't have a complete per-hand baseline yet.
   //
-  // Why averaged: the pooled-fit approach inflates the displayed
-  // delta because shrinkage relaxes asymmetrically between the
-  // small-N baseline and larger-N current — both push higher than
-  // per-hand fits but by different amounts, producing numbers that
-  // look like Right + Left instead of an honest average. Averaging
-  // is the user's intuitive reading and stays internally consistent
-  // with the per-hand cells. Same fix applied to the single-grip
-  // scopedImp branch in the render below.
+  // Uses POOLED current fit vs POOLED baseline so the headline `total`
+  // and per-zone Δ%s use the same calc as the Capacity (AUC) chart's
+  // most-recent point. Previously this averaged per-hand improvements,
+  // which produced a different number from the chart for grips with
+  // L/R asymmetry — confusing when a user compares the two surfaces.
+  // The chart, this card, and the Capacity-Improvement sub-rows now
+  // all read off the same fit pair (pooled current, pooled baseline)
+  // so the numbers tie out everywhere.
   const gripImprovement = useMemo(() => {
     const out = {};
     for (const grip of Object.keys(grip3xEstimates)) {
-      const lBase = perHandGripBaselines[`${grip}|L`];
-      const rBase = perHandGripBaselines[`${grip}|R`];
       const pooledRef = gripBaselines[grip];
-      if (lBase && rBase) {
-        // Train-to-failure model: every rep with valid actual_time_s is
-        // a (T, F) data point. Drop the legacy r.failed filter.
-        const buildHandPts = (hand) => history
-          .filter(r => r.grip === grip && r.hand === hand)
-          .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
-          .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
-        const lAmps = fitAmpsForPts(buildHandPts("L"), grip);
-        const rAmps = fitAmpsForPts(buildHandPts("R"), grip);
-        const lImp = lAmps ? improvementForAmps(lAmps, lBase.amps) : null;
-        const rImp = rAmps ? improvementForAmps(rAmps, rBase.amps) : null;
-        if (lImp && rImp) {
-          const since = lBase.date < rBase.date ? lBase.date : rBase.date;
-          // Average per-hand Δ% per zone — works for any number of zones
-          // since improvementForAmps now returns one key per ZONE_KEY.
-          const avg = { baselineDate: since };
-          for (const k of [...ZONE_KEYS, "total"]) {
-            avg[k] = Math.round((lImp[k] + rImp[k]) / 2);
-          }
-          out[grip] = avg;
-          continue;
-        }
-      }
-      // Fallback: pooled-fit comparison when per-hand baselines aren't
-      // ready yet on at least one side of this grip.
-      if (pooledRef) {
-        const imp = improvementForAmps(grip3xEstimates[grip], pooledRef.amps);
-        if (imp) out[grip] = { ...imp, baselineDate: pooledRef.date };
-      }
+      if (!pooledRef) continue;
+      const imp = improvementForAmps(grip3xEstimates[grip], pooledRef.amps);
+      if (imp) out[grip] = { ...imp, baselineDate: pooledRef.date };
     }
     return out;
-  }, [gripBaselines, perHandGripBaselines, grip3xEstimates, history]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gripBaselines, grip3xEstimates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Per-grip hand asymmetry diagnostic ──
   // For each grip with both L and R three-exp fits, compute the
@@ -2186,22 +2158,17 @@ export function AnalysisView({
         const perGripMode = !selGrip && Object.keys(grip3xEstimates).length >= 2;
         const gripImpEntries = Object.entries(gripImprovement);
 
-        // When a grip filter is active, cfEstimate is scoped to that
-        // grip AND to selHand (via the `failures` filter). Comparing
-        // it against a baseline of a different scope produces an
-        // apples-to-oranges comparison. We have three baselines to
-        // pick from, listed by tightness:
-        //   1. perHandGripBaselines[grip|hand]  — exact scope match
-        //   2. gripBaselines[grip]               — pools hands, per-grip
-        //   3. (fall through to early-days)
+        // When a grip filter is active, pick the tightest-scope baseline:
+        //   1. (grip, hand) when both selHand and the per-hand baseline exist
+        //   2. (grip pooled) otherwise — matches the Capacity (AUC) chart's
+        //      pooled calc so the numbers tie out across surfaces
         //
-        // To keep the comparison apples-to-apples, the LHS (current
-        // fit) is recomputed at the SAME scope as whichever baseline
-        // we end up using, instead of always using the hand-scoped
-        // cfEstimate. Without this, a (Micro, Left) current vs
-        // (Micro pooled-hands) baseline still mixes hand asymmetry
-        // into the Δ% — same flavor as the cross-muscle artifact,
-        // just smaller.
+        // The previous version computed an "average of per-hand
+        // improvements" for the Both case, which produced a different
+        // total from the chart for grips with L/R asymmetry. The
+        // headline now uses the same pooled fit as the chart, so a
+        // user comparing "% vs baseline" between this card and the
+        // Capacity chart sees one number, not two interpretations.
         let scopedImp = null;
         let scopedBaselineDate = null;
         let scopedScopeLabel = null;
@@ -2209,63 +2176,18 @@ export function AnalysisView({
           const phgKey = selHand && selHand !== "Both" ? `${selGrip}|${selHand}` : null;
           const phgRef = phgKey ? perHandGripBaselines[phgKey] : null;
           const gRef   = gripBaselines[selGrip];
-          const lBase  = perHandGripBaselines[`${selGrip}|L`];
-          const rBase  = perHandGripBaselines[`${selGrip}|R`];
           if (phgRef) {
             // Tightest match: current3xAmps (already hand+grip scoped
             // via the `failures` filter) vs per-(hand,grip) baseline.
             scopedImp = improvementForAmps(current3xAmps, phgRef.amps);
             scopedBaselineDate = phgRef.date;
             scopedScopeLabel = `${selGrip} · ${selHand === "L" ? "Left" : "Right"}`;
-          } else if (!selHand && lBase && rBase) {
-            // "Both" mode AND both per-hand baselines exist → display
-            // the AVERAGE of per-hand improvements rather than a
-            // pooled-fit comparison. The pooled approach used here
-            // before produced delta %s that looked like Right + Left
-            // because pooled-fit shrinkage relaxes asymmetrically
-            // between the small-N baseline and the larger-N current
-            // (both push higher than per-hand fits, but by different
-            // amounts). The average is the user's intuitive reading
-            // ("what's my typical improvement across both hands") and
-            // is internally consistent with the per-hand cells.
-            // Train-to-failure model: every rep with valid actual_time_s
-            // is a (T, F) data point. Drop the legacy r.failed filter.
-            const buildHandPts = (hand) => history
-              .filter(r => r.grip === selGrip && r.hand === hand)
-              .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
-              .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
-            const lAmps = fitAmpsForPts(buildHandPts("L"), selGrip);
-            const rAmps = fitAmpsForPts(buildHandPts("R"), selGrip);
-            const lImp = lAmps ? improvementForAmps(lAmps, lBase.amps) : null;
-            const rImp = rAmps ? improvementForAmps(rAmps, rBase.amps) : null;
-            if (lImp && rImp) {
-              // Average per-hand Δ% per zone — works for any number of
-              // zones since improvementForAmps returns one key per
-              // ZONE_KEY.
-              scopedImp = {};
-              for (const k of [...ZONE_KEYS, "total"]) {
-                scopedImp[k] = Math.round((lImp[k] + rImp[k]) / 2);
-              }
-              // Use the EARLIER of the two baseline dates as the "since"
-              // label so the reader sees the start of meaningful tracking.
-              scopedBaselineDate = lBase.date < rBase.date ? lBase.date : rBase.date;
-              scopedScopeLabel = `${selGrip} · avg of Left + Right`;
-            } else if (gRef && grip3xEstimates[selGrip]) {
-              // Per-hand fits unavailable for some reason — fall back to
-              // pooled. Same fallback as the no-per-hand-baseline path.
-              scopedImp = improvementForAmps(grip3xEstimates[selGrip], gRef.amps);
-              scopedBaselineDate = gRef.date;
-              scopedScopeLabel = `${selGrip} (pooled fit)`;
-            }
           } else if (gRef && grip3xEstimates[selGrip]) {
-            // Fallback: per-(hand,grip) baseline doesn't exist yet for
-            // both hands (e.g., one hand under-trained), but the grip-
-            // pooled baseline does. Use the grip-pooled CURRENT amps
-            // (pools both hands) so both sides of the comparison live
-            // in the same scope.
+            // Pooled comparison — same calc as the Capacity (AUC)
+            // chart at this grip's most-recent point.
             scopedImp = improvementForAmps(grip3xEstimates[selGrip], gRef.amps);
             scopedBaselineDate = gRef.date;
-            scopedScopeLabel = `${selGrip} (pooled fit · awaiting per-hand baseline)`;
+            scopedScopeLabel = `${selGrip} (pooled fit)`;
           }
         }
 
