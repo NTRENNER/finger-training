@@ -10,6 +10,7 @@
 //            × stalenessBoost(zoneOf(T))
 //            × recencyPenalty(zoneOf(T))
 //            × externalLoadModifier(zoneOf(T), activities)
+//            × focusBoost(zoneOf(T), climbingFocus)
 //
 // adaptBoost is SYMMETRIC: room = 1 − localRatio, where localRatio is
 // the Gaussian-smoothed F_actual / F_curve at T. Below-curve → boost,
@@ -138,6 +139,7 @@ export function externalLoadModifier(zone, activities) {
 //   4. score(T) = adaptBoost(T) × stalenessBoost(zoneOf(T))
 //                                × recencyPenalty(zoneOf(T))
 //                                × externalLoadModifier(zoneOf(T), activities)
+//                                × focusBoost(zoneOf(T), climbingFocus)
 //      adaptBoost is SYMMETRIC (vs. the earlier residualBoost which
 //      only rewarded limiters):
 //        room = 1 − localRatio   (positive = below curve, room to grow;
@@ -153,6 +155,13 @@ export function externalLoadModifier(zone, activities) {
 //      climbing — RPE-aware session fatigue from climbingFatigue.js
 //      pushes Power down hardest, Endurance least. Returns 1.0 when no
 //      recent climb session is found within 48h.
+//      focusBoost biases the pick toward the zones the user's current
+//      climbing goal lives in (bouldering / power_endurance / endurance).
+//      Calibrated as a tie-breaker — 1.0× neutral, 1.10–1.20× favor,
+//      0.90× de-emphasis. Strong signals (curve-coverage debt, big
+//      residual gap, recent climbing fatigue) still dominate; focus
+//      only shifts close calls. Returns 1.0 for every zone when
+//      climbingFocus is "balanced" or unset.
 //   5. Argmax over (hand, T). The headline loadKg is the anchored
 //      prescription at T_star (curve_shape × amplitude_anchor from
 //      prescription()), so a great recent session lifts the whole
