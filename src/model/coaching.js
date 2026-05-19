@@ -234,7 +234,11 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   if (Object.keys(handFits).length === 0) return null;
 
   // Sweep T per hand, find argmax score across (hand, T).
+  // Also track best score per ZONE for diagnostic overlay (see
+  // rec.zoneScores) — answers "why did Power win over S·E" without
+  // requiring devtools.
   let best = null;
+  const zoneScores = {};
   for (const [hand, { ratios }] of Object.entries(handFits)) {
     for (let T = tMin; T <= tMax; T += tStep) {
       // Gaussian-smoothed local residual ratio at T
@@ -278,6 +282,16 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // runner / on the tiles), not which ZONE gets picked.
       const ext = externalLoadModifier(zoneKey, activities);
       const score = adaptBoost * stale * recency * ext;
+
+      // Track best score per zone for the diagnostic overlay.
+      const zonePrev = zoneScores[zoneKey];
+      if (!zonePrev || score > zonePrev.score) {
+        zoneScores[zoneKey] = {
+          score, T, hand, adaptBoost, stalenessBoost: stale, recency, ext,
+          staleStatus: stalenessMap[zoneKey]?.status ?? "ok",
+          localRatio,
+        };
+      }
 
       if (!best || score > best.score) {
         best = {
@@ -324,5 +338,6 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     loadByHand[hand] = p && p.value > 0 ? p.value : null;
   }
   best.loadByHand = loadByHand;
+  best.zoneScores = zoneScores;  // diagnostic — see SessionPlanCard overlay
   return best;
 }
