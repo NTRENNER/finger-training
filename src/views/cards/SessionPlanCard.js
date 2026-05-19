@@ -316,24 +316,6 @@ export function SessionPlanCard({
               <span style={{ color: recCfg.color, fontWeight: 700 }}>Why: </span>
               {whyText}
             </div>
-            {/* TEMP DIAGNOSTIC: top-3 zone scores so we can see why
-                the engine picked what it picked. Remove once the
-                recommendation logic is confirmed-correct in production.
-                Format: zone (score) · adapt × stale × recency = score */}
-            {rec.zoneScores && (
-              <div style={{ marginTop: 6, fontSize: 10, color: C.muted, lineHeight: 1.4, fontFamily: "monospace" }}>
-                {Object.entries(rec.zoneScores)
-                  .sort((a, b) => b[1].score - a[1].score)
-                  .map(([zone, z]) => {
-                    const isWinner = zone === rec.zone;
-                    return (
-                      <div key={zone} style={{ color: isWinner ? recCfg.color : C.muted }}>
-                        {isWinner ? "★ " : "  "}{zone.padEnd(20)} T={String(z.T).padStart(3)} {z.score.toFixed(2)} = {z.adaptBoost.toFixed(2)} × {z.stalenessBoost} × {z.recency.toFixed(2)} × {z.ext.toFixed(2)}  [{z.staleStatus}]
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
           </button>
         );
       })()}

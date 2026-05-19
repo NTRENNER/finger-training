@@ -77,10 +77,16 @@ function CurveCoverageCard({ history }) {
 
   const STATUS_ORDER = { stale: 0, warning: 1, never: 2, ok: 3 };
   const STATUS_LABEL = {
-    stale:   { color: C.red,    text: "stale"   },
-    warning: { color: C.orange, text: "soon"    },
-    never:   { color: C.muted,  text: "never"   },
-    ok:      { color: C.green,  text: "fresh"   },
+    stale:   { color: C.red,    text: "stale"    },
+    warning: { color: C.orange, text: "soon"     },
+    // "never" was visually alarming — neutral "modeled" reflects that
+    // the curve is extrapolated from adjacent zones, which is not
+    // automatically a problem when those neighbors are well-sampled.
+    // The recommendation engine knows when extrapolation actually
+    // hurts (low data confidence + below-curve neighbors) and asks
+    // for a sample then; the card stays descriptive, not demanding.
+    never:   { color: C.muted,  text: "modeled"  },
+    ok:      { color: C.green,  text: "fresh"    },
   };
   const sortedZones = [...ZONE_KEYS].sort((a, b) => {
     const sa = STATUS_ORDER[staleness[a].status];
@@ -133,33 +139,45 @@ function CurveCoverageCard({ history }) {
         </div>
       </div>
 
-      {(staleCount > 0 || warningCount > 0 || neverCount > 0) && (
+      {/* Alarm box: only for stale or aging zones — those are real
+          training debts. "Never sampled" is reported descriptively
+          below (the modeled badge) rather than flagged as a problem;
+          when neighboring zones are well-sampled the curve there is
+          still a credible extrapolation, and the engine handles
+          prioritization on its own. */}
+      {(staleCount > 0 || warningCount > 0) && (
         <div style={{
           padding: "8px 10px", marginBottom: 12,
           background: C.bg, borderRadius: 8,
-          border: `1px solid ${staleCount > 0 ? C.red : warningCount > 0 ? C.orange : C.border}40`,
+          border: `1px solid ${staleCount > 0 ? C.red : C.orange}40`,
           fontSize: 11, color: C.muted, lineHeight: 1.5,
         }}>
           {staleCount > 0 && (
             <div>
-              <span style={{ color: C.red, fontWeight: 700 }}>● {staleCount} stale data</span>
-              {warningCount > 0 || neverCount > 0 ? " · " : ""}
+              <span style={{ color: C.red, fontWeight: 700 }}>● {staleCount} stale</span>
+              {warningCount > 0 ? " · " : ""}
             </div>
           )}
           {warningCount > 0 && (
             <div>
               <span style={{ color: C.orange, fontWeight: 700 }}>● {warningCount} aging</span>
-              {neverCount > 0 ? " · " : ""}
-            </div>
-          )}
-          {neverCount > 0 && (
-            <div>
-              <span style={{ color: C.muted, fontWeight: 700 }}>● {neverCount} never sampled</span>
             </div>
           )}
           <div style={{ marginTop: 4, fontStyle: "italic" }}>
-            The curve extrapolates where data is stale or missing. The engine prioritizes those durations to keep the fit honest.
+            Past the detraining window — the engine will prioritize a fresh sample.
           </div>
+        </div>
+      )}
+      {/* Neutral coverage summary when there are modeled-only zones
+          and no stale/aging ones. Information without alarm. */}
+      {neverCount > 0 && staleCount === 0 && warningCount === 0 && (
+        <div style={{
+          padding: "8px 10px", marginBottom: 12,
+          background: C.bg, borderRadius: 8,
+          border: `1px solid ${C.border}`,
+          fontSize: 11, color: C.muted, lineHeight: 1.5,
+        }}>
+          {ZONE_KEYS.length - neverCount} of {ZONE_KEYS.length} zones have direct samples. The remaining {neverCount === 1 ? "zone uses" : `${neverCount} zones use`} curve extrapolation from neighboring data — fine when neighbors are well-sampled.
         </div>
       )}
 
@@ -169,7 +187,7 @@ function CurveCoverageCard({ history }) {
           const cfg = STATUS_LABEL[s.status];
           const window = LOCKOUT_WINDOW_DAYS[k];
           const daysText = s.days == null
-            ? "never sampled"
+            ? "modeled from neighbors"
             : s.days === 0
               ? "today"
               : s.days === 1
