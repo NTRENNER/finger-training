@@ -77,3 +77,23 @@ export function downloadWorkoutCSV(log) {
   });
   a.click();
 }
+
+// Per-climb CSV — one row per logged climb. Includes the outdoor
+// metadata columns (route_name, crag, area) added in May 2026 so a
+// flatten + filter in a spreadsheet can quickly group by crag /
+// area / route. Empty cells for indoor climbs.
+export function downloadClimbingCSV(activities) {
+  const climbs = (activities || []).filter(a => a?.type === "climbing");
+  const cols = ["id","date","discipline","venue","wall","grade","ascent","rpe",
+                "session_rpe","route_name","crag","area"];
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [cols.join(","), ...climbs.map(c => cols.map(k => esc(c[k])).join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = Object.assign(document.createElement("a"), {
+    href: URL.createObjectURL(blob), download: "climbing-history.csv",
+  });
+  a.click();
+}

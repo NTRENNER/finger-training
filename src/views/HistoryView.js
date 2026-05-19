@@ -29,7 +29,7 @@ import { effectiveLoad, isShortfall } from "../model/prescription.js";
 import { TARGET_OPTIONS } from "../model/zones.js";
 import {
   loadLS, saveLS,
-  LS_BW_LOG_KEY, LS_HISTORY_DOMAIN_KEY,
+  LS_BW_LOG_KEY, LS_HISTORY_DOMAIN_KEY, LS_WORKOUT_LOG_KEY,
 } from "../lib/storage.js";
 import { WorkoutHistoryView } from "./WorkoutHistoryView.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
@@ -43,6 +43,7 @@ export function HistoryView({
   defaultWorkouts = {},
   onDeleteWorkoutSession = () => {},
   onDownloadWorkoutCSV = () => {},
+  onDownloadClimbingCSV = () => {},
   gripPresets = [],
 }) {
   const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
@@ -237,8 +238,17 @@ export function HistoryView({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22 }}>History</h2>
         <div style={{ display: "flex", gap: 8 }}>
+          {/* + Session is fingers-only: workouts are added from the
+              Workout tab, climbs from the climbing logger on Fingers. */}
           {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessDate(ymdLocal()); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
-          {domain === "fingers" && <Btn small onClick={onDownload} color={C.muted}>↓ CSV</Btn>}
+          {/* CSV download is shown on every tab in the same spot, with
+              the same visual treatment — picks the right exporter by
+              active domain so user behavior is consistent across tabs. */}
+          <Btn small onClick={() => {
+            if (domain === "workout")  onDownloadWorkoutCSV(loadLS(LS_WORKOUT_LOG_KEY) || []);
+            else if (domain === "climbing") onDownloadClimbingCSV();
+            else onDownload();
+          }} color={C.muted}>↓ CSV</Btn>
         </div>
       </div>
 

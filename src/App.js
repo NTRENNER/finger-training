@@ -31,7 +31,7 @@ import {
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
 } from "./lib/storage.js";
 import { DEFAULT_TRIP } from "./lib/trip.js";
-import { downloadCSV, downloadWorkoutCSV } from "./lib/csv.js";
+import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
 
 // App-level hooks (see src/hooks/).
@@ -814,6 +814,7 @@ export default function App() {
           defaultWorkouts={DEFAULT_WORKOUTS}
           onDeleteWorkoutSession={deleteWorkoutSession}
           onDownloadWorkoutCSV={downloadWorkoutCSV}
+          onDownloadClimbingCSV={() => downloadClimbingCSV(activities)}
           gripPresets={GRIP_PRESETS}
         />
       )}

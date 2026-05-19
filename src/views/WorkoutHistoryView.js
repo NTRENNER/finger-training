@@ -15,7 +15,7 @@
 
 import React, { useMemo, useState } from "react";
 import { C } from "../ui/theme.js";
-import { Card, Btn } from "../ui/components.js";
+import { Card } from "../ui/components.js";
 import { fmt1, toDisp, fmtClock, bwOnDate } from "../ui/format.js";
 import { ymdLocal } from "../util.js";
 import {
@@ -141,6 +141,10 @@ export function WorkoutHistoryView({
 
   return (
     <div>
+      {/* CSV download moved to the unified header in HistoryView so
+          all three tabs (Fingers / Workout / Climbing) share one
+          location and one visual treatment. The %-BW toggle stays
+          here since it's specific to the Workout view. */}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 8 }}>
         {bodyWeight != null && (
           <button onClick={() => setRelMode(r => !r)} style={{
@@ -149,7 +153,6 @@ export function WorkoutHistoryView({
             color: relMode ? "#fff" : C.muted, fontWeight: relMode ? 700 : 400,
           }}>% BW</button>
         )}
-        <Btn small onClick={() => onDownloadWorkoutCSV(log)} color={C.muted}>↓ CSV</Btn>
       </div>
 
       {/* Filters */}
