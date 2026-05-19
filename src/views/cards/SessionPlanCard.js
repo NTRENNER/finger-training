@@ -69,6 +69,11 @@ export function SessionPlanCard({
   // through the population fatigue curve so the scale-down adapts to
   // this user's actual response.
   personalGains = null,
+  // Cloud-synced climbing-focus bias ("balanced" | "bouldering" |
+  // "power_endurance" | "endurance"). Threaded to the engine to
+  // apply per-zone multipliers that nudge close calls toward the
+  // user's training goal.
+  climbingFocus = "balanced",
 }) {
   // ── Recommendation from the continuous engine ──────────────
   const rec = useMemo(
@@ -77,9 +82,10 @@ export function SessionPlanCard({
           freshMap, threeExpPriors, activities,
           perceivedFatigue: perceivedRpe > 1 ? perceivedRpe : 0,
           personalGains,
+          climbingFocus,
         })
       : null,
-    [history, grip, freshMap, threeExpPriors, activities, perceivedRpe, personalGains]
+    [history, grip, freshMap, threeExpPriors, activities, perceivedRpe, personalGains, climbingFocus]
   );
   const recommendedZone = rec?.zone;
 
@@ -219,6 +225,18 @@ export function SessionPlanCard({
   if (rec.ext != null && rec.ext < 0.85) {
     const pct = Math.round((1 - rec.ext) * 100);
     whyParts.push(`recent climbing / RPE ~${pct}% scale-down`);
+  }
+  // Climbing-focus bias — surface only when it actually nudged a
+  // non-neutral multiplier on the winning zone. Keeps the line
+  // honest about what tipped the balance.
+  if (rec.focus != null && rec.focus !== 1.0 && rec.climbingFocus && rec.climbingFocus !== "balanced") {
+    const pct = Math.round((rec.focus - 1) * 100);
+    const focusLabel = rec.climbingFocus === "power_endurance" ? "power endurance" : rec.climbingFocus;
+    if (pct > 0) {
+      whyParts.push(`${focusLabel} focus added +${pct}%`);
+    } else {
+      whyParts.push(`${focusLabel} focus despite −${Math.abs(pct)}% de-emphasis`);
+    }
   }
   if (whyParts.length === 0) {
     whyParts.push("curve is well-calibrated locally; this T scores best on staleness × recency");

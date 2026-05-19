@@ -168,6 +168,38 @@ const CONTINUOUS_T_MAX = 240;   // s — longest meaningful hold
 const CONTINUOUS_T_STEP = 5;    // s — sweep granularity
 const CONTINUOUS_BANDWIDTH = 30; // s — Gaussian kernel σ for residual smoothing
 
+// Climbing-focus zone biases. Multipliers in the engine's score
+// formula that nudge the recommendation toward the kind of climbing
+// the user is training for. Calibrated as a "tip-the-balance" lever:
+//   1.20× boosts a favored zone (wins close calls)
+//   0.90× de-emphasizes a zone (loses close calls)
+//   1.0× is neutral (most zones)
+// Strong signals (curve coverage debt, big residual gap, recent
+// climbing fatigue) still dominate — focus only shifts ties.
+//
+// "balanced" (default) returns 1.0 for every zone, so the engine
+// runs unchanged when no focus is set.
+export const FOCUS_MULTIPLIERS = {
+  balanced: {},  // all zones default to 1.0
+  bouldering: {
+    max_strength: 1.20, power: 1.20,
+    strength_endurance: 0.90, endurance: 0.90,
+  },
+  power_endurance: {
+    power: 1.10, power_strength: 1.20, strength: 1.20,
+    max_strength: 0.90, endurance: 0.90,
+  },
+  endurance: {
+    strength: 1.10, strength_endurance: 1.20, endurance: 1.20,
+    max_strength: 0.90, power: 0.90,
+  },
+};
+export function focusBoost(zone, focus) {
+  if (!focus || focus === "balanced") return 1.0;
+  const m = FOCUS_MULTIPLIERS[focus];
+  return m?.[zone] ?? 1.0;
+}
+
 export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const {
     freshMap = null,
@@ -178,6 +210,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     tMax = CONTINUOUS_T_MAX,
     tStep = CONTINUOUS_T_STEP,
     bandwidth = CONTINUOUS_BANDWIDTH,
+    climbingFocus = "balanced",
   } = opts;
   // perceivedFatigue + personalGains opts intentionally not consumed
   // here — see the per-T loop below for the rationale. The recommendation
@@ -277,7 +310,11 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // is a separate concern that scales the prescribed LOAD (in the
       // runner / on the tiles), not which ZONE gets picked.
       const ext = externalLoadModifier(zoneKey, activities);
-      const score = adaptBoost * stale * recency * ext;
+      // Climbing-focus multiplier — biases the engine toward zones
+      // that match the user's training goal. 1.0 when focus is
+      // "balanced" or unset (no behavior change for default users).
+      const focus = focusBoost(zoneKey, climbingFocus);
+      const score = adaptBoost * stale * recency * ext * focus;
 
       if (!best || score > best.score) {
         best = {
@@ -299,6 +336,8 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
           stalenessBoost: stale,
           recency,
           ext,
+          focus,           // climbing-focus multiplier at this zone
+          climbingFocus,   // the focus key (for "Why" line surfacing)
           staleStatus: stalenessMap[zoneKey]?.status ?? "ok",
           zone: zoneKey,
         };

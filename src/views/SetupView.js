@@ -479,6 +479,10 @@ export function SetupView({
   connectSlot = null,
   GOAL_CONFIG = {}, GRIP_PRESETS = [],
   bodyWeight = null, tindeq = null,
+  // Cloud-synced training-goal bias for the coaching engine
+  // ("balanced" default; bouldering / power_endurance / endurance).
+  // Threaded to SessionPlanCard which passes it to the engine.
+  climbingFocus = "balanced",
 }) {
   const [warmupActive, setWarmupActive] = useState(false);
 
@@ -589,6 +593,7 @@ export function SetupView({
         perceivedRpe={config.perceivedRpe ?? 1}
         onPerceivedRpeChange={(v) => setConfig(c => ({ ...c, perceivedRpe: v }))}
         personalGains={personalGains}
+        climbingFocus={climbingFocus}
       />
 
 

@@ -290,6 +290,56 @@ export async function fetchReps() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// USER SETTINGS (cloud-synced preferences)
+// ─────────────────────────────────────────────────────────────
+// One row per user keyed on auth.uid(). settings is JSONB so new
+// keys can be added without schema migrations — see the
+// `user_settings` migration for the rationale.
+
+// Fetch the signed-in user's settings object. Returns {} when no
+// row exists yet (new user) and null on error. The caller should
+// merge with local defaults rather than treating null as empty.
+export async function fetchUserSettings() {
+  try {
+    const { data, error } = await supabase
+      .from("user_settings")
+      .select("settings")
+      .maybeSingle();
+    if (error) { console.warn("Supabase settings fetch:", error.message); return null; }
+    return data?.settings || {};
+  } catch (e) {
+    console.warn("Supabase settings fetch exception:", e.message);
+    return null;
+  }
+}
+
+// Upsert the user's settings. The row's user_id defaults from
+// auth.uid() via RLS, so we just send the settings object. Patch
+// semantics: pass only the keys you want to change; server-side
+// uses JSONB || operator? No — Supabase upsert overwrites the
+// whole row. Caller should fetch first, merge, then push, or this
+// helper can do it. For now we accept the full settings object;
+// the App.js layer merges with local cached settings before push.
+export async function pushUserSettings(settings) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.id) return false;
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert({
+        user_id: user.id,
+        settings,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+    if (error) { console.warn("Supabase settings push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase settings push exception:", e.message);
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // REP TOMBSTONE HELPERS (rep_tombstones table)
 // ─────────────────────────────────────────────────────────────
 // Synced delete tracking. Previously LS_REP_DELETED_KEY was per-device,

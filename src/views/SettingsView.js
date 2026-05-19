@@ -35,6 +35,11 @@ export function SettingsView({
   unit = "lbs", onUnitChange = () => {},
   bodyWeight = null, onBWChange = () => {},
   trip = { date: "", name: "" }, onTripChange = () => {},
+  // Cloud-synced training goal bias. "balanced" (default) means the
+  // engine runs unmodified; the three preset focuses (bouldering,
+  // power_endurance, endurance) nudge zone recommendations toward
+  // the climbing style the user is training for.
+  climbingFocus = "balanced", onClimbingFocusChange = () => {},
   onPullFromCloud = () => {}, pullStatus = "idle", lastPulledAt = null,
 }) {
   const [showSQL, setShowSQL] = useState(false);
@@ -159,10 +164,55 @@ CREATE POLICY "auth_all" ON reps
         </Sect>
       </Card>
 
-      {/* (Training Focus card removed May 2026 — under the curve-trust
-          philosophy the curve is the single source of truth; no user-
-          configurable bias overrides it. Old localStorage entries
-          under ft_training_focus are orphaned but harmless.) */}
+      {/* Climbing Focus — gentle per-zone bias for the coaching engine.
+          Returned in May 2026 after a brief absence; the earlier
+          iteration was a hard override and got removed under the
+          curve-trust philosophy. This is a softer reintroduction:
+          1.10–1.20× boost / 0.90× de-emphasis multipliers that tip
+          close calls toward the user's training goal, never override
+          strong signals like curve-coverage debt or recent climbing
+          fatigue. Defaults to Balanced (no bias). Cloud-synced via
+          user_settings so the choice follows the user across
+          devices. See coaching.js FOCUS_MULTIPLIERS for the table. */}
+      <Card>
+        <Sect title="Climbing Focus">
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+            Nudges training-zone recommendations toward your climbing goal. Gentle bias — close calls only, the engine's curve-coverage and adaptation signals still drive most picks.
+          </div>
+          {(() => {
+            const opts = [
+              { key: "balanced",        label: "Balanced",     desc: "no bias (default)" },
+              { key: "bouldering",      label: "Bouldering",   desc: "max strength + power" },
+              { key: "power_endurance", label: "Power Endurance", desc: "sustained crimpy routes" },
+              { key: "endurance",       label: "Endurance",    desc: "long pumpy routes" },
+            ];
+            return (
+              <div style={{ display: "grid", gap: 6 }}>
+                {opts.map(o => {
+                  const active = climbingFocus === o.key;
+                  return (
+                    <button key={o.key}
+                      onClick={() => onClimbingFocusChange(o.key)}
+                      style={{
+                        padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                        textAlign: "left", border: `1px solid ${active ? C.blue : C.border}`,
+                        background: active ? `${C.blue}1a` : C.bg,
+                        color: active ? C.text : C.muted,
+                      }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: active ? C.blue : C.text }}>
+                        {o.label}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                        {o.desc}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </Sect>
+      </Card>
 
       <Card>
         <Sect title="Cloud Sync (Supabase)">

@@ -44,6 +44,7 @@ import {
   fetchWorkoutSessions, deleteWorkoutSession,
   pushBW, fetchBWLog,
   pushActivity, deleteActivityCloud, fetchActivities,
+  fetchUserSettings, pushUserSettings,
 } from "./lib/sync.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
@@ -103,6 +104,7 @@ const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
 // The localStorage entry "ft_baseline" is orphaned but harmless.)
 const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }]
 const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — user-configurable target date
+const LS_CLIMBING_FOCUS_KEY = "ft_climbing_focus";  // "balanced" | "bouldering" | "power_endurance" | "endurance" — feeds coaching engine focusBoost
 
 // Small App-local helpers.
 // uid + nowISO now live in src/util.js (uid is used by addActivity
@@ -316,9 +318,53 @@ export default function App() {
     saveLS(LS_TRIP_KEY, merged);
   };
 
-  // (Training Focus removed May 2026 — under the curve-trust model the
-  // curve is the single source of truth; no user-configurable bias
-  // overrides it. See coaching.js for the unweighted score function.)
+  // ── Climbing focus (cloud-synced training goal bias) ──────
+  // "balanced" (default), "bouldering", "power_endurance", "endurance"
+  // — feeds focusBoost() in coaching.js to bias zone recommendations
+  // toward the climbing goal. Synced to user_settings table so the
+  // selection follows the user across devices.
+  //
+  // (Earlier Training Focus iteration was removed in May 2026 under
+  // the curve-trust philosophy as a hard override. This is a softer
+  // re-introduction: gentle multipliers (1.10-1.20× boost, 0.90×
+  // de-emphasis) that nudge close calls, never override strong
+  // signals like curve-coverage debt or recent climbing fatigue.)
+  const [climbingFocus, setClimbingFocusState] = useState(() => {
+    const stored = loadLS(LS_CLIMBING_FOCUS_KEY);
+    return (typeof stored === "string" && stored) ? stored : "balanced";
+  });
+  const saveClimbingFocus = (next) => {
+    setClimbingFocusState(next);
+    saveLS(LS_CLIMBING_FOCUS_KEY, next);
+    // Fire-and-forget cloud push so cross-device sync is automatic.
+    // Merge with existing cloud settings so we don't clobber any
+    // future keys the user has set.
+    if (user) {
+      (async () => {
+        const current = (await fetchUserSettings()) || {};
+        await pushUserSettings({ ...current, climbing_focus: next });
+      })().catch(() => {});
+    }
+  };
+
+  // Pull climbing focus from cloud on sign-in. If cloud has a value
+  // and it differs from local, cloud wins (last-edit-on-any-device).
+  // No conflict resolution beyond that — focus is a single scalar.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const cloud = await fetchUserSettings();
+      if (cancelled || !cloud) return;
+      const cf = cloud.climbing_focus;
+      if (typeof cf === "string" && cf && cf !== climbingFocus) {
+        setClimbingFocusState(cf);
+        saveLS(LS_CLIMBING_FOCUS_KEY, cf);
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   // ── Session notes ─────────────────────────────────────────
   const [notes, setNotes] = useState(() => loadLS(LS_NOTES_KEY) || {});
@@ -701,6 +747,7 @@ export default function App() {
               GRIP_PRESETS={GRIP_PRESETS}
               bodyWeight={bodyWeight}
               tindeq={tindeq}
+              climbingFocus={climbingFocus}
             />
           );
         }
@@ -842,6 +889,8 @@ export default function App() {
           onBWChange={saveBW}
           trip={trip}
           onTripChange={saveTrip}
+          climbingFocus={climbingFocus}
+          onClimbingFocusChange={saveClimbingFocus}
           onPullFromCloud={pullFromCloud}
           pullStatus={pullStatus}
           lastPulledAt={lastPulledAt}
