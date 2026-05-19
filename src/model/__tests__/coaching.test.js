@@ -60,6 +60,28 @@ describe("recencyPenalty", () => {
     // But Power (refTime 30s) was not trained
     expect(recencyPenalty("power", history, "Crusher")).toBe(1.0);
   });
+
+  test("prefers actual_time_s over target_duration when present", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    // User targeted strength_endurance (140s) but only held 60s. The
+    // body trained power_strength, not strength_endurance — so:
+    //   recencyPenalty(power_strength) should be ~0 (fresh)
+    //   recencyPenalty(strength_endurance) should be 1.0 (untouched)
+    // This matches getZoneStaleness's bucketing so both functions
+    // agree on what counts as "trained in zone."
+    const history = [{
+      grip: "Crusher", target_duration: 140, actual_time_s: 60, date: today,
+    }];
+    expect(recencyPenalty("power_strength",     history, "Crusher")).toBeLessThan(0.1);
+    expect(recencyPenalty("strength_endurance", history, "Crusher")).toBe(1.0);
+  });
+
+  test("falls back to target_duration when actual_time_s is missing", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    // Legacy / manual rep with no actual_time_s — bucket by target.
+    const history = [{ grip: "Crusher", target_duration: 30, date: today }];
+    expect(recencyPenalty("power", history, "Crusher")).toBeLessThan(0.1);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────

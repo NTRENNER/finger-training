@@ -61,15 +61,28 @@ export const COACH_RECOVERY_TAU_DAYS = {
 // asymptotically to 1.0 as days_ago grows. Zone-specific tau means
 // Power recovers faster than Endurance. Returns 1.0 if zone never trained.
 //
-// Matches reps by ZONE bucket (zoneOf), not exact target_duration. Under
-// the continuous engine the user can train at any T in the zone's range
-// (e.g. T=145s is strength_endurance even though ZONE_REF_T is 160s) —
-// the rep should still count as recently training that zone.
+// Buckets reps by ACTUAL hold time (zoneOf(actual_time_s)), matching
+// getZoneStaleness's definition of "training a zone." Targeting a 140s
+// (S·E) hold but only lasting 60s means the body trained power_strength,
+// not S·E — both functions should agree. Falls back to target_duration
+// when actual_time_s is missing (legacy or manual rows).
+//
+// Earlier version used target_duration only. That disagreed with
+// getZoneStaleness: an off-target session locked in recency for the
+// INTENDED zone (cutting the staleness boost) without producing any
+// actual-time data in that zone. Result: genuinely-never-trained zones
+// like the user's Crusher S·E never won the recommendation despite
+// being correctly flagged as "never sampled" by the coverage card.
+// See conversation re: T=160s never being recommended on Crusher.
 export function recencyPenalty(zone, history, grip) {
   if (!grip || !history || history.length === 0) return 1.0;
   const tau = COACH_RECOVERY_TAU_DAYS[zone] ?? 2;
   const matchingDates = history
-    .filter(r => r.grip === grip && r.target_duration > 0 && zoneOf(r.target_duration) === zone)
+    .filter(r => {
+      if (r.grip !== grip) return false;
+      const td = r.actual_time_s > 0 ? r.actual_time_s : r.target_duration;
+      return td > 0 && zoneOf(td) === zone;
+    })
     .map(r => r.date)
     .filter(Boolean);
   if (matchingDates.length === 0) return 1.0;
