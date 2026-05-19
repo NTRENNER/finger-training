@@ -163,6 +163,17 @@ export function externalLoadModifier(zone, activities) {
 // by stalenessBoost — never-trained zones still get recommended when
 // no residual signal exists, which is correct: anchoring the curve
 // at unexplored durations IS the training opportunity.
+//
+// NEVER-ZONE adaptBoost FLOOR (May 2026): when zoneStatus is "never",
+// adaptBoost is floored at 1.0 so the 3.0× exploration boost can
+// actually win. Otherwise above-curve residuals from neighboring
+// sampled zones leak in via the Gaussian kernel (σ=30s) and crush
+// the boost down to 0.6, letting a routine Power pick win over a
+// never-sampled S·E zone. The curve through a never zone is pure
+// extrapolation from the three-exp fit; residual leakage from
+// neighbors is unreliable evidence about what would happen at that T.
+// Genuine in-zone limiters (adaptBoost > 1) still push higher than
+// the 1.0 floor — see per-T loop for the implementation.
 const CONTINUOUS_T_MIN = 5;     // s — shortest meaningful hold
 const CONTINUOUS_T_MAX = 240;   // s — longest meaningful hold
 const CONTINUOUS_T_STEP = 5;    // s — sweep granularity
@@ -290,9 +301,25 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // we ALSO actively skip strength zones since training there
       // contributes less marginal AUC than training a limiter.
       const room = 1 - localRatio;
-      const adaptBoost = Math.max(0.2, Math.min(3.0, 1 + room * 3));
+      let adaptBoost = Math.max(0.2, Math.min(3.0, 1 + room * 3));
 
       const zoneKey = zoneOf(T);
+      const zoneStatus = stalenessMap[zoneKey]?.status ?? "ok";
+      // Never-sampled zones: floor adaptBoost at 1.0 so the staleness
+      // 3.0× exploration boost can actually win the recommendation. The
+      // curve through a never-sampled zone is pure extrapolation from
+      // the three-exp fit; above-curve residuals leaking in from
+      // neighboring zones via the Gaussian kernel are unreliable
+      // evidence about what would happen at this T. Without this floor
+      // a Crusher S·E zone (T=160s) with no direct samples can have
+      // adaptBoost crushed to 0.2 by above-curve residuals from
+      // neighboring Strength reps (95-121s) — net score 0.2 × 3.0 = 0.6
+      // loses to a routine Power pick at 0.98. The floor preserves the
+      // "anchor unexplored zones" intent of the 3.0× boost while still
+      // letting genuine in-zone limiters (adaptBoost > 1) push higher.
+      if (zoneStatus === "never") {
+        adaptBoost = Math.max(adaptBoost, 1.0);
+      }
       const stale = stalenessBoost(zoneKey, stalenessMap);
       // Recency: just-trained zones get crushed (~0 immediately after
       // training, recovering to 1.0 over the zone's tau). Same per-zone
@@ -338,7 +365,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
           ext,
           focus,           // climbing-focus multiplier at this zone
           climbingFocus,   // the focus key (for "Why" line surfacing)
-          staleStatus: stalenessMap[zoneKey]?.status ?? "ok",
+          staleStatus: zoneStatus,
           zone: zoneKey,
         };
       }

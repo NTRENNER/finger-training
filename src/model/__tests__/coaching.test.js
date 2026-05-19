@@ -337,6 +337,67 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.T < 140 || rec.T >= 180).toBe(true);
   });
 
+  test("never-sampled zone wins over above-curve sampled zone (adaptBoost floor)", () => {
+    // Reproduce the May 2026 issue: Crusher Strength reps showing above-
+    // curve performance at 90-120s suppressed the adaptBoost at T=160s
+    // (Strength·Endurance) via Gaussian kernel leak, letting Power win
+    // even though S·E was "never" sampled (3.0× boost).
+    //
+    // History: solid coverage at 30-120s with the user above curve at
+    // 95-120s (~1.4× the fit). No samples in [140, 180) → S·E status
+    // should be "never" → 3.0× staleness boost.
+    //
+    // Without the floor: adaptBoost at T=160 gets crushed by leakage
+    // from above-curve 95-120s reps → ~0.2 × 3.0 = 0.6, loses to Power.
+    // With the floor: adaptBoost ≥ 1.0 in S·E → 1.0 × 3.0 = 3.0, wins.
+    const history = [
+      // Power zone, on curve (T=30s)
+      buildRep("L", 30, F_curve(30), 6),
+      buildRep("L", 30, F_curve(30), 12),
+      // Strength zone, ABOVE curve (T=95, T=120s) — this is what was
+      // leaking into T=160 via the Gaussian
+      buildRep("L", 95,  F_curve(95)  * 1.4, 8),
+      buildRep("L", 120, F_curve(120) * 1.4, 8),
+      buildRep("L", 120, F_curve(120) * 1.4, 18),
+      // Endurance anchor (T=220s) — well away from S·E so it doesn't
+      // dominate the localRatio computation at 160
+      buildRep("L", 220, F_curve(220), 14),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher",
+      { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    // Pick should land in the strength_endurance zone [140, 180)
+    expect(rec.zone).toBe("strength_endurance");
+    expect(rec.staleStatus).toBe("never");
+    // Floor pinned adaptBoost ≥ 1.0 in the never zone
+    expect(rec.adaptBoost).toBeGreaterThanOrEqual(1.0);
+  });
+
+  test("never-zone floor does not lift adaptBoost above 1.0 for limiter signal", () => {
+    // The floor is a MINIMUM, not a ceiling — a genuine below-curve
+    // signal in a never zone should still produce adaptBoost > 1.0.
+    // (Unlikely in practice since "never" means no in-zone data, but
+    // kernel leakage from a below-curve neighbor can drive localRatio
+    // below 1.0 at the never-zone's T.) Pin the contract that the floor
+    // doesn't clamp UP — only floors at 1.0 when adaptBoost would
+    // otherwise drop below.
+    const history = [
+      // Strong below-curve signal at 120s (Strength), bleeds into 160s
+      buildRep("L", 30,  F_curve(30),          5),
+      buildRep("L", 60,  F_curve(60),          5),
+      buildRep("L", 120, F_curve(120) * 0.5,   5),
+      buildRep("L", 120, F_curve(120) * 0.5,  10),
+      buildRep("L", 220, F_curve(220),        15),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher",
+      { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    // adaptBoost can be > 1.0 (limiter signal won't be clamped down)
+    expect(rec.adaptBoost).toBeGreaterThan(0);
+  });
+
   test("residualBoost field is preserved as alias for adaptBoost (back-compat)", () => {
     const history = [buildRep("L", 30, F_curve(30)), buildRep("L", 60, F_curve(60))];
     const priors = buildThreeExpPriors(history);
@@ -406,11 +467,12 @@ describe("coachingRecommendationContinuous", () => {
       session_id: `s-${grip}-${daysAgo}-${T}`,
     });
     // History: Crusher trained across all zones recently (none stale on
-    // Crusher), AND Micro trained at short Ts only (50 days ago) so Micro
-    // endurance is genuinely stale. Under pooled staleness the Crusher
-    // endurance training would mask Micro endurance's staleness; under
-    // per-grip staleness Micro endurance still flags as stale and the
-    // engine should pick endurance for Micro.
+    // Crusher), AND Micro trained everywhere EXCEPT endurance (also 50
+    // days ago — past every zone's lockout window). Endurance is the
+    // uniquely never-sampled Micro zone, so under per-grip staleness it
+    // should uniquely earn the 3.0× boost while all other Micro zones
+    // get the 2.0× stale boost. Pooled staleness would mask Micro
+    // endurance behind the Crusher endurance training.
     const history = [
       // Crusher: full coverage today
       rep("L", "Crusher", 10,  F_curve(10),  0),
@@ -419,19 +481,21 @@ describe("coachingRecommendationContinuous", () => {
       rep("L", "Crusher", 115, F_curve(115), 0),
       rep("L", "Crusher", 160, F_curve(160), 0),
       rep("L", "Crusher", 220, F_curve(220), 0),
-      // Micro: short-T only, 50 days ago — endurance window is 35d so
-      // Micro endurance is well past stale.
-      rep("L", "Micro", 10, F_curve(10), 50),
-      rep("L", "Micro", 30, F_curve(30), 50),
-      rep("L", "Micro", 70, F_curve(70), 50),
+      // Micro: covers max_strength through strength_endurance (50d ago)
+      // but never trained endurance. Endurance is uniquely "never".
+      rep("L", "Micro", 10,  F_curve(10),  50),
+      rep("L", "Micro", 30,  F_curve(30),  50),
+      rep("L", "Micro", 70,  F_curve(70),  50),
+      rep("L", "Micro", 115, F_curve(115), 50),
+      rep("L", "Micro", 160, F_curve(160), 50),
     ];
     const priors = buildThreeExpPriors(history);
     const rec = coachingRecommendationContinuous(history, "Micro",
       { threeExpPriors: priors, today });
     expect(rec).not.toBeNull();
-    // Engine should see Micro endurance as stale and prefer it. Pick
-    // should land in the endurance bucket (T ≥ 180s).
+    // Engine should see Micro endurance as never-trained and prefer it
+    // over the stale-but-sampled zones. Pick lands in endurance (T ≥ 180s).
     expect(rec.zone).toBe("endurance");
-    expect(rec.staleStatus).not.toBe("ok");
+    expect(rec.staleStatus).toBe("never");
   });
 });
