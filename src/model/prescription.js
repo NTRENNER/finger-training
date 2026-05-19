@@ -262,29 +262,10 @@ export function fitDoseK(history, opts = {}) {
   return bestK;
 }
 
-// ─────────────────────────────────────────────────────────────
-// SESSION COMPARTMENT AUC  (depends on effectiveLoad)
-// ─────────────────────────────────────────────────────────────
-// Textbook PK-style integral: dose_i = load × A_i × τ_Di × (1 − e^(−t/τ_Di))
-// Returns { fast, medium, slow, total } in kg·s units.
-export function sessionCompartmentAUC(reps, physModel = PHYS_MODEL_DEFAULT) {
-  const comps = [
-    { key: "fast",   A: physModel.weights.fast,   tauD: physModel.tauD.fast   },
-    { key: "medium", A: physModel.weights.medium, tauD: physModel.tauD.medium },
-    { key: "slow",   A: physModel.weights.slow,   tauD: physModel.tauD.slow   },
-  ];
-  const out = { fast: 0, medium: 0, slow: 0 };
-  for (const r of reps || []) {
-    const t = r.actual_time_s;
-    const L = effectiveLoad(r);
-    if (!t || !L || t <= 0 || L <= 0) continue;
-    for (const c of comps) {
-      out[c.key] += L * c.A * c.tauD * (1 - Math.exp(-t / c.tauD));
-    }
-  }
-  out.total = out.fast + out.medium + out.slow;
-  return out;
-}
+// (sessionCompartmentAUC moved to fatigue.js as sessionComponentAUC during
+// the three-timescale rebrand. The prescription.js copy was a dead
+// duplicate — no runtime caller, only the fatigue.test.js test exercised
+// either definition. Deleted May 2026.)
 
 // (RPE-10 progression bump retired in May 2026: rpeProgressionMultiplier,
 // BUMP_PER_SUCCESS, MAX_BUMP_MULT all gone. The train-to-failure model

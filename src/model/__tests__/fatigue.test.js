@@ -1,11 +1,11 @@
-// Tests for src/model/fatigue.js — three-compartment fatigue + session
+// Tests for src/model/fatigue.js — three-timescale fatigue + session
 // planner. Covers fatigueDose, fatigueAfterRest, availFrec, predictRepTimes,
-// sessionCompartmentAUC.
+// sessionComponentAUC.
 
 import {
   PHYS_MODEL_DEFAULT, DEF_FAT,
   fatigueDose, fatigueAfterRest, availFrac,
-  predictRepTimes, sessionCompartmentAUC,
+  predictRepTimes, sessionComponentAUC,
 } from "../fatigue.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -119,11 +119,11 @@ describe("predictRepTimes", () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// sessionCompartmentAUC — per-compartment dose accumulation
+// sessionComponentAUC — per-component dose accumulation
 // ─────────────────────────────────────────────────────────────
-describe("sessionCompartmentAUC", () => {
+describe("sessionComponentAUC", () => {
   test("returns zero dose for empty session", () => {
-    const out = sessionCompartmentAUC([]);
+    const out = sessionComponentAUC([]);
     expect(out.fast).toBe(0);
     expect(out.medium).toBe(0);
     expect(out.slow).toBe(0);
@@ -136,16 +136,16 @@ describe("sessionCompartmentAUC", () => {
       { actual_time_s: 30, avg_force_kg: 20 },
       { actual_time_s: 30, avg_force_kg: 20 },
     ];
-    const o1 = sessionCompartmentAUC(oneRep);
-    const o2 = sessionCompartmentAUC(twoReps);
+    const o1 = sessionComponentAUC(oneRep);
+    const o2 = sessionComponentAUC(twoReps);
     expect(o2.total).toBeCloseTo(2 * o1.total, 6);
   });
 
   test("short reps load fast more than slow; long reps load slow more", () => {
     const shortRep = [{ actual_time_s: 5, avg_force_kg: 20 }];
     const longRep  = [{ actual_time_s: 180, avg_force_kg: 20 }];
-    const sOut = sessionCompartmentAUC(shortRep);
-    const lOut = sessionCompartmentAUC(longRep);
+    const sOut = sessionComponentAUC(shortRep);
+    const lOut = sessionComponentAUC(longRep);
     // The long rep should deliver more slow-component dose than the
     // short rep does (a 180s hold sustains long enough to drive the
     // slow-timescale component).
@@ -163,8 +163,8 @@ describe("sessionCompartmentAUC", () => {
       { actual_time_s: 30, avg_force_kg: 0 },      // bad F (and weight_kg falls to 0 too)
       { actual_time_s: 30 },                       // missing F entirely
     ];
-    const out = sessionCompartmentAUC(reps);
-    const single = sessionCompartmentAUC([{ actual_time_s: 30, avg_force_kg: 20 }]);
+    const out = sessionComponentAUC(reps);
+    const single = sessionComponentAUC([{ actual_time_s: 30, avg_force_kg: 20 }]);
     expect(out.total).toBeCloseTo(single.total, 6);
   });
 });

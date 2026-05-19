@@ -1208,7 +1208,7 @@ export function AnalysisView({
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Force-Duration Analysis</h2>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-        Where failures fall on the fatigue curve reveals which energy system is your limiter — and what to train next.
+        Where reps fall relative to your force-duration curve shows which timescale is your limiter — and what to train next.
       </p>
 
       {/* Bodyweight logging lives on the Setup tab now (next to the

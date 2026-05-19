@@ -63,7 +63,7 @@ function _solve2(A, b) {
           (A[0][0]*b[1] - A[1][0]*b[0]) / det];
 }
 
-// Fit three-compartment amplitudes (a, b, c) to failure observations
+// Fit three-component amplitudes (a, b, c) to failure observations
 // with non-negativity constraints and a Gaussian shrinkage prior.
 //
 //   minimize over (a,b,c) ≥ 0 of:
@@ -157,7 +157,7 @@ export function predForceThreeExp(amps, T, taus = null) {
 
 // Definite integral of the three-exp F-D curve over [tMin, tMax]:
 //   ∫ a·e^(-t/τ) dt = a·τ·(e^(-tMin/τ) - e^(-tMax/τ))
-// Sum over the three compartments. Units = force·seconds (force-area).
+// Sum over the three components. Units = force·seconds (force-area).
 //
 // Used as a single "total capacity" scalar for the Journey/AUC tracker
 // — captures the area beneath the user's whole curve from the Power

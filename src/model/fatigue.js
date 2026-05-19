@@ -38,7 +38,7 @@ export const PHYS_MODEL_DEFAULT = {
   sMax:    null,   // per-(hand,grip), filled in from history
 };
 
-// Three-compartment fatigue decay parameters (defaults; derived from
+// Three-timescale fatigue decay parameters (defaults; derived from
 // PHYS_MODEL_DEFAULT for backwards compat with fatigueAfterRest's
 // {A1,tau1,...} call shape). Migrate fresh code to read PHYS_MODEL_DEFAULT
 // directly instead of DEF_FAT.
@@ -57,8 +57,8 @@ export function fatigueDose(weightKg, durationS, sMaxKg, k = PHYS_MODEL_DEFAULT.
 }
 
 // Fatigue remaining after a rest of restSeconds, given a current fatigue
-// state F. Each compartment recovers at its own tauR; total remaining is
-// the weighted sum of compartment fractions still in the fatigued pool.
+// state F. Each component recovers at its own tauR; total remaining is
+// the weighted sum of component fractions still in the fatigued pool.
 export function fatigueAfterRest(F, restSeconds, p = DEF_FAT) {
   const { A1, tau1, A2, tau2, A3, tau3 } = p;
   return F * (
@@ -73,7 +73,7 @@ export function fatigueAfterRest(F, restSeconds, p = DEF_FAT) {
 // can hold something briefly.
 export const availFrac = (F) => clamp(1 - F, 0.05, 1.0);
 
-// Returns the canonical three-compartment physModel for a (hand, grip)
+// Returns the canonical three-timescale physModel for a (hand, grip)
 // pair, with sMax filled in from the user's history. Taus and weights
 // are still population priors at this stage; per-user personalization
 // happens via fitThreeExpAmps in threeExp.js.
@@ -98,8 +98,8 @@ export function getPhysModel(history, hand, grip, opts = {}) {
 // ─────────────────────────────────────────────────────────────
 // SESSION PLANNER — per-rep fatigue curve prediction
 // ─────────────────────────────────────────────────────────────
-// Uses the canonical three-compartment depletion/recovery model
-// (PHYS_MODEL_DEFAULT). Each compartment depletes during a hang and
+// Uses the canonical three-timescale depletion/recovery model
+// (PHYS_MODEL_DEFAULT). Each component depletes during a hang and
 // recovers during rest. Returns an array of predicted hold times
 // (seconds) for each rep. Pass an explicit physModel to use a fitted
 // (hand, grip)-specific model; otherwise falls back to defaults.
@@ -130,11 +130,11 @@ export function predictRepTimes({ numReps, firstRepTime, restSeconds, physModel 
 }
 
 // ─────────────────────────────────────────────────────────────
-// PER-COMPARTMENT AUC (training dose delivered to each energy system)
+// PER-COMPONENT AUC (training dose delivered to each curve component)
 // ─────────────────────────────────────────────────────────────
 // Textbook PK-style integral: dose_i = load × A_i × τ_Di × (1 − e^(−t/τ_Di))
 // Returns { fast, medium, slow, total } in kg·s units.
-export function sessionCompartmentAUC(reps, physModel = PHYS_MODEL_DEFAULT) {
+export function sessionComponentAUC(reps, physModel = PHYS_MODEL_DEFAULT) {
   const comps = [
     { key: "fast",   A: physModel.weights.fast,   tauD: physModel.tauD.fast   },
     { key: "medium", A: physModel.weights.medium, tauD: physModel.tauD.medium },
