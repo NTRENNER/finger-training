@@ -54,6 +54,15 @@ import { coachingRecommendationContinuous } from "../../model/coaching.js";
 import { fatigueToModifier } from "../../model/climbingFatigue.js";
 import { applyPersonalGain } from "../../model/perceivedFatigueLearning.js";
 
+// Display labels for the climbing-focus pill in the header. Kept here
+// (vs imported from coaching.js) because coaching.js exports the
+// multiplier table by key, not a human-readable label set.
+const FOCUS_LABEL = {
+  bouldering: "Bouldering",
+  power_endurance: "Power Endurance",
+  endurance: "Endurance",
+};
+
 export function SessionPlanCard({
   history, grip, freshMap, threeExpPriors, activities = [],
   GOAL_CONFIG, unit, hand = "Both",
@@ -74,6 +83,11 @@ export function SessionPlanCard({
   // apply per-zone multipliers that nudge close calls toward the
   // user's training goal.
   climbingFocus = "balanced",
+  // Optional callback wired to the focus pill in the header — tapping
+  // it jumps to Settings so the user can change focus in one tap when
+  // priorities shift (climbing trip, recovery week). Pill only renders
+  // when climbingFocus is non-default ("balanced" stays hidden).
+  onNavigateToSettings,
 }) {
   // ── Recommendation from the continuous engine ──────────────
   const rec = useMemo(
@@ -260,12 +274,37 @@ export function SessionPlanCard({
         <div style={{ fontSize: 14, fontWeight: 700 }}>
           Session Plan · {grip}
         </div>
-        <div style={{
-          fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
-          padding: "2px 8px", borderRadius: 10,
-          background: activeColor + "22", color: activeColor,
-        }}>
-          {activeEmoji} {activeLabel}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          {/* Climbing-focus pill — only renders when focus is non-default.
+              Passive context indicator (not an action): tells the user the
+              engine is biased toward a particular zone family for the goal
+              they're training for. Tap to jump to Settings. The Why-line
+              still surfaces the actual multiplier when focus nudges the
+              winning zone; this pill is for awareness even when focus
+              wasn't the tipping factor. */}
+          {climbingFocus && climbingFocus !== "balanced" && (
+            <button
+              onClick={() => onNavigateToSettings?.()}
+              title="Change in Settings"
+              style={{
+                fontSize: 10, fontWeight: 600, letterSpacing: 0.2,
+                padding: "2px 8px", borderRadius: 10,
+                background: "transparent", color: C.muted,
+                border: `1px solid ${C.border}`,
+                cursor: onNavigateToSettings ? "pointer" : "default",
+                font: "inherit",
+              }}
+            >
+              🧗 {FOCUS_LABEL[climbingFocus] ?? climbingFocus} focus
+            </button>
+          )}
+          <div style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+            padding: "2px 8px", borderRadius: 10,
+            background: activeColor + "22", color: activeColor,
+          }}>
+            {activeEmoji} {activeLabel}
+          </div>
         </div>
       </div>
 

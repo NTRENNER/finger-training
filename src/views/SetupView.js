@@ -483,6 +483,9 @@ export function SetupView({
   // ("balanced" default; bouldering / power_endurance / endurance).
   // Threaded to SessionPlanCard which passes it to the engine.
   climbingFocus = "balanced",
+  // Tab-switch callback used by SessionPlanCard's focus pill to jump
+  // to Settings when the user wants to change their climbing focus.
+  onNavigateToSettings,
 }) {
   const [warmupActive, setWarmupActive] = useState(false);
 
@@ -594,6 +597,7 @@ export function SetupView({
         onPerceivedRpeChange={(v) => setConfig(c => ({ ...c, perceivedRpe: v }))}
         personalGains={personalGains}
         climbingFocus={climbingFocus}
+        onNavigateToSettings={onNavigateToSettings}
       />
 
 

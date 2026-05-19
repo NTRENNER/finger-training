@@ -750,6 +750,7 @@ export default function App() {
               bodyWeight={bodyWeight}
               tindeq={tindeq}
               climbingFocus={climbingFocus}
+              onNavigateToSettings={() => setTab(4)}
             />
           );
         }
