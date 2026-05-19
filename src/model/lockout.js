@@ -111,15 +111,26 @@ export function getZoneStaleness(history, today = new Date()) {
 // zones. Stable for "ok" so most recommendations aren't perturbed;
 // modest bump for "warning" to nudge the user before lockout; firm
 // 2× for "stale" so the engine genuinely prefers it over balanced
-// alternatives. "never" gets the same treatment as "stale" — never-
-// trained zones are the strongest candidates for the lockout system
-// to surface.
+// alternatives.
+//
+// "never" is bumped to 3.0× (higher than "stale") to prioritize
+// baseline coverage before adaptation-gain optimization takes over.
+// Without a sample in a zone, the F-D curve there is pure
+// extrapolation from the three-exp fit — every downstream prediction
+// (recommended load, AUC % gain estimate, force-curves overlay) is
+// less reliable. Calibrated to comfortably outscore typical
+// adaptBoost values (~1.5–2.5) at neutral residual so the engine
+// actually picks coverage when no stronger signal exists. The boost
+// self-resolves the moment a zone gets its first sample: status
+// flips to "ok"/"fresh" and the regular adaptation-gain math runs
+// unchanged. So this acts like a one-month coverage pass for new
+// users without any time-based logic.
 export function stalenessBoost(zoneKey, stalenessMap) {
   const s = stalenessMap?.[zoneKey];
   if (!s) return 1.0;
   switch (s.status) {
+    case "never":   return 3.0;
     case "stale":   return 2.0;
-    case "never":   return 2.0;
     case "warning": return 1.4;
     case "ok":
     default:        return 1.0;
