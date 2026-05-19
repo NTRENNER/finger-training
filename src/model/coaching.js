@@ -29,7 +29,7 @@
 // purple curve the user is looking at.
 
 import { ymdLocal } from "../util.js";
-import { zoneOf } from "./zones.js";
+import { zoneOf, ZONE_REF_T } from "./zones.js";
 import { getZoneStaleness, stalenessBoost } from "./lockout.js";
 import {
   computeSessionFatigue, mostRecentClimbDate, fatigueToModifier,
@@ -343,7 +343,24 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       const focus = focusBoost(zoneKey, climbingFocus);
       const score = adaptBoost * stale * recency * ext * focus;
 
-      if (!best || score > best.score) {
+      // Never-zone tiebreaker: snap to the zone's reference T. The
+      // adaptBoost floor (above) flattens the score across every T
+      // inside a never zone, so the bare argmax would pin the pick
+      // to the zone's lower boundary by first-T tiebreaker (S·E at
+      // T=140 instead of T=160, Endurance at T=180 instead of T=220).
+      // Bias the comparison toward ZONE_REF_T with a penalty far
+      // smaller than any real adaptBoost gradient — sampled-zone
+      // picks and meaningful signals still dominate, but within a
+      // never zone the canonical refT wins. Keeps the engine's
+      // never-zone pick consistent with the refTimes the rest of
+      // the app already surfaces (PrescribedLoadCard, TARGET_OPTIONS).
+      let effectiveScore = score;
+      if (zoneStatus === "never") {
+        const refT = ZONE_REF_T[zoneKey];
+        if (refT) effectiveScore -= Math.abs(T - refT) * 1e-6;
+      }
+
+      if (!best || effectiveScore > best._effectiveScore) {
         best = {
           T,
           hand,
@@ -367,12 +384,16 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
           climbingFocus,   // the focus key (for "Why" line surfacing)
           staleStatus: zoneStatus,
           zone: zoneKey,
+          // Internal: argmax comparator value. Underscore-prefixed
+          // so consumers don't depend on it; stripped before return.
+          _effectiveScore: effectiveScore,
         };
       }
     }
   }
 
   if (!best) return null;
+  delete best._effectiveScore;
 
   // Anchored loads via the unified prescription() — both the headline
   // loadKg (for best.hand) and the per-hand display ("L 38 / R 37").

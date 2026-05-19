@@ -204,20 +204,25 @@ describe("coachingRecommendationContinuous", () => {
   });
 
   test("recommends near a duration where actuals fall below the curve", () => {
-    // Many on-curve data points anchor the fit, plus a single isolated
-    // under-perform at 90s creates a localized limiter signal that the
-    // smoothed residual picks up.
+    // Coverage across every zone (so no never-zone wins by 3.0× boost),
+    // all 8 days ago (every zone is "ok" with recency near 1.0 — neutral
+    // score multipliers across the board). A single under-perform at 90s
+    // creates a localized limiter signal; with enough on-curve reps to
+    // dilute the limiter in the three-exp prior, the fit stays close to
+    // the true curve and the residual at T=90 produces adaptBoost > 1.
+    const d = 8;
     const history = [
-      buildRep("L", 5,  F_curve(5)),
-      buildRep("L", 10, F_curve(10)),
-      buildRep("L", 15, F_curve(15)),
-      buildRep("L", 20, F_curve(20)),
-      buildRep("L", 30, F_curve(30)),
-      buildRep("L", 45, F_curve(45)),
-      buildRep("L", 60, F_curve(60)),
-      buildRep("L", 120, F_curve(120)),
-      buildRep("L", 180, F_curve(180)),
-      buildRep("L", 90, F_curve(90) * 0.6),  // localized under-perform
+      buildRep("L", 5,   F_curve(5),   d),
+      buildRep("L", 10,  F_curve(10),  d),
+      buildRep("L", 15,  F_curve(15),  d),
+      buildRep("L", 20,  F_curve(20),  d),
+      buildRep("L", 30,  F_curve(30),  d),
+      buildRep("L", 45,  F_curve(45),  d),
+      buildRep("L", 60,  F_curve(60),  d),
+      buildRep("L", 120, F_curve(120), d),
+      buildRep("L", 160, F_curve(160), d),   // covers S·E
+      buildRep("L", 180, F_curve(180), d),   // covers endurance boundary
+      buildRep("L", 90,  F_curve(90) * 0.6, d),  // localized limiter
     ];
     const priors = buildThreeExpPriors(history);
     const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
@@ -372,6 +377,51 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.staleStatus).toBe("never");
     // Floor pinned adaptBoost ≥ 1.0 in the never zone
     expect(rec.adaptBoost).toBeGreaterThanOrEqual(1.0);
+  });
+
+  test("never-zone tiebreaker: T snaps to the zone's reference time", () => {
+    // With the adaptBoost floor flattening every T inside a never zone
+    // to the same score, the engine should pick the zone's canonical
+    // refT (S·E → 160) rather than the zone's lower boundary by first-T
+    // accident. History covers max_strength through strength so S·E and
+    // Endurance are both "never"; S·E wins by zone-order, and within
+    // S·E the pick should land at T=160 not T=140 (boundary).
+    const history = [
+      buildRep("L", 10,  F_curve(10),  6),   // max_strength
+      buildRep("L", 30,  F_curve(30),  6),   // power
+      buildRep("L", 30,  F_curve(30),  12),
+      buildRep("L", 70,  F_curve(70),  8),   // power_strength
+      buildRep("L", 95,  F_curve(95)  * 1.4, 8),   // strength (above curve)
+      buildRep("L", 120, F_curve(120) * 1.4, 8),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher",
+      { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    expect(rec.zone).toBe("strength_endurance");
+    expect(rec.staleStatus).toBe("never");
+    expect(rec.T).toBe(160);  // ZONE_REF_T.strength_endurance
+  });
+
+  test("never-zone snap: Endurance pick lands at T=220, not T=180 boundary", () => {
+    // Same property for the Endurance zone. History covers every zone
+    // except Endurance so Endurance is the uniquely-never pick. Pick
+    // should snap to the canonical Endurance refT.
+    const history = [
+      buildRep("L", 10,  F_curve(10),  5),   // max_strength
+      buildRep("L", 30,  F_curve(30),  5),   // power
+      buildRep("L", 70,  F_curve(70),  8),   // power_strength
+      buildRep("L", 95,  F_curve(95),  8),   // strength
+      buildRep("L", 120, F_curve(120), 8),
+      buildRep("L", 160, F_curve(160), 10),  // strength_endurance
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher",
+      { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    expect(rec.zone).toBe("endurance");
+    expect(rec.staleStatus).toBe("never");
+    expect(rec.T).toBe(220);  // ZONE_REF_T.endurance
   });
 
   test("never-zone floor does not lift adaptBoost above 1.0 for limiter signal", () => {
