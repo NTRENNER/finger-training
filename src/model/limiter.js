@@ -72,10 +72,19 @@ export function computeLimiterZone(history) {
   for (const [grip, failures] of rankedGrips) {
     if (failures.length < LIMITER_MIN_FAILURES) continue;
 
-    // Zone-bucket the recent failures.
+    // Zone-bucket the recent failures by ACTUAL hold time. Under
+    // train-to-failure the actual hold is the physiological reality
+    // that produced the data point — a rep targeting 115s (Strength)
+    // that failed at 60s physically tested power_strength, and its
+    // data point lives at T=60 (see line 97 below where trainPts use
+    // actual_time_s). Bucketing by target_duration would file that
+    // rep into Strength but then contaminate the Strength residual
+    // with a T=60 point — internal inconsistency. Fall back to
+    // target_duration only when actual is missing (legacy rows).
     const byZone = Object.fromEntries(ZONE_KEYS.map(k => [k, []]));
     for (const r of failures) {
-      const k = zoneOf(r.target_duration);
+      const td = r.actual_time_s > 0 ? r.actual_time_s : r.target_duration;
+      const k = zoneOf(td);
       if (byZone[k]) byZone[k].push(r);
     }
 
