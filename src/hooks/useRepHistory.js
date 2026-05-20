@@ -300,9 +300,35 @@ export function useRepHistory({ user }) {
 
         // If we pushed offline reps, refetch so state includes them with
         // proper server-assigned ids. Otherwise use the first fetch.
-        const finalReps = pushedAny ? (await fetchReps()) : remote;
+        const cloudReps = pushedAny ? (await fetchReps()) : remote;
         if (cancelled) return;
-        if (finalReps && finalReps.length > 0) setHistory(finalReps);
+        if (!cloudReps) return;
+
+        // MERGE, don't replace. Verify every toSync rep actually landed
+        // in cloud after the push round. Any that didn't are either:
+        //   (a) push-failed and already in the retry queue (network blip,
+        //       RLS error, etc.), or
+        //   (b) silently dropped server-side — e.g. a BEFORE INSERT trigger
+        //       that uses RETURN NULL skips the row without raising an
+        //       error, so pushRep returns true but the row isn't actually
+        //       in cloud (see reject_tombstoned_rep_insert).
+        // Preserve all of them in local state. The previous behavior
+        // (setHistory(cloudReps) unconditionally) replaced local with
+        // cloud and DISCARDED real workout data the user had entered.
+        // Re-queue silent drops so the retry mechanism gets a shot at
+        // them on the next cycle — enqueueReps de-dupes by id so this
+        // is safe to call on reps that are already queued.
+        const cloudIdSet = new Set(cloudReps.map(r => r.id).filter(Boolean));
+        const cloudSlotSet = new Set(cloudReps.map(compositeKey));
+        const preserved = toSync.filter(r =>
+          !(r.id && cloudIdSet.has(r.id)) &&
+          !cloudSlotSet.has(compositeKey(r))
+        );
+        if (preserved.length > 0) enqueueReps(preserved);
+        const finalReps = preserved.length > 0
+          ? [...cloudReps, ...preserved]
+          : cloudReps;
+        if (finalReps.length > 0) setHistory(finalReps);
       }
 
       if (!cancelled) refreshPending();

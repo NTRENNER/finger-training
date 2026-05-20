@@ -577,8 +577,25 @@ export default function App() {
           if (ok) pushedAny = true;
           else enqueueReps([rep]);
         }
-        const finalReps = pushedAny ? (await fetchReps()) : remoteReps;
-        replaceHistory(finalReps);
+        // MERGE, don't replace — see useRepHistory.js reconcile for the
+        // full rationale. Any toSync rep that didn't land in the refetched
+        // cloud (push-failed OR silently dropped by a server trigger that
+        // uses RETURN NULL) gets preserved in local state so we don't
+        // discard real workout data. enqueueReps de-dupes by id, safe to
+        // call on already-queued reps.
+        const cloudReps = pushedAny ? (await fetchReps()) : remoteReps;
+        if (cloudReps) {
+          const cloudIdSet = new Set(cloudReps.map(r => r.id).filter(Boolean));
+          const cloudSlotSet = new Set(cloudReps.map(compositeKey));
+          const preserved = toSync.filter(r =>
+            !(r.id && cloudIdSet.has(r.id)) &&
+            !cloudSlotSet.has(compositeKey(r))
+          );
+          if (preserved.length > 0) enqueueReps(preserved);
+          replaceHistory(preserved.length > 0
+            ? [...cloudReps, ...preserved]
+            : cloudReps);
+        }
       }
 
       // Workout sessions — merge into localStorage (skipping tombstoned ids).
