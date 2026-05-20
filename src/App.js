@@ -39,7 +39,7 @@ import { useAuth } from "./hooks/useAuth.js";
 import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import {
-  pushRep, fetchReps, enqueueReps, flushQueue,
+  pushRep, fetchReps, enqueueReps, flushQueue, LS_QUEUE_KEY,
   fetchRepTombstoneIds, fetchRepSlotTombstoneKeys, fetchSessionTombstoneIds,
   fetchWorkoutSessions, deleteWorkoutSession,
   pushBW, fetchBWLog,
@@ -592,9 +592,24 @@ export default function App() {
             !cloudSlotSet.has(compositeKey(r))
           );
           if (preserved.length > 0) enqueueReps(preserved);
-          replaceHistory(preserved.length > 0
-            ? [...cloudReps, ...preserved]
-            : cloudReps);
+
+          // Surface anything still in the retry queue that isn't in cloud
+          // or in `preserved`. The queue is a separate LS stash from the
+          // history — if an earlier reconcile (pre-fix) wiped history while
+          // pushes were failing, the data survived in the queue but became
+          // invisible to the History UI. See useRepHistory.js for the
+          // matching recovery in the auth-flip path.
+          const queue = loadLS(LS_QUEUE_KEY) || [];
+          const preservedIdSet = new Set(preserved.map(r => r.id).filter(Boolean));
+          const preservedSlotSet = new Set(preserved.map(compositeKey));
+          const fromQueue = queue.filter(r =>
+            !(r.id && cloudIdSet.has(r.id)) &&
+            !cloudSlotSet.has(compositeKey(r)) &&
+            !(r.id && preservedIdSet.has(r.id)) &&
+            !preservedSlotSet.has(compositeKey(r))
+          );
+
+          replaceHistory([...cloudReps, ...preserved, ...fromQueue]);
         }
       }
 

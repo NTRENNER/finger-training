@@ -325,9 +325,26 @@ export function useRepHistory({ user }) {
           !cloudSlotSet.has(compositeKey(r))
         );
         if (preserved.length > 0) enqueueReps(preserved);
-        const finalReps = preserved.length > 0
-          ? [...cloudReps, ...preserved]
-          : cloudReps;
+
+        // Surface anything still in the retry queue that isn't already
+        // in cloud or in `preserved`. The retry queue (LS_QUEUE_KEY) is
+        // a separate stash from LS_HISTORY_KEY — if a prior reconcile
+        // wiped history while pushes were failing, the reps survived
+        // in the queue but became invisible to the History UI. Stitch
+        // them back so the user sees what they actually entered, even
+        // when it still can't sync. Recovery path for the May 19 2026
+        // missing-finger-workout case.
+        const queue = loadLS(LS_QUEUE_KEY) || [];
+        const preservedIdSet = new Set(preserved.map(r => r.id).filter(Boolean));
+        const preservedSlotSet = new Set(preserved.map(compositeKey));
+        const fromQueue = queue.filter(r =>
+          !(r.id && cloudIdSet.has(r.id)) &&
+          !cloudSlotSet.has(compositeKey(r)) &&
+          !(r.id && preservedIdSet.has(r.id)) &&
+          !preservedSlotSet.has(compositeKey(r))
+        );
+
+        const finalReps = [...cloudReps, ...preserved, ...fromQueue];
         if (finalReps.length > 0) setHistory(finalReps);
       }
 
