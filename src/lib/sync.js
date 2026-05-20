@@ -201,11 +201,38 @@ export function repPayload(rep) {
 // The DB-level UNIQUE constraint reps_workout_slot_unique was added
 // in migration `reps_unique_workout_slot` (May 2026) — see the
 // migration for the full rationale.
+
+// id column on reps is type uuid. Anything that isn't a valid UUID
+// makes Postgres reject with "invalid input syntax for type uuid: ..."
+// — pushRep returns false, the rep enters the retry queue, and it
+// fails forever. Old client bundles stamped session-id-style 8-char
+// base-36 strings as rep ids (e.g. "22beh911", "5p5cts4k"); reps
+// created by those bundles never sync. Validate the id at push time
+// and re-stamp anything that doesn't match the UUID v4 shape so the
+// queue can finally drain. The DB row will have a fresh server-side
+// id; dedup happens on the workout-slot unique constraint, so a
+// re-stamped local id can't create a duplicate.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function ensureUuidId(rep) {
+  if (rep.id && UUID_RE.test(rep.id)) return rep;
+  const newId = (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    // Fallback for environments without crypto.randomUUID (very old
+    // browsers, some sandboxes). Builds a v4-shaped string with
+    // 12 hex chars of entropy in the last group.
+    : `${Date.now().toString(16).padStart(8, "0").slice(-8)}-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
+  if (rep.id) {
+    console.warn(`pushRep: re-stamping non-UUID id "${rep.id}" → "${newId}"`);
+  }
+  return { ...rep, id: newId };
+}
+
 export async function pushRep(rep) {
   try {
+    const safeRep = ensureUuidId(rep);
     const { error } = await supabase
       .from("reps")
-      .upsert([repPayload(rep)], { onConflict: "session_id,set_num,rep_num,hand" });
+      .upsert([repPayload(safeRep)], { onConflict: "session_id,set_num,rep_num,hand" });
     if (error) { console.warn("Supabase push:", error.message); return false; }
     return true;
   } catch (e) {
