@@ -904,6 +904,8 @@ export default function App() {
       {tab === 3 && (
         <HistoryView
           history={history}
+          freshMap={freshMap}
+          threeExpPriors={threeExpPriors}
           onDownload={() => downloadCSV(history)}
           unit={unit}
           bodyWeight={bodyWeight}

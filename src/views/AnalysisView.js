@@ -284,7 +284,11 @@ export function AnalysisView({
         const handReps = sortedAll.filter(r => r.hand === handKey);
         const handRep1 = handReps[0];
         if (!handRep1) return null;
-        const target = prescription(priorHistory, handKey, grip, targetDuration, {});
+        // Pass freshMap + threeExpPriors so prescription() uses its
+        // curve-fit path rather than the over-extrapolating anchored-
+        // linear fallback. Same fix as HistoryView.
+        const target = prescription(priorHistory, handKey, grip, targetDuration,
+          { freshMap, threeExpPriors });
         return {
           handKey,
           handRep1,
@@ -301,7 +305,7 @@ export function AnalysisView({
         };
       }).filter(Boolean),
     };
-  }, [selectedSessionId, history]);
+  }, [selectedSessionId, history, freshMap, threeExpPriors]);
 
   // BW normalization toggle. When ON, every metric surface (F-D chart,
   // AUC trajectory, Curve Improvement, Hand Asymmetry) renders in

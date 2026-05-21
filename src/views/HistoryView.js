@@ -37,7 +37,15 @@ import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
 
 export function HistoryView({
-  history, onDownload, unit = "lbs", bodyWeight = null,
+  history,
+  // Optional opts passed through to the prescription engine when we
+  // reconstruct "what would the engine recommend for this protocol?"
+  // for the rep-curve chart's target/used load caption. Without these,
+  // prescription() falls through to its degenerate anchored-linear
+  // fallback which can extrapolate wildly off short heavy reps.
+  freshMap = null,
+  threeExpPriors = null,
+  onDownload, unit = "lbs", bodyWeight = null,
   onDeleteSession, onUpdateSession,
   onDeleteRep, onUpdateRep, onAddRep,
   notes = {}, onNoteChange,
@@ -616,8 +624,16 @@ export function HistoryView({
                       targetDuration: sess.target_duration,
                       beforeDate: sess.date,
                     });
+                    // Pass freshMap + threeExpPriors so the engine
+                    // can use its full curve-fit path rather than
+                    // falling through to the anchored-linear fallback
+                    // (which can over-extrapolate by 70–80% off a
+                    // short heavy anchor rep). Using the current-state
+                    // freshMap/priors is fine — the population priors
+                    // barely move from session to session, and we
+                    // want the most accurate retrospective read.
                     const target = prescription(priorHistory, handKey, sess.grip,
-                      sess.target_duration, {});
+                      sess.target_duration, { freshMap, threeExpPriors });
                     return (
                       <div key={handKey} style={{ marginBottom: hands.length > 1 ? 12 : 0 }}>
                         {hands.length > 1 && (
