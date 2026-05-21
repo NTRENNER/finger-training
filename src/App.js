@@ -20,7 +20,7 @@ import {
   RestView, SwitchHandsView,
   SessionSummaryView,
 } from "./views/ActiveSessionViews.js";
-import { WorkoutTab, DEFAULT_WORKOUTS } from "./views/WorkoutTab.js";
+import { WorkoutTab, ALL_WORKOUTS_LOOKUP } from "./views/WorkoutTab.js";
 import { AnalysisContainer } from "./views/AnalysisContainer.js";
 
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
@@ -894,7 +894,7 @@ export default function App() {
           fatigueModel={fatigueModel}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
-          defaultWorkouts={DEFAULT_WORKOUTS}
+          defaultWorkouts={ALL_WORKOUTS_LOOKUP}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
@@ -922,7 +922,7 @@ export default function App() {
           activities={activities}
           onDeleteActivity={deleteActivity}
           onUpdateActivity={updateActivity}
-          defaultWorkouts={DEFAULT_WORKOUTS}
+          defaultWorkouts={ALL_WORKOUTS_LOOKUP}
           onDeleteWorkoutSession={deleteWorkoutSession}
           onDownloadWorkoutCSV={downloadWorkoutCSV}
           onDownloadClimbingCSV={() => downloadClimbingCSV(activities)}

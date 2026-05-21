@@ -182,7 +182,18 @@ export function WorkoutHistoryView({
       {sorted.map((session) => {
         const { origIdx } = session;
         const isEditing = editIdx === origIdx;
-        const wkDef = defaultWorkouts[session.workout] || {};
+        // Resolve the workout definition. New sessions (post-May
+        // 2026 cutover) carry a `workoutId` field stamped against
+        // the supportTraining schema — prefer that. Legacy sessions
+        // (pre-cutover) only have `workout`, which now lives under
+        // a `legacy_` prefix in the merged ALL_WORKOUTS_LOOKUP to
+        // avoid colliding with the new A/B/C/D. Last fallback is
+        // the raw key, for any session that doesn't match either
+        // (shouldn't happen, but doesn't crash if it does).
+        const wkDef = (session.workoutId && defaultWorkouts[session.workoutId])
+          || defaultWorkouts[`legacy_${session.workout}`]
+          || defaultWorkouts[session.workout]
+          || {};
 
         return (
           <Card key={origIdx} style={{ marginBottom: 10 }}>
@@ -243,7 +254,11 @@ export function WorkoutHistoryView({
               <div style={{ marginBottom: 12, padding: 10, background: C.bg, borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Change workout type:</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-                  {Object.keys(defaultWorkouts).map(key => (
+                  {/* Filter to non-legacy keys — the reclassify dropdown
+                      should only show workouts the user can actively
+                      assign today, not legacy A/B/C definitions kept
+                      in the lookup for historical-session resolution. */}
+                  {Object.keys(defaultWorkouts).filter(k => !k.startsWith("legacy_")).map(key => (
                     <button key={key} onClick={() => setEditWorkout(key)} style={{
                       padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer",
                       fontWeight: 700, fontSize: 13, textAlign: "center",

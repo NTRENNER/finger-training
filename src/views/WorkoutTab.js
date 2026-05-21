@@ -117,6 +117,25 @@ export const LEGACY_WORKOUTS = {
 export const DEFAULT_WORKOUTS = LEGACY_WORKOUTS;
 
 // ─────────────────────────────────────────────────────────────
+// History-view lookup dictionary
+// ─────────────────────────────────────────────────────────────
+// Merged dictionary of legacy + current workouts, with legacy keys
+// prefixed `legacy_` to avoid collision with the new schema's
+// A / B / C / D. Used by HistoryView / WorkoutHistoryView /
+// WorkoutAnalysisView to resolve exercise names regardless of
+// which schema a session was logged under.
+//
+// Consumers that need to render a "current workouts" picker (e.g.
+// the reclassify dropdown on a History session edit) should filter
+// to non-legacy keys via `key => !key.startsWith("legacy_")`.
+export const ALL_WORKOUTS_LOOKUP = {
+  ...Object.fromEntries(
+    Object.entries(LEGACY_WORKOUTS).map(([k, v]) => [`legacy_${k}`, v])
+  ),
+  ...SUPPORT_WORKOUTS,
+};
+
+// ─────────────────────────────────────────────────────────────
 // LocalStorage keys
 // ─────────────────────────────────────────────────────────────
 // Energy toggle is stored as { date, value } so an "I'm wiped"
