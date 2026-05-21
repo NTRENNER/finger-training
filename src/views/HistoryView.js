@@ -34,7 +34,9 @@ import {
 import { WorkoutHistoryView } from "./WorkoutHistoryView.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
-import { buildRepCurveBundle } from "../model/repCurveData.js";
+import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
+import { RecoveryChart } from "./cards/RecoveryChart.jsx";
+import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
 import { deleteBW } from "../lib/sync.js";
 
 export function HistoryView({
@@ -763,6 +765,36 @@ export function HistoryView({
                           unit={unit}
                           height={180}
                         />
+                        {/* Recovery dynamics — paired with RepCurveChart.
+                            Same input data (this hand's reps + the same
+                            physModel), different question: how much
+                            capacity comes back between reps? Hidden when
+                            fewer than 2 reps because the chart needs at
+                            least one inter-rep recovery to be useful. */}
+                        {handReps.length >= 2 && (() => {
+                          const physModel = buildPhysModel(history, handKey, sess.grip);
+                          const recBundle = buildRecoveryBundle({
+                            reps: handReps,
+                            restSeconds: restS,
+                            physModel,
+                          });
+                          if (recBundle.observed.length === 0) return null;
+                          const classification = classifyRecovery(recBundle.observedAtTarget);
+                          return (
+                            <div style={{ marginTop: 12 }}>
+                              <RecoveryChart
+                                observed={recBundle.observed}
+                                predicted={recBundle.predicted}
+                                headline={{
+                                  observed: recBundle.observedAtTarget,
+                                  classification,
+                                }}
+                                title="Recovery dynamics"
+                                height={160}
+                              />
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
