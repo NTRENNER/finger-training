@@ -151,42 +151,31 @@ export function ClimbingAnalysisView({ activities = [] }) {
   }, [allClimbs]);
 
   // ── Session volume (v-sum) ──
-  // For each session date, sum the grade ranks of all sent climbs (clean
-  // send + rest; attempts excluded). Stacked by discipline so a mixed
-  // session reads as bands rather than a single number — boulder vs
-  // rope contributions are visible at a glance. The "v-sum" name comes
-  // from bouldering convention (sum of V-grades) but the math
-  // generalises to YDS via gradeRank, so the same chart serves both.
+  // Boulder-only: sum of V-grade ranks per session date for clean sends
+  // + rest-completions. The v-sum concept is bouldering convention and
+  // doesn't carry the same meaning across YDS rope grades (a 5.12a
+  // attempt and a V5 boulder are different units of work). Restricting
+  // to boulder keeps the chart's semantic clean — a single-discipline
+  // volume tracker rather than a stacked mixed-units bar.
+  //
   // Most recent 60 sessions to keep the bar count readable on phones.
   const sessionVolume = useMemo(() => {
-    const sent = allClimbs.filter(wasSent);
+    const sent = allClimbs.filter(c => c.discipline === "boulder" && wasSent(c));
     if (sent.length === 0) return { rows: [], disciplines: [] };
-    // date -> discipline -> v-sum
     const byDate = {};
-    const discSet = new Set();
     for (const c of sent) {
       const r = gradeRank(c.grade);
       if (r < 0) continue;
-      if (!byDate[c.date]) byDate[c.date] = {};
-      const slot = byDate[c.date];
-      slot[c.discipline] = (slot[c.discipline] || 0) + r;
-      discSet.add(c.discipline);
+      byDate[c.date] = (byDate[c.date] || 0) + r;
     }
     const sortedDates = Object.keys(byDate).sort();
     const recent = sortedDates.slice(-60);
-    const disciplines = [...discSet];
-    const rows = recent.map(date => {
-      const row = { date: date.slice(5) };  // MM-DD for axis density
-      let total = 0;
-      for (const d of disciplines) {
-        const v = byDate[date][d] || 0;
-        row[d] = v;
-        total += v;
-      }
-      row.__total = total;
-      return row;
-    });
-    return { rows, disciplines };
+    const rows = recent.map(date => ({
+      date: date.slice(5),  // MM-DD for axis density
+      boulder: byDate[date] || 0,
+      __total: byDate[date] || 0,
+    }));
+    return { rows, disciplines: ["boulder"] };
   }, [allClimbs]);
 
   // ── Grade pyramid ──
@@ -364,16 +353,18 @@ export function ClimbingAnalysisView({ activities = [] }) {
           </div>
         </Card>
 
-        {/* Session volume (v-sum). Stacked bars, one per session date,
-            split by discipline color. Hidden when there are <2 sessions
-            since a single bar is just a number. */}
+        {/* Boulder session volume (v-sum). One bar per boulder session
+            date. Boulder-only by design — the v-sum concept is a
+            bouldering convention and mixing rope grades in via gradeRank
+            blurs the unit. Hidden when there are <2 sessions since a
+            single bar is just a number. */}
         {sessionVolume.rows.length > 1 && (
           <Card>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Session volume (v-sum)</div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Boulder session volume (v-sum)</div>
             <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-              Sum of grade ranks per session — quantity × quality in one number.
-              Sends and rest-completions count; attempts don't. Stacked by
-              discipline so mixed sessions read as bands.
+              Sum of V-grade ranks per boulder session — quantity × quality
+              in one number. Sends and rest-completions count; attempts don't.
+              Lead and top rope are excluded (v-sum is a boulder convention).
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={sessionVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
@@ -383,22 +374,13 @@ export function ClimbingAnalysisView({ activities = [] }) {
                 <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={32} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
-                  formatter={(v, name) => [v, disciplineMeta(name).label]}
+                  formatter={(v) => [v, "v-sum"]}
                 />
-                {sessionVolume.disciplines.map(d => (
-                  <Bar key={d} dataKey={d} stackId="vsum"
-                    fill={DISCIPLINE_COLORS[d] || C.muted}
-                    isAnimationActive={false} />
-                ))}
+                <Bar dataKey="boulder"
+                  fill={DISCIPLINE_COLORS.boulder || C.orange}
+                  isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
-            <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 4, fontSize: 11, color: C.muted, flexWrap: "wrap" }}>
-              {sessionVolume.disciplines.map(d => (
-                <span key={d} style={{ color: DISCIPLINE_COLORS[d] || C.muted, fontWeight: 600 }}>
-                  ■ {disciplineMeta(d).label}
-                </span>
-              ))}
-            </div>
           </Card>
         )}
 
