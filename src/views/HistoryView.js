@@ -445,7 +445,7 @@ export function HistoryView({
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 12, color: C.muted }}>
                   {sess.date}{sess.reps[0]?.session_started_at ? " · " + fmtClock(sess.reps[0].session_started_at) : ""}
-                  {(() => { const e = bwOnDate(bwLog, sess.date); return e ? " · " + fmt1(toDisp(e.kg, unit)) + " " + unit : ""; })()}
+                  {(() => { const e = bwOnDate(bwLog, sess.date); return e ? " · BW " + fmt1(toDisp(e.kg, unit)) + " " + unit : ""; })()}
                 </span>
                 {!isEditing && (
                   <>
