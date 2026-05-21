@@ -49,6 +49,7 @@ import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
 import { EnduranceCeilingCard } from "./analysis/EnduranceCeilingCard.js";
+import { CapacityTrajectoryCard, CapacityAbsoluteCard } from "./analysis/CapacityChartCards.js";
 // (EnergySystemBreakdownCard import removed — card dropped under curve-trust)
 
 // Per-grip color used wherever Micro and Crusher are charted side-by-
@@ -1817,62 +1818,10 @@ export function AnalysisView({
       {/* ── 1RM PR tracker ── */}
       <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
 
-      {/* ── Total Capacity (Area Under the Curve) over time — % vs baseline ──
-          Headline trajectory card: single-number capacity tracker per grip
-          showing ∫ F(t) dt over [5,180]s under the three-exp curve refit
-          each training date, expressed as % above each grip's baseline.
-          Lives at the top because the trajectory is the whole-page story
-          ("am I growing?") in one rising-line visual. Per-grip lines,
-          never pooled. Same integration window the Journey badges use,
-          so chart progress and badge progress read the same metric. The
-          absolute (kg·s) view of the same metric lives in the Advanced
-          metrics section at the bottom. */}
-      {aucHistoryByGrip && aucHistoryByGrip.hasPct && (
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
-            Total Capacity (Area Under the Curve) — % vs baseline
-            {normalizeOn && <span style={{ color: C.purple, fontSize: 12, marginLeft: 6 }}>· × BW</span>}
-          </div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-            {normalizeOn
-              ? "Same metric, normalized to bodyweight at each session date. Bold line is a 3-session rolling mean to read trend through noise; dots are the raw per-session values."
-              : "Same metric as a percentage above each grip's baseline. Bold line is a 3-session rolling mean to read trend through noise; dots are the raw per-session values."}
-          </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={normalizeOn ? aucHistoryByGrip.pctRowsBW : aucHistoryByGrip.pctRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-                label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-              <ReferenceLine y={0} stroke={C.muted} strokeWidth={2}
-                label={{ value: "baseline", position: "insideRight", fill: C.muted, fontSize: 10 }} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit="%"
-                label={{ value: "vs baseline", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
-              />
-              {aucHistoryByGrip.grips.flatMap(g => {
-                const color = GRIP_COLORS[g] || C.blue;
-                return [
-                  // Raw values: dots only, no connecting line.
-                  <Line key={`${g}_raw`} dataKey={`${g}_pct`} stroke="none"
-                    dot={{ r: 3, fill: color, stroke: color }} activeDot={{ r: 4 }}
-                    legendType="none" name={`${g} (raw)`} isAnimationActive={false} />,
-                  // Smoothed trend: bold line, no dots.
-                  <Line key={`${g}_sm`} dataKey={`${g}_pct_sm`} stroke={color}
-                    strokeWidth={3} dot={false} connectNulls name={g}
-                    isAnimationActive={false} />,
-                ];
-              })}
-            </LineChart>
-          </ResponsiveContainer>
-          <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
-            {aucHistoryByGrip.grips.map(g => (
-              <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
-            ))}
-          </div>
-        </Card>
-      )}
+      <CapacityTrajectoryCard
+        aucHistoryByGrip={aucHistoryByGrip}
+        normalizeOn={normalizeOn}
+      />
 
       {/* ── Curve Improvement summary ──
           (Was "Endurance Improvement" — renamed because the headline
@@ -2093,44 +2042,7 @@ export function AnalysisView({
             F-D chart's dashed "3-min" reference lines show F(180s)
             per grip from the three-exp curve.) */}
 
-        {/* ── Total Capacity (AUC) — absolute (kg·s) ──
-            Same metric as the % vs baseline chart at the top of the
-            page, but in raw physical units. Useful when you want to
-            sanity-check the headline % against the underlying area.
-            The "Advanced Metrics" section divider that used to wrap
-            this card was removed once the per-compartment dose + energy
-            system breakdown cards were dropped — with only one card
-            left below it, the divider was overhead for nothing. */}
-        {aucHistoryByGrip && (
-          <Card style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (Area Under the Curve) — absolute</div>
-            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-              Total area under your three-exp F-D curve from 5s to 3 min, per grip. Higher = bigger total work envelope. Each point refits the curve with data up to that date — early points stabilize as the data stack grows.
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={aucHistoryByGrip.absRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-                  label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48}
-                  label={{ value: "kg·s", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                  formatter={(val, name) => [val == null ? "—" : `${val.toLocaleString()} kg·s`, name]}
-                />
-                {aucHistoryByGrip.grips.map(g => (
-                  <Line key={g} dataKey={`${g}_abs`} stroke={GRIP_COLORS[g] || C.blue}
-                    strokeWidth={2} dot={{ r: 3 }} connectNulls name={g} />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-            <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
-              {aucHistoryByGrip.grips.map(g => (
-                <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
-              ))}
-            </div>
-          </Card>
-        )}
+        <CapacityAbsoluteCard aucHistoryByGrip={aucHistoryByGrip} />
 
         {/* (Per-Compartment Dose AUC chart + Energy System Breakdown
             card removed under curve-trust — both were zone-keyed
