@@ -234,8 +234,10 @@ export const exercises = {
     reps: "8–10",
     logWeight: true,
     // Lattice "Vacuum Style" video covers the prone variant in its
-    // shoulder section, with Aidan Roberts demoing form.
-    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw",
+    // shoulder section, with Aidan Roberts demoing form. Jumps to
+    // the Shoulder Exercises chapter (10:03 / 603s) where Aidan
+    // contrasts seated vs prone ER and demos the pronated lever.
+    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw&t=603s",
   },
 
   medBallThrows: {
@@ -334,10 +336,11 @@ export const exercises = {
     // it matters that session.
     loggable: false,
     type: "H",
-    // Lattice "Vacuum Style" with Aidan Roberts covers the supine
-    // frog in the hip section — same video covers the pancake +
-    // pancake leg lifts below, scrub to the section you want.
-    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw",
+    // Lattice "Vacuum Style" with Aidan Roberts — same video covers
+    // pancake + pancake leg lifts (different timestamps). Jumps to
+    // the Frog chapter (1:17 / 77s) where Aidan demos the supine
+    // variation specifically.
+    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw&t=77s",
   },
 
   weightedPancake: {
@@ -357,7 +360,10 @@ export const exercises = {
     sets: 3,
     reps: "6",
     logWeight: true,
-    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw",
+    // Jumps to the Weighted Pancake chapter (3:06 / 186s) of the
+    // Lattice video — Aidan walks through tempo, regressions, and
+    // the standing-against-wall variation.
+    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw&t=186s",
   },
 
   pancakeLegLifts: {
@@ -375,7 +381,10 @@ export const exercises = {
     // lifting your heel over", not numeric load.
     loggable: false,
     type: "H",
-    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw",
+    // Jumps to the Leg Lift chapter (6:48 / 408s) of the Lattice
+    // video — Aidan demos heel-over-block from pancake position,
+    // and explains the flexibility-before-mobility-strength order.
+    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw&t=408s",
   },
 };
 
