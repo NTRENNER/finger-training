@@ -509,4 +509,21 @@ describe("workouts (templates)", () => {
     expect(dDips.loggable).toBe(true);
     expect(dDips.logWeight).toBe(true);
   });
+
+  test("novel exercises carry a videoUrl pointing at a real video host", () => {
+    // For movements where a 90-second demo beats reading form cues.
+    // Standard lifts (bench, pullup, dips) intentionally don't carry
+    // one — a demo link there would feel condescending.
+    const exercisesWithVideo = ["hardStyleSitup", "bandedRotationalWork",
+      "supineWeightedFrog", "weightedPancake", "pancakeLegLifts",
+      "proneExternalRotation"];
+    const videoHostPattern = /^https:\/\/(www\.)?(youtube\.com|youtu\.be)/;
+    for (const w of Object.values(workouts)) {
+      for (const ex of w.exercises) {
+        if (!exercisesWithVideo.includes(ex.id)) continue;
+        expect(typeof ex.videoUrl).toBe("string");
+        expect(ex.videoUrl).toMatch(videoHostPattern);
+      }
+    }
+  });
 });

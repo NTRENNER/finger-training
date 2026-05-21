@@ -199,6 +199,7 @@ export const exercises = {
     // band tension cues if useful.
     loggable: false,
     type: "S",
+    videoUrl: "https://www.youtube.com/watch?v=qFScyUpr0nQ",
   },
 
   abWheel: {
@@ -232,6 +233,9 @@ export const exercises = {
     sets: 3,
     reps: "8–10",
     logWeight: true,
+    // Lattice "Vacuum Style" video covers the prone variant in its
+    // shoulder section, with Aidan Roberts demoing form.
+    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw",
   },
 
   medBallThrows: {
@@ -310,6 +314,7 @@ export const exercises = {
     ],
     loggable: false,
     type: "P",
+    videoUrl: "https://www.youtube.com/shorts/7FBTF01LBUI",
   },
 
   supineWeightedFrog: {
@@ -329,6 +334,10 @@ export const exercises = {
     // it matters that session.
     loggable: false,
     type: "H",
+    // Lattice "Vacuum Style" with Aidan Roberts covers the supine
+    // frog in the hip section — same video covers the pancake +
+    // pancake leg lifts below, scrub to the section you want.
+    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw",
   },
 
   weightedPancake: {
@@ -348,6 +357,7 @@ export const exercises = {
     sets: 3,
     reps: "6",
     logWeight: true,
+    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw",
   },
 
   pancakeLegLifts: {
@@ -365,6 +375,7 @@ export const exercises = {
     // lifting your heel over", not numeric load.
     loggable: false,
     type: "H",
+    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw",
   },
 };
 
