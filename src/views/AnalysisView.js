@@ -255,6 +255,12 @@ export function AnalysisView({
   // Click-to-expand state for the F-D chart. Clicking any rep dot
   // opens a modal showing the RepCurveChart for that rep's session.
   // null = no modal open.
+  // Per-grip three-exp priors — hoisted above selectedSession so the
+  // session-detail modal's prescription() call can use the curve-fit
+  // path. Used by the gap-narrowing tracker and prescription-potential
+  // calculation too. Could be lifted to App if it becomes hot.
+  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
+
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const handleDotClick = (data) => {
     if (data?.session_id) setSelectedSessionId(data.session_id);
@@ -375,11 +381,9 @@ export function AnalysisView({
 
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
-  // Per-grip three-exp priors. Used by the gap-narrowing tracker and
-  // the prescription-potential calculation (since three-exp is now the
-  // primary potential value when well-supported). Same memo as in
-  // SetupView; could be lifted to App if it becomes hot.
-  const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
+  // (threeExpPriors hoisted to the top of the component so the
+  // selectedSession useMemo can include it in its dep array without
+  // tripping ESLint's no-use-before-define rule.)
 
   // ── F-D curve fit (three-exp on raw force) ──
   // Per-grip three-exp curves are computed inside the chart's render
