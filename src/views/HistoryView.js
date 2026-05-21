@@ -35,6 +35,7 @@ import { WorkoutHistoryView } from "./WorkoutHistoryView.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
+import { deleteBW } from "../lib/sync.js";
 
 export function HistoryView({
   history,
@@ -207,7 +208,42 @@ export function HistoryView({
     setNewRepLoad(""); setNewRepTime("");
   };
 
-  const bwLog = useMemo(() => loadLS(LS_BW_LOG_KEY) || [], []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Body weight log — backing state so deletions re-render. Loaded
+  // once from localStorage; the Body Weight Log card mutates it via
+  // setBwLog, which also writes back to LS and (for cloud-synced
+  // entries) calls deleteBW to drop the row from Supabase.
+  const [bwLog, setBwLog] = useState(() => loadLS(LS_BW_LOG_KEY) || []);
+
+  // Sorted descending for display + the BW Log card. Anomaly detection
+  // flags entries that differ from the rolling median by > 15%, so
+  // a stale legacy entry (e.g. a 82 kg row in a 71 kg history) is
+  // surfaced as red for easy cleanup.
+  const bwLogSorted = useMemo(() => {
+    return [...bwLog]
+      .filter(e => e && e.date && Number(e.kg) > 0)
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }, [bwLog]);
+  const bwMedian = useMemo(() => {
+    if (bwLogSorted.length === 0) return null;
+    const sorted = bwLogSorted.map(e => Number(e.kg)).sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  }, [bwLogSorted]);
+  const [bwExpanded, setBwExpanded] = useState(false);
+
+  const handleDeleteBW = async (date) => {
+    // Native confirm — same pattern the session-delete buttons use.
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Delete body weight entry for ${date}?\n\nThis removes it locally and from the cloud.`)) return;
+    const next = bwLog.filter(e => e.date !== date);
+    setBwLog(next);
+    saveLS(LS_BW_LOG_KEY, next);
+    // Fire-and-forget cloud delete. If it fails, the local removal
+    // still stands; next reconcile would resurrect it from cloud, so
+    // log a warning so the user can retry if needed.
+    deleteBW(date).then(ok => {
+      if (!ok) console.warn(`BW cloud delete failed for ${date} — local removed but cloud may resurrect on next sync`);
+    });
+  };
 
   const grips = useMemo(() => [...new Set(history.map(r => r.grip).filter(Boolean))].sort(), [history]);
 
@@ -355,6 +391,77 @@ export function HistoryView({
               fontSize: 13, padding: "6px 12px", cursor: "pointer",
             }}>Cancel</button>
           </div>
+        </Card>
+      )}
+
+      {/* Body Weight Log — collapsible. Surfaces every BW entry the
+          History view's per-session BW lookup might draw from so you
+          can spot + delete anomalies (e.g. a legacy entry of 82 kg
+          in a 71 kg history that was producing phantom "BW 182 lbs"
+          captions). Highlighted in red when an entry deviates from
+          the rolling median by > 15%. */}
+      {bwLogSorted.length > 0 && (
+        <Card style={{ marginBottom: 12 }}>
+          <button
+            onClick={() => setBwExpanded(e => !e)}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+              background: "none", border: "none", color: "inherit",
+              cursor: "pointer", padding: 0, font: "inherit",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>Body weight log</div>
+              <div style={{ fontSize: 11, color: C.muted }}>
+                {bwLogSorted.length} {bwLogSorted.length === 1 ? "entry" : "entries"}
+                {bwMedian != null && ` · median ${fmt1(toDisp(bwMedian, unit))} ${unit}`}
+              </div>
+            </div>
+            <span style={{ fontSize: 11, color: C.muted }}>{bwExpanded ? "hide" : "show"}</span>
+          </button>
+          {bwExpanded && (
+            <div style={{
+              marginTop: 10,
+              maxHeight: 280, overflowY: "auto",
+              display: "flex", flexDirection: "column", gap: 4,
+            }}>
+              {bwLogSorted.map(entry => {
+                const lbs = toDisp(Number(entry.kg), unit);
+                const isAnomaly = bwMedian && Math.abs(Number(entry.kg) - bwMedian) / bwMedian > 0.15;
+                return (
+                  <div key={entry.date} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "6px 10px", borderRadius: 6,
+                    background: isAnomaly ? "#3f1a1a" : C.bg,
+                    border: `1px solid ${isAnomaly ? C.red : C.border}`,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span style={{ fontSize: 12, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                        {entry.date}
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: isAnomaly ? C.red : "inherit" }}>
+                        {fmt1(lbs)} {unit}
+                      </span>
+                      {isAnomaly && (
+                        <span style={{ fontSize: 10, color: C.red, fontStyle: "italic" }}>
+                          off median by {Math.round(Math.abs(Number(entry.kg) - bwMedian) / bwMedian * 100)}%
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleDeleteBW(entry.date)}
+                      title="Delete this BW entry (local + cloud)"
+                      style={{
+                        background: "none", border: "none",
+                        color: isAnomaly ? C.red : C.muted,
+                        fontSize: 14, cursor: "pointer", padding: "0 4px", lineHeight: 1,
+                      }}
+                    >🗑</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       )}
 

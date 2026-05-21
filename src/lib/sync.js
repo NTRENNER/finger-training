@@ -638,6 +638,22 @@ export async function pushBW(date, kg) {
   }
 }
 
+// Delete a single BW entry by date. Mirrors deleteActivityCloud /
+// deleteWorkoutSession. Returns true on success. Caller is responsible
+// for removing the matching local entry from LS_BW_LOG_KEY too — these
+// helpers don't touch localStorage.
+export async function deleteBW(date) {
+  if (!date) return false;
+  try {
+    const { error } = await supabase.from("body_weights").delete().eq("date", date);
+    if (error) { console.warn("Supabase BW delete:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase BW delete exception:", e.message);
+    return false;
+  }
+}
+
 // Returns array of { date, kg } sorted ascending by date, or null on
 // error. Shape matches the local LS_BW_LOG_KEY contents so the merge
 // path can union the two and dedupe by date trivially.
