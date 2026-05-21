@@ -290,9 +290,12 @@ describe("recommendNextWorkout: Rule 5 (D touch stale → D)", () => {
   });
 });
 
-describe("recommendNextWorkout: Rule 6 (high climbing density → REST)", () => {
-  test("recommends REST when 4+ climb days in last 5", () => {
-    // All non-climbing workouts fresh, climbing density high.
+describe("recommendNextWorkout: REST is never recommended", () => {
+  // The user signals their own rest needs — the engine doesn't
+  // prompt REST. Pin the invariant: even high climbing density
+  // (which the previous Rule 6 used to fire on) doesn't produce
+  // a REST recommendation.
+  test("does NOT recommend REST even at high climbing density", () => {
     const history = [
       sess("A", 2),
       sess("C", 3),
@@ -304,27 +307,11 @@ describe("recommendNextWorkout: Rule 6 (high climbing density → REST)", () => 
       climbingHistory: climbing,
       refDate: REF_DATE,
     });
-    expect(rec.primary.id).toBe("REST");
-    expect(rec.reason).toMatch(/4 climbing days/);
-  });
-
-  test("does NOT trigger REST when only 3 climb days in last 5", () => {
-    const history = [
-      sess("A", 2),
-      sess("C", 3),
-      sess("B", 3),
-      sess("D", 1),
-    ];
-    const climbing = [climb(0), climb(1), climb(3)];
-    const rec = recommendNextWorkout(history, {
-      climbingHistory: climbing,
-      refDate: REF_DATE,
-    });
     expect(rec.primary.id).not.toBe("REST");
   });
 });
 
-describe("recommendNextWorkout: Rule 7 (fallback → C)", () => {
+describe("recommendNextWorkout: Rule 6 (fallback → C)", () => {
   test("recommends C when nothing is strictly overdue", () => {
     // A fresh, C fresh, B fresh, D fresh, low climbing.
     const history = [
@@ -336,6 +323,25 @@ describe("recommendNextWorkout: Rule 7 (fallback → C)", () => {
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     expect(rec.primary.id).toBe("C");
     expect(rec.reason).toMatch(/safe useful default/);
+  });
+
+  test("falls back to C even at high climbing density", () => {
+    // Previously this case fired Rule 6 (REST). Now falls
+    // through to the C default. Mobility work is a reasonable
+    // recommendation on a heavy-climbing day — it's restorative
+    // adjacent and won't tax recovery.
+    const history = [
+      sess("A", 2),
+      sess("C", 2),
+      sess("B", 3),
+      sess("D", 2),
+    ];
+    const climbing = [climb(0), climb(1), climb(2), climb(3)];
+    const rec = recommendNextWorkout(history, {
+      climbingHistory: climbing,
+      refDate: REF_DATE,
+    });
+    expect(rec.primary.id).toBe("C");
   });
 });
 

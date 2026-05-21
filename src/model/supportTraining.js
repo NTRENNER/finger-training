@@ -537,13 +537,15 @@ export const workouts = {
 //      → B.
 //   5. Strength touch stale (D ≥4 days)
 //      → D.
-//   6. High climbing density (4+ distinct climb days in last 5)
-//      → REST.
-//   7. Fallback
+//   6. Fallback
 //      → C (safe useful default — compounds quietly).
 //
-// CLIMB is never recommended by this engine. REST IS — high
-// climbing density is a real coaching call.
+// Neither CLIMB nor REST is ever recommended by this engine.
+// CLIMB is logged via the climbing activities flow; REST is just
+// "don't open the app today." The user knows when they need to
+// rest without the engine prompting. A future deload-week
+// recommender could re-introduce structured rest at a higher
+// level (weeks, not days).
 //
 // Tunable thresholds live as constants below so tweaking doesn't
 // require touching the decision tree.
@@ -552,8 +554,6 @@ const A_OVERDUE_DAYS     = 7;
 const HIP_STALE_DAYS     = 7;
 const POWER_STALE_DAYS   = 10;
 const D_TOUCH_DAYS       = 4;
-const CLIMB_DENSE_COUNT  = 4;
-const CLIMB_DENSE_WINDOW = 5;
 
 /**
  * Recommend the next support-training session.
@@ -649,26 +649,19 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
         daysSinceD === Infinity
           ? "No D on record yet. Brief strength touch maintains the pull/press pattern between A sessions."
           : `Last D was ${daysSinceD} days ago. Brief strength touch.`,
-      alternatives: [workouts.C, workouts.REST],
-    };
-  }
-
-  // 6. High climbing density → REST.
-  const climbDays = recentClimbDayCount(climbingHistory, refDate, CLIMB_DENSE_WINDOW);
-  if (climbDays >= CLIMB_DENSE_COUNT) {
-    return {
-      primary: workouts.REST,
-      reason: `${climbDays} climbing days in the last ${CLIMB_DENSE_WINDOW}. Rest is what absorbs the training.`,
       alternatives: [workouts.C, workouts.D],
     };
   }
 
-  // 7. Fallback — nothing strictly overdue, default to C.
+  // 6. Fallback — nothing strictly overdue, default to C.
+  // Note: the user signals their own rest needs and doesn't want
+  // the engine prompting REST. A future deload-week recommender
+  // could re-introduce structured rest at the weekly level.
   return {
     primary: workouts.C,
     reason:
       "Nothing's strictly overdue. Positional capacity is a safe useful default that compounds quietly.",
-    alternatives: [workouts.REST, workouts.D],
+    alternatives: [workouts.D, workouts.B],
   };
 }
 
