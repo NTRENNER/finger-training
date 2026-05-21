@@ -526,14 +526,22 @@ function EnergyToggle({ value, onChange }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Workout picker — explicit A/B/C/D/CLIMB/REST tiles
+// Workout picker — explicit A/B/C/D tiles for the four trainable workouts
 // ─────────────────────────────────────────────────────────────
-// Always available even when the recommendation is one of these.
-// Lets the user override on any day for any reason.
+// CLIMB and REST are intentionally NOT in the picker — they're the
+// absence of a strength workout, not something you pick from a tile.
+// Climbing has its own log via the climbing activities flow; REST
+// is just "don't open the app today."
+//
+// The recommender CAN still produce a REST recommendation when
+// climbing density is high (Rule 6) — when that happens, the
+// recommendation card renders as usual but the user can either
+// accept it (logs a marker session) or override via the four
+// trainable tiles below.
 function WorkoutPicker({ pickedId, onPick }) {
-  const ORDER = ["A", "B", "C", "D", "CLIMB", "REST"];
+  const ORDER = ["A", "B", "C", "D"];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 4, marginBottom: 12 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4, marginBottom: 12 }}>
       {ORDER.map(id => {
         const wo = SUPPORT_WORKOUTS[id];
         if (!wo) return null;
