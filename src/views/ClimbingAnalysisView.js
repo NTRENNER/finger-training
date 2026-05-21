@@ -356,9 +356,10 @@ export function ClimbingAnalysisView({ activities = [] }) {
         {/* Boulder session volume (v-sum). One bar per boulder session
             date. Boulder-only by design — the v-sum concept is a
             bouldering convention and mixing rope grades in via gradeRank
-            blurs the unit. Hidden when there are <2 sessions since a
-            single bar is just a number. */}
-        {sessionVolume.rows.length > 1 && (
+            blurs the unit. Renders as soon as any boulder session
+            exists so a single early bar is still visible (it tells you
+            the chart works and gives you a baseline to beat). */}
+        {sessionVolume.rows.length >= 1 && (
           <Card>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Boulder session volume (v-sum)</div>
             <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
