@@ -25,7 +25,7 @@ import {
   fmt1, fmtW, fmtTime, toDisp, fromDisp, fmtClock, bwOnDate,
 } from "../ui/format.js";
 import { ymdLocal } from "../util.js";
-import { effectiveLoad, isShortfall } from "../model/prescription.js";
+import { effectiveLoad, isShortfall, prescription } from "../model/prescription.js";
 import { TARGET_OPTIONS } from "../model/zones.js";
 import {
   loadLS, saveLS,
@@ -575,43 +575,74 @@ export function HistoryView({
               </div>
             )}
 
-            {/* Forecasted-vs-actual rep curve. Seeds the forecast from
-                rep 1's actual hold (the real anchor), so the predicted
-                decay is the one that would have applied at this session's
-                actual capacity. Previous-session overlay shows the same
-                zone's last training day for "am I beating last time?".
-                Only renders when there are ≥ 2 reps with valid times. */}
+            {/* Forecasted-vs-actual rep curve, rendered per-hand. Both-
+                mode sessions get two stacked charts (Left + Right) so
+                the actual line doesn't artifactually concatenate the
+                two hands into one apparent set. Each hand's forecast is
+                seeded by THAT hand's rep 1; previous-session overlay is
+                also per-hand. Target / used load caption uses the
+                prescription engine run on history strictly before this
+                session's date — that's what the engine would have
+                recommended at the time. */}
             {(() => {
               const validReps = sess.reps.filter(r => Number(r.actual_time_s) > 0);
               if (validReps.length < 2) return null;
-              const sortedReps = validReps.slice().sort(
-                (a, b) => (a.set_num ?? 1) - (b.set_num ?? 1) || (a.rep_num ?? 0) - (b.rep_num ?? 0)
-              );
-              const rep1 = sortedReps[0];
-              const restS = rep1.rest_s ?? 20;
-              // Use the dominant hand for prevSession lookup. Both-mode
-              // sessions: pick L arbitrarily (still same zone/grip match).
-              const dominantHand = sess.hand === "B" ? "L" : sess.hand;
-              const bundle = buildRepCurveBundle({
-                history,
-                grip: sess.grip, hand: dominantHand,
-                numReps: sortedReps.length,
-                firstRepTime: rep1.actual_time_s,
-                restSeconds: restS,
-                actualReps: sortedReps,
-                targetDuration: sess.target_duration,
-                beforeDate: sess.date,
-              });
+              const hands = sess.hand === "B"
+                ? ["L", "R"].filter(h => validReps.some(r => r.hand === h))
+                : [sess.hand];
+              if (hands.length === 0) return null;
+              // History strictly before this session — what the engine
+              // knew when this session was prescribed.
+              const priorHistory = history.filter(r => r.date < sess.date);
               return (
                 <div style={{ marginBottom: 10 }}>
-                  <RepCurveChart
-                    forecasted={bundle.forecasted}
-                    actual={bundle.actual}
-                    prevSession={bundle.prevSession}
-                    asymptoticHold={bundle.asymptoticHold}
-                    targetS={bundle.targetS}
-                    height={180}
-                  />
+                  {hands.map(handKey => {
+                    const handReps = validReps
+                      .filter(r => r.hand === handKey)
+                      .sort((a, b) =>
+                        (a.set_num ?? 1) - (b.set_num ?? 1)
+                        || (a.rep_num ?? 0) - (b.rep_num ?? 0)
+                      );
+                    if (handReps.length === 0) return null;
+                    const rep1 = handReps[0];
+                    const restS = rep1.rest_s ?? 20;
+                    const bundle = buildRepCurveBundle({
+                      history,
+                      grip: sess.grip, hand: handKey,
+                      numReps: handReps.length,
+                      firstRepTime: rep1.actual_time_s,
+                      restSeconds: restS,
+                      actualReps: handReps,
+                      targetDuration: sess.target_duration,
+                      beforeDate: sess.date,
+                    });
+                    const target = prescription(priorHistory, handKey, sess.grip,
+                      sess.target_duration, {});
+                    return (
+                      <div key={handKey} style={{ marginBottom: hands.length > 1 ? 12 : 0 }}>
+                        {hands.length > 1 && (
+                          <div style={{
+                            fontSize: 10, fontWeight: 700, letterSpacing: 1,
+                            color: handKey === "L" ? C.blue : C.orange,
+                            marginBottom: 4,
+                          }}>
+                            {handKey === "L" ? "LEFT" : "RIGHT"}
+                          </div>
+                        )}
+                        <RepCurveChart
+                          forecasted={bundle.forecasted}
+                          actual={bundle.actual}
+                          prevSession={bundle.prevSession}
+                          asymptoticHold={bundle.asymptoticHold}
+                          targetS={bundle.targetS}
+                          targetWeightKg={target?.value ?? null}
+                          usedWeightKg={rep1.weight_kg ?? null}
+                          unit={unit}
+                          height={180}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })()}

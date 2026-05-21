@@ -27,6 +27,7 @@ import {
   ReferenceLine, Legend,
 } from "recharts";
 import { C } from "../../ui/theme.js";
+import { fmtW } from "../../ui/format.js";
 
 const COLORS = {
   forecasted:  "#e879f9",  // pink
@@ -63,6 +64,15 @@ export function RepCurveChart({
   prevSession = [],
   asymptoticHold = null,
   targetS = null,
+  // Load context — shown as a small caption above the chart so the
+  // user can diagnose "am I undershooting time because I'm overshooting
+  // load?". targetWeightKg = what prescription() would have recommended
+  // for this (grip, hand, T) before this session ran; usedWeightKg =
+  // what the user actually loaded. Both optional; caption only renders
+  // when at least one is present.
+  targetWeightKg = null,
+  usedWeightKg = null,
+  unit = "lbs",
   height = 220,
   showLegend = true,
   title = null,
@@ -105,11 +115,43 @@ export function RepCurveChart({
     ...merged.flatMap(r => [r.forecasted, r.actual, r.prev].filter(v => v != null)),
   ) * 1.1;
 
+  // Load drift indicator: % overshoot/undershoot of used vs target load.
+  // Hidden when within 1% (just noise from grip-weight variance).
+  const loadDriftPct = (() => {
+    if (targetWeightKg == null || usedWeightKg == null) return null;
+    if (!(targetWeightKg > 0)) return null;
+    const pct = (usedWeightKg - targetWeightKg) / targetWeightKg * 100;
+    if (Math.abs(pct) < 1) return null;
+    return Math.round(pct);
+  })();
+
   return (
     <div style={{ width: "100%" }}>
       {title && (
         <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: C.muted }}>
           {title}
+        </div>
+      )}
+      {(targetWeightKg != null || usedWeightKg != null) && (
+        <div style={{ fontSize: 10, color: C.muted, marginBottom: 4, lineHeight: 1.4 }}>
+          {targetWeightKg != null && (
+            <>Target: <b style={{ color: "#fff" }}>{fmtW(targetWeightKg, unit)} {unit}</b></>
+          )}
+          {targetWeightKg != null && usedWeightKg != null && (
+            <span style={{ margin: "0 6px" }}>·</span>
+          )}
+          {usedWeightKg != null && (
+            <>Used: <b style={{ color: "#fff" }}>{fmtW(usedWeightKg, unit)} {unit}</b></>
+          )}
+          {loadDriftPct != null && (
+            <span style={{
+              marginLeft: 6,
+              color: loadDriftPct > 0 ? "#f59e0b" : "#22c55e",
+              fontWeight: 700,
+            }}>
+              ({loadDriftPct > 0 ? "+" : ""}{loadDriftPct}%)
+            </span>
+          )}
         </div>
       )}
       <ResponsiveContainer width="100%" height={height}>

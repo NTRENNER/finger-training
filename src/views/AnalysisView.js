@@ -38,6 +38,7 @@ import {
 } from "../model/lockout.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
+import { prescription } from "../model/prescription.js";
 // (PrescribedLoadCard removed May 2026 — Setup's SessionPlanCard
 // renders the same six-zone tile grid plus the active session pick,
 // so showing it again on Analysis was redundant. The component file
@@ -259,37 +260,46 @@ export function AnalysisView({
     if (data?.session_id) setSelectedSessionId(data.session_id);
   };
 
-  // Build the bundle for the selected session (if any). Reps that
-  // share the session_id are the actuals; rep 1's actual_time_s seeds
-  // the forecast. Memoized so re-renders without a session change
-  // don't rebuild.
-  const selectedSessionBundle = useMemo(() => {
+  // Build per-hand bundles for the selected session. Mixed-hand
+  // sessions get one bundle per hand so the chart doesn't artifactually
+  // concatenate L+R into one apparent set. Target/used weight pulled
+  // from prescription() run on history strictly before this session.
+  const selectedSession = useMemo(() => {
     if (!selectedSessionId) return null;
     const sessReps = history.filter(r => r.session_id === selectedSessionId);
     if (sessReps.length === 0) return null;
-    const sorted = [...sessReps].sort(
+    const sortedAll = [...sessReps].sort(
       (a, b) => (a.set_num ?? 1) - (b.set_num ?? 1) || (a.rep_num ?? 0) - (b.rep_num ?? 0)
     );
-    const rep1 = sorted[0];
+    const sessDate = sortedAll[0].date;
+    const grip = sortedAll[0].grip;
+    const targetDuration = sortedAll[0].target_duration;
+    const restS = sortedAll[0].rest_s ?? 20;
+    const presentHands = Array.from(new Set(sortedAll.map(r => r.hand).filter(h => h === "L" || h === "R")));
+    const hands = presentHands.length > 0 ? presentHands : [sortedAll[0].hand || "L"];
+    const priorHistory = history.filter(r => r.date < sessDate);
     return {
-      meta: {
-        date: rep1.date,
-        grip: rep1.grip,
-        hand: rep1.hand,
-        targetDuration: rep1.target_duration,
-        restS: rep1.rest_s ?? 20,
-      },
-      bundle: buildRepCurveBundle({
-        history,
-        grip: rep1.grip,
-        hand: rep1.hand === "B" ? "L" : rep1.hand,
-        numReps: sorted.length,
-        firstRepTime: rep1.actual_time_s,
-        restSeconds: rep1.rest_s ?? 20,
-        actualReps: sorted,
-        targetDuration: rep1.target_duration,
-        beforeDate: rep1.date,
-      }),
+      meta: { date: sessDate, grip, targetDuration, restS },
+      perHand: hands.map(handKey => {
+        const handReps = sortedAll.filter(r => r.hand === handKey);
+        const handRep1 = handReps[0];
+        if (!handRep1) return null;
+        const target = prescription(priorHistory, handKey, grip, targetDuration, {});
+        return {
+          handKey,
+          handRep1,
+          target: target?.value ?? null,
+          bundle: buildRepCurveBundle({
+            history, grip, hand: handKey,
+            numReps: handReps.length,
+            firstRepTime: handRep1.actual_time_s,
+            restSeconds: handRep1.rest_s ?? restS,
+            actualReps: handReps,
+            targetDuration,
+            beforeDate: sessDate,
+          }),
+        };
+      }).filter(Boolean),
     };
   }, [selectedSessionId, history]);
 
@@ -1259,10 +1269,11 @@ export function AnalysisView({
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       {/* Click-to-expand session detail modal — triggered by tapping
-          any dot on the F-D scatter. Shows that session's rep-by-rep
-          forecasted vs actual decay with the previous-session overlay
-          and asymptotic floor reference line. */}
-      {selectedSessionBundle && (
+          any dot on the F-D scatter. Renders one RepCurveChart per
+          hand (so mixed-hand sessions don't artifactually splice L+R
+          into one apparent set), each with its own target/used load
+          caption and previous-session overlay. */}
+      {selectedSession && selectedSession.perHand.length > 0 && (
         <div
           onClick={() => setSelectedSessionId(null)}
           style={{
@@ -1277,15 +1288,16 @@ export function AnalysisView({
             style={{
               background: C.card ?? "#1a1a1a", borderRadius: 12,
               padding: 16, maxWidth: 520, width: "100%",
+              maxHeight: "90vh", overflowY: "auto",
               border: `1px solid ${C.border}`,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>
-                  {selectedSessionBundle.meta.grip} · {selectedSessionBundle.meta.hand}
+                  {selectedSession.meta.grip}
                   <span style={{ marginLeft: 8, fontSize: 12, color: C.muted, fontWeight: 400 }}>
-                    {selectedSessionBundle.meta.date} · target {selectedSessionBundle.meta.targetDuration}s · {selectedSessionBundle.meta.restS}s rest
+                    {selectedSession.meta.date} · target {selectedSession.meta.targetDuration}s · {selectedSession.meta.restS}s rest
                   </span>
                 </div>
               </div>
@@ -1298,14 +1310,30 @@ export function AnalysisView({
                 aria-label="Close"
               >×</button>
             </div>
-            <RepCurveChart
-              forecasted={selectedSessionBundle.bundle.forecasted}
-              actual={selectedSessionBundle.bundle.actual}
-              prevSession={selectedSessionBundle.bundle.prevSession}
-              asymptoticHold={selectedSessionBundle.bundle.asymptoticHold}
-              targetS={selectedSessionBundle.bundle.targetS}
-              height={240}
-            />
+            {selectedSession.perHand.map(h => (
+              <div key={h.handKey} style={{ marginBottom: selectedSession.perHand.length > 1 ? 14 : 0 }}>
+                {selectedSession.perHand.length > 1 && (
+                  <div style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: 1,
+                    color: h.handKey === "L" ? C.blue : C.orange,
+                    marginBottom: 4,
+                  }}>
+                    {h.handKey === "L" ? "LEFT" : "RIGHT"}
+                  </div>
+                )}
+                <RepCurveChart
+                  forecasted={h.bundle.forecasted}
+                  actual={h.bundle.actual}
+                  prevSession={h.bundle.prevSession}
+                  asymptoticHold={h.bundle.asymptoticHold}
+                  targetS={h.bundle.targetS}
+                  targetWeightKg={h.target}
+                  usedWeightKg={h.handRep1.weight_kg ?? null}
+                  unit={unit}
+                  height={220}
+                />
+              </div>
+            ))}
           </div>
         </div>
       )}
