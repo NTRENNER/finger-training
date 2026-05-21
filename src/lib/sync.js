@@ -190,7 +190,14 @@ export function repPayload(rep) {
   };
 }
 
-// Returns true on success, false on failure (caller should queue the rep).
+// Returns a tri-state result:
+//   'ok'         — push succeeded
+//   'tombstoned' — server-side trigger rejected because this rep matches
+//                  an id / slot / session tombstone. Caller MUST drop the
+//                  rep from any local queue / history (don't retry — the
+//                  rep is permanently dead).
+//   'error'      — transient failure (network, RLS, type mismatch, etc.).
+//                  Caller should enqueue for retry.
 //
 // Uses upsert on the WORKOUT-SLOT unique constraint
 // (session_id, set_num, rep_num, hand) instead of the primary key.
@@ -204,6 +211,20 @@ export function repPayload(rep) {
 // The DB-level UNIQUE constraint reps_workout_slot_unique was added
 // in migration `reps_unique_workout_slot` (May 2026) — see the
 // migration for the full rationale.
+//
+// Tombstone-rejection detection: the server trigger
+// reject_tombstoned_rep_insert raises EXCEPTION with the message
+// prefix "TOMBSTONE_REJECTION:" when a rep matches any of the three
+// tombstone tables (id, slot, session). We pattern-match that prefix
+// here and return 'tombstoned' so callers don't loop the retry queue
+// forever on permanently-rejected reps. See migration
+// tombstone_trigger_raise_exception (May 2026).
+const TOMBSTONE_REJECTION_PREFIX = "TOMBSTONE_REJECTION:";
+function isTombstoneRejection(err) {
+  if (!err) return false;
+  const msg = String(err.message || err.hint || err.details || "");
+  return msg.includes(TOMBSTONE_REJECTION_PREFIX);
+}
 
 // id column on reps is type uuid. Anything that isn't a valid UUID
 // makes Postgres reject with "invalid input syntax for type uuid: ..."
@@ -236,11 +257,22 @@ export async function pushRep(rep) {
     const { error } = await supabase
       .from("reps")
       .upsert([repPayload(safeRep)], { onConflict: "session_id,set_num,rep_num,hand" });
-    if (error) { console.warn("Supabase push:", error.message); return false; }
-    return true;
+    if (error) {
+      if (isTombstoneRejection(error)) {
+        console.info(`pushRep: tombstone rejection for rep ${safeRep.id} — dropping`);
+        return "tombstoned";
+      }
+      console.warn("Supabase push:", error.message);
+      return "error";
+    }
+    return "ok";
   } catch (e) {
+    if (isTombstoneRejection(e)) {
+      console.info(`pushRep: tombstone rejection (exception path) — dropping`);
+      return "tombstoned";
+    }
     console.warn("Supabase push exception:", e.message);
-    return false;
+    return "error";
   }
 }
 
@@ -253,39 +285,64 @@ export function enqueueReps(reps) {
   if (toAdd.length > 0) saveLS(LS_QUEUE_KEY, [...q, ...toAdd]);
 }
 
-// Attempt to push every queued rep; remove each one on success.
+// Attempt to push every queued rep; remove each one on success or on
+// permanent tombstone rejection.
+//
 // Returns the count successfully flushed so the caller can show a
 // "synced N pending reps" toast.
 //
-// Honors the synced tombstone set: a queued rep whose id has been
-// tombstoned (deleted on this or another device since being queued)
-// gets dropped from the queue silently. Without this check the queue
-// would re-resurrect deleted reps the same way the May 2026 reconcile
-// bug did — both push paths need the same gate.
+// Tombstone gates: pre-fetches all three tombstone tables (id / slot /
+// session) and drops matches before attempting to push. The reconcile
+// path in App.js / useRepHistory.js does the same — this brings flushQueue
+// to parity. Without this, slot- or session-tombstoned reps would hit
+// the server trigger every retry and never drain (after the trigger was
+// changed from RETURN NULL to RAISE EXCEPTION in May 2026).
+//
+// Safety net: even with all three client-side gates in place, a race
+// (rep queued before a tombstone got synced) can still cause the trigger
+// to throw. pushRep returns 'tombstoned' in that case and the rep is
+// dropped from the queue here, same as a pre-filtered match.
 export async function flushQueue() {
   const q = loadLS(LS_QUEUE_KEY) || [];
   if (q.length === 0) return 0;
-  const cloudTombstones = await fetchRepTombstoneIds();
-  const tombstoned = new Set([
-    ...(loadLS(LS_REP_DELETED_KEY) || []),
-    ...(cloudTombstones || []),
+  const compositeKey = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
+  // Fetch all three tombstone shapes in parallel — parity with the
+  // App.js / useRepHistory.js reconcile path.
+  const [cloudIdTombs, cloudSlotKeys, cloudSessionIds] = await Promise.all([
+    fetchRepTombstoneIds(),
+    fetchRepSlotTombstoneKeys(),
+    fetchSessionTombstoneIds(),
   ]);
+  const idTombs = new Set([
+    ...(loadLS(LS_REP_DELETED_KEY) || []),
+    ...(cloudIdTombs || []),
+  ]);
+  const slotTombs    = new Set(cloudSlotKeys   || []);
+  const sessionTombs = new Set(cloudSessionIds || []);
   let remaining = [...q];
   let flushed = 0;
   let dropped = 0;
   for (const rep of q) {
-    // Skip tombstoned reps; treat them as "successfully processed"
-    // for queue-cleanup purposes (drop from queue, don't retry).
-    if (rep.id && tombstoned.has(rep.id)) {
+    // Pre-flight tombstone gate. Treats matches as "successfully
+    // processed" — drop from queue, don't retry, don't push.
+    if ((rep.id && idTombs.has(rep.id))
+        || slotTombs.has(compositeKey(rep))
+        || (rep.session_id && sessionTombs.has(rep.session_id))) {
       remaining = remaining.filter(r => r.id !== rep.id);
       dropped++;
       continue;
     }
-    const ok = await pushRep(rep);
-    if (ok) {
+    const result = await pushRep(rep);
+    if (result === "ok") {
       remaining = remaining.filter(r => r.id !== rep.id);
       flushed++;
+    } else if (result === "tombstoned") {
+      // Race: rep wasn't in our pre-fetched tombstone snapshot but the
+      // server trigger rejected it. Drop from queue same as pre-flight.
+      remaining = remaining.filter(r => r.id !== rep.id);
+      dropped++;
     }
+    // result === "error" → leave in queue for next flush
   }
   saveLS(LS_QUEUE_KEY, remaining);
   if (dropped > 0) console.info(`flushQueue: dropped ${dropped} tombstoned rep(s) from queue`);

@@ -291,10 +291,12 @@ export function useRepHistory({ user }) {
         );
 
         let pushedAny = false;
+        const tombstonedIds = new Set();
         for (const rep of toSync) {
-          const ok = await pushRep(rep);
-          if (ok) pushedAny = true;
-          else enqueueReps([rep]);
+          const result = await pushRep(rep);
+          if (result === "ok") pushedAny = true;
+          else if (result === "error") enqueueReps([rep]);
+          else if (result === "tombstoned") tombstonedIds.add(rep.id);
         }
         if (cancelled) return;
 
@@ -308,21 +310,17 @@ export function useRepHistory({ user }) {
         // in cloud after the push round. Any that didn't are either:
         //   (a) push-failed and already in the retry queue (network blip,
         //       RLS error, etc.), or
-        //   (b) silently dropped server-side — e.g. a BEFORE INSERT trigger
-        //       that uses RETURN NULL skips the row without raising an
-        //       error, so pushRep returns true but the row isn't actually
-        //       in cloud (see reject_tombstoned_rep_insert).
-        // Preserve all of them in local state. The previous behavior
-        // (setHistory(cloudReps) unconditionally) replaced local with
-        // cloud and DISCARDED real workout data the user had entered.
-        // Re-queue silent drops so the retry mechanism gets a shot at
-        // them on the next cycle — enqueueReps de-dupes by id so this
-        // is safe to call on reps that are already queued.
+        //   (b) tombstone-rejected by the server trigger (rare race —
+        //       this device queued the rep before the tombstone synced).
+        // Preserve (a) so the user doesn't lose real data. Drop (b) by
+        // filtering out tombstonedIds — those reps are permanently dead
+        // on the server and re-queuing would loop forever.
         const cloudIdSet = new Set(cloudReps.map(r => r.id).filter(Boolean));
         const cloudSlotSet = new Set(cloudReps.map(compositeKey));
         const preserved = toSync.filter(r =>
           !(r.id && cloudIdSet.has(r.id)) &&
-          !cloudSlotSet.has(compositeKey(r))
+          !cloudSlotSet.has(compositeKey(r)) &&
+          !(r.id && tombstonedIds.has(r.id))
         );
         if (preserved.length > 0) enqueueReps(preserved);
 
@@ -487,8 +485,13 @@ export function useRepHistory({ user }) {
     });
     if (user) {
       stamped.forEach(rep => {
-        pushRep(rep).then(ok => {
-          if (!ok) { enqueueReps([rep]); refreshPending(); }
+        pushRep(rep).then(result => {
+          if (result === "error") { enqueueReps([rep]); refreshPending(); }
+          // result === "ok" → nothing to do
+          // result === "tombstoned" → rep matched a server tombstone (rare
+          //   race: addReps called for a rep whose id was tombstoned on
+          //   another device). Don't enqueue (would loop forever). Local
+          //   state still has it but it'll vanish on the next reconcile.
         });
       });
     }

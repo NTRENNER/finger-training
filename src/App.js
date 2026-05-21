@@ -595,16 +595,19 @@ export default function App() {
         );
         let pushedAny = false;
         for (const rep of toSync) {
-          const ok = await pushRep(rep);
-          if (ok) pushedAny = true;
-          else enqueueReps([rep]);
+          const result = await pushRep(rep);
+          if (result === "ok") pushedAny = true;
+          else if (result === "error") enqueueReps([rep]);
+          // result === "tombstoned" → race against a tombstone we didn't
+          // see in our pre-fetched snapshot. Drop silently — don't enqueue
+          // (would loop forever) and don't preserve in local history (the
+          // rep is permanently dead on the server).
         }
         // MERGE, don't replace — see useRepHistory.js reconcile for the
         // full rationale. Any toSync rep that didn't land in the refetched
-        // cloud (push-failed OR silently dropped by a server trigger that
-        // uses RETURN NULL) gets preserved in local state so we don't
-        // discard real workout data. enqueueReps de-dupes by id, safe to
-        // call on already-queued reps.
+        // cloud (push-failed for transient reasons) gets preserved in local
+        // state so we don't discard real workout data. enqueueReps de-dupes
+        // by id, safe to call on already-queued reps.
         const cloudReps = pushedAny ? (await fetchReps()) : remoteReps;
         if (cloudReps) {
           const cloudIdSet = new Set(cloudReps.map(r => r.id).filter(Boolean));
