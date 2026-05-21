@@ -33,6 +33,8 @@ import {
 } from "../lib/storage.js";
 import { WorkoutHistoryView } from "./WorkoutHistoryView.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
+import { RepCurveChart } from "./cards/RepCurveChart.jsx";
+import { buildRepCurveBundle } from "../model/repCurveData.js";
 
 export function HistoryView({
   history, onDownload, unit = "lbs", bodyWeight = null,
@@ -572,6 +574,47 @@ export function HistoryView({
                 </div>
               </div>
             )}
+
+            {/* Forecasted-vs-actual rep curve. Seeds the forecast from
+                rep 1's actual hold (the real anchor), so the predicted
+                decay is the one that would have applied at this session's
+                actual capacity. Previous-session overlay shows the same
+                zone's last training day for "am I beating last time?".
+                Only renders when there are ≥ 2 reps with valid times. */}
+            {(() => {
+              const validReps = sess.reps.filter(r => Number(r.actual_time_s) > 0);
+              if (validReps.length < 2) return null;
+              const sortedReps = validReps.slice().sort(
+                (a, b) => (a.set_num ?? 1) - (b.set_num ?? 1) || (a.rep_num ?? 0) - (b.rep_num ?? 0)
+              );
+              const rep1 = sortedReps[0];
+              const restS = rep1.rest_s ?? 20;
+              // Use the dominant hand for prevSession lookup. Both-mode
+              // sessions: pick L arbitrarily (still same zone/grip match).
+              const dominantHand = sess.hand === "B" ? "L" : sess.hand;
+              const bundle = buildRepCurveBundle({
+                history,
+                grip: sess.grip, hand: dominantHand,
+                numReps: sortedReps.length,
+                firstRepTime: rep1.actual_time_s,
+                restSeconds: restS,
+                actualReps: sortedReps,
+                targetDuration: sess.target_duration,
+                beforeDate: sess.date,
+              });
+              return (
+                <div style={{ marginBottom: 10 }}>
+                  <RepCurveChart
+                    forecasted={bundle.forecasted}
+                    actual={bundle.actual}
+                    prevSession={bundle.prevSession}
+                    asymptoticHold={bundle.asymptoticHold}
+                    targetS={bundle.targetS}
+                    height={180}
+                  />
+                </div>
+              );
+            })()}
 
             {/* Rep chips */}
             {(() => {

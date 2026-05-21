@@ -36,6 +36,8 @@ import {
   getZoneStaleness, getRollingSessionPace,
   ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS,
 } from "../model/lockout.js";
+import { RepCurveChart } from "./cards/RepCurveChart.jsx";
+import { buildRepCurveBundle } from "../model/repCurveData.js";
 // (PrescribedLoadCard removed May 2026 — Setup's SessionPlanCard
 // renders the same six-zone tile grid plus the active session pick,
 // so showing it again on Analysis was redundant. The component file
@@ -228,10 +230,13 @@ export function AnalysisView({
   history, unit = "lbs", bodyWeight = null,
   activities = [],
   freshMap = null,
-  // Per-zone learned fatigue gains (App-level memo). Passed through
-  // to PrescribedLoadCard so the analysis what-if slider reflects the
-  // same calibration the live workout will use.
-  personalGains = null,
+  // Per-grip β fatigue model from user_settings.settings.fatigue_model.
+  // Currently unused on this surface — the PrescribedLoadCard render was
+  // removed from Analysis because SessionPlanCard on Setup renders the
+  // same tiles. Kept on the prop signature for future Analysis-side
+  // diagnostics (β trajectory, cooked-vs-residual scatter).
+  // eslint-disable-next-line no-unused-vars
+  fatigueModel = null,
   // Cross-cutting App config — passed in rather than imported so this
   // module doesn't reach back into App.js for view-level constants.
   GOAL_CONFIG = {},
@@ -245,6 +250,48 @@ export function AnalysisView({
   // is a minimum-diff change that's trivially reversible.
   const selHand = "";
   const [selGrip,   setSelGrip]   = useState("");
+
+  // Click-to-expand state for the F-D chart. Clicking any rep dot
+  // opens a modal showing the RepCurveChart for that rep's session.
+  // null = no modal open.
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const handleDotClick = (data) => {
+    if (data?.session_id) setSelectedSessionId(data.session_id);
+  };
+
+  // Build the bundle for the selected session (if any). Reps that
+  // share the session_id are the actuals; rep 1's actual_time_s seeds
+  // the forecast. Memoized so re-renders without a session change
+  // don't rebuild.
+  const selectedSessionBundle = useMemo(() => {
+    if (!selectedSessionId) return null;
+    const sessReps = history.filter(r => r.session_id === selectedSessionId);
+    if (sessReps.length === 0) return null;
+    const sorted = [...sessReps].sort(
+      (a, b) => (a.set_num ?? 1) - (b.set_num ?? 1) || (a.rep_num ?? 0) - (b.rep_num ?? 0)
+    );
+    const rep1 = sorted[0];
+    return {
+      meta: {
+        date: rep1.date,
+        grip: rep1.grip,
+        hand: rep1.hand,
+        targetDuration: rep1.target_duration,
+        restS: rep1.rest_s ?? 20,
+      },
+      bundle: buildRepCurveBundle({
+        history,
+        grip: rep1.grip,
+        hand: rep1.hand === "B" ? "L" : rep1.hand,
+        numReps: sorted.length,
+        firstRepTime: rep1.actual_time_s,
+        restSeconds: rep1.rest_s ?? 20,
+        actualReps: sorted,
+        targetDuration: rep1.target_duration,
+        beforeDate: rep1.date,
+      }),
+    };
+  }, [selectedSessionId, history]);
 
   // BW normalization toggle. When ON, every metric surface (F-D chart,
   // AUC trajectory, Curve Improvement, Hand Asymmetry) renders in
@@ -986,6 +1033,11 @@ export function AnalysisView({
     x: r.actual_time_s,
     y: useRel ? r.avg_force_kg / bodyWeight : toDisp(r.avg_force_kg, unit),
     date: r.date, grip: r.grip, hand: r.hand,
+    // session_id lets click handlers gather the full session's reps to
+    // pop up the RepCurveChart for that workout.
+    session_id: r.session_id,
+    target_duration: r.target_duration,
+    rest_s: r.rest_s,
   });
   const leftDotsRel  = failures.filter(r => r.hand !== "R").map(buildDot);
   const rightDotsRel = failures.filter(r => r.hand === "R").map(buildDot);
@@ -1206,6 +1258,58 @@ export function AnalysisView({
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+      {/* Click-to-expand session detail modal — triggered by tapping
+          any dot on the F-D scatter. Shows that session's rep-by-rep
+          forecasted vs actual decay with the previous-session overlay
+          and asymptotic floor reference line. */}
+      {selectedSessionBundle && (
+        <div
+          onClick={() => setSelectedSessionId(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 100,
+            background: "rgba(0,0,0,0.7)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: C.card ?? "#1a1a1a", borderRadius: 12,
+              padding: 16, maxWidth: 520, width: "100%",
+              border: `1px solid ${C.border}`,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  {selectedSessionBundle.meta.grip} · {selectedSessionBundle.meta.hand}
+                  <span style={{ marginLeft: 8, fontSize: 12, color: C.muted, fontWeight: 400 }}>
+                    {selectedSessionBundle.meta.date} · target {selectedSessionBundle.meta.targetDuration}s · {selectedSessionBundle.meta.restS}s rest
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedSessionId(null)}
+                style={{
+                  background: "none", border: "none", color: C.muted,
+                  fontSize: 20, cursor: "pointer", padding: "0 4px",
+                }}
+                aria-label="Close"
+              >×</button>
+            </div>
+            <RepCurveChart
+              forecasted={selectedSessionBundle.bundle.forecasted}
+              actual={selectedSessionBundle.bundle.actual}
+              prevSession={selectedSessionBundle.bundle.prevSession}
+              asymptoticHold={selectedSessionBundle.bundle.asymptoticHold}
+              targetS={selectedSessionBundle.bundle.targetS}
+              height={240}
+            />
+          </div>
+        </div>
+      )}
+
       <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Force-Duration Analysis</h2>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
         Where reps fall relative to your force-duration curve shows which timescale is your limiter — and what to train next.
@@ -1358,10 +1462,10 @@ export function AnalysisView({
                       legendType="none" isAnimationActive={false} />
               )}
               {!fdSplitData && (
-                <Scatter data={leftDotsRel} dataKey="y" fill={HAND_COLORS.L} opacity={0.9} name="Left" />
+                <Scatter data={leftDotsRel} dataKey="y" fill={HAND_COLORS.L} opacity={0.9} name="Left" onClick={handleDotClick} style={{ cursor: "pointer" }} />
               )}
               {!fdSplitData && (
-                <Scatter data={rightDotsRel} dataKey="y" fill={HAND_COLORS.R} opacity={0.9} name="Right" />
+                <Scatter data={rightDotsRel} dataKey="y" fill={HAND_COLORS.R} opacity={0.9} name="Right" onClick={handleDotClick} style={{ cursor: "pointer" }} />
               )}
               {/* Per-grip split mode: one curve + one set of dots per grip.
                   Avoids the cross-muscle mudding (Micro FDP pinch ~5-10kg vs
@@ -1445,16 +1549,21 @@ export function AnalysisView({
                       ? r.avg_force_kg / bodyWeight
                       : toDisp(r.avg_force_kg, unit),
                     grip, date: r.date, hand: r.hand,
+                    session_id: r.session_id,
+                    target_duration: r.target_duration,
+                    rest_s: r.rest_s,
                   });
                   const lDots = gripReps.filter(r => r.hand !== "R").map(toDot);
                   const rDots = gripReps.filter(r => r.hand === "R").map(toDot);
                   elements.push(
                     <Scatter key={`${grip}-L`} data={lDots} dataKey="y"
-                      fill={HAND_COLORS.L} stroke={color} strokeWidth={1.5} opacity={0.9} />
+                      fill={HAND_COLORS.L} stroke={color} strokeWidth={1.5} opacity={0.9}
+                      onClick={handleDotClick} style={{ cursor: "pointer" }} />
                   );
                   elements.push(
                     <Scatter key={`${grip}-R`} data={rDots} dataKey="y"
-                      fill={HAND_COLORS.R} stroke={color} strokeWidth={1.5} opacity={0.9} />
+                      fill={HAND_COLORS.R} stroke={color} strokeWidth={1.5} opacity={0.9}
+                      onClick={handleDotClick} style={{ cursor: "pointer" }} />
                   );
                 }
                 return elements;

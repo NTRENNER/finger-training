@@ -40,7 +40,7 @@ export function AnalysisContainer(props) {
   const {
     // AnalysisView (fingers) props
     history, unit, bodyWeight, activities,
-    freshMap, personalGains,
+    freshMap, fatigueModel,
     GOAL_CONFIG, RM_GRIPS,
     // WorkoutAnalysisView (lifts) props
     defaultWorkouts,
@@ -96,7 +96,7 @@ export function AnalysisContainer(props) {
           bodyWeight={bodyWeight}
           activities={activities}
           freshMap={freshMap}
-          personalGains={personalGains}
+          fatigueModel={fatigueModel}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
         />

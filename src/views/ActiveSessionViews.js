@@ -30,6 +30,44 @@ import { clamp } from "../util.js";
 import { suggestWeight } from "../model/prescription.js";
 import { levelTitle } from "../model/levels.js";
 import { downloadCSV } from "../lib/csv.js";
+import { buildRepCurveBundle } from "../model/repCurveData.js";
+import { RepCurveChart } from "./cards/RepCurveChart.jsx";
+
+// Small wrapper used by both ActiveSessionView and AutoRepSessionView
+// (and SessionSummaryView) to render the live forecasted-vs-actual
+// rep curve. Seeds the forecast from rep 1's actual hold if available,
+// otherwise from the configured target_duration so the user sees the
+// engine's prediction before they've moved.
+function LiveRepCurveCard({ history, config, activeHand, sessionReps, embedded = false }) {
+  const bundle = useMemo(() => {
+    const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
+    const sameHandReps = (sessionReps || []).filter(r => r.hand === handForLookup);
+    const rep1 = sameHandReps[0];
+    const firstRepTime = rep1?.actual_time_s > 0 ? rep1.actual_time_s : config.targetTime;
+    return buildRepCurveBundle({
+      history,
+      grip: config.grip, hand: handForLookup,
+      numReps: config.repsPerSet,
+      firstRepTime,
+      restSeconds: config.restTime ?? 20,
+      actualReps: sameHandReps,
+      targetDuration: config.targetTime,
+      beforeDate: undefined, // live session — match any prior date
+    });
+  }, [history, config, activeHand, sessionReps]);
+  const inner = (
+    <RepCurveChart
+      forecasted={bundle.forecasted}
+      actual={bundle.actual}
+      prevSession={bundle.prevSession}
+      asymptoticHold={bundle.asymptoticHold}
+      targetS={bundle.targetS}
+      height={160}
+      showLegend={false}
+    />
+  );
+  return embedded ? inner : <Card style={{ marginBottom: 12 }}>{inner}</Card>;
+}
 
 // Level display — numeric only, no old badge names. Used by
 // SessionSummaryView's level-up animation.
@@ -134,8 +172,8 @@ function RepDots({ total, done, current }) {
 
 // ─────────────────────────────────────────────────────────────
 
-export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, unit = "lbs" }) {
-  const { config, currentRep, activeHand } = session;
+export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, unit = "lbs", history = [] }) {
+  const { config, currentRep, activeHand, sessionReps = [] } = session;
 
   // repPhase: 'ready' (show Start button, first rep only)
   //           'countdown' (3-2-1)
@@ -260,6 +298,17 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       </div>
 
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
+
+      {/* Live rep-curve preview — forecasted vs. actual so far, with
+          last-session overlay and asymptotic floor. Re-seeds from rep
+          1's actual time once it lands so the forecast tracks the
+          user's actual capacity for this session. */}
+      <LiveRepCurveCard
+        history={history}
+        config={config}
+        activeHand={activeHand}
+        sessionReps={sessionReps}
+      />
 
       {/* Countdown overlay */}
       {repPhase === "countdown" && (
@@ -630,8 +679,8 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
 
 // ─────────────────────────────────────────────────────────────
 
-export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs" }) {
-  const { config, currentRep, activeHand, refWeights } = session;
+export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs", history = [] }) {
+  const { config, currentRep, activeHand, refWeights, sessionReps = [] } = session;
   const handLabel = config.hand === "Both"
     ? (activeHand === "L" ? "Left Hand" : "Right Hand")
     : config.hand === "L" ? "Left Hand" : "Right Hand";
@@ -699,6 +748,14 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
       </div>
 
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
+
+      {/* Live rep-curve preview (same component as the manual flow). */}
+      <LiveRepCurveCard
+        history={history}
+        config={config}
+        activeHand={activeHand}
+        sessionReps={sessionReps}
+      />
 
       {/* Status card */}
       <Card style={{ textAlign: "center", padding: "32px 16px", marginTop: 12 }}>

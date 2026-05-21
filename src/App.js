@@ -1,7 +1,7 @@
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-exp F-D / curve-trust prescription · Tindeq Progressor BLE
 import React, {
-  useCallback, useEffect, useMemo, useState,
+  useCallback, useEffect, useState,
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
@@ -49,7 +49,7 @@ import {
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
 import { today, uid } from "./util.js";
-import { computePersonalGains } from "./model/perceivedFatigueLearning.js";
+import { defaultFatigueModel } from "./model/fatigueBeta.js";
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS / UTILITIES
@@ -361,6 +361,12 @@ export default function App() {
         setClimbingFocusState(cf);
         saveLS(LS_CLIMBING_FOCUS_KEY, cf);
       }
+      // Pull fatigue_model so the client uses the same β the server
+      // trigger is updating. Falls back to local defaults if cloud
+      // has no value yet (first-run before any rep-1 insert).
+      if (cloud.fatigue_model && typeof cloud.fatigue_model === "object") {
+        setFatigueModel(cloud.fatigue_model);
+      }
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -391,17 +397,13 @@ export default function App() {
     handleWorkoutSessionSaved,
   } = useRepHistory({ user });
 
-  // Per-zone learned fatigue gains (Bayesian-shrunk personal scalars
-  // on top of climbingFatigue.fatigueToModifier). Drives the adaptive
-  // half of the PrescribedLoadCard slider — population curve until the
-  // user has accumulated RPE-tagged reps, then adapts to their actual
-  // suppression. Memoized on history.length so we re-fit only when reps
-  // actually change. See model/perceivedFatigueLearning.js.
-  const personalGains = useMemo(
-    () => computePersonalGains(history).gains,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [history.length, history[history.length - 1]?.id]
-  );
+  // Per-grip fatigue β model (replaces perceivedFatigueLearning's
+  // per-zone shrinkage). Stored in user_settings.settings.fatigue_model
+  // so it persists across devices. Updated server-side by the
+  // update_fatigue_beta_from_rep_trg trigger on every rep-1 insert;
+  // the client re-fetches user_settings on sign-in to pick up changes.
+  // See src/model/fatigueBeta.js for the math.
+  const [fatigueModel, setFatigueModel] = useState(() => defaultFatigueModel());
 
   // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
@@ -505,10 +507,30 @@ export default function App() {
     handleRestDone, handleAbort,
   } = useSessionRunner({
     history, freshMap, threeExpPriors, addReps,
-    personalGains,
+    fatigueModel,
     tindeqConnected: tindeq.connected,
     onSessionStart: () => setTab(0),
   });
+
+  // Close the closed-loop learner: when a session finishes (phase →
+  // "done"), the server-side update_fatigue_beta_from_rep_trg has by
+  // then updated user_settings.fatigue_model. Re-fetch so the next
+  // session this app instance prescribes uses the new β instead of
+  // the pre-session value cached in React state. 1.5s delay gives the
+  // trigger time to commit and Supabase replication time to propagate.
+  // Without this, the new β wouldn't be visible until the user signs
+  // back in or reloads — fine across days, but breaks the loop if you
+  // stack two finger sessions in the same browser tab.
+  useEffect(() => {
+    if (phase !== "done" || !user) return;
+    const t = setTimeout(async () => {
+      const cloud = await fetchUserSettings();
+      if (cloud && cloud.fatigue_model && typeof cloud.fatigue_model === "object") {
+        setFatigueModel(cloud.fatigue_model);
+      }
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [phase, user]);
 
   // ── Manual cloud pull ─────────────────────────────────────
   // User-triggered refresh. Flushes any queued local reps first, then
@@ -771,7 +793,7 @@ export default function App() {
               onStart={startSession}
               history={history}
               freshMap={freshMap}
-              personalGains={personalGains}
+              fatigueModel={fatigueModel}
               unit={unit}
               onBwSave={saveBW}
               activities={activities}
@@ -795,23 +817,25 @@ export default function App() {
             return (
               <AutoRepSessionView
                 key={`auto-${activeHand}-${currentRep}`}
-                session={{ config, currentRep, sessionId, refWeights, activeHand }}
+                session={{ config, currentRep, sessionId, refWeights, activeHand, sessionReps }}
                 onRepDone={handleRepDone}
                 onAbort={handleAbort}
                 tindeq={tindeq}
                 unit={unit}
+                history={history}
               />
             );
           }
           return (
             <ActiveSessionView
               key={`${activeHand}-${currentRep}-${phase}`}
-              session={{ config, currentRep, sessionId, refWeights, activeHand }}
+              session={{ config, currentRep, sessionId, refWeights, activeHand, sessionReps }}
               onRepDone={handleRepDone}
               onAbort={handleAbort}
               tindeq={tindeq}
               autoStart={phase === "rep_active"}
               unit={unit}
+              history={history}
             />
           );
         }
@@ -864,7 +888,7 @@ export default function App() {
           bodyWeight={bodyWeight}
           activities={activities}
           freshMap={freshMap}
-          personalGains={personalGains}
+          fatigueModel={fatigueModel}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
           defaultWorkouts={DEFAULT_WORKOUTS}

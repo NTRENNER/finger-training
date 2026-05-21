@@ -15,11 +15,11 @@
 //      overridden via an alternative tile, this button dims to
 //      indicate "not the active pick" but still surfaces what the
 //      curve wanted.
-//   2. RPE slider — "How cooked today?" Scales the prescribed LOAD
-//      (workout runner + per-zone tiles below) without changing which
-//      zone the engine picks. Stamped on every rep at session start
-//      so perceivedFatigueLearning can adapt the modifier curve to
-//      the user's actual response.
+//   2. Cookedness slider — "How cooked today?" (0–10, mandatory).
+//      Scales the prescribed LOAD per-grip via exp(-β·c) without
+//      changing which zone the engine picks. Upserted to daily_state
+//      on session start so the server-side trigger can update β from
+//      every rep-1 insert.
 //   3. Override indicator + protocol controls — hangs/rest/time strip,
 //      hangs and rest sliders. Defaults track the active selection's
 //      T but stick once touched.
@@ -41,8 +41,8 @@
 //
 // PrescribedLoadCard still exists in src/views/cards/ — Analysis renders
 // it standalone for retrospective what-if exploration, where the slider
-// is purely local (no workout to drive). The two components share the
-// same per-zone fatigue math through climbingFatigue + applyPersonalGain.
+// is purely local (no workout to drive). Both components share the same
+// per-grip cookedness math through fatigueBeta.capacityMultiplier.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
@@ -51,8 +51,7 @@ import { fmtW } from "../../ui/format.js";
 import { ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
 import { coachingRecommendationContinuous } from "../../model/coaching.js";
-import { fatigueToModifier } from "../../model/climbingFatigue.js";
-import { applyPersonalGain } from "../../model/perceivedFatigueLearning.js";
+import { capacityMultiplier } from "../../model/fatigueBeta.js";
 
 // Display labels for the climbing-focus pill in the header. Kept here
 // (vs imported from coaching.js) because coaching.js exports the
@@ -70,14 +69,16 @@ export function SessionPlanCard({
   // back up so the workout runner uses it. Auto-fires whenever any of
   // those change.
   onApplyPlan,
-  // Slider state — controlled by SetupView so config.perceivedRpe
-  // carries through to the runner and gets stamped on every rep.
-  perceivedRpe,
-  onPerceivedRpeChange,
-  // Per-zone learned gains from perceivedFatigueLearning. Multiplied
-  // through the population fatigue curve so the scale-down adapts to
-  // this user's actual response.
-  personalGains = null,
+  // "How cooked today?" slider state (0 = fresh → 10 = wrecked). Owned
+  // by SetupView; flows through to useSessionRunner which upserts it to
+  // daily_state on session start. Mandatory: null means "not yet picked"
+  // and the Start button stays disabled.
+  cooked,
+  onCookedChange,
+  // Per-grip β model from user_settings.settings.fatigue_model. Used
+  // to compute the load scale-down: prescribedLoad = freshLoad ×
+  // exp(-β_grip · cooked). Replaces the old per-zone applyPersonalGain.
+  fatigueModel = null,
   // Cloud-synced climbing-focus bias ("balanced" | "bouldering" |
   // "power_endurance" | "endurance"). Threaded to the engine to
   // apply per-zone multipliers that nudge close calls toward the
@@ -90,16 +91,19 @@ export function SessionPlanCard({
   onNavigateToSettings,
 }) {
   // ── Recommendation from the continuous engine ──────────────
+  // coachingRecommendationContinuous ignores perceivedFatigue +
+  // personalGains opts ("intentionally not consumed" — see
+  // model/coaching.js). We still pass cooked through for future
+  // engine consumption but the recommendation today is fatigue-blind.
   const rec = useMemo(
     () => grip
       ? coachingRecommendationContinuous(history, grip, {
           freshMap, threeExpPriors, activities,
-          perceivedFatigue: perceivedRpe > 1 ? perceivedRpe : 0,
-          personalGains,
+          perceivedFatigue: cooked || 0,
           climbingFocus,
         })
       : null,
-    [history, grip, freshMap, threeExpPriors, activities, perceivedRpe, personalGains, climbingFocus]
+    [history, grip, freshMap, threeExpPriors, activities, cooked, climbingFocus]
   );
   const recommendedZone = rec?.zone;
 
@@ -113,21 +117,19 @@ export function SessionPlanCard({
   // carry into Micro silently.
   useEffect(() => { setOverrideZone(null); }, [grip]);
 
-  // ── Per-zone tiles (with personal-gain-adjusted scale-down) ─────────
+  // ── Per-zone tiles (with per-grip cookedness scale-down) ─────────
+  // Every tile gets the same multiplier because β is per-grip. If
+  // zone-specific suppression becomes important again, swap in a
+  // (grip, zone) β table here — the rest of the wiring stays.
   const rows = useMemo(() => {
     if (!grip) return null;
+    const fatigueMod = capacityMultiplier(fatigueModel, grip, cooked);
     return ZONE_KEYS.map(key => {
       const cfg = GOAL_CONFIG[key];
       if (!cfg) return null;
       const T = cfg.refTime;
       const pL = prescription(history, "L", grip, T, { freshMap, threeExpPriors });
       const pR = prescription(history, "R", grip, T, { freshMap, threeExpPriors });
-      const fatigueMod = perceivedRpe > 1
-        ? applyPersonalGain(
-            fatigueToModifier(key, perceivedRpe, 0),
-            personalGains?.[key],
-          )
-        : 1.0;
       return {
         key, label: cfg.label, emoji: cfg.emoji, color: cfg.color, T,
         L: pL?.value != null ? pL.value * fatigueMod : null,
@@ -141,7 +143,7 @@ export function SessionPlanCard({
           : "well-supported",
       };
     }).filter(Boolean);
-  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, perceivedRpe, personalGains]);
+  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, fatigueModel, cooked]);
 
   // ── Active row — drives the bottom session-details panel ─────────────
   const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
@@ -311,14 +313,21 @@ export function SessionPlanCard({
       {/* Recommended Session — pure-math curve pick. Always shows the
           engine's unscaled output (TARGET / LOAD / why) regardless of
           where the RPE slider is set or whether the user has overridden
-          via a tile click. The RPE slider scales the prescribed load
-          for the actual workout (in the runner) and on the per-zone
-          tiles below, but the recommendation itself stays anchored to
-          what the curve says. */}
+          via a tile click. The cookedness slider scales the displayed
+          load here AND on the per-zone tiles below AND the load the
+          runner stamps onto each rep — single multiplier, three render
+          sites, so what the user sees matches what they'll lift. */}
       {(() => {
         const recCfg = GOAL_CONFIG[rec.zone] ?? { color: C.blue, label: rec.zone, emoji: "🎯" };
-        const recL = rec.loadByHand?.L;
-        const recR = rec.loadByHand?.R;
+        // Per-grip cookedness multiplier — same factor the tiles below
+        // and the runner use. Multiplied through rec.loadKg and the
+        // per-hand values so the Recommended card stays in sync with
+        // the rest of the screen as the slider moves.
+        const recMult = capacityMultiplier(fatigueModel, grip, cooked);
+        const recLoadKg = rec.loadKg != null ? rec.loadKg * recMult : rec.loadKg;
+        const recL = rec.loadByHand?.L != null ? rec.loadByHand.L * recMult : null;
+        const recR = rec.loadByHand?.R != null ? rec.loadByHand.R * recMult : null;
+        const recScalePct = recMult < 0.999 ? Math.round((1 - recMult) * 100) : 0;
         // Recommended is the primary "tile" — clickable like the small
         // alternatives below. Tapping it clears any override (back to
         // the engine's pick). Active when no override is in effect.
@@ -356,9 +365,16 @@ export function SessionPlanCard({
                 </div>
               </div>
               <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Load</div>
+                <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  Load
+                  {recScalePct > 0 && (
+                    <span style={{ marginLeft: 6, color: C.orange, fontWeight: 700 }}>
+                      −{recScalePct}%
+                    </span>
+                  )}
+                </div>
                 <div style={{ fontSize: 28, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
-                  {fmtW(rec.loadKg, unit)}<span style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>{unit}</span>
+                  {fmtW(recLoadKg, unit)}<span style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>{unit}</span>
                 </div>
                 {(recL != null || recR != null) && (
                   <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
@@ -377,48 +393,71 @@ export function SessionPlanCard({
         );
       })()}
 
-      {/* RPE slider — applies a per-zone scale-down to the prescribed
-          loads (display + runner) without changing which zone the engine
-          recommends. */}
+      {/* "How cooked today?" slider — mandatory 0–10 pre-workout state.
+          0 = fresh (multiplier = 1, no scale-down). Higher values apply
+          exp(-β_grip · cooked) to the prescribed load. null = not yet
+          picked; the Start button stays disabled until the user moves
+          the slider. This guarantees every session contributes to the
+          β learner via daily_state. */}
       <div style={{
         display: "flex", alignItems: "center", gap: 12,
         padding: "10px 12px", marginBottom: 12,
-        borderRadius: 8, background: C.bg, border: `1px solid ${C.border}`,
+        borderRadius: 8,
+        background: cooked == null ? C.bg : C.bg,
+        border: `1px solid ${cooked == null ? C.orange : C.border}`,
       }}>
         <div style={{ flex: "0 0 auto" }}>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>
             How cooked today?
+            {cooked == null && (
+              <span style={{ color: C.orange, marginLeft: 6 }}>· required</span>
+            )}
           </div>
           <div style={{ fontSize: 10, color: C.muted }}>
-            {perceivedRpe === 1 ? "fresh — no scale-down" : `RPE ${perceivedRpe}`}
-            {personalGains && perceivedRpe > 1 && (() => {
-              const g = activeZone ? personalGains[activeZone] : null;
-              if (g == null || Math.abs(g - 1) < 0.1) return null;
-              const direction = g < 1 ? "less cooked than avg" : "more cooked than avg";
+            {cooked == null
+              ? "set before starting"
+              : cooked === 0
+                ? "fresh — no scale-down"
+                : `cooked ${cooked}/10`}
+            {cooked != null && cooked > 0 && fatigueModel && grip && (() => {
+              const b = fatigueModel[grip]?.beta;
+              if (!(b > 0)) return null;
+              const mult = Math.exp(-b * cooked);
+              const pct = Math.round((1 - mult) * 100);
+              if (pct < 1) return null;
               return (
                 <span style={{ marginLeft: 6, color: C.purple, fontStyle: "italic" }}>
-                  · calibrated ({direction})
+                  · {pct}% scale-down
                 </span>
               );
             })()}
           </div>
         </div>
         <input
-          type="range" min={1} max={10} step={1}
-          value={perceivedRpe}
-          onChange={e => onPerceivedRpeChange?.(Number(e.target.value))}
-          style={{ flex: 1, accentColor: C.orange }}
-          aria-label="Perceived fatigue (1 fresh, 10 cooked)"
+          type="range" min={0} max={10} step={1}
+          // Render the thumb at 0 visually when nothing is picked, but
+          // the underlying state stays null so the gate logic and the
+          // 0-vs-not-picked semantic remain distinct.
+          value={cooked == null ? 0 : cooked}
+          onChange={e => onCookedChange?.(Number(e.target.value))}
+          style={{
+            flex: 1,
+            accentColor: C.orange,
+            // Visual cue that the slider is "untouched" — slight opacity
+            // until first interaction.
+            opacity: cooked == null ? 0.55 : 1,
+          }}
+          aria-label="Cookedness (0 fresh, 10 wrecked)"
         />
-        {perceivedRpe > 1 && (
+        {cooked != null && cooked !== 0 && (
           <button
-            onClick={() => onPerceivedRpeChange?.(1)}
+            onClick={() => onCookedChange?.(0)}
             style={{
               flex: "0 0 auto", fontSize: 10, padding: "2px 8px",
               borderRadius: 4, border: `1px solid ${C.border}`,
               background: "transparent", color: C.muted, cursor: "pointer",
             }}
-          >reset</button>
+          >fresh</button>
         )}
       </div>
 

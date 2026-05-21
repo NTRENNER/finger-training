@@ -32,11 +32,11 @@
 //   ALTER TABLE reps
 //     ADD COLUMN IF NOT EXISTS perceived_rpe integer;
 //
-// `perceived_rpe` is the session-level "how cooked do you feel today"
-// scalar (1-10) the user dials on the PrescribedLoadCard slider. Same
-// value is stamped onto every rep in the session. Null when the
-// slider was left at fresh (1) — those reps don't carry a learning
-// signal for perceivedFatigueLearning.computePersonalGains.
+// `perceived_rpe` was the per-rep stamp for the legacy per-zone gain
+// learner. The new per-grip β learner reads cookedness from the
+// daily_state table (joined by date) inside the server-side trigger
+// update_fatigue_beta_from_rep_trg. Column preserved on `reps` for
+// historical reads; always null on new writes.
 //
 // `was_recommended` carries the WorkoutTab rotation signal across
 // devices. WorkoutTab derives "next workout" from the synced log,
@@ -180,9 +180,12 @@ export function repPayload(rep) {
     rest_s: rep.rest_s, session_id: rep.session_id,
     failed: rep.failed ?? false,
     session_started_at: rep.session_started_at ?? null,
-    // Session-level perceived fatigue (1-10) when the user dialed
-    // the PrescribedLoadCard slider. Null when fresh — those reps
-    // don't carry a learning signal for perceivedFatigueLearning.
+    // perceived_rpe was the per-rep stamp for the old per-zone
+    // shrinkage learner (perceivedFatigueLearning, removed). The new
+    // per-grip β learner reads cookedness from daily_state via the
+    // server-side trigger, not from this column. Preserved here for
+    // back-compat with historical reads and to avoid dropping the
+    // column from the table — always null on new writes.
     perceived_rpe: rep.perceived_rpe ?? null,
   };
 }
@@ -314,6 +317,50 @@ export async function fetchReps() {
     // RPE slider. Numbers > 1 carry a learning signal.
     perceived_rpe: r.perceived_rpe ?? null,
   }));
+}
+
+// ─────────────────────────────────────────────────────────────
+// DAILY STATE (cooked scalar — drives the per-grip β learner)
+// ─────────────────────────────────────────────────────────────
+// One row per date, holding the user's pre-workout "How cooked
+// today?" scalar (0 = fresh, 10 = wrecked). Written by SessionPlanCard
+// before the user accepts a prescription, so it can't be biased by
+// session outcome.
+//
+// The Postgres trigger update_fatigue_beta_from_rep_trg joins this
+// table on NEW.date when rep 1 of a session arrives, then steps
+// user_settings.settings.fatigue_model[grip].beta. Without a row in
+// daily_state for the session's date, the learner sits this rep out.
+
+export async function pushDailyState(date, cooked) {
+  if (!date || cooked == null) return false;
+  try {
+    const { error } = await supabase.from("daily_state").upsert(
+      { date, cooked: Number(cooked) },
+      { onConflict: "date" }
+    );
+    if (error) { console.warn("Supabase daily_state push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase daily_state push exception:", e.message);
+    return false;
+  }
+}
+
+export async function fetchDailyStateForDate(date) {
+  if (!date) return null;
+  try {
+    const { data, error } = await supabase
+      .from("daily_state")
+      .select("date, cooked")
+      .eq("date", date)
+      .maybeSingle();
+    if (error) { console.warn("Supabase daily_state fetch:", error.message); return null; }
+    return data ? { date: data.date, cooked: data.cooked } : null;
+  } catch (e) {
+    console.warn("Supabase daily_state fetch exception:", e.message);
+    return null;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

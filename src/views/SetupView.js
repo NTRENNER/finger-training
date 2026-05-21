@@ -469,10 +469,10 @@ function ClimbingLogCard({ activities = [], onLog }) {
 export function SetupView({
   config, setConfig, onStart, history,
   freshMap = null,
-  // Per-zone learned fatigue gains (App-level memo). Passed straight
-  // through to PrescribedLoadCard so the slider's scale-down matches
-  // what the runner will actually prescribe.
-  personalGains = null,
+  // Per-grip β fatigue model from user_settings. Passed through to
+  // SessionPlanCard so the slider's scale-down preview matches what
+  // the runner will actually prescribe.
+  fatigueModel = null,
   unit = "lbs",
   onBwSave = () => {},
   activities = [], onLogActivity = () => {},
@@ -593,9 +593,9 @@ export function SetupView({
         GOAL_CONFIG={GOAL_CONFIG}
         unit={unit}
         onApplyPlan={(plan) => setConfig(c => ({ ...c, ...plan }))}
-        perceivedRpe={config.perceivedRpe ?? 1}
-        onPerceivedRpeChange={(v) => setConfig(c => ({ ...c, perceivedRpe: v }))}
-        personalGains={personalGains}
+        cooked={config.cooked}
+        onCookedChange={(v) => setConfig(c => ({ ...c, cooked: v }))}
+        fatigueModel={fatigueModel}
         climbingFocus={climbingFocus}
         onNavigateToSettings={onNavigateToSettings}
       />
@@ -612,12 +612,20 @@ export function SetupView({
       {/* Tindeq Connect slot — rendered just above the Start button */}
       {connectSlot}
 
+      {/* Start gating: grip must be picked AND cookedness must be set.
+          The cooked == null case means the user hasn't touched the
+          slider since opening the screen — we require deliberate input
+          so every session contributes to the β learner. */}
       <Btn
         onClick={onStart}
-        disabled={!config.grip}
+        disabled={!config.grip || config.cooked == null}
         style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12 }}
       >
-        {config.grip ? "Start Session →" : "Select a grip to start"}
+        {!config.grip
+          ? "Select a grip to start"
+          : config.cooked == null
+            ? "Set cookedness to start"
+            : "Start Session →"}
       </Btn>
     </div>
   );
