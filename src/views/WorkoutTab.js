@@ -32,6 +32,7 @@ import {
 
 import { today } from "../util.js";
 import { recommendSet } from "../model/workout-progression.js";
+import { shortBuildLabel } from "../lib/buildInfo.js";
 
 import { BwPrompt } from "./SetupView.js";
 
@@ -1140,16 +1141,17 @@ export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = D
   // ── Render ──
   return (
     <div style={{ padding: "16px 16px 80px" }}>
-      {/* Build version stamp — small, top-right corner. Lets us
-          confirm what code is actually running on the device when
-          debugging cache/deploy mismatches. Bumped per commit by
-          editing the literal below. */}
+      {/* Build version stamp — small, top-right corner. Auto-bumped
+          per commit (git SHA + build date baked in via
+          REACT_APP_BUILD_SHA / REACT_APP_BUILD_TIME in package.json's
+          build script; see src/lib/buildInfo.js). Lets us confirm
+          which bundle is running on a device without DevTools. */}
       <div style={{
         position: "absolute", top: 6, right: 8,
         fontSize: 9, color: C.muted, opacity: 0.5,
         fontFamily: "monospace", pointerEvents: "none",
       }}>
-        v.fix.sidekey
+        {shortBuildLabel()}
       </div>
 
       {/* Sub-tab nav */}

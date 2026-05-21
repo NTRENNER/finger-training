@@ -25,6 +25,7 @@ import { C } from "../ui/theme.js";
 import { Card, Btn, Sect } from "../ui/components.js";
 import { KG_TO_LBS, fmt0, toDisp, fromDisp } from "../ui/format.js";
 import { tripCountdown } from "../lib/trip.js";
+import { longBuildLabel } from "../lib/buildInfo.js";
 
 export function SettingsView({
   user, loginEmail, setLoginEmail,
@@ -378,7 +379,18 @@ CREATE POLICY "auth_all" ON reps
             freshness so unexplored durations get sampled too. The
             recommendation is one specific (T, load) pair per session.
             <br /><br />
-            <b>Version:</b> Finger Training v3
+            <b>Build:</b>{" "}
+            <span style={{ fontFamily: "monospace", color: "#fff" }}>
+              {longBuildLabel()}
+            </span>
+            <br />
+            <span style={{ fontSize: 11 }}>
+              Compare this string against the latest commit on{" "}
+              <code>main</code> to confirm the device is on the
+              current bundle. If it lags after a deploy, hard-reload
+              (Settings → Apps → Chrome → Storage → Clear cache, or
+              on desktop Cmd/Ctrl-Shift-R).
+            </span>
           </div>
         </Sect>
       </Card>
