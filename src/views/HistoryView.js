@@ -228,8 +228,6 @@ export function HistoryView({
     const sorted = bwLogSorted.map(e => Number(e.kg)).sort((a, b) => a - b);
     return sorted[Math.floor(sorted.length / 2)];
   }, [bwLogSorted]);
-  const [bwExpanded, setBwExpanded] = useState(false);
-
   const handleDeleteBW = async (date) => {
     // Native confirm — same pattern the session-delete buttons use.
     // eslint-disable-next-line no-alert
@@ -394,80 +392,9 @@ export function HistoryView({
         </Card>
       )}
 
-      {/* Body Weight Log — collapsible. Surfaces every BW entry the
-          History view's per-session BW lookup might draw from so you
-          can spot + delete anomalies (e.g. a legacy entry of 82 kg
-          in a 71 kg history that was producing phantom "BW 182 lbs"
-          captions). Highlighted in red when an entry deviates from
-          the rolling median by > 15%. */}
-      {bwLogSorted.length > 0 && (
-        <Card style={{ marginBottom: 12 }}>
-          <button
-            onClick={() => setBwExpanded(e => !e)}
-            style={{
-              width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-              background: "none", border: "none", color: "inherit",
-              cursor: "pointer", padding: 0, font: "inherit",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 700 }}>Body weight log</div>
-              <div style={{ fontSize: 11, color: C.muted }}>
-                {bwLogSorted.length} {bwLogSorted.length === 1 ? "entry" : "entries"}
-                {bwMedian != null && ` · median ${fmt1(toDisp(bwMedian, unit))} ${unit}`}
-              </div>
-            </div>
-            <span style={{ fontSize: 11, color: C.muted }}>{bwExpanded ? "hide" : "show"}</span>
-          </button>
-          {bwExpanded && (
-            <div style={{
-              marginTop: 10,
-              maxHeight: 280, overflowY: "auto",
-              display: "flex", flexDirection: "column", gap: 4,
-            }}>
-              {bwLogSorted.map(entry => {
-                const lbs = toDisp(Number(entry.kg), unit);
-                const isAnomaly = bwMedian && Math.abs(Number(entry.kg) - bwMedian) / bwMedian > 0.15;
-                return (
-                  <div key={entry.date} style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "6px 10px", borderRadius: 6,
-                    background: isAnomaly ? "#3f1a1a" : C.bg,
-                    border: `1px solid ${isAnomaly ? C.red : C.border}`,
-                  }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                      <span style={{ fontSize: 12, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
-                        {entry.date}
-                      </span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: isAnomaly ? C.red : "inherit" }}>
-                        {fmt1(lbs)} {unit}
-                      </span>
-                      {isAnomaly && (
-                        <span style={{ fontSize: 10, color: C.red, fontStyle: "italic" }}>
-                          off median by {Math.round(Math.abs(Number(entry.kg) - bwMedian) / bwMedian * 100)}%
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => handleDeleteBW(entry.date)}
-                      title="Delete this BW entry (local + cloud)"
-                      style={{
-                        background: "none", border: "none",
-                        color: isAnomaly ? C.red : C.muted,
-                        fontSize: 14, cursor: "pointer", padding: "0 4px", lineHeight: 1,
-                      }}
-                    >🗑</button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      )}
-
       {/* Domain toggle */}
       <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
-        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["climbing", "🧗 Climbing"]].map(([key, label]) => (
+        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["climbing", "🧗 Climbing"], ["weight", "⚖️ Weight"]].map(([key, label]) => (
           <button key={key} onClick={() => switchDomain(key)} style={{
             flex: 1, padding: "8px 0", borderRadius: 20, border: "none", cursor: "pointer",
             fontWeight: 700, fontSize: 13,
@@ -496,6 +423,65 @@ export function HistoryView({
           onDeleteActivity={onDeleteActivity}
           onUpdateActivity={onUpdateActivity}
         />
+      )}
+      {domain === "weight" && (
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Body weight log</div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+                {bwLogSorted.length} {bwLogSorted.length === 1 ? "entry" : "entries"}
+                {bwMedian != null && ` · median ${fmt1(toDisp(bwMedian, unit))} ${unit}`}
+              </div>
+            </div>
+          </div>
+          {bwLogSorted.length === 0 ? (
+            <div style={{ color: C.muted, fontSize: 12, padding: "16px 0", textAlign: "center" }}>
+              No body weight entries yet. Log one from the Setup tab's BW prompt.
+            </div>
+          ) : (
+            <div style={{
+              display: "flex", flexDirection: "column", gap: 4,
+              maxHeight: 480, overflowY: "auto",
+            }}>
+              {bwLogSorted.map(entry => {
+                const lbs = toDisp(Number(entry.kg), unit);
+                const isAnomaly = bwMedian && Math.abs(Number(entry.kg) - bwMedian) / bwMedian > 0.15;
+                return (
+                  <div key={entry.date} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "8px 12px", borderRadius: 8,
+                    background: isAnomaly ? "#3f1a1a" : C.bg,
+                    border: `1px solid ${isAnomaly ? C.red : C.border}`,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                      <span style={{ fontSize: 13, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                        {entry.date}
+                      </span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: isAnomaly ? C.red : "inherit" }}>
+                        {fmt1(lbs)} {unit}
+                      </span>
+                      {isAnomaly && (
+                        <span style={{ fontSize: 10, color: C.red, fontStyle: "italic" }}>
+                          off median by {Math.round(Math.abs(Number(entry.kg) - bwMedian) / bwMedian * 100)}%
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleDeleteBW(entry.date)}
+                      title="Delete this BW entry (local + cloud)"
+                      style={{
+                        background: "none", border: "none",
+                        color: isAnomaly ? C.red : C.muted,
+                        fontSize: 15, cursor: "pointer", padding: "0 4px", lineHeight: 1,
+                      }}
+                    >🗑</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
       )}
       {domain === "fingers" && <>
 
