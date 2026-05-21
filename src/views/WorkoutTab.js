@@ -1,23 +1,42 @@
 // ─────────────────────────────────────────────────────────────
 // WORKOUT TAB
 // ─────────────────────────────────────────────────────────────
-// The non-finger-training "Workout" tab — barbell/dumbbell/calisthenic
-// session log built around the 3-day rotation plan (A/B/C). Includes
-// the live session UI (set tracking, exercise substitution, weight
-// progression nudges) and the plan editor (tweak default exercises,
-// reorder, reset to defaults).
+// Strength / power / mobility training that supports climbing.
+// Rebuilt May 2026 around the supportTraining schema (see
+// src/model/supportTraining.js) — one BIG workout per week (A) plus
+// frequent low-friction sessions (B / C / D). The previous 3-day
+// rotation (legacy A/B/C, "Lift Day 1" / "Lift Day 2" / "Power")
+// was prone to skipped sessions because the high-volume days took
+// too long; the new shape addresses that directly.
 //
-// Coupling to App.js is purely via props: unit, onSessionSaved (called
-// when the user saves a completed session — App fans this out into
-// localStorage + cloud sync), onBwSave (BwPrompt callback), and trip
-// (the user-configurable target date for the countdown badge). All
-// other state is local to this module.
+// Flow:
+//   1. recommendNextWorkout() looks at the user's recent support
+//      sessions + climbing history + an `energyLow` toggle and
+//      proposes one workout for today, with a one-line reason.
+//   2. The user can accept the recommendation, override via the
+//      A/B/C/D/CLIMB/REST picker, or skip with REST.
+//   3. Active session: loggable exercises (per-set weight tracking)
+//      render with SessionExRow (preserved from the previous
+//      WorkoutTab — recommendSet drives weight suggestions); non-
+//      loggable exercises (mobility, explosive, bodyweight)
+//      render as compact SimpleExRow tiles with done + notes.
+//   4. Saving stamps `workoutId: A|B|C|D` alongside the legacy
+//      `workout` field for back-compat with the existing log
+//      shape. HistoryView reads `workout` first, so legacy
+//      sessions render unchanged.
 //
-// DEFAULT_WORKOUTS is also exported because HistoryView and TrendsView
-// both want it for their workout-history rendering; App.js imports it
-// here and passes it as a `defaultWorkouts` prop to those views.
+// LEGACY_WORKOUTS is exported (was DEFAULT_WORKOUTS, content
+// preserved) so HistoryView, WorkoutHistoryView, and
+// WorkoutAnalysisView can resolve historical sessions' exercise
+// names. The current tab no longer reads it.
+//
+// Plan editor and exercise substitutes are gone — the supportTraining
+// workouts are opinionated about which exercises do what, and the
+// substitute table was keyed by legacy exercise IDs that no longer
+// exist. Both can come back if needed; for now the simpler tab is
+// the point.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
@@ -30,151 +49,29 @@ import {
   DEFAULT_TRIP, weeksToTrip, tripCountdown,
 } from "../lib/trip.js";
 
-import { today } from "../util.js";
+import { today, nowISO } from "../util.js";
 import { recommendSet } from "../model/workout-progression.js";
 import { shortBuildLabel } from "../lib/buildInfo.js";
+
+import {
+  workouts as SUPPORT_WORKOUTS,
+  recommendNextWorkout,
+} from "../model/supportTraining.js";
 
 import { BwPrompt } from "./SetupView.js";
 
 // ─────────────────────────────────────────────────────────────
-// WORKOUT-TAB LOCAL STATE KEYS
-// ─────────────────────────────────────────────────────────────
-
-
-
-// WORKOUT PLAN
-// ─────────────────────────────────────────────────────────────
-const LS_WORKOUT_PLAN_KEY    = "ft_workout_plan";
-// "ft_workout_state" used to store the rotation index + session
-// count as local state. Rotation is now derived from wLog (synced
-// across devices) so the local state is unused. The first
-// saveLog() call below opportunistically clears any stale value
-// from users' localStorage as a one-shot cleanup.
-const LS_LEGACY_WORKOUT_STATE_KEY = "ft_workout_state";
+// Legacy data export — preserves the OLD DEFAULT_WORKOUTS content
+// so HistoryView / WorkoutHistoryView / WorkoutAnalysisView can
+// resolve historical session exercise names. The new tab does NOT
+// consume this; it lives here only as a stable export for views
+// that show historical data.
 //
-// LS_WORKOUT_LOG_KEY now lives in src/lib/storage.js (imported above).
-// LS_TRIP_KEY stays in App.js — that's where the trip-load/save lives;
-// WorkoutTab receives the resolved `trip` value as a prop.
-
-// nowISO — wall-clock timestamp on the saved session row. Kept inline
-// since this is the only consumer.
-const nowISO = () => new Date().toISOString();
-
-
-
+// Renamed from DEFAULT_WORKOUTS (no internal use any more); kept
+// the original export name DEFAULT_WORKOUTS pointing to it so
+// App.js's existing import doesn't break.
 // ─────────────────────────────────────────────────────────────
-
-// ROTATION + TYPE METADATA
-
-// ─────────────────────────────────────────────────────────────
-
-
-// 3-day workout rotation: F (Fingers/Power) → S (Strength) → H (Hypertrophy).
-const WK_ROTATION = ["A", "B", "C"];
-
-const WTYPE_META = {
-  F: { label: "F", bg: "#1a2d4a", color: "#58a6ff" },
-  S: { label: "S", bg: "#2d1f00", color: "#e3b341" },
-  H: { label: "H", bg: "#2d0000", color: "#f85149" },
-  P: { label: "P", bg: "#2d1200", color: "#f0883e" },
-  C: { label: "C", bg: "#002d10", color: "#3fb950" },
-  X: { label: "↔", bg: "#1e1e2e", color: "#8b949e" },
-};
-
-
-
-// ─────────────────────────────────────────────────────────────
-
-// EXERCISE SUBSTITUTIONS
-
-// Shown during a live session when the planned exercise's
-
-// equipment is unavailable. Swaps are session-only and do not
-
-// modify the plan template.
-
-// ─────────────────────────────────────────────────────────────
-
-// Exercise substitution options — shown during a live session when equipment is unavailable.
-// Keys are exercise IDs from DEFAULT_WORKOUTS; values are arrays of alternatives.
-// Swaps are session-only and do not modify the plan template.
-const EXERCISE_SUBSTITUTES = {
-  bench_press:   [
-    { id: "ohp",           name: "Overhead press",         type: "S", reps: "5",       logWeight: true,  unilateral: true, note: "Single-arm — KB or DB" },
-    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  unilateral: true, availableLoads: [35, 50, 55, 62, 70], note: "Single-arm — alternating sides" },
-    { id: "push_ups",      name: "Push-ups",               type: "S", reps: "8–12",    logWeight: false, note: "Weighted vest if bodyweight is easy" },
-  ],
-  kb_press:      [
-    // Substitutions FOR kb_press (single-arm KB press in Workout B,
-    // alternating sides). Bench / push-ups are bilateral
-    // alternatives if you don't have a KB; OHP also single-arm.
-    { id: "ohp",           name: "Overhead press",         type: "S", reps: "5",       logWeight: true,  unilateral: true, note: "Single-arm — KB or DB" },
-    { id: "bench_press",   name: "Bench press",            type: "S", reps: "5",       logWeight: true,  note: "" },
-    { id: "push_ups",      name: "Push-ups",               type: "S", reps: "8–12",    logWeight: false, note: "Weighted vest if bodyweight is easy" },
-  ],
-  pull_ups:      [
-    { id: "lat_pulldown",  name: "Lat pulldown",           type: "S", reps: "5",       logWeight: true,  note: "" },
-    { id: "ring_rows",     name: "Ring rows",              type: "S", reps: "8–10",    logWeight: false, note: "Elevate feet to increase difficulty" },
-    { id: "band_pullups",  name: "Band-assisted pull-ups", type: "S", reps: "5",       logWeight: false, note: "" },
-  ],
-  landmine_rows: [
-    { id: "db_rows",       name: "DB rows",                type: "S", reps: "5",       logWeight: true,  unilateral: true, note: "" },
-    { id: "cable_rows",    name: "Cable rows",             type: "S", reps: "5",       logWeight: true,  note: "" },
-    { id: "trx_rows",      name: "TRX rows",               type: "S", reps: "8–10",    logWeight: false, note: "Feet elevated for more load" },
-  ],
-  dips:          [
-    { id: "close_bench",   name: "Close-grip bench",       type: "S", reps: "5",       logWeight: true,  note: "" },
-    { id: "tricep_ext",    name: "Tricep extension",       type: "S", reps: "8–10",    logWeight: true,  note: "Cable or DB" },
-    { id: "kb_press",      name: "KB press",               type: "S", reps: "5",       logWeight: true,  unilateral: true, availableLoads: [35, 50, 55, 62, 70], note: "Single-arm — alternating sides" },
-  ],
-  rdl:           [
-    { id: "good_morning",  name: "Good mornings",          type: "H", reps: "5",       logWeight: true,  note: "" },
-    { id: "kb_deadlift",   name: "KB deadlift",            type: "H", reps: "5",       logWeight: true,  note: "" },
-    { id: "hip_hinge",     name: "Hip hinge (band)",       type: "H", reps: "8–10",    logWeight: false, note: "Band around hips, hinge toward wall" },
-  ],
-  trx_ham_curl:  [
-    { id: "nordic_curl",   name: "Nordic curl",            type: "H", reps: "3–5",     logWeight: false, note: "Slow lowering; add 1 rep/1–2 wks" },
-    { id: "sb_ham_curl",   name: "Stability ball curl",    type: "H", reps: "8–10",    logWeight: false, note: "" },
-    { id: "glute_bridge",  name: "Single-leg glute bridge",type: "H", reps: "10",      logWeight: false, unilateral: true, note: "" },
-  ],
-  goblet_squat:  [
-    { id: "step_up",       name: "Step-up",                type: "S", reps: "6–8",     logWeight: true,  unilateral: true, note: "Climbing & hiking strength" },
-    { id: "box_squat",     name: "Box squat",              type: "S", reps: "5",       logWeight: true,  note: "" },
-    { id: "split_squat",   name: "Bulgarian split squat",  type: "S", reps: "6",       logWeight: true,  unilateral: true, note: "" },
-  ],
-  step_up:       [
-    { id: "goblet_squat",  name: "Goblet squat",           type: "S", reps: "8",       logWeight: true,  note: "Joint health — keep load moderate" },
-    { id: "split_squat",   name: "Bulgarian split squat",  type: "S", reps: "6",       logWeight: true,  unilateral: true, note: "" },
-    { id: "lunge",         name: "Reverse lunge",          type: "S", reps: "8",       logWeight: true,  unilateral: true, note: "" },
-  ],
-  bicep_curls:   [
-    { id: "hammer_curls",  name: "Curls",                  type: "S", reps: "8",       logWeight: true,  unilateral: true, availableLoads: [20, 25, 40], note: "Brachialis emphasis (hammer grip)" },
-    { id: "band_curls",    name: "Band curls",             type: "S", reps: "10–12",   logWeight: false, note: "" },
-    { id: "chin_up",       name: "Chin-ups (supinated)",   type: "S", reps: "5",       logWeight: true,  note: "Direct bicep transfer" },
-  ],
-  slam_balls:    [
-    { id: "med_ball",      name: "Medicine ball throw",    type: "P", reps: "8–10",    logWeight: true,  note: "" },
-    { id: "broad_jump",    name: "Broad jump",             type: "P", reps: "6–8",     logWeight: false, note: "" },
-    { id: "box_jump",      name: "Box jump",               type: "P", reps: "6–8",     logWeight: false, note: "" },
-  ],
-  kb_snatch:     [
-    { id: "kb_swing",      name: "KB swing",               type: "P", reps: "10",      logWeight: true,  note: "" },
-    { id: "db_snatch",     name: "DB snatch",              type: "P", reps: "5",       logWeight: true,  unilateral: true, note: "" },
-    { id: "power_clean",   name: "Power clean",            type: "P", reps: "5",       logWeight: true,  note: "" },
-  ],
-};
-
-
-
-// ─────────────────────────────────────────────────────────────
-
-// DEFAULT WORKOUT PLANS
-
-// 3-day rotation: A (Push+Pull) → B (Push+Pull variant) → C (Power).
-
-// ─────────────────────────────────────────────────────────────
-
-export const DEFAULT_WORKOUTS = {
+export const LEGACY_WORKOUTS = {
   A: {
     name: "Lift Day 1 (Push + Pull)",
     exercises: [
@@ -183,8 +80,8 @@ export const DEFAULT_WORKOUTS = {
       { id: "bench_press",   name: "Bench press",           type: "S", sets: 2,    reps: "5",      logWeight: true,  note: "" },
       { id: "dips",          name: "Dips",                  type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Weighted when bodyweight is easy" },
       { id: "bicep_curls",   name: "Bicep curls",           type: "S", sets: 2,    reps: "8",      logWeight: true,  unilateral: true, availableLoads: [20, 25, 40], note: "Undercling strength — rep up at current DB, jump when at top" },
-      { id: "rdl",           name: "RDL",                   type: "H", sets: 2,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
-      { id: "trx_ham_curl",  name: "TRX hamstring curl",    type: "H", sets: 2,    reps: "6–8",    logWeight: false, note: "Slow eccentric; single-leg when ready" },
+      { id: "rdl",           name: "RDL",                   type: "S", sets: 2,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
+      { id: "trx_ham_curl",  name: "TRX hamstring curl",    type: "S", sets: 2,    reps: "6–8",    logWeight: false, note: "Slow eccentric; single-leg when ready" },
       { id: "goblet_squat",  name: "Goblet squat",          type: "S", sets: 1,    reps: "8",      logWeight: true,  note: "Joint health — keep load moderate" },
       { id: "stretch",       name: "Stretching",            type: "X", sets: null, reps: null,     logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
     ],
@@ -197,9 +94,9 @@ export const DEFAULT_WORKOUTS = {
       { id: "kb_press",      name: "KB press",              type: "S", sets: 2,    reps: "5",      logWeight: true,  unilateral: true, availableLoads: [35, 50, 55, 62, 70], note: "Single-arm — alternating sides" },
       { id: "dips",          name: "Dips",                  type: "S", sets: 2,    reps: "5",      logWeight: true,  bodyweightAdditive: true, note: "Weighted when bodyweight is easy" },
       { id: "bicep_curls",   name: "Bicep curls",           type: "S", sets: 2,    reps: "8",      logWeight: true,  unilateral: true, availableLoads: [20, 25, 40], note: "Undercling strength — rep up at current DB, jump when at top" },
-      { id: "rdl",           name: "RDL",                   type: "H", sets: 2,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
-      { id: "trx_ham_curl",  name: "TRX hamstring curl",    type: "H", sets: 2,    reps: "6–8",    logWeight: false, note: "Slow eccentric; single-leg when ready" },
-      { id: "step_up",       name: "Step-up",               type: "S", sets: 1,    reps: "6–8",     logWeight: true, unilateral: true, note: "Climbing & hiking strength — load when bodyweight easy" },
+      { id: "rdl",           name: "RDL",                   type: "S", sets: 2,    reps: "3–5",    logWeight: true,  note: "Heavy — load in lengthened position" },
+      { id: "trx_ham_curl",  name: "TRX hamstring curl",    type: "S", sets: 2,    reps: "6–8",    logWeight: false, note: "Slow eccentric; single-leg when ready" },
+      { id: "step_up",       name: "Step-up",               type: "S", sets: 1,    reps: "6–8",    logWeight: true,  unilateral: true, note: "Climbing & hiking strength — load when bodyweight easy" },
       { id: "stretch",       name: "Stretching",            type: "X", sets: null, reps: null,     logWeight: false, note: "Couch · Splits machine · Hamstring lockout · Forearms · Lat" },
     ],
   },
@@ -213,52 +110,86 @@ export const DEFAULT_WORKOUTS = {
   },
 };
 
-
+// Back-compat alias — App.js, HistoryView, WorkoutAnalysisView, and
+// WorkoutHistoryView all import DEFAULT_WORKOUTS for legacy-session
+// name resolution. Keep the export name; the content is the legacy
+// data.
+export const DEFAULT_WORKOUTS = LEGACY_WORKOUTS;
 
 // ─────────────────────────────────────────────────────────────
+// LocalStorage keys
+// ─────────────────────────────────────────────────────────────
+// Energy toggle is stored as { date, value } so an "I'm wiped"
+// state set on Monday night doesn't bleed into Tuesday morning's
+// recommendation. Auto-clears at midnight without any explicit
+// cleanup logic — the read helper compares date against today().
+const LS_ENERGY_LOW_KEY = "ft_support_energy_low";
 
-// EXERCISE / SESSION ROW PRIMITIVES
+function loadEnergyLow() {
+  const stored = loadLS(LS_ENERGY_LOW_KEY);
+  if (stored?.date === today() && stored?.value === true) return true;
+  return false;
+}
+function saveEnergyLow(value) {
+  saveLS(LS_ENERGY_LOW_KEY, { date: today(), value: !!value });
+}
 
 // ─────────────────────────────────────────────────────────────
+// Type badge metadata
+// ─────────────────────────────────────────────────────────────
+// S = Strength, H = Hypertrophy / mobility, P = Power, X = Stretch.
+// Matches the legacy palette so the badge color is consistent if
+// you compare old + new sessions side by side in History.
+const WTYPE_META = {
+  S: { label: "S", color: C.blue,   bg: C.blue   + "22" },
+  H: { label: "H", color: C.purple, bg: C.purple + "22" },
+  P: { label: "P", color: C.orange, bg: C.orange + "22" },
+  X: { label: "X", color: C.muted,  bg: C.border          },
+};
 
-// ── Type badge ────────────────────────────────────────────────
+// Workout ID accent colors. The recommendation card and the picker
+// buttons use these so the active workout has a consistent visual
+// identity across surfaces.
+const WORKOUT_COLORS = {
+  A: C.blue,
+  B: C.orange,
+  C: C.purple,
+  D: C.green,
+  CLIMB: "#e05560",
+  REST: C.muted,
+};
+
+function genId() { return Math.random().toString(36).slice(2, 10); }
+
+// ─────────────────────────────────────────────────────────────
+// Type badge
+// ─────────────────────────────────────────────────────────────
 function WTypeBadge({ type }) {
-  const m = WTYPE_META[type] || WTYPE_META.X;
+  const meta = WTYPE_META[type] || WTYPE_META.S;
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", justifyContent: "center",
-      width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
-      background: m.bg, color: m.color, fontSize: 11, fontWeight: 700,
-    }}>{m.label}</span>
+      width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+      fontSize: 11, fontWeight: 700, color: meta.color, background: meta.bg,
+    }}>{meta.label}</span>
   );
 }
 
-// ── Exercise row (read-only) ──────────────────────────────────
-function ExerciseRow({ ex, last }) {
-  const setsReps = [ex.sets && `${ex.sets}×`, ex.reps].filter(Boolean).join(" ");
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 12,
-      padding: "11px 0",
-      borderBottom: last ? "none" : `1px solid ${C.border}`,
-    }}>
-      <WTypeBadge type={ex.type} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 15, color: C.text }}>{ex.name}</div>
-        {ex.note ? <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{ex.note}</div> : null}
-      </div>
-      {setsReps && (
-        <div style={{ fontSize: 13, color: C.muted, whiteSpace: "nowrap" }}>{setsReps}</div>
-      )}
-    </div>
-  );
-}
-
-// ── Session logging row ───────────────────────────────────────
-function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onToggle, last, recommendations = [] }) {
-  const allSetsDone = ex.logWeight && setsData?.sets
+// ─────────────────────────────────────────────────────────────
+// SessionExRow — per-set weight + reps tracking
+// ─────────────────────────────────────────────────────────────
+// Preserved from the previous WorkoutTab. Used for loggable=true
+// exercises only. Drives weight suggestions via recommendSet() in
+// the parent component and renders the editable input grid.
+//
+// Unilateral exercises render TWO short rows per set (L on top,
+// R below) so each side gets its own reps + weight inputs. The
+// pair shares one done button — a "set" of unilateral work is one
+// logical unit even though the two sides happen sequentially.
+function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recommendations = [], last }) {
+  const allSetsDone = setsData?.sets
     ? setsData.sets.every(s => s.done)
-    : !!done;
+    : false;
   const inputStyle = {
     width: 72, background: C.bg, border: `1px solid ${C.border}`,
     color: C.text, borderRadius: 6, padding: "4px 7px", fontSize: 14,
@@ -284,1347 +215,737 @@ function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, done, onTogg
         <WTypeBadge type={ex.type} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, color: C.text }}>{ex.name}</div>
-          {ex.note ? <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{ex.note}</div> : null}
+          {ex.intent ? (
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{ex.intent}</div>
+          ) : null}
 
-          {ex.logWeight && setsData?.sets ? (
-            // ── Per-set rows ──
-            // Unilateral exercises render TWO short rows per set (L
-            // on top, R below) so each side gets its own reps + weight
-            // input. The pair shares one done button — a "set" of
-            // unilateral work is one logical unit even though the two
-            // sides happen sequentially. Bilateral exercises keep the
-            // original single-row layout.
-            <div style={{ marginTop: 10 }}>
-              {/* Column headers */}
-              <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: C.muted, width: 36, flexShrink: 0 }}></span>
-                <span style={{ fontSize: 11, color: C.muted, width: 48, textAlign: "center" }}>reps</span>
-                <span style={{ fontSize: 11, color: C.muted, width: 72, textAlign: "center" }}>weight</span>
-                {prevSets?.length > 0 && (
-                  <span style={{ fontSize: 11, color: C.muted, width: 44, textAlign: "center" }}>prev</span>
-                )}
-              </div>
+          <div style={{ marginTop: 10 }}>
+            {/* Column headers */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: C.muted, width: 36, flexShrink: 0 }}></span>
+              <span style={{ fontSize: 11, color: C.muted, width: 48, textAlign: "center" }}>reps</span>
+              <span style={{ fontSize: 11, color: C.muted, width: 72, textAlign: "center" }}>weight</span>
+              {prevSets?.length > 0 && (
+                <span style={{ fontSize: 11, color: C.muted, width: 44, textAlign: "center" }}>prev</span>
+              )}
+            </div>
 
-              {setsData.sets.map((s, i) => {
-                const isExtra = i >= (ex.sets || 0);
+            {setsData.sets.map((s, i) => {
+              const isExtra = i >= (ex.sets || 0);
+              const rec = recommendations[i];
 
-                // Per-set progression hint(s) from the recommender.
-                // Also used as a fallback for the input values below —
-                // if startSession's pre-fill missed (stale state, code
-                // mismatch, schema drift), the renderer surfaces the
-                // recommendation directly so the user sees a number
-                // rather than an empty box that contradicts the hint.
-                const rec = recommendations[i];
-
-                // Renders one side's row of inputs. For unilateral
-                // sets, we call this twice per set with side="L"/"R";
-                // for bilateral, once with side=null.
-                const renderSideRow = (side, sLabel, sideKey) => {
-                  // side is "L" or "R" (single char) — map to the
-                  // schema's full word "left"/"right". Previously this
-                  // used `side.toLowerCase()` directly which produced
-                  // "lWeight" / "rWeight" — keys that don't exist on
-                  // anything (recommender returns leftWeight; cloud
-                  // stores leftWeight; volume math reads leftWeight).
-                  // The bug caused every unilateral input to be empty
-                  // and every typed unilateral value to be saved under
-                  // garbage keys that the recommender then couldn't
-                  // find on the next session.
-                  const sideWord  = side === "L" ? "left" : side === "R" ? "right" : null;
-                  const repsKey   = sideWord ? `${sideWord}Reps`   : "reps";
-                  const weightKey = sideWord ? `${sideWord}Weight` : "weight";
-                  // Fallback chain: stored sessionData → recommendation →
-                  // template default → empty. Treat "" as "not set"
-                  // (every "stored" value the user types is non-empty;
-                  // an explicit empty just means they want the rec).
-                  const stored = (k) => {
-                    const v = s[k];
-                    return v != null && v !== "" ? v : null;
-                  };
-                  // Recommended values from the live recommender (used
-                  // as a fallback for the input value AND as a visible
-                  // placeholder so the suggestion is impossible to miss
-                  // even if value-fallback fails for some reason).
-                  const recReps   = rec ? (rec[repsKey]   ?? rec.reps)   : null;
-                  const recWeight = rec ? (rec[weightKey] ?? rec.weight) : null;
-                  const repsVal   = stored(repsKey)
-                    ?? recReps
-                    ?? (side ? "" : ex.reps)
-                    ?? "";
-                  const weightVal = stored(weightKey)
-                    ?? recWeight
-                    ?? "";
-                  const prev      = prevSets?.[i];
-                  const prevShown = side
-                    ? (prev && typeof prev === "object" ? prev[side] : null)
-                    : prev;
-                  return (
-                    <div key={sideKey} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: side === "L" ? 4 : 6 }}>
-                      <span style={{ fontSize: 12, color: isExtra ? C.orange : C.muted, width: 36, flexShrink: 0 }}>
-                        {sLabel}
-                      </span>
-                      <input
-                        type="text" inputMode="text"
-                        value={repsVal}
-                        onChange={e => {
-                          const next = [...setsData.sets];
-                          next[i] = { ...next[i], [repsKey]: e.target.value };
-                          onSetsChange({ sets: next });
-                        }}
-                        style={{ ...inputStyle, width: 48, fontSize: 13 }}
-                        placeholder={recReps != null ? String(recReps) : (ex.reps || "")}
-                      />
-                      <input
-                        type="number" inputMode="decimal"
-                        value={weightVal}
-                        onChange={e => {
-                          const next = [...setsData.sets];
-                          next[i] = { ...next[i], [weightKey]: e.target.value };
-                          onSetsChange({ sets: next });
-                        }}
-                        style={inputStyle}
-                        placeholder={recWeight != null ? String(recWeight) : ""}
-                      />
-                      <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
-                      {prevShown ? (
-                        <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevShown}</span>
-                      ) : prevSets?.length > 0 ? (
-                        <span style={{ width: 44 }} />
-                      ) : null}
-                      {/* Done button — render only on the last (or
-                          only) side row so it sits at the visual
-                          end of the set. */}
-                      {(side === null || side === "R") && doneBtn(s.done, () => {
-                        const next = [...setsData.sets];
-                        next[i] = { ...next[i], done: !next[i].done };
-                        onSetsChange({ sets: next });
-                      })}
-                      {/* Remove extra set — only on last side row */}
-                      {(side === null || side === "R") && isExtra && (
-                        <button
-                          onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
-                          style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1 }}
-                          title="Remove this set"
-                        >−</button>
-                      )}
-                    </div>
-                  );
+              const renderSideRow = (side, sLabel, sideKey) => {
+                const sideWord  = side === "L" ? "left" : side === "R" ? "right" : null;
+                const repsKey   = sideWord ? `${sideWord}Reps`   : "reps";
+                const weightKey = sideWord ? `${sideWord}Weight` : "weight";
+                const stored = (k) => {
+                  const v = s[k];
+                  return v != null && v !== "" ? v : null;
                 };
-
-                // Hint line styling — `rec` declared above (also used
-                // as the input-value fallback). Bilateral exercises
-                // get a single hint line under the set; unilateral get
-                // one per side.
-                const hintStyle = { fontSize: 10, color: C.muted, marginLeft: 44, marginTop: -2, marginBottom: 4, fontStyle: "italic" };
-
-                if (ex.unilateral) {
-                  return (
-                    <div key={i} style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: 11, color: isExtra ? C.orange : C.muted, marginBottom: 2 }}>
-                        S{i + 1}
-                      </div>
-                      {renderSideRow("L", "L", `${i}-L`)}
-                      {rec?.leftReasoning && (
-                        <div style={hintStyle}>{rec.leftReasoning}</div>
-                      )}
-                      {renderSideRow("R", "R", `${i}-R`)}
-                      {rec?.rightReasoning && (
-                        <div style={hintStyle}>{rec.rightReasoning}</div>
-                      )}
-                    </div>
-                  );
-                }
+                const recReps   = rec ? (rec[repsKey]   ?? rec.reps)   : null;
+                const recWeight = rec ? (rec[weightKey] ?? rec.weight) : null;
+                const repsVal   = stored(repsKey)   ?? recReps   ?? (side ? "" : ex.reps) ?? "";
+                const weightVal = stored(weightKey) ?? recWeight ?? "";
+                const prev      = prevSets?.[i];
+                const prevShown = side
+                  ? (prev && typeof prev === "object" ? prev[side] : null)
+                  : prev;
                 return (
-                  <div key={i}>
-                    {renderSideRow(null, `S${i + 1}`, `${i}`)}
-                    {rec?.reasoning && (
-                      <div style={hintStyle}>{rec.reasoning}</div>
+                  <div key={sideKey} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: side === "L" ? 4 : 6 }}>
+                    <span style={{ fontSize: 12, color: isExtra ? C.orange : C.muted, width: 36, flexShrink: 0 }}>
+                      {sLabel}
+                    </span>
+                    <input
+                      type="text" inputMode="text"
+                      value={repsVal}
+                      onChange={e => {
+                        const next = [...setsData.sets];
+                        next[i] = { ...next[i], [repsKey]: e.target.value };
+                        onSetsChange({ sets: next });
+                      }}
+                      style={{ ...inputStyle, width: 48, fontSize: 13 }}
+                      placeholder={recReps != null ? String(recReps) : (ex.reps || "")}
+                    />
+                    <input
+                      type="number" inputMode="decimal"
+                      value={weightVal}
+                      onChange={e => {
+                        const next = [...setsData.sets];
+                        next[i] = { ...next[i], [weightKey]: e.target.value };
+                        onSetsChange({ sets: next });
+                      }}
+                      style={inputStyle}
+                      placeholder={recWeight != null ? String(recWeight) : ""}
+                    />
+                    <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
+                    {prevShown ? (
+                      <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevShown}</span>
+                    ) : prevSets?.length > 0 ? (
+                      <span style={{ width: 44 }} />
+                    ) : null}
+                    {(side === null || side === "R") && doneBtn(s.done, () => {
+                      const next = [...setsData.sets];
+                      next[i] = { ...next[i], done: !next[i].done };
+                      onSetsChange({ sets: next });
+                    })}
+                    {(side === null || side === "R") && isExtra && (
+                      <button
+                        onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
+                        style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1 }}
+                        title="Remove this set"
+                      >−</button>
                     )}
                   </div>
                 );
-              })}
+              };
 
-              {/* Add set button — initialize new set with the right
-                  schema so users don't end up mixing bilateral fields
-                  on a unilateral exercise (which the volume math
-                  would happily skip). */}
-              <button
-                onClick={() => onSetsChange({
-                  sets: [...setsData.sets, ex.unilateral
-                    ? { leftReps: ex.reps || "", leftWeight: "", rightReps: ex.reps || "", rightWeight: "", done: false }
-                    : { weight: "", reps: ex.reps || "", done: false }
-                  ]
-                })}
-                style={{
-                  marginTop: 4, width: "100%", padding: "5px 0",
-                  background: "none", border: `1px dashed ${C.border}`,
-                  color: C.muted, borderRadius: 6, fontSize: 12, cursor: "pointer",
-                }}
-              >+ Set</button>
-            </div>
-          ) : (
-            // ── No weight, just reps label ──
-            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>
-              {[ex.sets && `${ex.sets}×`, ex.reps].filter(Boolean).join(" ")}
-            </div>
-          )}
+              const hintStyle = { fontSize: 10, color: C.muted, marginLeft: 44, marginTop: -2, marginBottom: 4, fontStyle: "italic" };
+
+              if (ex.unilateral) {
+                return (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, color: isExtra ? C.orange : C.muted, marginBottom: 2 }}>S{i + 1}</div>
+                    {renderSideRow("L", "L", `${i}-L`)}
+                    {rec?.leftReasoning  && (<div style={hintStyle}>{rec.leftReasoning}</div>)}
+                    {renderSideRow("R", "R", `${i}-R`)}
+                    {rec?.rightReasoning && (<div style={hintStyle}>{rec.rightReasoning}</div>)}
+                  </div>
+                );
+              }
+              return (
+                <div key={i}>
+                  {renderSideRow(null, `S${i + 1}`, `${i}`)}
+                  {rec?.reasoning && (<div style={hintStyle}>{rec.reasoning}</div>)}
+                </div>
+              );
+            })}
+
+            <button
+              onClick={() => onSetsChange({
+                sets: [...setsData.sets, ex.unilateral
+                  ? { leftReps: ex.reps || "", leftWeight: "", rightReps: ex.reps || "", rightWeight: "", done: false }
+                  : { weight: "", reps: ex.reps || "", done: false }
+                ]
+              })}
+              style={{
+                marginTop: 4, width: "100%", padding: "5px 0",
+                background: "none", border: `1px dashed ${C.border}`,
+                color: C.muted, borderRadius: 6, fontSize: 12, cursor: "pointer",
+              }}
+            >+ Set</button>
+          </div>
         </div>
-        {/* Single done button for non-weight exercises */}
-        {!ex.logWeight && doneBtn(!!done, onToggle)}
       </div>
     </div>
   );
 }
 
-
+// ─────────────────────────────────────────────────────────────
+// SimpleExRow — done checkbox + notes for non-loggable exercises
+// ─────────────────────────────────────────────────────────────
+// Used for exercises where numeric load tracking is the wrong
+// shape: bodyweight, banded, time-based, mobility, explosive (med
+// ball, jumps, skater bounds). Shows the exercise name, the
+// prescription string, the intent paragraph, a done toggle, and
+// an optional notes field for session-specific commentary
+// ("red band today", "broad jump 2.3m best", etc).
+function SimpleExRow({ ex, done, notes, onToggle, onNotesChange, last }) {
+  return (
+    <div style={{
+      padding: "12px 0",
+      borderBottom: last ? "none" : `1px solid ${C.border}`,
+      opacity: done ? 0.55 : 1,
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <WTypeBadge type={ex.type} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ fontSize: 15, color: C.text }}>{ex.name}</div>
+            <div style={{ fontSize: 12, color: C.muted, whiteSpace: "nowrap" }}>{ex.prescription}</div>
+          </div>
+          {ex.intent ? (
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4, lineHeight: 1.4 }}>{ex.intent}</div>
+          ) : null}
+          <input
+            value={notes || ""}
+            onChange={e => onNotesChange?.(e.target.value)}
+            placeholder="Notes (band, distance, weight…)"
+            style={{
+              marginTop: 8, width: "100%",
+              background: C.bg, border: `1px solid ${C.border}`,
+              color: C.text, borderRadius: 6, padding: "5px 8px", fontSize: 12,
+            }}
+          />
+        </div>
+        <button onClick={onToggle} style={{
+          width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+          background: done ? C.green : "transparent",
+          border: `2px solid ${done ? C.green : C.border}`,
+          color: done ? "#000" : C.muted,
+          cursor: "pointer", fontSize: 12, display: "flex",
+          alignItems: "center", justifyContent: "center",
+        }}>{done ? "✓" : ""}</button>
+      </div>
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────
-
-// WORKOUT EDITOR
-
+// RecommendationCard
 // ─────────────────────────────────────────────────────────────
-
-// ── Plan editor for one workout ───────────────────────────────
-function WorkoutEditor({ wKey, workout, onSave, onClose, onReset }) {
-  const [exercises, setExercises] = useState(() => workout.exercises.map(e => ({ ...e })));
-  const [name, setName] = useState(workout.name);
-
-  const updateEx = (idx, field, val) => {
-    setExercises(prev => prev.map((e, i) => i === idx ? { ...e, [field]: val } : e));
-  };
-  const addEx = () => setExercises(prev => [...prev, {
-    id: `ex_${Date.now()}`, name: "New exercise", type: "S",
-    sets: 3, reps: "5", logWeight: true, note: "",
-  }]);
-  const removeEx = (idx) => setExercises(prev => prev.filter((_, i) => i !== idx));
-  const moveEx = (idx, dir) => {
-    const next = [...exercises];
-    const swapIdx = idx + dir;
-    if (swapIdx < 0 || swapIdx >= next.length) return;
-    [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
-    setExercises(next);
-  };
-
-  const inputStyle = {
-    background: C.bg, border: `1px solid ${C.border}`,
-    color: C.text, borderRadius: 6, padding: "4px 8px", fontSize: 13,
-  };
+// Renders recommendNextWorkout() output at the top of the tab.
+// The primary suggestion is a big button; alternatives are smaller
+// chips below. Clicking any of them sets the active workout for
+// the day. The reason text is the engine's one-line "why."
+function RecommendationCard({ recommendation, onPickWorkout, pickedId }) {
+  if (!recommendation) return null;
+  const { primary, reason, caution, alternatives } = recommendation;
+  const isAccepted = pickedId === primary.id;
+  const accent = WORKOUT_COLORS[primary.id] || C.blue;
 
   return (
-    <div style={{ padding: "0 16px 32px" }}>
-      {/* Workout name */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>Workout name</div>
-        <input
-          value={name} onChange={e => setName(e.target.value)}
-          style={{ ...inputStyle, width: "100%", fontSize: 15 }}
-        />
+    <Card style={{ marginBottom: 12, border: `1px solid ${accent}66` }}>
+      <div style={{ fontSize: 11, color: C.muted, letterSpacing: 0.5, marginBottom: 6 }}>
+        TODAY'S RECOMMENDATION
       </div>
-
-      {/* Exercise rows */}
-      {exercises.map((ex, idx) => (
-        <div key={ex.id} style={{
-          background: C.card, border: `1px solid ${C.border}`,
-          borderRadius: 8, padding: 12, marginBottom: 8,
-        }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-            {/* Type selector */}
-            <select
-              value={ex.type}
-              onChange={e => updateEx(idx, "type", e.target.value)}
-              style={{ ...inputStyle, width: 52 }}
-            >
-              {Object.keys(WTYPE_META).map(t => (
-                <option key={t} value={t}>{WTYPE_META[t].label}</option>
-              ))}
-            </select>
-            {/* Name */}
-            <input
-              value={ex.name}
-              onChange={e => updateEx(idx, "name", e.target.value)}
-              style={{ ...inputStyle, flex: 1 }}
-            />
-            {/* Move up/down */}
-            <button onClick={() => moveEx(idx, -1)} style={{ ...inputStyle, padding: "4px 7px", cursor: "pointer" }}>↑</button>
-            <button onClick={() => moveEx(idx, 1)}  style={{ ...inputStyle, padding: "4px 7px", cursor: "pointer" }}>↓</button>
-            {/* Delete */}
-            <button onClick={() => removeEx(idx)} style={{ ...inputStyle, padding: "4px 7px", color: C.red, cursor: "pointer" }}>✕</button>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ fontSize: 12, color: C.muted }}>Sets</span>
-              <input
-                type="number" value={ex.sets ?? ""}
-                onChange={e => updateEx(idx, "sets", e.target.value ? Number(e.target.value) : null)}
-                style={{ ...inputStyle, width: 48 }}
-              />
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ fontSize: 12, color: C.muted }}>Reps</span>
-              <input
-                value={ex.reps ?? ""}
-                onChange={e => updateEx(idx, "reps", e.target.value || null)}
-                style={{ ...inputStyle, width: 72 }}
-              />
-            </div>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: C.muted, cursor: "pointer" }}>
-              <input
-                type="checkbox" checked={!!ex.logWeight}
-                onChange={e => updateEx(idx, "logWeight", e.target.checked)}
-              />
-              Log weight
-            </label>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <input
-              value={ex.note || ""}
-              onChange={e => updateEx(idx, "note", e.target.value)}
-              placeholder="Note (optional)"
-              style={{ ...inputStyle, width: "100%", fontSize: 12 }}
-            />
-          </div>
+      <button
+        onClick={() => onPickWorkout(primary.id)}
+        style={{
+          width: "100%", textAlign: "left",
+          background: isAccepted ? `${accent}22` : "transparent",
+          border: `1px solid ${isAccepted ? accent : C.border}`,
+          borderRadius: 10, padding: "10px 12px",
+          cursor: "pointer", color: "inherit",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+          <span style={{
+            fontSize: 11, fontWeight: 700, color: accent,
+            background: `${accent}1a`,
+            padding: "2px 8px", borderRadius: 4, letterSpacing: 0.5,
+          }}>{primary.shortName}</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{primary.name.replace(/^Workout [A-D] — /, "")}</span>
         </div>
-      ))}
+        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>{reason}</div>
+        {caution && (
+          <div style={{
+            marginTop: 6, fontSize: 11, color: C.orange,
+            background: `${C.orange}11`, borderRadius: 6,
+            padding: "4px 8px", fontStyle: "italic",
+          }}>⚠ {caution}</div>
+        )}
+      </button>
+      {alternatives && alternatives.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: C.muted, alignSelf: "center", marginRight: 2 }}>
+            or:
+          </span>
+          {alternatives.map(w => {
+            const altAccent = WORKOUT_COLORS[w.id] || C.muted;
+            const altActive = pickedId === w.id;
+            return (
+              <button
+                key={w.id}
+                onClick={() => onPickWorkout(w.id)}
+                style={{
+                  background: altActive ? `${altAccent}22` : "transparent",
+                  border: `1px solid ${altActive ? altAccent : C.border}`,
+                  color: altActive ? altAccent : C.muted,
+                  borderRadius: 6, padding: "4px 10px", fontSize: 12,
+                  fontWeight: 600, cursor: "pointer",
+                }}
+              >{w.shortName}</button>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
 
-      <button onClick={addEx} style={{
-        width: "100%", padding: "10px", marginBottom: 8,
-        background: "transparent", border: `1px dashed ${C.border}`,
-        color: C.muted, borderRadius: 8, cursor: "pointer", fontSize: 14,
-      }}>+ Add exercise</button>
-
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <button onClick={() => onSave(name, exercises)} style={{
-          flex: 1, padding: "11px", background: C.blue, color: "#000",
-          border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 14,
-        }}>Save</button>
-        <button onClick={onClose} style={{
-          flex: 1, padding: "11px", background: C.bg, color: C.text,
-          border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer", fontSize: 14,
-        }}>Cancel</button>
-        <button onClick={onReset} style={{
-          padding: "11px 14px", background: C.bg, color: C.red,
-          border: `1px solid ${C.red}`, borderRadius: 8, cursor: "pointer", fontSize: 13,
-        }}>Reset</button>
+// ─────────────────────────────────────────────────────────────
+// EnergyToggle
+// ─────────────────────────────────────────────────────────────
+// Manual "I'm wiped" signal for the recommender. When ON, the
+// engine blocks A (the BIG day) regardless of overdue staleness
+// and falls back to D + a caution. Resets at midnight via the
+// date-stamped storage scheme in loadEnergyLow / saveEnergyLow.
+function EnergyToggle({ value, onChange }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "8px 10px", marginBottom: 12,
+      borderRadius: 8, background: C.bg, border: `1px solid ${value ? C.orange : C.border}`,
+    }}>
+      <div style={{ fontSize: 12, color: C.muted }}>
+        How's the energy?
+      </div>
+      <div style={{ display: "flex", gap: 4 }}>
+        <button
+          onClick={() => onChange(false)}
+          style={{
+            padding: "5px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+            cursor: "pointer",
+            background: !value ? C.green : "transparent",
+            color: !value ? "#000" : C.muted,
+            border: `1px solid ${!value ? C.green : C.border}`,
+          }}
+        >Fresh</button>
+        <button
+          onClick={() => onChange(true)}
+          style={{
+            padding: "5px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+            cursor: "pointer",
+            background: value ? C.orange : "transparent",
+            color: value ? "#000" : C.muted,
+            border: `1px solid ${value ? C.orange : C.border}`,
+          }}
+        >Wiped</button>
       </div>
     </div>
   );
 }
 
-
-
 // ─────────────────────────────────────────────────────────────
-
-// WORKOUT TAB
-
+// Workout picker — explicit A/B/C/D/CLIMB/REST tiles
 // ─────────────────────────────────────────────────────────────
-
-// Pure helper: returns a new set object with empty fields backfilled
-// from the recommendation. Stored values (anything non-empty) win.
-// Schema-aware: unilateral exDef writes leftWeight/leftReps/etc.;
-// bilateral writes weight/reps. Used by the sessionActive sync effect.
-function mergeSetWithRec(s, rec, exDef, isEmpty) {
-  const out = { ...s };
-  if (exDef.unilateral) {
-    if (isEmpty(out.leftWeight)  && rec?.leftWeight)  out.leftWeight  = rec.leftWeight;
-    if (isEmpty(out.leftReps)    && rec?.leftReps)    out.leftReps    = rec.leftReps;
-    if (isEmpty(out.rightWeight) && rec?.rightWeight) out.rightWeight = rec.rightWeight;
-    if (isEmpty(out.rightReps)   && rec?.rightReps)   out.rightReps   = rec.rightReps;
-  } else {
-    if (isEmpty(out.weight) && rec?.weight) out.weight = rec.weight;
-    if (isEmpty(out.reps)   && rec?.reps)   out.reps   = rec.reps;
-  }
-  return out;
+// Always available even when the recommendation is one of these.
+// Lets the user override on any day for any reason.
+function WorkoutPicker({ pickedId, onPick }) {
+  const ORDER = ["A", "B", "C", "D", "CLIMB", "REST"];
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 4, marginBottom: 12 }}>
+      {ORDER.map(id => {
+        const wo = SUPPORT_WORKOUTS[id];
+        if (!wo) return null;
+        const isPicked = pickedId === id;
+        const accent = WORKOUT_COLORS[id] || C.muted;
+        return (
+          <button
+            key={id}
+            onClick={() => onPick(id)}
+            style={{
+              padding: "8px 0", borderRadius: 8, cursor: "pointer",
+              fontSize: 12, fontWeight: 700,
+              background: isPicked ? accent : "transparent",
+              color: isPicked ? "#000" : C.muted,
+              border: `1px solid ${isPicked ? accent : C.border}`,
+            }}
+            title={wo.name}
+          >{wo.shortName}</button>
+        );
+      })}
+    </div>
+  );
 }
 
-// Shallow equality for set objects on the keys we care about. Avoids
-// noisy state updates when the merge produced an identical set.
-function sameSet(a, b) {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  const keys = ["weight", "reps", "leftWeight", "leftReps", "rightWeight", "rightReps", "done"];
-  return keys.every(k => (a[k] ?? "") === (b[k] ?? ""));
-}
+// ─────────────────────────────────────────────────────────────
+// Main WorkoutTab
+// ─────────────────────────────────────────────────────────────
+export function WorkoutTab({
+  unit,
+  onSessionSaved,
+  onBwSave = () => {},
+  trip = DEFAULT_TRIP,
+  // Climbing activities log (from App's `activities` state). Used
+  // by the recommender for tag staleness (climbing contributes
+  // neural/connective load) and for the high-density REST trigger.
+  activities = [],
+}) {
+  // ── State ─────────────────────────────────────────────
+  const [wLog, setWLog] = useState(() => loadLS(LS_WORKOUT_LOG_KEY) || []);
+  const [energyLow, setEnergyLow] = useState(() => loadEnergyLow());
+  // pickedId: null means "follow recommendation"; otherwise an
+  // explicit workout selection.
+  const [pickedId, setPickedId] = useState(null);
+  const [sessionActive, setSessionActive] = useState(false);
+  const [sessionData, setSessionData] = useState({}); // exId → { sets:[...] } | { done, notes }
+  const [sessionNotes, setSessionNotes] = useState(""); // overall session note
 
-// ── Main WorkoutTab ───────────────────────────────────────────
-export function WorkoutTab({ unit, onSessionSaved, onBwSave = () => {}, trip = DEFAULT_TRIP }) {
-  const [subTab, setSubTab]         = useState("today");
-  // Load the stored plan if any, then re-apply per-exercise metadata
-  // from DEFAULT_WORKOUTS (unilateral flag, availableLoads ladder,
-  // bodyweightAdditive flag, updated note) on top. The stored plan
-  // is the source of truth for STRUCTURE (which exercises in which
-  // workout, in what order); DEFAULT_WORKOUTS is the source of truth
-  // for METADATA (per-exercise flags that drive the UI and
-  // recommender). Without this merge, a user who customized their
-  // plan once would never receive future metadata updates — kb_press
-  // would stay bilateral even after the code marked it unilateral,
-  // for example.
-  //
-  // Match by id; the lookup table is built from every workout's
-  // exercises in DEFAULT_WORKOUTS (id is unique across workouts).
-  // Fields that land on top: unilateral, availableLoads,
-  // bodyweightAdditive. Anything the user might have legitimately
-  // customized (sets, reps, name, note) is preserved as-is.
-  const [plan,   setPlan]           = useState(() => {
-    const stored = loadLS(LS_WORKOUT_PLAN_KEY);
-    if (!stored) return DEFAULT_WORKOUTS;
-    const defMeta = {};
-    for (const wk of Object.values(DEFAULT_WORKOUTS)) {
-      for (const ex of (wk.exercises || [])) {
-        if (!defMeta[ex.id]) defMeta[ex.id] = {
-          unilateral: ex.unilateral,
-          availableLoads: ex.availableLoads,
-          bodyweightAdditive: ex.bodyweightAdditive,
-        };
-      }
-    }
-    // Exercise ID migrations — when an exercise was renamed (cloud
-    // history was migrated to the new id), users with a customized
-    // local plan are still iterating the OLD id, calling recommendSet
-    // with a key that has no history → empty inputs. Re-key them on
-    // load so the recommender finds the migrated history.
-    const ID_MIGRATIONS = {
-      ohp: "kb_press",
-      hammer_curls: "bicep_curls",
-    };
-    const migrateId = (id) => ID_MIGRATIONS[id] || id;
-    const merged = {};
-    for (const [key, wk] of Object.entries(stored)) {
-      merged[key] = {
-        ...wk,
-        exercises: (wk.exercises || []).map(ex => {
-          const newId = migrateId(ex.id);
-          // Pull DEFAULT_WORKOUTS metadata for the (possibly migrated)
-          // id so the renamed exercise inherits the correct
-          // unilateral/availableLoads/bodyweightAdditive flags. If
-          // the migrated id has new metadata it overrides whatever
-          // the stored plan had.
-          const meta = defMeta[newId];
-          const baseEx = newId !== ex.id ? { ...ex, id: newId } : ex;
-          if (!meta) return baseEx;
-          return {
-            ...baseEx,
-            ...(meta.unilateral !== undefined && { unilateral: meta.unilateral }),
-            ...(meta.availableLoads !== undefined && { availableLoads: meta.availableLoads }),
-            ...(meta.bodyweightAdditive !== undefined && { bodyweightAdditive: meta.bodyweightAdditive }),
-          };
-        }),
-      };
-    }
-    return merged;
-  });
-  // Same id migration applied to the local wLog cache. Cloud was
-  // migrated server-side, but if the user's local cache still holds
-  // pre-migration sessions (e.g., an old offline-logged session that
-  // never re-synced), the recommender wouldn't find them under the
-  // new id. Cheap one-time pass at load.
-  const [wLog,   setWLog]           = useState(() => {
-    const raw = loadLS(LS_WORKOUT_LOG_KEY) || [];
-    const ID_MIGRATIONS = { ohp: "kb_press", hammer_curls: "bicep_curls" };
-    return raw.map(s => {
-      if (!s?.exercises) return s;
-      const migrated = {};
-      let changed = false;
-      for (const [exId, exData] of Object.entries(s.exercises)) {
-        const newId = ID_MIGRATIONS[exId] || exId;
-        if (newId !== exId) changed = true;
-        // If both old and new id exist in the same session, keep the new
-        // one's data (more recent semantics) and drop the old.
-        if (migrated[newId]) continue;
-        migrated[newId] = exData;
-      }
-      return changed ? { ...s, exercises: migrated } : s;
-    });
-  });
-  const [sessionActive,  setSessionActive]  = useState(false);
-  const [sessionData,    setSessionData]    = useState({});    // exId → {sets, done}
-  const [swaps,          setSwaps]          = useState({});    // originalExId → substituteEx
-  const [swapPickerFor,  setSwapPickerFor]  = useState(null);  // originalExId showing picker
-  const [editingKey, setEditingKey] = useState(null);          // "A"|"B"|"C"|null
+  // Climbing-only filter on activities. The recommender's API takes
+  // a `climbingHistory` array of type-tagged entries; pre-filter so
+  // future activity types don't accidentally pollute the signal.
+  const climbingHistory = useMemo(
+    () => (activities || []).filter(a => a?.type === "climb"),
+    [activities]
+  );
 
-  const savePlan  = (p) => { setPlan(p);  saveLS(LS_WORKOUT_PLAN_KEY,  p); };
-  const saveLog   = (l) => {
-    setWLog(l);
-    saveLS(LS_WORKOUT_LOG_KEY, l);
-    // One-shot cleanup: drop the orphaned legacy "ft_workout_state"
-    // key from users' localStorage so it doesn't sit around forever.
-    // No-op when already absent. Removing on every save is cheaper
-    // than a useEffect-scoped one-time migration.
-    try { window.localStorage.removeItem(LS_LEGACY_WORKOUT_STATE_KEY); } catch {}
+  // ── Recommendation ───────────────────────────────────
+  // Drop pin-style rotation sessions (legacy ROTATION_PIN_KEY) so
+  // they don't pollute the recommender's daysSinceLastOfType counts.
+  // Also drop sessions that don't carry workoutId — those are legacy
+  // OLD A/B/C sessions; intentionally invisible to the recommender
+  // (per user preference: "keep visible in History, invisible to
+  // recommender").
+  const recommenderInput = useMemo(() =>
+    wLog.filter(s => s && s.workoutId && s.workout !== ROTATION_PIN_KEY),
+    [wLog]
+  );
+  const recommendation = useMemo(
+    () => recommendNextWorkout(recommenderInput, {
+      energyLow,
+      climbingHistory,
+      refDate: today(),
+    }),
+    [recommenderInput, energyLow, climbingHistory]
+  );
+
+  // The active workout is either the user's override or the
+  // recommender's primary. We then look up the full template from
+  // SUPPORT_WORKOUTS.
+  const activeId = pickedId || recommendation?.primary?.id || "A";
+  const activeWorkout = SUPPORT_WORKOUTS[activeId];
+
+  // ── Energy toggle persistence ────────────────────────
+  const handleEnergyChange = (next) => {
+    setEnergyLow(next);
+    saveEnergyLow(next);
   };
 
-  // ── Derive rotation state from the synced workout log ─────
-  // Previously this lived in LS_WORKOUT_STATE_KEY (`ft_workout_state`)
-  // as { rotationIndex, sessionCount } that was only ever written to
-  // localStorage — never synced to Supabase. The result was that two
-  // devices for the same user disagreed on "what's next" because each
-  // tracked its own counter. Computing the rotation from wLog (which
-  // IS synced via fetchWorkoutSessions) makes both devices see the
-  // same recommendation.
-  //
-  // Sessions tagged `wasRecommended: true` advance the rotation;
-  // off-rotation picks (user chose B when rotKey was A) DON'T, so
-  // the queue persists across one-off deviations — same UX as the
-  // old local-state code. Legacy sessions (logged before this flag
-  // existed) are treated as recommended; this matches what the old
-  // code actually did, since it ALWAYS advanced on completion in the
-  // common case where the user followed the recommendation.
-  //
-  // Rotation pins (workout === ROTATION_PIN_KEY) are synthetic
-  // entries the user can write via the "Make X the next-up" action.
-  // The MOST RECENT pin establishes a new baseline: rotation index
-  // resets to the position of pin.exercises.__pinTo, and only
-  // sessions logged AFTER that pin contribute to further advances.
-  // Pins are themselves wasRecommended:false so they don't double-
-  // count as advances. This is the cross-device recovery valve when
-  // sync gaps drift the rotation, and also the "start a fresh cycle"
-  // gesture going forward.
-  //
-  // The legacy LS key ("ft_workout_state") is opportunistically
-  // removed by saveLog() on every workout save so it doesn't sit
-  // forever in users' localStorage.
-  const { rotationIndex, sessionCount } = useMemo(() => {
-    // Sort by date+completedAt so out-of-order arrivals from the
-    // cloud reconcile (legacy sessions without completedAt) still
-    // produce a stable derivation.
-    const sorted = [...wLog].sort((a, b) => {
-      const ta = `${a.date || ""}|${a.completedAt || ""}`;
-      const tb = `${b.date || ""}|${b.completedAt || ""}`;
-      return ta.localeCompare(tb);
-    });
-
-    // Most recent pin establishes a baseline.
-    let pinIdx = -1;
-    let pinTo = null;
-    for (let i = sorted.length - 1; i >= 0; i--) {
-      if (sorted[i].workout === ROTATION_PIN_KEY) {
-        pinIdx = i;
-        pinTo = sorted[i].exercises?.__pinTo ?? null;
-        break;
-      }
-    }
-
-    let baseIdx = 0;
-    let countFrom = 0;
-    if (pinIdx >= 0 && WK_ROTATION.includes(pinTo)) {
-      baseIdx = WK_ROTATION.indexOf(pinTo);
-      countFrom = pinIdx + 1;     // count only sessions AFTER the pin
-    }
-
-    let advanced = 0;
-    for (let i = countFrom; i < sorted.length; i++) {
-      const s = sorted[i];
-      if (s.workout === ROTATION_PIN_KEY) continue;
-      if (s.wasRecommended !== false) advanced++;
-    }
-
-    return {
-      // Visible session count excludes pin entries — pins aren't
-      // workouts, just rotation markers.
-      sessionCount: sorted.filter(s => s.workout !== ROTATION_PIN_KEY).length,
-      rotationIndex: (baseIdx + advanced) % WK_ROTATION.length,
-    };
-  }, [wLog]);
-
-  const rotKey    = WK_ROTATION[rotationIndex % WK_ROTATION.length];
-  // displayKey: the workout currently being previewed / logged. Defaults to the
-  // recommendation (rotKey) but the user can override via the picker below.
-  // If the user picks something other than rotKey and completes it, we log the
-  // session but do NOT advance the rotation — so the "next up" queue persists.
-  const [displayKey, setDisplayKey] = useState(rotKey);
-  // If the recommendation changes (after a normal completion), reset the
-  // displayed workout back to the new recommendation.
-  useEffect(() => { setDisplayKey(rotKey); }, [rotKey]);
-  const workout   = plan[displayKey] || plan[rotKey];
-  const sessionN  = sessionCount + 1;
-  const wtr       = weeksToTrip(trip.date);
-
-  // Switch the previewed workout. Clear any in-flight swaps since they
-  // reference exercise IDs from the previous workout.
-  const pickWorkout = (k) => {
-    if (k === displayKey) return;
-    setDisplayKey(k);
-    setSwaps({});
-    setSwapPickerFor(null);
-  };
-
-  // Manual rotation override. Writes a synthetic "pin" entry into
-  // wLog and pushes it through onSessionSaved so it syncs across
-  // devices (other devices then derive the same rotation from the
-  // same pin). Use cases:
-  //   * Recovery from cross-device sync drift ("Set next to B" on
-  //     each phone gets them back in lockstep).
-  //   * Starting a fresh training cycle.
-  //   * Skipping a workout you'd already done elsewhere.
-  // The pin itself is filtered out of all display surfaces — it's
-  // a rotation marker, not a workout.
-  const setRotationTo = (key) => {
-    if (!WK_ROTATION.includes(key)) return;
-    const pinSession = {
-      id: genId(),
-      date: today(),
-      completedAt: nowISO(),
-      workout: ROTATION_PIN_KEY,
-      sessionNumber: 0,
-      wasRecommended: false,
-      exercises: { __pinTo: key },
-    };
-    const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
-    saveLog([...freshLog, pinSession]);
-    if (onSessionSaved) onSessionSaved(pinSession);
-    setDisplayKey(key);
-  };
-
-  // Previous best set weights for an exercise in this workout slot.
-  // Returns one entry per set. Bilateral exercises get a string
-  // weight per set; unilateral exercises get { L, R } per set so the
-  // session UI can show the previous left/right weights side-by-side.
-  //
-  // Walks the log backward and SKIPS sessions where the exercise's
-  // sets have no usable data (e.g., a session the user opened but
-  // never actually completed — sets array exists but every entry
-  // has empty weight/reps and done=false). Without that skip, an
-  // aborted session would shadow the real previous data right behind
-  // it, leaving the prev column empty and the recommender blind.
-  // A set is "usable" only when the user explicitly marked it done.
-  // We deliberately ignore non-empty weight/reps because startSession
-  // pre-fills both fields from the recommendation — an aborted session
-  // ends up with prefilled values + done=false and would otherwise
-  // shadow real prior data. If the user really did the work but
-  // forgot to tick done, that's a UX miss they can correct in History.
-  const setIsUsable = (s) => !!(s && s.done);
-  // Two-pass lookup: prefer same-workout history (so Workout A's curls
-  // don't crowd Workout B's), but fall back to ANY workout containing
-  // the exercise so shared lifts always have a prev to anchor on.
-  // Mirrors findLastSession in src/model/workout-progression.js — same
-  // chronological selection (date DESC, then completedAt DESC) rather
-  // than array-position walking, because wLog insertion order can drift
-  // from chronological order and would otherwise let older sessions
-  // shadow newer ones (e.g., 04-16 A dips with empty weight shadowing
-  // 04-21 A dips with weight=10).
-  const prevSetsFromMatching = (exId, exDef, predicate) => {
-    const matches = [];
-    for (const e of wLog) {
-      if (!predicate(e)) continue;
-      const sets = e.exercises?.[exId]?.sets;
-      if (!sets || sets.length === 0) continue;
-      if (!sets.some(setIsUsable)) continue;
-      matches.push(e);
-    }
-    if (matches.length === 0) return null;
-    matches.sort((a, b) => {
-      const ad = a?.date || "";
-      const bd = b?.date || "";
-      if (ad !== bd) return bd.localeCompare(ad);
-      const ac = a?.completedAt || "";
-      const bc = b?.completedAt || "";
-      return bc.localeCompare(ac);
-    });
-    const sets = matches[0].exercises[exId].sets;
-    if (exDef?.unilateral) {
-      return sets.map(s => {
-        const left  = s.leftWeight  ?? s.weight ?? "";
-        const right = s.rightWeight ?? s.weight ?? "";
-        if (!left && !right) return null;
-        return { L: left, R: right };
-      }).filter(Boolean);
-    }
-    return sets.map(s => s.weight ?? s.leftWeight ?? "").filter(Boolean);
-  };
-  // Most recent session containing the exercise, regardless of which
-  // workout slot it was logged under. Mirrors findLastSession in
-  // src/model/workout-progression.js — a lift like dips that appears
-  // in both A and B should anchor its prev pill to whichever session
-  // was most recent, not to "the most recent A session" specifically.
-  const prevBestSets = (exId, exDef) => {
-    return prevSetsFromMatching(exId, exDef, () => true) || [];
-  };
-
+  // ── Session start ────────────────────────────────────
   const startSession = () => {
-    // Pre-populate inputs using the progression recommender — see
-    // src/model/workout-progression.js. The recommender does smart
-    // things based on history: a clean session bumps weight (or
-    // reps for KB-style discrete-load exercises); a missed-reps
-    // session holds weight; a catastrophic miss backs off. The
-    // returned reasoning is also rendered under each input by
-    // SessionExRow so the user knows why the suggestion is what
-    // it is.
-    const init = {};
-    workout.exercises.forEach(ex => {
-      if (ex.logWeight && ex.sets) {
-        init[ex.id] = {
-          sets: Array.from({ length: ex.sets }, (_, i) => {
-            const rec = recommendSet(wLog, ex, displayKey, i);
-            if (ex.unilateral) {
-              return {
-                leftReps:    rec.leftReps    ?? "",
-                leftWeight:  rec.leftWeight  ?? "",
-                rightReps:   rec.rightReps   ?? "",
-                rightWeight: rec.rightWeight ?? "",
-                done: false,
-              };
-            }
+    if (!activeWorkout || activeWorkout.exercises.length === 0) {
+      // CLIMB / REST have no exercises — saving doesn't apply.
+      // Just save a marker session for the log.
+      saveMarkerSession(activeId);
+      return;
+    }
+    const seed = {};
+    for (const ex of activeWorkout.exercises) {
+      if (ex.loggable) {
+        // Seed sets with recommendSet-suggested values from wLog
+        // history. Same protocol the legacy tab used.
+        const sets = Array.from({ length: ex.sets || 1 }, (_, i) => {
+          const rec = recommendSet(wLog, ex, activeId, i);
+          if (ex.unilateral) {
             return {
-              weight: rec.weight ?? "",
-              reps:   rec.reps   ?? "",
+              leftReps:    rec?.leftReps    ?? ex.reps ?? "",
+              leftWeight:  rec?.leftWeight  ?? "",
+              rightReps:   rec?.rightReps   ?? ex.reps ?? "",
+              rightWeight: rec?.rightWeight ?? "",
               done: false,
-            };
-          })
-        };
-      } else {
-        init[ex.id] = { done: false };
-      }
-    });
-    setSessionData(init);
-    setSwaps({});
-    setSwapPickerFor(null);
-    setSessionActive(true);
-  };
-
-  // Belt-and-suspenders sync: when sessionActive flips on (or wLog
-  // updates mid-session, which happens when a cloud sync brings in
-  // sessions the local cache was missing), walk every logWeight
-  // exercise and fill in any empty sessionData fields with the live
-  // recommendation. startSession populates initially, but if it ran
-  // with a stale wLog (cloud sync hadn't completed yet) the prior-
-  // session lookup may have returned nothing — when wLog refreshes
-  // with the missing data, this effect backfills the inputs without
-  // the user needing to restart the session.
-  //
-  // Mutation guard via sameSet prevents loops: if no field changed
-  // (because user typed values OR because the recommendation hasn't
-  // changed since last sync), setSessionData returns prev unchanged.
-  useEffect(() => {
-    if (!sessionActive) return;
-    setSessionData(prev => {
-      const isEmpty = (v) => v == null || v === "";
-      // Build a fresh state by recomputing every logWeight set with
-      // the live recommendation merged over what's already stored.
-      // Stored values win; empties get backfilled. Only commit the
-      // new state if we actually changed anything (avoids re-render
-      // churn in the common case where startSession populated cleanly).
-      const next = { ...prev };
-      let anyChange = false;
-      for (const ex of (workout?.exercises || [])) {
-        if (!ex.logWeight || !ex.sets) continue;
-        const cur = next[ex.id];
-        if (!cur || !Array.isArray(cur.sets)) continue;
-        const newSets = cur.sets.map((s, i) => mergeSetWithRec(s, recommendSet(wLog, ex, displayKey, i), ex, isEmpty));
-        const changed = newSets.some((ns, i) => !sameSet(ns, cur.sets[i]));
-        if (changed) {
-          next[ex.id] = { ...cur, sets: newSets };
-          anyChange = true;
-        }
-      }
-      return anyChange ? next : prev;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionActive, wLog]);
-
-  // Swap an exercise for the current session only
-  const doSwap = (originalEx, substituteEx) => {
-    const numSets = originalEx.sets || 2;
-    setSessionData(prev => {
-      const next = { ...prev };
-      delete next[originalEx.id];
-      next[substituteEx.id] = substituteEx.logWeight
-        ? { sets: Array.from({ length: numSets }, () => ({ weight: "", reps: substituteEx.reps || "", done: false })) }
-        : { done: false };
-      return next;
-    });
-    setSwaps(prev => ({ ...prev, [originalEx.id]: { ...substituteEx, sets: numSets } }));
-    setSwapPickerFor(null);
-  };
-
-  const revertSwap = (originalEx) => {
-    const numSets = originalEx.sets || 2;
-    const swapped = swaps[originalEx.id];
-    setSessionData(prev => {
-      const next = { ...prev };
-      if (swapped) delete next[swapped.id];
-      next[originalEx.id] = originalEx.logWeight
-        ? { sets: Array.from({ length: numSets }, () => ({ weight: "", reps: originalEx.reps || "", done: false })) }
-        : { done: false };
-      return next;
-    });
-    setSwaps(prev => { const s = { ...prev }; delete s[originalEx.id]; return s; });
-    setSwapPickerFor(null);
-  };
-
-  const genId = () => {
-    try { return crypto.randomUUID(); } catch { return `ws_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`; }
-  };
-
-  const completeSession = () => {
-    // wasRecommended flag is what the rotation derivation reads to
-    // decide whether this session should advance the queue. True
-    // when the user completed the workout the rotation was offering;
-    // false when they picked a different one (off-rotation deviation).
-    // Persisted on the session record so it syncs to other devices.
-    const wasRecommended = displayKey === rotKey && WK_ROTATION.includes(displayKey);
-    // Normalize sessionData before saving so empty fields that were
-    // displayed using the live recommendation get written with the
-    // recommended value. Mirrors the input-value fallback in
-    // SessionExRow so "what you saw" is "what gets recorded".
-    const isEmpty = (v) => v == null || v === "";
-    const normalizedExercises = {};
-    for (const [exId, exData] of Object.entries(sessionData)) {
-      const exDef = (workout.exercises.find(e => e.id === exId)) || swaps[exId];
-      if (!exDef || !exDef.logWeight || !Array.isArray(exData?.sets)) {
-        normalizedExercises[exId] = exData;
-        continue;
-      }
-      normalizedExercises[exId] = {
-        ...exData,
-        sets: exData.sets.map((s, i) => {
-          const rec = recommendSet(wLog, exDef, displayKey, i);
-          if (exDef.unilateral) {
-            return {
-              ...s,
-              leftReps:    isEmpty(s.leftReps)    ? (rec.leftReps    ?? "") : s.leftReps,
-              leftWeight:  isEmpty(s.leftWeight)  ? (rec.leftWeight  ?? "") : s.leftWeight,
-              rightReps:   isEmpty(s.rightReps)   ? (rec.rightReps   ?? "") : s.rightReps,
-              rightWeight: isEmpty(s.rightWeight) ? (rec.rightWeight ?? "") : s.rightWeight,
             };
           }
           return {
-            ...s,
-            reps:   isEmpty(s.reps)   ? (rec.reps   ?? "") : s.reps,
-            weight: isEmpty(s.weight) ? (rec.weight ?? "") : s.weight,
+            reps:   rec?.reps   ?? ex.reps ?? "",
+            weight: rec?.weight ?? "",
+            done: false,
           };
-        }),
-      };
+        });
+        seed[ex.id] = { sets };
+      } else {
+        seed[ex.id] = { done: false, notes: "" };
+      }
     }
-    const session = { id: genId(), date: today(), completedAt: nowISO(), workout: displayKey, sessionNumber: sessionN, wasRecommended, exercises: normalizedExercises };
-    // Read fresh from localStorage rather than the React state snapshot, which may
-    // be stale if the migration effect rewrote the log after this component mounted.
-    const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
-    saveLog([...freshLog, session]);
-    if (onSessionSaved) onSessionSaved(session);
-    // No separate rotation state to bump — rotationIndex is derived
-    // from wLog by the useMemo above, so the next render automatically
-    // reflects the new completion (and other devices will recompute
-    // the same answer when they sync wLog from Supabase).
-    setSessionActive(false);
-    setSessionData({});
-    setSwaps({});
-    setSwapPickerFor(null);
+    setSessionData(seed);
+    setSessionNotes("");
+    setSessionActive(true);
   };
 
-  const allDone = workout && workout.exercises.every(ex => {
-    const activeId = swaps[ex.id]?.id ?? ex.id;
-    const d = sessionData[activeId];
-    if (!d) return false;
-    if (ex.logWeight && d.sets) return d.sets.every(s => s.done);
-    return !!d.done;
-  });
+  // ── Save a session ───────────────────────────────────
+  // Stamps `workoutId` (new schema, recommender-readable) AND
+  // `workout` (legacy field, HistoryView reads this for display).
+  // Same shape as the previous WorkoutTab's session record so the
+  // existing cloud sync and History rendering keep working.
+  const saveSession = () => {
+    if (!activeWorkout) return;
+    const wasRecommended = activeId === recommendation?.primary?.id;
+    const session = {
+      id: genId(),
+      date: today(),
+      completedAt: nowISO(),
+      workout: activeId,
+      workoutId: activeId,
+      sessionNumber: countSupportSessions(wLog) + 1,
+      wasRecommended,
+      exercises: sessionData,
+      notes: sessionNotes || "",
+    };
+    const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    const nextLog = [...freshLog, session];
+    setWLog(nextLog);
+    saveLS(LS_WORKOUT_LOG_KEY, nextLog);
+    onSessionSaved?.(session);
+    setSessionActive(false);
+    setSessionData({});
+    setSessionNotes("");
+    setPickedId(null); // back to "follow recommendation"
+  };
 
-  // ── Sub-tab pill bar ──
-  const tabPill = (label, key) => (
-    <button
-      key={key}
-      onClick={() => { setSubTab(key); setEditingKey(null); }}
-      style={{
-        flex: 1, padding: "9px 0", fontSize: 13, fontWeight: subTab === key ? 700 : 400,
-        color: subTab === key ? C.blue : C.muted,
-        background: "none", border: "none",
-        borderBottom: subTab === key ? `2px solid ${C.blue}` : "2px solid transparent",
-        cursor: "pointer",
-      }}
-    >{label}</button>
-  );
+  // CLIMB / REST save path — no exercise data, just a marker so
+  // the recommender sees the session date.
+  const saveMarkerSession = (workoutId) => {
+    const session = {
+      id: genId(),
+      date: today(),
+      completedAt: nowISO(),
+      workout: workoutId,
+      workoutId,
+      sessionNumber: countSupportSessions(wLog) + 1,
+      wasRecommended: workoutId === recommendation?.primary?.id,
+      exercises: {},
+      notes: "",
+    };
+    const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    const nextLog = [...freshLog, session];
+    setWLog(nextLog);
+    saveLS(LS_WORKOUT_LOG_KEY, nextLog);
+    onSessionSaved?.(session);
+    setPickedId(null);
+  };
 
-  // ── Week calendar ──
-  const WEEK_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-  const WEEK_ROLES  = ["Climb", "Train", "Rest", "Climb+Train", "Rest", "Climb+Train", "Sabbath"];
-  const todayDow    = new Date().getDay(); // 0=Sun
+  // ── Per-exercise update helpers ──────────────────────
+  const updateExerciseSets = (exId, next) => {
+    setSessionData(prev => ({ ...prev, [exId]: next }));
+  };
+  const toggleExerciseDone = (exId) => {
+    setSessionData(prev => ({
+      ...prev,
+      [exId]: { ...prev[exId], done: !prev[exId]?.done },
+    }));
+  };
+  const updateExerciseNotes = (exId, notes) => {
+    setSessionData(prev => ({
+      ...prev,
+      [exId]: { ...prev[exId], notes },
+    }));
+  };
 
-  // ── Render ──
+  // Surface previous session's reps/weights for each exercise so
+  // SessionExRow's "prev" column populates. Walks back through wLog
+  // for the most recent session containing this exercise id.
+  const prevSetsFor = (exId) => {
+    for (let i = wLog.length - 1; i >= 0; i--) {
+      const s = wLog[i];
+      const exData = s?.exercises?.[exId];
+      if (!exData?.sets?.length) continue;
+      return exData.sets.map(setSummary);
+    }
+    return [];
+  };
+
+  const abortSession = () => {
+    setSessionActive(false);
+    setSessionData({});
+    setSessionNotes("");
+  };
+
+  // ── Render ──────────────────────────────────────────
+  const wtr = weeksToTrip(trip);
+  const countdownLabel = tripCountdown(trip);
+
   return (
-    <div style={{ padding: "16px 16px 80px" }}>
-      {/* Build version stamp — small, top-right corner. Auto-bumped
-          per commit (git SHA + build date baked in via
-          REACT_APP_BUILD_SHA / REACT_APP_BUILD_TIME in package.json's
-          build script; see src/lib/buildInfo.js). Lets us confirm
-          which bundle is running on a device without DevTools. */}
+    <div style={{ padding: "16px 16px 80px", position: "relative" }}>
+      {/* Build version stamp — auto-bumped per commit via the
+          build script (see src/lib/buildInfo.js). Confirms which
+          bundle a device is running without opening DevTools. */}
       <div style={{
         position: "absolute", top: 6, right: 8,
         fontSize: 9, color: C.muted, opacity: 0.5,
         fontFamily: "monospace", pointerEvents: "none",
-      }}>
-        {shortBuildLabel()}
-      </div>
+      }}>{shortBuildLabel()}</div>
 
-      {/* Sub-tab nav */}
-      <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, marginBottom: 20 }}>
-        {tabPill("Today", "today")}
-        {tabPill("Plan", "plan")}
-      </div>
-
-      {/* ─── TODAY view ─────────────────────────────────────── */}
-      {subTab === "today" && !sessionActive && (
+      {sessionActive && activeWorkout ? (
+        // ── Active session view ───────────────────────────
         <>
-          {/* Workout card */}
-          <Card style={{ marginBottom: 12 }}>
-            {/* Workout picker — recommended is highlighted; pick any for this session */}
-            <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-              {Object.keys(plan).map(k => {
-                const isPicked = k === displayKey;
-                const isRec    = k === rotKey;
-                return (
-                  <button key={k} onClick={() => pickWorkout(k)} style={{
-                    flex: 1, padding: "10px 4px", borderRadius: 10, cursor: "pointer",
-                    background: isPicked ? C.blue : C.border,
-                    color:      isPicked ? "#000" : C.muted,
-                    fontWeight: 700, fontSize: 14,
-                    border: isRec ? `2px solid ${C.blue}` : "2px solid transparent",
-                    position: "relative", transition: "all 0.15s",
-                  }}>
-                    {isRec && (
-                      <div style={{
-                        position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)",
-                        fontSize: 9, fontWeight: 700, background: C.blue, color: "#000",
-                        padding: "1px 6px", borderRadius: 6, whiteSpace: "nowrap",
-                        letterSpacing: "0.06em",
-                      }}>
-                        NEXT UP
-                      </div>
-                    )}
-                    {k}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>
-                  WORKOUT {displayKey}
-                  {displayKey === rotKey
-                    ? "  ·  NEXT UP"
-                    : (
-                      <span style={{ color: C.orange }}>
-                        {"  ·  OUT OF ORDER — queue still starts with "}{rotKey}
-                        {" · "}
-                        <button
-                          onClick={() => setRotationTo(displayKey)}
-                          title="Reset the rotation so the cycle starts here. Useful if devices have drifted out of sync, or to start a fresh training cycle."
-                          style={{
-                            background: "none", border: "none", color: C.blue,
-                            fontSize: 11, fontWeight: 700, padding: 0,
-                            textDecoration: "underline", cursor: "pointer",
-                          }}
-                        >
-                          Make {displayKey} the next-up
-                        </button>
-                      </span>
-                    )
-                  }
-                </div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{workout.name}</div>
-                <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>
-                  {workout.exercises.filter(e => e.type !== "X").map(e => e.name).join(" · ")}
-                </div>
-              </div>
-            </div>
-
-            {/* Metrics row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-              {[["Session #", sessionN], ["Weeks to trip", wtr]].map(([label, val]) => (
-                <div key={label} style={{
-                  background: C.bg, borderRadius: 8, padding: "10px 14px",
-                  border: `1px solid ${C.border}`,
-                }}>
-                  <div style={{ fontSize: 11, color: C.muted }}>{label}</div>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: C.text }}>{val}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Exercise list — with swap UI on the preview card, so equipment
-                substitutions can be set before starting the session. */}
-            <div>
-              {workout.exercises.map((ex, i) => {
-                const isSwapped  = !!swaps[ex.id];
-                const activeEx   = isSwapped ? { ...swaps[ex.id] } : ex;
-                const subs       = EXERCISE_SUBSTITUTES[ex.id] || [];
-                const pickerOpen = swapPickerFor === ex.id;
-                const isLast     = i === workout.exercises.length - 1;
-                return (
-                  <div key={ex.id}>
-                    {subs.length > 0 && (
-                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 2 }}>
-                        <button
-                          onClick={() => setSwapPickerFor(pickerOpen ? null : ex.id)}
-                          style={{
-                            fontSize: 11, padding: "2px 8px", borderRadius: 4, cursor: "pointer",
-                            background: "none", border: `1px solid ${isSwapped ? C.orange : C.border}`,
-                            color: isSwapped ? C.orange : C.muted,
-                          }}
-                        >
-                          {isSwapped ? `⇄ ${activeEx.name} (swapped)` : "⇄ swap"}
-                        </button>
-                      </div>
-                    )}
-                    {pickerOpen && (
-                      <div style={{
-                        background: C.bg, border: `1px solid ${C.border}`,
-                        borderRadius: 8, padding: "10px 12px", marginBottom: 8,
-                      }}>
-                        <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                          Substitute for <strong style={{ color: C.text }}>{ex.name}</strong>:
-                        </div>
-                        {isSwapped && (
-                          <button
-                            onClick={() => revertSwap(ex)}
-                            style={{
-                              display: "block", width: "100%", textAlign: "left",
-                              padding: "8px 10px", marginBottom: 4, borderRadius: 6,
-                              background: C.border, border: "none", cursor: "pointer",
-                              fontSize: 13, color: C.text, fontWeight: 600,
-                            }}
-                          >
-                            ↩ {ex.name} <span style={{ color: C.muted, fontWeight: 400 }}>(revert to original)</span>
-                          </button>
-                        )}
-                        {subs.map(sub => (
-                          <button
-                            key={sub.id}
-                            onClick={() => doSwap(ex, sub)}
-                            style={{
-                              display: "block", width: "100%", textAlign: "left",
-                              padding: "8px 10px", marginBottom: 4, borderRadius: 6,
-                              background: activeEx.id === sub.id ? C.orange + "22" : C.card,
-                              border: `1px solid ${activeEx.id === sub.id ? C.orange : C.border}`,
-                              cursor: "pointer", fontSize: 13, color: C.text,
-                            }}
-                          >
-                            <span style={{ fontWeight: 600 }}>{sub.name}</span>
-                            <span style={{ color: C.muted }}> · {sub.reps}</span>
-                            {sub.note && <span style={{ color: C.muted, fontSize: 11 }}> — {sub.note}</span>}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <ExerciseRow ex={activeEx} last={isLast} />
-                  </div>
-                );
-              })}
-            </div>
-
-            <div style={{ marginTop: 16 }}>
-              <BwPrompt unit={unit} onSave={onBwSave} />
-            </div>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
+              <span style={{
+                fontSize: 12, fontWeight: 700, color: WORKOUT_COLORS[activeId] || C.blue,
+                background: `${WORKOUT_COLORS[activeId] || C.blue}1a`,
+                padding: "2px 8px", borderRadius: 4, marginRight: 8, letterSpacing: 0.5,
+              }}>{activeWorkout.shortName}</span>
+              {activeWorkout.name.replace(/^Workout [A-D] — /, "")}
+            </h2>
             <button
-              onClick={startSession}
+              onClick={abortSession}
               style={{
-                width: "100%", padding: "14px",
-                background: C.blue, color: "#000",
-                border: "none", borderRadius: 10, fontWeight: 700,
-                fontSize: 16, cursor: "pointer",
+                background: "none", border: "none", color: C.muted,
+                fontSize: 12, cursor: "pointer", padding: "2px 8px",
               }}
-            >Start session</button>
-          </Card>
+            >Cancel</button>
+          </div>
 
-          {/* Week calendar */}
           <Card>
-            <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 12, letterSpacing: 1 }}>THIS WEEK</div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              {WEEK_LABELS.map((lbl, i) => {
-                const isToday = i === todayDow;
-                const role = WEEK_ROLES[i];
-                const abbr = role === "Climb+Train" ? "CT" : role === "Sabbath" ? "S" : role[0];
-                return (
-                  <div key={lbl} style={{ textAlign: "center", flex: 1 }}>
-                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>{lbl}</div>
-                    <div style={{
-                      width: 34, height: 34, borderRadius: "50%", margin: "0 auto",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      border: isToday ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
-                      background: isToday ? "#1a2d4a" : C.bg,
-                      fontSize: 11, fontWeight: isToday ? 700 : 400,
-                      color: isToday ? C.blue : C.muted,
-                    }}>{abbr}</div>
-                  </div>
+            {activeWorkout.exercises.map((ex, i) => {
+              const last = i === activeWorkout.exercises.length - 1;
+              const exData = sessionData[ex.id] || {};
+              if (ex.loggable) {
+                // Build per-set recommendations for this exercise.
+                // recommendSet is called per set index, same protocol
+                // the legacy tab used.
+                const recommendations = Array.from(
+                  { length: (exData.sets?.length || ex.sets || 1) },
+                  (_, idx) => recommendSet(wLog, ex, activeId, idx)
                 );
-              })}
-            </div>
-          </Card>
-        </>
-      )}
-
-      {/* ─── SESSION ACTIVE view ────────────────────────────── */}
-      {subTab === "today" && sessionActive && (
-        <Card>
-          <div style={{ marginBottom: 16 }}>
-            {/* Show the workout the user is actually IN (displayKey),
-                not the rotation pointer (rotKey). They diverge when
-                the user manually picks an off-rotation workout from
-                the picker. Previously this displayed rotKey, which
-                was misleading when displayKey ≠ rotKey (e.g., the
-                user logging Workout B while the rotation says C is
-                next). */}
-            <div style={{ fontSize: 11, color: C.muted }}>
-              WORKOUT {displayKey}  ·  SESSION #{sessionN}
-              {displayKey !== rotKey && (
-                <span style={{ color: C.orange, marginLeft: 8 }}>(off-rotation; next: {rotKey})</span>
-              )}
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>{workout.name}</div>
-          </div>
-
-          {workout.exercises.map((ex, i) => {
-            const isSwapped  = !!swaps[ex.id];
-            const activeEx   = isSwapped ? { ...swaps[ex.id] } : ex;
-            const sKey       = activeEx.id;
-            const subs       = EXERCISE_SUBSTITUTES[ex.id] || [];
-            const pickerOpen = swapPickerFor === ex.id;
-            const isLast     = i === workout.exercises.length - 1;
-
-            return (
-              <div key={ex.id}>
-                {/* Swap button row */}
-                {subs.length > 0 && (
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 2 }}>
-                    <button
-                      onClick={() => setSwapPickerFor(pickerOpen ? null : ex.id)}
-                      style={{
-                        fontSize: 11, padding: "2px 8px", borderRadius: 4, cursor: "pointer",
-                        background: "none", border: `1px solid ${isSwapped ? C.orange : C.border}`,
-                        color: isSwapped ? C.orange : C.muted,
-                      }}
-                    >
-                      {isSwapped ? `⇄ ${activeEx.name} (swapped)` : "⇄ swap"}
-                    </button>
-                  </div>
-                )}
-
-                {/* Inline swap picker */}
-                {pickerOpen && (
-                  <div style={{
-                    background: C.bg, border: `1px solid ${C.border}`,
-                    borderRadius: 8, padding: "10px 12px", marginBottom: 8,
-                  }}>
-                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                      Substitute for <strong style={{ color: C.text }}>{ex.name}</strong>:
-                    </div>
-                    {isSwapped && (
-                      <button
-                        onClick={() => revertSwap(ex)}
-                        style={{
-                          display: "block", width: "100%", textAlign: "left",
-                          padding: "8px 10px", marginBottom: 4, borderRadius: 6,
-                          background: C.border, border: "none", cursor: "pointer",
-                          fontSize: 13, color: C.text, fontWeight: 600,
-                        }}
-                      >
-                        ↩ {ex.name} <span style={{ color: C.muted, fontWeight: 400 }}>(revert to original)</span>
-                      </button>
-                    )}
-                    {subs.map(sub => (
-                      <button
-                        key={sub.id}
-                        onClick={() => doSwap(ex, sub)}
-                        style={{
-                          display: "block", width: "100%", textAlign: "left",
-                          padding: "8px 10px", marginBottom: 4, borderRadius: 6,
-                          background: activeEx.id === sub.id ? C.orange + "22" : C.card,
-                          border: `1px solid ${activeEx.id === sub.id ? C.orange : C.border}`,
-                          cursor: "pointer", fontSize: 13, color: C.text,
-                        }}
-                      >
-                        <span style={{ fontWeight: 600 }}>{sub.name}</span>
-                        <span style={{ color: C.muted }}> · {sub.reps}</span>
-                        {sub.note && <span style={{ color: C.muted, fontSize: 11 }}> — {sub.note}</span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <SessionExRow
-                  ex={activeEx}
-                  unit={unit}
-                  prevSets={prevBestSets(sKey, activeEx)}
-                  setsData={sessionData[sKey]}
-                  onSetsChange={(val) => setSessionData(prev => ({ ...prev, [sKey]: val }))}
-                  done={!!sessionData[sKey]?.done}
-                  onToggle={() => setSessionData(prev => ({
-                    ...prev,
-                    [sKey]: { ...prev[sKey], done: !prev[sKey]?.done },
-                  }))}
-                  last={isLast && !pickerOpen}
-                  // Per-set progression suggestions — same recommender
-                  // that startSession used to pre-fill the inputs.
-                  // Computed here per render so the reasoning text
-                  // stays in sync with whatever set count the user
-                  // has after add/remove.
-                  recommendations={(activeEx.sets ? Array.from({ length: Math.max(activeEx.sets, sessionData[sKey]?.sets?.length || 0) }, (_, i) => recommendSet(wLog, activeEx, displayKey, i)) : [])}
+                return (
+                  <SessionExRow
+                    key={ex.id}
+                    ex={ex}
+                    unit={unit}
+                    prevSets={prevSetsFor(ex.id)}
+                    setsData={exData}
+                    onSetsChange={(next) => updateExerciseSets(ex.id, next)}
+                    recommendations={recommendations}
+                    last={last}
+                  />
+                );
+              }
+              return (
+                <SimpleExRow
+                  key={ex.id}
+                  ex={ex}
+                  done={!!exData.done}
+                  notes={exData.notes || ""}
+                  onToggle={() => toggleExerciseDone(ex.id)}
+                  onNotesChange={(v) => updateExerciseNotes(ex.id, v)}
+                  last={last}
                 />
-              </div>
-            );
-          })}
+              );
+            })}
+          </Card>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+          <textarea
+            value={sessionNotes}
+            onChange={e => setSessionNotes(e.target.value)}
+            placeholder="Session notes (optional)"
+            rows={2}
+            style={{
+              width: "100%", marginTop: 12, padding: "8px 10px",
+              background: C.bg, border: `1px solid ${C.border}`,
+              color: C.text, borderRadius: 8, fontSize: 13, fontFamily: "inherit",
+              resize: "vertical",
+            }}
+          />
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button
-              onClick={() => {
-                if (allDone) {
-                  completeSession();
-                } else if (window.confirm("Some exercises aren't fully checked off — finish session anyway?")) {
-                  completeSession();
-                }
-              }}
+              onClick={saveSession}
               style={{
-                flex: 1, padding: "13px",
-                background: allDone ? C.green : C.blue,
-                color: "#000",
-                border: "none", borderRadius: 10, fontWeight: 700,
-                fontSize: 15, cursor: "pointer",
+                flex: 1, padding: "12px", background: C.green, color: "#000",
+                border: "none", borderRadius: 8, fontWeight: 700, fontSize: 15,
+                cursor: "pointer",
               }}
-            >{allDone ? "Complete session ✓" : "Finish session →"}</button>
-            <button
-              onClick={() => { setSessionActive(false); setSessionData({}); setSwaps({}); setSwapPickerFor(null); }}
-              style={{
-                padding: "13px 16px", background: "transparent",
-                border: `1px solid ${C.border}`, color: C.muted,
-                borderRadius: 10, cursor: "pointer", fontSize: 14,
-              }}
-            >Abandon</button>
+            >Save Session</button>
           </div>
-        </Card>
-      )}
-
-      {/* ─── PLAN view ──────────────────────────────────────── */}
-      {subTab === "plan" && (
+        </>
+      ) : (
+        // ── Today / picker view ──────────────────────────
         <>
-          {editingKey ? (
-            <WorkoutEditor
-              wKey={editingKey}
-              workout={plan[editingKey]}
-              onSave={(name, exercises) => {
-                savePlan({ ...plan, [editingKey]: { name, exercises } });
-                setEditingKey(null);
-              }}
-              onClose={() => setEditingKey(null)}
-              onReset={() => {
-                if (window.confirm(`Reset Workout ${editingKey} to defaults?`)) {
-                  savePlan({ ...plan, [editingKey]: DEFAULT_WORKOUTS[editingKey] });
-                  setEditingKey(null);
-                }
-              }}
-            />
-          ) : (
-            <>
-              {/* Sequence rule callout */}
-              <div style={{
-                background: "#1a2d1a", border: `1px solid ${C.green}`,
-                borderRadius: 8, padding: "10px 14px", marginBottom: 16,
-                fontSize: 13, color: C.green,
-              }}>
-                <strong>A → B → C</strong>
-                <span style={{ color: C.muted, fontWeight: 400 }}> · session-sequenced, not day-specific · C requires a rest day before climbing</span>
-              </div>
+          <RecommendationCard
+            recommendation={recommendation}
+            onPickWorkout={(id) => setPickedId(id)}
+            pickedId={pickedId || recommendation?.primary?.id}
+          />
 
-              {/* One-tap reset for the whole plan — useful when stale
-                  exercise IDs (or other drift) need to be cleared
-                  without drilling into each workout's editor. */}
-              <div style={{ marginBottom: 16, textAlign: "right" }}>
-                <button
-                  onClick={() => {
-                    if (window.confirm("Reset ALL workouts (A, B, C) to defaults? This will replace any custom edits.")) {
-                      savePlan(DEFAULT_WORKOUTS);
-                    }
-                  }}
-                  style={{
-                    padding: "6px 12px", background: "transparent",
-                    border: `1px solid ${C.border}`, color: C.muted,
-                    borderRadius: 6, cursor: "pointer", fontSize: 12,
-                  }}
-                >Reset all to defaults</button>
-              </div>
+          <WorkoutPicker
+            pickedId={pickedId || recommendation?.primary?.id}
+            onPick={(id) => setPickedId(id)}
+          />
 
-              {/* Workout cards */}
-              {["A", "B", "C"].map(key => {
-                const wk = plan[key];
-                const isNext = key === rotKey;
-                return (
-                  <Card key={key} style={{ marginBottom: 10, borderColor: isNext ? C.blue : C.border }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                      <div style={{
-                        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-                        background: isNext ? "#1a2d4a" : C.bg,
-                        border: `1px solid ${isNext ? C.blue : C.border}`,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 16, fontWeight: 800, color: isNext ? C.blue : C.muted,
-                      }}>{key}</div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{wk.name}</div>
-                        <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-                          {wk.exercises.filter(e => e.type !== "X").map(e => e.name).join(" · ")}
+          <EnergyToggle value={energyLow} onChange={handleEnergyChange} />
+
+          {activeWorkout && (
+            <Card>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>
+                  {activeWorkout.name.replace(/^Workout [A-D] — /, "")}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted }}>
+                  {countdownLabel}{wtr != null ? ` · ${wtr}w to trip` : ""}
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+                {activeWorkout.purpose}
+              </div>
+              {activeWorkout.exercises.length === 0 ? (
+                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginBottom: 12 }}>
+                  {activeId === "REST"
+                    ? "Rest is what absorbs the training. Save the marker so the recommender knows you took the day."
+                    : "Climbing has no logged exercises here — log climbs in the climbing log instead. Save the marker if you want it to count toward recommender staleness."}
+                </div>
+              ) : (
+                <div style={{ marginBottom: 12 }}>
+                  {activeWorkout.exercises.map((ex, i) => (
+                    <div key={ex.id} style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "6px 0",
+                      borderBottom: i < activeWorkout.exercises.length - 1 ? `1px solid ${C.border}` : "none",
+                    }}>
+                      <WTypeBadge type={ex.type} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: C.text }}>{ex.name}</div>
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>
+                          {ex.prescription}{ex.loggable ? "" : " · done/notes"}
                         </div>
                       </div>
-                      <button
-                        onClick={() => setEditingKey(key)}
-                        style={{
-                          padding: "6px 12px", background: "transparent",
-                          border: `1px solid ${C.border}`, color: C.muted,
-                          borderRadius: 6, cursor: "pointer", fontSize: 12,
-                        }}
-                      >Edit</button>
                     </div>
-                    {wk.exercises.map((ex, i) => (
-                      <ExerciseRow key={ex.id} ex={ex} last={i === wk.exercises.length - 1} />
-                    ))}
-                  </Card>
-                );
-              })}
-
-              {/* Trip countdown — conjugate-friendly: countdown + taper window only */}
-              {(() => {
-                const cd = tripCountdown(trip.date);
-                if (!cd) return null;
-                const tripName = trip.name || "Trip";
-                return (
-                  <Card style={{ marginTop: 4 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 10, letterSpacing: 1 }}>
-                      {tripName.toUpperCase()} COUNTDOWN
-                    </div>
-                    {cd.past ? (
-                      <div style={{ fontSize: 13, color: C.muted }}>
-                        {cd.tripLabel} — trip date is in the past. Edit in Settings.
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: `1px solid ${C.border}` }}>
-                          <div style={{ fontSize: 13, color: C.yellow, fontWeight: 600, minWidth: 90 }}>
-                            {cd.weeks}wk · {cd.days}d
-                          </div>
-                          <div style={{ fontSize: 13, color: C.muted }}>
-                            Until {tripName} ({cd.tripLabel})
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", gap: 10, padding: "7px 0" }}>
-                          <div style={{
-                            fontSize: 13,
-                            color: cd.inTaper ? C.red : C.yellow,
-                            fontWeight: 600, minWidth: 90,
-                          }}>
-                            {cd.inTaper ? "TAPER" : cd.taperLabel}
-                          </div>
-                          <div style={{ fontSize: 13, color: C.muted }}>
-                            {cd.inTaper
-                              ? "Cut volume 40%, hold intensity"
-                              : "Taper window starts (T−7d)"}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </Card>
-                );
-              })()}
-            </>
+                  ))}
+                </div>
+              )}
+              {activeWorkout.coachingNotes && activeWorkout.coachingNotes.length > 0 && (
+                <div style={{
+                  background: C.bg, borderRadius: 8, padding: "8px 10px",
+                  marginBottom: 12, border: `1px solid ${C.border}`,
+                  fontSize: 11, color: C.muted, lineHeight: 1.6,
+                }}>
+                  {activeWorkout.coachingNotes.map((n, i) => (
+                    <div key={i}>· {n}</div>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={startSession}
+                style={{
+                  width: "100%", padding: "12px",
+                  background: WORKOUT_COLORS[activeId] || C.blue,
+                  color: "#000", border: "none", borderRadius: 8,
+                  fontSize: 15, fontWeight: 700, cursor: "pointer",
+                }}
+              >
+                {activeWorkout.exercises.length === 0
+                  ? `Log ${activeWorkout.shortName} marker`
+                  : `Start ${activeWorkout.shortName}`}
+              </button>
+            </Card>
           )}
+
+          <BwPrompt unit={unit} onSave={onBwSave} />
         </>
       )}
     </div>
   );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
+
+// Count non-pin sessions in the log. Used to assign sessionNumber
+// on save. Counts both legacy and new sessions — sessionNumber is
+// a simple cumulative index, schema-agnostic.
+function countSupportSessions(wLog) {
+  return (wLog || []).filter(s => s && s.workout !== ROTATION_PIN_KEY).length;
+}
+
+// Reduce a stored set object into a compact "prev" display string
+// for SessionExRow's prev column. For unilateral sets, returns
+// an object { L: "...", R: "..." }; for bilateral, returns a
+// single string.
+function setSummary(set) {
+  if (set == null) return null;
+  if (set.leftReps != null || set.leftWeight != null) {
+    const fmt = (r, w) => {
+      if ((r == null || r === "") && (w == null || w === "")) return "";
+      return `${r ?? ""}${r && w ? "@" : ""}${w ?? ""}`;
+    };
+    return {
+      L: fmt(set.leftReps, set.leftWeight),
+      R: fmt(set.rightReps, set.rightWeight),
+    };
+  }
+  const r = set.reps, w = set.weight;
+  if ((r == null || r === "") && (w == null || w === "")) return "";
+  return `${r ?? ""}${r && w ? "@" : ""}${w ?? ""}`;
 }
 

@@ -883,7 +883,7 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
+      {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} activities={activities} />}
       {tab === 2 && (
         <AnalysisContainer
           history={history}
