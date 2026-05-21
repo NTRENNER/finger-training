@@ -37,10 +37,40 @@ import { today } from "../util.js";
 // ─────────────────────────────────────────────────────────────
 // Exercises
 // ─────────────────────────────────────────────────────────────
-// Each exercise carries enough metadata for the UI to render its
-// tile without a second lookup: prescription, intent, progression,
-// optional cautions. `tags` feeds the recommender's tag-staleness
-// engine downstream.
+// Each exercise carries:
+//
+//   Coaching fields (always present): id, name, tags, prescription
+//     (display string), intent, progression notes, optional cautions.
+//
+//   Logging fields (for the WorkoutTab UI):
+//     loggable: true  — render with the full per-set weight/rep UI
+//                       (SessionExRow). Provides numeric load
+//                       progression for the lift-style exercises.
+//     loggable: false — render as a compact "name + prescription +
+//                       done?" tile with an optional notes field.
+//                       For bodyweight / mobility / explosive items
+//                       where numeric load tracking is the wrong
+//                       shape (med-ball slam, KB snatch, skater
+//                       bound, ab wheel — band color or distance is
+//                       the variable, not "weight").
+//
+//   When loggable=true, the following mirror the legacy
+//   DEFAULT_WORKOUTS schema so recommendSet() and SessionExRow keep
+//   working unchanged:
+//     type                — S/H/P/X badge color
+//     sets                — number of sets to log
+//     reps                — display-only string ("2–4", "5", etc.)
+//     logWeight           — true → numeric weight per set
+//     bodyweightAdditive  — true → "+X kg added to BW" instead of
+//                           absolute load (pullups, dips)
+//     unilateral          — true → L/R logged per set (curls, KB
+//                           snatch, split squat)
+//     availableLoads      — optional array of fixed DBs / KBs
+//                           (some exercises only have certain
+//                           weights available)
+//
+//   The `tags` field feeds the recommender's tag-staleness engine
+//   downstream — independent of the logging fields.
 
 export const exercises = {
   weightedPullup: {
@@ -55,6 +85,12 @@ export const exercises = {
       "No grinders.",
     ],
     cautions: ["Reduce if elbows, shoulders, or fingers feel tweaky."],
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "2–4",
+    logWeight: true,
+    bodyweightAdditive: true,
   },
 
   benchPress: {
@@ -64,6 +100,11 @@ export const exercises = {
     prescription: "2 × 5",
     intent: "Low-volume pressing strength for upper-body balance.",
     progression: ["Add small load when both sets feel clean."],
+    loggable: true,
+    type: "S",
+    sets: 2,
+    reps: "5",
+    logWeight: true,
   },
 
   dips: {
@@ -75,6 +116,12 @@ export const exercises = {
       "Low-volume pressing on D as the dedicated pressing slot. Skipping bench in A keeps pressing volume from doubling up across the week.",
     progression: ["Add load slowly.", "Keep ROM pain-free."],
     cautions: ["Avoid deep ROM if anterior shoulder feels irritated."],
+    loggable: true,
+    type: "S",
+    sets: 2,
+    reps: "3–5",
+    logWeight: true,
+    bodyweightAdditive: true,
   },
 
   splitSquat: {
@@ -88,6 +135,12 @@ export const exercises = {
       "Explosive concentric.",
       "Add load gradually.",
     ],
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "5–8",
+    logWeight: true,
+    unilateral: true,
   },
 
   bandedLatPull: {
@@ -102,6 +155,10 @@ export const exercises = {
       "Keep full reach and scapular motion.",
       "Pull elbow toward hip, not toward chest.",
     ],
+    // Non-loggable: band color is the load axis, not numeric weight.
+    // The user logs band variant + sets in the notes field.
+    loggable: false,
+    type: "S",
   },
 
   bicepCurls: {
@@ -117,6 +174,13 @@ export const exercises = {
       "Use full ROM unless joints object.",
     ],
     cautions: ["Reduce if elbows feel irritated from climbing or pull-ups."],
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "6–10",
+    logWeight: true,
+    unilateral: true,
+    availableLoads: [20, 25, 40],
   },
 
   hardStyleSitup: {
@@ -131,6 +195,10 @@ export const exercises = {
       "Reduce hand assistance.",
       "Control eccentric.",
     ],
+    // Non-loggable: bodyweight + band tension. Notes field tracks
+    // band tension cues if useful.
+    loggable: false,
+    type: "S",
   },
 
   abWheel: {
@@ -144,6 +212,8 @@ export const exercises = {
       "Slow eccentric.",
       "Progress toward standing rollouts (much later).",
     ],
+    loggable: false,
+    type: "S",
   },
 
   proneExternalRotation: {
@@ -157,6 +227,11 @@ export const exercises = {
       "Build range first, then add load.",
       "Later cycle: 4 × 3–5 heavier for maximal strength.",
     ],
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "8–10",
+    logWeight: true,
   },
 
   medBallThrows: {
@@ -170,6 +245,10 @@ export const exercises = {
       "Rotate variations.",
       "Stop before fatigue slows movement.",
     ],
+    // Non-loggable: med ball weight rarely changes, intent is the
+    // primary variable. Notes field is sufficient.
+    loggable: false,
+    type: "P",
   },
 
   kbSnatch: {
@@ -179,6 +258,12 @@ export const exercises = {
     prescription: "4 × 4–6 / side",
     intent: "Hip drive, posterior chain, rhythm, athletic sequencing.",
     progression: ["Increase crispness first.", "Then load.", "Never grind reps."],
+    loggable: true,
+    type: "P",
+    sets: 4,
+    reps: "4–6",
+    logWeight: true,
+    unilateral: true,
   },
 
   jumps: {
@@ -192,6 +277,9 @@ export const exercises = {
       "Low volume.",
       "Full recovery between sets.",
     ],
+    // Non-loggable: distance/height is the variable, not weight.
+    loggable: false,
+    type: "P",
   },
 
   skaterBounds: {
@@ -202,6 +290,8 @@ export const exercises = {
     intent:
       "Lateral-plane power — flagging, sideways throws, cross-body moves. Most strength programs skip the lateral plane entirely; climbing is full of it.",
     progression: ["Increase distance.", "Stick landings.", "Do not rush reps."],
+    loggable: false,
+    type: "P",
   },
 
   bandedRotationalWork: {
@@ -216,6 +306,8 @@ export const exercises = {
       "Increase speed before load.",
       "Stay organized — no sloppy reps.",
     ],
+    loggable: false,
+    type: "P",
   },
 
   supineWeightedFrog: {
@@ -230,6 +322,11 @@ export const exercises = {
       "Improve relaxation quality.",
       "Extend duration gradually.",
     ],
+    // Non-loggable: time-based hold with bilateral weight. Numeric
+    // load tracking is overkill; notes field can capture weight if
+    // it matters that session.
+    loggable: false,
+    type: "H",
   },
 
   weightedPancake: {
@@ -244,6 +341,11 @@ export const exercises = {
       "Lower hip height as flexibility improves (yoga blocks → floor).",
       "Add load only once end-range control is solid.",
     ],
+    loggable: true,
+    type: "H",
+    sets: 3,
+    reps: "6",
+    logWeight: true,
   },
 
   pancakeLegLifts: {
@@ -257,6 +359,10 @@ export const exercises = {
       "Increase object height as control improves.",
       "Keep reps strict — no hip rotation to cheat.",
     ],
+    // Non-loggable: progression is "height of the object you're
+    // lifting your heel over", not numeric load.
+    loggable: false,
+    type: "H",
   },
 };
 
