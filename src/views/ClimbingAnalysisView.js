@@ -26,6 +26,7 @@ import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from "recharts";
+import { PyramidChart } from "./cards/PyramidChart.jsx";
 import { C } from "../ui/theme.js";
 import { Card, Sect } from "../ui/components.js";
 import {
@@ -470,21 +471,14 @@ export function ClimbingAnalysisView({ activities = [] }) {
             </div>
           ) : (
             <>
-              <ResponsiveContainer width="100%" height={Math.max(140, pyramid.rows.length * 28 + 30)}>
-                <BarChart data={pyramid.rows} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 0 }}>
-                  <CartesianGrid stroke={C.border} strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" tick={{ fill: C.muted, fontSize: 11 }} allowDecimals={false} />
-                  <YAxis type="category" dataKey="grade"
-                    tick={{ fill: C.text, fontSize: 12, fontWeight: 600 }}
-                    width={48} />
-                  <Tooltip
-                    contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
-                    formatter={(v) => [`${v} send${v === 1 ? "" : "s"}`, "Count"]}
-                  />
-                  <Bar dataKey="count" fill={DISCIPLINE_COLORS[pyramidDiscipline]}
-                    radius={[0, 4, 4, 0]} isAnimationActive={false} />
-                </BarChart>
-              </ResponsiveContainer>
+              {/* True centered pyramid with per-tier coaching status.
+                  Replaces the prior horizontal bar chart. See
+                  model/gradePyramid.js for Power Company Climbing's
+                  project / consolidate / cleanup / base ATB logic. */}
+              <PyramidChart
+                rows={pyramid.rows}
+                fill={DISCIPLINE_COLORS[pyramidDiscipline]}
+              />
               <div style={{ marginTop: 6, fontSize: 11, color: C.muted, textAlign: "right" }}>
                 {pyramid.total} clean send{pyramid.total === 1 ? "" : "s"} total
               </div>
