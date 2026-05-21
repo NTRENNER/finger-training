@@ -958,6 +958,7 @@ export default function App() {
           onPullFromCloud={pullFromCloud}
           pullStatus={pullStatus}
           lastPulledAt={lastPulledAt}
+          fatigueModel={fatigueModel}
         />
       )}
     </div>

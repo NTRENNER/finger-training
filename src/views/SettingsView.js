@@ -42,6 +42,11 @@ export function SettingsView({
   // the climbing style the user is training for.
   climbingFocus = "balanced", onClimbingFocusChange = () => {},
   onPullFromCloud = () => {}, pullStatus = "idle", lastPulledAt = null,
+  // Per-grip fatigue β state — read-only inspector. Sourced from
+  // user_settings.settings.fatigue_model in App.js, updated server-side
+  // by the trigger update_fatigue_beta_from_rep_trg on every rep-1
+  // insert. See src/model/fatigueBeta.js for the math.
+  fatigueModel = null,
 }) {
   const [showSQL, setShowSQL] = useState(false);
   const sql = `-- Run this once in your Supabase SQL editor (fresh install):
@@ -316,6 +321,106 @@ CREATE POLICY "auth_all" ON reps
               )}
             </div>
           )}
+        </Sect>
+      </Card>
+
+      {/* ── Fatigue Model inspector ─────────────────────────────
+          Read-only view of the per-grip β learner state. β controls
+          how aggressively the engine scales down prescribed loads in
+          response to the cookedness slider:
+            multiplier(grip, cooked) = exp(-β_grip · cooked)
+          n_obs is the count of rep-1 observations the server-side
+          trigger has folded in; last_update is the last rep-1 push
+          that actually moved β. Useful as a sanity check (β = 0.05
+          is the cold-start prior, so a number close to that with
+          n_obs = 0 means the learner hasn't observed anything yet)
+          and for debugging weird load suggestions. */}
+      <Card>
+        <Sect title="Fatigue Model (β per grip)">
+          {(() => {
+            if (!fatigueModel || typeof fatigueModel !== "object") {
+              return (
+                <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+                  No fatigue model loaded yet. Sign in and complete a
+                  finger session — the server-side trigger writes the
+                  initial state on the first rep-1 insert.
+                </div>
+              );
+            }
+            const meta = ["eta", "lambda"];
+            const grips = Object.entries(fatigueModel)
+              .filter(([k, v]) => !meta.includes(k) && v && typeof v === "object" && "beta" in v);
+            if (grips.length === 0) {
+              return (
+                <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+                  Fatigue model exists but has no per-grip rows yet. Run
+                  a finger session at any cookedness &gt; 0 to start
+                  populating the learner.
+                </div>
+              );
+            }
+            // Cookedness sweep for a quick "what does β = X mean in
+            // practice" sanity column. exp(-β · 5) is the multiplier
+            // at the middle of the slider.
+            const sample = (b) => `${Math.round(Math.exp(-b * 5) * 100)}%`;
+            return (
+              <div>
+                <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+                  Capacity multiplier at "cooked = 5" shown for context
+                  — that's what gets multiplied against your fresh
+                  prescription when the slider sits mid-range. Higher
+                  β = steeper scale-down per cookedness point.
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ color: C.muted, textAlign: "left" }}>
+                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>Grip</th>
+                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>β</th>
+                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>@c=5</th>
+                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>n_obs</th>
+                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>last update</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grips.map(([grip, g]) => {
+                      const b = Number(g.beta);
+                      const last = g.last_update
+                        ? new Date(g.last_update).toISOString().slice(0, 10)
+                        : "—";
+                      return (
+                        <tr key={grip} style={{ borderTop: `1px solid ${C.border}` }}>
+                          <td style={{ padding: "6px", fontWeight: 600, color: "#fff" }}>{grip}</td>
+                          <td style={{ padding: "6px", fontFamily: "monospace" }}>
+                            {Number.isFinite(b) ? b.toFixed(4) : "—"}
+                          </td>
+                          <td style={{ padding: "6px", fontFamily: "monospace", color: C.muted }}>
+                            {Number.isFinite(b) ? sample(b) : "—"}
+                          </td>
+                          <td style={{ padding: "6px", fontFamily: "monospace", color: C.muted }}>
+                            {Number(g.n_obs) || 0}
+                          </td>
+                          <td style={{ padding: "6px", fontFamily: "monospace", color: C.muted, fontSize: 11 }}>
+                            {last}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 10, fontStyle: "italic", lineHeight: 1.5 }}>
+                  Cold-start β = 0.05 (multiplier ≈ 78% at c=5). Updates
+                  via SGD: <code>β ← β − η·e·c − λ·(β − β_prior)</code>
+                  where e = ln(actual/target) on rep 1.{" "}
+                  {fatigueModel.eta != null && (
+                    <>η = {Number(fatigueModel.eta).toFixed(3)}, </>
+                  )}
+                  {fatigueModel.lambda != null && (
+                    <>λ = {Number(fatigueModel.lambda).toFixed(3)}.</>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </Sect>
       </Card>
 
