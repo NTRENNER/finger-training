@@ -538,7 +538,21 @@ export function HistoryView({
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 12, color: C.muted }}>
                   {sess.date}{sess.reps[0]?.session_started_at ? " · " + fmtClock(sess.reps[0].session_started_at) : ""}
-                  {(() => { const e = bwOnDate(bwLog, sess.date); return e ? " · BW " + fmt1(toDisp(e.kg, unit)) + " " + unit : ""; })()}
+                  {(() => {
+                    const e = bwOnDate(bwLog, sess.date);
+                    if (!e) return null;
+                    // Wrap BW + value + unit together in a nowrap span
+                    // so the label and number never end up on different
+                    // lines when the header wraps.
+                    return (
+                      <>
+                        {" · "}
+                        <span style={{ whiteSpace: "nowrap" }}>
+                          BW {fmt1(toDisp(e.kg, unit))} {unit}
+                        </span>
+                      </>
+                    );
+                  })()}
                 </span>
                 {!isEditing && (
                   <>
