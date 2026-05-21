@@ -296,15 +296,17 @@ export const exercises = {
 
   bandedRotationalWork: {
     id: "bandedRotationalWork",
-    name: "Banded Rotational Work",
+    name: "Banded Core Chop",
     tags: ["core", "power", "explosive"],
-    prescription: "2–4 rounds",
+    prescription: "3 × 6 / side · alternate high-to-low and low-to-high week to week",
     intent:
-      "Rotational force transfer for climbing movement. Bands are the practical constraint — pick variety: banded chops (high-to-low and low-to-high), banded Pallof press rotations, banded rotational throws if you have wall space.",
+      "Rotational power through the torso — the same force-transfer pattern that drives crossing throws, lateral dynos, and any move where the hips load and the upper body delivers. Anchor a heavy band at shoulder height (high-to-low) or at hip height (low-to-high) on a rack or post. Stand perpendicular, feet shoulder width, weight loaded into the inside leg. Grab the band with both hands and chop diagonally across the body — high anchor → opposite hip, or low anchor → opposite shoulder. The chop should feel like the hip initiates and the arms finish, not arms-only.",
     progression: [
-      "Rotate variations week to week so it doesn't become routine.",
-      "Increase speed before load.",
-      "Stay organized — no sloppy reps.",
+      "Rotate AROUND your center of mass — don't lunge or lean forward over the lead leg. The torso turns; the feet stay rooted.",
+      "Hip and shoulder should NOT move together. Coil first (hip rotates, shoulders stay back), then unleash. The stretch is what generates the power.",
+      "Shoulders depressed, scapulae protracted, arms internally rotated through the chop.",
+      "Increase speed before load. A faster chop with a lighter band beats a sluggish chop with a heavy one.",
+      "Step further from the anchor for more torque before switching to a thicker band.",
     ],
     loggable: false,
     type: "P",
