@@ -30,8 +30,10 @@ import { clamp } from "../util.js";
 import { suggestWeight } from "../model/prescription.js";
 import { levelTitle } from "../model/levels.js";
 import { downloadCSV } from "../lib/csv.js";
-import { buildRepCurveBundle } from "../model/repCurveData.js";
+import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
+import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
+import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 
 // Small wrapper used by both ActiveSessionView and AutoRepSessionView
 // (and SessionSummaryView) to render the live forecasted-vs-actual
@@ -63,6 +65,46 @@ function LiveRepCurveCard({ history, config, activeHand, sessionReps, embedded =
       asymptoticHold={bundle.asymptoticHold}
       targetS={bundle.targetS}
       height={160}
+      showLegend={false}
+    />
+  );
+  return embedded ? inner : <Card style={{ marginBottom: 12 }}>{inner}</Card>;
+}
+
+// Live recovery-dynamics card — between-rep capacity restoration
+// for the current set. Renders alongside LiveRepCurveCard once
+// rep 2 has landed (with only rep 1 there's nothing to plot —
+// observed series is just [1.0]). The two charts answer different
+// questions on the same data: LiveRepCurveCard shows hold-time
+// trajectory; LiveRecoveryCard shows what fraction of capacity
+// each rep started with.
+function LiveRecoveryCard({ history, config, activeHand, sessionReps, embedded = false }) {
+  const bundle = useMemo(() => {
+    const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
+    const sameHandReps = (sessionReps || [])
+      .filter(r => r.hand === handForLookup)
+      .filter(r => Number(r.actual_time_s) > 0);
+    // Rep 2 is the first inter-rep recovery measurement. Until
+    // that's in the books there's no recovery to show.
+    if (sameHandReps.length < 2) return null;
+    const physModel = buildPhysModel(history, handForLookup, config.grip);
+    return buildRecoveryBundle({
+      reps: sameHandReps,
+      restSeconds: config.restTime ?? 20,
+      physModel,
+    });
+  }, [history, config, activeHand, sessionReps]);
+  if (!bundle || bundle.observed.length === 0) return null;
+  const classification = classifyRecovery(bundle.observedAtTarget);
+  const inner = (
+    <RecoveryChart
+      observed={bundle.observed}
+      predicted={bundle.predicted}
+      headline={{
+        observed: bundle.observedAtTarget,
+        classification,
+      }}
+      height={140}
       showLegend={false}
     />
   );
@@ -304,6 +346,13 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
           1's actual time once it lands so the forecast tracks the
           user's actual capacity for this session. */}
       <LiveRepCurveCard
+        history={history}
+        config={config}
+        activeHand={activeHand}
+        sessionReps={sessionReps}
+      />
+
+      <LiveRecoveryCard
         history={history}
         config={config}
         activeHand={activeHand}
@@ -751,6 +800,13 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
 
       {/* Live rep-curve preview (same component as the manual flow). */}
       <LiveRepCurveCard
+        history={history}
+        config={config}
+        activeHand={activeHand}
+        sessionReps={sessionReps}
+      />
+
+      <LiveRecoveryCard
         history={history}
         config={config}
         activeHand={activeHand}

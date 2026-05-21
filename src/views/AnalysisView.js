@@ -50,6 +50,7 @@ import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
 import { EnduranceCeilingCard } from "./analysis/EnduranceCeilingCard.js";
 import { CapacityTrajectoryCard, CapacityAbsoluteCard } from "./analysis/CapacityChartCards.js";
+import { RecoveryTrendCard } from "./analysis/RecoveryTrendCard.jsx";
 // (EnergySystemBreakdownCard import removed — card dropped under curve-trust)
 
 // Per-grip color used wherever Micro and Crusher are charted side-by-
@@ -2043,6 +2044,14 @@ export function AnalysisView({
             per grip from the three-exp curve.) */}
 
         <CapacityAbsoluteCard aucHistoryByGrip={aucHistoryByGrip} />
+
+        {/* Recovery dynamics over time — per-session observed
+            recovered fraction at rep 2, per grip, with a 3-session
+            rolling-mean line. Pairs with the per-session
+            RecoveryChart in HistoryView: that one answers "how
+            well-rested was today?", this one answers "is my
+            recovery improving over weeks?" */}
+        <RecoveryTrendCard history={history} grips={grips} />
 
         {/* (Per-Compartment Dose AUC chart + Energy System Breakdown
             card removed under curve-trust — both were zone-keyed

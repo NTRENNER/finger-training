@@ -137,3 +137,74 @@ export function buildRecoveryBundle({ reps, restSeconds, physModel }) {
     observedAtTarget: obsAtTarget,
   };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Cross-session trend
+// ─────────────────────────────────────────────────────────────
+// Per-session observed recovered fraction at the target rep,
+// aggregated across the history for trend rendering in AnalysisView.
+// "Is my recovery improving over weeks/months?" — the question the
+// per-session chart can't answer.
+//
+// Grouping: by (session_id || date) — falls back to date when
+// session_id is missing on legacy rows. Per-hand averaging within a
+// session (Both-mode sessions have both L and R; we average their
+// observed fractions so one point per session per grip).
+
+export function buildRecoveryTrend(history, grip) {
+  if (!Array.isArray(history) || history.length === 0 || !grip) return [];
+
+  // Group reps by (session_id, grip, hand).
+  const groups = new Map();
+  for (const r of history) {
+    if (r.grip !== grip) continue;
+    if (!(Number(r.actual_time_s) > 0)) continue;
+    const sessKey = r.session_id || r.date;
+    const handKey = r.hand || "L";
+    const key = `${sessKey}|${handKey}`;
+    if (!groups.has(key)) groups.set(key, { sessKey, date: r.date, hand: handKey, reps: [] });
+    groups.get(key).reps.push(r);
+  }
+  if (groups.size === 0) return [];
+
+  // For each (session, hand), compute observed fraction at target rep.
+  // Average across hands within the same session for a single
+  // per-session datapoint (avoids double-plotting Both-mode sessions).
+  const bySession = new Map();
+  for (const grp of groups.values()) {
+    if (grp.reps.length < GAP_TARGET_REP) continue;
+    const observed = buildObservedRecoverySeries(grp.reps);
+    const v = observed.find(p => p.rep === GAP_TARGET_REP)?.observedFraction;
+    if (v == null) continue;
+    const entry = bySession.get(grp.sessKey) || { date: grp.date, values: [] };
+    entry.values.push(v);
+    entry.date = grp.date; // last write wins; dates should match within sessKey
+    bySession.set(grp.sessKey, entry);
+  }
+  if (bySession.size === 0) return [];
+
+  // Aggregate per-session: mean of L/R observed fractions, sorted by date ASC.
+  return [...bySession.values()]
+    .map(({ date, values }) => ({
+      date,
+      observedAtTarget: values.reduce((s, v) => s + v, 0) / values.length,
+    }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+// Add a 3-session rolling mean column to a trend series so the
+// chart can render dots (raw) + a smoothed trend line, same pattern
+// CapacityTrajectoryCard uses. Returns a new array with the same
+// length; the smoothed value at index i is the mean of indices
+// [max(0, i-2)..i].
+export function withRollingMean(trend, window = 3) {
+  if (!Array.isArray(trend) || trend.length === 0) return [];
+  return trend.map((row, i) => {
+    const start = Math.max(0, i - (window - 1));
+    const slice = trend.slice(start, i + 1).map(r => r.observedAtTarget).filter(Number.isFinite);
+    const smoothed = slice.length > 0
+      ? slice.reduce((s, v) => s + v, 0) / slice.length
+      : null;
+    return { ...row, observedSmoothed: smoothed };
+  });
+}

@@ -5,6 +5,8 @@ import {
   buildObservedRecoverySeries,
   buildPredictedRecoverySeries,
   buildRecoveryBundle,
+  buildRecoveryTrend,
+  withRollingMean,
   classifyRecovery,
   OPERATING_LOW, OPERATING_HIGH, GAP_TARGET_REP,
 } from "../recoveryDynamics.js";
@@ -208,6 +210,109 @@ describe("buildRecoveryBundle", () => {
 // ─────────────────────────────────────────────────────────────
 // Module-level constants — sanity
 // ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// buildRecoveryTrend — per-session aggregation across history
+// ─────────────────────────────────────────────────────────────
+
+function repRow({ session_id, date, grip, hand, rep_num, actual_time_s }) {
+  return { session_id, date, grip, hand, rep_num, actual_time_s };
+}
+
+describe("buildRecoveryTrend", () => {
+  test("empty / null inputs → empty array", () => {
+    expect(buildRecoveryTrend([], "Crusher")).toEqual([]);
+    expect(buildRecoveryTrend(null, "Crusher")).toEqual([]);
+    expect(buildRecoveryTrend([repRow({})], null)).toEqual([]);
+  });
+
+  test("one session with rep 2 produces one point", () => {
+    const history = [
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 24 }),
+    ];
+    const out = buildRecoveryTrend(history, "Crusher");
+    expect(out).toHaveLength(1);
+    expect(out[0].date).toBe("2026-05-01");
+    expect(out[0].observedAtTarget).toBeCloseTo(24 / 30, 5);
+  });
+
+  test("sessions sort ascending by date", () => {
+    const history = [
+      repRow({ session_id: "s2", date: "2026-05-10", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),
+      repRow({ session_id: "s2", date: "2026-05-10", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 27 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 24 }),
+    ];
+    const out = buildRecoveryTrend(history, "Crusher");
+    expect(out.map(p => p.date)).toEqual(["2026-05-01", "2026-05-10"]);
+  });
+
+  test("Both-mode session averages L and R into one point", () => {
+    const history = [
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 24 }), // L: 0.8
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "R", rep_num: 1, actual_time_s: 30 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "R", rep_num: 2, actual_time_s: 21 }), // R: 0.7
+    ];
+    const out = buildRecoveryTrend(history, "Crusher");
+    expect(out).toHaveLength(1);
+    expect(out[0].observedAtTarget).toBeCloseTo(0.75, 5); // mean(0.8, 0.7)
+  });
+
+  test("filters by grip — Micro sessions ignored when querying Crusher", () => {
+    const history = [
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 24 }),
+      repRow({ session_id: "s2", date: "2026-05-02", grip: "Micro", hand: "L", rep_num: 1, actual_time_s: 30 }),
+      repRow({ session_id: "s2", date: "2026-05-02", grip: "Micro", hand: "L", rep_num: 2, actual_time_s: 18 }),
+    ];
+    const out = buildRecoveryTrend(history, "Crusher");
+    expect(out).toHaveLength(1);
+    expect(out[0].observedAtTarget).toBeCloseTo(24 / 30, 5);
+  });
+
+  test("session with only rep 1 produces no point", () => {
+    const history = [
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),
+    ];
+    expect(buildRecoveryTrend(history, "Crusher")).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// withRollingMean
+// ─────────────────────────────────────────────────────────────
+
+describe("withRollingMean", () => {
+  test("empty input → empty output", () => {
+    expect(withRollingMean([])).toEqual([]);
+    expect(withRollingMean(null)).toEqual([]);
+  });
+
+  test("first point smoothed = raw (window of 1 effectively)", () => {
+    const trend = [{ date: "d1", observedAtTarget: 0.8 }];
+    const out = withRollingMean(trend);
+    expect(out[0].observedSmoothed).toBe(0.8);
+  });
+
+  test("3-window mean on 3 points = arithmetic mean of all three", () => {
+    const trend = [
+      { date: "d1", observedAtTarget: 0.6 },
+      { date: "d2", observedAtTarget: 0.8 },
+      { date: "d3", observedAtTarget: 0.7 },
+    ];
+    const out = withRollingMean(trend, 3);
+    expect(out[2].observedSmoothed).toBeCloseTo((0.6 + 0.8 + 0.7) / 3, 5);
+  });
+
+  test("preserves date and original observedAtTarget", () => {
+    const trend = [{ date: "d1", observedAtTarget: 0.5 }];
+    const out = withRollingMean(trend);
+    expect(out[0].date).toBe("d1");
+    expect(out[0].observedAtTarget).toBe(0.5);
+  });
+});
 
 describe("operating-zone constants", () => {
   test("LOW < HIGH and both in (0, 1)", () => {
