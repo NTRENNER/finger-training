@@ -95,13 +95,10 @@ const GRIP_PRESETS = ["Crusher", "Micro", "Prime"];
 // trip keys live in their respective view modules (WorkoutTab, etc.).
 const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
-// LS_READINESS_KEY ("ft_readiness") was the subjective daily check-in
-// emoji. Both that widget AND the computed-from-history readiness
-// score that briefly replaced it have been removed — coaching now
-// uses a constant neutral readiness=5. Old stored ratings under
-// "ft_readiness" are orphaned but harmless; nothing reads them.
-// (LS_BASELINE_KEY removed — was a Monod CF/W' snapshot, now obsolete.
-// The localStorage entry "ft_baseline" is orphaned but harmless.)
+// Orphan LS keys (nothing reads them, kept here so future devs don't
+// chase ghost values they spot in DevTools): "ft_readiness" (old
+// subjective check-in + a brief computed-readiness score), "ft_baseline"
+// (Monod CF/W' snapshot), "ft_genesis" (Journey/BadgesView snapshot).
 const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }]
 const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — user-configurable target date
 const LS_CLIMBING_FOCUS_KEY = "ft_climbing_focus";  // "balanced" | "bouldering" | "power_endurance" | "endurance" — feeds coaching engine focusBoost
@@ -320,15 +317,12 @@ export default function App() {
 
   // ── Climbing focus (cloud-synced training goal bias) ──────
   // "balanced" (default), "bouldering", "power_endurance", "endurance"
-  // — feeds focusBoost() in coaching.js to bias zone recommendations
-  // toward the climbing goal. Synced to user_settings table so the
-  // selection follows the user across devices.
-  //
-  // (Earlier Training Focus iteration was removed in May 2026 under
-  // the curve-trust philosophy as a hard override. This is a softer
-  // re-introduction: gentle multipliers (1.10-1.20× boost, 0.90×
-  // de-emphasis) that nudge close calls, never override strong
-  // signals like curve-coverage debt or recent climbing fatigue.)
+  // — feeds focusBoost() in coaching.js with gentle multipliers
+  // (1.10–1.20× boost, 0.90× de-emphasis) that nudge close calls.
+  // Strong signals (curve-coverage debt, recent climbing fatigue)
+  // still dominate; this is intentionally a tiebreaker, not an
+  // override. Synced to user_settings so the selection follows the
+  // user across devices.
   const [climbingFocus, setClimbingFocusState] = useState(() => {
     const stored = loadLS(LS_CLIMBING_FOCUS_KEY);
     return (typeof stored === "string" && stored) ? stored : "balanced";
@@ -408,33 +402,7 @@ export default function App() {
   // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
 
-  // Readiness score was previously displayed as a 1-10 number computed
-  // from training history (24h-decay model in src/model/readiness.js)
-  // and fed into the coaching engine. It was removed from the UI and
-  // from the coaching pipeline because (a) the displayed number was
-  // hard to act on, and (b) the multiplier it produced ([0.5, 1.0])
-  // was small relative to the gap/residual/focus factors that
-  // actually drive recommendations. The earlier subjective check-in
-  // widget — emoji picker on the Setup tab — is also gone. Coaching
-  // now uses the engine's default readiness=5 (neutral). Old subjective
-  // ratings under LS_READINESS_KEY are orphaned but harmless.
-
-  // (liveEstimate / gripEstimates Monod useMemos removed in the
-  // Monod-removal pass — App.js no longer imports any Monod code.
-  // The three-exp curve is the only F-D model now; per-grip fits
-  // happen on-demand inside AnalysisView via fitThreeExpAmps.)
-
-  // (Baseline-snapshot Monod CF/W' state + auto-baseline effect removed
-  // in the same pass. The snapshot was stored to LS_BASELINE_KEY but
-  // never read by anything downstream — pure dead code under the
-  // three-exp model. Per-grip baselines for the Curve Improvement card
-  // are derived live in AnalysisView from the three-exp fit.)
   const [activities, setActivities] = useState(() => loadLS(LS_ACTIVITY_KEY) || []);
-
-  // (Genesis badge snapshot + detection effect removed — the Journey /
-  // BadgesView surface that consumed it was deleted in commit caf7d2a.
-  // The localStorage entry under LS_GENESIS_KEY is orphaned but
-  // harmless; nothing reads it. The constant is also deleted below.)
 
   const addActivity = useCallback((act) => {
     const stamped = { ...act, id: uid() };
@@ -482,11 +450,11 @@ export default function App() {
     if (updated) pushActivity(updated);
   }, []);
 
-  // (setSessionRPE removed May 2026 — the UI that drove it
-  // (SessionRPECard) was retired alongside the unified SessionPlanCard.
-  // The session_rpe column on activities is still respected by
-  // climbingFatigue.computeSessionFatigue if it shows up via cloud sync,
-  // we just no longer write to it from Setup.)
+  // Note: setSessionRPE no longer exists (SessionPlanCard now hosts
+  // the climb-fatigue UI directly). The session_rpe column on
+  // activities is still read by climbingFatigue.computeSessionFatigue
+  // if it arrives via cloud sync from another device.
+
 
 
   // ── Tindeq ────────────────────────────────────────────────
@@ -847,10 +815,6 @@ export default function App() {
           return <SwitchHandsView onReady={() => setPhase("rep_ready")} />;
         }
 
-        // (alt_switch phase removed — alternating-hand mode is gone with
-        // the flat 20s rest; Both-mode now does all hangs on one hand
-        // then switches to the other.)
-
         if (phase === "resting") {
           return (
             <RestView
@@ -864,8 +828,6 @@ export default function App() {
             />
           );
         }
-
-        // (between_sets phase removed — single-set only under curve-trust commit C)
 
         if (phase === "done") {
           return (

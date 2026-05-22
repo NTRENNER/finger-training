@@ -70,17 +70,10 @@ import {
 
 import { BwPrompt } from "./SetupView.js";
 
-// ─────────────────────────────────────────────────────────────
-// Legacy data export — preserves the OLD DEFAULT_WORKOUTS content
-// so HistoryView / WorkoutHistoryView / WorkoutAnalysisView can
-// resolve historical session exercise names. The new tab does NOT
-// consume this; it lives here only as a stable export for views
-// that show historical data.
-//
-// Renamed from DEFAULT_WORKOUTS (no internal use any more); kept
-// the original export name DEFAULT_WORKOUTS pointing to it so
-// App.js's existing import doesn't break.
-// ─────────────────────────────────────────────────────────────
+// Legacy workout templates kept ONLY so historical sessions
+// logged under the pre-2026 schema still resolve their exercise
+// names in HistoryView / WorkoutHistoryView / WorkoutAnalysisView.
+// Don't add new templates here — they go in src/model/supportTraining.js.
 export const LEGACY_WORKOUTS = {
   A: {
     name: "Lift Day 1 (Push + Pull)",
@@ -120,10 +113,8 @@ export const LEGACY_WORKOUTS = {
   },
 };
 
-// Back-compat alias — App.js, HistoryView, WorkoutAnalysisView, and
-// WorkoutHistoryView all import DEFAULT_WORKOUTS for legacy-session
-// name resolution. Keep the export name; the content is the legacy
-// data.
+// Back-compat alias — App.js + History views still import
+// DEFAULT_WORKOUTS by name. Don't rename without sweeping consumers.
 export const DEFAULT_WORKOUTS = LEGACY_WORKOUTS;
 
 // ─────────────────────────────────────────────────────────────
