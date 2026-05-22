@@ -118,13 +118,10 @@ export function AnalysisView({
   GOAL_CONFIG = {},
   RM_GRIPS = [],
 }) {
-  // Hand-filter state retired (the L/R/Both buttons were removed —
-  // see the FilterCard comment near render). Kept as a const so the
-  // many `(!selHand || r.hand === selHand)` checks scattered through
-  // the file still compile and behave as "no hand filter applied."
-  // Cleaner refactor would inline-strip every reference, but this
-  // is a minimum-diff change that's trivially reversible.
-  const selHand = "";
+  // Grip filter — null/"" means "Both grips pooled" (default view).
+  // The hand-filter sibling state (selHand) was retired with the L/R/Both
+  // buttons; per-hand views now happen at the per-card level (Strength
+  // Balance, Hand Asymmetry) rather than via a tab-level filter.
   const [selGrip,   setSelGrip]   = useState("");
 
   // Click-to-expand state for the F-D chart. Clicking any rep dot
@@ -236,14 +233,14 @@ export function AnalysisView({
   );
 
   // All reps with usable force + time data for the selected filters.
-  // selHand === "" means Both — pool L+R for the F-D chart's at-a-glance
-  // view. Per-hand prescriptions still iterate L and R explicitly elsewhere.
+  // L+R are always pooled at the view level — the F-D chart shows an
+  // at-a-glance picture, and per-hand views happen inside the cards
+  // that genuinely need them (Strength Balance, Hand Asymmetry).
   const reps = useMemo(() => history.filter(r =>
-    (!selHand || r.hand === selHand) &&
     (!selGrip || r.grip === selGrip) &&
     r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
     r.actual_time_s > 0
-  ), [history, selHand, selGrip]);
+  ), [history, selGrip]);
 
   // Train-to-failure model (May 2026): every rep with a valid
   // actual_time_s is a failure data point. The legacy success/failure
@@ -675,7 +672,6 @@ export function AnalysisView({
     const byGrip = {};
     for (const r of history) {
       if (!r.grip) continue;
-      if (selHand && r.hand !== selHand) continue;
       if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
       if (!(r.actual_time_s > 0)) continue;
       byGrip[r.grip] = (byGrip[r.grip] || 0) + 1;
@@ -685,7 +681,7 @@ export function AnalysisView({
       .map(([grip]) => grip);
     if (qualifyingGrips.length < 2) return null;
     return Object.fromEntries(qualifyingGrips.map(g => [g, true]));
-  }, [history, selHand, selGrip]);
+  }, [history, selGrip]);
 
   // F-D curve stroke color. When a grip is selected (single-curve mode)
   // we tint the curve and its 3-min sustainable reference with the
@@ -833,7 +829,7 @@ export function AnalysisView({
   // threeExpPriors memoized earlier in AnalysisView so the F-D chart
   // curve and any per-grip three-exp consumers share one fit basis.
 
-  // Three-exp fit for the current (selHand, selGrip) scope. Uses the
+  // Three-exp fit for the current selGrip scope. Uses the
   // same `failures` array that backs cfEstimate, so the fits are
   // directly comparable. When no grip is selected, we can't pick a
   // prior — fall back to no-shrinkage fit (which validation showed
@@ -1233,20 +1229,17 @@ export function AnalysisView({
 
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
-        {/* Hand selector removed: per-hand data already lives in the
-            Coaching Prescription L/R columns, the Critical Force
-            cards' per-hand split, and the Curve Improvement card's
-            single-hand mode (selectable via the per-grip filter alone
-            — Both is now an honest average of L+R per-hand fits, not
-            a pooled-fit refit that inflated the displayed deltas).
-            Removing the top-level filter eliminates a class of
-            silent-filter bugs (e.g., 5581094 where selHand="L"
-            default hid Micro reps logged as R) without losing any
-            actionable per-hand information. */}
-        {/* Filter card row: grip pills (left) + Absolute / × BW units
+        {/* Filter card: grip pills (left) + Absolute / × BW units
             toggle (right). Renders if EITHER grips exist OR a BW is
             set — previously gated on grips alone, which hid the units
-            toggle for users with BW but no Tindeq reps. */}
+            toggle for users with BW but no Tindeq reps.
+
+            No hand selector: page-level hand filtering was retired
+            because it added a confusing default state (a stale "L"
+            selection used to silently hide Micro reps logged as R).
+            Per-hand views happen inside the specific cards that need
+            them (Strength Balance, Hand Asymmetry, the F-D chart's
+            optional L/R overlay); the page as a whole is hand-pooled. */}
         {(grips.length > 0 || bodyWeight > 0) && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1655,33 +1648,19 @@ export function AnalysisView({
           const perGripMode = !selGrip && Object.keys(grip3xEstimates).length >= 2;
           const gripImpEntries = Object.entries(gripImprovement);
 
-          // When a grip filter is active, pick the tightest-scope baseline:
-          //   1. (grip, hand) when both selHand and the per-hand baseline exist
-          //   2. (grip pooled) otherwise — matches the Capacity (AUC) chart's
-          //      pooled calc so the numbers tie out across surfaces
-          //
-          // The previous version computed an "average of per-hand
-          // improvements" for the Both case, which produced a different
-          // total from the chart for grips with L/R asymmetry. The
-          // headline now uses the same pooled fit as the chart, so a
-          // user comparing "% vs baseline" between this card and the
-          // Capacity chart sees one number, not two interpretations.
+          // When a grip filter is active, compute its improvement vs
+          // the per-grip pooled baseline — same calc as the Capacity
+          // (AUC) chart at this grip's most-recent point, so the
+          // numbers tie out across surfaces. The Curve Improvement
+          // headline previously had a per-hand branch (and earlier
+          // still, an "average of per-hand improvements" alternative)
+          // but both went away with the page-level hand filter.
           let scopedImp = null;
           let scopedBaselineDate = null;
           let scopedScopeLabel = null;
           if (selGrip) {
-            const phgKey = selHand && selHand !== "Both" ? `${selGrip}|${selHand}` : null;
-            const phgRef = phgKey ? perHandGripBaselines[phgKey] : null;
-            const gRef   = gripBaselines[selGrip];
-            if (phgRef) {
-              // Tightest match: current3xAmps (already hand+grip scoped
-              // via the `failures` filter) vs per-(hand,grip) baseline.
-              scopedImp = improvementForAmps(current3xAmps, phgRef.amps);
-              scopedBaselineDate = phgRef.date;
-              scopedScopeLabel = `${selGrip} · ${selHand === "L" ? "Left" : "Right"}`;
-            } else if (gRef && grip3xEstimates[selGrip]) {
-              // Pooled comparison — same calc as the Capacity (AUC)
-              // chart at this grip's most-recent point.
+            const gRef = gripBaselines[selGrip];
+            if (gRef && grip3xEstimates[selGrip]) {
               scopedImp = improvementForAmps(grip3xEstimates[selGrip], gRef.amps);
               scopedBaselineDate = gRef.date;
               scopedScopeLabel = `${selGrip} (pooled fit)`;
@@ -1747,23 +1726,19 @@ export function AnalysisView({
                 scopedImp ? (
                   <>
                     <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                      {/* Subtitle phrasing depends on scope. The single-
-                          hand and pooled-fit labels read naturally as
-                          "X vs X baseline". The averaged-hands label
-                          already names what it is, so just print it. */}
-                      {scopedScopeLabel?.includes("avg")
-                        ? scopedScopeLabel
-                        : `${scopedScopeLabel} vs ${scopedScopeLabel} baseline`}
+                      {/* Pooled-fit label only — reads as "X vs X baseline".
+                          Previously had a per-hand and an averaged-hands
+                          variant, both retired with the page-level hand
+                          filter. */}
+                      {`${scopedScopeLabel} vs ${scopedScopeLabel} baseline`}
                     </div>
                     {renderRow(null, scopedImp)}
                   </>
                 ) : (() => {
-                  const handForProg = selHand && selHand !== "Both" ? selHand : null;
-                  const p = baselineProgress(selGrip, handForProg);
-                  const handLabel = handForProg ? (handForProg === "L" ? "Left" : "Right") : null;
+                  const p = baselineProgress(selGrip);
                   return (
                     <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-                      Need ≥{FAIL_THRESHOLD} failures across ≥{DUR_THRESHOLD} target durations on <b>{selGrip}</b>{handLabel ? ` (${handLabel})` : ""} for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
+                      Need ≥{FAIL_THRESHOLD} failures across ≥{DUR_THRESHOLD} target durations on <b>{selGrip}</b> for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
                       <div style={{ marginTop: 6, fontSize: 11 }}>
                         Progress:{" "}
                         <span style={{ color: p.failures >= FAIL_THRESHOLD ? C.green : C.text, fontWeight: 600 }}>
