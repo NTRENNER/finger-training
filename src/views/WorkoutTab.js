@@ -793,8 +793,18 @@ export function WorkoutTab({
   };
 
   // ── Render ──────────────────────────────────────────
-  const wtr = weeksToTrip(trip);
-  const countdownLabel = tripCountdown(trip);
+  // Both helpers parse a YYYY-MM-DD string, not the {date, name} object
+  // — pull .date off the trip prop. (Bug pre-May 2026: passing the whole
+  // object string-concatenated to "[object Object]T00:00:00" and parsed
+  // as Invalid Date, so weeks always read 0 and the countdown prefix
+  // rendered blank.)
+  const wtr = weeksToTrip(trip?.date);
+  const countdownData = tripCountdown(trip?.date);
+  // Compose the prefix shown before "· Nw to trip": "{Trip name} {Mon D}"
+  // when both are available, else whichever is available, else empty.
+  const countdownLabel = countdownData
+    ? `${trip?.name ? trip.name + " " : ""}${countdownData.tripLabel}`
+    : "";
 
   return (
     <div style={{ padding: "16px 16px 80px", position: "relative" }}>
