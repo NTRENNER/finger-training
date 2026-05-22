@@ -53,7 +53,6 @@ import { Card, Btn } from "../ui/components.js";
 import { fmt0, toDisp, fromDisp } from "../ui/format.js";
 
 import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
-import { today } from "../util.js";
 import { WarmupView } from "./WarmupView.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
