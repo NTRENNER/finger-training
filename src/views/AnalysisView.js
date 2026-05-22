@@ -1481,8 +1481,15 @@ export function AnalysisView({
               asymmetry %. Below ~5% reads as 'symmetric'; above ~15%
               flags the weaker hand as the real climbing limiter on this
               grip. Computed at T=30s (middle of curve, exercises fast +
-              middle components). */}
-          {handAsymmetry.length > 0 && (
+              middle components).
+              Auto-hide rule (May 2026): the section only renders when at
+              least one grip crosses the 5% asymmetric threshold. When
+              everything is symmetric there's no signal worth surfacing,
+              and silently hiding keeps the F-D chart tighter. The check
+              surfaces itself again automatically if asymmetry drifts in
+              (injury, asymmetric training, instrument drift), so the
+              user doesn't have to remember to look for it. */}
+          {handAsymmetry.some(h => h.asymPct >= 0.05) && (
             <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
                 Hand Asymmetry
