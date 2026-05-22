@@ -48,7 +48,12 @@ import { computeLimiterZone } from "../model/limiter.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
-import { EnduranceCeilingCard } from "./analysis/EnduranceCeilingCard.js";
+// EnduranceCeilingCard dropped May 2026 — the F(180s)/F(5s) ratio is
+// invariant to proportional strength gains (so it reads "NEEDS WORK"
+// even while the user is measurably getting stronger), the literature
+// benchmark bands aren't validated against personal performance, and
+// the underlying curve shape is already visible on the F-D chart and
+// the 3-min hold weight is shown on the Strength Balance card.
 import { CapacityTrajectoryCard, CapacityAbsoluteCard } from "./analysis/CapacityChartCards.js";
 import { RecoveryTrendCard } from "./analysis/RecoveryTrendCard.jsx";
 // (EnergySystemBreakdownCard import removed — card dropped under curve-trust)
@@ -1548,11 +1553,6 @@ export function AnalysisView({
         <StrengthBalanceCard
           gripHandFits={gripHandFits}
           balanceHistory={balanceHistory}
-          unit={unit}
-        />
-
-        <EnduranceCeilingCard
-          gripHandFits={gripHandFits}
           unit={unit}
         />
 
