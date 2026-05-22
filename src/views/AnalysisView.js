@@ -54,7 +54,7 @@ import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
 // benchmark bands aren't validated against personal performance, and
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
-import { CapacityTrajectoryCard, CapacityAbsoluteCard } from "./analysis/CapacityChartCards.js";
+import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
 import { RecoveryTrendCard } from "./analysis/RecoveryTrendCard.jsx";
 // (EnergySystemBreakdownCard import removed — card dropped under curve-trust)
 
@@ -1550,6 +1550,212 @@ export function AnalysisView({
             tabular per-zone view lives on Setup where it informs the
             actual session pick.) */}
 
+        {/* ── Curve Improvement summary ──
+            (Was "Endurance Improvement" — renamed because the headline
+            isn't endurance, it's the average of three F-D curve point
+            improvements at ZONE_REF_T's power/strength/endurance times
+            — currently 7s / 45s / 120s. The blue Endurance cell is the
+            one true endurance signal; Power and Strength are the other
+            two reference points on the same curve.)
+            Rendered right under the F-D chart as the per-zone summary
+            of "where are the gains coming from" — the chart shows the
+            shape, this card shows the deltas. The CapacityTrajectory
+            % trend follows immediately so the reader can pivot from
+            "where" (zones) to "when" (over time).
+            When no grip filter is active AND ≥2 grips have fits, split
+            the card into per-grip sections so Micro (FDP) and Crusher
+            (FDS) each show their own Δ% against the shared baseline. */}
+        {(improvement || Object.keys(gripImprovement).length > 0) && (() => {
+          // Reusable row renderer — one header + one Power/Strength/Endurance
+          // row of three Δ% tiles.
+          const renderRow = (label, imp) => (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+                {label && (
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>
+                    {label}
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginLeft: "auto" }}>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: imp.total >= 0 ? C.green : C.red, lineHeight: 1 }}>
+                    {imp.total >= 0 ? "+" : ""}{imp.total}%
+                  </div>
+                  <div style={{ fontSize: 11, color: C.muted }}>total</div>
+                </div>
+              </div>
+              {/* 6 zone tiles. Two rows of three on narrow screens
+                  (gridTemplateColumns auto-wraps via `repeat(3, ...)`).
+                  Short labels (Max/Pwr/P/S/Str/S/E/End) keep tiles
+                  readable on mobile. Driven by ZONE6 so labels and
+                  colors come from the schema. */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: 6,
+              }}>
+                {ZONE6.map(z => {
+                  const val = imp[z.key];
+                  if (val == null) return null;
+                  return (
+                    <div key={z.key} style={{
+                      background: C.bg, borderRadius: 10, padding: "8px 6px", textAlign: "center",
+                      border: `1px solid ${z.color}30`,
+                    }}>
+                      <div style={{ fontSize: 9, color: C.muted, marginBottom: 3 }}>{z.short}</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: val >= 0 ? z.color : C.red }}>
+                        {val >= 0 ? "+" : ""}{val}%
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+
+          // perGripMode is keyed off having multiple per-grip CURRENT fits,
+          // not improvements — so users mid-data-collection see an honest
+          // "early days" message instead of falling back to the pooled
+          // improvement number, which would re-introduce the same cross-
+          // muscle artifact (Crusher's high-CF reps inflating Micro's
+          // baseline) that motivated the per-grip split in the first
+          // place.
+          const perGripMode = !selGrip && Object.keys(grip3xEstimates).length >= 2;
+          const gripImpEntries = Object.entries(gripImprovement);
+
+          // When a grip filter is active, pick the tightest-scope baseline:
+          //   1. (grip, hand) when both selHand and the per-hand baseline exist
+          //   2. (grip pooled) otherwise — matches the Capacity (AUC) chart's
+          //      pooled calc so the numbers tie out across surfaces
+          //
+          // The previous version computed an "average of per-hand
+          // improvements" for the Both case, which produced a different
+          // total from the chart for grips with L/R asymmetry. The
+          // headline now uses the same pooled fit as the chart, so a
+          // user comparing "% vs baseline" between this card and the
+          // Capacity chart sees one number, not two interpretations.
+          let scopedImp = null;
+          let scopedBaselineDate = null;
+          let scopedScopeLabel = null;
+          if (selGrip) {
+            const phgKey = selHand && selHand !== "Both" ? `${selGrip}|${selHand}` : null;
+            const phgRef = phgKey ? perHandGripBaselines[phgKey] : null;
+            const gRef   = gripBaselines[selGrip];
+            if (phgRef) {
+              // Tightest match: current3xAmps (already hand+grip scoped
+              // via the `failures` filter) vs per-(hand,grip) baseline.
+              scopedImp = improvementForAmps(current3xAmps, phgRef.amps);
+              scopedBaselineDate = phgRef.date;
+              scopedScopeLabel = `${selGrip} · ${selHand === "L" ? "Left" : "Right"}`;
+            } else if (gRef && grip3xEstimates[selGrip]) {
+              // Pooled comparison — same calc as the Capacity (AUC)
+              // chart at this grip's most-recent point.
+              scopedImp = improvementForAmps(grip3xEstimates[selGrip], gRef.amps);
+              scopedBaselineDate = gRef.date;
+              scopedScopeLabel = `${selGrip} (pooled fit)`;
+            }
+          }
+
+          return (
+            <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Improvement</div>
+                {!perGripMode && !selGrip && global3xBaseline && (
+                  <div style={{ fontSize: 11, color: C.muted }}>since {global3xBaseline.date}</div>
+                )}
+                {selGrip && scopedImp && (
+                  <div style={{ fontSize: 11, color: C.muted }}>since {scopedBaselineDate}</div>
+                )}
+              </div>
+              {perGripMode ? (
+                gripImpEntries.length > 0 ? (
+                  <>
+                    {gripImpEntries.map(([grip, imp], i, arr) => (
+                      <div key={grip} style={{
+                        paddingBottom: i < arr.length - 1 ? 12 : 0,
+                        borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
+                        marginBottom: i < arr.length - 1 ? 12 : 0,
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{grip}</div>
+                          <div style={{ fontSize: 10, color: C.muted }}>since {imp.baselineDate}</div>
+                        </div>
+                        {renderRow(null, imp)}
+                      </div>
+                    ))}
+                    {/* Show an "early days" placeholder for any grip with a
+                        current fit but no qualifying per-grip baseline yet,
+                        so the user knows we're aware of it and waiting on
+                        more data rather than silently dropping it. */}
+                    {Object.keys(grip3xEstimates).filter(g => !gripImprovement[g]).map(grip => {
+                      const p = baselineProgress(grip);
+                      return (
+                        <div key={grip} style={{
+                          paddingTop: 12, marginTop: 12, borderTop: `1px solid ${C.border}`,
+                          fontSize: 11, color: C.muted, lineHeight: 1.5,
+                        }}>
+                          <b style={{ color: C.text }}>{grip}</b>{" · "}
+                          <span style={{ color: p.failures >= FAIL_THRESHOLD ? C.green : C.text }}>
+                            {Math.min(p.failures, FAIL_THRESHOLD)} of {FAIL_THRESHOLD} failures
+                          </span>
+                          {" · "}
+                          <span style={{ color: p.distinctDurations >= DUR_THRESHOLD ? C.green : C.text }}>
+                            {Math.min(p.distinctDurations, DUR_THRESHOLD)} of {DUR_THRESHOLD} durations
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+                    Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the three-exp fit can't separate the fast / medium / slow components cleanly enough for the per-zone Δ% to be meaningful.
+                  </div>
+                )
+              ) : selGrip ? (
+                scopedImp ? (
+                  <>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                      {/* Subtitle phrasing depends on scope. The single-
+                          hand and pooled-fit labels read naturally as
+                          "X vs X baseline". The averaged-hands label
+                          already names what it is, so just print it. */}
+                      {scopedScopeLabel?.includes("avg")
+                        ? scopedScopeLabel
+                        : `${scopedScopeLabel} vs ${scopedScopeLabel} baseline`}
+                    </div>
+                    {renderRow(null, scopedImp)}
+                  </>
+                ) : (() => {
+                  const handForProg = selHand && selHand !== "Both" ? selHand : null;
+                  const p = baselineProgress(selGrip, handForProg);
+                  const handLabel = handForProg ? (handForProg === "L" ? "Left" : "Right") : null;
+                  return (
+                    <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+                      Need ≥{FAIL_THRESHOLD} failures across ≥{DUR_THRESHOLD} target durations on <b>{selGrip}</b>{handLabel ? ` (${handLabel})` : ""} for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
+                      <div style={{ marginTop: 6, fontSize: 11 }}>
+                        Progress:{" "}
+                        <span style={{ color: p.failures >= FAIL_THRESHOLD ? C.green : C.text, fontWeight: 600 }}>
+                          {Math.min(p.failures, FAIL_THRESHOLD)} of {FAIL_THRESHOLD} failures
+                        </span>
+                        {" · "}
+                        <span style={{ color: p.distinctDurations >= DUR_THRESHOLD ? C.green : C.text, fontWeight: 600 }}>
+                          {Math.min(p.distinctDurations, DUR_THRESHOLD)} of {DUR_THRESHOLD} durations
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : improvement ? (
+                renderRow(null, improvement)
+              ) : null}
+            </Card>
+          );
+        })()}
+
+        <CapacityTrajectoryCard
+          aucHistoryByGrip={aucHistoryByGrip}
+          normalizeOn={normalizeOn}
+        />
+
         <StrengthBalanceCard
           gripHandFits={gripHandFits}
           balanceHistory={balanceHistory}
@@ -1819,210 +2025,6 @@ export function AnalysisView({
       {/* ── 1RM PR tracker ── */}
       <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
 
-      <CapacityTrajectoryCard
-        aucHistoryByGrip={aucHistoryByGrip}
-        normalizeOn={normalizeOn}
-      />
-
-      {/* ── Curve Improvement summary ──
-          (Was "Endurance Improvement" — renamed because the headline
-          isn't endurance, it's the average of three F-D curve point
-          improvements at ZONE_REF_T's power/strength/endurance times
-          — currently 7s / 45s / 120s. The blue Endurance cell is the
-          one true endurance signal; Power and Strength are the other
-          two reference points on the same curve.)
-          Now sits BELOW the Area Under the Curve trajectory because
-          this card is the per-zone breakdown that answers "where are
-          the gains coming from?" once the trajectory has hooked you.
-          When no grip filter is active AND ≥2 grips have fits, split
-          the card into per-grip sections so Micro (FDP) and Crusher
-          (FDS) each show their own Δ% against the shared baseline. */}
-      {(improvement || Object.keys(gripImprovement).length > 0) && (() => {
-        // Reusable row renderer — one header + one Power/Strength/Endurance
-        // row of three Δ% tiles.
-        const renderRow = (label, imp) => (
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-              {label && (
-                <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>
-                  {label}
-                </div>
-              )}
-              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginLeft: "auto" }}>
-                <div style={{ fontSize: 26, fontWeight: 900, color: imp.total >= 0 ? C.green : C.red, lineHeight: 1 }}>
-                  {imp.total >= 0 ? "+" : ""}{imp.total}%
-                </div>
-                <div style={{ fontSize: 11, color: C.muted }}>total</div>
-              </div>
-            </div>
-            {/* 6 zone tiles. Two rows of three on narrow screens
-                (gridTemplateColumns auto-wraps via `repeat(3, ...)`).
-                Short labels (Max/Pwr/P/S/Str/S/E/End) keep tiles
-                readable on mobile. Driven by ZONE6 so labels and
-                colors come from the schema. */}
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 6,
-            }}>
-              {ZONE6.map(z => {
-                const val = imp[z.key];
-                if (val == null) return null;
-                return (
-                  <div key={z.key} style={{
-                    background: C.bg, borderRadius: 10, padding: "8px 6px", textAlign: "center",
-                    border: `1px solid ${z.color}30`,
-                  }}>
-                    <div style={{ fontSize: 9, color: C.muted, marginBottom: 3 }}>{z.short}</div>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: val >= 0 ? z.color : C.red }}>
-                      {val >= 0 ? "+" : ""}{val}%
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-
-        // perGripMode is keyed off having multiple per-grip CURRENT fits,
-        // not improvements — so users mid-data-collection see an honest
-        // "early days" message instead of falling back to the pooled
-        // improvement number, which would re-introduce the same cross-
-        // muscle artifact (Crusher's high-CF reps inflating Micro's
-        // baseline) that motivated the per-grip split in the first
-        // place.
-        const perGripMode = !selGrip && Object.keys(grip3xEstimates).length >= 2;
-        const gripImpEntries = Object.entries(gripImprovement);
-
-        // When a grip filter is active, pick the tightest-scope baseline:
-        //   1. (grip, hand) when both selHand and the per-hand baseline exist
-        //   2. (grip pooled) otherwise — matches the Capacity (AUC) chart's
-        //      pooled calc so the numbers tie out across surfaces
-        //
-        // The previous version computed an "average of per-hand
-        // improvements" for the Both case, which produced a different
-        // total from the chart for grips with L/R asymmetry. The
-        // headline now uses the same pooled fit as the chart, so a
-        // user comparing "% vs baseline" between this card and the
-        // Capacity chart sees one number, not two interpretations.
-        let scopedImp = null;
-        let scopedBaselineDate = null;
-        let scopedScopeLabel = null;
-        if (selGrip) {
-          const phgKey = selHand && selHand !== "Both" ? `${selGrip}|${selHand}` : null;
-          const phgRef = phgKey ? perHandGripBaselines[phgKey] : null;
-          const gRef   = gripBaselines[selGrip];
-          if (phgRef) {
-            // Tightest match: current3xAmps (already hand+grip scoped
-            // via the `failures` filter) vs per-(hand,grip) baseline.
-            scopedImp = improvementForAmps(current3xAmps, phgRef.amps);
-            scopedBaselineDate = phgRef.date;
-            scopedScopeLabel = `${selGrip} · ${selHand === "L" ? "Left" : "Right"}`;
-          } else if (gRef && grip3xEstimates[selGrip]) {
-            // Pooled comparison — same calc as the Capacity (AUC)
-            // chart at this grip's most-recent point.
-            scopedImp = improvementForAmps(grip3xEstimates[selGrip], gRef.amps);
-            scopedBaselineDate = gRef.date;
-            scopedScopeLabel = `${selGrip} (pooled fit)`;
-          }
-        }
-
-        return (
-          <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Improvement</div>
-              {!perGripMode && !selGrip && global3xBaseline && (
-                <div style={{ fontSize: 11, color: C.muted }}>since {global3xBaseline.date}</div>
-              )}
-              {selGrip && scopedImp && (
-                <div style={{ fontSize: 11, color: C.muted }}>since {scopedBaselineDate}</div>
-              )}
-            </div>
-            {perGripMode ? (
-              gripImpEntries.length > 0 ? (
-                <>
-                  {gripImpEntries.map(([grip, imp], i, arr) => (
-                    <div key={grip} style={{
-                      paddingBottom: i < arr.length - 1 ? 12 : 0,
-                      borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
-                      marginBottom: i < arr.length - 1 ? 12 : 0,
-                    }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{grip}</div>
-                        <div style={{ fontSize: 10, color: C.muted }}>since {imp.baselineDate}</div>
-                      </div>
-                      {renderRow(null, imp)}
-                    </div>
-                  ))}
-                  {/* Show an "early days" placeholder for any grip with a
-                      current fit but no qualifying per-grip baseline yet,
-                      so the user knows we're aware of it and waiting on
-                      more data rather than silently dropping it. */}
-                  {Object.keys(grip3xEstimates).filter(g => !gripImprovement[g]).map(grip => {
-                    const p = baselineProgress(grip);
-                    return (
-                      <div key={grip} style={{
-                        paddingTop: 12, marginTop: 12, borderTop: `1px solid ${C.border}`,
-                        fontSize: 11, color: C.muted, lineHeight: 1.5,
-                      }}>
-                        <b style={{ color: C.text }}>{grip}</b>{" · "}
-                        <span style={{ color: p.failures >= FAIL_THRESHOLD ? C.green : C.text }}>
-                          {Math.min(p.failures, FAIL_THRESHOLD)} of {FAIL_THRESHOLD} failures
-                        </span>
-                        {" · "}
-                        <span style={{ color: p.distinctDurations >= DUR_THRESHOLD ? C.green : C.text }}>
-                          {Math.min(p.distinctDurations, DUR_THRESHOLD)} of {DUR_THRESHOLD} durations
-                        </span>
-                      </div>
-                    );
-                  })}
-                </>
-              ) : (
-                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-                  Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the three-exp fit can't separate the fast / medium / slow components cleanly enough for the per-zone Δ% to be meaningful.
-                </div>
-              )
-            ) : selGrip ? (
-              scopedImp ? (
-                <>
-                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                    {/* Subtitle phrasing depends on scope. The single-
-                        hand and pooled-fit labels read naturally as
-                        "X vs X baseline". The averaged-hands label
-                        already names what it is, so just print it. */}
-                    {scopedScopeLabel?.includes("avg")
-                      ? scopedScopeLabel
-                      : `${scopedScopeLabel} vs ${scopedScopeLabel} baseline`}
-                  </div>
-                  {renderRow(null, scopedImp)}
-                </>
-              ) : (() => {
-                const handForProg = selHand && selHand !== "Both" ? selHand : null;
-                const p = baselineProgress(selGrip, handForProg);
-                const handLabel = handForProg ? (handForProg === "L" ? "Left" : "Right") : null;
-                return (
-                  <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-                    Need ≥{FAIL_THRESHOLD} failures across ≥{DUR_THRESHOLD} target durations on <b>{selGrip}</b>{handLabel ? ` (${handLabel})` : ""} for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
-                    <div style={{ marginTop: 6, fontSize: 11 }}>
-                      Progress:{" "}
-                      <span style={{ color: p.failures >= FAIL_THRESHOLD ? C.green : C.text, fontWeight: 600 }}>
-                        {Math.min(p.failures, FAIL_THRESHOLD)} of {FAIL_THRESHOLD} failures
-                      </span>
-                      {" · "}
-                      <span style={{ color: p.distinctDurations >= DUR_THRESHOLD ? C.green : C.text, fontWeight: 600 }}>
-                        {Math.min(p.distinctDurations, DUR_THRESHOLD)} of {DUR_THRESHOLD} durations
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()
-            ) : improvement ? (
-              renderRow(null, improvement)
-            ) : null}
-          </Card>
-        );
-      })()}
-
       {reps.length === 0 ? (
         <Card>
           <div style={{ textAlign: "center", padding: "32px 0", color: C.muted }}>
@@ -2033,17 +2035,13 @@ export function AnalysisView({
         </Card>
       ) : (<>
 
-        {/* (Critical Force Estimate, Climbing Endurance chart, and
-            Train block — Next Session Focus per-grip cards — all
-            removed under the three-exp / curve-trust direction. The
-            Setup tab's ContinuousPickCard is the prescription surface;
-            Analysis stays focused on diagnostics: F-D chart, AUC over
-            time, Curve Improvement, Hand Asymmetry. The "sustainable
-            force ceiling" the old CF card showed isn't lost — the
-            F-D chart's dashed "3-min" reference lines show F(180s)
-            per grip from the three-exp curve.) */}
-
-        <CapacityAbsoluteCard aucHistoryByGrip={aucHistoryByGrip} />
+        {/* (Critical Force Estimate, Climbing Endurance chart, Train
+            block, and the absolute-kg·s Capacity card all removed under
+            the three-exp / curve-trust direction. The absolute AUC was
+            redundant — magnitude is already visible on the F-D chart
+            and Strength Balance card, and the kg·s unit on the chart
+            axis was opaque. The % vs baseline trajectory tells the
+            actual training-progress story.) */}
 
         {/* Recovery dynamics over time — per-session observed
             recovered fraction at rep 2, per grip, with a 3-session

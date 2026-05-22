@@ -1,19 +1,18 @@
 // ─────────────────────────────────────────────────────────────
-// CAPACITY CHART CARDS — Total Capacity (AUC) trajectory + absolute
+// CAPACITY CHART CARDS — Total Capacity (AUC) trajectory
 // ─────────────────────────────────────────────────────────────
-// Two cards backed by the same aucHistoryByGrip data structure:
+// <CapacityTrajectoryCard> — % vs baseline, per-grip, with a
+//   3-session rolling-mean trend line over the raw points. The
+//   headline trajectory card; renders right under Curve Improvement
+//   in Analysis so the user pivots from "where the gains came from"
+//   (zones) to "when they showed up" (over time).
 //
-//   <CapacityTrajectoryCard> — % vs baseline, per-grip, with a
-//     3-session rolling-mean trend line over the raw points. The
-//     headline trajectory card; renders at the top of the AUC
-//     section because the rising line is the whole-page story.
+// (CapacityAbsoluteCard — raw kg·s sibling — was dropped May 2026:
+//  magnitude is already visible on the F-D chart and Strength Balance
+//  card, the kg·s axis unit is opaque, and the % version tells the
+//  actual training-progress story.)
 //
-//   <CapacityAbsoluteCard>  — absolute kg·s, per-grip. Sanity-check
-//     view for the % chart; lives at the bottom of Analysis.
-//
-// Same metric, two scales — kept in one file so the recharts
-// imports and the chart styling are shared. Both extracted from
-// AnalysisView May 2026 (decomp pass).
+// Extracted from AnalysisView May 2026 (decomp pass).
 //
 // Inputs (props):
 //   aucHistoryByGrip — {
@@ -90,37 +89,3 @@ export function CapacityTrajectoryCard({ aucHistoryByGrip, normalizeOn }) {
   );
 }
 
-export function CapacityAbsoluteCard({ aucHistoryByGrip }) {
-  if (!aucHistoryByGrip) return null;
-
-  return (
-    <Card style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Total Capacity (Area Under the Curve) — absolute</div>
-      <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        Total area under your three-exp F-D curve from 5s to 3 min, per grip. Higher = bigger total work envelope. Each point refits the curve with data up to that date — early points stabilize as the data stack grows.
-      </div>
-      <ResponsiveContainer width="100%" height={200}>
-        <LineChart data={aucHistoryByGrip.absRows} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-          <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
-            label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-          <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48}
-            label={{ value: "kg·s", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
-          <Tooltip
-            contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-            formatter={(val, name) => [val == null ? "—" : `${val.toLocaleString()} kg·s`, name]}
-          />
-          {aucHistoryByGrip.grips.map(g => (
-            <Line key={g} dataKey={`${g}_abs`} stroke={GRIP_COLORS[g] || C.blue}
-              strokeWidth={2} dot={{ r: 3 }} connectNulls name={g} />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
-      <div style={{ display: "flex", justifyContent: "space-around", marginTop: 4, fontSize: 10, color: C.muted }}>
-        {aucHistoryByGrip.grips.map(g => (
-          <span key={g} style={{ color: GRIP_COLORS[g] || C.blue }}>━ {g}</span>
-        ))}
-      </div>
-    </Card>
-  );
-}
