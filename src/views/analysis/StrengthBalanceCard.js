@@ -30,14 +30,9 @@
 import React from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
+import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, fmtW } from "../../ui/format.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
-
-// Per-grip color — kept local rather than imported from AnalysisView,
-// matching the same pattern used by OneRMPRCard. Two keys, stable
-// values; the maintenance cost of two copies is lower than the
-// coupling cost of a shared module that exists only for this constant.
-const GRIP_COLORS = { Crusher: C.orange, Micro: "#e05560" };
 
 // Reference time for the ratio. 10s is a "near-peak" sample that's
 // past contractile noise but still in the alactic / strength regime

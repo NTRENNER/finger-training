@@ -32,9 +32,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Card, Btn } from "../ui/components.js";
 import { C } from "../ui/theme.js";
 import { fmtW } from "../ui/format.js";
+import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { generateWarmupProtocol } from "../model/warmup.js";
-
-const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 
 function fmtSec(s) {
   if (s == null || !isFinite(s)) return "0";

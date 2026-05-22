@@ -32,11 +32,7 @@ import {
 } from "recharts";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
-
-// Per-grip color — kept local; same pattern as the sibling cards
-// in this directory (OneRMPRCard, StrengthBalanceCard, etc). Any
-// drift surfaces visually in the F-D chart split mode.
-const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
+import { GRIP_COLORS } from "../../ui/grip-colors.js";
 
 export function CapacityTrajectoryCard({ aucHistoryByGrip, normalizeOn }) {
   if (!aucHistoryByGrip || !aucHistoryByGrip.hasPct) return null;

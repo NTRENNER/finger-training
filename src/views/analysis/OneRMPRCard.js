@@ -21,14 +21,8 @@ import {
 } from "recharts";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
+import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, fmtW, toDisp } from "../../ui/format.js";
-
-// Per-grip color — kept local rather than imported from
-// AnalysisView's GRIP_COLORS map, since this card stands alone and
-// shouldn't reach into a sibling view for a 2-key constant.
-// Same shape, same values; if either drifts, the visual stops
-// matching the F-D chart's split mode and we'll catch it visually.
-const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 
 export function OneRMPRCard({ activities = [], rmGrips = [], unit = "lbs" }) {
   const rmReps = activities.filter(a => a.type === "oneRM" && a.weight_kg > 0);

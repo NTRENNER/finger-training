@@ -82,25 +82,7 @@ import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
 // the 3-min hold weight is shown on the Strength Balance card.
 import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
 import { RecoveryTrendCard } from "./analysis/RecoveryTrendCard.jsx";
-// (EnergySystemBreakdownCard import removed — card dropped under curve-trust)
-
-// Per-grip color used wherever Micro and Crusher are charted side-by-
-// side (F-D scatter overlays, AUC-PR cards, CF-over-time chart).
-// Single source of truth so the legend, scatter dots, line strokes,
-// and PR badges all agree without five identical inline declarations.
-// Falls back to C.blue at call sites that pass an unknown grip key.
-const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
-
-// (buildRecFromFit removed under curve-trust — the per-grip Train
-// cards it backed are gone; Setup's ContinuousPickCard is the
-// prescription surface now.)
-
-// PrescribedLoadCard lives in ./cards/PrescribedLoadCard.js — same
-// component is rendered on both Setup (under the Recommended Session)
-// and Analysis (under the F-D chart). Single source, two render sites.
-
-// (CurveCoverageCard extracted to ./analysis/CurveCoverageCard.js
-//  in the May 2026 AnalysisView decomp pass.)
+import { GRIP_COLORS } from "../ui/grip-colors.js";
 
 export function AnalysisView({
   history, unit = "lbs", bodyWeight = null,

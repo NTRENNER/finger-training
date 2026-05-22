@@ -34,13 +34,12 @@ import {
 } from "recharts";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
+import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import {
   buildRecoveryTrend, withRollingMean,
   GAP_TARGET_REP, GAP_NOISE_BAND,
 } from "../../model/recoveryDynamics.js";
 import { buildPhysModel } from "../../model/repCurveData.js";
-
-const GRIP_COLORS = { Micro: "#e05560", Crusher: C.orange, Prime: "#7c5cbf" };
 
 // Pretty-print a gap value as a signed percentage. 0.05 → "+5%",
 // -0.12 → "-12%". Returns "—" for null/undefined.
