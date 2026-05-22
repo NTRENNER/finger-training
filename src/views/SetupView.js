@@ -4,42 +4,43 @@
 // The "Setup" tab. Under the curve-trust philosophy, the F-D curve
 // is the source of truth for what to train next. The continuous
 // engine (coachingRecommendationContinuous in src/model/coaching.js)
-// returns a specific (T, load) prescription rather than snapping to
-// one of six fixed zone reference times.
+// returns a specific (T, load) prescription rather than snapping
+// to one of six fixed zone reference times.
 //
 // Layout (top to bottom):
 //   • Adaptive Warm-up entry card
-//   • ClimbingLogCard (collapsed full climb logger — discipline /
-//     grade / ascent / wall / RPE; merged here from the retired
-//     Climbing tab so all climbing capture lives on Fingers)
-//   • SessionRPECard (appears when today has ≥1 climb logged; lets
-//     the user confirm or override the derived session fatigue from
-//     per-climb RPEs — drives the externalLoadModifier on the
-//     next finger-training prescription)
-//   • BwPrompt
-//   • Grip Type pills (still per-grip; the curve is grip-scoped)
-//   • ContinuousPickCard — the primary recommendation:
-//       "Train at 92s @ 38 lbs · L 38 / R 37" with optional
-//       protocol fine-tune (hangs + rest defaults derived from T).
-//       Auto-applies to session config so Start Session uses it.
-//   • PrescribedLoadCard — all 6 zones, L/R, anchored prescription
-//       (shared with Analysis via src/views/cards/PrescribedLoadCard.js;
-//       gated on a grip being selected)
+//   • ClimbingLogCard — collapsed full climb logger (discipline /
+//     grade / ascent / wall / RPE), merged here from the retired
+//     Climbing tab so all climbing capture lives on Fingers.
+//   • BwPrompt — inline body-weight nudge when stale.
+//   • Grip Type pills — per-grip; the curve is grip-scoped.
+//   • SessionPlanCard — the unified plan surface. It hosts:
+//       - The recommended (T, load) pick from the continuous engine
+//       - A 6-zone tile grid with anchored loads (was PrescribedLoadCard)
+//       - The "how cooked today?" slider feeding adaptive RPE
+//       - A per-session climb-fatigue confirm/override (was
+//         SessionRPECard) when today has ≥1 climb logged
+//       - Climbing-focus pill that surfaces non-balanced focus
+//     Replaces three previously separate cards (ContinuousPickCard,
+//     PrescribedLoadCard, SessionRPECard).
 //   • Tindeq Connect slot
-//   • Start Session button (single set; multi-set was retired)
+//   • Start Session button — single set; multi-set was retired.
 //
 // Moved to Analysis (May 2026):
-//   • CurveCoverageCard — per-zone data freshness. Reference view
-//     now lives alongside the F-D chart and PrescribedLoadCard.
+//   • CurveCoverageCard — per-zone data freshness + annual session
+//     pace. Belongs with the diagnostic view, not the prescription.
 //
-// Removed in this rewrite:
+// Removed entirely:
 //   • SessionPlannerCard — 6-zone picker + within/between-set
-//     sliders + fatigue chart. Replaced by ContinuousPick.
+//     sliders + fatigue chart. The continuous engine replaced it.
 //   • Coaching Prescription card (per-hand 6-zone L/R grid).
-//     Replaced by PrescribedLoadCard's unified single-source layout.
+//     Folded into SessionPlanCard's tile grid.
 //   • ZoneCoverageCard (Zone Workout Summary). Pure descriptive
 //     card not driven by the curve; cut under "all in on curve."
-//   • Training Focus inline picker.
+//   • Training Focus inline picker. Replaced by climbing-focus
+//     selector at the App level.
+//   • PrescribedLoadCard.js (the standalone component) — merged
+//     into SessionPlanCard as the tile grid.
 //
 // Multi-set machinery is fully removed from the data model + runner
 // (May 2026). Sessions are single-set; the runner reads

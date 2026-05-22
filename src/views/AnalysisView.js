@@ -1,20 +1,46 @@
 // ─────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
 // ─────────────────────────────────────────────────────────────
-// The "Analysis" tab — Force-Duration chart, Total Capacity (AUC)
-// trajectory, Critical Force estimate cards, per-grip Curve
-// Improvement, the shared PrescribedLoadCard, and CurveCoverageCard
-// (per-zone data freshness + annual session pace).
+// The "Analysis" tab. Top-to-bottom render order:
 //
-// All state comes in via props: history, freshMap (built in
+//   1. Force-Duration chart (the source of truth — three-exp fit
+//      over recent reps, optional bootstrap band, click-a-dot
+//      session detail modal).
+//   2. Per-grip Curve Improvement summary (zone-bucketed % gain
+//      vs personal baseline).
+//   3. Total Capacity (AUC) trajectory — % vs baseline with a
+//      3-session rolling-mean trend line. Optional ×BW normalize.
+//   4. Force Curves history overlay (per-session three-exp curves
+//      stacked so you can see the shape evolve over time).
+//   5. OneRMPRCard — recent PR snapshots per grip.
+//   6. Recovery Trend — gap (observed − predicted) between rep 1
+//      and rep 2 at the target time, robust to rep 1 lengthening.
+//   7. Strength Balance — Crusher (open hand) vs Micro (crimp)
+//      ratio at 10s, classified against the user's own baseline.
+//   8. Curve Coverage — per-zone data freshness + annual session
+//      pace (the diagnostic that anchors the page).
+//
+// State comes in via props: history, freshMap (built in
 // useRepHistory), activities, bodyWeight. threeExpPriors are
-// memoized locally from history. No localStorage access for primary
-// state, no BLE, no live session state — pure read-and-render
-// over the rep array.
+// memoized locally from history. No localStorage access for
+// primary state, no BLE, no live session state — pure
+// read-and-render over the rep array.
 //
 // Cross-cutting App config (GOAL_CONFIG, RM_GRIPS) is passed in as
 // props so this module stays decoupled from App.js's constant block;
 // pure model helpers are imported directly from the model layer.
+//
+// Cards that USED to live here and were retired May 2026:
+//   • Critical Force estimate card (per-grip CF/W' numbers) — the
+//     three-exp curve is the source of truth now; CF was a
+//     Monod-anchored derived metric.
+//   • PrescribedLoadCard — duplicated what SessionPlanCard already
+//     shows on Setup; one source of prescription per surface.
+//   • Endurance Ceiling card — F(180)/F(5) was invariant to
+//     proportional strength gains and clustered around 21–22%
+//     across grips, so it produced no actionable signal.
+//   • Absolute Capacity (raw kg·s) card — % vs baseline tells the
+//     training-progress story; the kg·s axis was opaque.
 
 import React, { useMemo, useState } from "react";
 import {
