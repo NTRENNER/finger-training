@@ -20,7 +20,8 @@ import {
   RestView, SwitchHandsView,
   SessionSummaryView,
 } from "./views/ActiveSessionViews.js";
-import { WorkoutTab, ALL_WORKOUTS_LOOKUP } from "./views/WorkoutTab.js";
+import { WorkoutTab } from "./views/WorkoutTab.js";
+import { ALL_WORKOUTS_LOOKUP } from "./views/workout/workoutLegacy.js";
 import { AnalysisContainer } from "./views/AnalysisContainer.js";
 
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
