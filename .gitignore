@@ -11,15 +11,20 @@
 # production
 /build
 # Sandbox-session artifacts: the FUSE-mounted dev environment can't always
-# delete these reliably, so we generated build_old_* / _trash_* folders
-# during automated rebuilds. Ignored so they don't pollute git.
+# delete these reliably, so we generated build_old_* / _trash_* / build.bak.*
+# folders during automated rebuilds. Ignored so they don't pollute git.
 build_old_*
 _trash_*
+build.bak.*
 
-# Local backup / session-scratch source files
+# Local backup / session-scratch source files. *.deleted / *.deleted.*
+# capture an older soft-delete convention some sessions used in place
+# of rm; safer to gitignore than to risk re-committing them.
 *.bak
 *.bak_*
 *.orig
+*.deleted
+*.deleted.*
 src/*.bak
 src/*.bak_*
 *.patch
