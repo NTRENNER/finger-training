@@ -854,7 +854,6 @@ export default function App() {
           bodyWeight={bodyWeight}
           activities={activities}
           freshMap={freshMap}
-          fatigueModel={fatigueModel}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
           defaultWorkouts={ALL_WORKOUTS_LOOKUP}

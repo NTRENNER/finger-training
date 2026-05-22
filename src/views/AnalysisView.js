@@ -83,13 +83,6 @@ export function AnalysisView({
   history, unit = "lbs", bodyWeight = null,
   activities = [],
   freshMap = null,
-  // Per-grip β fatigue model from user_settings.settings.fatigue_model.
-  // Currently unused on this surface — the PrescribedLoadCard render was
-  // removed from Analysis because SessionPlanCard on Setup renders the
-  // same tiles. Kept on the prop signature for future Analysis-side
-  // diagnostics (β trajectory, cooked-vs-residual scatter).
-  // eslint-disable-next-line no-unused-vars
-  fatigueModel = null,
   // Cross-cutting App config — passed in rather than imported so this
   // module doesn't reach back into App.js for view-level constants.
   GOAL_CONFIG = {},
@@ -304,9 +297,9 @@ export function AnalysisView({
   );
 
   // Per-grip × per-hand three-exp fits. Used by the Strength Balance
-  // and Endurance Ceiling cards below. Falls back to a pooled fit on
-  // the grip when a hand doesn't have enough samples. Doubles as a
-  // grip-level "is this grip fitable at all?" gate (≥3 total reps).
+  // card. Falls back to a pooled fit on the grip when a hand doesn't
+  // have enough samples. Doubles as a grip-level "is this grip
+  // fitable at all?" gate (≥3 total reps).
   const gripHandFits = useMemo(() => {
     const out = {};
     for (const grip of grips) {
