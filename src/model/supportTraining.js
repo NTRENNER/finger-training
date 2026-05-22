@@ -11,8 +11,13 @@
 //     reservation slot; everything else is frequent / low-friction.
 //   - Climbing fatigue is local to the forearms — most days a
 //     strength session is fine alongside climbing.
-//   - The post-outdoor-Monday "I'm wiped" case (6–12×/year) is
-//     covered by a manual `energyLow` toggle, not dedicated logic.
+//   - The post-outdoor-Monday "I'm wiped" case is handled by the
+//     user closing the app, not by a UI toggle. If you're wiped
+//     enough to want a different workout, you're wiped enough to
+//     skip — and on the rare day you want a lighter session, the
+//     A/B/C picker override is one tap. A previous `energyLow`
+//     toggle was removed (May 2026) because it only created a
+//     theoretical behavior change: the user already self-gates.
 //   - Cookedness is finger-specific and is NOT consumed here.
 //
 // Workouts:
@@ -571,15 +576,13 @@ export const workouts = {
 // ─────────────────────────────────────────────────────────────
 // Decision logic (first match wins):
 //
-//   1. A is overdue (≥7 days) AND energyLow is set
-//      → C, with caution to reschedule A.
-//   2. A is overdue AND energy is OK
+//   1. A is overdue (≥7 days)
 //      → A. The week's strength reservation.
-//   3. Power / explosive stale (≥10 days)
+//   2. Power / explosive stale (≥10 days)
 //      → B.
-//   4. Strength touch stale (C ≥4 days)
+//   3. Strength touch stale (C ≥4 days)
 //      → C.
-//   5. Fallback
+//   4. Fallback
 //      → C (the low-fatigue default — brief, doesn't bury you).
 //
 // Neither CLIMB nor REST is ever recommended by this engine.
@@ -589,14 +592,22 @@ export const workouts = {
 // recommender could re-introduce structured rest at a higher
 // level (weeks, not days).
 //
-// What happened to the old Rule 3 (hip/positional-capacity stale
-// → recommend C)? That rule was retired when the dedicated mobility
-// session moved out of the picker rotation into the daily-stretching
-// pill (May 2026). Mobility staleness is still computed via
-// computeTagDaysSince and surfaces visually on the pill itself —
-// gray default, yellow at 3–5 days, orange at 6+ — instead of
-// elbowing a weekly workout slot. STRETCH is never a recommender
-// output; it's a daily habit the user toggles directly.
+// What happened to the old "energyLow" rule (A overdue + low
+// energy → C with caution)? Retired May 2026. The toggle was
+// theoretical: if the user is wiped enough to want a lighter
+// workout, they're wiped enough to skip the app entirely; if
+// they want C instead of A on any given day, the picker override
+// is one tap. The toggle didn't capture history either — it
+// auto-cleared at midnight — so it wasn't doing data work.
+//
+// What happened to the old hip/positional-capacity rule? Retired
+// when the dedicated mobility session moved out of the picker
+// rotation into the daily-stretching pill (May 2026). Mobility
+// staleness is still computed via computeTagDaysSince and
+// surfaces visually on the pill itself — gray default, yellow at
+// 3–5 days, orange at 6+ — instead of elbowing a weekly workout
+// slot. STRETCH is never a recommender output; it's a daily
+// habit the user toggles directly.
 //
 // Tunable thresholds live as constants below so tweaking doesn't
 // require touching the decision tree.
@@ -616,8 +627,6 @@ const C_TOUCH_DAYS       = 4;
  *   *recommends* STRETCH — that's a user-driven daily habit, not a
  *   day-of choice.
  * @param {Object} [opts]
- * @param {boolean} [opts.energyLow=false]  Manual "I'm wiped" toggle.
- *   When set, A is blocked even if overdue.
  * @param {Array<{type:string, date:string}>} [opts.climbingHistory=[]]
  *   Activities log (from the existing `activities` state). Entries
  *   with type === "climb" feed tag staleness for the climbing
@@ -631,7 +640,6 @@ const C_TOUCH_DAYS       = 4;
  */
 export function recommendNextWorkout(workoutHistory = [], opts = {}) {
   const {
-    energyLow = false,
     climbingHistory = [],
     refDate = today(),
   } = opts;
@@ -640,18 +648,7 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
   const daysSinceC = daysSinceLastOfType(workoutHistory, "C", refDate);
   const tagDays    = computeTagDaysSince(workoutHistory, climbingHistory, refDate);
 
-  // 1. A overdue + low energy → C, with caution.
-  if (daysSinceA >= A_OVERDUE_DAYS && energyLow) {
-    return {
-      primary: workouts.C,
-      reason:
-        "A is due but you flagged low energy. C maintains the strength pattern without the volume — claim A on a fresher day.",
-      caution: "Don't push for A tonight.",
-      alternatives: [workouts.B, workouts.REST],
-    };
-  }
-
-  // 2. A overdue + energy OK → A. The week's reservation slot.
+  // 1. A overdue → A. The week's reservation slot.
   if (daysSinceA >= A_OVERDUE_DAYS) {
     return {
       primary: workouts.A,
@@ -662,7 +659,7 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
     };
   }
 
-  // 3. Power / explosive stale → B.
+  // 2. Power / explosive stale → B.
   const powerDays = Math.min(
     tagDays.power     ?? Infinity,
     tagDays.explosive ?? Infinity,
@@ -677,7 +674,7 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
     };
   }
 
-  // 4. Strength touch stale → C.
+  // 3. Strength touch stale → C.
   if (daysSinceC >= C_TOUCH_DAYS) {
     return {
       primary: workouts.C,
@@ -689,7 +686,7 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
     };
   }
 
-  // 5. Fallback — nothing strictly overdue, default to C.
+  // 4. Fallback — nothing strictly overdue, default to C.
   // C is the lowest-fatigue real workout in the rotation; safe to
   // do on top of climbing or in a fresher window. The user signals
   // their own rest needs and doesn't want the engine prompting REST,
@@ -788,7 +785,6 @@ export function recentClimbDayCount(climbingHistory, refDate, withinDays) {
 //   //   full array can be passed as `climbingHistory`.
 //
 //   const rec = recommendNextWorkout(wLog, {
-//     energyLow,                  // boolean from a "I'm wiped" toggle in UI
 //     climbingHistory: activities,
 //   });
 //

@@ -14,14 +14,17 @@
 //             rotation into a daily-habit pill in WorkoutTab)
 //
 // Rules (first match wins):
-//   1. A overdue + low energy → C, with caution
-//   2. A overdue + energy OK → A
-//   3. Power stale → B
-//   4. C touch stale → C
-//   5. Fallback → C
+//   1. A overdue → A
+//   2. Power stale → B
+//   3. C touch stale → C
+//   4. Fallback → C
 //
 // STRETCH is accepted in history (it's a real marker session) but
 // the recommender NEVER emits it — that's user-driven via the pill.
+// The energyLow opts param was removed (May 2026): the toggle only
+// flipped Rule 1's primary from A to C, but the user already gates
+// behavior by deciding whether to open the app, and the picker
+// override handles the rare case where they want a lighter session.
 
 import {
   workouts,
@@ -226,31 +229,7 @@ describe("recentClimbDayCount", () => {
 // recommendNextWorkout — rule-by-rule
 // ─────────────────────────────────────────────────────────────
 
-describe("recommendNextWorkout: Rule 1 (A overdue + energyLow → C)", () => {
-  test("blocks A and recommends C with caution when energy is low", () => {
-    const history = [sess("A", 10)]; // A overdue
-    const rec = recommendNextWorkout(history, {
-      energyLow: true,
-      refDate: REF_DATE,
-    });
-    // Post-rename: C is the low-fatigue neural touch (was D), the
-    // right rescue when A is due but the user is wiped.
-    expect(rec.primary.id).toBe("C");
-    expect(rec.caution).toBeTruthy();
-    expect(rec.alternatives.map(w => w.id)).toContain("REST");
-  });
-
-  test("doesn't block A when energyLow is false", () => {
-    const history = [sess("A", 10)];
-    const rec = recommendNextWorkout(history, {
-      energyLow: false,
-      refDate: REF_DATE,
-    });
-    expect(rec.primary.id).toBe("A");
-  });
-});
-
-describe("recommendNextWorkout: Rule 2 (A overdue + energy OK → A)", () => {
+describe("recommendNextWorkout: Rule 1 (A overdue → A)", () => {
   test("recommends A when last A was 7+ days ago", () => {
     const history = [sess("A", 7)];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
@@ -271,7 +250,7 @@ describe("recommendNextWorkout: Rule 2 (A overdue + energy OK → A)", () => {
   });
 });
 
-describe("recommendNextWorkout: Rule 3 (power stale → B)", () => {
+describe("recommendNextWorkout: Rule 2 (power stale → B)", () => {
   test("recommends B when power is 10+ days old and other rules don't fire", () => {
     // A fresh (so rule 1/2 don't fire), B old.
     const history = [
@@ -293,7 +272,7 @@ describe("recommendNextWorkout: Rule 3 (power stale → B)", () => {
   });
 });
 
-describe("recommendNextWorkout: Rule 4 (C touch stale → C)", () => {
+describe("recommendNextWorkout: Rule 3 (C touch stale → C)", () => {
   test("recommends C when last C was 4+ days ago and nothing else is overdue", () => {
     // A fresh, B fresh, C 5 days ago.
     const history = [
@@ -363,7 +342,7 @@ describe("recommendNextWorkout: STRETCH is never recommended", () => {
   });
 });
 
-describe("recommendNextWorkout: Rule 5 (fallback → C)", () => {
+describe("recommendNextWorkout: Rule 4 (fallback → C)", () => {
   test("recommends C when nothing is strictly overdue", () => {
     // A fresh, B fresh, C fresh (within touch window).
     const history = [

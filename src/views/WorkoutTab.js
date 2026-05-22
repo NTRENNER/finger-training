@@ -11,8 +11,8 @@
 //
 // Flow:
 //   1. recommendNextWorkout() looks at the user's recent support
-//      sessions + climbing history + an `energyLow` toggle and
-//      proposes one workout for today, with a one-line reason.
+//      sessions + climbing history and proposes one workout for
+//      today, with a one-line reason.
 //   2. The user can accept the recommendation, override via the
 //      A/B/C/D/CLIMB/REST picker, or skip with REST.
 //   3. Active session: loggable exercises (per-set weight tracking)
@@ -138,24 +138,6 @@ export const ALL_WORKOUTS_LOOKUP = {
   ),
   ...SUPPORT_WORKOUTS,
 };
-
-// ─────────────────────────────────────────────────────────────
-// LocalStorage keys
-// ─────────────────────────────────────────────────────────────
-// Energy toggle is stored as { date, value } so an "I'm wiped"
-// state set on Monday night doesn't bleed into Tuesday morning's
-// recommendation. Auto-clears at midnight without any explicit
-// cleanup logic — the read helper compares date against today().
-const LS_ENERGY_LOW_KEY = "ft_support_energy_low";
-
-function loadEnergyLow() {
-  const stored = loadLS(LS_ENERGY_LOW_KEY);
-  if (stored?.date === today() && stored?.value === true) return true;
-  return false;
-}
-function saveEnergyLow(value) {
-  saveLS(LS_ENERGY_LOW_KEY, { date: today(), value: !!value });
-}
 
 // ─────────────────────────────────────────────────────────────
 // Type badge metadata
@@ -525,50 +507,7 @@ function RecommendationCard({ recommendation, onPickWorkout, pickedId }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// EnergyToggle
-// ─────────────────────────────────────────────────────────────
-// Manual "I'm wiped" signal for the recommender. When ON, the
-// engine blocks A (the BIG day) regardless of overdue staleness
-// and falls back to D + a caution. Resets at midnight via the
-// date-stamped storage scheme in loadEnergyLow / saveEnergyLow.
-function EnergyToggle({ value, onChange }) {
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "8px 10px", marginBottom: 12,
-      borderRadius: 8, background: C.bg, border: `1px solid ${value ? C.orange : C.border}`,
-    }}>
-      <div style={{ fontSize: 12, color: C.muted }}>
-        How's the energy?
-      </div>
-      <div style={{ display: "flex", gap: 4 }}>
-        <button
-          onClick={() => onChange(false)}
-          style={{
-            padding: "5px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600,
-            cursor: "pointer",
-            background: !value ? C.green : "transparent",
-            color: !value ? "#000" : C.muted,
-            border: `1px solid ${!value ? C.green : C.border}`,
-          }}
-        >Fresh</button>
-        <button
-          onClick={() => onChange(true)}
-          style={{
-            padding: "5px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600,
-            cursor: "pointer",
-            background: value ? C.orange : "transparent",
-            color: value ? "#000" : C.muted,
-            border: `1px solid ${value ? C.orange : C.border}`,
-          }}
-        >Wiped</button>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Workout picker — explicit A/B/C/D tiles for the four trainable workouts
+// Workout picker — explicit A/B/C tiles for the trainable workouts
 // ─────────────────────────────────────────────────────────────
 // CLIMB and REST are intentionally NOT in the picker — they're the
 // absence of a strength workout, not something you pick from a tile.
@@ -749,7 +688,6 @@ export function WorkoutTab({
     }
     return migrated;
   });
-  const [energyLow, setEnergyLow] = useState(() => loadEnergyLow());
   // pickedId: null means "follow recommendation"; otherwise an
   // explicit workout selection.
   const [pickedId, setPickedId] = useState(null);
@@ -778,11 +716,10 @@ export function WorkoutTab({
   );
   const recommendation = useMemo(
     () => recommendNextWorkout(recommenderInput, {
-      energyLow,
       climbingHistory,
       refDate: today(),
     }),
-    [recommenderInput, energyLow, climbingHistory]
+    [recommenderInput, climbingHistory]
   );
 
   // The active workout is either the user's override or the
@@ -815,12 +752,6 @@ export function WorkoutTab({
     }
     return { todaySession, daysSince, done: !!todaySession };
   }, [wLog]);
-
-  // ── Energy toggle persistence ────────────────────────
-  const handleEnergyChange = (next) => {
-    setEnergyLow(next);
-    saveEnergyLow(next);
-  };
 
   // ── Session start ────────────────────────────────────
   const startSession = () => {
@@ -1124,8 +1055,6 @@ export function WorkoutTab({
             daysSince={stretchState.daysSince}
             onToggle={toggleTodaysStretch}
           />
-
-          <EnergyToggle value={energyLow} onChange={handleEnergyChange} />
 
           {activeWorkout && (
             <Card>
