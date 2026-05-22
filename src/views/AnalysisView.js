@@ -52,7 +52,7 @@ import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp, bwOnDate } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
-import { STRENGTH_MAX, ZONE_REF_T, ZONE_KEYS, ZONE6 } from "../model/zones.js";
+import { STRENGTH_MAX, ZONE6 } from "../model/zones.js";
 import {
   predForceThreeExp,
   buildThreeExpPriors, computeAUCThreeExp,
