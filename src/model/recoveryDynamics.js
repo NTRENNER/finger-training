@@ -141,17 +141,33 @@ export function buildRecoveryBundle({ reps, restSeconds, physModel }) {
 // ─────────────────────────────────────────────────────────────
 // Cross-session trend
 // ─────────────────────────────────────────────────────────────
-// Per-session observed recovered fraction at the target rep,
-// aggregated across the history for trend rendering in AnalysisView.
-// "Is my recovery improving over weeks/months?" — the question the
-// per-session chart can't answer.
+// Per-session metrics at the target rep, aggregated across the
+// history for trend rendering in AnalysisView. "Is my recovery
+// improving over weeks/months?" — the question the per-session
+// chart can't answer.
+//
+// Two metrics per session:
+//   observedAtTarget — raw rep2/rep1 ratio. Easy to read but
+//     confounded by rep 1 time changes: as the user gets stronger
+//     and lasts longer on rep 1, the same rest interval refills a
+//     smaller fraction of the (now deeper) depletion. Observed
+//     trends down even when the recovery side is unchanged.
+//   gapAtTarget — observed minus model-predicted at rep 2. The
+//     predicted fraction also drops as rep 1 lengthens, so the GAP
+//     stays flat when recovery is actually unchanged. A negative,
+//     widening gap is the real "recovery is degrading" signal.
 //
 // Grouping: by (session_id || date) — falls back to date when
 // session_id is missing on legacy rows. Per-hand averaging within a
 // session (Both-mode sessions have both L and R; we average their
-// observed fractions so one point per session per grip).
+// values so one point per session per grip).
+//
+// physModel is optional (back-compat). When supplied, gapAtTarget is
+// populated using predictRepTimes seeded with each session's actual
+// rep 1 time + rest_s. When omitted, gapAtTarget is null and only
+// observedAtTarget is filled.
 
-export function buildRecoveryTrend(history, grip) {
+export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
   if (!Array.isArray(history) || history.length === 0 || !grip) return [];
 
   // Group reps by (session_id, grip, hand).
@@ -167,44 +183,85 @@ export function buildRecoveryTrend(history, grip) {
   }
   if (groups.size === 0) return [];
 
-  // For each (session, hand), compute observed fraction at target rep.
+  // For each (session, hand), compute observed fraction at target rep
+  // and (when physModel is supplied) the model-predicted fraction.
   // Average across hands within the same session for a single
   // per-session datapoint (avoids double-plotting Both-mode sessions).
   const bySession = new Map();
   for (const grp of groups.values()) {
     if (grp.reps.length < GAP_TARGET_REP) continue;
-    const observed = buildObservedRecoverySeries(grp.reps);
-    const v = observed.find(p => p.rep === GAP_TARGET_REP)?.observedFraction;
-    if (v == null) continue;
-    const entry = bySession.get(grp.sessKey) || { date: grp.date, values: [] };
-    entry.values.push(v);
+    const sorted = [...grp.reps].sort((a, b) => (a.rep_num ?? 0) - (b.rep_num ?? 0));
+    const rep1 = sorted[0];
+    const repTarget = sorted.find(r => r.rep_num === GAP_TARGET_REP) ?? sorted[GAP_TARGET_REP - 1];
+    const t1 = Number(rep1?.actual_time_s);
+    const tT = Number(repTarget?.actual_time_s);
+    if (!(t1 > 0) || !(tT > 0)) continue;
+    const observed = tT / t1;
+
+    // Predicted fraction at the target rep, seeded with THIS session's
+    // actual rep 1 time + rest. Falls back to 20s rest if rest_s is
+    // missing on the rep row (same convention as HistoryView).
+    let gap = null;
+    if (physModel) {
+      const rawRest = Number(rep1.rest_s);
+      const rest = Number.isFinite(rawRest) && rawRest >= 0 ? rawRest : 20;
+      const predTimes = predictRepTimes({
+        numReps: GAP_TARGET_REP,
+        firstRepTime: t1,
+        restSeconds: rest,
+        physModel,
+      });
+      if (Array.isArray(predTimes) && predTimes.length >= GAP_TARGET_REP && predTimes[0] > 0) {
+        const predicted = predTimes[GAP_TARGET_REP - 1] / predTimes[0];
+        gap = observed - predicted;
+      }
+    }
+
+    const entry = bySession.get(grp.sessKey) || {
+      date: grp.date, observedVals: [], gapVals: [],
+    };
+    entry.observedVals.push(observed);
+    if (gap != null && Number.isFinite(gap)) entry.gapVals.push(gap);
     entry.date = grp.date; // last write wins; dates should match within sessKey
     bySession.set(grp.sessKey, entry);
   }
   if (bySession.size === 0) return [];
 
-  // Aggregate per-session: mean of L/R observed fractions, sorted by date ASC.
+  // Aggregate per-session: mean of L/R values, sorted by date ASC.
+  const mean = (vals) => vals.reduce((s, v) => s + v, 0) / vals.length;
   return [...bySession.values()]
-    .map(({ date, values }) => ({
+    .map(({ date, observedVals, gapVals }) => ({
       date,
-      observedAtTarget: values.reduce((s, v) => s + v, 0) / values.length,
+      observedAtTarget: observedVals.length > 0 ? mean(observedVals) : null,
+      gapAtTarget: gapVals.length > 0 ? mean(gapVals) : null,
     }))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-// Add a 3-session rolling mean column to a trend series so the
-// chart can render dots (raw) + a smoothed trend line, same pattern
-// CapacityTrajectoryCard uses. Returns a new array with the same
-// length; the smoothed value at index i is the mean of indices
-// [max(0, i-2)..i].
+// Add 3-session rolling-mean columns to a trend series so the chart
+// can render dots (raw) + smoothed trend lines, same pattern as
+// CapacityTrajectoryCard. Smooths both observedAtTarget and
+// gapAtTarget when present; emits null when a window has no finite
+// values for a field.
 export function withRollingMean(trend, window = 3) {
   if (!Array.isArray(trend) || trend.length === 0) return [];
   return trend.map((row, i) => {
     const start = Math.max(0, i - (window - 1));
-    const slice = trend.slice(start, i + 1).map(r => r.observedAtTarget).filter(Number.isFinite);
-    const smoothed = slice.length > 0
-      ? slice.reduce((s, v) => s + v, 0) / slice.length
-      : null;
-    return { ...row, observedSmoothed: smoothed };
+    const slice = trend.slice(start, i + 1);
+    const meanField = (field) => {
+      const vals = slice.map(r => r[field]).filter(Number.isFinite);
+      return vals.length > 0 ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+    };
+    return {
+      ...row,
+      observedSmoothed: meanField("observedAtTarget"),
+      gapSmoothed: meanField("gapAtTarget"),
+    };
   });
 }
+
+// Threshold for the "matches model" band on the gap chart. Per-rep
+// timing noise of ~10% on rep 1 and rep 2 compounds to roughly
+// ±0.10 noise on the ratio, so gaps inside ±NOISE_BAND are
+// statistically indistinguishable from "matches the model."
+export const GAP_NOISE_BAND = 0.10;

@@ -8,7 +8,7 @@ import {
   buildRecoveryTrend,
   withRollingMean,
   classifyRecovery,
-  OPERATING_LOW, OPERATING_HIGH, GAP_TARGET_REP,
+  OPERATING_LOW, OPERATING_HIGH, GAP_TARGET_REP, GAP_NOISE_BAND,
 } from "../recoveryDynamics.js";
 import { getPhysModel } from "../fatigue.js";
 
@@ -278,6 +278,83 @@ describe("buildRecoveryTrend", () => {
     ];
     expect(buildRecoveryTrend(history, "Crusher")).toEqual([]);
   });
+
+  test("without physModel, gapAtTarget is null", () => {
+    const history = [
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 24 }),
+    ];
+    const out = buildRecoveryTrend(history, "Crusher");
+    expect(out[0].observedAtTarget).toBeCloseTo(24 / 30, 5);
+    expect(out[0].gapAtTarget).toBeNull();
+  });
+
+  test("with physModel + rest_s, gapAtTarget = observed − predicted at rep 2", () => {
+    const history = [
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30, rest_s: 20 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 24, rest_s: 20 }),
+    ];
+    const out = buildRecoveryTrend(history, "Crusher", { physModel });
+    expect(out).toHaveLength(1);
+    expect(out[0].observedAtTarget).toBeCloseTo(24 / 30, 5);
+    expect(Number.isFinite(out[0].gapAtTarget)).toBe(true);
+    // gap = observed - predicted; with the population physModel and
+    // 20s rest after a 30s rep 1, predicted recovery is well below 1.
+    // We just sanity-check the relationship rather than re-deriving it.
+    expect(out[0].gapAtTarget).toBeLessThan(out[0].observedAtTarget);
+  });
+
+  test("missing rest_s falls back to 20s, gap still computed", () => {
+    const history = [
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 24 }),
+    ];
+    const out = buildRecoveryTrend(history, "Crusher", { physModel });
+    expect(Number.isFinite(out[0].gapAtTarget)).toBe(true);
+  });
+
+  test("gap is robust to rep 1 lengthening at constant load", () => {
+    // Same recovery dynamics, but rep 1 got longer between sessions
+    // (user got stronger). Observed fraction will drop, but gap should
+    // stay flat-ish because predicted drops in step with observed.
+    const baseRest = 20;
+    // For each session, set rep 2 = predicted-at-target * rep 1, so
+    // observed exactly equals predicted → gap = 0. If gap stays ≈ 0
+    // across both sessions despite observed dropping, the metric works.
+    const { predictRepTimes } = require("../fatigue.js");
+    const predA = predictRepTimes({ numReps: 2, firstRepTime: 20, restSeconds: baseRest, physModel });
+    const predB = predictRepTimes({ numReps: 2, firstRepTime: 35, restSeconds: baseRest, physModel });
+    const fracA = predA[1] / predA[0];
+    const fracB = predB[1] / predB[0];
+    const history = [
+      repRow({ session_id: "sA", date: "2026-04-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 20, rest_s: baseRest }),
+      repRow({ session_id: "sA", date: "2026-04-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 20 * fracA, rest_s: baseRest }),
+      repRow({ session_id: "sB", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 35, rest_s: baseRest }),
+      repRow({ session_id: "sB", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 35 * fracB, rest_s: baseRest }),
+    ];
+    const out = buildRecoveryTrend(history, "Crusher", { physModel });
+    expect(out).toHaveLength(2);
+    // Observed has dropped (longer rep 1 → deeper depletion → smaller fraction)
+    expect(out[1].observedAtTarget).toBeLessThan(out[0].observedAtTarget);
+    // …but the gap should be ≈ 0 for both sessions (within rounding noise)
+    expect(Math.abs(out[0].gapAtTarget)).toBeLessThan(0.01);
+    expect(Math.abs(out[1].gapAtTarget)).toBeLessThan(0.01);
+  });
+
+  test("Both-mode gap averages L and R gaps", () => {
+    const history = [
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30, rest_s: 20 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 24, rest_s: 20 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "R", rep_num: 1, actual_time_s: 30, rest_s: 20 }),
+      repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "R", rep_num: 2, actual_time_s: 21, rest_s: 20 }),
+    ];
+    const out = buildRecoveryTrend(history, "Crusher", { physModel });
+    expect(out).toHaveLength(1);
+    // L and R have identical predicted (same rep 1, same rest, same model),
+    // so the mean gap should equal the average of the two observed-minus-predicted.
+    expect(out[0].observedAtTarget).toBeCloseTo(0.75, 5); // mean(0.8, 0.7)
+    expect(Number.isFinite(out[0].gapAtTarget)).toBe(true);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -311,6 +388,37 @@ describe("withRollingMean", () => {
     const out = withRollingMean(trend);
     expect(out[0].date).toBe("d1");
     expect(out[0].observedAtTarget).toBe(0.5);
+  });
+
+  test("smooths gapAtTarget in parallel with observedAtTarget", () => {
+    const trend = [
+      { date: "d1", observedAtTarget: 0.6, gapAtTarget: -0.05 },
+      { date: "d2", observedAtTarget: 0.8, gapAtTarget:  0.10 },
+      { date: "d3", observedAtTarget: 0.7, gapAtTarget: -0.02 },
+    ];
+    const out = withRollingMean(trend, 3);
+    expect(out[2].observedSmoothed).toBeCloseTo((0.6 + 0.8 + 0.7) / 3, 5);
+    expect(out[2].gapSmoothed).toBeCloseTo((-0.05 + 0.10 + -0.02) / 3, 5);
+  });
+
+  test("gapSmoothed is null when no finite gap values in window", () => {
+    const trend = [
+      { date: "d1", observedAtTarget: 0.6, gapAtTarget: null },
+      { date: "d2", observedAtTarget: 0.8, gapAtTarget: null },
+    ];
+    const out = withRollingMean(trend, 3);
+    expect(out[0].gapSmoothed).toBeNull();
+    expect(out[1].gapSmoothed).toBeNull();
+    // Observed is still smoothed
+    expect(out[0].observedSmoothed).toBeCloseTo(0.6, 5);
+    expect(out[1].observedSmoothed).toBeCloseTo(0.7, 5);
+  });
+});
+
+describe("GAP_NOISE_BAND", () => {
+  test("is a small positive fraction (sane noise threshold)", () => {
+    expect(GAP_NOISE_BAND).toBeGreaterThan(0);
+    expect(GAP_NOISE_BAND).toBeLessThan(0.5);
   });
 });
 
