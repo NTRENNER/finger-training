@@ -16,16 +16,28 @@
 //   - Cookedness is finger-specific and is NOT consumed here.
 //
 // Workouts:
-//   A     — Strength Support     (BIG, ~45 min, one per week)
-//   B     — Athletic Power       (FREQUENT, ~30 min, recovers fast)
-//   C     — Positional Capacity  (FREQUENT, ~20 min, hip access)
-//   D     — Neural Strength Touch (FREQUENT, ~15 min, the easy yes)
-//   CLIMB — primary climbing session (INPUT ONLY — the recommender
-//           never pushes you to climb; climbing happens for its own
-//           reasons. Climbing history is consumed for tag staleness
-//           on neural/connective/finger patterns.)
-//   REST  — explicit rest day (the recommender CAN push toward this
-//           when climbing density is high; rest is real training.)
+//   A       — Strength Support      (BIG, ~45 min, one per week)
+//   B       — Athletic Power        (FREQUENT, ~30 min, recovers fast)
+//   C       — Neural Strength Touch (FREQUENT, ~15 min, the easy yes)
+//   STRETCH — Daily Stretching      (DAILY HABIT, ~5–10 min, hip + forearm)
+//   CLIMB   — primary climbing session (INPUT ONLY — the recommender
+//             never pushes you to climb; climbing happens for its own
+//             reasons. Climbing history is consumed for tag staleness
+//             on neural/connective/finger patterns.)
+//   REST    — explicit rest day (the recommender CAN push toward this
+//             when climbing density is high; rest is real training.)
+//
+// Rename history (May 2026): Old C (Positional Capacity, the dedicated
+// mobility session) was moved out of the picker rotation entirely —
+// the literature is clear that mobility adapts to frequency, not dose,
+// so it lives as a daily-habit pill below the A/B/C picker rather than
+// competing weekly with strength/power for a slot. Old D (Neural
+// Strength Touch) was promoted into the now-empty C slot so the picker
+// reads A/B/C cleanly. A one-shot migration in WorkoutTab rewrites
+// historical sessions with workoutId "D" → "C" on first load; no
+// migration is needed for old-C sessions because none exist (the user
+// never used the dedicated mobility session, which is part of why we
+// know the daily-habit framing is the right shape for the adaptation).
 
 import { today } from "../util.js";
 
@@ -462,43 +474,18 @@ export const workouts = {
   C: {
     id: "C",
     shortName: "C",
-    name: "Workout C — Positional Capacity",
-    purpose: "Hip mobility and usable range for climbing-specific positions.",
-    // Was "Positional Capacity + Restoration". Rope flow dropped
-    // because it's already in the warm-up / cool-down habit (no
-    // point double-counting); Zone 2 dropped because it didn't fit
-    // the positional theme. C is now three exercises, tightly
-    // focused on hip access — frog → pancake → pancake leg lifts
-    // is the right progression for the climbing patterns it serves.
-    fatigueClass: "frequent",
-    fatigueCost: 1,
-    // C is the only workout that produces a mobility / positional-
-    // capacity stimulus. Rule 3 in the recommender keys on these
-    // tags exclusively, so keeping them clean (not also tagging A
-    // with "hip" because of split squat) is what makes Rule 3 work.
-    tags: ["mobility", "positionalCapacity", "restoration"],
-    exercises: [
-      exercises.supineWeightedFrog,
-      exercises.weightedPancake,
-      exercises.pancakeLegLifts,
-    ],
-    coachingNotes: [
-      "This is not generic stretching.",
-      "Build climbing-specific hip access and usable range.",
-      "Leave loose, athletic, and restored.",
-    ],
-  },
-
-  D: {
-    id: "D",
-    shortName: "D",
-    name: "Workout D — Neural Strength Touch",
+    name: "Workout C — Neural Strength Touch",
     purpose: "Brief low-fatigue strength exposure to maintain frequency.",
     // The "I can do this when tired" workout — pull + press + arm
     // + core in ~15 min. Catches the post-outdoor-Monday case and
     // the broader "I'd skip A but this still happens" pattern.
-    // Dips on D is locked (no bench/dips alternation any more);
+    // Dips on C is locked (no bench/dips alternation any more);
     // bench lives on A.
+    //
+    // Was workouts.D before the May 2026 rename. Same content,
+    // same fatigueClass, same tags — only the slot key changed
+    // because the old C (Positional Capacity) graduated into the
+    // STRETCH daily-habit pill below the picker.
     fatigueClass: "frequent",
     fatigueCost: 1,
     tags: ["strength", "neural"],
@@ -512,6 +499,41 @@ export const workouts = {
       "This should feel like activation, not training.",
       "Leave fresher than you started.",
       "No fatigue chasing.",
+    ],
+  },
+
+  STRETCH: {
+    id: "STRETCH",
+    shortName: "Stretch",
+    name: "Daily Stretching",
+    purpose: "Hip and forearm mobility — adaptation comes from frequency, not dose.",
+    // Was Workout C (Positional Capacity) before the May 2026 rename.
+    // Pulled out of the weekly picker because the literature on hip
+    // and forearm mobility is clear: short, regular sessions drive
+    // adaptation; dedicating one weekly slot is the wrong shape. The
+    // exercises are unchanged — they now live behind a daily-habit
+    // pill rendered below the A/B/C picker in WorkoutTab. The pill
+    // toggles between done / not-done for today and logs a marker
+    // session each time so history, streaks, and CSV export all keep
+    // working through the existing workout_sessions schema.
+    fatigueClass: "frequent",
+    fatigueCost: 0,
+    // Same tag set as old C. computeTagDaysSince still feeds these
+    // into the recommender's tag-staleness map, but the recommender
+    // no longer has a mobility-stale → recommend-this rule (the
+    // staleness now drives the pill's color state instead). Keeping
+    // the tags here lets future surfaces — analytics, end-of-week
+    // briefings — read "days since mobility" without special-casing.
+    tags: ["mobility", "positionalCapacity", "restoration"],
+    exercises: [
+      exercises.supineWeightedFrog,
+      exercises.weightedPancake,
+      exercises.pancakeLegLifts,
+    ],
+    coachingNotes: [
+      "Short and regular beats long and rare.",
+      "Hip access for steep climbing positions.",
+      "Leave loose, not exhausted.",
     ],
   },
 
@@ -550,17 +572,15 @@ export const workouts = {
 // Decision logic (first match wins):
 //
 //   1. A is overdue (≥7 days) AND energyLow is set
-//      → D, with caution to reschedule A.
+//      → C, with caution to reschedule A.
 //   2. A is overdue AND energy is OK
 //      → A. The week's strength reservation.
-//   3. Hip / positional-capacity / mobility stale (≥7 days)
-//      → C.
-//   4. Power / explosive stale (≥10 days)
+//   3. Power / explosive stale (≥10 days)
 //      → B.
-//   5. Strength touch stale (D ≥4 days)
-//      → D.
-//   6. Fallback
-//      → C (safe useful default — compounds quietly).
+//   4. Strength touch stale (C ≥4 days)
+//      → C.
+//   5. Fallback
+//      → C (the low-fatigue default — brief, doesn't bury you).
 //
 // Neither CLIMB nor REST is ever recommended by this engine.
 // CLIMB is logged via the climbing activities flow; REST is just
@@ -569,20 +589,32 @@ export const workouts = {
 // recommender could re-introduce structured rest at a higher
 // level (weeks, not days).
 //
+// What happened to the old Rule 3 (hip/positional-capacity stale
+// → recommend C)? That rule was retired when the dedicated mobility
+// session moved out of the picker rotation into the daily-stretching
+// pill (May 2026). Mobility staleness is still computed via
+// computeTagDaysSince and surfaces visually on the pill itself —
+// gray default, yellow at 3–5 days, orange at 6+ — instead of
+// elbowing a weekly workout slot. STRETCH is never a recommender
+// output; it's a daily habit the user toggles directly.
+//
 // Tunable thresholds live as constants below so tweaking doesn't
 // require touching the decision tree.
 
 const A_OVERDUE_DAYS     = 7;
-const HIP_STALE_DAYS     = 7;
 const POWER_STALE_DAYS   = 10;
-const D_TOUCH_DAYS       = 4;
+const C_TOUCH_DAYS       = 4;
 
 /**
  * Recommend the next support-training session.
  *
  * @param {Array<{id:string, workoutId:string, date:string}>} workoutHistory
- *   Completed support sessions. `workoutId` is one of A/B/C/D/CLIMB/REST.
- *   Order doesn't matter; the recommender scans for most-recent matches.
+ *   Completed support sessions. `workoutId` is one of
+ *   A/B/C/STRETCH/CLIMB/REST. Order doesn't matter; the recommender
+ *   scans for most-recent matches. STRETCH sessions are accepted in
+ *   history (they're real marker sessions) but the engine never
+ *   *recommends* STRETCH — that's a user-driven daily habit, not a
+ *   day-of choice.
  * @param {Object} [opts]
  * @param {boolean} [opts.energyLow=false]  Manual "I'm wiped" toggle.
  *   When set, A is blocked even if overdue.
@@ -605,17 +637,17 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
   } = opts;
 
   const daysSinceA = daysSinceLastOfType(workoutHistory, "A", refDate);
-  const daysSinceD = daysSinceLastOfType(workoutHistory, "D", refDate);
+  const daysSinceC = daysSinceLastOfType(workoutHistory, "C", refDate);
   const tagDays    = computeTagDaysSince(workoutHistory, climbingHistory, refDate);
 
-  // 1. A overdue + low energy → D, with caution.
+  // 1. A overdue + low energy → C, with caution.
   if (daysSinceA >= A_OVERDUE_DAYS && energyLow) {
     return {
-      primary: workouts.D,
+      primary: workouts.C,
       reason:
-        "A is due but you flagged low energy. D maintains the strength pattern without the volume — claim A on a fresher day.",
+        "A is due but you flagged low energy. C maintains the strength pattern without the volume — claim A on a fresher day.",
       caution: "Don't push for A tonight.",
-      alternatives: [workouts.C, workouts.REST],
+      alternatives: [workouts.B, workouts.REST],
     };
   }
 
@@ -626,29 +658,11 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
       reason: daysSinceA === Infinity
         ? "No A on record yet. This is the week's one big strength day."
         : `Last A was ${daysSinceA} days ago — time to claim the week's strength slot.`,
-      alternatives: [workouts.D, workouts.C],
+      alternatives: [workouts.C, workouts.B],
     };
   }
 
-  // 3. Positional-capacity / mobility stimulus stale → C.
-  // Only C carries these workout-level tags, so this is functionally
-  // "C is stale" with tag indirection in case a future workout adds
-  // mobility content.
-  const mobilityDays = Math.min(
-    tagDays.positionalCapacity ?? Infinity,
-    tagDays.mobility           ?? Infinity,
-  );
-  if (mobilityDays >= HIP_STALE_DAYS) {
-    return {
-      primary: workouts.C,
-      reason: mobilityDays === Infinity
-        ? "Positional capacity hasn't been touched yet — start here for hips-close-to-wall access."
-        : `Positional capacity is ${mobilityDays} days stale. Supports steep-climbing positions.`,
-      alternatives: [workouts.D, workouts.REST],
-    };
-  }
-
-  // 4. Power / explosive stale → B.
+  // 3. Power / explosive stale → B.
   const powerDays = Math.min(
     tagDays.power     ?? Infinity,
     tagDays.explosive ?? Infinity,
@@ -659,31 +673,31 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
       reason: powerDays === Infinity
         ? "No athletic power work on record yet. Stay fast and springy."
         : `Athletic power is due (~${powerDays} days). Keep it fast and low-fatigue.`,
-      alternatives: [workouts.C, workouts.D],
+      alternatives: [workouts.C, workouts.A],
     };
   }
 
-  // 5. Strength touch stale → D.
-  if (daysSinceD >= D_TOUCH_DAYS) {
+  // 4. Strength touch stale → C.
+  if (daysSinceC >= C_TOUCH_DAYS) {
     return {
-      primary: workouts.D,
+      primary: workouts.C,
       reason:
-        daysSinceD === Infinity
-          ? "No D on record yet. Brief strength touch maintains the pull/press pattern between A sessions."
-          : `Last D was ${daysSinceD} days ago. Brief strength touch.`,
-      alternatives: [workouts.C, workouts.D],
+        daysSinceC === Infinity
+          ? "No C on record yet. Brief strength touch maintains the pull/press pattern between A sessions."
+          : `Last C was ${daysSinceC} days ago. Brief strength touch.`,
+      alternatives: [workouts.B, workouts.REST],
     };
   }
 
-  // 6. Fallback — nothing strictly overdue, default to C.
-  // Note: the user signals their own rest needs and doesn't want
-  // the engine prompting REST. A future deload-week recommender
-  // could re-introduce structured rest at the weekly level.
+  // 5. Fallback — nothing strictly overdue, default to C.
+  // C is the lowest-fatigue real workout in the rotation; safe to
+  // do on top of climbing or in a fresher window. The user signals
+  // their own rest needs and doesn't want the engine prompting REST,
+  // so REST is offered as an alternative rather than the primary.
   return {
     primary: workouts.C,
-    reason:
-      "Nothing's strictly overdue. Positional capacity is a safe useful default that compounds quietly.",
-    alternatives: [workouts.D, workouts.B],
+    reason: "Nothing's strictly overdue. C is the low-fatigue default — brief, doesn't bury you.",
+    alternatives: [workouts.B, workouts.REST],
   };
 }
 
@@ -764,8 +778,8 @@ export function recentClimbDayCount(climbingHistory, refDate, withinDays) {
 //   import { recommendNextWorkout, workouts } from "../model/supportTraining.js";
 //
 //   // wLog: existing workout-session log. New entries should carry
-//   //   `workoutId: "A" | "B" | "C" | "D"` so this recommender can
-//   //   read them. Older entries with the legacy `workout` field
+//   //   `workoutId: "A" | "B" | "C" | "STRETCH"` so this recommender
+//   //   can read them. Older entries with the legacy `workout` field
 //   //   are invisible to the recommender — that's fine for a soft
 //   //   migration, the system just starts learning from new sessions.
 //   //

@@ -1,10 +1,27 @@
 // Tests for src/model/supportTraining.js — support workout
 // recommender + tag-staleness helpers.
 //
-// Strategy: pin each rule of the 7-rule decision tree with at least
-// one test, plus edge cases (empty history, future-dated entries,
+// Strategy: pin each rule of the decision tree with at least one
+// test, plus edge cases (empty history, future-dated entries,
 // unknown workoutId). The recommender accepts an explicit `refDate`
 // so tests don't depend on wall-clock time.
+//
+// Layout after the May 2026 rename:
+//   A  — Strength Support (big, weekly slot)
+//   B  — Athletic Power (frequent)
+//   C  — Neural Strength Touch (frequent; was D before the rename)
+//   STRETCH — Daily Stretching (was C; pulled out of the picker
+//             rotation into a daily-habit pill in WorkoutTab)
+//
+// Rules (first match wins):
+//   1. A overdue + low energy → C, with caution
+//   2. A overdue + energy OK → A
+//   3. Power stale → B
+//   4. C touch stale → C
+//   5. Fallback → C
+//
+// STRETCH is accepted in history (it's a real marker session) but
+// the recommender NEVER emits it — that's user-driven via the pill.
 
 import {
   workouts,
@@ -101,15 +118,31 @@ describe("daysSinceLastOfType", () => {
 
 describe("computeTagDaysSince", () => {
   test("workout sessions contribute their template tags", () => {
-    // C tags: positionalCapacity + mobility + restoration. ("hip" is
-    // an exercise-level descriptor — it does NOT appear as a workout-
-    // level tag, by design: workout-level tags describe the stimulus,
-    // not the body parts touched. See note on workouts.A.)
-    const tagDays = computeTagDaysSince([sess("C", 4)], [], REF_DATE);
+    // STRETCH tags: positionalCapacity + mobility + restoration.
+    // ("hip" is an exercise-level descriptor — it does NOT appear as
+    // a workout-level tag, by design: workout-level tags describe the
+    // stimulus, not the body parts touched. See note on workouts.A.)
+    // After the May 2026 rename, these tags moved off C (which now
+    // carries strength/neural) and onto STRETCH (the daily-habit
+    // pill), but the underlying tag bookkeeping is unchanged — any
+    // session whose template lists a tag contributes it.
+    const tagDays = computeTagDaysSince([sess("STRETCH", 4)], [], REF_DATE);
     expect(tagDays.positionalCapacity).toBe(4);
     expect(tagDays.mobility).toBe(4);
     expect(tagDays.restoration).toBe(4);
     expect(tagDays.hip).toBeUndefined();
+  });
+
+  test("post-rename C contributes strength + neural tags", () => {
+    // C (was D before the May 2026 rename) is the neural strength
+    // touch workout — pull/press/arm/core in ~15 min. Its workout-
+    // level tags are strength + neural; it does NOT contribute
+    // mobility/positionalCapacity any more (those live on STRETCH).
+    const tagDays = computeTagDaysSince([sess("C", 2)], [], REF_DATE);
+    expect(tagDays.strength).toBe(2);
+    expect(tagDays.neural).toBe(2);
+    expect(tagDays.mobility).toBeUndefined();
+    expect(tagDays.positionalCapacity).toBeUndefined();
   });
 
   test("climbing activities contribute the CLIMB tag bundle", () => {
@@ -193,14 +226,16 @@ describe("recentClimbDayCount", () => {
 // recommendNextWorkout — rule-by-rule
 // ─────────────────────────────────────────────────────────────
 
-describe("recommendNextWorkout: Rule 1 (A overdue + energyLow → D)", () => {
-  test("blocks A and recommends D with caution when energy is low", () => {
+describe("recommendNextWorkout: Rule 1 (A overdue + energyLow → C)", () => {
+  test("blocks A and recommends C with caution when energy is low", () => {
     const history = [sess("A", 10)]; // A overdue
     const rec = recommendNextWorkout(history, {
       energyLow: true,
       refDate: REF_DATE,
     });
-    expect(rec.primary.id).toBe("D");
+    // Post-rename: C is the low-fatigue neural touch (was D), the
+    // right rescue when A is due but the user is wiped.
+    expect(rec.primary.id).toBe("C");
     expect(rec.caution).toBeTruthy();
     expect(rec.alternatives.map(w => w.id)).toContain("REST");
   });
@@ -236,29 +271,11 @@ describe("recommendNextWorkout: Rule 2 (A overdue + energy OK → A)", () => {
   });
 });
 
-describe("recommendNextWorkout: Rule 3 (hip stale → C)", () => {
-  test("recommends C when hip work is 8 days old and A is fresh", () => {
-    // A recently done (so rule 1/2 don't fire), C 8 days ago.
-    const history = [sess("A", 2), sess("C", 8)];
-    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("C");
-  });
-
-  test("recommends C when hip has NEVER been touched", () => {
-    // A recent, nothing else. positionalCapacity = Infinity = stale.
-    const history = [sess("A", 2)];
-    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("C");
-    expect(rec.reason).toMatch(/hasn't been touched yet/);
-  });
-});
-
-describe("recommendNextWorkout: Rule 4 (power stale → B)", () => {
+describe("recommendNextWorkout: Rule 3 (power stale → B)", () => {
   test("recommends B when power is 10+ days old and other rules don't fire", () => {
-    // A fresh, C fresh (so hip not stale), B old.
+    // A fresh (so rule 1/2 don't fire), B old.
     const history = [
       sess("A", 2),
-      sess("C", 3),
       sess("B", 11),
     ];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
@@ -268,39 +285,47 @@ describe("recommendNextWorkout: Rule 4 (power stale → B)", () => {
   test("does NOT fire when power is only 9 days old", () => {
     const history = [
       sess("A", 2),
-      sess("C", 3),
       sess("B", 9),
+      sess("C", 1), // keep C fresh so Rule 4 doesn't fire either
     ];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     expect(rec.primary.id).not.toBe("B");
   });
 });
 
-describe("recommendNextWorkout: Rule 5 (D touch stale → D)", () => {
-  test("recommends D when last D was 4+ days ago and nothing else is overdue", () => {
-    // A fresh, C fresh, B fresh, D 5 days ago.
+describe("recommendNextWorkout: Rule 4 (C touch stale → C)", () => {
+  test("recommends C when last C was 4+ days ago and nothing else is overdue", () => {
+    // A fresh, B fresh, C 5 days ago.
     const history = [
       sess("A", 2),
-      sess("C", 3),
       sess("B", 3),
-      sess("D", 5),
+      sess("C", 5),
     ];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("D");
+    expect(rec.primary.id).toBe("C");
+    expect(rec.reason).toMatch(/5 days ago/);
+  });
+
+  test("recommends C when no C has ever been done and earlier rules don't fire", () => {
+    // A done recently (so rule 2 doesn't fire) but C never done →
+    // daysSinceC = Infinity, well past the 4-day threshold.
+    const history = [sess("A", 2), sess("B", 3)];
+    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
+    expect(rec.primary.id).toBe("C");
+    expect(rec.reason).toMatch(/No C on record/);
   });
 });
 
 describe("recommendNextWorkout: REST is never recommended", () => {
   // The user signals their own rest needs — the engine doesn't
   // prompt REST. Pin the invariant: even high climbing density
-  // (which the previous Rule 6 used to fire on) doesn't produce
-  // a REST recommendation.
+  // (which an earlier draft of the recommender used to fire on)
+  // doesn't produce a REST recommendation.
   test("does NOT recommend REST even at high climbing density", () => {
     const history = [
       sess("A", 2),
-      sess("C", 3),
       sess("B", 3),
-      sess("D", 1),
+      sess("C", 1),
     ];
     const climbing = [climb(0), climb(1), climb(2), climb(3)];
     const rec = recommendNextWorkout(history, {
@@ -311,30 +336,54 @@ describe("recommendNextWorkout: REST is never recommended", () => {
   });
 });
 
-describe("recommendNextWorkout: Rule 6 (fallback → C)", () => {
-  test("recommends C when nothing is strictly overdue", () => {
-    // A fresh, C fresh, B fresh, D fresh, low climbing.
+describe("recommendNextWorkout: STRETCH is never recommended", () => {
+  // Pin the invariant that the recommender never emits STRETCH as
+  // primary. STRETCH is the daily-habit pill — user-driven, not a
+  // recommender output. Even when mobility tags are deeply stale
+  // (the case that used to fire the dropped Rule 3 → C), the engine
+  // ignores it and falls through to a normal A/B/C choice.
+  test("does NOT recommend STRETCH even with no mobility on record", () => {
+    // Nothing on record → all tags Infinity-stale. Pre-rename, this
+    // case would have hit Rule 3 (mobility stale → old C). Now it
+    // falls through to Rule 2 (no A on record → A) because the
+    // mobility-stale rule no longer exists.
+    const rec = recommendNextWorkout([], { refDate: REF_DATE });
+    expect(rec.primary.id).not.toBe("STRETCH");
+  });
+
+  test("does NOT recommend STRETCH when fresh STRETCH sessions exist", () => {
     const history = [
       sess("A", 2),
-      sess("C", 2),
       sess("B", 3),
-      sess("D", 2),
+      sess("C", 1),
+      sess("STRETCH", 0), // logged today via the pill
+    ];
+    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
+    expect(rec.primary.id).not.toBe("STRETCH");
+  });
+});
+
+describe("recommendNextWorkout: Rule 5 (fallback → C)", () => {
+  test("recommends C when nothing is strictly overdue", () => {
+    // A fresh, B fresh, C fresh (within touch window).
+    const history = [
+      sess("A", 2),
+      sess("B", 3),
+      sess("C", 2),
     ];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     expect(rec.primary.id).toBe("C");
-    expect(rec.reason).toMatch(/safe useful default/);
+    expect(rec.reason).toMatch(/low-fatigue default/);
   });
 
   test("falls back to C even at high climbing density", () => {
-    // Previously this case fired Rule 6 (REST). Now falls
-    // through to the C default. Mobility work is a reasonable
-    // recommendation on a heavy-climbing day — it's restorative
-    // adjacent and won't tax recovery.
+    // The user doesn't want REST prompted; falling through to C
+    // is reasonable on a heavy-climbing day — it's the lowest-
+    // fatigue real workout in the rotation and won't tax recovery.
     const history = [
       sess("A", 2),
-      sess("C", 2),
       sess("B", 3),
-      sess("D", 2),
+      sess("C", 2),
     ];
     const climbing = [climb(0), climb(1), climb(2), climb(3)];
     const rec = recommendNextWorkout(history, {
@@ -406,10 +455,17 @@ describe("recommendNextWorkout: defensive input handling", () => {
 
 describe("workouts (templates)", () => {
   test("all expected workouts exist", () => {
-    for (const id of ["A", "B", "C", "D", "CLIMB", "REST"]) {
+    for (const id of ["A", "B", "C", "STRETCH", "CLIMB", "REST"]) {
       expect(workouts[id]).toBeTruthy();
       expect(workouts[id].id).toBe(id);
     }
+  });
+
+  test("no leftover D entry after the May 2026 rename", () => {
+    // D was renamed to C; the slot should be gone from the map so a
+    // stray workouts.D lookup fails loudly instead of silently
+    // resolving to old content.
+    expect(workouts.D).toBeUndefined();
   });
 
   test("A is the only 'big' fatigueClass", () => {
@@ -417,10 +473,10 @@ describe("workouts (templates)", () => {
     expect(big.map(w => w.id)).toEqual(["A"]);
   });
 
-  test("B / C / D are all 'frequent'", () => {
+  test("B / C / STRETCH are all 'frequent'", () => {
     expect(workouts.B.fatigueClass).toBe("frequent");
     expect(workouts.C.fatigueClass).toBe("frequent");
-    expect(workouts.D.fatigueClass).toBe("frequent");
+    expect(workouts.STRETCH.fatigueClass).toBe("frequent");
   });
 
   test("CLIMB and REST have no exercises", () => {
@@ -432,12 +488,18 @@ describe("workouts (templates)", () => {
     expect(workouts.A.exercises).toHaveLength(7);
   });
 
-  test("C has 3 exercises (rope flow + Zone 2 dropped)", () => {
-    expect(workouts.C.exercises).toHaveLength(3);
+  test("STRETCH inherits the 3 mobility exercises from old C", () => {
+    // Old C's frog → pancake → pancake leg lifts moved verbatim into
+    // STRETCH when the rename pulled mobility out of the picker. Pin
+    // the contents so an accidental edit doesn't drop one.
+    const ids = workouts.STRETCH.exercises.map(e => e.id);
+    expect(ids).toEqual(["supineWeightedFrog", "weightedPancake", "pancakeLegLifts"]);
   });
 
-  test("D presses with dips, not bench (locked post-decomp)", () => {
-    const ids = workouts.D.exercises.map(e => e.id);
+  test("C presses with dips, not bench (inherited from old D)", () => {
+    // C absorbed old D's content: pull/press/arm/core in ~15 min.
+    // Dips on C is locked — bench lives on A.
+    const ids = workouts.C.exercises.map(e => e.id);
     expect(ids).toContain("dips");
     expect(ids).not.toContain("benchPress");
   });
@@ -501,13 +563,13 @@ describe("workouts (templates)", () => {
     expect(aLoggable.length).toBeGreaterThanOrEqual(3);
   });
 
-  test("D presses with dips and dips is loggable", () => {
-    // D's pressing slot is dips post-decomp; we want weight tracking
-    // on it so progression carries forward like the legacy schema.
-    const dDips = workouts.D.exercises.find(ex => ex.id === "dips");
-    expect(dDips).toBeTruthy();
-    expect(dDips.loggable).toBe(true);
-    expect(dDips.logWeight).toBe(true);
+  test("C presses with dips and dips is loggable", () => {
+    // C's pressing slot is dips (inherited from old D); weight
+    // tracking enabled so per-set progression carries forward.
+    const cDips = workouts.C.exercises.find(ex => ex.id === "dips");
+    expect(cDips).toBeTruthy();
+    expect(cDips.loggable).toBe(true);
+    expect(cDips.logWeight).toBe(true);
   });
 
   test("novel exercises carry a videoUrl pointing at a real video host", () => {

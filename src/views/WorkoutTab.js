@@ -43,8 +43,12 @@ import { Card } from "../ui/components.js";
 
 import {
   loadLS, saveLS,
-  LS_WORKOUT_LOG_KEY, ROTATION_PIN_KEY,
+  LS_WORKOUT_LOG_KEY, LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
+  ROTATION_PIN_KEY,
 } from "../lib/storage.js";
+import {
+  pushWorkoutSession, deleteWorkoutSession,
+} from "../lib/sync.js";
 import {
   DEFAULT_TRIP, weeksToTrip, tripCountdown,
 } from "../lib/trip.js";
@@ -168,12 +172,15 @@ const WTYPE_META = {
 
 // Workout ID accent colors. The recommendation card and the picker
 // buttons use these so the active workout has a consistent visual
-// identity across surfaces.
+// identity across surfaces. After the May 2026 rename, "C" inherits
+// the green that used to belong to D (so the new C — the neural
+// strength touch — keeps its visual identity), and STRETCH gets the
+// purple slot that the dropped mobility C used to occupy.
 const WORKOUT_COLORS = {
   A: C.blue,
   B: C.orange,
-  C: C.purple,
-  D: C.green,
+  C: C.green,
+  STRETCH: C.purple,
   CLIMB: "#e05560",
   REST: C.muted,
 };
@@ -574,9 +581,12 @@ function EnergyToggle({ value, onChange }) {
 // accept it (logs a marker session) or override via the four
 // trainable tiles below.
 function WorkoutPicker({ pickedId, onPick }) {
-  const ORDER = ["A", "B", "C", "D"];
+  // Three weekly-rotation workouts in the picker. STRETCH is NOT
+  // listed here — it's a daily habit rendered as a separate wide
+  // pill below the picker, not a Tuesday-vs-Thursday choice.
+  const ORDER = ["A", "B", "C"];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4, marginBottom: 12 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, marginBottom: 8 }}>
       {ORDER.map(id => {
         const wo = SUPPORT_WORKOUTS[id];
         if (!wo) return null;
@@ -602,6 +612,103 @@ function WorkoutPicker({ pickedId, onPick }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// StretchPill — daily-habit toggle for hip + forearm mobility
+// ─────────────────────────────────────────────────────────────
+// Renders full-width below the A/B/C picker. Click = toggle: if
+// today doesn't yet have a STRETCH session, log a marker session;
+// if it does, remove it. Reversible-forever beats a confirm step
+// for a low-stakes habit tracker — an accidental tap is fixed by
+// tapping again, and the pill's visible state change makes the
+// accident immediately obvious.
+//
+// Color state communicates staleness without prompting:
+//   gray   — done today (no pressure)
+//   gray   — done yesterday or day before (still fresh)
+//   yellow — 3–5 days since last stretch
+//   orange — 6+ days since last stretch
+// "Days since" is read from the workout log directly; we don't go
+// through the recommender's tagDays plumbing for this because we
+// want to count STRETCH marker sessions specifically, not anything
+// that happens to carry a mobility tag.
+//
+// The component is presentation-only: parent owns the toggle handler
+// and reads/writes the workout log. This keeps the pill testable in
+// isolation and makes the pull-trigger explicit in WorkoutTab.
+function StretchPill({ done, daysSince, onToggle }) {
+  // Color band: green when done today, gray when fresh, yellow at
+  // mid-staleness, orange at high. Thresholds matched to the
+  // literature's "every few days is fine, weekly is not" — yellow
+  // appears around the threshold where adaptation starts to drift
+  // back; orange when you'd notice the lost range in climbing.
+  let accent = C.muted;
+  let pillBg = "transparent";
+  let textColor = C.muted;
+  if (done) {
+    accent = C.green;
+    pillBg = `${C.green}22`;
+    textColor = C.green;
+  } else if (daysSince == null || daysSince >= 6) {
+    // Never logged or 6+ days stale → orange. "Never" reads as
+    // infinitely stale; we'd rather show the warning color than
+    // pretend a brand-new user is on top of mobility.
+    accent = C.orange;
+    pillBg = `${C.orange}1a`;
+    textColor = C.orange;
+  } else if (daysSince >= 3) {
+    accent = C.yellow;
+    pillBg = `${C.yellow}1a`;
+    textColor = C.yellow;
+  }
+
+  const subtitle = done
+    ? "Done today ✓"
+    : daysSince == null
+      ? "Never logged"
+      : daysSince === 0
+        ? "Last: earlier today"
+        : daysSince === 1
+          ? "Last: yesterday"
+          : `Last: ${daysSince}d ago`;
+
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        width: "100%",
+        padding: "10px 14px",
+        marginBottom: 12,
+        background: pillBg,
+        border: `1px solid ${accent}`,
+        borderRadius: 8,
+        cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        textAlign: "left",
+      }}
+      // The toggle is the whole point — a hover hint keeps the
+      // tap behavior discoverable without an inline icon.
+      title={done ? "Tap to un-log today's stretch" : "Tap to log today's stretch"}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: textColor, letterSpacing: 0.3 }}>
+          Daily Stretching
+        </div>
+        <div style={{ fontSize: 11, color: textColor, opacity: 0.85 }}>
+          {subtitle}
+        </div>
+      </div>
+      <div style={{
+        fontSize: 11, fontWeight: 700, color: textColor,
+        padding: "3px 8px", borderRadius: 4,
+        border: `1px solid ${accent}`,
+        textTransform: "uppercase", letterSpacing: 0.5,
+      }}>
+        {done ? "✓" : "Tap to log"}
+      </div>
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main WorkoutTab
 // ─────────────────────────────────────────────────────────────
 export function WorkoutTab({
@@ -615,7 +722,33 @@ export function WorkoutTab({
   activities = [],
 }) {
   // ── State ─────────────────────────────────────────────
-  const [wLog, setWLog] = useState(() => loadLS(LS_WORKOUT_LOG_KEY) || []);
+  // wLog initial: load, then run the May 2026 D → C migration if
+  // any historical sessions still carry workoutId "D". The migration
+  // is intentionally schemaless (no version flag) and idempotent —
+  // a session can be rewritten 0 or 1 times and that's it. We
+  // re-push each rewritten session through pushWorkoutSession; the
+  // upsert is keyed on session id, so the cloud row's `workout`
+  // column gets updated in-place. If another device has already
+  // migrated the same session, the upsert is a harmless no-op.
+  const [wLog, setWLog] = useState(() => {
+    const raw = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    const needsRewrite = raw.some(s => s?.workoutId === "D");
+    if (!needsRewrite) return raw;
+    const migrated = raw.map(s =>
+      s?.workoutId === "D" ? { ...s, workout: "C", workoutId: "C" } : s
+    );
+    saveLS(LS_WORKOUT_LOG_KEY, migrated);
+    // Fire-and-forget the cloud catch-up. Failures are logged by the
+    // sync helper and don't block the UI — the local migration
+    // already succeeded, so the user's history reads correctly
+    // immediately; cloud reconciles whenever sync succeeds next.
+    for (let i = 0; i < raw.length; i++) {
+      if (raw[i]?.workoutId === "D") {
+        pushWorkoutSession(migrated[i]).catch(() => {});
+      }
+    }
+    return migrated;
+  });
   const [energyLow, setEnergyLow] = useState(() => loadEnergyLow());
   // pickedId: null means "follow recommendation"; otherwise an
   // explicit workout selection.
@@ -657,6 +790,31 @@ export function WorkoutTab({
   // SUPPORT_WORKOUTS.
   const activeId = pickedId || recommendation?.primary?.id || "A";
   const activeWorkout = SUPPORT_WORKOUTS[activeId];
+
+  // ── Daily stretching state ───────────────────────────
+  // Read today's STRETCH session (if any) and the most recent
+  // STRETCH date from the log. The pill consumes both — today's
+  // session drives the done/not-done state for the toggle, the
+  // most-recent date drives the soft staleness coloring.
+  const stretchState = useMemo(() => {
+    const todayStr = today();
+    let todaySession = null;
+    let mostRecentDate = null;
+    for (const s of wLog) {
+      if (s?.workoutId !== "STRETCH") continue;
+      if (s.date === todayStr) todaySession = s;
+      if (!mostRecentDate || s.date > mostRecentDate) mostRecentDate = s.date;
+    }
+    let daysSince = null;
+    if (mostRecentDate) {
+      const a = new Date(mostRecentDate + "T00:00:00").getTime();
+      const b = new Date(todayStr        + "T00:00:00").getTime();
+      if (Number.isFinite(a) && Number.isFinite(b)) {
+        daysSince = Math.max(0, Math.floor((b - a) / (24 * 60 * 60 * 1000)));
+      }
+    }
+    return { todaySession, daysSince, done: !!todaySession };
+  }, [wLog]);
 
   // ── Energy toggle persistence ────────────────────────
   const handleEnergyChange = (next) => {
@@ -754,6 +912,48 @@ export function WorkoutTab({
     saveLS(LS_WORKOUT_LOG_KEY, nextLog);
     onSessionSaved?.(session);
     setPickedId(null);
+  };
+
+  // Toggle today's STRETCH marker. If a session for today already
+  // exists, remove it (LS + synced set + tombstone, mirroring the
+  // WorkoutHistoryView delete path); otherwise log a fresh marker.
+  // Tombstoning is what stops a deleted-today stretch from
+  // resurrecting on the next cloud pull — same defense the rest
+  // of the workout-delete flow relies on.
+  const toggleTodaysStretch = () => {
+    const todayStr = today();
+    const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    const existing = freshLog.find(
+      s => s?.workoutId === "STRETCH" && s.date === todayStr
+    );
+    if (existing) {
+      const nextLog = freshLog.filter(s => s.id !== existing.id);
+      setWLog(nextLog);
+      saveLS(LS_WORKOUT_LOG_KEY, nextLog);
+      const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
+      synced.delete(existing.id);
+      saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
+      const deleted = new Set(loadLS(LS_WORKOUT_DELETED_KEY) || []);
+      deleted.add(existing.id);
+      saveLS(LS_WORKOUT_DELETED_KEY, [...deleted]);
+      deleteWorkoutSession(existing.id).catch(() => {});
+      return;
+    }
+    const session = {
+      id: genId(),
+      date: todayStr,
+      completedAt: nowISO(),
+      workout: "STRETCH",
+      workoutId: "STRETCH",
+      sessionNumber: countSupportSessions(freshLog) + 1,
+      wasRecommended: false,
+      exercises: {},
+      notes: "",
+    };
+    const nextLog = [...freshLog, session];
+    setWLog(nextLog);
+    saveLS(LS_WORKOUT_LOG_KEY, nextLog);
+    onSessionSaved?.(session);
   };
 
   // ── Per-exercise update helpers ──────────────────────
@@ -913,6 +1113,16 @@ export function WorkoutTab({
           <WorkoutPicker
             pickedId={pickedId || recommendation?.primary?.id}
             onPick={(id) => setPickedId(id)}
+          />
+
+          {/* StretchPill sits below the picker, intentionally on its
+              own row at full width — width is the visual cue that this
+              is a daily habit, not another picker option competing
+              with A/B/C for today's slot. */}
+          <StretchPill
+            done={stretchState.done}
+            daysSince={stretchState.daysSince}
+            onToggle={toggleTodaysStretch}
           />
 
           <EnergyToggle value={energyLow} onChange={handleEnergyChange} />
