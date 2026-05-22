@@ -3,26 +3,32 @@
 // ─────────────────────────────────────────────────────────────
 // Strength / power / mobility training that supports climbing.
 // Rebuilt May 2026 around the supportTraining schema (see
-// src/model/supportTraining.js) — one BIG workout per week (A) plus
-// frequent low-friction sessions (B / C / D). The previous 3-day
-// rotation (legacy A/B/C, "Lift Day 1" / "Lift Day 2" / "Power")
-// was prone to skipped sessions because the high-volume days took
-// too long; the new shape addresses that directly.
+// src/model/supportTraining.js) — one BIG workout per week (A)
+// plus two frequent low-friction sessions (B / C), with a daily
+// stretching pill rendered below the picker for mobility (it's
+// a daily habit, not a weekly slot). The previous 3-day rotation
+// (legacy A/B/C, "Lift Day 1" / "Lift Day 2" / "Power") was prone
+// to skipped sessions because the high-volume days took too long;
+// the new shape addresses that directly.
 //
 // Flow:
 //   1. recommendNextWorkout() looks at the user's recent support
 //      sessions + climbing history and proposes one workout for
 //      today, with a one-line reason.
-//   2. The user can accept the recommendation, override via the
-//      A/B/C/D/CLIMB/REST picker, or skip with REST.
+//   2. The user can accept the recommendation or override via the
+//      A/B/C picker. The StretchPill below the picker is an
+//      independent daily toggle, not a recommender output. CLIMB
+//      and REST are never recommended either — climbing is logged
+//      via the climbing activities flow, REST is just "don't open
+//      the app today."
 //   3. Active session: loggable exercises (per-set weight tracking)
 //      render with SessionExRow (preserved from the previous
 //      WorkoutTab — recommendSet drives weight suggestions); non-
 //      loggable exercises (mobility, explosive, bodyweight)
 //      render as compact SimpleExRow tiles with done + notes.
-//   4. Saving stamps `workoutId: A|B|C|D` alongside the legacy
-//      `workout` field for back-compat with the existing log
-//      shape. HistoryView reads `workout` first, so legacy
+//   4. Saving stamps `workoutId: A|B|C|STRETCH` alongside the
+//      legacy `workout` field for back-compat with the existing
+//      log shape. HistoryView reads `workout` first, so legacy
 //      sessions render unchanged.
 //
 // LEGACY_WORKOUTS is exported (was DEFAULT_WORKOUTS, content
@@ -509,16 +515,14 @@ function RecommendationCard({ recommendation, onPickWorkout, pickedId }) {
 // ─────────────────────────────────────────────────────────────
 // Workout picker — explicit A/B/C tiles for the trainable workouts
 // ─────────────────────────────────────────────────────────────
-// CLIMB and REST are intentionally NOT in the picker — they're the
-// absence of a strength workout, not something you pick from a tile.
-// Climbing has its own log via the climbing activities flow; REST
-// is just "don't open the app today."
-//
-// The recommender CAN still produce a REST recommendation when
-// climbing density is high (Rule 6) — when that happens, the
-// recommendation card renders as usual but the user can either
-// accept it (logs a marker session) or override via the four
-// trainable tiles below.
+// CLIMB, REST, and STRETCH are intentionally NOT in the picker.
+// CLIMB and REST are the absence of a strength workout, not
+// something you pick from a tile — climbing has its own log via
+// the climbing activities flow, REST is just "don't open the app
+// today." STRETCH is a daily habit rendered as its own full-width
+// pill below the picker. The recommender never proposes any of
+// the three as primary either; the picker shows what the engine
+// actually picks from.
 function WorkoutPicker({ pickedId, onPick }) {
   // Three weekly-rotation workouts in the picker. STRETCH is NOT
   // listed here — it's a daily habit rendered as a separate wide

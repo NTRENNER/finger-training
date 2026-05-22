@@ -130,7 +130,7 @@ export const exercises = {
     tags: ["strength", "shoulder", "connective"],
     prescription: "2 × 3–5",
     intent:
-      "Low-volume pressing on D as the dedicated pressing slot. Skipping bench in A keeps pressing volume from doubling up across the week.",
+      "Light, frequent pressing on C, complementing the heavier bench in A. Two press days per week without doubling the heavy stimulus.",
     progression: ["Add load slowly.", "Keep ROM pain-free."],
     cautions: ["Avoid deep ROM if anterior shoulder feels irritated."],
     loggable: true,

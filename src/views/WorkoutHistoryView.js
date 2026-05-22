@@ -187,7 +187,7 @@ export function WorkoutHistoryView({
         // the supportTraining schema — prefer that. Legacy sessions
         // (pre-cutover) only have `workout`, which now lives under
         // a `legacy_` prefix in the merged ALL_WORKOUTS_LOOKUP to
-        // avoid colliding with the new A/B/C/D. Last fallback is
+        // avoid colliding with the new A/B/C/STRETCH. Last fallback is
         // the raw key, for any session that doesn't match either
         // (shouldn't happen, but doesn't crash if it does).
         const wkDef = (session.workoutId && defaultWorkouts[session.workoutId])
