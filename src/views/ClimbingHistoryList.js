@@ -190,16 +190,17 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
     // Drop wall when the new combination doesn't allow it. Setting to
     // null tells pushActivity to clear the column on the upserted row.
     updates.wall = showWall ? wall : null;
-    // Outdoor metadata: trim, then write — null clears the column
-    // when switching indoor/outdoor or deleting the value.
+    // Name (route_name) applies to any climb; crag/area stay outdoor-
+    // only. null clears a column when the value is deleted or when
+    // switching a climb from outdoor to indoor. Switching to indoor
+    // keeps the name but drops the location fields.
+    updates.route_name = routeName.trim() || null;
     if (showOutdoorMeta) {
-      updates.route_name = routeName.trim() || null;
-      updates.crag       = crag.trim()      || null;
-      updates.area       = area.trim()      || null;
+      updates.crag = crag.trim() || null;
+      updates.area = area.trim() || null;
     } else {
-      updates.route_name = null;
-      updates.crag       = null;
-      updates.area       = null;
+      updates.crag = null;
+      updates.area = null;
     }
     onSave(updates);
   };
@@ -274,26 +275,26 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
         </div>
       </>}
 
-      {/* Outdoor route metadata — only when venue=outdoor. Free-text,
-          all optional. Same field set as ClimbingLogCard so creating
-          and editing share one mental model. */}
-      {showOutdoorMeta && <>
-        {sectionLabel("Route (optional)")}
-        {[
-          { val: routeName, set: setRouteName, ph: "Route name" },
-          { val: crag,      set: setCrag,      ph: "Cliff / crag" },
-          { val: area,      set: setArea,      ph: "Area" },
-        ].map(({ val, set, ph }) => (
-          <input key={ph} type="text" placeholder={ph}
-            value={val} onChange={e => set(e.target.value)}
-            style={{
-              width: "100%", padding: "6px 8px", marginBottom: 6,
-              borderRadius: 6, background: C.bg, color: C.text,
-              border: `1px solid ${C.border}`, fontSize: 12,
-            }} />
-        ))}
-        <div style={{ marginBottom: 4 }} />
-      </>}
+      {/* Name + outdoor location. Name applies to any climb; crag/area
+          stay outdoor-only. Same field set as ClimbingLogCard so
+          creating and editing share one mental model. */}
+      {sectionLabel("Name (optional)")}
+      {[
+        { val: routeName, set: setRouteName, ph: "Name this climb" },
+        ...(showOutdoorMeta ? [
+          { val: crag, set: setCrag, ph: "Cliff / crag" },
+          { val: area, set: setArea, ph: "Area" },
+        ] : []),
+      ].map(({ val, set, ph }) => (
+        <input key={ph} type="text" placeholder={ph}
+          value={val} onChange={e => set(e.target.value)}
+          style={{
+            width: "100%", padding: "6px 8px", marginBottom: 6,
+            borderRadius: 6, background: C.bg, color: C.text,
+            border: `1px solid ${C.border}`, fontSize: 12,
+          }} />
+      ))}
+      <div style={{ marginBottom: 4 }} />
 
       {/* Grade */}
       {sectionLabel(`Grade (${discipline === "boulder" ? "V-scale" : "YDS"})`)}

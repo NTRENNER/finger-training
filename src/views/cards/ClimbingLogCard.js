@@ -2,8 +2,8 @@
 // CLIMBING LOG CARD — single-card climb logger
 // ─────────────────────────────────────────────────────────────
 // One climbing entry's worth of data: discipline + venue + grade +
-// ascent style + wall (boulder-only) + RPE, plus outdoor-only route
-// metadata (route name / cliff / area). Collapses to a one-row
+// ascent style + wall (boulder-only) + RPE, plus an optional name
+// (any climb) and outdoor-only location (cliff / area). Collapses to a one-row
 // tappable button when not in use; expands inline with the full
 // form on tap. Saves via the onLog callback handed in by the
 // caller; doesn't touch storage or sync itself.
@@ -87,15 +87,18 @@ export function ClimbingLogCard({ activities = [], onLog }) {
       discipline, venue, grade, ascent, rpe,
     };
     if (showWall) entry.wall = wall;
+    // Optional name — available for any climb (a meaningful gym project
+    // deserves a name as much as an outdoor route). Stored as route_name
+    // so it surfaces as the bold title in History.
+    const rn = routeName.trim();
+    if (rn) entry.route_name = rn;
     if (showOutdoorMeta) {
       // Trim and drop empties so we don't write whitespace-only
       // values that look like data but break sort/filter.
-      const rn = routeName.trim();
       const cr = crag.trim();
       const ar = area.trim();
-      if (rn) entry.route_name = rn;
-      if (cr) entry.crag       = cr;
-      if (ar) entry.area       = ar;
+      if (cr) entry.crag = cr;
+      if (ar) entry.area = ar;
     }
     onLog(entry);
     setLogged(true);
@@ -201,12 +204,14 @@ export function ClimbingLogCard({ activities = [], onLog }) {
         ))}
       </div>
 
-      {/* Outdoor route metadata — only shown when venue=outdoor.
-          Three free-text inputs (route name, cliff/crag, area) so a
-          send at "Y-12 · Obed · The Journey" stays searchable later.
-          All optional — leaving blank just records the climb without
-          the location detail. */}
-      {showOutdoorMeta && (() => {
+      {/* Name + outdoor location. The name is optional and applies to
+          any climb — a meaningful gym project deserves a name as much
+          as an outdoor route, and it shows as the bold title in History.
+          Cliff/crag + area only appear outdoors, where a send at
+          "Y-12 · Obed · The Journey" stays searchable later. All
+          optional — leaving blank just records the climb without the
+          extra detail. */}
+      {(() => {
         const inputStyle = {
           width: "100%", padding: "8px 10px", borderRadius: 8,
           background: C.bg, color: C.text, border: `1px solid ${C.border}`,
@@ -215,17 +220,21 @@ export function ClimbingLogCard({ activities = [], onLog }) {
         return (
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
-              Route (optional)
+              Name (optional)
             </div>
-            <input type="text" placeholder="Route name (e.g. The Journey)"
+            <input type="text" placeholder="Name this climb (e.g. The Journey)"
               value={routeName} onChange={e => setRouteName(e.target.value)}
-              style={inputStyle} />
-            <input type="text" placeholder="Cliff / crag (e.g. Y-12)"
-              value={crag} onChange={e => setCrag(e.target.value)}
-              style={inputStyle} />
-            <input type="text" placeholder="Area (e.g. Obed)"
-              value={area} onChange={e => setArea(e.target.value)}
-              style={{ ...inputStyle, marginBottom: 0 }} />
+              style={showOutdoorMeta ? inputStyle : { ...inputStyle, marginBottom: 0 }} />
+            {showOutdoorMeta && (
+              <>
+                <input type="text" placeholder="Cliff / crag (e.g. Y-12)"
+                  value={crag} onChange={e => setCrag(e.target.value)}
+                  style={inputStyle} />
+                <input type="text" placeholder="Area (e.g. Obed)"
+                  value={area} onChange={e => setArea(e.target.value)}
+                  style={{ ...inputStyle, marginBottom: 0 }} />
+              </>
+            )}
           </div>
         );
       })()}
