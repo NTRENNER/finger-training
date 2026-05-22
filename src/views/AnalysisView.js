@@ -1756,11 +1756,10 @@ export function AnalysisView({
           normalizeOn={normalizeOn}
         />
 
-        <StrengthBalanceCard
-          gripHandFits={gripHandFits}
-          balanceHistory={balanceHistory}
-          unit={unit}
-        />
+        {/* (StrengthBalanceCard moved to the bottom of Analysis — see
+            the closing block. The user's preferred reading order is:
+            chart → per-zone deltas → time trend → exploratory overlays
+            → 1RM PRs → recovery → hand asymmetry → curve coverage.) */}
 
         {/* ── Force Curves History — vs baseline overlay ──
             Baseline three-exp curve (dashed, muted) overlaid against
@@ -2016,10 +2015,10 @@ export function AnalysisView({
           );
         })()}
 
-        {/* Curve Coverage — per-zone data freshness + annual pace.
-            Moved here from Setup so both per-zone reference cards
-            (prescribed load + freshness) live together. */}
-        <CurveCoverageCard history={history} />
+        {/* (CurveCoverageCard moved to the bottom of Analysis — see
+            the closing block. Lives last so the freshness rundown
+            anchors the page rather than interrupting the metric
+            stack mid-scroll.) */}
       </>)}
 
       {/* ── 1RM PR tracker ── */}
@@ -2050,6 +2049,22 @@ export function AnalysisView({
             well-rested was today?", this one answers "is my
             recovery improving over weeks?" */}
         <RecoveryTrendCard history={history} grips={grips} />
+
+        {/* Hand asymmetry — second-to-last per user preference. The
+            crusher-vs-micro ratio is more "explore when curious" than
+            "check every session," so it lives near the bottom rather
+            than competing with the metric stack up top. */}
+        <StrengthBalanceCard
+          gripHandFits={gripHandFits}
+          balanceHistory={balanceHistory}
+          unit={unit}
+        />
+
+        {/* Curve Coverage — per-zone data freshness + annual pace.
+            Anchors the bottom of Analysis: it's a "how good is your
+            data" rundown rather than a training-signal card, so it
+            reads naturally as the final summary of the page. */}
+        <CurveCoverageCard history={history} />
 
         {/* (Per-Compartment Dose AUC chart + Energy System Breakdown
             card removed under curve-trust — both were zone-keyed
