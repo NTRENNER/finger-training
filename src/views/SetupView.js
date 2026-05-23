@@ -53,6 +53,7 @@ import { Card, Btn } from "../ui/components.js";
 import { fmt0, toDisp, fromDisp } from "../ui/format.js";
 
 import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
+import { today } from "../util.js";
 import { WarmupView } from "./WarmupView.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
@@ -80,6 +81,14 @@ export function BwPrompt({ unit = "lbs", onSave }) {
   // confirm-current shortcut) is the right call to action whether
   // the log is fresh or stale.
 
+  // "Logged today" gates the ✓ Yes button: once the latest log entry
+  // is today's date, the button grays out to "Logged today" so the
+  // user gets visual confirmation that their tap registered (without
+  // this, the prompt re-rendered the same "Still 157 lbs?" view with
+  // no visible change, leading to repeated clicks). Update stays
+  // available for actually changing the weight today.
+  const loggedToday = !!latest && latest.date === today();
+
   const save = () => {
     const kg = fromDisp(Math.round(parseFloat(inputVal)), unit);
     if (!isNaN(kg) && kg > 0) { onSave(kg); setEditing(false); }
@@ -104,10 +113,21 @@ export function BwPrompt({ unit = "lbs", onSave }) {
             background: C.border, color: C.text, fontSize: 12, fontWeight: 600,
           }}>{latest ? "Update" : "Set"}</button>
           {latest && (
-            <button onClick={() => onSave(latest.kg)} style={{
-              padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer",
-              background: C.green + "33", color: C.green, fontSize: 12, fontWeight: 600,
-            }}>✓ Yes</button>
+            <button
+              onClick={loggedToday ? undefined : () => onSave(latest.kg)}
+              disabled={loggedToday}
+              title={loggedToday ? "Already logged today — tap Update to change" : "Confirm today's weight"}
+              style={{
+                padding: "5px 12px", borderRadius: 8, border: "none",
+                cursor: loggedToday ? "default" : "pointer",
+                background: loggedToday ? C.border : C.green + "33",
+                color:      loggedToday ? C.muted : C.green,
+                fontSize: 12, fontWeight: 600,
+                opacity: loggedToday ? 0.7 : 1,
+              }}
+            >
+              {loggedToday ? "✓ Logged today" : "✓ Yes"}
+            </button>
           )}
         </>
       ) : (
