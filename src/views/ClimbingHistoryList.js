@@ -1,17 +1,25 @@
 // ─────────────────────────────────────────────────────────────
 // CLIMBING HISTORY LIST
 // ─────────────────────────────────────────────────────────────
-// Climb list with a filter-pills row above. Three mutually exclusive
-// grouping modes (set via the Named or Grade group pills, default
-// "date"):
-//   - date:  one card per date, descending (default)
-//   - named: filter to climbs with route_name + group by route name,
-//            alphabetical across cards; sends inside date-desc
-//   - grade: group by grade, hardest first; sends inside date-desc
+// Climb list with a filter-pills row above plus an independent "Sort
+// by" selector. Filters and grouping are orthogonal so the user can
+// combine, e.g., 'Named filter + Grade grouping' to see all named
+// sends arranged by grade.
 //
-// Discipline / venue / wall pills further narrow what shows —
-// single-select per category, tap a selected pill to clear it. When
-// discipline is locked to boulder or lead, a grade range picker
+// Filter pills (additive, tap to toggle):
+//   - Named: show only climbs with a route_name set
+//   - Boulder / Lead: discipline (single-select per category)
+//   - Indoor / Outdoor: venue (single-select per category)
+//   - MoonBoard / Kilter: wall (single-select; only shown when the
+//     combo allows it — indoor boulder)
+//
+// Sort-by selector (single-select, default Date):
+//   - Date:  one card per date, descending
+//   - Name:  one card per route_name, alphabetical; sends inside
+//            date-desc. Unnamed climbs collapse into one '—' card.
+//   - Grade: one card per grade, hardest-first; sends inside date-desc
+//
+// When discipline is locked to boulder or lead, a grade range picker
 // appears below the pills so the user can also clamp min/max grade
 // (V scale for boulder, YDS for lead). The range stays hidden when
 // discipline is "all" because the two grade scales can't be mixed.
@@ -38,9 +46,10 @@ import {
 } from "../lib/climbing-grades.js";
 import { loadLS, saveLS, LS_CLIMBING_HISTORY_FILTERS_KEY } from "../lib/storage.js";
 
-// Default filter state — everything "all" (no filtering), date grouping.
+// Default filter state — nothing filtered, date grouping.
 const DEFAULT_FILTERS = {
-  groupBy:    "date",  // "date" | "named" | "grade"
+  named:      false,   // filter to climbs with route_name only
+  groupBy:    "date",  // "date" | "name" | "grade"
   discipline: "all",   // "all" | "boulder" | "lead"
   venue:      "all",   // "all" | "indoor" | "outdoor"
   wall:       "all",   // "all" | "moonboard" | "kilter"
@@ -48,16 +57,28 @@ const DEFAULT_FILTERS = {
   gradeMax:   null,    // grade string or null
 };
 
-// Migrate the prior LS shape (`{ named: true/false, ... }` with no
-// groupBy field) to the new groupBy field. Idempotent — anything that
-// already has groupBy passes through.
+// Migrate older LS shapes to the current (named-as-filter + groupBy)
+// model. Two prior versions exist in the wild:
+//   v1: { named: true/false } with no groupBy — Named was the only
+//       grouping concept. Map: groupBy = name when named, else date.
+//   v2: { groupBy: "named" } — the intermediate combined version
+//       where Named bundled filter + group. Map: split into
+//       named=true + groupBy="name".
+// Idempotent; current-shape entries pass through.
 function migrateFilters(stored) {
   if (!stored || typeof stored !== "object") return DEFAULT_FILTERS;
   const out = { ...DEFAULT_FILTERS, ...stored };
-  if (!out.groupBy) {
-    out.groupBy = stored.named ? "named" : "date";
+  // v2 → current
+  if (stored.groupBy === "named") {
+    out.named = true;
+    out.groupBy = "name";
   }
-  delete out.named;
+  // v1 → current (only triggers when groupBy isn't set at all)
+  if (!stored.groupBy && stored.named !== undefined) {
+    out.named = !!stored.named;
+    out.groupBy = stored.named ? "name" : "date";
+  }
+  out.named = !!out.named;
   return out;
 }
 
@@ -76,13 +97,21 @@ export function ClimbingHistoryList({
     setFiltersState(next);
     saveLS(LS_CLIMBING_HISTORY_FILTERS_KEY, next);
   };
-  // Pick handler for the pill row. Group pills (Named, Grade) toggle
-  // groupBy between their value and "date". Filter pills (discipline,
-  // venue, wall) use tap-to-deselect within their category.
+  // Pick handler for the pill row. Three kinds of controls:
+  //   - groupBy: tap a sort pill to select that grouping; tapping
+  //     the active one resets to "date" so the user can always get
+  //     back to the default with one tap.
+  //   - named: pure toggle (it's a filter now, no longer a grouping).
+  //   - everything else (discipline / venue / wall): single-select
+  //     per category with tap-to-deselect.
   const pickFilter = (key, value) => {
     if (key === "groupBy") {
       const next = (filters.groupBy === value) ? "date" : value;
       updateFilters({ ...filters, groupBy: next });
+      return;
+    }
+    if (key === "named") {
+      updateFilters({ ...filters, named: !filters.named });
       return;
     }
     const next = (filters[key] === value) ? "all" : value;
@@ -120,7 +149,7 @@ export function ClimbingHistoryList({
   const maxRank = filters.gradeMax ? gradeRank(filters.gradeMax) : null;
   const filtered = useMemo(() => {
     return climbs.filter(c => {
-      if (filters.groupBy === "named" && !c.route_name) return false;
+      if (filters.named && !c.route_name) return false;
       if (filters.discipline !== "all" && c.discipline !== filters.discipline) return false;
       if (filters.venue !== "all") {
         const v = c.venue || "indoor";  // legacy fallback
@@ -141,15 +170,15 @@ export function ClimbingHistoryList({
     });
   }, [climbs, filters, minRank, maxRank]);
 
-  // ── Group: by date (default), name (Named mode), or grade ──
-  // Date mode: existing behavior — one card per date, descending.
-  // Name mode: one card per route_name, alphabetical. Within each
-  // card, sends are listed date-descending.
-  // Grade mode: one card per grade, hardest-first (rank desc). Within
-  // each card, sends are listed date-descending.
+  // ── Group: by date (default), name, or grade ──
+  // Date mode: one card per date, descending.
+  // Name mode: one card per route_name, alphabetical. Unnamed climbs
+  //   (route_name === "") collapse into a single '—' card.
+  // Grade mode: one card per grade, hardest-first (rank desc).
+  // Within each non-date card, sends are listed date-descending.
   const grouped = useMemo(() => {
     const m = new Map();
-    if (filters.groupBy === "named") {
+    if (filters.groupBy === "name") {
       for (const c of filtered) {
         const key = c.route_name || "—";
         if (!m.has(key)) m.set(key, []);
@@ -158,7 +187,13 @@ export function ClimbingHistoryList({
       for (const arr of m.values()) {
         arr.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
       }
-      return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      // Alphabetical across cards; push the '—' (unnamed) bucket to
+      // the bottom so it doesn't dominate the top of the list.
+      return [...m.entries()].sort((a, b) => {
+        if (a[0] === "—") return 1;
+        if (b[0] === "—") return -1;
+        return a[0].localeCompare(b[0]);
+      });
     }
     if (filters.groupBy === "grade") {
       for (const c of filtered) {
@@ -210,7 +245,7 @@ export function ClimbingHistoryList({
         grouped.map(([groupKey, list]) => (
           <Card key={groupKey}>
             <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-              {filters.groupBy === "named" && (
+              {filters.groupBy === "name" && (
                 <span><b style={{ color: C.text }}>{groupKey}</b> · {list.length} send{list.length === 1 ? "" : "s"}</span>
               )}
               {filters.groupBy === "grade" && (
@@ -244,7 +279,7 @@ export function ClimbingHistoryList({
                   showDate={filters.groupBy !== "date"}
                   // Only suppress route_name in name mode (it's the
                   // card header there); keep it visible in grade mode.
-                  hideRouteName={filters.groupBy === "named"}
+                  hideRouteName={filters.groupBy === "name"}
                   onEdit={onUpdateActivity ? () => setEditingId(c.id) : null}
                   onDelete={onDeleteActivity ? () => {
                     if (window.confirm("Delete this climb?")) onDeleteActivity(c.id);
@@ -284,7 +319,9 @@ function FilterPills({
   const pill = (label, key, value) => {
     const active = key === "groupBy"
       ? filters.groupBy === value
-      : filters[key] === value;
+      : key === "named"
+        ? !!filters.named
+        : filters[key] === value;
     return (
       <button
         key={`${key}-${value}`}
@@ -311,7 +348,7 @@ function FilterPills({
   };
 
   // Suffix tail line: shows N of M and a hint of the active grouping.
-  const groupingHint = filters.groupBy === "named"
+  const groupingHint = filters.groupBy === "name"
     ? " · grouped by name"
     : filters.groupBy === "grade"
       ? " · grouped by grade (hardest first)"
@@ -319,9 +356,10 @@ function FilterPills({
 
   return (
     <Card style={{ marginBottom: 12 }}>
+      {/* Filter pills row (additive). Named is a pure filter — tapping
+          it just toggles 'only show climbs with a route_name'. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-        {pill("Named", "groupBy", "named")}
-        {pill("Grade", "groupBy", "grade")}
+        {pill("Named", "named", true)}
         <span style={{ width: 6 }} />
         {pill("Boulder", "discipline", "boulder")}
         {pill("Lead",    "discipline", "lead")}
@@ -333,6 +371,20 @@ function FilterPills({
           {pill("MoonBoard", "wall", "moonboard")}
           {pill("Kilter",    "wall", "kilter")}
         </>}
+      </div>
+
+      {/* Sort selector — independent from the filters above. Default
+          is Date; tap Name or Grade to switch grouping. Tapping the
+          active pill resets to Date. This lets the user combine
+          'Named filter + Grade grouping' or any other pair. */}
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center",
+        marginTop: 8, fontSize: 11, color: C.muted,
+      }}>
+        <span>Sort:</span>
+        {pill("Date",  "groupBy", "date")}
+        {pill("Name",  "groupBy", "name")}
+        {pill("Grade", "groupBy", "grade")}
       </div>
 
       {gradeRangeVisible && (
