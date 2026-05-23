@@ -36,6 +36,7 @@ import {
   disciplineMeta,
 } from "../lib/climbing-grades.js";
 import { inferProjectGrade } from "../model/gradePyramid.js";
+import { pyramidPinKey } from "../lib/storage.js";
 
 // Tier step size in rank units, per discipline. Boulder steps by
 // whole V-grades (V4 → V5 = +1 rank). YDS at 5.10+ steps by letter
@@ -131,24 +132,27 @@ export function ClimbingAnalysisView({
     if (!wallFilterActive && pyramidWall !== "all") setPyramidWall("all");
   }, [wallFilterActive, pyramidWall]);
 
-  // ── Pyramid settings — pinned project + warmup floor (per discipline) ──
-  // State + LS write + cloud sync live in App.js (single source of
-  // truth for user_settings). Here we just read the per-discipline
-  // slice and forward edits through the prop handlers.
-  const pinnedProject    = pyramidProjectMap[pyramidDiscipline] || null;
-  const warmupFloorGrade = pyramidWarmupMap[pyramidDiscipline]  || null;
+  // ── Pyramid settings — pins per (discipline, venue, wall) ──
+  // Composite key includes venue + wall so a V4 commercial-set pin
+  // doesn't bleed into the MoonBoard view (each context is its own
+  // climb). State + LS write + cloud sync live in App.js — here we
+  // just read the slot for the active filter combination and forward
+  // edits via the prop handlers.
+  const pinKey = pyramidPinKey(pyramidDiscipline, pyramidVenue, pyramidWall);
+  const pinnedProject    = pyramidProjectMap[pinKey] || null;
+  const warmupFloorGrade = pyramidWarmupMap[pinKey]  || null;
   const warmupFloorRank  = warmupFloorGrade ? gradeRank(warmupFloorGrade) : null;
 
   const updatePinnedProject = (grade) => {
     const next = { ...pyramidProjectMap };
-    if (grade) next[pyramidDiscipline] = grade;
-    else delete next[pyramidDiscipline];
+    if (grade) next[pinKey] = grade;
+    else delete next[pinKey];
     onPyramidProjectChange(next);
   };
   const updateWarmupFloor = (grade) => {
     const next = { ...pyramidWarmupMap };
-    if (grade) next[pyramidDiscipline] = grade;
-    else delete next[pyramidDiscipline];
+    if (grade) next[pinKey] = grade;
+    else delete next[pinKey];
     onPyramidWarmupChange(next);
   };
 
@@ -535,14 +539,14 @@ export function ClimbingAnalysisView({
             </div>
           )}
 
-          {/* Pyramid settings: project pin + warmup floor (per discipline).
-              Pin is the primary control — you know your project better
-              than the algo does. Auto falls back to the highest grade
-              with ≥2 clean sends as a cold-start. Warmup floor hides
-              easy-mileage grades so the base tier reflects real
-              climbing, not warmups. */}
+          {/* Pyramid settings: project pin + warmup floor for the
+              ACTIVE filter combination (discipline · venue · wall).
+              Each combo gets its own pin slot — pinning V7 on
+              MoonBoard doesn't affect your commercial-set pin. */}
           <PyramidSettings
             discipline={pyramidDiscipline}
+            venue={pyramidVenue}
+            wall={wallFilterActive ? pyramidWall : "all"}
             pinnedProject={pinnedProject}
             inferredProject={inferredProject}
             warmupFloorGrade={warmupFloorGrade}
@@ -778,18 +782,19 @@ function Stat({ label, value }) {
   );
 }
 
-// Per-discipline pyramid settings — pinned project grade + warmup
-// floor. Both compact <select>s in a single flex row. Empty string =
-// unset; upstream maps that to deletion from the synced settings map.
-// The pin is the primary control because the climber knows their
-// project better than any data-driven heuristic; auto falls back to
-// the highest grade with at least one clean send.
+// Per-(discipline, venue, wall) pyramid settings — pinned project
+// grade + warmup floor. Each filter combination gets its own pin
+// slot, so a V4 commercial-set pin doesn't bleed into the MoonBoard
+// view (each context is its own climb). A small "For: Boulder ·
+// Indoor · MoonBoard" label sits above the pickers so the user
+// knows which combination the pin applies to.
 //
 // The warmup floor list is clamped to grades strictly below the active
 // project. A floor at or above the project would either exclude the
 // project tier (silly) or do nothing useful.
 function PyramidSettings({
-  discipline, pinnedProject, inferredProject,
+  discipline, venue, wall,
+  pinnedProject, inferredProject,
   warmupFloorGrade, onPinProject, onSetWarmupFloor,
 }) {
   const allGrades = discipline === "boulder" ? V_GRADES : YDS_GRADES;
@@ -805,36 +810,52 @@ function PyramidSettings({
     cursor: "pointer",
   };
 
-  return (
-    <div style={{
-      display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center",
-      marginBottom: 12, fontSize: 11, color: C.muted,
-    }}>
-      <span>Project:</span>
-      <select
-        value={pinnedProject || ""}
-        onChange={(e) => onPinProject(e.target.value || null)}
-        style={selectStyle}
-        title="Pin a project grade. Auto uses the highest grade you've clean-sent as a fallback."
-      >
-        <option value="">Auto{inferredProject ? ` (${inferredProject})` : ""}</option>
-        {allGrades.map(g => (
-          <option key={g} value={g}>{g}</option>
-        ))}
-      </select>
+  // Combo label — built from the metadata helpers so the wording stays
+  // in sync with the filter pills above. Wall is omitted when "all" or
+  // when it doesn't apply to the current discipline/venue.
+  const disciplineLabel = (CLIMB_DISCIPLINES.find(d => d.key === discipline) || {}).label || discipline;
+  const venueLabel = venue === "all"
+    ? "All venues"
+    : (VENUES.find(v => v.key === venue) || {}).label || venue;
+  const wallLabel = (!wall || wall === "all")
+    ? null
+    : (BOULDER_WALLS.find(w => w.key === wall) || {}).label || wall;
+  const comboLabel = [disciplineLabel, venueLabel, wallLabel].filter(Boolean).join(" · ");
 
-      <span style={{ marginLeft: 8 }}>Warmups ≤</span>
-      <select
-        value={warmupFloorGrade || ""}
-        onChange={(e) => onSetWarmupFloor(e.target.value || null)}
-        style={selectStyle}
-        title="Hide easy grades from the pyramid. Sends at or below this grade are tallied separately as warmups."
-      >
-        <option value="">None</option>
-        {warmupOptions.map(g => (
-          <option key={g} value={g}>{g}</option>
-        ))}
-      </select>
+  return (
+    <div style={{ marginBottom: 12, fontSize: 11, color: C.muted }}>
+      <div style={{ marginBottom: 6 }}>
+        For: <span style={{ color: C.text, fontWeight: 600 }}>{comboLabel}</span>
+      </div>
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center",
+      }}>
+        <span>Project:</span>
+        <select
+          value={pinnedProject || ""}
+          onChange={(e) => onPinProject(e.target.value || null)}
+          style={selectStyle}
+          title="Pin a project grade for this exact filter combination. Auto uses the highest grade you've clean-sent under these filters."
+        >
+          <option value="">Auto{inferredProject ? ` (${inferredProject})` : ""}</option>
+          {allGrades.map(g => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+
+        <span style={{ marginLeft: 8 }}>Warmups ≤</span>
+        <select
+          value={warmupFloorGrade || ""}
+          onChange={(e) => onSetWarmupFloor(e.target.value || null)}
+          style={selectStyle}
+          title="Hide easy grades from the pyramid for this combination. Sends at or below this grade are tallied separately as warmups."
+        >
+          <option value="">None</option>
+          {warmupOptions.map(g => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }

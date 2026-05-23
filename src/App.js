@@ -31,6 +31,7 @@ import {
   LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
   LS_PYRAMID_PROJECT_KEY, LS_PYRAMID_WARMUP_KEY,
+  migrateLegacyPyramidPins,
 } from "./lib/storage.js";
 import { DEFAULT_TRIP } from "./lib/trip.js";
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
@@ -343,19 +344,23 @@ export default function App() {
     }
   };
 
-  // ── Climbing pyramid pins (per discipline) ─────────────────
-  // Both stored as { [discipline]: grade } maps so a V-grade boulder
-  // pin doesn't pollute the YDS pin and vice versa. Synced to
-  // user_settings.{ pyramid_project, pyramid_warmup } so the pins
-  // follow the user across devices — without this, you'd pin V7 on
-  // your laptop and the phone would auto-infer something different
-  // from the same data. Local LS is the read cache for fast first
-  // paint; cloud is the authority.
+  // ── Climbing pyramid pins (per filter combination) ─────────
+  // Both stored as { [composite-key]: grade } maps where the key is
+  // `${discipline}|${venue}|${wall}` (built via pyramidPinKey). Each
+  // (boulder, indoor, commercial) vs (boulder, indoor, moonboard)
+  // vs (boulder, outdoor, all) etc. gets its own slot because V4 on
+  // a MoonBoard isn't the same climb as V4 on a commercial set.
+  //
+  // Synced to user_settings.{ pyramid_project, pyramid_warmup } so
+  // the pins follow the user across devices. Local LS is the read
+  // cache for fast first paint; cloud is the authority. Legacy
+  // discipline-keyed pins get migrated to composite shape on load
+  // so existing users don't lose their previous pins.
   const [pyramidProjectMap, setPyramidProjectMapState] = useState(
-    () => loadLS(LS_PYRAMID_PROJECT_KEY) || {}
+    () => migrateLegacyPyramidPins(loadLS(LS_PYRAMID_PROJECT_KEY))
   );
   const [pyramidWarmupMap, setPyramidWarmupMapState] = useState(
-    () => loadLS(LS_PYRAMID_WARMUP_KEY) || {}
+    () => migrateLegacyPyramidPins(loadLS(LS_PYRAMID_WARMUP_KEY))
   );
   const savePyramidProjectMap = (next) => {
     setPyramidProjectMapState(next);
@@ -393,16 +398,19 @@ export default function App() {
         setClimbingFocusState(cf);
         saveLS(LS_CLIMBING_FOCUS_KEY, cf);
       }
-      // Pyramid pin maps — apply if cloud has them, even when empty
-      // {} (cloud signal "no pins yet" is meaningful and should clear
-      // a stale local pin if the user cleared it on another device).
+      // Pyramid pin maps — apply if cloud has them. Migration runs on
+      // the cloud side too so a row last written under the legacy
+      // discipline-keyed shape gets normalized before it lands in
+      // local state.
       if (cloud.pyramid_project && typeof cloud.pyramid_project === "object") {
-        setPyramidProjectMapState(cloud.pyramid_project);
-        saveLS(LS_PYRAMID_PROJECT_KEY, cloud.pyramid_project);
+        const migrated = migrateLegacyPyramidPins(cloud.pyramid_project);
+        setPyramidProjectMapState(migrated);
+        saveLS(LS_PYRAMID_PROJECT_KEY, migrated);
       }
       if (cloud.pyramid_warmup && typeof cloud.pyramid_warmup === "object") {
-        setPyramidWarmupMapState(cloud.pyramid_warmup);
-        saveLS(LS_PYRAMID_WARMUP_KEY, cloud.pyramid_warmup);
+        const migrated = migrateLegacyPyramidPins(cloud.pyramid_warmup);
+        setPyramidWarmupMapState(migrated);
+        saveLS(LS_PYRAMID_WARMUP_KEY, migrated);
       }
       // Pull fatigue_model so the client uses the same β the server
       // trigger is updating. Falls back to local defaults if cloud

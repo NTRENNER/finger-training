@@ -99,16 +99,55 @@ export const LS_ANALYSIS_SUBTAB_KEY = "ft_analysis_subtab";
 // navigations.
 export const LS_BW_NORMALIZE_KEY = "ft_bw_normalize";
 
-// Climbing grade pyramid — per-discipline pinned project grade. Map
-// shape: { boulder: "V6", lead: "5.12a", top_rope: null }. A non-null
-// value overrides inferProjectGrade in ClimbingAnalysisView. Lets the
-// user say "V6 is my project" even when they only have one V6 send,
-// or pin V5 when one lucky V6 would otherwise auto-anchor the rubric.
+// Climbing grade pyramid — pinned project grade per (discipline,
+// venue, wall) combination. Map shape: keys are pipe-separated
+// `${discipline}|${venue}|${wall}` strings; values are grade strings.
+// Example:
+//   {
+//     "boulder|indoor|commercial": "V7",
+//     "boulder|indoor|moonboard":  "V5",
+//     "boulder|outdoor|all":       "V6",
+//     "lead|all|all":              "5.13a",
+//   }
+// Why per-combination: a V4 on a MoonBoard isn't the same as a V4
+// on a commercial set or outdoors. Each context deserves its own
+// project anchor.
 export const LS_PYRAMID_PROJECT_KEY = "ft_pyramid_project";
 
-// Climbing grade pyramid — per-discipline warmup floor (rank, inclusive).
-// Map shape: { boulder: 3, lead: 8, top_rope: 8 }. Grades at or below
-// the floor are excluded from the pyramid chart and surfaced as a small
-// "plus N warmup sends" caption underneath. Stops easy mileage from
-// padding the base tier into looking healthy when it's just warmups.
+// Climbing grade pyramid — warmup floor per (discipline, venue, wall).
+// Same composite-key shape as LS_PYRAMID_PROJECT_KEY. Grades at or
+// below the floor are excluded from the pyramid chart and surfaced as
+// a small "plus N warmup sends" caption underneath. Per-combination
+// because warmup grades differ across walls (V3 is a warmup on
+// commercial sets but a real climb on a MoonBoard).
 export const LS_PYRAMID_WARMUP_KEY = "ft_pyramid_warmup";
+
+// Build a stable composite key for the pyramid pin maps from the
+// active filter set. Wall only matters for indoor boulder; for any
+// other combination we force "all" so the key reflects only the
+// actually-active filters and we don't fragment the pin namespace
+// over irrelevant axes.
+export function pyramidPinKey(discipline, venue, wall) {
+  const wallPart = (discipline === "boulder" && venue !== "outdoor")
+    ? (wall || "all")
+    : "all";
+  return `${discipline || "boulder"}|${venue || "all"}|${wallPart}`;
+}
+
+// Convert a legacy discipline-keyed pin map (`{ boulder: "V6" }`) to
+// the composite-key shape. Legacy entries get the broadest filter
+// combo (all venues, all walls). Already-migrated entries pass through.
+// Returns a fresh object; safe to call on undefined/null/non-object.
+export function migrateLegacyPyramidPins(map) {
+  if (!map || typeof map !== "object") return {};
+  const out = {};
+  for (const [k, v] of Object.entries(map)) {
+    if (typeof k !== "string" || !k || !v) continue;
+    if (k.includes("|")) {
+      out[k] = v;
+    } else {
+      out[`${k}|all|all`] = v;
+    }
+  }
+  return out;
+}
