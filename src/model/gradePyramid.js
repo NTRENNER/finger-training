@@ -7,22 +7,29 @@
 // at project − 3 should contain "All The Boulders" (ATB), not
 // just a few token easier sends.
 //
-// Two anchoring modes are supported:
+// The climber picks the project grade explicitly (via the pin in
+// ClimbingAnalysisView). The model just walks tiers down from there.
+// Two label/band sets are available:
+//
+//   anchorMode = 'flash' (default for live UI, forward-looking)
+//     Bands tolerate aspirational projects:
+//       Project       — what you're trying       0–2 sends
+//       Push          — the bridge               1–3 sends
+//       Consolidate   — solid territory          3–5 sends
+//       Volume (ATB)  — your reliable grade      10+ sends
 //
 //   anchorMode = 'send' (legacy / backward-looking)
-//     project = highest grade with ≥ minSends clean sends. Tiers
-//     count down 0/-1/-2/-3 with bands [1-2 / 3-5 / 5-10 / 10+].
-//     Mirrors the article's original framing.
+//     Bands assume project = grade you've already sent:
+//       Project   1-2 / Consolidate 3-5 / Cleanup 5-10 / Base 10+
 //
-//   anchorMode = 'flash' (forward-looking)
-//     project = flash + gap (default +3). Tier roles change:
-//       Project   (flash + 3) — what you're trying      0–2 sends
-//       Push      (flash + 2) — the bridge              1–3 sends
-//       Consolidate (flash+1) — solid territory         3–5 sends
-//       Volume    (flash, ATB) — your reliable grade    10+ sends
-//     The Volume tier sits at the flash grade itself — the
-//     "all the boulders" advice applies where you're sending
-//     reliably, not at flash − 1.
+// Both sets share the same {0, -1, -2, -3} tier offsets in rank
+// units, scaled by `stepSize` so YDS pyramids step by letter
+// subgrades (0.25 rank/tier) and boulder pyramids step by V-grades
+// (1 rank/tier).
+//
+// Cold-start auto-anchor: inferProjectGrade picks the highest grade
+// with ≥2 clean sends (one-shot fallback) — used only when the user
+// hasn't pinned a project yet.
 //
 // Pure functions over the existing `pyramid.rows` shape produced by
 // ClimbingAnalysisView ({ grade, count, rank } per row, sorted easy
@@ -92,42 +99,6 @@ export function inferProjectGrade(rows, { minSends = 2 } = {}) {
   return pool.sort((a, b) => b.rank - a.rank)[0]?.grade ?? null;
 }
 
-// Pick the flash grade as the highest-rank grade where the flash rate
-// (onsight + flash ascents / total encounters) clears `minRate` AND
-// total encounters clear `minEncounters`. "Encounters" is every climb
-// logged at that grade — clean sends, rest-sends, attempts. Including
-// attempts in the denominator stops a climber who flashes V6 once but
-// fails six other times from calling V6 their flash grade.
-//
-// perGradeStats shape: [{ grade, rank, flashes, total }]
-//
-// Returns the grade string or null if nothing qualifies. With sparse
-// data, returning null is intentional — the UI falls back to the
-// legacy send-anchored inference rather than overcommitting to an
-// undersampled flash anchor.
-export function inferFlashGrade(perGradeStats, { minRate = 0.5, minEncounters = 3 } = {}) {
-  if (!Array.isArray(perGradeStats) || perGradeStats.length === 0) return null;
-  const qualifying = perGradeStats.filter(g =>
-    Number.isFinite(g.rank) &&
-    g.total >= minEncounters &&
-    (g.flashes / g.total) >= minRate
-  );
-  if (qualifying.length === 0) return null;
-  return qualifying.sort((a, b) => b.rank - a.rank)[0]?.grade ?? null;
-}
-
-// Walk a discipline's ordered grade list to find flash + gap. Caller
-// supplies the list (V_GRADES or YDS_GRADES from climbing-grades.js)
-// so this stays grade-scheme-agnostic. Returns null if the flash
-// grade isn't in the list or the target index exceeds the list end
-// (e.g. flash V13, gap +3 → out of bounds).
-export function projectFromFlash(flashGrade, gap, gradesList) {
-  if (!flashGrade || !Array.isArray(gradesList) || gradesList.length === 0) return null;
-  const idx = gradesList.indexOf(flashGrade);
-  if (idx === -1) return null;
-  return gradesList[idx + gap] || null;
-}
-
 // Build the 4-tier plan with status + advice per tier. Accepts the
 // project grade as an override; falls back to inferProjectGrade for
 // send-anchored mode (flash-anchored always passes an explicit project
@@ -146,6 +117,10 @@ export function buildPyramidPlan(rows, projectGrade = null, {
   // caller in ClimbingAnalysisView computes this via gradeRank() from
   // climbing-grades.js, which knows the V / YDS scales.
   projectRank: explicitRank = null,
+  // Tier offset in rank units. Boulder = 1 (each tier = 1 V-grade).
+  // YDS at 5.10+ = 0.25 (each tier = 1 letter subgrade). Caller picks
+  // based on discipline; this function stays scheme-agnostic.
+  stepSize = 1,
 } = {}) {
   const allGrades = (rows || [])
     .filter(r => Number.isFinite(r.rank))
@@ -161,11 +136,14 @@ export function buildPyramidPlan(rows, projectGrade = null, {
 
   // countByRank lets us look up actual counts even for tier ranks
   // that don't show up in the rows array (no sends at that rank).
+  // Keys are normalized to 2 decimals so float-precision wobble on
+  // 0.25 increments (0.5, 0.75, etc.) doesn't fragment the lookup.
+  const rankKey = (r) => Math.round(r * 100) / 100;
   const countByRank = new Map();
   const gradeByRank = new Map();
   for (const r of allGrades) {
-    countByRank.set(r.rank, r.count);
-    gradeByRank.set(r.rank, r.grade);
+    countByRank.set(rankKey(r.rank), r.count);
+    gradeByRank.set(rankKey(r.rank), r.grade);
   }
 
   // Even with no row at the project rank, we still want a grade label
@@ -174,9 +152,10 @@ export function buildPyramidPlan(rows, projectGrade = null, {
   const projectGradeFallback = projectGrade;
 
   return tiersFor(anchorMode).map(t => {
-    const tierRank = projectRank != null ? projectRank + t.tier : null;
-    const actualCount = tierRank != null ? (countByRank.get(tierRank) ?? 0) : 0;
-    let grade = tierRank != null ? (gradeByRank.get(tierRank) ?? null) : null;
+    const tierRank = projectRank != null ? projectRank + t.tier * stepSize : null;
+    const lookupKey = tierRank != null ? rankKey(tierRank) : null;
+    const actualCount = lookupKey != null ? (countByRank.get(lookupKey) ?? 0) : 0;
+    let grade = lookupKey != null ? (gradeByRank.get(lookupKey) ?? null) : null;
     // If the project tier itself has no rows (truly aspirational),
     // surface the explicit project grade label so the UI shows the
     // tier name instead of "—".

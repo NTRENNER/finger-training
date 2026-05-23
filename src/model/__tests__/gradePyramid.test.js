@@ -3,8 +3,6 @@
 
 import {
   inferProjectGrade,
-  inferFlashGrade,
-  projectFromFlash,
   buildPyramidPlan,
   topPyramidRecommendation,
   TIER_DEFINITIONS,
@@ -13,8 +11,6 @@ import {
 
 // Helper: build the row shape ClimbingAnalysisView produces.
 const row = (grade, rank, count) => ({ grade, rank, count });
-// Helper: per-grade flash stats shape used by inferFlashGrade.
-const stat = (grade, rank, flashes, total) => ({ grade, rank, flashes, total });
 
 describe("inferProjectGrade", () => {
   test("picks the highest-rank grade with at least minSends (default 2)", () => {
@@ -195,63 +191,6 @@ describe("TIER_DEFINITIONS", () => {
   });
 });
 
-describe("inferFlashGrade", () => {
-  test("picks the highest grade clearing minRate AND minEncounters", () => {
-    const stats = [
-      stat("V3", 3, 10, 10),  // 100% × 10
-      stat("V4", 4, 8,  10),  // 80%  × 10
-      stat("V5", 5, 1,  10),  // 10%  × 10  — too low
-    ];
-    expect(inferFlashGrade(stats)).toBe("V4");
-  });
-
-  test("ignores grades with too few encounters", () => {
-    const stats = [
-      stat("V4", 4, 10, 10),  // 100% × 10
-      stat("V6", 6, 1, 1),    // 100% × 1  — too few encounters
-    ];
-    expect(inferFlashGrade(stats)).toBe("V4");
-  });
-
-  test("returns null when nothing qualifies", () => {
-    const stats = [stat("V5", 5, 1, 5)]; // 20% — too low
-    expect(inferFlashGrade(stats)).toBeNull();
-  });
-
-  test("respects custom minRate and minEncounters", () => {
-    const stats = [
-      stat("V4", 4, 6, 10), // 60%
-      stat("V5", 5, 5, 10), // 50%
-    ];
-    expect(inferFlashGrade(stats, { minRate: 0.55 })).toBe("V4");
-    expect(inferFlashGrade(stats, { minEncounters: 11 })).toBeNull();
-  });
-
-  test("returns null for empty/invalid input", () => {
-    expect(inferFlashGrade([])).toBeNull();
-    expect(inferFlashGrade(null)).toBeNull();
-  });
-});
-
-describe("projectFromFlash", () => {
-  const VS = ["V0","V1","V2","V3","V4","V5","V6","V7","V8"];
-
-  test("walks +gap steps along the grade list", () => {
-    expect(projectFromFlash("V4", 3, VS)).toBe("V7");
-    expect(projectFromFlash("V4", 2, VS)).toBe("V6");
-  });
-
-  test("returns null when target exceeds the list", () => {
-    expect(projectFromFlash("V8", 3, VS)).toBeNull();
-  });
-
-  test("returns null for unknown grades or empty list", () => {
-    expect(projectFromFlash("V99", 3, VS)).toBeNull();
-    expect(projectFromFlash("V4", 3, [])).toBeNull();
-    expect(projectFromFlash(null, 3, VS)).toBeNull();
-  });
-});
-
 describe("buildPyramidPlan — flash-anchored", () => {
   test("uses flash-anchored tier labels and bands", () => {
     // Project = V7 (flash V4 + gap 3). User has 0 sends at V7.
@@ -278,5 +217,23 @@ describe("buildPyramidPlan — flash-anchored", () => {
     const rows = [row("V4", 4, 5)];
     const plan = buildPyramidPlan(rows, "V7", { anchorMode: "flash", projectRank: 7 });
     expect(plan[0].grade).toBe("V7"); // forward-looking label
+  });
+
+  test("YDS: stepSize 0.25 walks tiers by single letter subgrades", () => {
+    // Flash 5.12a (rank 12.0) → project 5.13a (rank 13.0).
+    // Tier -1 at rank 12.75 = 5.12d, -2 at 12.5 = 5.12c, -3 at 12.25 = 5.12b.
+    const rows = [
+      { grade: "5.12b", rank: 12.25, count: 12 }, // volume
+      { grade: "5.12c", rank: 12.5,  count: 4 },  // consolidate
+      { grade: "5.12d", rank: 12.75, count: 2 },  // push
+      { grade: "5.13a", rank: 13.0,  count: 0 },  // project (no sends yet)
+    ];
+    const plan = buildPyramidPlan(rows, "5.13a", {
+      anchorMode: "flash", projectRank: 13.0, stepSize: 0.25,
+    });
+    expect(plan[0]).toMatchObject({ label: "Project",      grade: "5.13a", actualCount: 0 });
+    expect(plan[1]).toMatchObject({ label: "Push",         grade: "5.12d", actualCount: 2 });
+    expect(plan[2]).toMatchObject({ label: "Consolidate",  grade: "5.12c", actualCount: 4 });
+    expect(plan[3]).toMatchObject({ label: "Volume (ATB)", grade: "5.12b", actualCount: 12 });
   });
 });
