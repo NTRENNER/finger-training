@@ -217,10 +217,15 @@ export const exercises = {
       "Reduce hand assistance.",
       "Control eccentric.",
     ],
-    // Non-loggable: bodyweight + band tension. Notes field tracks
-    // band tension cues if useful.
-    loggable: false,
+    // Loggable with band tension (logBand) — the band is the
+    // progression variable. Bilateral (the band loops around both
+    // feet so it's one tension across the whole movement, not a
+    // per-side selection like the lat pull).
+    loggable: true,
     type: "S",
+    sets: 3,
+    reps: "4–6",
+    logBand: true,
     videoUrl: "https://www.youtube.com/watch?v=qFScyUpr0nQ",
   },
 
@@ -228,20 +233,22 @@ export const exercises = {
     id: "abWheel",
     name: "Ab Wheel",
     tags: ["core", "strength", "shoulder"],
-    prescription: "1–2 light sets",
+    prescription: "1–2 × 5–10",
     intent: "Light anti-extension touch for steep-climbing force transfer.",
     progression: [
       "Increase ROM gradually.",
       "Slow eccentric.",
       "Progress toward standing rollouts (much later).",
     ],
-    // Loggable as set-circles (circlesOnly): no reps or weight, just
-    // a clickable circle per set. The progression variable is ROM
-    // quality, which isn't worth numeric tracking — done/not-done is
-    // enough to keep the habit anchored.
+    // Loggable as set-circles with reps (circlesOnly + reps): one
+    // tappable circle per set, with a reps input alongside. The
+    // circle conveys "set N done"; the reps input tracks how many
+    // rollouts you actually did. Weight is still excluded — load
+    // progression is ROM quality, not numeric.
     loggable: true,
     type: "S",
     sets: 2,
+    reps: "5–10",
     circlesOnly: true,
   },
 

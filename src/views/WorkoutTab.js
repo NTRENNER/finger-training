@@ -199,12 +199,22 @@ export function WorkoutTab({
     for (const ex of activeWorkout.exercises) {
       if (ex.loggable) {
         // Three logging modes for loggable exercises:
-        //   - circlesOnly: each set is just a done flag.
+        //   - circlesOnly: one done flag per set, optionally with
+        //     reps (if ex.reps is set — e.g. Ab Wheel).
         //   - logBand: reps + band color (no numeric weight).
         //   - default (logWeight): reps + numeric weight, with
         //     recommendSet seeding the suggested load.
         const sets = Array.from({ length: ex.sets || 1 }, (_, i) => {
-          if (ex.circlesOnly) return { done: false };
+          if (ex.circlesOnly) {
+            // Seed reps from the prior session when the exercise
+            // tracks reps too; otherwise just a bare done flag.
+            if (ex.reps) {
+              const lastSession = findLastSessionFor(wLog, activeId, ex.id);
+              const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
+              return { reps: lastSet?.reps ?? "", done: false };
+            }
+            return { done: false };
+          }
           if (ex.logBand) {
             // Seed band from last session if available — no progression
             // logic (band selection is qualitative; let user step up

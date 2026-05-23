@@ -71,12 +71,15 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
       alignItems: "center", justifyContent: "center",
     }}>{isDone ? "✓" : ""}</button>
   );
-  // Circles-only mode: short-circuit the whole render and just show
-  // one tappable circle per set. No reps, no weight, no headers —
-  // the only signal that matters is "did you do the set?". Used for
-  // habit-style exercises like Ab Wheel where ROM quality isn't
-  // worth numeric tracking.
+  // Circles-only mode: one tappable circle per SET (not per rep).
+  // Each circle conveys "did you do this set?" Optionally, if the
+  // exercise has a reps prescription (ex.reps), a small reps input
+  // sits alongside each circle so the user can also log the rep
+  // count without losing the lightweight habit-tracker feel.
+  // Used for movements like Ab Wheel where ROM quality is the load
+  // axis (no weight, no band) but rep volume is still useful info.
   if (ex.circlesOnly && setsData?.sets) {
+    const showReps = !!ex.reps;
     return (
       <div style={{
         padding: "12px 0",
@@ -93,50 +96,88 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
             {ex.intent ? (
               <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{ex.intent}</div>
             ) : null}
-            <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
+            {/* Surface the prescription text inside the active session
+                so the user can see suggested sets × reps without
+                bouncing back to the preview card. The reps + sets
+                hint disappeared on the May 2026 circlesOnly migration. */}
+            {ex.prescription ? (
+              <div style={{
+                fontSize: 11, color: C.muted, marginTop: 4, fontStyle: "italic",
+              }}>
+                {ex.prescription}
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 12 }}>
+              {/* One row per set: label, optional reps input, circle. */}
               {setsData.sets.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    const next = [...setsData.sets];
-                    next[i] = { ...next[i], done: !next[i].done };
-                    onSetsChange({ sets: next });
-                  }}
-                  title={`Set ${i + 1}: tap to toggle done`}
-                  style={{
-                    width: 36, height: 36, borderRadius: "50%",
-                    background: s.done ? C.green : "transparent",
-                    border: `2px solid ${s.done ? C.green : C.border}`,
-                    color: s.done ? "#000" : C.muted,
-                    cursor: "pointer", fontSize: 13, fontWeight: 700,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}
-                >
-                  {s.done ? "✓" : i + 1}
-                </button>
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 8, marginBottom: 6,
+                }}>
+                  <span style={{ fontSize: 12, color: C.muted, width: 36, flexShrink: 0 }}>
+                    Set {i + 1}
+                  </span>
+                  {showReps && (
+                    <input
+                      type="text" inputMode="text"
+                      value={s.reps ?? ""}
+                      onChange={e => {
+                        const next = [...setsData.sets];
+                        next[i] = { ...next[i], reps: e.target.value };
+                        onSetsChange({ sets: next });
+                      }}
+                      placeholder={ex.reps}
+                      style={{
+                        width: 60, background: C.bg, border: `1px solid ${C.border}`,
+                        color: C.text, borderRadius: 6, padding: "4px 7px", fontSize: 14,
+                        textAlign: "center",
+                      }}
+                    />
+                  )}
+                  {showReps && (
+                    <span style={{ fontSize: 11, color: C.muted }}>reps</span>
+                  )}
+                  <button
+                    onClick={() => {
+                      const next = [...setsData.sets];
+                      next[i] = { ...next[i], done: !next[i].done };
+                      onSetsChange({ sets: next });
+                    }}
+                    title={`Set ${i + 1}: tap to toggle done`}
+                    style={{
+                      width: 32, height: 32, borderRadius: "50%",
+                      background: s.done ? C.green : "transparent",
+                      border: `2px solid ${s.done ? C.green : C.border}`,
+                      color: s.done ? "#000" : C.muted,
+                      cursor: "pointer", fontSize: 13, fontWeight: 700,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {s.done ? "✓" : ""}
+                  </button>
+                  {i >= (ex.sets || 0) && (
+                    <button
+                      onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
+                      style={{
+                        background: "none", border: "none", color: C.muted,
+                        cursor: "pointer", fontSize: 14, padding: "0 4px", lineHeight: 1,
+                      }}
+                      title="Remove this set"
+                    >−</button>
+                  )}
+                </div>
               ))}
               <button
-                onClick={() => onSetsChange({ sets: [...setsData.sets, { done: false }] })}
+                onClick={() => onSetsChange({
+                  sets: [...setsData.sets, showReps ? { reps: "", done: false } : { done: false }],
+                })}
                 style={{
-                  width: 36, height: 36, borderRadius: "50%",
+                  marginTop: 4, width: "100%", padding: "5px 0",
                   background: "none", border: `1px dashed ${C.border}`,
-                  color: C.muted, cursor: "pointer", fontSize: 16,
-                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: C.muted, borderRadius: 6, fontSize: 12, cursor: "pointer",
                 }}
-                title="Add a set"
-              >+</button>
-              {setsData.sets.length > (ex.sets || 1) && (
-                <button
-                  onClick={() => onSetsChange({ sets: setsData.sets.slice(0, -1) })}
-                  style={{
-                    width: 28, height: 28, borderRadius: "50%",
-                    background: "none", border: `1px solid ${C.border}`,
-                    color: C.muted, cursor: "pointer", fontSize: 14,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}
-                  title="Remove the last set"
-                >−</button>
-              )}
+              >+ Set</button>
             </div>
           </div>
         </div>
