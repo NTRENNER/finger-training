@@ -483,11 +483,14 @@ export function WorkoutTab({
           {/* StretchPill sits below the picker, intentionally on its
               own row at full width — width is the visual cue that this
               is a daily habit, not another picker option competing
-              with A/B/C for today's slot. */}
+              with A/B/C for today's slot. Tap = select STRETCH so the
+              card below renders the stretch exercises; the marker log
+              lives on the green button inside that card. */}
           <StretchPill
             done={stretchState.done}
             daysSince={stretchState.daysSince}
-            onToggle={toggleTodaysStretch}
+            selected={activeId === "STRETCH"}
+            onSelect={() => setPickedId("STRETCH")}
           />
 
           {activeWorkout && (
@@ -543,17 +546,26 @@ export function WorkoutTab({
                 </div>
               )}
               <button
-                onClick={startSession}
+                onClick={
+                  // STRETCH is a daily habit, not a tracked session — the
+                  // green button toggles today's marker directly instead
+                  // of dropping into the active-session per-exercise UI.
+                  activeId === "STRETCH" ? toggleTodaysStretch : startSession
+                }
                 style={{
                   width: "100%", padding: "12px",
-                  background: WORKOUT_COLORS[activeId] || C.blue,
+                  background: activeId === "STRETCH" && stretchState.done
+                    ? C.muted
+                    : (WORKOUT_COLORS[activeId] || C.blue),
                   color: "#000", border: "none", borderRadius: 8,
                   fontSize: 15, fontWeight: 700, cursor: "pointer",
                 }}
               >
-                {activeWorkout.exercises.length === 0
-                  ? `Log ${activeWorkout.shortName} marker`
-                  : `Start ${activeWorkout.shortName}`}
+                {activeId === "STRETCH"
+                  ? (stretchState.done ? "Un-log Today's Stretch" : "Log Today's Stretch")
+                  : activeWorkout.exercises.length === 0
+                    ? `Log ${activeWorkout.shortName} marker`
+                    : `Start ${activeWorkout.shortName}`}
               </button>
             </Card>
           )}

@@ -1,12 +1,13 @@
 // ─────────────────────────────────────────────────────────────
-// StretchPill — daily-habit toggle for hip + forearm mobility
+// StretchPill — daily-habit selector for hip + forearm mobility
 // ─────────────────────────────────────────────────────────────
-// Renders full-width below the A/B/C picker. Click = toggle: if
-// today doesn't yet have a STRETCH session, log a marker session;
-// if it does, remove it. Reversible-forever beats a confirm step
-// for a low-stakes habit tracker — an accidental tap is fixed by
-// tapping again, and the pill's visible state change makes the
-// accident immediately obvious.
+// Renders full-width below the A/B/C picker. Tapping the pill selects
+// STRETCH as today's workout — the card below the picker then renders
+// the stretch exercise list, mirroring the A/B/C preview flow. Logging
+// the marker is moved to the green button inside that card so "view"
+// and "log" are two separate, unambiguous actions. (Earlier design
+// tap-to-log directly here, but it hid the actual exercises behind
+// the toggle — users had to leave the app to remember what to do.)
 //
 // Color state communicates staleness without prompting:
 //   green  — done today
@@ -18,14 +19,18 @@
 // want to count STRETCH marker sessions specifically, not anything
 // that happens to carry a mobility tag.
 //
-// The component is presentation-only: parent owns the toggle handler
+// The `selected` prop adds a thicker accent border when STRETCH is
+// the currently-active workout — matches the visual weight of the
+// A/B/C picker tiles when they're picked.
+//
+// The component is presentation-only: parent owns the select handler
 // and reads/writes the workout log. This keeps the pill testable in
-// isolation and makes the pull-trigger explicit in WorkoutTab.
+// isolation and makes the data path explicit in WorkoutTab.
 
 import React from "react";
 import { C } from "../../ui/theme.js";
 
-export function StretchPill({ done, daysSince, onToggle }) {
+export function StretchPill({ done, daysSince, selected = false, onSelect }) {
   // Color band: green when done today, gray when fresh, yellow at
   // mid-staleness, orange at high. Thresholds matched to the
   // literature's "every few days is fine, weekly is not" — yellow
@@ -63,21 +68,24 @@ export function StretchPill({ done, daysSince, onToggle }) {
 
   return (
     <button
-      onClick={onToggle}
+      onClick={onSelect}
       style={{
         width: "100%",
         padding: "10px 14px",
         marginBottom: 12,
         background: pillBg,
-        border: `1px solid ${accent}`,
+        // Thicker border + outline when selected so the pill reads as
+        // "this is what's loaded in the card below" — matches the
+        // visual weight of the A/B/C picker tiles when they're picked.
+        border: `${selected ? 2 : 1}px solid ${accent}`,
+        outline: selected ? `1px solid ${accent}` : "none",
+        outlineOffset: selected ? -3 : 0,
         borderRadius: 8,
         cursor: "pointer",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         textAlign: "left",
       }}
-      // The toggle is the whole point — a hover hint keeps the
-      // tap behavior discoverable without an inline icon.
-      title={done ? "Tap to un-log today's stretch" : "Tap to log today's stretch"}
+      title={selected ? "Selected — log via the button below" : "Tap to view today's stretches"}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: textColor, letterSpacing: 0.3 }}>
@@ -93,7 +101,7 @@ export function StretchPill({ done, daysSince, onToggle }) {
         border: `1px solid ${accent}`,
         textTransform: "uppercase", letterSpacing: 0.5,
       }}>
-        {done ? "✓" : "Tap to log"}
+        {done ? "✓" : "View"}
       </div>
     </button>
   );
