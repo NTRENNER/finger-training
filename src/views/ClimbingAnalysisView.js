@@ -35,6 +35,11 @@ import {
   gradeRank, weekKey,
   disciplineMeta,
 } from "../lib/climbing-grades.js";
+import {
+  loadLS, saveLS,
+  LS_PYRAMID_PROJECT_KEY, LS_PYRAMID_WARMUP_KEY,
+} from "../lib/storage.js";
+import { inferProjectGrade } from "../model/gradePyramid.js";
 
 // Color per discipline. Boulder = orange (power), top_rope = purple,
 // lead = blue (rope-climbing palette). Falls back to muted for unknowns.
@@ -104,6 +109,35 @@ export function ClimbingAnalysisView({ activities = [] }) {
   useEffect(() => {
     if (!wallFilterActive && pyramidWall !== "all") setPyramidWall("all");
   }, [wallFilterActive, pyramidWall]);
+
+  // ── Pyramid settings — pinned project + warmup floor (per discipline) ──
+  // Both persist across navigations. Keyed by discipline because a
+  // boulderer projecting V6 and onsighting 5.11a needs different pins
+  // for boulder vs lead.
+  const [pinnedProjectMap, setPinnedProjectMap] = useState(
+    () => loadLS(LS_PYRAMID_PROJECT_KEY) || {}
+  );
+  const [warmupFloorMap, setWarmupFloorMap] = useState(
+    () => loadLS(LS_PYRAMID_WARMUP_KEY) || {}
+  );
+  const pinnedProject     = pinnedProjectMap[pyramidDiscipline] || null;
+  const warmupFloorGrade  = warmupFloorMap[pyramidDiscipline]   || null;
+  const warmupFloorRank   = warmupFloorGrade ? gradeRank(warmupFloorGrade) : null;
+
+  const updatePinnedProject = (grade) => {
+    const next = { ...pinnedProjectMap };
+    if (grade) next[pyramidDiscipline] = grade;
+    else delete next[pyramidDiscipline];
+    setPinnedProjectMap(next);
+    saveLS(LS_PYRAMID_PROJECT_KEY, next);
+  };
+  const updateWarmupFloor = (grade) => {
+    const next = { ...warmupFloorMap };
+    if (grade) next[pyramidDiscipline] = grade;
+    else delete next[pyramidDiscipline];
+    setWarmupFloorMap(next);
+    saveLS(LS_PYRAMID_WARMUP_KEY, next);
+  };
 
   // ── Max sends card state ────────────────────────────────────
   // Independent filter set from the pyramid (above) so the user can
@@ -211,6 +245,37 @@ export function ClimbingAnalysisView({ activities = [] }) {
       .sort((a, b) => a.rank - b.rank);
     return { rows, total: climbs.length };
   }, [allClimbs, pyramidDiscipline, pyramidVenue, pyramidWall, wallFilterActive, pyramidWindow]);
+
+  // ── Warmup partition ──
+  // Split the filtered pyramid rows into (display, warmup) based on the
+  // per-discipline warmup floor. Floor is inclusive — a floor of V3
+  // excludes V0/V1/V2/V3 from the chart. Aggregated warmup counts
+  // surface as a caption below the pyramid so the climber can see
+  // their warmup mileage without it inflating the base tier.
+  const pyramidPartition = useMemo(() => {
+    if (warmupFloorRank == null) {
+      return { displayRows: pyramid.rows, warmupRows: [], warmupSends: 0 };
+    }
+    const display = [];
+    const warmups = [];
+    for (const r of pyramid.rows) {
+      if (r.rank <= warmupFloorRank) warmups.push(r);
+      else display.push(r);
+    }
+    return {
+      displayRows: display,
+      warmupRows: warmups,
+      warmupSends: warmups.reduce((s, r) => s + r.count, 0),
+    };
+  }, [pyramid.rows, warmupFloorRank]);
+
+  // Auto-inferred project from the (post-warmup-filter) rows. Shown as
+  // a hint next to the pin picker so the user knows what the algo would
+  // pick if they cleared the pin.
+  const inferredProject = useMemo(
+    () => inferProjectGrade(pyramidPartition.displayRows),
+    [pyramidPartition.displayRows]
+  );
 
   // ── Max sends by ascent style ──
   // For each clean-send style (onsight / flash / redpoint), find the
@@ -447,10 +512,24 @@ export function ClimbingAnalysisView({ activities = [] }) {
             </div>
           )}
 
-          {pyramid.rows.length === 0 ? (
+          {/* Pyramid settings: project pin + warmup floor (per discipline).
+              Pin overrides auto-inference (default requires ≥2 clean sends
+              at a grade). Warmup floor excludes easy-mileage grades from
+              the chart so the base tier reflects real climbing, not warmups. */}
+          <PyramidSettings
+            discipline={pyramidDiscipline}
+            pinnedProject={pinnedProject}
+            inferredProject={inferredProject}
+            warmupFloorGrade={warmupFloorGrade}
+            onPinProject={updatePinnedProject}
+            onSetWarmupFloor={updateWarmupFloor}
+          />
+
+          {pyramidPartition.displayRows.length === 0 ? (
             <div style={{ color: C.muted, fontSize: 12, padding: "12px 0" }}>
-              No clean sends match these filters. Widen the window or
-              loosen the venue / wall filter above.
+              {pyramid.rows.length === 0
+                ? "No clean sends match these filters. Widen the window or loosen the venue / wall filter above."
+                : `All ${pyramid.total} clean send${pyramid.total === 1 ? "" : "s"} are in your warmup zone (≤ ${warmupFloorGrade}). Lower the warmup floor to see them in the pyramid.`}
             </div>
           ) : (
             <>
@@ -459,11 +538,15 @@ export function ClimbingAnalysisView({ activities = [] }) {
                   model/gradePyramid.js for Power Company Climbing's
                   project / consolidate / cleanup / base ATB logic. */}
               <PyramidChart
-                rows={pyramid.rows}
+                rows={pyramidPartition.displayRows}
                 fill={DISCIPLINE_COLORS[pyramidDiscipline]}
+                projectGrade={pinnedProject}
               />
               <div style={{ marginTop: 6, fontSize: 11, color: C.muted, textAlign: "right" }}>
                 {pyramid.total} clean send{pyramid.total === 1 ? "" : "s"} total
+                {pyramidPartition.warmupSends > 0
+                  ? ` · ${pyramidPartition.warmupSends} warmup${pyramidPartition.warmupSends === 1 ? "" : "s"} at ${pyramidPartition.warmupRows.map(r => r.grade).join(", ")} (hidden)`
+                  : ""}
               </div>
             </>
           )}
@@ -663,6 +746,68 @@ function Stat({ label, value }) {
     }}>
       <div style={{ fontSize: 11, color: C.muted }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>{value}</div>
+    </div>
+  );
+}
+
+// Per-discipline pyramid settings — pinned project grade + warmup
+// floor. Both compact <select>s in a single row so the controls stay
+// out of the way unless the user wants them. Empty string = unset
+// (use auto / no floor); upstream maps that to LS deletion.
+//
+// The warmup floor list is clamped to grades strictly below the active
+// project (pin if set, otherwise the auto-inferred grade). A floor at
+// or above the project would either exclude the project tier (silly)
+// or do nothing useful, so we just hide those options.
+function PyramidSettings({
+  discipline, pinnedProject, inferredProject,
+  warmupFloorGrade, onPinProject, onSetWarmupFloor,
+}) {
+  const allGrades = discipline === "boulder" ? V_GRADES : YDS_GRADES;
+  const activeProject = pinnedProject || inferredProject;
+  const projectRank = activeProject ? gradeRank(activeProject) : null;
+  // Cap warmup options at one rank below project. If no project yet,
+  // any grade is fair game so cold-start users can still set a floor.
+  const warmupOptions = projectRank != null
+    ? allGrades.filter(g => gradeRank(g) < projectRank)
+    : allGrades;
+
+  const selectStyle = {
+    padding: "3px 6px", borderRadius: 6, fontSize: 11,
+    background: C.bg, color: C.text, border: `1px solid ${C.border}`,
+    cursor: "pointer",
+  };
+
+  return (
+    <div style={{
+      display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center",
+      marginBottom: 12, fontSize: 11, color: C.muted,
+    }}>
+      <span>Project:</span>
+      <select
+        value={pinnedProject || ""}
+        onChange={(e) => onPinProject(e.target.value || null)}
+        style={selectStyle}
+        title="Pin a project grade. Auto uses the highest grade with ≥2 clean sends."
+      >
+        <option value="">Auto{inferredProject ? ` (${inferredProject})` : ""}</option>
+        {allGrades.map(g => (
+          <option key={g} value={g}>{g}</option>
+        ))}
+      </select>
+
+      <span style={{ marginLeft: 8 }}>Warmups ≤</span>
+      <select
+        value={warmupFloorGrade || ""}
+        onChange={(e) => onSetWarmupFloor(e.target.value || null)}
+        style={selectStyle}
+        title="Hide easy grades from the pyramid. Sends at or below this grade are tallied separately as warmups."
+      >
+        <option value="">None</option>
+        {warmupOptions.map(g => (
+          <option key={g} value={g}>{g}</option>
+        ))}
+      </select>
     </div>
   );
 }

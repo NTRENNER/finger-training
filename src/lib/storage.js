@@ -98,3 +98,17 @@ export const LS_ANALYSIS_SUBTAB_KEY = "ft_analysis_subtab";
 // the BW from THAT date, not just current BW. Persisted across
 // navigations.
 export const LS_BW_NORMALIZE_KEY = "ft_bw_normalize";
+
+// Climbing grade pyramid — per-discipline pinned project grade. Map
+// shape: { boulder: "V6", lead: "5.12a", top_rope: null }. A non-null
+// value overrides inferProjectGrade in ClimbingAnalysisView. Lets the
+// user say "V6 is my project" even when they only have one V6 send,
+// or pin V5 when one lucky V6 would otherwise auto-anchor the rubric.
+export const LS_PYRAMID_PROJECT_KEY = "ft_pyramid_project";
+
+// Climbing grade pyramid — per-discipline warmup floor (rank, inclusive).
+// Map shape: { boulder: 3, lead: 8, top_rope: 8 }. Grades at or below
+// the floor are excluded from the pyramid chart and surfaced as a small
+// "plus N warmup sends" caption underneath. Stops easy mileage from
+// padding the base tier into looking healthy when it's just warmups.
+export const LS_PYRAMID_WARMUP_KEY = "ft_pyramid_warmup";

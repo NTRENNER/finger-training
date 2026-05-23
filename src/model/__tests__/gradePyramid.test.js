@@ -12,11 +12,28 @@ import {
 const row = (grade, rank, count) => ({ grade, rank, count });
 
 describe("inferProjectGrade", () => {
-  test("picks the highest-rank grade with a send", () => {
+  test("picks the highest-rank grade with at least minSends (default 2)", () => {
     const rows = [
-      row("V3", 3, 4), row("V5", 5, 2), row("V6", 6, 1),
+      row("V3", 3, 4), row("V5", 5, 2), row("V6", 6, 2),
     ];
     expect(inferProjectGrade(rows)).toBe("V6");
+  });
+
+  test("skips one-shot sends so a lucky V6 doesn't anchor the pyramid", () => {
+    const rows = [
+      row("V3", 3, 4), row("V5", 5, 2), row("V6", 6, 1), // V6 = one-shot
+    ];
+    expect(inferProjectGrade(rows)).toBe("V5");
+  });
+
+  test("falls back to highest one-send grade when nothing clears the threshold (cold start)", () => {
+    const rows = [row("V3", 3, 1), row("V4", 4, 1)];
+    expect(inferProjectGrade(rows)).toBe("V4");
+  });
+
+  test("respects custom minSends threshold", () => {
+    const rows = [row("V5", 5, 3), row("V6", 6, 2)];
+    expect(inferProjectGrade(rows, { minSends: 3 })).toBe("V5");
   });
 
   test("returns null for empty/invalid input", () => {
@@ -33,7 +50,7 @@ describe("inferProjectGrade", () => {
 
 describe("buildPyramidPlan", () => {
   test("returns 4 tiers in project → base order", () => {
-    const plan = buildPyramidPlan([row("V6", 6, 1)]);
+    const plan = buildPyramidPlan([row("V6", 6, 2)]);
     expect(plan).toHaveLength(4);
     expect(plan.map(p => p.tier)).toEqual([0, -1, -2, -3]);
     expect(plan[0].grade).toBe("V6");
@@ -43,10 +60,10 @@ describe("buildPyramidPlan", () => {
   test("fills counts from rows by rank", () => {
     const rows = [
       row("V3", 3, 4), row("V4", 4, 6),
-      row("V5", 5, 3), row("V6", 6, 1),
+      row("V5", 5, 3), row("V6", 6, 2),
     ];
     const plan = buildPyramidPlan(rows);
-    expect(plan[0]).toMatchObject({ grade: "V6", actualCount: 1 }); // project
+    expect(plan[0]).toMatchObject({ grade: "V6", actualCount: 2 }); // project
     expect(plan[1]).toMatchObject({ grade: "V5", actualCount: 3 }); // P-1
     expect(plan[2]).toMatchObject({ grade: "V4", actualCount: 6 }); // P-2
     expect(plan[3]).toMatchObject({ grade: "V3", actualCount: 4 }); // P-3
@@ -55,7 +72,7 @@ describe("buildPyramidPlan", () => {
   test("tiers with no sends get count 0 and grade null", () => {
     // Project at V6, but nothing sent at V4 (P-2) — gap tier
     const rows = [
-      row("V3", 3, 5), row("V5", 5, 2), row("V6", 6, 1),
+      row("V3", 3, 5), row("V5", 5, 2), row("V6", 6, 2),
     ];
     const plan = buildPyramidPlan(rows);
     expect(plan[2].grade).toBeNull();
@@ -68,10 +85,10 @@ describe("buildPyramidPlan", () => {
       row("V3", 3, 4),  // base: light (need 10+)
       row("V4", 4, 7),  // P-2: on_track (5-10)
       row("V5", 5, 4),  // P-1: on_track (3-5)
-      row("V6", 6, 1),  // project: on_track (1-2)
+      row("V6", 6, 2),  // project: on_track (1-2)
     ];
     const plan = buildPyramidPlan(rows);
-    expect(plan[0].status).toBe("on_track"); // project = 1
+    expect(plan[0].status).toBe("on_track"); // project = 2
     expect(plan[1].status).toBe("on_track"); // P-1 = 4
     expect(plan[2].status).toBe("on_track"); // P-2 = 7
     expect(plan[3].status).toBe("light");    // base = 4 < 10
@@ -110,7 +127,7 @@ describe("topPyramidRecommendation", () => {
       row("V3", 3, 2),  // base: light (need 10)
       row("V4", 4, 7),  // P-2: on_track
       row("V5", 5, 4),  // P-1: on_track
-      row("V6", 6, 1),  // project: on_track
+      row("V6", 6, 2),  // project: on_track
     ];
     const rec = topPyramidRecommendation(buildPyramidPlan(rows));
     expect(rec).toBeTruthy();
@@ -119,7 +136,7 @@ describe("topPyramidRecommendation", () => {
   });
 
   test("missing tier gets a 'build it' message", () => {
-    const rows = [row("V6", 6, 1)];
+    const rows = [row("V6", 6, 2)];
     const rec = topPyramidRecommendation(buildPyramidPlan(rows));
     expect(rec.message).toMatch(/start sending/i);
   });
@@ -127,7 +144,7 @@ describe("topPyramidRecommendation", () => {
   test("balanced pyramid suggests pushing the project", () => {
     const rows = [
       row("V3", 3, 12), row("V4", 4, 7),
-      row("V5", 5, 4),  row("V6", 6, 1),
+      row("V5", 5, 4),  row("V6", 6, 2),
     ];
     const rec = topPyramidRecommendation(buildPyramidPlan(rows));
     expect(rec.tier).toBe(0);

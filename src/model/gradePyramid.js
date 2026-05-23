@@ -32,19 +32,30 @@ const TIER_TARGETS = [
     advice: "All The Boulders. Take down a new one every session as part of warmup. When you run out of easy ones, the leftovers are the ones with the most to teach you." },
 ];
 
-// Pick the project grade as the highest-rank grade with at least one
-// clean send. Returns null if the input is empty or has no ranks.
+// Pick the project grade as the highest-rank grade with at least
+// `minSends` clean sends. Returns null if the input is empty or has
+// no ranks. A second cold-start tier kicks in when no grade clears
+// the threshold yet — we fall back to the highest grade with ≥1 send
+// rather than returning null, so early data still surfaces a pyramid.
+//
+// Why a minimum: a lucky one-shot send shouldn't anchor the project
+// tier. Before the threshold, a single V6 in an otherwise V4-heavy
+// log would shift every tier up one grade and label V3 as "base."
+// Requiring 2+ sends matches the article's spirit — project = the
+// grade you're sending, not the one you've happened to send.
 //
 // The Power Company article explicitly notes the rubric should shift
-// up a grade once the user starts sending the level below quickly —
-// so a future iteration could let the user pin the project grade by
-// hand. v1 just derives it from the data.
-export function inferProjectGrade(rows) {
+// up a grade once the user starts sending the level below quickly,
+// so users should also be able to pin the project grade by hand
+// (see buildPyramidPlan's projectGrade override + the pin UI on
+// ClimbingAnalysisView).
+export function inferProjectGrade(rows, { minSends = 2 } = {}) {
   if (!Array.isArray(rows) || rows.length === 0) return null;
-  const sorted = [...rows]
-    .filter(r => Number.isFinite(r.rank) && r.count > 0)
-    .sort((a, b) => b.rank - a.rank);
-  return sorted[0]?.grade ?? null;
+  const withSends = rows.filter(r => Number.isFinite(r.rank) && r.count > 0);
+  if (withSends.length === 0) return null;
+  const qualifying = withSends.filter(r => r.count >= minSends);
+  const pool = qualifying.length > 0 ? qualifying : withSends; // cold-start fallback
+  return pool.sort((a, b) => b.rank - a.rank)[0]?.grade ?? null;
 }
 
 // Build the 4-tier plan with status + advice per tier. Accepts the
