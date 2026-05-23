@@ -172,10 +172,15 @@ export const exercises = {
       "Keep full reach and scapular motion.",
       "Pull elbow toward hip, not toward chest.",
     ],
-    // Non-loggable: band color is the load axis, not numeric weight.
-    // The user logs band variant + sets in the notes field.
-    loggable: false,
+    // Loggable with band color instead of numeric weight (logBand).
+    // Unilateral — each side gets its own reps + band, since you may
+    // load one side heavier when the other's recovering.
+    loggable: true,
     type: "S",
+    sets: 3,
+    reps: "6–10",
+    logBand: true,
+    unilateral: true,
   },
 
   bicepCurls: {
@@ -230,8 +235,14 @@ export const exercises = {
       "Slow eccentric.",
       "Progress toward standing rollouts (much later).",
     ],
-    loggable: false,
+    // Loggable as set-circles (circlesOnly): no reps or weight, just
+    // a clickable circle per set. The progression variable is ROM
+    // quality, which isn't worth numeric tracking — done/not-done is
+    // enough to keep the habit anchored.
+    loggable: true,
     type: "S",
+    sets: 2,
+    circlesOnly: true,
   },
 
   proneExternalRotation: {
@@ -338,8 +349,15 @@ export const exercises = {
       "Increase speed before load. A faster chop with a lighter band beats a sluggish chop with a heavy one.",
       "Step further from the anchor for more torque before switching to a thicker band.",
     ],
-    loggable: false,
+    // Loggable with band color instead of numeric weight (logBand).
+    // Reps are per-side ("3 × 6 / side") — we treat each side as a
+    // separate row by reusing the unilateral pattern.
+    loggable: true,
     type: "P",
+    sets: 3,
+    reps: "6",
+    logBand: true,
+    unilateral: true,
     videoUrl: "https://www.youtube.com/shorts/7FBTF01LBUI",
   },
 

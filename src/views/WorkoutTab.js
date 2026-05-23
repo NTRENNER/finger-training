@@ -198,9 +198,36 @@ export function WorkoutTab({
     const seed = {};
     for (const ex of activeWorkout.exercises) {
       if (ex.loggable) {
-        // Seed sets with recommendSet-suggested values from wLog
-        // history. Same protocol the legacy tab used.
+        // Three logging modes for loggable exercises:
+        //   - circlesOnly: each set is just a done flag.
+        //   - logBand: reps + band color (no numeric weight).
+        //   - default (logWeight): reps + numeric weight, with
+        //     recommendSet seeding the suggested load.
         const sets = Array.from({ length: ex.sets || 1 }, (_, i) => {
+          if (ex.circlesOnly) return { done: false };
+          if (ex.logBand) {
+            // Seed band from last session if available — no progression
+            // logic (band selection is qualitative; let user step up
+            // manually when they're ready). Lookup the most-recent
+            // session containing this exercise to pull the prior band.
+            const lastSession = findLastSessionFor(wLog, activeId, ex.id);
+            const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
+            if (ex.unilateral) {
+              return {
+                leftReps:  lastSet?.leftReps  ?? ex.reps ?? "",
+                leftBand:  lastSet?.leftBand  ?? "",
+                rightReps: lastSet?.rightReps ?? ex.reps ?? "",
+                rightBand: lastSet?.rightBand ?? "",
+                done: false,
+              };
+            }
+            return {
+              reps: lastSet?.reps ?? ex.reps ?? "",
+              band: lastSet?.band ?? "",
+              done: false,
+            };
+          }
+          // Default weight-logged exercise — seed via recommendSet.
           const rec = recommendSet(wLog, ex, activeId, i);
           if (ex.unilateral) {
             return {
@@ -588,12 +615,23 @@ function countSupportSessions(wLog) {
   return (wLog || []).filter(s => s && s.workout !== ROTATION_PIN_KEY).length;
 }
 
-// Reduce a stored set object into a compact "prev" display string
-// for SessionExRow's prev column. For unilateral sets, returns
-// an object { L: "...", R: "..." }; for bilateral, returns a
-// single string.
+// Reduce a stored set object into a compact "prev" display value for
+// SessionExRow's prev column. Three shapes:
+//   - weight: { reps, weight, done } (or unilateral { leftReps, ... })
+//     → returns a string like "5@80" or { L: "5@80", R: "5@80" }.
+//   - band:   { reps, band } / { leftReps, leftBand, ... }
+//     → returns { band, reps } so the prev pill can render a swatch.
+//   - circles-only: { done } → returns "✓" if done else "".
 function setSummary(set) {
   if (set == null) return null;
+  // Unilateral with band
+  if (set.leftBand !== undefined || set.rightBand !== undefined) {
+    return {
+      L: set.leftBand  ? { band: set.leftBand,  reps: set.leftReps  } : "",
+      R: set.rightBand ? { band: set.rightBand, reps: set.rightReps } : "",
+    };
+  }
+  // Unilateral with weight
   if (set.leftReps != null || set.leftWeight != null) {
     const fmt = (r, w) => {
       if ((r == null || r === "") && (w == null || w === "")) return "";
@@ -604,8 +642,31 @@ function setSummary(set) {
       R: fmt(set.rightReps, set.rightWeight),
     };
   }
-  const r = set.reps, w = set.weight;
-  if ((r == null || r === "") && (w == null || w === "")) return "";
-  return `${r ?? ""}${r && w ? "@" : ""}${w ?? ""}`;
+  // Bilateral with band
+  if (set.band !== undefined) {
+    return set.band ? { band: set.band, reps: set.reps } : "";
+  }
+  // Bilateral with weight
+  if (set.reps !== undefined || set.weight !== undefined) {
+    const r = set.reps, w = set.weight;
+    if ((r == null || r === "") && (w == null || w === "")) return "";
+    return `${r ?? ""}${r && w ? "@" : ""}${w ?? ""}`;
+  }
+  // Circles-only — return a checkmark when done.
+  return set.done ? "✓" : "";
+}
+
+// Walk wLog backward to find the most recent session that contains
+// a sets-shaped entry for the given exercise. Used to seed band-mode
+// exercises (recommendSet handles weight-mode seeding internally).
+function findLastSessionFor(wLog, workoutId, exId) {
+  for (let i = (wLog?.length ?? 0) - 1; i >= 0; i--) {
+    const s = wLog[i];
+    if (!s || s.workout === ROTATION_PIN_KEY) continue;
+    if (s.workoutId !== workoutId && s.workout !== workoutId) continue;
+    const exData = s.exercises?.[exId];
+    if (exData?.sets?.length) return s;
+  }
+  return null;
 }
 

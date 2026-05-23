@@ -507,18 +507,28 @@ describe("workouts (templates)", () => {
   });
 
   test("loggable exercises carry the per-set tracking schema", () => {
-    // When loggable=true, the SessionExRow rendering path needs
-    // sets/reps/type/logWeight to work. Pin the required fields so
-    // a future exercise edit can't accidentally produce a half-typed
-    // loggable exercise that crashes the row renderer.
+    // Three logging modes are valid for loggable=true:
+    //   - logWeight: reps + numeric weight per set (default strength).
+    //   - logBand:   reps + band-color per set (banded resistance).
+    //   - circlesOnly: no reps/weight, just a clickable circle per set
+    //     (habit-style tracking like Ab Wheel).
+    // Pin the required fields per mode so a future exercise edit can't
+    // accidentally produce a half-typed loggable exercise that crashes
+    // the row renderer.
     for (const w of Object.values(workouts)) {
       for (const ex of w.exercises) {
         if (!ex.loggable) continue;
         expect(typeof ex.sets).toBe("number");
         expect(ex.sets).toBeGreaterThan(0);
-        expect(typeof ex.reps).toBe("string");
-        expect(typeof ex.logWeight).toBe("boolean");
         expect(["S", "H", "P", "X"]).toContain(ex.type);
+        // Exactly one of the three logging-mode flags must be set.
+        const modes = [ex.logWeight, ex.logBand, ex.circlesOnly].filter(Boolean);
+        expect(modes).toHaveLength(1);
+        // logWeight and logBand also require a reps prescription
+        // string for the input placeholders. circlesOnly skips reps.
+        if (ex.logWeight || ex.logBand) {
+          expect(typeof ex.reps).toBe("string");
+        }
       }
     }
   });

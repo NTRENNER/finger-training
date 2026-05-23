@@ -32,3 +32,25 @@ export const WORKOUT_COLORS = {
   CLIMB: "#e05560",
   REST: C.muted,
 };
+
+// Band color palette for exercises logged with band resistance instead
+// of numeric weight (Banded Core Chop, Heavy-Band Single-Arm Lat Pull,
+// etc). Ordered light → heavy in a common pull-up-band progression so
+// the dropdown reads in the natural "step up to the next band" order.
+// `swatch` is the actual CSS color used in the picker dot; `key` is
+// what gets stored in the session record. Brand-agnostic — the user
+// picks whichever color matches their actual band, the model just
+// stores the label.
+export const BAND_COLORS = [
+  { key: "yellow", label: "Yellow", swatch: "#facc15" },
+  { key: "orange", label: "Orange", swatch: "#fb923c" },
+  { key: "red",    label: "Red",    swatch: "#ef4444" },
+  { key: "green",  label: "Green",  swatch: "#22c55e" },
+  { key: "blue",   label: "Blue",   swatch: "#3b82f6" },
+  { key: "purple", label: "Purple", swatch: "#a78bfa" },
+  { key: "black",  label: "Black",  swatch: "#1f2937" },
+];
+// Quick lookup by key for rendering swatches from a stored band value.
+export const BAND_COLOR_LOOKUP = Object.fromEntries(
+  BAND_COLORS.map(b => [b.key, b])
+);

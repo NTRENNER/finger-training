@@ -28,6 +28,7 @@ import {
   sessionExerciseVolume, sessionExerciseEst1RM,
   isBodyweightAdditive, parseRepsCount,
 } from "../model/workout-volume.js";
+import { BAND_COLOR_LOOKUP } from "./workout/workoutConstants.js";
 
 export function WorkoutHistoryView({
   unit = "lbs", bodyWeight = null,
@@ -333,14 +334,42 @@ export function WorkoutHistoryView({
                     <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{exName}</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {data.sets.map((s, si) => {
-                        // Detect unilateral schema by presence of any
-                        // L/R field. Bilateral sets render as a single
-                        // "5 × 80 lbs" pill; unilateral renders as a
-                        // single pill with both sides stacked
-                        // ("L 8 × 80 / R 7 × 80") so per-side
-                        // asymmetry stays visible at a glance.
-                        const isUni = s.leftReps != null  || s.leftWeight  != null
-                                   || s.rightReps != null || s.rightWeight != null;
+                        // Detect schema by which fields are present.
+                        // isUni: any L/R field present (weight OR band).
+                        // isBand: any *band field present.
+                        // isCircles: no reps, no weight, no band, no L/R
+                        //   — only the done flag. Render a simple dot.
+                        const isUni = s.leftReps != null || s.leftWeight != null
+                                   || s.rightReps != null || s.rightWeight != null
+                                   || s.leftBand != null || s.rightBand != null;
+                        const isBand = s.band != null
+                                    || s.leftBand != null || s.rightBand != null;
+                        const isCircles = !isUni
+                                       && s.reps == null && s.weight == null
+                                       && s.band == null;
+                        const bandSwatch = (key, sz = 9) => {
+                          const meta = BAND_COLOR_LOOKUP[key];
+                          if (!meta) return null;
+                          return (
+                            <span style={{
+                              display: "inline-block", width: sz, height: sz, borderRadius: "50%",
+                              background: meta.swatch, border: "1px solid rgba(255,255,255,0.2)",
+                              flexShrink: 0, marginRight: 3, verticalAlign: "middle",
+                            }} />
+                          );
+                        };
+                        const formatBandSide = (reps, band) => {
+                          const r = parseRepsCount(reps);
+                          const hasReps = r > 0;
+                          if (!band && !hasReps) return "—";
+                          return (
+                            <>
+                              {bandSwatch(band)}
+                              {hasReps ? `${r}` : ""}
+                              {band ? (BAND_COLOR_LOOKUP[band]?.label || band) : ""}
+                            </>
+                          );
+                        };
                         const formatSide = (reps, weight) => {
                           const r = parseRepsCount(reps);
                           const w = parseFloat(weight);
@@ -365,7 +394,18 @@ export function WorkoutHistoryView({
                             color: s.done ? C.text : C.muted,
                             display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 1,
                           }}>
-                            {isUni ? (
+                            {isCircles ? (
+                              <span style={{ fontSize: 12 }}>{s.done ? "✓" : "—"}</span>
+                            ) : isUni && isBand ? (
+                              <>
+                                <span style={{ fontSize: 11 }}>
+                                  <span style={{ color: C.muted }}>L </span>{formatBandSide(s.leftReps, s.leftBand)}
+                                </span>
+                                <span style={{ fontSize: 11 }}>
+                                  <span style={{ color: C.muted }}>R </span>{formatBandSide(s.rightReps, s.rightBand)}
+                                </span>
+                              </>
+                            ) : isUni ? (
                               <>
                                 <span style={{ fontSize: 11 }}>
                                   <span style={{ color: C.muted }}>L </span>{formatSide(s.leftReps, s.leftWeight)}
@@ -374,6 +414,8 @@ export function WorkoutHistoryView({
                                   <span style={{ color: C.muted }}>R </span>{formatSide(s.rightReps, s.rightWeight)}
                                 </span>
                               </>
+                            ) : isBand ? (
+                              <span>{formatBandSide(s.reps, s.band)}</span>
                             ) : (
                               formatSide(s.reps, s.weight)
                             )}
