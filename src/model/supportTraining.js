@@ -258,20 +258,27 @@ export const exercises = {
   },
 
   medBallThrows: {
+    // Kept the id as medBallThrows so historical sessions still
+    // resolve to this exercise. Display name dropped "Throws" — user
+    // doesn't have a good wall to throw against, slams-only.
     id: "medBallThrows",
-    name: "Med Ball Slams / Throws",
+    name: "Med Ball Slams",
     tags: ["power", "explosive", "core"],
     prescription: "4–5 × 3–5",
     intent: "Explosive whole-body power without taxing pulling muscles.",
     progression: [
       "Increase intent before load.",
-      "Rotate variations.",
+      "Step up to the next ball weight when 3–5 reps stay crisp.",
       "Stop before fatigue slows movement.",
     ],
-    // Non-loggable: med ball weight rarely changes, intent is the
-    // primary variable. Notes field is sufficient.
-    loggable: false,
+    // Loggable now (May 2026) — ball weight is the actual progression
+    // variable, not just session notes. Same shape as the other
+    // strength rows so SessionExRow renders sets × (reps @ weight).
+    loggable: true,
     type: "P",
+    sets: 4,
+    reps: "3–5",
+    logWeight: true,
   },
 
   kbSnatch: {
