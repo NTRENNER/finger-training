@@ -30,6 +30,7 @@ import {
   LS_HISTORY_KEY, LS_REP_DELETED_KEY,
   LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
+  LS_PYRAMID_PROJECT_KEY, LS_PYRAMID_WARMUP_KEY,
 } from "./lib/storage.js";
 import { DEFAULT_TRIP } from "./lib/trip.js";
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
@@ -342,9 +343,45 @@ export default function App() {
     }
   };
 
-  // Pull climbing focus from cloud on sign-in. If cloud has a value
-  // and it differs from local, cloud wins (last-edit-on-any-device).
-  // No conflict resolution beyond that — focus is a single scalar.
+  // ── Climbing pyramid pins (per discipline) ─────────────────
+  // Both stored as { [discipline]: grade } maps so a V-grade boulder
+  // pin doesn't pollute the YDS pin and vice versa. Synced to
+  // user_settings.{ pyramid_project, pyramid_warmup } so the pins
+  // follow the user across devices — without this, you'd pin V7 on
+  // your laptop and the phone would auto-infer something different
+  // from the same data. Local LS is the read cache for fast first
+  // paint; cloud is the authority.
+  const [pyramidProjectMap, setPyramidProjectMapState] = useState(
+    () => loadLS(LS_PYRAMID_PROJECT_KEY) || {}
+  );
+  const [pyramidWarmupMap, setPyramidWarmupMapState] = useState(
+    () => loadLS(LS_PYRAMID_WARMUP_KEY) || {}
+  );
+  const savePyramidProjectMap = (next) => {
+    setPyramidProjectMapState(next);
+    saveLS(LS_PYRAMID_PROJECT_KEY, next);
+    if (user) {
+      (async () => {
+        const current = (await fetchUserSettings()) || {};
+        await pushUserSettings({ ...current, pyramid_project: next });
+      })().catch(() => {});
+    }
+  };
+  const savePyramidWarmupMap = (next) => {
+    setPyramidWarmupMapState(next);
+    saveLS(LS_PYRAMID_WARMUP_KEY, next);
+    if (user) {
+      (async () => {
+        const current = (await fetchUserSettings()) || {};
+        await pushUserSettings({ ...current, pyramid_warmup: next });
+      })().catch(() => {});
+    }
+  };
+
+  // Pull climbing focus + pyramid pins + fatigue model from cloud on
+  // sign-in. Cloud-wins for scalars/maps that already exist on the
+  // cloud row — keeps cross-device state coherent without a more
+  // elaborate merge protocol.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -355,6 +392,17 @@ export default function App() {
       if (typeof cf === "string" && cf && cf !== climbingFocus) {
         setClimbingFocusState(cf);
         saveLS(LS_CLIMBING_FOCUS_KEY, cf);
+      }
+      // Pyramid pin maps — apply if cloud has them, even when empty
+      // {} (cloud signal "no pins yet" is meaningful and should clear
+      // a stale local pin if the user cleared it on another device).
+      if (cloud.pyramid_project && typeof cloud.pyramid_project === "object") {
+        setPyramidProjectMapState(cloud.pyramid_project);
+        saveLS(LS_PYRAMID_PROJECT_KEY, cloud.pyramid_project);
+      }
+      if (cloud.pyramid_warmup && typeof cloud.pyramid_warmup === "object") {
+        setPyramidWarmupMapState(cloud.pyramid_warmup);
+        saveLS(LS_PYRAMID_WARMUP_KEY, cloud.pyramid_warmup);
       }
       // Pull fatigue_model so the client uses the same β the server
       // trigger is updating. Falls back to local defaults if cloud
@@ -857,6 +905,10 @@ export default function App() {
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
           defaultWorkouts={ALL_WORKOUTS_LOOKUP}
+          pyramidProjectMap={pyramidProjectMap}
+          pyramidWarmupMap={pyramidWarmupMap}
+          onPyramidProjectChange={savePyramidProjectMap}
+          onPyramidWarmupChange={savePyramidWarmupMap}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder

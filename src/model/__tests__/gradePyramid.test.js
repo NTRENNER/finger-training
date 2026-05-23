@@ -13,28 +13,20 @@ import {
 const row = (grade, rank, count) => ({ grade, rank, count });
 
 describe("inferProjectGrade", () => {
-  test("picks the highest-rank grade with at least minSends (default 2)", () => {
+  test("default ≥1 send: a single redpoint of the hardest grade anchors", () => {
     const rows = [
-      row("V3", 3, 4), row("V5", 5, 2), row("V6", 6, 2),
+      row("V3", 3, 4), row("V5", 5, 2), row("V6", 6, 1),
     ];
+    // V6 has 1 send — that's enough. Climber who redpointed V6 once
+    // calls V6 their project; the auto answer matches.
     expect(inferProjectGrade(rows)).toBe("V6");
   });
 
-  test("skips one-shot sends so a lucky V6 doesn't anchor the pyramid", () => {
+  test("respects custom minSends threshold (e.g. ≥2 for stricter inference)", () => {
     const rows = [
-      row("V3", 3, 4), row("V5", 5, 2), row("V6", 6, 1), // V6 = one-shot
+      row("V3", 3, 4), row("V5", 5, 2), row("V6", 6, 1),
     ];
-    expect(inferProjectGrade(rows)).toBe("V5");
-  });
-
-  test("falls back to highest one-send grade when nothing clears the threshold (cold start)", () => {
-    const rows = [row("V3", 3, 1), row("V4", 4, 1)];
-    expect(inferProjectGrade(rows)).toBe("V4");
-  });
-
-  test("respects custom minSends threshold", () => {
-    const rows = [row("V5", 5, 3), row("V6", 6, 2)];
-    expect(inferProjectGrade(rows, { minSends: 3 })).toBe("V5");
+    expect(inferProjectGrade(rows, { minSends: 2 })).toBe("V5");
   });
 
   test("returns null for empty/invalid input", () => {

@@ -28,8 +28,8 @@
 // (1 rank/tier).
 //
 // Cold-start auto-anchor: inferProjectGrade picks the highest grade
-// with ≥2 clean sends (one-shot fallback) — used only when the user
-// hasn't pinned a project yet.
+// with at least one clean send — used only when the user hasn't
+// pinned a project yet.
 //
 // Pure functions over the existing `pyramid.rows` shape produced by
 // ClimbingAnalysisView ({ grade, count, rank } per row, sorted easy
@@ -74,29 +74,29 @@ function tiersFor(anchorMode) {
 // only need one canonical name each.)
 
 // Pick the project grade as the highest-rank grade with at least
-// `minSends` clean sends. Returns null if the input is empty or has
-// no ranks. A second cold-start tier kicks in when no grade clears
-// the threshold yet — we fall back to the highest grade with ≥1 send
-// rather than returning null, so early data still surfaces a pyramid.
+// `minSends` clean sends. Default 1 — a single redpoint (or flash) of
+// a hard grade IS evidence you've sent that grade and the climber's
+// own mental model of "what's my project" treats it as anchor-worthy.
+// The earlier ≥2 default was overcautious and produced the wrong
+// answer for climbers who'd actually redpointed their hardest grade
+// once.
 //
-// Why a minimum: a lucky one-shot send shouldn't anchor the project
-// tier. Before the threshold, a single V6 in an otherwise V4-heavy
-// log would shift every tier up one grade and label V3 as "base."
-// Requiring 2+ sends matches the article's spirit — project = the
-// grade you're sending, not the one you've happened to send.
+// Lucky one-shot inflation is a real concern in bouldering (a single
+// hot V6 day) but the pin override is the right escape hatch for it.
+// Defaulting to ≥1 keeps the auto answer congruent with what a
+// climber would say out loud about their project grade.
 //
-// The Power Company article explicitly notes the rubric should shift
-// up a grade once the user starts sending the level below quickly,
-// so users should also be able to pin the project grade by hand
-// (see buildPyramidPlan's projectGrade override + the pin UI on
-// ClimbingAnalysisView).
-export function inferProjectGrade(rows, { minSends = 2 } = {}) {
+// The Power Company article also notes the rubric should shift up a
+// grade once the user starts sending the level below quickly, so the
+// pin override in ClimbingAnalysisView lets users push the auto
+// answer up when they're ready.
+export function inferProjectGrade(rows, { minSends = 1 } = {}) {
   if (!Array.isArray(rows) || rows.length === 0) return null;
-  const withSends = rows.filter(r => Number.isFinite(r.rank) && r.count > 0);
-  if (withSends.length === 0) return null;
-  const qualifying = withSends.filter(r => r.count >= minSends);
-  const pool = qualifying.length > 0 ? qualifying : withSends; // cold-start fallback
-  return pool.sort((a, b) => b.rank - a.rank)[0]?.grade ?? null;
+  const qualifying = rows.filter(r =>
+    Number.isFinite(r.rank) && r.count >= minSends
+  );
+  if (qualifying.length === 0) return null;
+  return qualifying.sort((a, b) => b.rank - a.rank)[0]?.grade ?? null;
 }
 
 // Build the 4-tier plan with status + advice per tier. Accepts the

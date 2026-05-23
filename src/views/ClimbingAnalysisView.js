@@ -35,10 +35,6 @@ import {
   gradeRank, weekKey,
   disciplineMeta,
 } from "../lib/climbing-grades.js";
-import {
-  loadLS, saveLS,
-  LS_PYRAMID_PROJECT_KEY, LS_PYRAMID_WARMUP_KEY,
-} from "../lib/storage.js";
 import { inferProjectGrade } from "../model/gradePyramid.js";
 
 // Tier step size in rank units, per discipline. Boulder steps by
@@ -112,7 +108,16 @@ function clamberFilter(activities, days) {
   return climbs.filter(a => a.date >= cutoff);
 }
 
-export function ClimbingAnalysisView({ activities = [] }) {
+export function ClimbingAnalysisView({
+  activities = [],
+  // Per-discipline pyramid pins lifted to App so they sync via
+  // user_settings (climbing focus pattern). Without sync, pins set
+  // on one device wouldn't follow the user to another.
+  pyramidProjectMap = {},
+  pyramidWarmupMap = {},
+  onPyramidProjectChange = () => {},
+  onPyramidWarmupChange = () => {},
+}) {
   const [pyramidDiscipline, setPyramidDiscipline] = useState("boulder");
   const [pyramidVenue,      setPyramidVenue]      = useState("all");  // "all" | "indoor" | "outdoor"
   const [pyramidWall,       setPyramidWall]       = useState("all");  // "all" | "commercial" | "moonboard" | "kilter"
@@ -127,32 +132,24 @@ export function ClimbingAnalysisView({ activities = [] }) {
   }, [wallFilterActive, pyramidWall]);
 
   // ── Pyramid settings — pinned project + warmup floor (per discipline) ──
-  // Both persist across navigations. Keyed by discipline because a
-  // boulderer projecting V6 and onsighting 5.11a needs different pins
-  // for boulder vs lead.
-  const [pinnedProjectMap, setPinnedProjectMap] = useState(
-    () => loadLS(LS_PYRAMID_PROJECT_KEY) || {}
-  );
-  const [warmupFloorMap, setWarmupFloorMap] = useState(
-    () => loadLS(LS_PYRAMID_WARMUP_KEY) || {}
-  );
-  const pinnedProject     = pinnedProjectMap[pyramidDiscipline] || null;
-  const warmupFloorGrade  = warmupFloorMap[pyramidDiscipline]   || null;
-  const warmupFloorRank   = warmupFloorGrade ? gradeRank(warmupFloorGrade) : null;
+  // State + LS write + cloud sync live in App.js (single source of
+  // truth for user_settings). Here we just read the per-discipline
+  // slice and forward edits through the prop handlers.
+  const pinnedProject    = pyramidProjectMap[pyramidDiscipline] || null;
+  const warmupFloorGrade = pyramidWarmupMap[pyramidDiscipline]  || null;
+  const warmupFloorRank  = warmupFloorGrade ? gradeRank(warmupFloorGrade) : null;
 
   const updatePinnedProject = (grade) => {
-    const next = { ...pinnedProjectMap };
+    const next = { ...pyramidProjectMap };
     if (grade) next[pyramidDiscipline] = grade;
     else delete next[pyramidDiscipline];
-    setPinnedProjectMap(next);
-    saveLS(LS_PYRAMID_PROJECT_KEY, next);
+    onPyramidProjectChange(next);
   };
   const updateWarmupFloor = (grade) => {
-    const next = { ...warmupFloorMap };
+    const next = { ...pyramidWarmupMap };
     if (grade) next[pyramidDiscipline] = grade;
     else delete next[pyramidDiscipline];
-    setWarmupFloorMap(next);
-    saveLS(LS_PYRAMID_WARMUP_KEY, next);
+    onPyramidWarmupChange(next);
   };
 
   // ── Max sends card state ────────────────────────────────────
@@ -286,9 +283,8 @@ export function ClimbingAnalysisView({ activities = [] }) {
   }, [pyramid.rows, warmupFloorRank]);
 
   // ── Effective project + tier step size ──
-  // Project = pinned grade if set, else the legacy send-anchored
-  // inference (highest grade with ≥2 clean sends, with a one-send
-  // cold-start fallback). The user is the source of truth — they
+  // Project = pinned grade if set, else the highest grade with at
+  // least one clean send. The user is the source of truth — they
   // know their project grade better than any heuristic. Tier labels
   // always use the forward-looking set (Project / Push / Consolidate
   // / Volume) because that reads better in all cases; the project
@@ -784,10 +780,10 @@ function Stat({ label, value }) {
 
 // Per-discipline pyramid settings — pinned project grade + warmup
 // floor. Both compact <select>s in a single flex row. Empty string =
-// unset; upstream maps that to LS deletion. The pin is the primary
-// control because the climber knows their project better than any
-// data-driven heuristic; auto falls back to the legacy send-anchored
-// inference (highest grade with ≥2 clean sends) for cold start.
+// unset; upstream maps that to deletion from the synced settings map.
+// The pin is the primary control because the climber knows their
+// project better than any data-driven heuristic; auto falls back to
+// the highest grade with at least one clean send.
 //
 // The warmup floor list is clamped to grades strictly below the active
 // project. A floor at or above the project would either exclude the
@@ -819,7 +815,7 @@ function PyramidSettings({
         value={pinnedProject || ""}
         onChange={(e) => onPinProject(e.target.value || null)}
         style={selectStyle}
-        title="Pin a project grade. Auto uses the highest grade with ≥2 clean sends as a cold-start fallback."
+        title="Pin a project grade. Auto uses the highest grade you've clean-sent as a fallback."
       >
         <option value="">Auto{inferredProject ? ` (${inferredProject})` : ""}</option>
         {allGrades.map(g => (
