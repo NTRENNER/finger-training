@@ -1,11 +1,20 @@
 // ─────────────────────────────────────────────────────────────
 // CLIMBING HISTORY LIST
 // ─────────────────────────────────────────────────────────────
-// Climb list with a filter-pills row above. Default view is
-// date-grouped; selecting the Named pill switches to a name-grouped
-// view (all sends of "The Journey" stacked into one card, alphabetical
-// across cards). Discipline / venue / wall pills further narrow what
-// shows — single-select per category, tap a selected pill to clear it.
+// Climb list with a filter-pills row above. Three mutually exclusive
+// grouping modes (set via the Named or Grade group pills, default
+// "date"):
+//   - date:  one card per date, descending (default)
+//   - named: filter to climbs with route_name + group by route name,
+//            alphabetical across cards; sends inside date-desc
+//   - grade: group by grade, hardest first; sends inside date-desc
+//
+// Discipline / venue / wall pills further narrow what shows —
+// single-select per category, tap a selected pill to clear it. When
+// discipline is locked to boulder or lead, a grade range picker
+// appears below the pills so the user can also clamp min/max grade
+// (V scale for boulder, YDS for lead). The range stays hidden when
+// discipline is "all" because the two grade scales can't be mixed.
 //
 // Filter state persists to localStorage (LS_CLIMBING_HISTORY_FILTERS_KEY)
 // so re-entering the tab lands on the same view. View state only —
@@ -22,18 +31,35 @@ import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import {
   CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS, VENUES,
+  V_GRADES, YDS_GRADES,
   disciplineMeta, ascentMeta, wallMeta, describeClimb,
+  gradeRank,
   gradesFor, defaultGradeFor,
 } from "../lib/climbing-grades.js";
 import { loadLS, saveLS, LS_CLIMBING_HISTORY_FILTERS_KEY } from "../lib/storage.js";
 
-// Default filter state — everything "all" (no filtering), name-group off.
+// Default filter state — everything "all" (no filtering), date grouping.
 const DEFAULT_FILTERS = {
-  named: false,
-  discipline: "all",  // "all" | "boulder" | "lead"
-  venue:      "all",  // "all" | "indoor" | "outdoor"
-  wall:       "all",  // "all" | "moonboard" | "kilter"
+  groupBy:    "date",  // "date" | "named" | "grade"
+  discipline: "all",   // "all" | "boulder" | "lead"
+  venue:      "all",   // "all" | "indoor" | "outdoor"
+  wall:       "all",   // "all" | "moonboard" | "kilter"
+  gradeMin:   null,    // grade string (e.g. "V4" / "5.10c") or null
+  gradeMax:   null,    // grade string or null
 };
+
+// Migrate the prior LS shape (`{ named: true/false, ... }` with no
+// groupBy field) to the new groupBy field. Idempotent — anything that
+// already has groupBy passes through.
+function migrateFilters(stored) {
+  if (!stored || typeof stored !== "object") return DEFAULT_FILTERS;
+  const out = { ...DEFAULT_FILTERS, ...stored };
+  if (!out.groupBy) {
+    out.groupBy = stored.named ? "named" : "date";
+  }
+  delete out.named;
+  return out;
+}
 
 export function ClimbingHistoryList({
   climbs,
@@ -44,24 +70,29 @@ export function ClimbingHistoryList({
 
   // ── Filter state (persisted) ────────────────────────────────
   const [filters, setFiltersState] = useState(() => {
-    const stored = loadLS(LS_CLIMBING_HISTORY_FILTERS_KEY);
-    return { ...DEFAULT_FILTERS, ...(stored || {}) };
+    return migrateFilters(loadLS(LS_CLIMBING_HISTORY_FILTERS_KEY));
   });
   const updateFilters = (next) => {
     setFiltersState(next);
     saveLS(LS_CLIMBING_HISTORY_FILTERS_KEY, next);
   };
-  // Tap-to-deselect: tapping the active pill in a category clears it
-  // back to "all". Tapping a different pill in the same category
-  // switches selection. The Named pill is a plain toggle.
+  // Pick handler for the pill row. Group pills (Named, Grade) toggle
+  // groupBy between their value and "date". Filter pills (discipline,
+  // venue, wall) use tap-to-deselect within their category.
   const pickFilter = (key, value) => {
-    if (key === "named") {
-      updateFilters({ ...filters, named: !filters.named });
+    if (key === "groupBy") {
+      const next = (filters.groupBy === value) ? "date" : value;
+      updateFilters({ ...filters, groupBy: next });
       return;
     }
     const next = (filters[key] === value) ? "all" : value;
     updateFilters({ ...filters, [key]: next });
   };
+  // Grade range pickers (min/max) only show meaningful values when a
+  // single discipline is selected — the V and YDS scales can't share a
+  // dropdown. The picker callbacks accept null to clear.
+  const setGradeMin = (g) => updateFilters({ ...filters, gradeMin: g || null });
+  const setGradeMax = (g) => updateFilters({ ...filters, gradeMax: g || null });
 
   // Wall pills only make sense for indoor boulder (or "all venues"
   // boulder). Hide the row when not applicable; auto-clear any
@@ -74,48 +105,86 @@ export function ClimbingHistoryList({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallPillsVisible]);
 
+  // Grade range picker only shows when a single discipline is picked;
+  // when discipline flips, the prior range may be on the wrong scale
+  // (V vs YDS). Auto-clear so a stale range can't silently exclude.
+  useEffect(() => {
+    if (filters.discipline === "all" && (filters.gradeMin || filters.gradeMax)) {
+      updateFilters({ ...filters, gradeMin: null, gradeMax: null });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.discipline]);
+
   // ── Apply filters ───────────────────────────────────────────
+  const minRank = filters.gradeMin ? gradeRank(filters.gradeMin) : null;
+  const maxRank = filters.gradeMax ? gradeRank(filters.gradeMax) : null;
   const filtered = useMemo(() => {
     return climbs.filter(c => {
-      if (filters.named && !c.route_name) return false;
+      if (filters.groupBy === "named" && !c.route_name) return false;
       if (filters.discipline !== "all" && c.discipline !== filters.discipline) return false;
       if (filters.venue !== "all") {
         const v = c.venue || "indoor";  // legacy fallback
         if (v !== filters.venue) return false;
       }
       if (filters.wall !== "all" && c.wall !== filters.wall) return false;
+      // Grade range applies only when both ends are on the same scale
+      // as the climb — guard via discipline match above (range only
+      // settable when a single discipline is picked, so c.discipline
+      // matches if we got this far).
+      if (minRank != null || maxRank != null) {
+        const r = gradeRank(c.grade);
+        if (!Number.isFinite(r)) return false;
+        if (minRank != null && r < minRank) return false;
+        if (maxRank != null && r > maxRank) return false;
+      }
       return true;
     });
-  }, [climbs, filters]);
+  }, [climbs, filters, minRank, maxRank]);
 
-  // ── Group: by date (default) or by name (Named mode) ───────
+  // ── Group: by date (default), name (Named mode), or grade ──
   // Date mode: existing behavior — one card per date, descending.
   // Name mode: one card per route_name, alphabetical. Within each
-  // card, sends are listed date-descending so the most recent ascent
-  // surfaces first.
+  // card, sends are listed date-descending.
+  // Grade mode: one card per grade, hardest-first (rank desc). Within
+  // each card, sends are listed date-descending.
   const grouped = useMemo(() => {
     const m = new Map();
-    if (filters.named) {
+    if (filters.groupBy === "named") {
       for (const c of filtered) {
         const key = c.route_name || "—";
         if (!m.has(key)) m.set(key, []);
         m.get(key).push(c);
       }
-      // Sort within group by date desc; then sort groups alphabetically.
       for (const arr of m.values()) {
         arr.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
       }
       return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
     }
+    if (filters.groupBy === "grade") {
+      for (const c of filtered) {
+        const key = c.grade || "—";
+        if (!m.has(key)) m.set(key, []);
+        m.get(key).push(c);
+      }
+      for (const arr of m.values()) {
+        arr.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      }
+      // Sort groups by grade rank descending (hardest first). Unknown
+      // grades drop to the bottom via the -1 rank fallback.
+      return [...m.entries()].sort((a, b) => {
+        const ra = gradeRank(a[0]);
+        const rb = gradeRank(b[0]);
+        return rb - ra;
+      });
+    }
+    // Default: date.
     for (const c of filtered) {
       const key = c.date || "—";
       if (!m.has(key)) m.set(key, []);
       m.get(key).push(c);
     }
-    // Date groups already come pre-sorted descending from the caller,
-    // but force the order here in case callers stop sorting upstream.
     return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [filtered, filters.named]);
+  }, [filtered, filters.groupBy]);
 
   return (
     <div>
@@ -123,6 +192,8 @@ export function ClimbingHistoryList({
         filters={filters}
         onPick={pickFilter}
         wallVisible={wallPillsVisible}
+        onSetGradeMin={setGradeMin}
+        onSetGradeMax={setGradeMax}
         totalClimbs={climbs.length}
         filteredCount={filtered.length}
       />
@@ -139,9 +210,13 @@ export function ClimbingHistoryList({
         grouped.map(([groupKey, list]) => (
           <Card key={groupKey}>
             <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-              {filters.named ? (
+              {filters.groupBy === "named" && (
                 <span><b style={{ color: C.text }}>{groupKey}</b> · {list.length} send{list.length === 1 ? "" : "s"}</span>
-              ) : (
+              )}
+              {filters.groupBy === "grade" && (
+                <span><b style={{ color: C.text }}>{groupKey}</b> · {list.length} climb{list.length === 1 ? "" : "s"}</span>
+              )}
+              {filters.groupBy === "date" && (
                 <span>{groupKey} · {list.length} climb{list.length === 1 ? "" : "s"}</span>
               )}
             </div>
@@ -164,11 +239,12 @@ export function ClimbingHistoryList({
                 <ClimbRow
                   key={c.id || `${c.date}-${c.grade}-${c.ascent}`}
                   climb={c}
-                  // In name mode the route_name is in the card header,
-                  // so suppress it on the row and show the date instead
-                  // (since date is no longer the grouping key).
-                  showDate={filters.named}
-                  hideRouteName={filters.named}
+                  // Show the date inline whenever date isn't the
+                  // grouping key (name + grade modes both need it).
+                  showDate={filters.groupBy !== "date"}
+                  // Only suppress route_name in name mode (it's the
+                  // card header there); keep it visible in grade mode.
+                  hideRouteName={filters.groupBy === "named"}
                   onEdit={onUpdateActivity ? () => setEditingId(c.id) : null}
                   onDelete={onDeleteActivity ? () => {
                     if (window.confirm("Delete this climb?")) onDeleteActivity(c.id);
@@ -184,16 +260,31 @@ export function ClimbingHistoryList({
 }
 
 // ─────────────────────────────────────────────────────────────
-// FilterPills — single row of toggleable filters above the list
+// FilterPills — pill row + optional grade-range picker
 // ─────────────────────────────────────────────────────────────
 // Top Rope and Commercial-wall are intentionally omitted from the
 // pill set — they're the "unnamed default" the user typically climbs
 // and don't need their own filter. With everything deselected, the
 // list shows the full unfiltered set, so top_rope and commercial
 // climbs are still visible by default.
-function FilterPills({ filters, onPick, wallVisible, totalClimbs, filteredCount }) {
+//
+// Group pills (Named, Grade) sit in their own visual cluster at the
+// start of the row so they read as "view mode" toggles distinct from
+// the "what's in scope" filter pills that follow.
+//
+// The min/max grade-range pickers appear below the pills when
+// discipline is locked to a single value — V grades when boulder is
+// active, YDS grades when lead is. When discipline = "all" the
+// picker hides (the two scales can't share a dropdown sensibly).
+function FilterPills({
+  filters, onPick, wallVisible,
+  onSetGradeMin, onSetGradeMax,
+  totalClimbs, filteredCount,
+}) {
   const pill = (label, key, value) => {
-    const active = key === "named" ? filters.named : filters[key] === value;
+    const active = key === "groupBy"
+      ? filters.groupBy === value
+      : filters[key] === value;
     return (
       <button
         key={`${key}-${value}`}
@@ -209,10 +300,28 @@ function FilterPills({ filters, onPick, wallVisible, totalClimbs, filteredCount 
       </button>
     );
   };
+
+  // Grade range picker is only meaningful for a single discipline.
+  const gradeRangeVisible = filters.discipline !== "all";
+  const gradeList = filters.discipline === "boulder" ? V_GRADES : YDS_GRADES;
+  const selectStyle = {
+    padding: "3px 6px", borderRadius: 6, fontSize: 11,
+    background: C.bg, color: C.text, border: `1px solid ${C.border}`,
+    cursor: "pointer",
+  };
+
+  // Suffix tail line: shows N of M and a hint of the active grouping.
+  const groupingHint = filters.groupBy === "named"
+    ? " · grouped by name"
+    : filters.groupBy === "grade"
+      ? " · grouped by grade (hardest first)"
+      : "";
+
   return (
     <Card style={{ marginBottom: 12 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-        {pill("Named", "named", true)}
+        {pill("Named", "groupBy", "named")}
+        {pill("Grade", "groupBy", "grade")}
         <span style={{ width: 6 }} />
         {pill("Boulder", "discipline", "boulder")}
         {pill("Lead",    "discipline", "lead")}
@@ -225,9 +334,37 @@ function FilterPills({ filters, onPick, wallVisible, totalClimbs, filteredCount 
           {pill("Kilter",    "wall", "kilter")}
         </>}
       </div>
+
+      {gradeRangeVisible && (
+        <div style={{
+          display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center",
+          marginTop: 8, fontSize: 11, color: C.muted,
+        }}>
+          <span>Grades:</span>
+          <select
+            value={filters.gradeMin || ""}
+            onChange={(e) => onSetGradeMin(e.target.value)}
+            style={selectStyle}
+            title="Hide climbs softer than this grade. Leave blank for no lower bound."
+          >
+            <option value="">min</option>
+            {gradeList.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <span>to</span>
+          <select
+            value={filters.gradeMax || ""}
+            onChange={(e) => onSetGradeMax(e.target.value)}
+            style={selectStyle}
+            title="Hide climbs harder than this grade. Leave blank for no upper bound."
+          >
+            <option value="">max</option>
+            {gradeList.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+        </div>
+      )}
+
       <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
-        {filteredCount} of {totalClimbs} climb{totalClimbs === 1 ? "" : "s"}
-        {filters.named && " · grouped by name"}
+        {filteredCount} of {totalClimbs} climb{totalClimbs === 1 ? "" : "s"}{groupingHint}
       </div>
     </Card>
   );
