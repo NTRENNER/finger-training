@@ -37,14 +37,31 @@ import { bwOnDate, toDisp } from "../ui/format.js";
 const LS_WORKOUT_PLAN_KEY = "ft_workout_plan";
 
 // Legacy → current id migration map. Stale local plans or sessions
-// logged under old snake_case keys (kb_snatch, hammer_curls, ohp)
-// get rewritten to the modern camelCase / current ids so one
-// exercise renders ONE card instead of splitting data across an
-// "old name" card and a "new name" card.
+// logged under old snake_case keys get rewritten to the modern
+// camelCase / current ids so one exercise renders ONE card instead
+// of splitting data across an "old name" card and a "new name" card.
+//
+// Audit when adding entries: an exercise belongs here ONLY if the
+// legacy and current ids refer to the same physical movement (same
+// muscle action, same loading pattern). Don't bridge cosmetically-
+// similar exercises (e.g. step_up → splitSquat) — those are real
+// re-prescriptions and their histories should stay separate.
 const ID_MIGRATIONS = {
+  // Legacy snake_case → current snake_case (no camelCase equivalent
+  // exists in supportTraining.js, but the renamed legacy id is what
+  // current data uses).
   ohp: "kb_press",
-  hammer_curls: "bicep_curls",
-  kb_snatch: "kbSnatch",       // legacy "KB snatch" → current "Kettlebell Snatch"
+
+  // Legacy snake_case → current camelCase. These exercises have a
+  // current supportTraining definition with the same physical movement
+  // but the new id casing. Without migration, the user sees two cards
+  // — one with old data, one with new — for the same exercise.
+  pull_ups:     "weightedPullup",
+  bench_press:  "benchPress",
+  bicep_curls:  "bicepCurls",
+  hammer_curls: "bicepCurls",     // even-older legacy chained through
+  slam_balls:   "medBallThrows",
+  kb_snatch:    "kbSnatch",
 };
 const migrateId = (id) => ID_MIGRATIONS[id] || id;
 
