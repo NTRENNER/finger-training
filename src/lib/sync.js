@@ -92,14 +92,33 @@ import { today } from "../util.js";
 // authenticated push end up here and are flushed on the next sync.
 export const LS_QUEUE_KEY = "ft_push_queue";
 
+// Fetch the current user's id from the live Supabase auth session.
+// Returns null if not signed in (caller bails out of the push). All
+// per-row inserts call this and attach the returned id as user_id
+// so RLS WITH CHECK passes and the row is correctly attributed.
+// Server-side, each table also has DEFAULT auth.uid() on user_id —
+// belt and suspenders, but the explicit field avoids a round-trip
+// surprise if the default ever gets dropped.
+async function currentUserId() {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    return user?.id ?? null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // WORKOUT-SESSION HELPERS (workout_sessions table)
 // ─────────────────────────────────────────────────────────────
 
 export async function pushWorkoutSession(session) {
   try {
+    const userId = await currentUserId();
+    if (!userId) return false;
     const { error } = await supabase.from("workout_sessions").upsert({
       id:               session.id,
+      user_id:          userId,
       date:             session.date,
       completed_at:     session.completedAt ?? null,
       workout:          session.workout,
@@ -166,12 +185,13 @@ export async function deleteWorkoutSession(id) {
 // UUID each time and every re-push (offline-queue flush, reconcile,
 // retry, tab-focus event) created a duplicate row. The May 2026
 // duplicate-storm bug across multiple workouts was exactly this.
-export function repPayload(rep) {
+export function repPayload(rep, userId) {
   return {
     // Only included when present so legacy reps without ids still go
     // through .insert-style path (Postgres assigns UUID). Modern reps
     // always carry one, so upsert(onConflict: "id") deduplicates.
     ...(rep.id ? { id: rep.id } : {}),
+    user_id: userId,
     date: rep.date, grip: rep.grip, hand: rep.hand,
     target_duration: rep.target_duration, weight_kg: rep.weight_kg,
     actual_time_s: rep.actual_time_s, avg_force_kg: rep.avg_force_kg,
@@ -253,10 +273,13 @@ function ensureUuidId(rep) {
 
 export async function pushRep(rep) {
   try {
+    const userId = await currentUserId();
+    if (!userId) return "error";
     const safeRep = ensureUuidId(rep);
     const { error } = await supabase
       .from("reps")
-      .upsert([repPayload(safeRep)], { onConflict: "session_id,set_num,rep_num,hand" });
+      .upsert([repPayload(safeRep, userId)],
+        { onConflict: "user_id,session_id,set_num,rep_num,hand" });
     if (error) {
       if (isTombstoneRejection(error)) {
         console.info(`pushRep: tombstone rejection for rep ${safeRep.id} — dropping`);
@@ -392,9 +415,11 @@ export async function fetchReps() {
 export async function pushDailyState(date, cooked) {
   if (!date || cooked == null) return false;
   try {
+    const userId = await currentUserId();
+    if (!userId) return false;
     const { error } = await supabase.from("daily_state").upsert(
-      { date, cooked: Number(cooked) },
-      { onConflict: "date" }
+      { user_id: userId, date, cooked: Number(cooked) },
+      { onConflict: "user_id,date" }
     );
     if (error) { console.warn("Supabase daily_state push:", error.message); return false; }
     return true;
@@ -488,9 +513,11 @@ export async function pushRepTombstones(ids) {
   const valid = (ids || []).filter(Boolean);
   if (valid.length === 0) return true;
   try {
+    const userId = await currentUserId();
+    if (!userId) return false;
     const { error } = await supabase
       .from("rep_tombstones")
-      .upsert(valid.map(id => ({ id })), { onConflict: "id" });
+      .upsert(valid.map(id => ({ id, user_id: userId })), { onConflict: "id" });
     if (error) { console.warn("Supabase tombstone push:", error.message); return false; }
     return true;
   } catch (e) {
@@ -538,14 +565,17 @@ export async function pushRepSlotTombstones(slots) {
   );
   if (valid.length === 0) return true;
   try {
+    const userId = await currentUserId();
+    if (!userId) return false;
     const { error } = await supabase
       .from("rep_slot_tombstones")
       .upsert(valid.map(s => ({
+        user_id:    userId,
         session_id: s.session_id,
         set_num:    s.set_num,
         rep_num:    s.rep_num,
         hand:       s.hand,
-      })), { onConflict: "session_id,set_num,rep_num,hand" });
+      })), { onConflict: "user_id,session_id,set_num,rep_num,hand" });
     if (error) { console.warn("Supabase slot tombstone push:", error.message); return false; }
     return true;
   } catch (e) {
@@ -603,8 +633,11 @@ export async function fetchSessionTombstoneIds() {
 export async function pushActivity(act) {
   if (!act?.id) return false;
   try {
+    const userId = await currentUserId();
+    if (!userId) return false;
     const { error } = await supabase.from("activities").upsert({
       id:         act.id,
+      user_id:    userId,
       type:       act.type ?? "climbing",
       date:       act.date,
       discipline: act.discipline ?? null,
@@ -683,9 +716,11 @@ export async function fetchActivities() {
 export async function pushBW(date, kg) {
   if (!date || !(kg > 0)) return false;
   try {
+    const userId = await currentUserId();
+    if (!userId) return false;
     const { error } = await supabase.from("body_weights").upsert(
-      { date, kg },
-      { onConflict: "date" }
+      { user_id: userId, date, kg },
+      { onConflict: "user_id,date" }
     );
     if (error) { console.warn("Supabase BW push:", error.message); return false; }
     return true;
