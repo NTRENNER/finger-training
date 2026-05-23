@@ -47,11 +47,13 @@ const BLOCK = { size: 14, gap: 3 };
 export function PyramidChart({
   rows = [],
   fill = "#f59e0b",   // tier-agnostic fallback color (matches the old bar chart's orange)
-  projectGrade = null, // optional override; otherwise inferred from rows
+  projectGrade = null, // explicit; otherwise inferred from rows (send-anchored)
+  projectRank = null,  // required when projectGrade has 0 rows (flash-anchored, forward-looking)
+  anchorMode = "send", // 'send' | 'flash' — controls tier labels + bands
 }) {
   const plan = useMemo(
-    () => buildPyramidPlan(rows, projectGrade),
-    [rows, projectGrade]
+    () => buildPyramidPlan(rows, projectGrade, { anchorMode, projectRank }),
+    [rows, projectGrade, anchorMode, projectRank]
   );
   const headline = useMemo(() => topPyramidRecommendation(plan), [plan]);
   const inferredProject = useMemo(() => inferProjectGrade(rows), [rows]);

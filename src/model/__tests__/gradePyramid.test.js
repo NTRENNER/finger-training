@@ -3,13 +3,18 @@
 
 import {
   inferProjectGrade,
+  inferFlashGrade,
+  projectFromFlash,
   buildPyramidPlan,
   topPyramidRecommendation,
   TIER_DEFINITIONS,
+  FLASH_TIER_DEFINITIONS,
 } from "../gradePyramid.js";
 
 // Helper: build the row shape ClimbingAnalysisView produces.
 const row = (grade, rank, count) => ({ grade, rank, count });
+// Helper: per-grade flash stats shape used by inferFlashGrade.
+const stat = (grade, rank, flashes, total) => ({ grade, rank, flashes, total });
 
 describe("inferProjectGrade", () => {
   test("picks the highest-rank grade with at least minSends (default 2)", () => {
@@ -175,5 +180,103 @@ describe("TIER_DEFINITIONS", () => {
       expect(typeof t.max).toBe("number");
       expect(typeof t.advice).toBe("string");
     }
+  });
+
+  test("flash-anchored tiers also export 4 entries with min/max/advice", () => {
+    expect(FLASH_TIER_DEFINITIONS).toHaveLength(4);
+    for (const t of FLASH_TIER_DEFINITIONS) {
+      expect(typeof t.label).toBe("string");
+      expect(typeof t.min).toBe("number");
+      expect(typeof t.max).toBe("number");
+      expect(typeof t.advice).toBe("string");
+    }
+    // Project tier may have 0 sends (it's forward-looking).
+    expect(FLASH_TIER_DEFINITIONS[0].min).toBe(0);
+  });
+});
+
+describe("inferFlashGrade", () => {
+  test("picks the highest grade clearing minRate AND minEncounters", () => {
+    const stats = [
+      stat("V3", 3, 10, 10),  // 100% × 10
+      stat("V4", 4, 8,  10),  // 80%  × 10
+      stat("V5", 5, 1,  10),  // 10%  × 10  — too low
+    ];
+    expect(inferFlashGrade(stats)).toBe("V4");
+  });
+
+  test("ignores grades with too few encounters", () => {
+    const stats = [
+      stat("V4", 4, 10, 10),  // 100% × 10
+      stat("V6", 6, 1, 1),    // 100% × 1  — too few encounters
+    ];
+    expect(inferFlashGrade(stats)).toBe("V4");
+  });
+
+  test("returns null when nothing qualifies", () => {
+    const stats = [stat("V5", 5, 1, 5)]; // 20% — too low
+    expect(inferFlashGrade(stats)).toBeNull();
+  });
+
+  test("respects custom minRate and minEncounters", () => {
+    const stats = [
+      stat("V4", 4, 6, 10), // 60%
+      stat("V5", 5, 5, 10), // 50%
+    ];
+    expect(inferFlashGrade(stats, { minRate: 0.55 })).toBe("V4");
+    expect(inferFlashGrade(stats, { minEncounters: 11 })).toBeNull();
+  });
+
+  test("returns null for empty/invalid input", () => {
+    expect(inferFlashGrade([])).toBeNull();
+    expect(inferFlashGrade(null)).toBeNull();
+  });
+});
+
+describe("projectFromFlash", () => {
+  const VS = ["V0","V1","V2","V3","V4","V5","V6","V7","V8"];
+
+  test("walks +gap steps along the grade list", () => {
+    expect(projectFromFlash("V4", 3, VS)).toBe("V7");
+    expect(projectFromFlash("V4", 2, VS)).toBe("V6");
+  });
+
+  test("returns null when target exceeds the list", () => {
+    expect(projectFromFlash("V8", 3, VS)).toBeNull();
+  });
+
+  test("returns null for unknown grades or empty list", () => {
+    expect(projectFromFlash("V99", 3, VS)).toBeNull();
+    expect(projectFromFlash("V4", 3, [])).toBeNull();
+    expect(projectFromFlash(null, 3, VS)).toBeNull();
+  });
+});
+
+describe("buildPyramidPlan — flash-anchored", () => {
+  test("uses flash-anchored tier labels and bands", () => {
+    // Project = V7 (flash V4 + gap 3). User has 0 sends at V7.
+    const rows = [
+      row("V4", 4, 20),  // volume (ATB): 10+ on track
+      row("V5", 5, 4),   // consolidate (flash+1): 3-5 on track
+      row("V6", 6, 2),   // push (flash+2): 1-3 on track
+    ];
+    const plan = buildPyramidPlan(rows, "V7", { anchorMode: "flash", projectRank: 7 });
+    expect(plan[0]).toMatchObject({ label: "Project",     grade: "V7", actualCount: 0, targetMin: 0 });
+    expect(plan[1]).toMatchObject({ label: "Push",        grade: "V6", actualCount: 2 });
+    expect(plan[2]).toMatchObject({ label: "Consolidate", grade: "V5", actualCount: 4 });
+    expect(plan[3]).toMatchObject({ label: "Volume (ATB)", grade: "V4", actualCount: 20 });
+  });
+
+  test("project with 0 sends is on_track (band min is 0), not missing", () => {
+    const rows = [row("V4", 4, 20)];
+    const plan = buildPyramidPlan(rows, "V7", { anchorMode: "flash", projectRank: 7 });
+    expect(plan[0].actualCount).toBe(0);
+    expect(plan[0].status).toBe("on_track");
+  });
+
+  test("project tier still gets a grade label even with no rows at that rank", () => {
+    const rows = [row("V4", 4, 5)];
+    const plan = buildPyramidPlan(rows, "V7", { anchorMode: "flash", projectRank: 7 });
+    expect(plan[0].grade).toBe("V7"); // forward-looking label
   });
 });

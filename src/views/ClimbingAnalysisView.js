@@ -39,7 +39,13 @@ import {
   loadLS, saveLS,
   LS_PYRAMID_PROJECT_KEY, LS_PYRAMID_WARMUP_KEY,
 } from "../lib/storage.js";
-import { inferProjectGrade } from "../model/gradePyramid.js";
+import {
+  inferProjectGrade, inferFlashGrade, projectFromFlash,
+} from "../model/gradePyramid.js";
+
+// Gap between flash grade and project grade. The "+3 grades" coaching
+// heuristic — project = what you couldn't reasonably send today.
+const FLASH_TO_PROJECT_GAP = 3;
 
 // Color per discipline. Boulder = orange (power), top_rope = purple,
 // lead = blue (rope-climbing palette). Falls back to muted for unknowns.
@@ -269,13 +275,72 @@ export function ClimbingAnalysisView({ activities = [] }) {
     };
   }, [pyramid.rows, warmupFloorRank]);
 
-  // Auto-inferred project from the (post-warmup-filter) rows. Shown as
-  // a hint next to the pin picker so the user knows what the algo would
-  // pick if they cleared the pin.
-  const inferredProject = useMemo(
+  // ── Flash stats ──
+  // Per-grade { flashes, total } in the same filter set as the pyramid.
+  // "Flashes" = onsight + flash ascents (first-try sends). "Total" =
+  // every climb logged at that grade — clean sends, rests, attempts.
+  // Including attempts in the denominator stops a one-shot lucky V6
+  // from claiming flash status when most V6 attempts came up short.
+  const flashStats = useMemo(() => {
+    const windowDef = WINDOWS.find(w => w.key === pyramidWindow);
+    const climbs = clamberFilter(allClimbs, windowDef.days)
+      .filter(c => c.discipline === pyramidDiscipline)
+      .filter(c => {
+        if (pyramidVenue === "all") return true;
+        const v = c.venue || "indoor";
+        return v === pyramidVenue;
+      })
+      .filter(c => {
+        if (!wallFilterActive || pyramidWall === "all") return true;
+        return c.wall === pyramidWall;
+      });
+    const byGrade = {};
+    for (const c of climbs) {
+      if (!c.grade) continue;
+      if (!byGrade[c.grade]) byGrade[c.grade] = { flashes: 0, total: 0 };
+      byGrade[c.grade].total += 1;
+      if (c.ascent === "flash" || c.ascent === "onsight") {
+        byGrade[c.grade].flashes += 1;
+      }
+    }
+    const allGrades = pyramidDiscipline === "boulder" ? V_GRADES : YDS_GRADES;
+    return allGrades
+      .filter(g => byGrade[g])
+      .map(g => ({ grade: g, rank: gradeRank(g), ...byGrade[g] }));
+  }, [allClimbs, pyramidDiscipline, pyramidVenue, pyramidWall, wallFilterActive, pyramidWindow]);
+
+  // Flash grade: highest where flash rate ≥ 50% with ≥3 encounters.
+  // Returns null until enough data accumulates — the UI falls back to
+  // the legacy send-anchored inference in that case.
+  const inferredFlash = useMemo(
+    () => inferFlashGrade(flashStats),
+    [flashStats]
+  );
+
+  // Flash-anchored project: walk up gradesList by FLASH_TO_PROJECT_GAP
+  // from the flash grade. Falls back to the legacy send-anchored
+  // inference when no flash grade can be determined yet.
+  const gradesList = pyramidDiscipline === "boulder" ? V_GRADES : YDS_GRADES;
+  const flashAnchoredProject = useMemo(
+    () => projectFromFlash(inferredFlash, FLASH_TO_PROJECT_GAP, gradesList),
+    [inferredFlash, gradesList]
+  );
+  const legacyInferredProject = useMemo(
     () => inferProjectGrade(pyramidPartition.displayRows),
     [pyramidPartition.displayRows]
   );
+
+  // Effective project — priority: explicit pin > flash-anchored > legacy.
+  const inferredProject = flashAnchoredProject || legacyInferredProject;
+  const effectiveProject = pinnedProject || inferredProject;
+  const effectiveProjectRank = effectiveProject ? gradeRank(effectiveProject) : null;
+  // Anchor mode flips to 'flash' as soon as we have a flash grade,
+  // regardless of whether the user pinned the project — the pinned
+  // grade still anchors the tier ranks, but the tier labels/bands
+  // come from the flash-anchored set (Project / Push / Consolidate /
+  // Volume) because the climber has shown enough data to use the
+  // forward-looking interpretation.
+  const pyramidAnchorMode = inferredFlash ? "flash" : "send";
 
   // ── Max sends by ascent style ──
   // For each clean-send style (onsight / flash / redpoint), find the
@@ -513,13 +578,16 @@ export function ClimbingAnalysisView({ activities = [] }) {
           )}
 
           {/* Pyramid settings: project pin + warmup floor (per discipline).
-              Pin overrides auto-inference (default requires ≥2 clean sends
-              at a grade). Warmup floor excludes easy-mileage grades from
-              the chart so the base tier reflects real climbing, not warmups. */}
+              Pin overrides auto-inference. With enough data, the auto
+              project is flash + 3 grades (forward-looking project =
+              what you're trying, not the hardest you've sent). Warmup
+              floor excludes easy-mileage grades so the base tier
+              reflects real climbing. */}
           <PyramidSettings
             discipline={pyramidDiscipline}
             pinnedProject={pinnedProject}
             inferredProject={inferredProject}
+            inferredFlash={inferredFlash}
             warmupFloorGrade={warmupFloorGrade}
             onPinProject={updatePinnedProject}
             onSetWarmupFloor={updateWarmupFloor}
@@ -536,11 +604,14 @@ export function ClimbingAnalysisView({ activities = [] }) {
               {/* True centered pyramid with per-tier coaching status.
                   Replaces the prior horizontal bar chart. See
                   model/gradePyramid.js for Power Company Climbing's
-                  project / consolidate / cleanup / base ATB logic. */}
+                  project / consolidate / cleanup / base ATB logic.
+                  anchorMode = 'flash' once enough flash data exists. */}
               <PyramidChart
                 rows={pyramidPartition.displayRows}
                 fill={DISCIPLINE_COLORS[pyramidDiscipline]}
-                projectGrade={pinnedProject}
+                projectGrade={effectiveProject}
+                projectRank={effectiveProjectRank}
+                anchorMode={pyramidAnchorMode}
               />
               <div style={{ marginTop: 6, fontSize: 11, color: C.muted, textAlign: "right" }}>
                 {pyramid.total} clean send{pyramid.total === 1 ? "" : "s"} total
@@ -751,23 +822,25 @@ function Stat({ label, value }) {
 }
 
 // Per-discipline pyramid settings — pinned project grade + warmup
-// floor. Both compact <select>s in a single row so the controls stay
-// out of the way unless the user wants them. Empty string = unset
-// (use auto / no floor); upstream maps that to LS deletion.
+// floor, with the auto-inferred flash grade surfaced as a read-only
+// hint so the user understands what's anchoring the pyramid.
+//
+// Both pins are compact <select>s in a single flex row. Empty string
+// = unset (use auto / no floor); upstream maps that to LS deletion.
 //
 // The warmup floor list is clamped to grades strictly below the active
-// project (pin if set, otherwise the auto-inferred grade). A floor at
-// or above the project would either exclude the project tier (silly)
-// or do nothing useful, so we just hide those options.
+// project. A floor at or above the project would either exclude the
+// project tier (silly) or do nothing useful.
+//
+// Why no flash pin: the user picked auto-only flash inference. If
+// that changes, add a flash pin here next to project.
 function PyramidSettings({
-  discipline, pinnedProject, inferredProject,
+  discipline, pinnedProject, inferredProject, inferredFlash,
   warmupFloorGrade, onPinProject, onSetWarmupFloor,
 }) {
   const allGrades = discipline === "boulder" ? V_GRADES : YDS_GRADES;
   const activeProject = pinnedProject || inferredProject;
   const projectRank = activeProject ? gradeRank(activeProject) : null;
-  // Cap warmup options at one rank below project. If no project yet,
-  // any grade is fair game so cold-start users can still set a floor.
   const warmupOptions = projectRank != null
     ? allGrades.filter(g => gradeRank(g) < projectRank)
     : allGrades;
@@ -779,35 +852,45 @@ function PyramidSettings({
   };
 
   return (
-    <div style={{
-      display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center",
-      marginBottom: 12, fontSize: 11, color: C.muted,
-    }}>
-      <span>Project:</span>
-      <select
-        value={pinnedProject || ""}
-        onChange={(e) => onPinProject(e.target.value || null)}
-        style={selectStyle}
-        title="Pin a project grade. Auto uses the highest grade with ≥2 clean sends."
-      >
-        <option value="">Auto{inferredProject ? ` (${inferredProject})` : ""}</option>
-        {allGrades.map(g => (
-          <option key={g} value={g}>{g}</option>
-        ))}
-      </select>
+    <div style={{ marginBottom: 12, fontSize: 11, color: C.muted }}>
+      {/* Flash anchor hint — surfaces what's driving the auto project. */}
+      <div style={{ marginBottom: 6 }}>
+        Flash anchor: {inferredFlash
+          ? <span style={{ color: C.text, fontWeight: 600 }}>{inferredFlash}</span>
+          : <span style={{ fontStyle: "italic" }}>not yet (need 3+ climbs at ≥50% flash rate)</span>
+        }
+        {inferredFlash && (
+          <span style={{ color: C.muted }}> · project auto = flash + {FLASH_TO_PROJECT_GAP}</span>
+        )}
+      </div>
 
-      <span style={{ marginLeft: 8 }}>Warmups ≤</span>
-      <select
-        value={warmupFloorGrade || ""}
-        onChange={(e) => onSetWarmupFloor(e.target.value || null)}
-        style={selectStyle}
-        title="Hide easy grades from the pyramid. Sends at or below this grade are tallied separately as warmups."
-      >
-        <option value="">None</option>
-        {warmupOptions.map(g => (
-          <option key={g} value={g}>{g}</option>
-        ))}
-      </select>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <span>Project:</span>
+        <select
+          value={pinnedProject || ""}
+          onChange={(e) => onPinProject(e.target.value || null)}
+          style={selectStyle}
+          title="Pin a project grade. Auto = flash + 3 once enough data exists, else the highest grade with ≥2 clean sends."
+        >
+          <option value="">Auto{inferredProject ? ` (${inferredProject})` : ""}</option>
+          {allGrades.map(g => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+
+        <span style={{ marginLeft: 8 }}>Warmups ≤</span>
+        <select
+          value={warmupFloorGrade || ""}
+          onChange={(e) => onSetWarmupFloor(e.target.value || null)}
+          style={selectStyle}
+          title="Hide easy grades from the pyramid. Sends at or below this grade are tallied separately as warmups."
+        >
+          <option value="">None</option>
+          {warmupOptions.map(g => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }
