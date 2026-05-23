@@ -30,58 +30,12 @@ import {
   ROTATION_PIN_KEY,
 } from "../lib/storage.js";
 import { bwOnDate, toDisp } from "../ui/format.js";
+import { migrateExerciseId, buildExerciseDefIndex } from "../model/exerciseIds.js";
 
 // Locally re-declared to match WorkoutTab's storage key (which is
 // defined inline there, not exported). Keeping the string literal
 // in sync between the two is a small cost for view independence.
 const LS_WORKOUT_PLAN_KEY = "ft_workout_plan";
-
-// Legacy → current id migration map. Stale local plans or sessions
-// logged under old snake_case keys get rewritten to the modern
-// camelCase / current ids so one exercise renders ONE card instead
-// of splitting data across an "old name" card and a "new name" card.
-//
-// Audit when adding entries: an exercise belongs here ONLY if the
-// legacy and current ids refer to the same physical movement (same
-// muscle action, same loading pattern). Don't bridge cosmetically-
-// similar exercises (e.g. step_up → splitSquat) — those are real
-// re-prescriptions and their histories should stay separate.
-const ID_MIGRATIONS = {
-  // Legacy snake_case → current snake_case (no camelCase equivalent
-  // exists in supportTraining.js, but the renamed legacy id is what
-  // current data uses).
-  ohp: "kb_press",
-
-  // Legacy snake_case → current camelCase. These exercises have a
-  // current supportTraining definition with the same physical movement
-  // but the new id casing. Without migration, the user sees two cards
-  // — one with old data, one with new — for the same exercise.
-  pull_ups:     "weightedPullup",
-  bench_press:  "benchPress",
-  bicep_curls:  "bicepCurls",
-  hammer_curls: "bicepCurls",     // even-older legacy chained through
-  slam_balls:   "medBallThrows",
-  kb_snatch:    "kbSnatch",
-};
-const migrateId = (id) => ID_MIGRATIONS[id] || id;
-
-// Build a flat lookup of every known exercise definition from the
-// workout plan. LAST definition wins so when both a legacy and a
-// current workout contain the same migrated id, the current
-// definition's name + flags take precedence (e.g. "Kettlebell
-// Snatch" rather than the legacy "KB snatch"). Plan iteration
-// order is legacy_* first, then current — see ALL_WORKOUTS_LOOKUP
-// in workoutLegacy.js.
-function buildExDefIndex(plan) {
-  const index = {};
-  for (const wk of Object.values(plan || {})) {
-    for (const ex of (wk?.exercises || [])) {
-      if (!ex?.id) continue;
-      index[ex.id] = ex;
-    }
-  }
-  return index;
-}
 
 // For one exercise id, walk wLog chronologically and produce
 // [{date, top, volume, sessionBw}] points, one per session that
@@ -303,7 +257,7 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
       const migrated = {};
       let changed = false;
       for (const [exId, exData] of Object.entries(s.exercises)) {
-        const newId = migrateId(exId);
+        const newId = migrateExerciseId(exId);
         if (newId !== exId) changed = true;
         if (migrated[newId]) continue;
         migrated[newId] = exData;
@@ -326,7 +280,7 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
       out[key] = {
         ...wk,
         exercises: (wk?.exercises || []).map(ex => {
-          const newId = migrateId(ex.id);
+          const newId = migrateExerciseId(ex.id);
           return newId !== ex.id ? { ...ex, id: newId } : ex;
         }),
       };
@@ -334,7 +288,7 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
     return out;
   });
 
-  const exIndex = useMemo(() => buildExDefIndex(plan), [plan]);
+  const exIndex = useMemo(() => buildExerciseDefIndex(plan), [plan]);
 
   // For each exercise in the plan with logWeight=true, build its
   // series. Sort the result by latest-session date DESC so the most

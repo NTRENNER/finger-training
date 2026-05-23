@@ -36,6 +36,7 @@ import {
 import { DEFAULT_TRIP } from "./lib/trip.js";
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
+import { exerciseName, buildExerciseDefIndex } from "./model/exerciseIds.js";
 
 // App-level hooks (see src/hooks/).
 import { useAuth } from "./hooks/useAuth.js";
@@ -946,7 +947,15 @@ export default function App() {
           onUpdateActivity={updateActivity}
           defaultWorkouts={ALL_WORKOUTS_LOOKUP}
           onDeleteWorkoutSession={deleteWorkoutSession}
-          onDownloadWorkoutCSV={downloadWorkoutCSV}
+          onDownloadWorkoutCSV={(log) => {
+            // Build the migrated name index here so the CSV column for
+            // each exercise uses the same canonical "Med Ball Slams"
+            // labels the rest of the app shows, instead of the raw
+            // logged ids ("slam_balls", "kb_snatch") and the snake-
+            // to-space fallback the CSV would otherwise use.
+            const exIndex = buildExerciseDefIndex(ALL_WORKOUTS_LOOKUP);
+            downloadWorkoutCSV(log, (exId) => exerciseName(exId, exIndex));
+          }}
           onDownloadClimbingCSV={() => downloadClimbingCSV(activities)}
           gripPresets={GRIP_PRESETS}
         />

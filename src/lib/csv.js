@@ -39,7 +39,20 @@ export function downloadCSV(reps) {
 // Per-set workout-log CSV — one row per set across all sessions.
 // Sessions with bodyweight-only exercises (no sets array) get one
 // row with empty set/reps/weight columns.
-export function downloadWorkoutCSV(log) {
+//
+// `resolveName` is an optional function (exId) => displayName that
+// the caller (App.js) supplies so the CSV uses the same migrated /
+// current names the rest of the app shows — "Med Ball Slams"
+// rather than "slam balls". Without it we fall back to the raw
+// snake-to-space rendering for back-compat.
+export function downloadWorkoutCSV(log, resolveName) {
+  const nameOf = (exId) => {
+    if (typeof resolveName === "function") {
+      const n = resolveName(exId);
+      if (n) return n;
+    }
+    return (exId || "").replace(/_/g, " ");
+  };
   const rows = [];
   for (const s of log) {
     // Skip rotation-pin entries — they're synced markers from
@@ -48,7 +61,7 @@ export function downloadWorkoutCSV(log) {
     // Hardcoded literal here to keep src/lib/csv.js dependency-free.
     if (s.workout === "__rotation_pin") continue;
     for (const [exId, exData] of Object.entries(s.exercises || {})) {
-      const exName = exId.replace(/_/g, " ");
+      const exName = nameOf(exId);
       if (exData.sets && exData.sets.length > 0) {
         exData.sets.forEach((set, i) => {
           // Unilateral sets emit two rows (L, R) so per-side

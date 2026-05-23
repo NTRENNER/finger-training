@@ -28,6 +28,9 @@ import {
   sessionExerciseVolume, sessionExerciseEst1RM,
   isBodyweightAdditive, parseRepsCount,
 } from "../model/workout-volume.js";
+import {
+  migrateExerciseId, buildExerciseDefIndex,
+} from "../model/exerciseIds.js";
 import { BAND_COLOR_LOOKUP, normalizeBands } from "./workout/workoutConstants.js";
 
 export function WorkoutHistoryView({
@@ -52,42 +55,54 @@ export function WorkoutHistoryView({
   const bwLog    = useMemo(() => loadLS(LS_BW_LOG_KEY)       || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   const syncedIds = useMemo(() => new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Flat name lookup across all workout definitions
+  // Flat exercise-definition lookup, keyed by CURRENT (post-migration)
+  // id. Walking the merged ALL_WORKOUTS_LOOKUP yields both legacy and
+  // current definitions; buildExerciseDefIndex applies id migration so
+  // a legacy `kb_snatch` exercise lands at the same key as the current
+  // `kbSnatch`. Last-wins on collision so the current name takes
+  // precedence over the legacy one (e.g. "Med Ball Slams" over the
+  // legacy "Slam balls"). Used for rendering names and querying
+  // metadata like isBodyweightAdditive at row-render time.
+  const exDefs = useMemo(
+    () => buildExerciseDefIndex(defaultWorkouts),
+    [defaultWorkouts],
+  );
+
+  // Convenience name-only view derived from exDefs. Keyed by current id
+  // so every lookup site needs to migrate the logged id first.
   const exNames = useMemo(() => {
     const map = {};
-    for (const wk of Object.values(defaultWorkouts)) {
-      for (const ex of (wk.exercises || [])) {
-        if (!map[ex.id]) map[ex.id] = ex.name || ex.id.replace(/_/g, " ");
-      }
+    for (const [id, def] of Object.entries(exDefs)) {
+      map[id] = def?.name || id.replace(/_/g, " ");
     }
     return map;
-  }, [defaultWorkouts]);
+  }, [exDefs]);
 
-  // Flat exercise-definition lookup, so we can ask isBodyweightAdditive
-  // (and any future per-exercise metadata) at render time without
-  // re-walking the workout plan tree.
-  const exDefs = useMemo(() => {
-    const map = {};
-    for (const wk of Object.values(defaultWorkouts)) {
-      for (const ex of (wk.exercises || [])) {
-        if (!map[ex.id]) map[ex.id] = ex;
-      }
-    }
-    return map;
-  }, [defaultWorkouts]);
+  // Resolve a logged exercise id (which may be a legacy snake_case id
+  // like `slam_balls`) to its display name via the migration map.
+  // Falls back to a snake-to-space rendering when no def exists.
+  const nameFor = (loggedId) => {
+    const cur = migrateExerciseId(loggedId);
+    return exNames[cur] || (loggedId || "").replace(/_/g, " ");
+  };
 
-  // Exercises that appear in the log with actual sets (reps + weight) — the measurable ones
+  // Exercises that appear in the log with actual sets (reps + weight) —
+  // dedupe by current id so a user with sessions under both `slam_balls`
+  // and `medBallThrows` sees ONE filter option, not two.
   const measurableExIds = useMemo(() => {
     const seen = new Set();
     for (const s of log) {
       for (const [id, data] of Object.entries(s.exercises || {})) {
-        if (data.sets && data.sets.length > 0) seen.add(id);
+        if (data.sets && data.sets.length > 0) seen.add(migrateExerciseId(id));
       }
     }
     return [...seen].sort((a, b) => (exNames[a] || a).localeCompare(exNames[b] || b));
   }, [log, exNames]);
 
-  // Apply filters — a session matches if it contains the selected exercise with sets
+  // Apply filters — a session matches if any of its exercises (after
+  // id migration) equals the selected current id. Must check ALL keys
+  // because a legacy and current id may both appear in different
+  // sessions but resolve to the same canonical id.
   const filtered = useMemo(() => {
     const cutoff = filterDays > 0
       ? ymdLocal(new Date(Date.now() - filterDays * 864e5))
@@ -95,8 +110,10 @@ export function WorkoutHistoryView({
     return log.filter(s => {
       if (cutoff && s.date < cutoff) return false;
       if (filterEx) {
-        const exData = s.exercises?.[filterEx];
-        if (!exData?.sets?.length) return false;
+        const match = Object.entries(s.exercises || {}).some(
+          ([id, data]) => migrateExerciseId(id) === filterEx && data?.sets?.length > 0,
+        );
+        if (!match) return false;
       }
       return true;
     });
@@ -293,10 +310,11 @@ export function WorkoutHistoryView({
                 than "every session that contained a bench press, with
                 all the other lifts still in view." */}
             {Object.entries(session.exercises || {})
-              .filter(([id]) => !filterEx || id === filterEx)
+              .filter(([id]) => !filterEx || migrateExerciseId(id) === filterEx)
               .map(([id, data]) => {
-              const exName = exNames[id] || id.replace(/_/g, " ");
-              const exDef  = exDefs[id];
+              const curId  = migrateExerciseId(id);
+              const exName = nameFor(id);
+              const exDef  = exDefs[curId];
 
               if (data.sets && data.sets.length) {
                 const anyDone = data.sets.some(s => s.done);
