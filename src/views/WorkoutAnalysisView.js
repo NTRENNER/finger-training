@@ -29,28 +29,37 @@ import {
   loadLS, saveLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY,
   ROTATION_PIN_KEY,
 } from "../lib/storage.js";
-import { bwOnDate } from "../ui/format.js";
+import { bwOnDate, toDisp } from "../ui/format.js";
 
 // Locally re-declared to match WorkoutTab's storage key (which is
 // defined inline there, not exported). Keeping the string literal
 // in sync between the two is a small cost for view independence.
 const LS_WORKOUT_PLAN_KEY = "ft_workout_plan";
 
-// Throwaway ID-migration map (mirror of the one in WorkoutTab) so a
-// stale local plan or wLog with old `ohp` / `hammer_curls` keys still
-// resolves to the modern exercise definitions. Same logic as in
-// WorkoutTab.js — duplicated here so this view stays self-contained.
-const ID_MIGRATIONS = { ohp: "kb_press", hammer_curls: "bicep_curls" };
+// Legacy → current id migration map. Stale local plans or sessions
+// logged under old snake_case keys (kb_snatch, hammer_curls, ohp)
+// get rewritten to the modern camelCase / current ids so one
+// exercise renders ONE card instead of splitting data across an
+// "old name" card and a "new name" card.
+const ID_MIGRATIONS = {
+  ohp: "kb_press",
+  hammer_curls: "bicep_curls",
+  kb_snatch: "kbSnatch",       // legacy "KB snatch" → current "Kettlebell Snatch"
+};
 const migrateId = (id) => ID_MIGRATIONS[id] || id;
 
 // Build a flat lookup of every known exercise definition from the
-// workout plan. First definition encountered for an id wins.
+// workout plan. LAST definition wins so when both a legacy and a
+// current workout contain the same migrated id, the current
+// definition's name + flags take precedence (e.g. "Kettlebell
+// Snatch" rather than the legacy "KB snatch"). Plan iteration
+// order is legacy_* first, then current — see ALL_WORKOUTS_LOOKUP
+// in workoutLegacy.js.
 function buildExDefIndex(plan) {
   const index = {};
   for (const wk of Object.values(plan || {})) {
     for (const ex of (wk?.exercises || [])) {
       if (!ex?.id) continue;
-      if (index[ex.id]) continue;
       index[ex.id] = ex;
     }
   }
@@ -69,7 +78,14 @@ function buildExDefIndex(plan) {
 // × BW chart view divides each session's value by the BW from THAT
 // session — a March top-set at 165 lb is normalized by 165, even
 // if the user weighs 175 today.
-function buildExerciseSeries(wLog, exId, exDef, currentBw, bwLog) {
+//
+// UNIT NOTE: both bwLog entries and the `currentBw` prop are in KG,
+// but per-set `weight` values are in DISPLAY units (lbs or kg as the
+// user types them). The volume helpers add bw + weight directly, so
+// we must convert sessionBw to display units BEFORE handing it in,
+// otherwise a 71 kg user with 75 lbs added would get effectiveLoad
+// = 71 + 75 = 146 instead of the correct 156.5 + 75 = 231.5.
+function buildExerciseSeries(wLog, exId, exDef, currentBw, bwLog, unit) {
   if (!Array.isArray(wLog)) return [];
   const out = [];
   const sorted = [...wLog].sort((a, b) => {
@@ -85,8 +101,10 @@ function buildExerciseSeries(wLog, exId, exDef, currentBw, bwLog) {
     if (!sets.some(set => set && set.done)) continue;
     // Per-session BW: prefer the log entry on or before this date,
     // fall back to the user's current BW (so brand-new BW logs that
-    // postdate old sessions still produce sane numerators).
-    const sessionBw = bwOnDate(bwLog, s.date)?.kg ?? currentBw ?? null;
+    // postdate old sessions still produce sane numerators). Convert
+    // kg → display units so the volume math is unit-consistent.
+    const sessionBwKg = bwOnDate(bwLog, s.date)?.kg ?? currentBw ?? null;
+    const sessionBw = sessionBwKg != null ? toDisp(sessionBwKg, unit) : null;
     const top = sessionExerciseTopWeight(sets, sessionBw, exDef);
     const vol = sessionExerciseVolume(sets, sessionBw, exDef);
     if (top <= 0 && vol <= 0) continue;
@@ -310,13 +328,13 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
     const items = [];
     for (const [exId, exDef] of Object.entries(exIndex)) {
       if (!exDef?.logWeight) continue;
-      const series = buildExerciseSeries(wLog, exId, exDef, bodyWeight, bwLog);
+      const series = buildExerciseSeries(wLog, exId, exDef, bodyWeight, bwLog, unit);
       if (series.length === 0) continue;
       items.push({ exDef, series, lastDate: series[series.length - 1].date });
     }
     items.sort((a, b) => (b.lastDate || "").localeCompare(a.lastDate || ""));
     return items;
-  }, [exIndex, wLog, bodyWeight, bwLog]);
+  }, [exIndex, wLog, bodyWeight, bwLog, unit]);
 
   return (
     <div style={{ padding: "16px 20px", maxWidth: 720, margin: "0 auto" }}>

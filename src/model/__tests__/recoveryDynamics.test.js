@@ -119,20 +119,20 @@ describe("buildPredictedRecoverySeries", () => {
 // ─────────────────────────────────────────────────────────────
 
 describe("classifyRecovery", () => {
-  test("inside [LOW, HIGH] → well_calibrated", () => {
-    expect(classifyRecovery(0.8)).toBe("well_calibrated");
-    expect(classifyRecovery(OPERATING_LOW)).toBe("well_calibrated");
-    expect(classifyRecovery(OPERATING_HIGH)).toBe("well_calibrated");
+  test("inside [LOW, HIGH] → operating_zone", () => {
+    expect(classifyRecovery(0.8)).toBe("operating_zone");
+    expect(classifyRecovery(OPERATING_LOW)).toBe("operating_zone");
+    expect(classifyRecovery(OPERATING_HIGH)).toBe("operating_zone");
   });
 
-  test("below LOW → under_rested", () => {
-    expect(classifyRecovery(0.5)).toBe("under_rested");
-    expect(classifyRecovery(OPERATING_LOW - 0.01)).toBe("under_rested");
+  test("below LOW → deep_depletion", () => {
+    expect(classifyRecovery(0.5)).toBe("deep_depletion");
+    expect(classifyRecovery(OPERATING_LOW - 0.01)).toBe("deep_depletion");
   });
 
-  test("above HIGH → over_rested", () => {
-    expect(classifyRecovery(0.95)).toBe("over_rested");
-    expect(classifyRecovery(1.0)).toBe("over_rested");
+  test("above HIGH → shallow_depletion", () => {
+    expect(classifyRecovery(0.95)).toBe("shallow_depletion");
+    expect(classifyRecovery(1.0)).toBe("shallow_depletion");
   });
 
   test("null / invalid → null", () => {

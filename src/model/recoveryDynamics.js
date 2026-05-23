@@ -94,17 +94,21 @@ export const GAP_TARGET_REP = 2;
 export const OPERATING_LOW  = 0.7;  // below = meaningfully degraded
 export const OPERATING_HIGH = 0.9;  // above = rest interval has slack
 
-// Classify the observed recovery at the target rep into a coaching
-// bucket. Returns one of:
-//   "well_calibrated" — within [LOW, HIGH], healthy operating zone
-//   "under_rested"    — below LOW, rep is meaningfully degraded
-//   "over_rested"     — above HIGH, rest interval has slack
-//   null              — observed value missing
+// Classify the observed recovery at the target rep. Purely
+// descriptive of the depletion depth — the rest interval is fixed
+// by the protocol, so we don't moralize about "under-rested." A
+// deeply-depleted rep 2 means rep 1 was hard + 20s wasn't enough
+// to refill; that's not a discipline issue, it's set shape.
+// Returns one of:
+//   "operating_zone"    — within [LOW, HIGH], typical training depth
+//   "deep_depletion"    — below LOW, steep loss between reps
+//   "shallow_depletion" — above HIGH, plenty of headroom in rest
+//   null                — observed value missing
 export function classifyRecovery(observedFraction) {
   if (observedFraction == null || !Number.isFinite(observedFraction)) return null;
-  if (observedFraction < OPERATING_LOW) return "under_rested";
-  if (observedFraction > OPERATING_HIGH) return "over_rested";
-  return "well_calibrated";
+  if (observedFraction < OPERATING_LOW) return "deep_depletion";
+  if (observedFraction > OPERATING_HIGH) return "shallow_depletion";
+  return "operating_zone";
 }
 
 // One-shot bundle for the chart. Given a session's reps + the

@@ -96,20 +96,22 @@ export function RecoveryChart({
     );
   }
 
-  // Headline: short coaching read on the gap at rep 2.
+  // Headline: descriptive read on the depletion depth at rep 2.
+  // Frames what we OBSERVED — the rest is fixed by the protocol,
+  // so we don't editorialize about "under-rested."
   const headlineText = headline?.classification ? (
-    headline.classification === "well_calibrated"
-      ? "Rest interval well-calibrated"
-      : headline.classification === "under_rested"
-        ? "Under-rested — rep degraded"
-        : headline.classification === "over_rested"
-          ? "Over-rested — slack in the interval"
+    headline.classification === "operating_zone"
+      ? "Within typical operating zone"
+      : headline.classification === "deep_depletion"
+        ? "Deep depletion — steep loss between reps"
+        : headline.classification === "shallow_depletion"
+          ? "Shallow depletion — rest has headroom"
           : null
   ) : null;
   const headlineColor =
-    headline?.classification === "well_calibrated" ? C.green
-    : headline?.classification === "under_rested"  ? C.orange
-    : headline?.classification === "over_rested"   ? C.muted
+    headline?.classification === "operating_zone"    ? C.green
+    : headline?.classification === "deep_depletion"  ? C.orange
+    : headline?.classification === "shallow_depletion" ? C.muted
     : C.muted;
 
   return (

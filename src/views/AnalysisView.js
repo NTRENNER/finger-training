@@ -76,7 +76,7 @@ import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
 import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
-import { RecoveryTrendCard } from "./analysis/RecoveryTrendCard.jsx";
+import { RecoveryTrendCard, RecoveryObservedTrendCard } from "./analysis/RecoveryTrendCard.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 
 export function AnalysisView({
@@ -1803,12 +1803,16 @@ export function AnalysisView({
             axis was opaque. The % vs baseline trajectory tells the
             actual training-progress story.) */}
 
-        {/* Recovery dynamics over time — per-session observed
-            recovered fraction at rep 2, per grip, with a 3-session
-            rolling-mean line. Pairs with the per-session
-            RecoveryChart in HistoryView: that one answers "how
-            well-rested was today?", this one answers "is my
-            recovery improving over weeks?" */}
+        {/* Recovery dynamics over time — paired cards.
+            Observed trend (this card) reads the direct, easy-to-feel
+            signal: raw rep 2 / rep 1 ratio smoothed over 3 sessions.
+            "How fragmented are my sets over time?" Confounded by
+            rep 1 lengthening as the user gets stronger.
+            Gap trend (below) factors that confound out by comparing
+            against the personalized recovery model. "Is my recovery
+            side underperforming what my taus predict?" Two views of
+            the same underlying signal, intentionally kept separate. */}
+        <RecoveryObservedTrendCard history={history} grips={grips} />
         <RecoveryTrendCard history={history} grips={grips} />
 
         {/* Hand asymmetry — second-to-last per user preference. The
