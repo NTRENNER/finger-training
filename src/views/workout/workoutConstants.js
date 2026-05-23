@@ -54,3 +54,34 @@ export const BAND_COLORS = [
 export const BAND_COLOR_LOOKUP = Object.fromEntries(
   BAND_COLORS.map(b => [b.key, b])
 );
+
+// Normalize the `band` field shape. Old (single-band) sessions stored
+// a plain string ("red"); current (multi-band) sessions store an
+// array (["red", "green"]). Renderers + comparison code call this so
+// they don't need to branch on shape. Empty values normalize to [].
+// Sorted by BAND_COLORS index so the same selection always renders in
+// the same order regardless of the order the user tapped the chips.
+export function normalizeBands(value) {
+  if (!value) return [];
+  const arr = Array.isArray(value) ? value : [value];
+  const seen = new Set();
+  const out = [];
+  for (const k of arr) {
+    if (typeof k !== "string" || !k || seen.has(k)) continue;
+    if (!BAND_COLOR_LOOKUP[k]) continue;
+    seen.add(k);
+    out.push(k);
+  }
+  // Stable order: walk BAND_COLORS and emit any selected key.
+  return BAND_COLORS.map(b => b.key).filter(k => seen.has(k));
+}
+
+// Toggle a band color in a normalized array. Returns a new array
+// (sorted via normalizeBands).
+export function toggleBand(currentValue, colorKey) {
+  const arr = normalizeBands(currentValue);
+  const next = arr.includes(colorKey)
+    ? arr.filter(k => k !== colorKey)
+    : [...arr, colorKey];
+  return normalizeBands(next);
+}

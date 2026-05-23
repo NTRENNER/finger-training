@@ -22,10 +22,13 @@ import React from "react";
 import { C } from "../../ui/theme.js";
 import { WTypeBadge } from "./WTypeBadge.js";
 import { VideoLink } from "./VideoLink.js";
-import { BAND_COLORS, BAND_COLOR_LOOKUP } from "./workoutConstants.js";
+import {
+  BAND_COLORS, BAND_COLOR_LOOKUP,
+  normalizeBands, toggleBand,
+} from "./workoutConstants.js";
 
-// Small color dot used in the band picker + the prev column so the
-// stored color is visible at a glance.
+// Small color dot used in the prev column + the history pill so a
+// stored band value is visible at a glance.
 function BandSwatch({ colorKey, size = 12 }) {
   const meta = BAND_COLOR_LOOKUP[colorKey];
   if (!meta) return null;
@@ -35,6 +38,17 @@ function BandSwatch({ colorKey, size = 12 }) {
       background: meta.swatch, border: "1px solid rgba(255,255,255,0.2)",
       flexShrink: 0,
     }} />
+  );
+}
+
+// Row of stacked swatches for a multi-band selection (e.g. green + red).
+function BandStack({ bands, size = 10, gap = 2 }) {
+  const arr = normalizeBands(bands);
+  if (arr.length === 0) return null;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap }}>
+      {arr.map(k => <BandSwatch key={k} colorKey={k} size={size} />)}
+    </span>
   );
 }
 
@@ -152,8 +166,8 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
             <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
               <span style={{ fontSize: 11, color: C.muted, width: 36, flexShrink: 0 }}></span>
               <span style={{ fontSize: 11, color: C.muted, width: 48, textAlign: "center" }}>reps</span>
-              <span style={{ fontSize: 11, color: C.muted, width: ex.logBand ? 96 : 72, textAlign: "center" }}>
-                {ex.logBand ? "band" : "weight"}
+              <span style={{ fontSize: 11, color: C.muted, width: ex.logBand ? 192 : 72, textAlign: "center" }}>
+                {ex.logBand ? "bands" : "weight"}
               </span>
               {prevSets?.length > 0 && (
                 <span style={{ fontSize: 11, color: C.muted, width: 44, textAlign: "center" }}>prev</span>
@@ -187,14 +201,16 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                 const prevShown = side
                   ? (prev && typeof prev === "object" ? prev[side] : null)
                   : prev;
-                // For band mode, the prev pill shows the swatch + name.
-                // For weight mode, just the formatted prev string.
+                // Prev pill shows whatever the last session recorded.
+                // Band mode renders a stack of swatches (handles multi-
+                // band selections); weight mode renders the formatted
+                // string.
                 const renderPrev = () => {
                   if (!prevShown) return prevSets?.length > 0 ? <span style={{ width: 44 }} /> : null;
-                  if (ex.logBand && typeof prevShown === "object" && prevShown.band) {
+                  if (ex.logBand && typeof prevShown === "object" && prevShown.bands) {
                     return (
                       <span style={{ fontSize: 12, color: C.muted, width: 44, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <BandSwatch colorKey={prevShown.band} size={10} />
+                        <BandStack bands={prevShown.bands} size={10} />
                         {prevShown.reps || ""}
                       </span>
                     );
@@ -218,26 +234,36 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       placeholder={recReps != null ? String(recReps) : (ex.reps || "")}
                     />
                     {ex.logBand ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, width: 96 }}>
-                        <BandSwatch colorKey={loadVal} />
-                        <select
-                          value={loadVal}
-                          onChange={e => {
-                            const next = [...setsData.sets];
-                            next[i] = { ...next[i], [loadKey]: e.target.value };
-                            onSetsChange({ sets: next });
-                          }}
-                          style={{
-                            background: C.bg, color: C.text, border: `1px solid ${C.border}`,
-                            borderRadius: 6, padding: "4px 6px", fontSize: 13, cursor: "pointer",
-                            flex: 1, minWidth: 0,
-                          }}
-                        >
-                          <option value="">band</option>
-                          {BAND_COLORS.map(b => (
-                            <option key={b.key} value={b.key}>{b.label}</option>
-                          ))}
-                        </select>
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", flexWrap: "wrap",
+                        gap: 3, maxWidth: 192,
+                      }}>
+                        {BAND_COLORS.map(b => {
+                          const active = normalizeBands(loadVal).includes(b.key);
+                          return (
+                            <button
+                              key={b.key}
+                              type="button"
+                              onClick={() => {
+                                const nextBands = toggleBand(loadVal, b.key);
+                                const next = [...setsData.sets];
+                                next[i] = { ...next[i], [loadKey]: nextBands };
+                                onSetsChange({ sets: next });
+                              }}
+                              title={`${b.label}${active ? " (selected)" : ""} — tap to toggle`}
+                              style={{
+                                width: 22, height: 22, borderRadius: "50%",
+                                background: b.swatch, cursor: "pointer", padding: 0,
+                                border: active
+                                  ? "2px solid #fff"
+                                  : `1px solid ${C.border}`,
+                                opacity: active ? 1 : 0.55,
+                                boxShadow: active ? "0 0 0 1px rgba(0,0,0,0.4)" : "none",
+                                flexShrink: 0,
+                              }}
+                            />
+                          );
+                        })}
                       </span>
                     ) : (
                       <>

@@ -28,7 +28,7 @@ import {
   sessionExerciseVolume, sessionExerciseEst1RM,
   isBodyweightAdditive, parseRepsCount,
 } from "../model/workout-volume.js";
-import { BAND_COLOR_LOOKUP } from "./workout/workoutConstants.js";
+import { BAND_COLOR_LOOKUP, normalizeBands } from "./workout/workoutConstants.js";
 
 export function WorkoutHistoryView({
   unit = "lbs", bodyWeight = null,
@@ -351,22 +351,24 @@ export function WorkoutHistoryView({
                           const meta = BAND_COLOR_LOOKUP[key];
                           if (!meta) return null;
                           return (
-                            <span style={{
+                            <span key={key} style={{
                               display: "inline-block", width: sz, height: sz, borderRadius: "50%",
                               background: meta.swatch, border: "1px solid rgba(255,255,255,0.2)",
-                              flexShrink: 0, marginRight: 3, verticalAlign: "middle",
+                              flexShrink: 0, marginRight: 2, verticalAlign: "middle",
                             }} />
                           );
                         };
-                        const formatBandSide = (reps, band) => {
+                        const formatBandSide = (reps, bandValue) => {
+                          const bands = normalizeBands(bandValue);
                           const r = parseRepsCount(reps);
                           const hasReps = r > 0;
-                          if (!band && !hasReps) return "—";
+                          if (bands.length === 0 && !hasReps) return "—";
+                          const label = bands.map(k => BAND_COLOR_LOOKUP[k]?.label || k).join("+");
                           return (
                             <>
-                              {bandSwatch(band)}
-                              {hasReps ? `${r}` : ""}
-                              {band ? (BAND_COLOR_LOOKUP[band]?.label || band) : ""}
+                              {bands.map(k => bandSwatch(k))}
+                              {hasReps ? `${r} ` : ""}
+                              {label}
                             </>
                           );
                         };

@@ -619,16 +619,24 @@ function countSupportSessions(wLog) {
 // SessionExRow's prev column. Three shapes:
 //   - weight: { reps, weight, done } (or unilateral { leftReps, ... })
 //     → returns a string like "5@80" or { L: "5@80", R: "5@80" }.
-//   - band:   { reps, band } / { leftReps, leftBand, ... }
-//     → returns { band, reps } so the prev pill can render a swatch.
+//   - band:   { reps, band } / { leftReps, leftBand, ... } where band
+//     is an array of color keys (or, for older sessions, a single
+//     string)
+//     → returns { bands: [...], reps } so the prev pill can render
+//     a swatch stack.
 //   - circles-only: { done } → returns "✓" if done else "".
 function setSummary(set) {
   if (set == null) return null;
+  const toBandShape = (bands, reps) => {
+    const arr = Array.isArray(bands) ? bands : (bands ? [bands] : []);
+    if (arr.length === 0 && (reps == null || reps === "")) return "";
+    return { bands: arr, reps };
+  };
   // Unilateral with band
   if (set.leftBand !== undefined || set.rightBand !== undefined) {
     return {
-      L: set.leftBand  ? { band: set.leftBand,  reps: set.leftReps  } : "",
-      R: set.rightBand ? { band: set.rightBand, reps: set.rightReps } : "",
+      L: toBandShape(set.leftBand,  set.leftReps),
+      R: toBandShape(set.rightBand, set.rightReps),
     };
   }
   // Unilateral with weight
@@ -644,7 +652,7 @@ function setSummary(set) {
   }
   // Bilateral with band
   if (set.band !== undefined) {
-    return set.band ? { band: set.band, reps: set.reps } : "";
+    return toBandShape(set.band, set.reps);
   }
   // Bilateral with weight
   if (set.reps !== undefined || set.weight !== undefined) {
