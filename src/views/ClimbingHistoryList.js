@@ -1,15 +1,23 @@
 // ─────────────────────────────────────────────────────────────
 // CLIMBING HISTORY LIST
 // ─────────────────────────────────────────────────────────────
-// Date-grouped climb list. Each row supports inline edit (pencil)
-// and delete (×). Edit opens a compact form pre-populated with the
-// existing values; Save dispatches onUpdateActivity(id, updates),
-// Cancel collapses without writing.
+// Climb list with a filter-pills row above. Default view is
+// date-grouped; selecting the Named pill switches to a name-grouped
+// view (all sends of "The Journey" stacked into one card, alphabetical
+// across cards). Discipline / venue / wall pills further narrow what
+// shows — single-select per category, tap a selected pill to clear it.
 //
-// onUpdateActivity / onDeleteActivity are optional — omit either
-// to render the corresponding control as read-only.
+// Filter state persists to localStorage (LS_CLIMBING_HISTORY_FILTERS_KEY)
+// so re-entering the tab lands on the same view. View state only —
+// not synced to the cloud.
+//
+// Each row supports inline edit (pencil) and delete (×). Edit opens a
+// compact form pre-populated with the existing values; Save dispatches
+// onUpdateActivity(id, updates), Cancel collapses without writing.
+// onUpdateActivity / onDeleteActivity are optional — omit either to
+// render the corresponding control as read-only.
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import {
@@ -17,6 +25,15 @@ import {
   disciplineMeta, ascentMeta, wallMeta, describeClimb,
   gradesFor, defaultGradeFor,
 } from "../lib/climbing-grades.js";
+import { loadLS, saveLS, LS_CLIMBING_HISTORY_FILTERS_KEY } from "../lib/storage.js";
+
+// Default filter state — everything "all" (no filtering), name-group off.
+const DEFAULT_FILTERS = {
+  named: false,
+  discipline: "all",  // "all" | "boulder" | "lead"
+  venue:      "all",  // "all" | "indoor" | "outdoor"
+  wall:       "all",  // "all" | "moonboard" | "kilter"
+};
 
 export function ClimbingHistoryList({
   climbs,
@@ -25,73 +42,210 @@ export function ClimbingHistoryList({
 }) {
   const [editingId, setEditingId] = useState(null);
 
-  const byDate = useMemo(() => {
-    const m = new Map();
-    for (const c of climbs) {
-      const d = c.date || "—";
-      if (!m.has(d)) m.set(d, []);
-      m.get(d).push(c);
+  // ── Filter state (persisted) ────────────────────────────────
+  const [filters, setFiltersState] = useState(() => {
+    const stored = loadLS(LS_CLIMBING_HISTORY_FILTERS_KEY);
+    return { ...DEFAULT_FILTERS, ...(stored || {}) };
+  });
+  const updateFilters = (next) => {
+    setFiltersState(next);
+    saveLS(LS_CLIMBING_HISTORY_FILTERS_KEY, next);
+  };
+  // Tap-to-deselect: tapping the active pill in a category clears it
+  // back to "all". Tapping a different pill in the same category
+  // switches selection. The Named pill is a plain toggle.
+  const pickFilter = (key, value) => {
+    if (key === "named") {
+      updateFilters({ ...filters, named: !filters.named });
+      return;
     }
-    return [...m.entries()];
-  }, [climbs]);
+    const next = (filters[key] === value) ? "all" : value;
+    updateFilters({ ...filters, [key]: next });
+  };
 
-  if (climbs.length === 0) {
+  // Wall pills only make sense for indoor boulder (or "all venues"
+  // boulder). Hide the row when not applicable; auto-clear any
+  // stale wall selection so it doesn't silently exclude data.
+  const wallPillsVisible = filters.discipline !== "lead" && filters.venue !== "outdoor";
+  useEffect(() => {
+    if (!wallPillsVisible && filters.wall !== "all") {
+      updateFilters({ ...filters, wall: "all" });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallPillsVisible]);
+
+  // ── Apply filters ───────────────────────────────────────────
+  const filtered = useMemo(() => {
+    return climbs.filter(c => {
+      if (filters.named && !c.route_name) return false;
+      if (filters.discipline !== "all" && c.discipline !== filters.discipline) return false;
+      if (filters.venue !== "all") {
+        const v = c.venue || "indoor";  // legacy fallback
+        if (v !== filters.venue) return false;
+      }
+      if (filters.wall !== "all" && c.wall !== filters.wall) return false;
+      return true;
+    });
+  }, [climbs, filters]);
+
+  // ── Group: by date (default) or by name (Named mode) ───────
+  // Date mode: existing behavior — one card per date, descending.
+  // Name mode: one card per route_name, alphabetical. Within each
+  // card, sends are listed date-descending so the most recent ascent
+  // surfaces first.
+  const grouped = useMemo(() => {
+    const m = new Map();
+    if (filters.named) {
+      for (const c of filtered) {
+        const key = c.route_name || "—";
+        if (!m.has(key)) m.set(key, []);
+        m.get(key).push(c);
+      }
+      // Sort within group by date desc; then sort groups alphabetically.
+      for (const arr of m.values()) {
+        arr.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      }
+      return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    }
+    for (const c of filtered) {
+      const key = c.date || "—";
+      if (!m.has(key)) m.set(key, []);
+      m.get(key).push(c);
+    }
+    // Date groups already come pre-sorted descending from the caller,
+    // but force the order here in case callers stop sorting upstream.
+    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  }, [filtered, filters.named]);
+
+  return (
+    <div>
+      <FilterPills
+        filters={filters}
+        onPick={pickFilter}
+        wallVisible={wallPillsVisible}
+        totalClimbs={climbs.length}
+        filteredCount={filtered.length}
+      />
+
+      {filtered.length === 0 ? (
+        <Card>
+          <div style={{ color: C.muted, fontSize: 13 }}>
+            {climbs.length === 0
+              ? "No climbs logged yet. Use the Fingers tab to log your first climb."
+              : "No climbs match these filters. Clear a pill above to widen the view."}
+          </div>
+        </Card>
+      ) : (
+        grouped.map(([groupKey, list]) => (
+          <Card key={groupKey}>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+              {filters.named ? (
+                <span><b style={{ color: C.text }}>{groupKey}</b> · {list.length} send{list.length === 1 ? "" : "s"}</span>
+              ) : (
+                <span>{groupKey} · {list.length} climb{list.length === 1 ? "" : "s"}</span>
+              )}
+            </div>
+            {list.map(c => {
+              const isEditing = editingId === c.id;
+              if (isEditing && onUpdateActivity) {
+                return (
+                  <ClimbEditRow
+                    key={c.id}
+                    climb={c}
+                    onSave={(updates) => {
+                      onUpdateActivity(c.id, updates);
+                      setEditingId(null);
+                    }}
+                    onCancel={() => setEditingId(null)}
+                  />
+                );
+              }
+              return (
+                <ClimbRow
+                  key={c.id || `${c.date}-${c.grade}-${c.ascent}`}
+                  climb={c}
+                  // In name mode the route_name is in the card header,
+                  // so suppress it on the row and show the date instead
+                  // (since date is no longer the grouping key).
+                  showDate={filters.named}
+                  hideRouteName={filters.named}
+                  onEdit={onUpdateActivity ? () => setEditingId(c.id) : null}
+                  onDelete={onDeleteActivity ? () => {
+                    if (window.confirm("Delete this climb?")) onDeleteActivity(c.id);
+                  } : null}
+                />
+              );
+            })}
+          </Card>
+        ))
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// FilterPills — single row of toggleable filters above the list
+// ─────────────────────────────────────────────────────────────
+// Top Rope and Commercial-wall are intentionally omitted from the
+// pill set — they're the "unnamed default" the user typically climbs
+// and don't need their own filter. With everything deselected, the
+// list shows the full unfiltered set, so top_rope and commercial
+// climbs are still visible by default.
+function FilterPills({ filters, onPick, wallVisible, totalClimbs, filteredCount }) {
+  const pill = (label, key, value) => {
+    const active = key === "named" ? filters.named : filters[key] === value;
     return (
-      <Card>
-        <div style={{ color: C.muted, fontSize: 13 }}>
-          No climbs logged yet. Use the Fingers tab to log your first climb.
-        </div>
-      </Card>
+      <button
+        key={`${key}-${value}`}
+        onClick={() => onPick(key, value)}
+        style={{
+          padding: "4px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer",
+          border: "none", fontWeight: 600,
+          background: active ? C.purple : C.border,
+          color:      active ? "#fff" : C.muted,
+        }}
+      >
+        {label}
+      </button>
     );
-  }
-
-  return byDate.map(([date, list]) => (
-    <Card key={date}>
-      <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
-        {date} · {list.length} climb{list.length === 1 ? "" : "s"}
+  };
+  return (
+    <Card style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+        {pill("Named", "named", true)}
+        <span style={{ width: 6 }} />
+        {pill("Boulder", "discipline", "boulder")}
+        {pill("Lead",    "discipline", "lead")}
+        <span style={{ width: 6 }} />
+        {pill("Indoor",  "venue", "indoor")}
+        {pill("Outdoor", "venue", "outdoor")}
+        {wallVisible && <>
+          <span style={{ width: 6 }} />
+          {pill("MoonBoard", "wall", "moonboard")}
+          {pill("Kilter",    "wall", "kilter")}
+        </>}
       </div>
-      {list.map(c => {
-        const isEditing = editingId === c.id;
-        if (isEditing && onUpdateActivity) {
-          return (
-            <ClimbEditRow
-              key={c.id}
-              climb={c}
-              onSave={(updates) => {
-                onUpdateActivity(c.id, updates);
-                setEditingId(null);
-              }}
-              onCancel={() => setEditingId(null)}
-            />
-          );
-        }
-        return (
-          <ClimbRow
-            key={c.id || `${c.date}-${c.grade}-${c.ascent}`}
-            climb={c}
-            onEdit={onUpdateActivity ? () => setEditingId(c.id) : null}
-            onDelete={onDeleteActivity ? () => {
-              if (window.confirm("Delete this climb?")) onDeleteActivity(c.id);
-            } : null}
-          />
-        );
-      })}
+      <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
+        {filteredCount} of {totalClimbs} climb{totalClimbs === 1 ? "" : "s"}
+        {filters.named && " · grouped by name"}
+      </div>
     </Card>
-  ));
+  );
 }
 
 // ─────────────────────────────────────────────────────────────
 // ClimbRow — read-only display for one climb entry
 // ─────────────────────────────────────────────────────────────
-function ClimbRow({ climb: c, onEdit, onDelete }) {
+function ClimbRow({ climb: c, onEdit, onDelete, showDate = false, hideRouteName = false }) {
   const isSend = c.ascent && c.ascent !== "attempt";
   const disc   = disciplineMeta(c.discipline);
   const wall   = c.discipline === "boulder" && c.wall ? wallMeta(c.wall) : null;
   const venueLabel = c.venue === "outdoor" ? "Outdoor" : null;
-  // Build the outdoor location label: "Route, Crag, Area" — only the
-  // pieces that exist. Renders as a third line under the main row
-  // when any are present (typically only on outdoor climbs).
-  const locationParts = [c.route_name, c.crag, c.area].filter(Boolean);
+  // Build the location label: route_name (suppressed in name-group
+  // mode since it's in the card header) + crag + area. Only the
+  // pieces that exist render; typically only on outdoor climbs.
+  const showRouteName = !hideRouteName && c.route_name;
+  const locationParts = [showRouteName && c.route_name, c.crag, c.area].filter(Boolean);
 
   return (
     <div style={{
@@ -110,6 +264,7 @@ function ClimbRow({ climb: c, onEdit, onDelete }) {
           </span>
         </div>
         <div style={{ fontSize: 11, color: isSend ? C.green : C.muted }}>
+          {showDate && c.date ? `${c.date} · ` : ""}
           {c.ascent ? ascentMeta(c.ascent).label : describeClimb(c)}
           {Number.isFinite(c.rpe) ? ` · RPE ${c.rpe}` : ""}
         </div>
@@ -118,8 +273,8 @@ function ClimbRow({ climb: c, onEdit, onDelete }) {
             fontSize: 11, color: C.text, marginTop: 2,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
-            {c.route_name && <b>{c.route_name}</b>}
-            {c.route_name && (c.crag || c.area) ? " · " : ""}
+            {showRouteName && <b>{c.route_name}</b>}
+            {showRouteName && (c.crag || c.area) ? " · " : ""}
             <span style={{ color: C.muted }}>
               {[c.crag, c.area].filter(Boolean).join(", ")}
             </span>

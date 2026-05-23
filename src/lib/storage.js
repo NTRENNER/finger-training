@@ -99,6 +99,13 @@ export const LS_ANALYSIS_SUBTAB_KEY = "ft_analysis_subtab";
 // navigations.
 export const LS_BW_NORMALIZE_KEY = "ft_bw_normalize";
 
+// Climbing history filter pills — persists the active filter selection
+// (named-only toggle + per-category single-select for discipline, venue,
+// wall) so re-opening the History tab lands on the same view the user
+// left. Shape: { named: bool, discipline: str, venue: str, wall: str }.
+// Local-only — view state, not worth syncing to the cloud.
+export const LS_CLIMBING_HISTORY_FILTERS_KEY = "ft_climbing_history_filters";
+
 // Climbing grade pyramid — pinned project grade per (discipline,
 // venue, wall) combination. Map shape: keys are pipe-separated
 // `${discipline}|${venue}|${wall}` strings; values are grade strings.
