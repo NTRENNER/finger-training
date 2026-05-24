@@ -852,7 +852,7 @@ export default function App() {
                       disabled={tindeq.connected || tindeq.reconnecting}
                       color={tindeq.connected ? C.green : tindeq.reconnecting ? C.orange : C.blue}
                     >
-                      {tindeq.connected ? "Connected" : tindeq.reconnecting ? "Reconnecting…" : "Connect BLE"}
+                      {tindeq.connected ? "Connected" : tindeq.reconnecting ? "Reconnecting…" : "Connect Tindeq"}
                     </Btn>
                   </div>
                 </div>

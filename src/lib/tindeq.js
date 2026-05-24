@@ -376,7 +376,7 @@ export function useTindeq() {
           await setupGatt(device);
           setConnected(true);
         } catch {
-          setBleError("Connection lost — tap Connect BLE to reconnect.");
+          setBleError("Connection lost — tap Connect Tindeq to reconnect.");
         } finally {
           setReconnecting(false);
           reconnectingRef.current = false;
