@@ -46,7 +46,11 @@ const CELL    = 7;
 const GAP     = 1;
 const ROW_H   = CELL + GAP;
 const COL_W   = CELL + GAP;
-const DAYS    = 365;  // window
+// Minimum span — even a brand-new user with one logged session gets
+// at least 12 weeks of context so the grid doesn't render as a single
+// lonely cell. 84 days × 1 col/week = ~12 cols, which still reads as
+// a calendar rather than a sparkline.
+const MIN_DAYS = 84;
 const WEEKDAY = ["", "Mon", "", "Wed", "", "Fri", ""]; // sparse so the labels don't crowd
 
 // Build the per-day activity map from raw inputs. Single pass over
@@ -97,11 +101,13 @@ function intensity(entry) {
 // Build the 7×N grid of dates ending today. Aligns weeks so Sunday
 // is row 0; some leading cells before the first day are blank to
 // pad the column. Returns columns[col][row] = date string or null.
-function buildGrid(endDate) {
+// `days` is the inclusive span — buildGrid covers the most recent
+// `days` calendar days ending on endDate.
+function buildGrid(endDate, days) {
   const end = new Date(endDate + "T00:00:00");
-  const startMs = end.getTime() - (DAYS - 1) * 86400000;
+  const startMs = end.getTime() - (days - 1) * 86400000;
   const dates = [];
-  for (let i = 0; i < DAYS; i++) {
+  for (let i = 0; i < days; i++) {
     dates.push(new Date(startMs + i * 86400000));
   }
   // Pad the front so column 0 starts on Sunday.
@@ -116,6 +122,35 @@ function buildGrid(endDate) {
     cols.push(col);
   }
   return cols;
+}
+
+// Find the earliest dated entry across all data sources, returned as
+// a "YYYY-MM-DD" string or null when nothing has been logged. Used
+// to anchor the heatmap span — the grid starts at the user's first
+// session rather than always reaching back a fixed 365 days, so a
+// new user doesn't see months of empty cells from before they
+// started using the app.
+function earliestActivityDate({ history, activities, wLog }) {
+  let earliest = null;
+  const consider = (d) => {
+    if (!d || typeof d !== "string") return;
+    if (!earliest || d < earliest) earliest = d;
+  };
+  for (const r of history || [])    consider(r?.date);
+  for (const a of activities || []) consider(a?.date);
+  for (const s of wLog || [])       consider(s?.date);
+  return earliest;
+}
+
+// Compute the day count between two ymd strings, inclusive. Used to
+// derive the heatmap span from the earliest activity date back to
+// today. Returns 1 for same-day, null for invalid inputs.
+function daysBetweenInclusive(startYmd, endYmd) {
+  if (!startYmd || !endYmd) return null;
+  const a = new Date(startYmd + "T00:00:00").getTime();
+  const b = new Date(endYmd   + "T00:00:00").getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.max(1, Math.round((b - a) / 86400000) + 1);
 }
 
 // Group adjacent columns by the month their FIRST in-range day falls
@@ -145,8 +180,36 @@ export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
   );
 
   const today = ymdLocal();
-  const cols = useMemo(() => buildGrid(today), [today]);
+
+  // Dynamic span: start at the user's earliest logged activity (so a
+  // 2-month-old account doesn't show 10 months of empty cells), but
+  // never less than MIN_DAYS so the grid keeps enough context to
+  // read as a calendar instead of a tiny strip. End is always today.
+  const earliest = useMemo(
+    () => earliestActivityDate({ history, activities, wLog }),
+    [history, activities, wLog],
+  );
+  const spanDays = useMemo(() => {
+    const fromEarliest = daysBetweenInclusive(earliest, today);
+    if (fromEarliest == null) return MIN_DAYS;
+    return Math.max(fromEarliest, MIN_DAYS);
+  }, [earliest, today]);
+
+  const cols = useMemo(() => buildGrid(today, spanDays), [today, spanDays]);
   const monthBands = useMemo(() => buildMonthBands(cols), [cols]);
+
+  // Friendly header label — "Last N days" while the span is short
+  // enough that a day count reads cleanly; "Since {Month YYYY}" once
+  // the user has more than a couple of months of history and the
+  // day count would be too noisy to parse at a glance.
+  const headerLabel = useMemo(() => {
+    if (spanDays <= 60) return `Last ${spanDays} days`;
+    const startDate = new Date(today + "T00:00:00").getTime() - (spanDays - 1) * 86400000;
+    const startLabel = new Date(startDate).toLocaleString(undefined, {
+      month: "long", year: "numeric",
+    });
+    return `Since ${startLabel}`;
+  }, [spanDays, today]);
 
   // Scroll the grid to its right edge on mount so the most recent
   // (and most likely active) cells are in view. Without this, users
@@ -178,7 +241,7 @@ export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
   return (
     <Card style={{ marginBottom: 16, padding: "12px 14px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
-        <div style={{ fontSize: 13, fontWeight: 700 }}>Last 365 days</div>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>{headerLabel}</div>
         <div style={{ fontSize: 11, color: C.muted }}>
           {totals.activeDays} active {totals.activeDays === 1 ? "day" : "days"}
           {" · "}
