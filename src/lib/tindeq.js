@@ -25,9 +25,10 @@
 //      sample) so the view doesn't have to read peak before the
 //      next rep resets it.
 //
-// Auto-fail: if the measured force drops below 95% of targetKgRef
-// for >1.5 s during a manual rep, autoFailCallbackRef fires so the
-// view can end the rep and mark it as failed without user input.
+// Auto-fail: if the measured force drops below the hybrid threshold
+// (see AUTOFAIL_ABS_SAG_KG below) for >1.5 s during a manual rep,
+// autoFailCallbackRef fires so the view can end the rep and mark it
+// as failed without user input.
 //
 // No app-layer keepalive: the OS/link layer already keeps BLE alive,
 // and writing CMD_TARE every 25 s (which we used to do) actually
@@ -208,6 +209,23 @@ export function useTindeq() {
   const AD_END_MS    = 500;  // ms below end-threshold before rep is confirmed done
   const AD_MIN_MS    = 1500; // minimum rep duration — filters noise
 
+  // ── Manual auto-fail thresholds ──
+  // The auto-fail rule used to be a pure 0.95 × target percentage. At
+  // light loads that's a brutally tight absolute window — a 13 lb
+  // target gives only 0.3 kg of slack, so a normal breath or a grip
+  // micro-adjustment can trigger fail. The hybrid floor below picks
+  // whichever is MORE forgiving (lower threshold) at each load:
+  //   - At 30 kg (66 lbs) target: 0.95 × 30 = 28.5 kg; 30 − 2 = 28.0 kg.
+  //     Absolute floor wins; 2 kg slack.
+  //   - At 50 kg target: 0.95 × 50 = 47.5 kg; 50 − 2 = 48.0 kg.
+  //     Percentage wins; 2.5 kg slack.
+  // Crossover is at AUTOFAIL_PCT × target == target − AUTOFAIL_ABS_SAG_KG
+  // → target == AUTOFAIL_ABS_SAG_KG / (1 − AUTOFAIL_PCT) = 2 / 0.05 = 40 kg.
+  // Below 40 kg the absolute floor governs; above it the percentage does.
+  const AUTOFAIL_PCT        = 0.95;
+  const AUTOFAIL_ABS_SAG_KG = 2.0;
+  const AUTOFAIL_MS         = 1500;
+
   // Stable setter — lets views register/clear the callback without prop drilling
   const setAutoFailCallback = useCallback((fn) => {
     autoFailCallbackRef.current = fn ?? null;
@@ -252,10 +270,14 @@ export function useTindeq() {
       if (measuringRef.current) {
         const tgt = targetKgRef.current;
         if (tgt != null && tgt > 0) {
-          const threshold = tgt * 0.95;
+          // Hybrid threshold — see AUTOFAIL_* constants above for the
+          // rationale. min() picks the lower (more forgiving) of the
+          // 95% rule and the 2 kg absolute floor, so light-target reps
+          // get human-scale slack instead of fractional-kg precision.
+          const threshold = Math.min(tgt * AUTOFAIL_PCT, tgt - AUTOFAIL_ABS_SAG_KG);
           if (kg < threshold) {
             if (belowSinceRef.current === null) belowSinceRef.current = Date.now();
-            else if (Date.now() - belowSinceRef.current > 1500) {
+            else if (Date.now() - belowSinceRef.current > AUTOFAIL_MS) {
               belowSinceRef.current = null;
               autoFailCallbackRef.current?.();
             }
