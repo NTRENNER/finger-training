@@ -8,7 +8,6 @@
 // to one of six fixed zone reference times.
 //
 // Layout (top to bottom):
-//   • Adaptive Warm-up entry card
 //   • BwPrompt — inline body-weight nudge when stale.
 //   • Grip Type pills — per-grip; the curve is grip-scoped.
 //   • SessionPlanCard — the unified plan surface. It hosts:
@@ -55,9 +54,8 @@ import { C } from "../ui/theme.js";
 import { Card, Btn } from "../ui/components.js";
 import { fmt0, toDisp, fromDisp } from "../ui/format.js";
 
-import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
+import { loadLS, LS_BW_LOG_KEY } from "../lib/storage.js";
 import { today } from "../util.js";
-import { WarmupView } from "./WarmupView.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.js";
@@ -185,7 +183,6 @@ export function SetupView({
   activities = [],
   connectSlot = null,
   GOAL_CONFIG = {}, GRIP_PRESETS = [],
-  bodyWeight = null, tindeq = null,
   // Cloud-synced training-goal bias for the coaching engine
   // ("balanced" default; bouldering / power_endurance / endurance).
   // Threaded to SessionPlanCard which passes it to the engine.
@@ -194,54 +191,13 @@ export function SetupView({
   // to Settings when the user wants to change their climbing focus.
   onNavigateToSettings,
 }) {
-  const [warmupActive, setWarmupActive] = useState(false);
-
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
 
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
 
-  // Adaptive Warm-up takeover — replaces SetupView until closed.
-  if (warmupActive) {
-    const wLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
-    return (
-      <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
-        <WarmupView
-          history={history}
-          wLog={wLog}
-          bodyWeightKg={bodyWeight}
-          tindeq={tindeq}
-          unit={unit}
-          onClose={() => setWarmupActive(false)}
-        />
-      </div>
-    );
-  }
-
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
-
-      {/* Adaptive Warm-up entry point */}
-      <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Adaptive Warm-up</div>
-            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.4 }}>
-              Force-curve-derived hangs + cross-loaded pullups. Same feel every session, never near failure.
-            </div>
-          </div>
-          <button
-            onClick={() => setWarmupActive(true)}
-            style={{
-              background: C.purple, color: "#fff", border: "none", borderRadius: 8,
-              padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Generate
-          </button>
-        </div>
-      </Card>
 
       {/* Bodyweight quick-log. ClimbingLogCard used to sit immediately
           above this row, but climb capture moved out to the dedicated
