@@ -13,29 +13,31 @@ Ordering is rough priority, not strict sequencing.
 
 ---
 
-## 1. Extract domain hooks from `App.js` (RE-SCOPED)
+## 1. Extract domain hooks from `App.js` ✓ SHIPPED (commits 7315b0b, f2c2e13)
 
-**Status before curve-trust.** Originally proposed splitting App.js
-state into `useUserSettings`, `useCloudSync`, `useFingerHistory`,
-`useActivities`. The `useFingerHistory` hook was the centerpiece
-because it would dedupe `gripBaselines` + `perHandGripBaselines`
-between AnalysisView and BadgesView.
+Delivered: `useUserSettings` (unit + bodyWeight + bwLog + trip +
+climbingFocus + pyramid pin maps + fatigueModel, with the combined
+user_settings cloud reconcile and the BW reconcile) and
+`useActivities` (climbing log + 1RM CRUD + reconcile). App.js
+dropped from 1062 → 812 lines.
 
-**What changed.** BadgesView is gone (commit caf7d2a). The duplicate
-consumer of those baselines no longer exists; lifting them into a
-shared hook is now pure code-organization work, not dedup work.
+**Not done, with reasoning:**
 
-**What's still real.**
+- `useCloudSync()` was originally proposed but isn't a coherent
+  boundary in this codebase. Cloud sync logic is intrinsically
+  tied to each state slice — BW reconcile is in `useUserSettings`,
+  activities reconcile is in `useActivities`, reps reconcile is in
+  `useRepHistory`. There isn't a generic "sync orchestrator" to
+  extract because each domain owns its own reconcile loop. Pull
+  status + manual pull button remain in App.js where they belong
+  (they orchestrate cross-hook refresh).
 
-- `useUserSettings()` — bodyWeight, unit, trip, bwLog. Still
-  cleanly carve-able. Easy win.
-- `useCloudSync()` — auth + Supabase pull/push, dirty-flag
-  tracking, last-pulled-at, sync status. Still self-contained.
-- `useActivities()` — climbing log + 1RM activities. Small.
-
-`useFingerHistory()` becomes optional cleanup, not dedup work.
-
-**Effort.** Small-medium. Pure code organization at this point.
+- `useFingerHistory()` was originally proposed to dedupe
+  `gripBaselines` between AnalysisView and BadgesView. BadgesView
+  is gone (caf7d2a), so the dedup justification is moot. Lifting
+  the baselines to a shared hook now is pure code-organization
+  work without a forcing function; skip unless AnalysisView grows
+  back the second consumer.
 
 ---
 
