@@ -19,7 +19,7 @@
 // naturally. The detail popup uses derived per-day rollups from the
 // same inputs.
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useEffect } from "react";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import { ymdLocal } from "../util.js";
@@ -37,8 +37,13 @@ const RAMP = [
   "#5fd95f",          // 4+
 ];
 
-const CELL    = 11;   // px per cell — fits ~7×53 = 583px wide; scales down via parent overflow
-const GAP     = 2;
+// Cell size tuned to fit a full 53-week year inside the History
+// view's 480px max-width card. 53 cols × 8px = 424px, plus the
+// weekday-label column and card padding still leaves a few pixels of
+// breathing room. The grid stays scrollable as a fallback for even
+// narrower viewports.
+const CELL    = 7;
+const GAP     = 1;
 const ROW_H   = CELL + GAP;
 const COL_W   = CELL + GAP;
 const DAYS    = 365;  // window
@@ -143,6 +148,16 @@ export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
   const cols = useMemo(() => buildGrid(today), [today]);
   const monthBands = useMemo(() => buildMonthBands(cols), [cols]);
 
+  // Scroll the grid to its right edge on mount so the most recent
+  // (and most likely active) cells are in view. Without this, users
+  // on narrower viewports see only the oldest months — and conclude
+  // the heatmap is broken when their recent activity isn't visible.
+  const scrollRef = useRef(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [cols]);
+
   // Totals shown in the card header — quick at-a-glance counts for
   // the visible window.
   const totals = useMemo(() => {
@@ -175,7 +190,7 @@ export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
           Padding-bottom leaves room for the day-of-week labels on
           the left when the grid scrolls — they're absolutely
           positioned to stay aligned with their rows. */}
-      <div style={{ overflowX: "auto", paddingTop: 14, position: "relative" }}>
+      <div ref={scrollRef} style={{ overflowX: "auto", paddingTop: 14, position: "relative" }}>
         <div style={{
           display: "inline-grid",
           gridTemplateColumns: `auto repeat(${cols.length}, ${COL_W}px)`,
