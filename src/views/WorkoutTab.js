@@ -175,8 +175,13 @@ export function WorkoutTab({
     const todayStr = today();
     let todaySession = null;
     let mostRecentDate = null;
+    // Accept either workoutId or the legacy `workout` field. The sync
+    // layer now mirrors one into the other on fetch, but older LS
+    // entries or future schema drift could still leave only one set,
+    // so check both rather than break the pill silently.
+    const isStretch = (s) => s && (s.workoutId === "STRETCH" || s.workout === "STRETCH");
     for (const s of wLog) {
-      if (s?.workoutId !== "STRETCH") continue;
+      if (!isStretch(s)) continue;
       if (s.date === todayStr) todaySession = s;
       if (!mostRecentDate || s.date > mostRecentDate) mostRecentDate = s.date;
     }
@@ -363,8 +368,11 @@ export function WorkoutTab({
   const toggleTodaysStretch = () => {
     const todayStr = today();
     const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    // Match by either workoutId or workout for the same reason
+     // stretchState does — cloud-synced rows or older LS entries may
+     // only have one of the two fields set.
     const existing = freshLog.find(
-      s => s?.workoutId === "STRETCH" && s.date === todayStr
+      s => s && (s.workoutId === "STRETCH" || s.workout === "STRETCH") && s.date === todayStr
     );
     if (existing) {
       const nextLog = freshLog.filter(s => s.id !== existing.id);

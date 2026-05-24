@@ -158,6 +158,14 @@ export async function fetchWorkoutSessions() {
     date:            s.date,
     completedAt:     s.completed_at ?? null,
     workout:         s.workout,
+    // The DB column is named `workout`; the client-side schema added
+    // a separate `workoutId` field later. Mirror on read so cloud-
+    // synced sessions look identical to locally-saved ones — without
+    // this, every downstream consumer that filters by workoutId
+    // (stretchState, daysSinceLastOfType, computeTagDaysSince) misses
+    // cloud-pulled rows and the user sees "no stretches logged"
+    // even though History happily renders them.
+    workoutId:       s.workout,
     sessionNumber:   s.session_number,
     // Carry was_recommended through. Null/undefined means "legacy or
     // pre-column row" — WorkoutTab's rotation derivation treats !== false
