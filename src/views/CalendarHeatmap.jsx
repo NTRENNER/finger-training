@@ -221,17 +221,21 @@ export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
     if (el) el.scrollLeft = el.scrollWidth;
   }, [cols]);
 
-  // Totals shown in the card header — quick at-a-glance counts for
-  // the visible window.
+  // Header counts are DAYS-with-each-category, not raw occurrences.
+  // A day with 8 climbs counts as one climbing day (not eight) — same
+  // mental model as the grid itself, where one cell = one day
+  // regardless of how much got packed in. Treating them as day counts
+  // keeps the header's numbers comparable to "activeDays" and avoids
+  // climb-heavy days dominating the totals strip.
   const totals = useMemo(() => {
     let f = 0, w = 0, c = 0, s = 0, activeDays = 0;
     for (const entry of dayIndex.values()) {
       if (intensity(entry) === 0) continue;
       activeDays += 1;
-      f += entry.fingers.size;
-      w += entry.workouts.length;
-      c += entry.climbs.length;
-      s += entry.stretches.length;
+      if (entry.fingers.size > 0)   f += 1;
+      if (entry.workouts.length > 0) w += 1;
+      if (entry.climbs.length > 0)   c += 1;
+      if (entry.stretches.length > 0) s += 1;
     }
     return { fingers: f, workouts: w, climbs: c, stretches: s, activeDays };
   }, [dayIndex]);
