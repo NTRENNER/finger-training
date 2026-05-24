@@ -200,14 +200,17 @@ export function SetupView({
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
 
-      {/* Grip Type — still per-grip, the curve is grip-scoped */}
+      {/* Grip Type — still per-grip, the curve is grip-scoped. The
+          heading doubles as the call-to-action: it reads "Select a grip
+          to start" (blue) until a grip is picked, then reverts to the
+          neutral "Grip Type" label. */}
       <Card>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Grip Type</div>
-        {!config.grip && (
-          <div style={{ fontSize: 12, color: C.blue, fontWeight: 600, marginBottom: 8 }}>
-            Select a grip to start
-          </div>
-        )}
+        <div style={{
+          fontSize: 14, fontWeight: 700, marginBottom: 12,
+          color: config.grip ? C.text : C.blue,
+        }}>
+          {config.grip ? "Grip Type" : "Select a grip to start"}
+        </div>
         <div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
             {GRIP_PRESETS.map(g => (
