@@ -80,6 +80,7 @@ import { SimpleExRow } from "./workout/SimpleExRow.js";
 import { RecommendationCard } from "./workout/RecommendationCard.js";
 import { WorkoutPicker } from "./workout/WorkoutPicker.js";
 import { StretchPill } from "./workout/StretchPill.js";
+import { ExercisePicker } from "./workout/ExercisePicker.js";
 import {
   countSupportSessions, setSummary, findLastSessionFor,
 } from "./workout/workoutHelpers.js";
@@ -130,6 +131,16 @@ export function WorkoutTab({
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionData, setSessionData] = useState({}); // exId → { sets:[...] } | { done, notes }
   const [sessionNotes, setSessionNotes] = useState(""); // overall session note
+  // Session-local exercise list. Seeded from activeWorkout.exercises
+  // at startSession; mutated by the per-row swap picker so a user can
+  // substitute one exercise for another mid-workout without editing
+  // the template. Rendering walks liveExercises (not activeWorkout)
+  // once a session is active. Cleared when the session ends.
+  const [liveExercises, setLiveExercises] = useState([]);
+  // Swap picker state. null = closed; otherwise { index: number } —
+  // the position in liveExercises being replaced. Add-at-end is
+  // signaled by index === liveExercises.length.
+  const [pickerState, setPickerState] = useState(null);
 
   // ── Recommendation ───────────────────────────────────
   // Drop pin-style rotation sessions (legacy ROTATION_PIN_KEY) so
@@ -180,6 +191,64 @@ export function WorkoutTab({
     return { todaySession, daysSince, done: !!todaySession };
   }, [wLog]);
 
+  // Per-exercise seed builder. Pulled out of startSession so the
+  // mid-session swap/add picker can reuse it for a single exercise
+  // without duplicating the three-logging-mode branching.
+  const seedExercise = (ex) => {
+    if (!ex.loggable) return { done: false, notes: "" };
+    const sets = Array.from({ length: ex.sets || 1 }, (_, i) => {
+      if (ex.circlesOnly) {
+        // Seed reps from the prior session when the exercise tracks
+        // reps too; otherwise just a bare done flag.
+        if (ex.reps) {
+          const lastSession = findLastSessionFor(wLog, activeId, ex.id);
+          const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
+          return { reps: lastSet?.reps ?? "", done: false };
+        }
+        return { done: false };
+      }
+      if (ex.logBand) {
+        // Seed band from last session if available — no progression
+        // logic (band selection is qualitative; let user step up
+        // manually when they're ready). Lookup the most-recent
+        // session containing this exercise to pull the prior band.
+        const lastSession = findLastSessionFor(wLog, activeId, ex.id);
+        const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
+        if (ex.unilateral) {
+          return {
+            leftReps:  lastSet?.leftReps  ?? ex.reps ?? "",
+            leftBand:  lastSet?.leftBand  ?? "",
+            rightReps: lastSet?.rightReps ?? ex.reps ?? "",
+            rightBand: lastSet?.rightBand ?? "",
+            done: false,
+          };
+        }
+        return {
+          reps: lastSet?.reps ?? ex.reps ?? "",
+          band: lastSet?.band ?? "",
+          done: false,
+        };
+      }
+      // Default weight-logged exercise — seed via recommendSet.
+      const rec = recommendSet(wLog, ex, activeId, i);
+      if (ex.unilateral) {
+        return {
+          leftReps:    rec?.leftReps    ?? ex.reps ?? "",
+          leftWeight:  rec?.leftWeight  ?? "",
+          rightReps:   rec?.rightReps   ?? ex.reps ?? "",
+          rightWeight: rec?.rightWeight ?? "",
+          done: false,
+        };
+      }
+      return {
+        reps:   rec?.reps   ?? ex.reps ?? "",
+        weight: rec?.weight ?? "",
+        done: false,
+      };
+    });
+    return { sets };
+  };
+
   // ── Session start ────────────────────────────────────
   const startSession = () => {
     if (!activeWorkout || activeWorkout.exercises.length === 0) {
@@ -190,71 +259,46 @@ export function WorkoutTab({
     }
     const seed = {};
     for (const ex of activeWorkout.exercises) {
-      if (ex.loggable) {
-        // Three logging modes for loggable exercises:
-        //   - circlesOnly: one done flag per set, optionally with
-        //     reps (if ex.reps is set — e.g. Ab Wheel).
-        //   - logBand: reps + band color (no numeric weight).
-        //   - default (logWeight): reps + numeric weight, with
-        //     recommendSet seeding the suggested load.
-        const sets = Array.from({ length: ex.sets || 1 }, (_, i) => {
-          if (ex.circlesOnly) {
-            // Seed reps from the prior session when the exercise
-            // tracks reps too; otherwise just a bare done flag.
-            if (ex.reps) {
-              const lastSession = findLastSessionFor(wLog, activeId, ex.id);
-              const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
-              return { reps: lastSet?.reps ?? "", done: false };
-            }
-            return { done: false };
-          }
-          if (ex.logBand) {
-            // Seed band from last session if available — no progression
-            // logic (band selection is qualitative; let user step up
-            // manually when they're ready). Lookup the most-recent
-            // session containing this exercise to pull the prior band.
-            const lastSession = findLastSessionFor(wLog, activeId, ex.id);
-            const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
-            if (ex.unilateral) {
-              return {
-                leftReps:  lastSet?.leftReps  ?? ex.reps ?? "",
-                leftBand:  lastSet?.leftBand  ?? "",
-                rightReps: lastSet?.rightReps ?? ex.reps ?? "",
-                rightBand: lastSet?.rightBand ?? "",
-                done: false,
-              };
-            }
-            return {
-              reps: lastSet?.reps ?? ex.reps ?? "",
-              band: lastSet?.band ?? "",
-              done: false,
-            };
-          }
-          // Default weight-logged exercise — seed via recommendSet.
-          const rec = recommendSet(wLog, ex, activeId, i);
-          if (ex.unilateral) {
-            return {
-              leftReps:    rec?.leftReps    ?? ex.reps ?? "",
-              leftWeight:  rec?.leftWeight  ?? "",
-              rightReps:   rec?.rightReps   ?? ex.reps ?? "",
-              rightWeight: rec?.rightWeight ?? "",
-              done: false,
-            };
-          }
-          return {
-            reps:   rec?.reps   ?? ex.reps ?? "",
-            weight: rec?.weight ?? "",
-            done: false,
-          };
-        });
-        seed[ex.id] = { sets };
-      } else {
-        seed[ex.id] = { done: false, notes: "" };
-      }
+      seed[ex.id] = seedExercise(ex);
     }
     setSessionData(seed);
+    setLiveExercises(activeWorkout.exercises);
     setSessionNotes("");
     setSessionActive(true);
+  };
+
+  // ── Mid-session exercise swap / add ──────────────────
+  // The picker dispatches here. `index === liveExercises.length` means
+  // "append a new exercise" (the add-at-end affordance); anything
+  // smaller is a swap of the row at that index. The old exercise's
+  // sessionData entry is dropped on swap so we don't carry stale data
+  // for a row that's no longer visible.
+  const handlePickerPick = (newEx) => {
+    const idx = pickerState?.index ?? liveExercises.length;
+    setPickerState(null);
+    if (!newEx) return;
+    // Guard against duplicate IDs (the picker already excludes them
+    // but a stale click could race the close).
+    if (liveExercises.some((ex, i) => i !== idx && ex.id === newEx.id)) return;
+    setLiveExercises(prev => {
+      const next = [...prev];
+      if (idx >= next.length) next.push(newEx);
+      else next[idx] = newEx;
+      return next;
+    });
+    setSessionData(prev => {
+      const next = { ...prev };
+      // Swap path: drop the data entry for the exercise we're
+      // replacing so the saved session reflects what was actually
+      // performed (not a phantom dips entry left behind by a swap
+      // to push-ups).
+      if (idx < liveExercises.length) {
+        const replacedId = liveExercises[idx]?.id;
+        if (replacedId && replacedId !== newEx.id) delete next[replacedId];
+      }
+      next[newEx.id] = seedExercise(newEx);
+      return next;
+    });
   };
 
   // ── Save a session ───────────────────────────────────
@@ -284,6 +328,7 @@ export function WorkoutTab({
     setSessionActive(false);
     setSessionData({});
     setSessionNotes("");
+    setLiveExercises([]);
     setPickedId(null); // back to "follow recommendation"
   };
 
@@ -385,6 +430,8 @@ export function WorkoutTab({
     setSessionActive(false);
     setSessionData({});
     setSessionNotes("");
+    setLiveExercises([]);
+    setPickerState(null);
   };
 
   // ── Render ──────────────────────────────────────────
@@ -434,9 +481,30 @@ export function WorkoutTab({
           </div>
 
           <Card>
-            {activeWorkout.exercises.map((ex, i) => {
-              const last = i === activeWorkout.exercises.length - 1;
+            {liveExercises.map((ex, i) => {
+              const last = i === liveExercises.length - 1;
               const exData = sessionData[ex.id] || {};
+              // Per-row swap affordance. Tiny chip in the top-right
+              // corner of the row so it doesn't compete with the
+              // exercise title for attention; opens the picker scoped
+              // to this row's index.
+              const swapBar = (
+                <div style={{
+                  display: "flex", justifyContent: "flex-end",
+                  paddingTop: 4,
+                }}>
+                  <button
+                    onClick={() => setPickerState({ index: i })}
+                    title="Swap this exercise"
+                    style={{
+                      background: "none", border: `1px solid ${C.border}`,
+                      color: C.muted, fontSize: 10, fontWeight: 600,
+                      letterSpacing: 0.4, padding: "2px 8px",
+                      borderRadius: 4, cursor: "pointer",
+                    }}
+                  >↔ Swap</button>
+                </div>
+              );
               if (ex.loggable) {
                 // Build per-set recommendations for this exercise.
                 // recommendSet is called per set index, same protocol
@@ -446,30 +514,48 @@ export function WorkoutTab({
                   (_, idx) => recommendSet(wLog, ex, activeId, idx)
                 );
                 return (
-                  <SessionExRow
-                    key={ex.id}
-                    ex={ex}
-                    unit={unit}
-                    prevSets={prevSetsFor(ex.id)}
-                    setsData={exData}
-                    onSetsChange={(next) => updateExerciseSets(ex.id, next)}
-                    recommendations={recommendations}
-                    last={last}
-                  />
+                  <div key={ex.id}>
+                    {swapBar}
+                    <SessionExRow
+                      ex={ex}
+                      unit={unit}
+                      prevSets={prevSetsFor(ex.id)}
+                      setsData={exData}
+                      onSetsChange={(next) => updateExerciseSets(ex.id, next)}
+                      recommendations={recommendations}
+                      last={last}
+                    />
+                  </div>
                 );
               }
               return (
-                <SimpleExRow
-                  key={ex.id}
-                  ex={ex}
-                  done={!!exData.done}
-                  notes={exData.notes || ""}
-                  onToggle={() => toggleExerciseDone(ex.id)}
-                  onNotesChange={(v) => updateExerciseNotes(ex.id, v)}
-                  last={last}
-                />
+                <div key={ex.id}>
+                  {swapBar}
+                  <SimpleExRow
+                    ex={ex}
+                    done={!!exData.done}
+                    notes={exData.notes || ""}
+                    onToggle={() => toggleExerciseDone(ex.id)}
+                    onNotesChange={(v) => updateExerciseNotes(ex.id, v)}
+                    last={last}
+                  />
+                </div>
               );
             })}
+            {/* Add-exercise affordance — appends a new row to the
+                session via the picker, scoped to "index === length"
+                so handlePickerPick treats it as an add rather than
+                a swap. Stays inside the Card so it visually attaches
+                to the exercise list. */}
+            <button
+              onClick={() => setPickerState({ index: liveExercises.length })}
+              style={{
+                marginTop: 12, width: "100%", padding: "8px 0",
+                background: "none", border: `1px dashed ${C.border}`,
+                color: C.muted, borderRadius: 8, fontSize: 12,
+                fontWeight: 600, cursor: "pointer",
+              }}
+            >+ Add exercise</button>
           </Card>
 
           <textarea
@@ -495,6 +581,22 @@ export function WorkoutTab({
               }}
             >Save Session</button>
           </div>
+
+          {/* Mid-session exercise picker. Mounted at the end of the
+              active-session branch so it overlays the workout view.
+              Excludes IDs already present so swaps + adds can't
+              produce duplicate rows. handlePickerPick handles both
+              swap (index < length) and add (index === length). */}
+          {pickerState && (
+            <ExercisePicker
+              title={pickerState.index >= liveExercises.length ? "Add exercise" : "Swap exercise"}
+              excludeIds={liveExercises
+                .filter((_, i) => i !== pickerState.index)
+                .map(ex => ex.id)}
+              onPick={handlePickerPick}
+              onCancel={() => setPickerState(null)}
+            />
+          )}
         </>
       ) : (
         // ── Today / picker view ──────────────────────────
