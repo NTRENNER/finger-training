@@ -20,6 +20,7 @@
 import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
 import { exercises as EXERCISE_CATALOG } from "../../model/supportTraining.js";
+import { migrateExerciseId } from "../../model/exerciseIds.js";
 
 // Short label for the exercise type. Mirrors the existing type
 // taxonomy (S=Strength, P=Power, etc.) used elsewhere — kept tiny
@@ -50,16 +51,33 @@ function typeBadge(type) {
 export function ExercisePicker({ title = "Pick exercise", excludeIds = [], onPick, onCancel }) {
   const [q, setQ] = useState("");
 
-  // Build the candidate list from the catalog. Filter out non-loggable
-  // catalog entries (the A/B/C workout definitions live in the same
-  // export under unique keys and shouldn't appear as picker rows) and
-  // anything the caller asked us to hide.
+  // Stable Set for "already in this workout" lookup. Kept outside the
+  // useMemo so the items list re-renders only when the underlying ids
+  // actually change. (excludeIds is reconstructed on every parent
+  // render — joining its sorted ids gives a stable dep for useMemo.)
+  const excludedKey = useMemo(
+    () => (excludeIds || []).slice().sort().join("|"),
+    [excludeIds],
+  );
+
+  // Build the candidate list from the catalog. We keep non-loggable
+  // workout templates (A/B/C) out — they have no `loggable` flag at
+  // all, and we explicitly require `loggable !== false`. We DO keep
+  // already-in-workout exercises in the list but mark them as
+  // disabled, since silently hiding them confuses users ("where did
+  // Med Ball Slams go?" when editing Workout B, which already
+  // includes it).
   const items = useMemo(() => {
-    const excluded = new Set(excludeIds);
+    // Migrate excluded ids through the legacy → current map so a
+    // session that still stores the old `slam_balls` id correctly
+    // marks the catalog's `medBallThrows` row as already added.
+    // Without this, the user could add a duplicate that resolves to
+    // the same canonical exercise.
+    const excluded = new Set((excludeIds || []).map(migrateExerciseId));
     const all = Object.values(EXERCISE_CATALOG)
       .filter(ex => ex && typeof ex === "object" && ex.id && ex.name)
       .filter(ex => ex.loggable !== false)         // skip non-loggable workout templates
-      .filter(ex => !excluded.has(ex.id));
+      .map(ex => ({ ...ex, _alreadyAdded: excluded.has(migrateExerciseId(ex.id)) }));
     // Case-insensitive substring match across name + intent + tags so
     // a user can type "press", "shoulder", or "snatch" and find the
     // right exercise without remembering its exact catalog key.
@@ -74,8 +92,14 @@ export function ExercisePicker({ title = "Pick exercise", excludeIds = [], onPic
           return hay.includes(needle);
         })
       : all;
-    return filtered.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  }, [q, excludeIds]);
+    // Sort: pickable first (so the user sees actionable options up
+    // top), then alphabetical within each group.
+    return filtered.sort((a, b) => {
+      if (a._alreadyAdded !== b._alreadyAdded) return a._alreadyAdded ? 1 : -1;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, excludedKey]);
 
   return (
     <div
@@ -144,43 +168,58 @@ export function ExercisePicker({ title = "Pick exercise", excludeIds = [], onPic
               No exercises match "{q}".
             </div>
           ) : (
-            items.map(ex => (
-              <button
-                key={ex.id}
-                onClick={() => onPick(ex)}
-                style={{
-                  width: "100%", textAlign: "left",
-                  padding: "10px 16px",
-                  background: "none", border: "none",
-                  borderBottom: `1px solid ${C.border}`,
-                  cursor: "pointer", color: "inherit",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
-                    {ex.name}
-                  </span>
-                  {typeBadge(ex.type)}
-                  {ex.prescription && (
-                    <span style={{
-                      fontSize: 11, color: C.muted, marginLeft: "auto",
-                      flexShrink: 0,
-                    }}>
-                      {ex.prescription}
+            items.map(ex => {
+              const disabled = ex._alreadyAdded;
+              return (
+                <button
+                  key={ex.id}
+                  onClick={() => !disabled && onPick(ex)}
+                  disabled={disabled}
+                  title={disabled ? "Already in this workout" : "Tap to pick"}
+                  style={{
+                    width: "100%", textAlign: "left",
+                    padding: "10px 16px",
+                    background: "none", border: "none",
+                    borderBottom: `1px solid ${C.border}`,
+                    cursor: disabled ? "not-allowed" : "pointer",
+                    color: "inherit",
+                    opacity: disabled ? 0.45 : 1,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+                      {ex.name}
                     </span>
-                  )}
-                </div>
-                {ex.intent && (
-                  <div style={{
-                    fontSize: 11, color: C.muted, marginTop: 2, lineHeight: 1.4,
-                    overflow: "hidden", textOverflow: "ellipsis",
-                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                  }}>
-                    {ex.intent}
+                    {typeBadge(ex.type)}
+                    {disabled && (
+                      <span style={{
+                        fontSize: 9, color: C.muted, marginLeft: 6,
+                        textTransform: "uppercase", letterSpacing: 0.5,
+                      }}>
+                        already added
+                      </span>
+                    )}
+                    {ex.prescription && (
+                      <span style={{
+                        fontSize: 11, color: C.muted, marginLeft: "auto",
+                        flexShrink: 0,
+                      }}>
+                        {ex.prescription}
+                      </span>
+                    )}
                   </div>
-                )}
-              </button>
-            ))
+                  {ex.intent && (
+                    <div style={{
+                      fontSize: 11, color: C.muted, marginTop: 2, lineHeight: 1.4,
+                      overflow: "hidden", textOverflow: "ellipsis",
+                      display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                    }}>
+                      {ex.intent}
+                    </div>
+                  )}
+                </button>
+              );
+            })
           )}
         </div>
       </div>
