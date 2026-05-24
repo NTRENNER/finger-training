@@ -39,6 +39,7 @@ import { exerciseName, buildExerciseDefIndex } from "./model/exerciseIds.js";
 // App-level hooks (see src/hooks/).
 import { useAuth } from "./hooks/useAuth.js";
 import { useRepHistory } from "./hooks/useRepHistory.js";
+import { useDailyState } from "./hooks/useDailyState.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import { useUserSettings } from "./hooks/useUserSettings.js";
 import { useActivities } from "./hooks/useActivities.js";
@@ -254,8 +255,20 @@ export default function App() {
 
   // Auth subscription + setUser are owned by useAuth() above.
 
+  // ── Daily cookedness cache (LS + cloud reconcile) ────────
+  // Provides cookedOnDate(date) + saveCooked(date, cooked) for the
+  // retroactive-cookedness slider on AnalysisView's session-detail
+  // modal. dailyState (the raw map) is fed into useRepHistory below
+  // so the freshMap rebuild can apply per-rep capacity multipliers
+  // without the curve fit needing to know about the cookedness model.
+  const { dailyState, cookedOnDate, saveCooked } = useDailyState({ user });
+
   // ── Rep history + freshMap + cloud reconcile + CRUD ──────
   // (see src/hooks/useRepHistory.js)
+  // dailyState + fatigueModel feed the freshMap's external-fatigue
+  // compensation path. Both are nullable; when either is missing the
+  // path no-ops and freshMap behaves like the original within-set
+  // fatigue-only version.
   const {
     history,
     freshMap, threeExpPriors,
@@ -263,7 +276,7 @@ export default function App() {
     addReps, updateRep, deleteRep, updateSession, deleteSession,
     replaceHistory,
     handleWorkoutSessionSaved,
-  } = useRepHistory({ user });
+  } = useRepHistory({ user, fatigueModel, dailyState });
 
   // Per-grip fatigue β model (replaces perceivedFatigueLearning's
   // (fatigueModel + setFatigueModel come from useUserSettings above —
@@ -731,6 +744,8 @@ export default function App() {
           pyramidWarmupMap={pyramidWarmupMap}
           onPyramidProjectChange={savePyramidProjectMap}
           onPyramidWarmupChange={savePyramidWarmupMap}
+          cookedOnDate={cookedOnDate}
+          onSaveCooked={saveCooked}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder

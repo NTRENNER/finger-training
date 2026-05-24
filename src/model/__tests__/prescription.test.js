@@ -189,6 +189,52 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     expect(freshLoadFor({ avg_force_kg: 30 }, map)).toBe(30);
     expect(freshLoadFor({ avg_force_kg: 30 }, null)).toBe(30);
   });
+
+  test("cookedByDate + fatigueModel scales fresh load up on cooked days", () => {
+    // Same rep on two different dates — one tagged cooked, one fresh.
+    // The cooked-day rep should report a higher fresh-equivalent
+    // load: capacityMultiplier scales down what you could lift, so
+    // dividing by it recovers the load you'd have lifted fresh.
+    const history = [
+      { id: "fresh", hand: "L", grip: "Crusher",
+        session_id: "s_fresh", set_num: 1, rep_num: 1,
+        avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
+        date: "2026-05-01" },
+      { id: "cooked", hand: "L", grip: "Crusher",
+        session_id: "s_cooked", set_num: 1, rep_num: 1,
+        avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
+        date: "2026-05-02" },
+    ];
+    // Minimal fatigue model: a single per-grip beta that gives a
+    // meaningful scale-down at cooked=7. The exact value doesn't
+    // matter; we just need the cooked-day fresh > fresh-day fresh.
+    const fatigueModel = { Crusher: { beta: 0.03 } };
+    const cookedByDate = { "2026-05-02": 7 };
+    const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
+    const fresh = map.get("id:fresh").fresh;
+    const cooked = map.get("id:cooked").fresh;
+    expect(fresh).toBeCloseTo(25, 4);
+    expect(cooked).toBeGreaterThan(fresh);
+    // Sanity bound — the multiplier exp(-0.03 * 7) ≈ 0.81, so
+    // 25 / 0.81 ≈ 30.85.
+    expect(cooked).toBeCloseTo(25 / Math.exp(-0.03 * 7), 2);
+  });
+
+  test("cookedByDate without fatigueModel is a no-op", () => {
+    // Both opts are required for compensation to fire — passing one
+    // without the other should leave fresh = load (within-set
+    // fatigue still applies as normal).
+    const history = [
+      { id: "r1", hand: "L", grip: "Crusher",
+        session_id: "s1", set_num: 1, rep_num: 1,
+        avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
+        date: "2026-05-02" },
+    ];
+    const cookedByDate = { "2026-05-02": 7 };
+    // No fatigueModel arg → compensation skipped.
+    const map = buildFreshLoadMap(history, { cookedByDate });
+    expect(map.get("id:r1").fresh).toBeCloseTo(25, 4);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────

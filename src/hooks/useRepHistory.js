@@ -89,7 +89,7 @@ function addRepTombstones(ids) {
   if (changed) saveLS(LS_REP_DELETED_KEY, [...existing]);
 }
 
-export function useRepHistory({ user }) {
+export function useRepHistory({ user, fatigueModel = null, dailyState = null }) {
   const [history, setHistory] = useState(() => loadLS(LS_HISTORY_KEY) || []);
   useEffect(() => saveLS(LS_HISTORY_KEY, history), [history]);
 
@@ -151,10 +151,30 @@ export function useRepHistory({ user }) {
     [freshMapFp] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // Stable fingerprint for dailyState so freshMap only rebuilds when
+  // a date's cooked value actually changes (vs every render that
+  // happens to recreate the dailyState object reference).
+  const dailyStateFp = useMemo(() => {
+    if (!dailyState) return "";
+    return Object.entries(dailyState)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([d, c]) => `${d}:${c}`).join("|");
+  }, [dailyState]);
+
   const freshMap = useMemo(() => {
     const k = fitDoseK(history) ?? PHYS_MODEL_DEFAULT.doseK;
-    return buildFreshLoadMap(history, { doseK: k, personalTausByGrip: personalRecoveryTaus });
-  }, [freshMapFp, personalRecoveryTaus]); // eslint-disable-line react-hooks/exhaustive-deps
+    return buildFreshLoadMap(history, {
+      doseK: k,
+      personalTausByGrip: personalRecoveryTaus,
+      // Cookedness compensation: divides each rep's load by
+      // capacityMultiplier(model, grip, cookedOnDate) so a cooked
+      // session looks like its fresh-equivalent to the curve fit.
+      // Retroactive edits via AnalysisView's session-detail modal
+      // flow into here within one render cycle.
+      cookedByDate: dailyState,
+      fatigueModel: fatigueModel,
+    });
+  }, [freshMapFp, personalRecoveryTaus, dailyStateFp, fatigueModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const threeExpPriors = useMemo(
     () => buildThreeExpPriors(history),

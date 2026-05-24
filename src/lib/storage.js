@@ -99,6 +99,15 @@ export const LS_ANALYSIS_SUBTAB_KEY = "ft_analysis_subtab";
 // navigations.
 export const LS_BW_NORMALIZE_KEY = "ft_bw_normalize";
 
+// Daily cookedness cache — per-date 0–10 scalar mirroring the
+// Supabase daily_state table for offline reads + retroactive edits.
+// Shape: { [ymdDate]: cooked }. Cloud-synced on sign-in by useDailyState;
+// retroactive edits from AnalysisView's session-detail modal write
+// both LS and cloud so the curve-fit pipeline (buildFreshLoadMap) can
+// down-weight cooked sessions immediately, without waiting for a cloud
+// round-trip.
+export const LS_DAILY_STATE_KEY = "ft_daily_state";
+
 // Climbing history filter pills — persists the active filter selection
 // (named-only toggle + per-category single-select for discipline, venue,
 // wall) so re-opening the History tab lands on the same view the user

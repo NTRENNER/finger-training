@@ -42,7 +42,7 @@
 //   • Absolute Capacity (raw kg·s) card — % vs baseline tells the
 //     training-progress story; the kg·s axis was opaque.
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 // recharts imports moved out with ForceDurationCard / ForceCurvesOverlayCard
 // (May 2026 BACKLOG #156). AnalysisView no longer renders any chart
 // directly — child cards own their own chart machinery.
@@ -82,6 +82,65 @@ import { useAucHistoryByGrip } from "../hooks/useAucHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
 import { useHistoryOverlay } from "../hooks/useHistoryOverlay.js";
 
+// Retroactive cookedness slider for the session-detail modal. 0-10
+// integer with a "clear" button to remove the entry entirely (=
+// "no opinion logged"). Local "draft" state lets the slider move
+// smoothly without writing to LS + cloud on every pixel; we commit
+// on mouseup / touchend so the curve-fit pipeline rebuilds once
+// per gesture, not 60 times per second.
+function CookednessSlider({ date, value, onChange }) {
+  // Draft state mirrors the slider during drag. Sync down from the
+  // committed `value` whenever it changes externally (e.g. another
+  // device pushed an update) so we don't shadow newer data.
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+
+  const committed = value ?? null;
+  const draftN = draft ?? 0;
+
+  return (
+    <div style={{
+      marginTop: 14, paddingTop: 12,
+      borderTop: `1px solid ${C.border}`,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+          Cookedness on {date}
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: committed != null ? C.purple : C.muted }}>
+            {committed != null ? `${draftN}/10` : "unset"}
+          </div>
+          {committed != null && (
+            <button
+              onClick={() => onChange(null)}
+              title="Clear retroactive cookedness — treat as fresh"
+              style={{
+                background: "none", border: "none", color: C.muted,
+                fontSize: 11, cursor: "pointer", padding: 0,
+                textDecoration: "underline",
+              }}
+            >clear</button>
+          )}
+        </div>
+      </div>
+      <input
+        type="range"
+        min="0" max="10" step="1"
+        value={draftN}
+        onChange={(e) => setDraft(Number(e.target.value))}
+        onMouseUp={() => onChange(draft ?? 0)}
+        onTouchEnd={() => onChange(draft ?? 0)}
+        style={{ width: "100%", accentColor: C.purple }}
+      />
+      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.4 }}>
+        Tag external fatigue you forgot to declare (climbing, sleep deficit, etc.).
+        Higher = more cooked — the curve fit treats this day's reps as their
+        fresh-equivalent so future prescriptions don't drift down.
+      </div>
+    </div>
+  );
+}
 export function AnalysisView({
   history, unit = "lbs", bodyWeight = null,
   activities = [],
@@ -90,6 +149,12 @@ export function AnalysisView({
   // module doesn't reach back into App.js for view-level constants.
   GOAL_CONFIG = {},
   RM_GRIPS = [],
+  // Retroactive cookedness — the session-detail modal exposes a
+  // slider that calls onSaveCooked(date, cooked|null) when the user
+  // wants to tag a past day's external fatigue load. Both default to
+  // no-ops so the component still mounts cleanly without these props.
+  cookedOnDate = () => null,
+  onSaveCooked = () => {},
 }) {
   // Grip filter — null/"" means "Both grips pooled" (default view).
   // The hand-filter sibling state (selHand) was retired with the L/R/Both
@@ -591,6 +656,22 @@ export function AnalysisView({
                 />
               </div>
             ))}
+
+            {/* Retroactive cookedness slider — lets the user tag a
+                past day's external fatigue load (climbing volume,
+                sleep deficit, etc.) without having had the slider
+                set at session time. The day's cookedness flows into
+                buildFreshLoadMap → the curve fit divides this rep's
+                load by capacityMultiplier(model, grip, cooked),
+                surfacing the fresh-equivalent and preventing a
+                cooked session from skewing future fresh prescriptions
+                downward. Per-day, not per-session — multiple sessions
+                on the same date share one cookedness value. */}
+            <CookednessSlider
+              date={selectedSession.meta.date}
+              value={cookedOnDate(selectedSession.meta.date)}
+              onChange={(v) => onSaveCooked(selectedSession.meta.date, v)}
+            />
           </div>
         </div>
       )}

@@ -47,6 +47,7 @@ import {
   THREE_EXP_LAMBDA_DEFAULT,
   fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
+import { capacityMultiplier } from "./fatigueBeta.js";
 
 // ─────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
@@ -166,6 +167,21 @@ export function buildFreshLoadMap(history, opts = {}) {
     // per-rep based on the rep's grip. Falls back to fatParams when a grip
     // isn't in the map (cold start, sparse data). Engine-only personalization.
     personalTausByGrip = null,
+    // Per-date cookedness map for EXTERNAL fatigue compensation
+    // (climbing volume / sleep deficit / general systemic load
+    // logged via the daily cookedness slider, including retroactive
+    // edits from the AnalysisView session-detail modal). Plain
+    // object: { "YYYY-MM-DD": 0..10 }.
+    // When combined with the per-grip β fatigueModel below,
+    // capacityMultiplier(model, grip, cooked) = exp(-β·cooked)
+    // returns the scale-down factor that was applied (or should
+    // have been applied) on that date — buildFreshLoadMap divides
+    // each rep's load by it to recover the "fresh-equivalent"
+    // load the curve fit should see. Without this, a cooked
+    // session looks like a real capacity drop and skews the next
+    // prescription downward.
+    cookedByDate = null,
+    fatigueModel = null,
   } = opts;
   const out = new Map();
   if (!history || history.length === 0) return out;
@@ -220,7 +236,22 @@ export function buildFreshLoadMap(history, opts = {}) {
 
       const af = availFrac(F);
       const load = effectiveLoad(r);
-      const fresh = af > 0 && load > 0 ? load / af : load;
+      // Within-set fatigue compensation (existing path): divide by
+      // availFrac to recover the fresh-equivalent load given how
+      // fatigued the user was at this point in the set.
+      let fresh = af > 0 && load > 0 ? load / af : load;
+      // External (per-day) cookedness compensation: also divide by
+      // the capacity multiplier that was active on this rep's date.
+      // Requires both the cookedByDate map AND the fatigueModel —
+      // either alone is a no-op (capacityMultiplier returns 1.0
+      // when cooked is null or model is missing).
+      if (cookedByDate && fatigueModel && r?.date) {
+        const cooked = cookedByDate[r.date];
+        if (cooked != null && cooked > 0) {
+          const mult = capacityMultiplier(fatigueModel, r.grip, cooked);
+          if (mult > 0) fresh = fresh / mult;
+        }
+      }
       out.set(repKey(r), { fresh, availFrac: af, load });
 
       const sMax = sMaxByKey.get(`${r.hand}|${r.grip}`) || 20;

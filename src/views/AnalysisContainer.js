@@ -48,6 +48,12 @@ export function AnalysisContainer(props) {
     pyramidProjectMap = {}, pyramidWarmupMap = {},
     onPyramidProjectChange = () => {},
     onPyramidWarmupChange = () => {},
+    // Retroactive cookedness wiring — AnalysisView's session-detail
+    // modal exposes a slider that calls onSaveCooked(date, value);
+    // cookedOnDate(date) reads the current value for the slider's
+    // initial position.
+    cookedOnDate = () => null,
+    onSaveCooked = () => {},
   } = props;
 
   const [sub, setSub] = useState(() => {
@@ -102,6 +108,8 @@ export function AnalysisContainer(props) {
           freshMap={freshMap}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
+          cookedOnDate={cookedOnDate}
+          onSaveCooked={onSaveCooked}
         />
       )}
       {sub === "lifts" && (

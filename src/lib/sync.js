@@ -490,6 +490,24 @@ export async function fetchDailyStateForDate(date) {
   }
 }
 
+// Bulk fetch — pulls every daily_state row for the signed-in user.
+// Used by useDailyState's cloud reconcile so the retroactive-
+// cookedness UI on AnalysisView's session-detail modal can show + edit
+// any past day's value without round-tripping per session.
+// Returns an array of { date, cooked } rows, or null on error.
+export async function fetchAllDailyStates() {
+  try {
+    const { data, error } = await supabase
+      .from("daily_state")
+      .select("date, cooked");
+    if (error) { console.warn("Supabase daily_state bulk fetch:", error.message); return null; }
+    return (data || []).map(r => ({ date: r.date, cooked: r.cooked }));
+  } catch (e) {
+    console.warn("Supabase daily_state bulk fetch exception:", e.message);
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // USER SETTINGS (cloud-synced preferences)
 // ─────────────────────────────────────────────────────────────
