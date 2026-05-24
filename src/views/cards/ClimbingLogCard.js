@@ -28,20 +28,24 @@ import {
   gradesFor, defaultGradeFor,
 } from "../../lib/climbing-grades.js";
 
-// Per-RPE descriptive label rendered under the slider. Helps the
-// user calibrate "what does an 8 actually mean" without leaving
-// the form.
+// Per-RPE descriptive label rendered under the slider. Calibrated
+// for PER-CLIMB effort (not session intensity) — the question is
+// "how hard did THIS climb feel?", not "how hard did the whole
+// session feel?". The model layer aggregates per-climb RPEs into a
+// session-fatigue scalar (see climbingFatigue.computeSessionFatigue),
+// so per-climb is the source of truth and the slider should read
+// that way to the user.
 const RPE_DESCRIPTIONS = {
-  1:  "Very easy — barely a workout",
-  2:  "Easy — recovery-level",
-  3:  "Light — warm-up intensity",
-  4:  "Moderate — comfortable training",
-  5:  "Hard — focused training day",
-  6:  "Hard+ — pushing into fatigue",
-  7:  "Very hard — strong session",
-  8:  "Very hard+ — limit attempts",
-  9:  "Near maximum — couldn't have done much more",
-  10: "Maximum — true RPE 10, full effort",
+  1:  "Trivial — warm-up move",
+  2:  "Very easy — could do all day",
+  3:  "Easy — well below ability",
+  4:  "Moderate — comfortable working effort",
+  5:  "Solid — definitely working",
+  6:  "Hard — felt the climb",
+  7:  "Very hard — close to my limit",
+  8:  "Limit — barely held it",
+  9:  "Near max — one rep / move in reserve",
+  10: "Maximum — dispatched everything I had",
 };
 
 export function ClimbingLogCard({ activities = [], onLog }) {
@@ -324,10 +328,13 @@ export function ClimbingLogCard({ activities = [], onLog }) {
         ))}
       </div>
 
-      {/* RPE */}
+      {/* RPE — per-climb effort (not session-wide). The label
+          explicitly disambiguates because users naturally read a
+          bare "RPE" as the session-fatigue number they fill out on
+          the Setup tab. */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
         <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Effort (RPE)
+          Climb Effort (RPE)
         </div>
         <div style={{ fontSize: 22, fontWeight: 800, color: C.purple }}>
           {rpe}<span style={{ fontSize: 12, color: C.muted, fontWeight: 400 }}>/10</span>

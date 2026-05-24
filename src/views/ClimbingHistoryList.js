@@ -694,9 +694,10 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
         )}
       </div>
 
-      {/* RPE */}
+      {/* RPE — per-climb effort, matching ClimbingLogCard's label
+          so the create + edit flows agree on what this number means. */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-        {sectionLabel("Effort (RPE)")}
+        {sectionLabel("Climb Effort (RPE)")}
         <div style={{ fontSize: 16, fontWeight: 700, color: C.purple }}>
           {rpe}<span style={{ fontSize: 10, color: C.muted, fontWeight: 400 }}>/10</span>
         </div>
