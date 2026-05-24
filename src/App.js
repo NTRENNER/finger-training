@@ -746,11 +746,25 @@ export default function App() {
           msOverflowStyle: "none",  // IE/Edge legacy
         }}
       >
-        {/* Brand block (🧗 Finger title) removed late May 2026 — it
-            cost ~80px on the left for no functional value, and the
-            tab bar needed every pixel to keep Fingers/Workout/Climb/
-            Analysis/History visible without horizontal scroll on a
-            narrow phone. */}
+        {/* Climber icon — branding mark + home button. The full
+            "🧗 Finger" wordmark was dropped late May 2026 (the
+            "Finger" text was redundant once you're inside the app
+            and cost ~50px the tab bar needed), but the icon stayed
+            because it's the only visual identity in an otherwise
+            flat top bar. Doubles as a logo-as-home affordance:
+            tapping returns to the Fingers tab from anywhere. */}
+        <button
+          onClick={() => setTab(0)}
+          aria-label="Home (Fingers)"
+          title="Home"
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            padding: "12px 10px 12px 0", marginRight: 4,
+            fontSize: 22, lineHeight: 1, flexShrink: 0,
+          }}
+        >
+          🧗
+        </button>
         {TABS.map((t, i) => (
           <button
             key={t}
