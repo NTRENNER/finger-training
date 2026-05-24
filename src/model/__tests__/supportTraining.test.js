@@ -32,7 +32,6 @@ import {
   daysBetween,
   daysSinceLastOfType,
   computeTagDaysSince,
-  recentClimbDayCount,
 } from "../supportTraining.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -53,14 +52,6 @@ function sess(workoutId, daysAgo) {
   return {
     id: `${workoutId}-${daysAgo}`,
     workoutId,
-    date: daysBefore(REF_DATE, daysAgo),
-  };
-}
-
-function climb(daysAgo) {
-  return {
-    id: `c-${daysAgo}`,
-    type: "climb",
     date: daysBefore(REF_DATE, daysAgo),
   };
 }
@@ -129,7 +120,7 @@ describe("computeTagDaysSince", () => {
     // carries strength/neural) and onto STRETCH (the daily-habit
     // pill), but the underlying tag bookkeeping is unchanged — any
     // session whose template lists a tag contributes it.
-    const tagDays = computeTagDaysSince([sess("STRETCH", 4)], [], REF_DATE);
+    const tagDays = computeTagDaysSince([sess("STRETCH", 4)], REF_DATE);
     expect(tagDays.positionalCapacity).toBe(4);
     expect(tagDays.mobility).toBe(4);
     expect(tagDays.restoration).toBe(4);
@@ -141,87 +132,32 @@ describe("computeTagDaysSince", () => {
     // touch workout — pull/press/arm/core in ~15 min. Its workout-
     // level tags are strength + neural; it does NOT contribute
     // mobility/positionalCapacity any more (those live on STRETCH).
-    const tagDays = computeTagDaysSince([sess("C", 2)], [], REF_DATE);
+    const tagDays = computeTagDaysSince([sess("C", 2)], REF_DATE);
     expect(tagDays.strength).toBe(2);
     expect(tagDays.neural).toBe(2);
     expect(tagDays.mobility).toBeUndefined();
     expect(tagDays.positionalCapacity).toBeUndefined();
   });
 
-  test("climbing activities contribute the CLIMB tag bundle", () => {
-    const tagDays = computeTagDaysSince([], [climb(2)], REF_DATE);
-    // CLIMB.tags: ["climbing", "finger", "neural", "connective"]
-    expect(tagDays.climbing).toBe(2);
-    expect(tagDays.finger).toBe(2);
-    expect(tagDays.neural).toBe(2);
-    expect(tagDays.connective).toBe(2);
-  });
-
-  test("picks the MINIMUM days across all sources for shared tags", () => {
-    // Both A (10 days ago) and a hard climb (2 days ago) tag "neural".
-    // The recent climb should win.
-    const tagDays = computeTagDaysSince(
-      [sess("A", 10)],
-      [climb(2)],
-      REF_DATE,
-    );
-    expect(tagDays.neural).toBe(2);
+  test("picks the MINIMUM days when a tag appears in multiple sessions", () => {
+    // C tags "strength"; a C 5 days ago and another 2 days ago — the
+    // more recent should win.
+    const tagDays = computeTagDaysSince([sess("C", 5), sess("C", 2)], REF_DATE);
+    expect(tagDays.strength).toBe(2);
   });
 
   test("future-dated entries are ignored", () => {
     const future = { id: "f", workoutId: "A", date: daysBefore(REF_DATE, -5) };
-    const tagDays = computeTagDaysSince([future], [], REF_DATE);
+    const tagDays = computeTagDaysSince([future], REF_DATE);
     expect(tagDays.strength).toBeUndefined();
   });
 
   test("unknown workoutId is skipped, not crashed", () => {
     const tagDays = computeTagDaysSince(
       [{ id: "x", workoutId: "ZZZ", date: daysBefore(REF_DATE, 2) }],
-      [],
       REF_DATE,
     );
     expect(tagDays).toEqual({});
-  });
-
-  test("non-climb activities are ignored", () => {
-    const tagDays = computeTagDaysSince(
-      [],
-      [{ id: "r", type: "rpe", date: daysBefore(REF_DATE, 1) }],
-      REF_DATE,
-    );
-    expect(tagDays).toEqual({});
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// recentClimbDayCount
-// ─────────────────────────────────────────────────────────────
-
-describe("recentClimbDayCount", () => {
-  test("counts distinct dates within window", () => {
-    const climbs = [climb(0), climb(1), climb(3), climb(4)];
-    expect(recentClimbDayCount(climbs, REF_DATE, 5)).toBe(4);
-  });
-
-  test("dedupes multiple climbs on the same date", () => {
-    const climbs = [climb(2), climb(2), climb(2)];
-    expect(recentClimbDayCount(climbs, REF_DATE, 5)).toBe(1);
-  });
-
-  test("respects the window boundary (exclusive)", () => {
-    // window of 5 → days 0,1,2,3,4 count; day 5 does not.
-    const climbs = [climb(4), climb(5)];
-    expect(recentClimbDayCount(climbs, REF_DATE, 5)).toBe(1);
-  });
-
-  test("ignores non-climb activities", () => {
-    const mixed = [climb(1), { id: "r", type: "rpe", date: daysBefore(REF_DATE, 0) }];
-    expect(recentClimbDayCount(mixed, REF_DATE, 5)).toBe(1);
-  });
-
-  test("returns 0 for empty input", () => {
-    expect(recentClimbDayCount([], REF_DATE, 5)).toBe(0);
-    expect(recentClimbDayCount(null, REF_DATE, 5)).toBe(0);
   });
 });
 
@@ -297,20 +233,15 @@ describe("recommendNextWorkout: Rule 3 (C touch stale → C)", () => {
 
 describe("recommendNextWorkout: REST is never recommended", () => {
   // The user signals their own rest needs — the engine doesn't
-  // prompt REST. Pin the invariant: even high climbing density
-  // (which an earlier draft of the recommender used to fire on)
-  // doesn't produce a REST recommendation.
-  test("does NOT recommend REST even at high climbing density", () => {
+  // prompt REST. Pin the invariant: with everything fresh it falls
+  // through to a real workout, never REST.
+  test("does NOT recommend REST when everything is fresh", () => {
     const history = [
       sess("A", 2),
       sess("B", 3),
       sess("C", 1),
     ];
-    const climbing = [climb(0), climb(1), climb(2), climb(3)];
-    const rec = recommendNextWorkout(history, {
-      climbingHistory: climbing,
-      refDate: REF_DATE,
-    });
+    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     expect(rec.primary.id).not.toBe("REST");
   });
 });
@@ -355,44 +286,16 @@ describe("recommendNextWorkout: Rule 4 (fallback → C)", () => {
     expect(rec.reason).toMatch(/low-fatigue default/);
   });
 
-  test("falls back to C even at high climbing density", () => {
-    // The user doesn't want REST prompted; falling through to C
-    // is reasonable on a heavy-climbing day — it's the lowest-
-    // fatigue real workout in the rotation and won't tax recovery.
+  test("falls back to C when nothing is overdue", () => {
+    // C is the lowest-fatigue real workout in the rotation; the safe
+    // default when no rule fires.
     const history = [
       sess("A", 2),
       sess("B", 3),
       sess("C", 2),
     ];
-    const climbing = [climb(0), climb(1), climb(2), climb(3)];
-    const rec = recommendNextWorkout(history, {
-      climbingHistory: climbing,
-      refDate: REF_DATE,
-    });
+    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     expect(rec.primary.id).toBe("C");
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// recommendNextWorkout — interaction with climbing as a stimulus source
-// ─────────────────────────────────────────────────────────────
-
-describe("recommendNextWorkout: climbing tag inheritance", () => {
-  test("recent CLIMB inhibits Rule 4 (power) via shared 'neural' tag? no — power tags are separate", () => {
-    // Power tags are power/explosive, NOT neural. A recent climb
-    // contributes neural/connective/climbing/finger but should NOT
-    // make B look fresh. Pin the separation.
-    const history = [
-      sess("A", 2),
-      sess("C", 3),
-      sess("B", 12), // B is overdue
-    ];
-    const climbing = [climb(0), climb(1)]; // recent neural load
-    const rec = recommendNextWorkout(history, {
-      climbingHistory: climbing,
-      refDate: REF_DATE,
-    });
-    expect(rec.primary.id).toBe("B"); // still recommends B
   });
 });
 
@@ -414,16 +317,6 @@ describe("recommendNextWorkout: defensive input handling", () => {
     ];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     // A is fresh, falls through to other rules — shouldn't crash.
-    expect(rec.primary).toBeTruthy();
-  });
-
-  test("skips climbing entries that are not type=climb", () => {
-    const rec = recommendNextWorkout([sess("A", 2)], {
-      climbingHistory: [
-        { id: "r", type: "rpe", date: daysBefore(REF_DATE, 1) },
-      ],
-      refDate: REF_DATE,
-    });
     expect(rec.primary).toBeTruthy();
   });
 });

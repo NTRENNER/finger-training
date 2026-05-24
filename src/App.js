@@ -955,7 +955,7 @@ export default function App() {
         return null;
       })()}
 
-      {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} activities={activities} />}
+      {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 2 && (
         <ClimbView
           activities={activities}
