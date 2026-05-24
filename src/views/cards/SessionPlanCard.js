@@ -15,7 +15,7 @@
 //      overridden via an alternative tile, this button dims to
 //      indicate "not the active pick" but still surfaces what the
 //      curve wanted.
-//   2. Cookedness slider — "How cooked today?" (0–10, mandatory).
+//   2. Cookedness slider — "How cooked today?" (0–10, defaults to fresh).
 //      Scales the prescribed LOAD per-grip via exp(-β·c) without
 //      changing which zone the engine picks. Upserted to daily_state
 //      on session start so the server-side trigger can update β from
@@ -393,33 +393,26 @@ export function SessionPlanCard({
         );
       })()}
 
-      {/* "How cooked today?" slider — mandatory 0–10 pre-workout state.
-          0 = fresh (multiplier = 1, no scale-down). Higher values apply
-          exp(-β_grip · cooked) to the prescribed load. null = not yet
-          picked; the Start button stays disabled until the user moves
-          the slider. This guarantees every session contributes to the
-          β learner via daily_state. */}
+      {/* "How cooked today?" slider — 0–10 pre-workout state, defaults
+          to 0 (fresh, multiplier = 1, no scale-down). Higher values apply
+          exp(-β_grip · cooked) to the prescribed load. Optional: leave it
+          at fresh on a normal day; raise it only when you're not. */}
       <div style={{
         display: "flex", alignItems: "center", gap: 12,
         padding: "10px 12px", marginBottom: 12,
         borderRadius: 8,
-        background: cooked == null ? C.bg : C.bg,
-        border: `1px solid ${cooked == null ? C.orange : C.border}`,
+        background: C.bg,
+        border: `1px solid ${C.border}`,
       }}>
         <div style={{ flex: "0 0 auto" }}>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>
             How cooked today?
-            {cooked == null && (
-              <span style={{ color: C.orange, marginLeft: 6 }}>· required</span>
-            )}
           </div>
           <div style={{ fontSize: 10, color: C.muted }}>
-            {cooked == null
-              ? "set before starting"
-              : cooked === 0
-                ? "fresh — no scale-down"
-                : `cooked ${cooked}/10`}
-            {cooked != null && cooked > 0 && fatigueModel && grip && (() => {
+            {cooked === 0
+              ? "fresh — no scale-down"
+              : `cooked ${cooked}/10`}
+            {cooked > 0 && fatigueModel && grip && (() => {
               const b = fatigueModel[grip]?.beta;
               if (!(b > 0)) return null;
               const mult = Math.exp(-b * cooked);
@@ -435,21 +428,15 @@ export function SessionPlanCard({
         </div>
         <input
           type="range" min={0} max={10} step={1}
-          // Render the thumb at 0 visually when nothing is picked, but
-          // the underlying state stays null so the gate logic and the
-          // 0-vs-not-picked semantic remain distinct.
-          value={cooked == null ? 0 : cooked}
+          value={cooked ?? 0}
           onChange={e => onCookedChange?.(Number(e.target.value))}
           style={{
             flex: 1,
             accentColor: C.orange,
-            // Visual cue that the slider is "untouched" — slight opacity
-            // until first interaction.
-            opacity: cooked == null ? 0.55 : 1,
           }}
           aria-label="Cookedness (0 fresh, 10 wrecked)"
         />
-        {cooked != null && cooked !== 0 && (
+        {cooked > 0 && (
           <button
             onClick={() => onCookedChange?.(0)}
             style={{

@@ -85,13 +85,12 @@ export function useSessionRunner({
     repsPerSet: 5,
     targetTime: 45,
     restTime:   20,
-    // Pre-workout cookedness scalar (0–10). 0 = fresh, no scale-down;
-    // 10 = wrecked, max scale-down. Set by the SessionPlanCard slider;
-    // mandatory — the Start button stays disabled until the user picks
-    // a value. startSession upserts this into daily_state by today's
-    // date so the server-side β trigger can read it when reps land.
-    // null = not yet picked.
-    cooked: null,
+    // Pre-workout cookedness scalar (0–10). Defaults to 0 (fresh, no
+    // scale-down); the user only raises it on days they're not fresh.
+    // Set by the SessionPlanCard slider. startSession upserts this into
+    // daily_state by today's date so the server-side β trigger can read
+    // it when reps land.
+    cooked: 0,
   }));
 
   // No derived fields anymore — config is rawConfig.

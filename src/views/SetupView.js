@@ -317,18 +317,15 @@ export function SetupView({
       {/* Tindeq Connect slot — rendered just above the Start button */}
       {connectSlot}
 
-      {/* Start gating: grip must be picked AND cookedness must be set.
-          The cooked == null case means the user hasn't touched the
-          slider since opening the screen — we require deliberate input
-          so every session contributes to the β learner. */}
+      {/* Start gating: a grip must be picked. Cookedness defaults to 0
+          (fresh); the user only adjusts it on days they're not fresh,
+          so it's no longer a precondition for starting. */}
       <Btn
         onClick={onStart}
-        disabled={!config.grip || config.cooked == null}
+        disabled={!config.grip}
         style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12 }}
       >
-        {config.cooked == null
-          ? "Set cookedness to start"
-          : "Start Session →"}
+        Start Session →
       </Btn>
     </div>
   );
