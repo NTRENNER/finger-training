@@ -222,7 +222,12 @@ export function repPayload(rep, userId) {
     manual_load_kg:     rep.manual_load_kg ?? null,
     weight_kg:          rep.prescribed_load_kg ?? rep.weight_kg ?? null,
     actual_time_s: rep.actual_time_s, avg_force_kg: rep.avg_force_kg,
-    peak_force_kg: rep.peak_force_kg ?? 0,
+    // Preserve null for "no measurement" vs an actual zero reading.
+    // The DB column is nullable; collapsing null → 0 was a stale
+    // default from before manual-load entries existed and now muddies
+    // the "did Tindeq capture this rep?" signal that downstream code
+    // (and any future code) might reasonably want to check.
+    peak_force_kg: rep.peak_force_kg ?? null,
     set_num: rep.set_num, rep_num: rep.rep_num,
     rest_s: rep.rest_s, session_id: rep.session_id,
     failed: rep.failed ?? false,
@@ -420,8 +425,13 @@ export async function fetchReps() {
     manual_load_kg:     r.manual_load_kg != null ? Number(r.manual_load_kg) : null,
     weight_kg: Number(r.weight_kg ?? r.prescribed_load_kg) || 0,
     actual_time_s: Number(r.actual_time_s) || 0,
-    avg_force_kg: Number(r.avg_force_kg) || 0,
-    peak_force_kg: Number(r.peak_force_kg) || 0,
+    // Same null-vs-zero semantics as the push side: null means "no
+    // Tindeq measurement" (manual entry, or a rep where the device
+    // wasn't recording), 0 would mean "measured zero force." Mirror
+    // the manual_load_kg pattern a few lines up so the round-trip
+    // preserves the distinction.
+    avg_force_kg:  r.avg_force_kg  != null ? Number(r.avg_force_kg)  : null,
+    peak_force_kg: r.peak_force_kg != null ? Number(r.peak_force_kg) : null,
     set_num: Number(r.set_num) || 1,
     rep_num: Number(r.rep_num) || 1,
     rest_s: Number(r.rest_s) || 20,
