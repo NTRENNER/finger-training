@@ -44,9 +44,8 @@
 
 import React, { useMemo, useState } from "react";
 import {
-  ResponsiveContainer, LineChart, Line, ComposedChart, Scatter,
+  ResponsiveContainer, LineChart, Line,
   XAxis, YAxis, Tooltip, CartesianGrid,
-  ReferenceLine, ReferenceArea,
 } from "recharts";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
@@ -76,7 +75,8 @@ import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
 // the 3-min hold weight is shown on the Strength Balance card.
 import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
 import { RecoveryTrendCard, RecoveryObservedTrendCard } from "./analysis/RecoveryTrendCard.jsx";
-import { GRIP_COLORS } from "../ui/grip-colors.js";
+import { GRIP_COLORS, HAND_COLORS } from "../ui/grip-colors.js";
+import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { useAucHistoryByGrip } from "../hooks/useAucHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
 import { useHistoryOverlay } from "../hooks/useHistoryOverlay.js";
@@ -470,14 +470,12 @@ export function AnalysisView({
   }, [history, maxDur]);
 
   // ── Relative strength helpers ──
+  // useRel gates the absolute-vs-relative rendering path that
+  // builds leftDotsRel / rightDotsRel / threeExpCurveDataRel /
+  // maxForceRel below. The narrower fmtForce/forceUnit helpers
+  // and the HAND_COLORS palette moved into ForceDurationCard
+  // (the only place that consumes them).
   const useRel = relMode && bodyWeight != null && bodyWeight > 0;
-  // Convert a kg force value to the display value (abs or relative)
-  const fmtForce = (kg) => {
-    if (kg == null) return "—";
-    if (useRel) return fmt1(kg / bodyWeight);     // unitless ratio
-    return fmtW(kg, unit);
-  };
-  const forceUnit = useRel ? "× BW" : unit;
 
   // Scatter data — split by hand under the train-to-failure model.
   // The previous green/red split (Completed / Auto-failed) was a
@@ -487,7 +485,6 @@ export function AnalysisView({
   // Hand Asymmetry card below the chart. Reps with no hand or
   // hand="Both" (legacy data) drop into the L bucket as a quiet
   // default — rare and not worth a third bar.
-  const HAND_COLORS = { L: C.blue, R: C.yellow };
   const buildDot = (r) => ({
     x: r.actual_time_s,
     y: useRel ? r.avg_force_kg / bodyWeight : toDisp(r.avg_force_kg, unit),
@@ -559,19 +556,8 @@ export function AnalysisView({
     ? overlayLast
     : Math.max(0, Math.min(overlayLast, historyNowIdx));
 
-  // Custom tooltip for scatter chart
-  const ScatterTooltip = ({ active, payload, unit: tipUnit }) => {
-    if (!active || !payload?.[0]) return null;
-    const d = payload[0].payload;
-    const u = tipUnit || unit;
-    return (
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, padding: "8px 12px", borderRadius: 8, fontSize: 12 }}>
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>{d.date}{d.grip ? ` · ${d.grip}` : ""}</div>
-        <div>Duration: <b>{fmt1(d.x)}s</b></div>
-        <div>Force: <b>{fmt1(d.y)} {u}</b></div>
-      </div>
-    );
-  };
+  // (ScatterTooltip moved into ForceDurationCard — only that card
+  // consumed it.)
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -706,296 +692,35 @@ export function AnalysisView({
           below in the {reps.length === 0 ? ...} block. */}
       {reps.length > 0 && (<>
         {/* ── Force-Duration scatter ──
-            Display mode (Absolute vs × BW) is now driven by the global
+            Display mode (Absolute vs × BW) is driven by the global
             normalize toggle in the page header — the per-card pill that
             used to live here was retired so all four metric surfaces
-            switch in lockstep. */}
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Force vs. Duration</div>
-          {(() => {
-            const splitMode = !!fdSplitData;
-            return (
-              <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
-                <span><span style={{ color: HAND_COLORS.L }}>●</span> Left</span>
-                <span><span style={{ color: HAND_COLORS.R }}>●</span> Right</span>
-                {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model: a regression fit summing three exponentials with progressively longer decay constants (≈10s / 30s / 180s). The components are labeled fast / medium / slow by timescale; treating them as specific tissue compartments would be an overclaim the fit doesn't support."><span style={{ color: curveColor }}>―</span> F-D curve (3-exp)</span>}
-                {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — well past the medium component's decay, where the slow component carries essentially the whole load. The closest model analog to a 'long-duration sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
-                {splitMode && Object.keys(fdSplitData).map(g => (
-                  <span key={g}>
-                    <span style={{ color: GRIP_COLORS[g] || C.blue }}>―</span> {g}
-                    <span style={{ color: GRIP_COLORS[g] || C.blue, opacity: 0.7 }}> ╌</span> 3-min
-                  </span>
-                ))}
-                {!splitMode && limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
-                {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
-              </div>
-            );
-          })()}
-          <ResponsiveContainer width="100%" height={260}>
-            <ComposedChart margin={{ top: 10, right: 16, bottom: 28, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis
-                type="number" dataKey="x"
-                domain={[0, maxDur + 10]}
-                label={{ value: "Duration (s)", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
-                tick={{ fill: C.muted, fontSize: 11 }}
-              />
-              <YAxis
-                type="number"
-                domain={[0, Math.ceil(maxForceRel * 1.15 / (useRel ? 0.1 : 10)) * (useRel ? 0.1 : 10)]}
-                tick={{ fill: C.muted, fontSize: 11 }}
-                unit={useRel ? "" : ` ${unit}`}
-                width={42}
-              />
-              <Tooltip content={<ScatterTooltip unit={forceUnit} />} />
-              {/* Zone backgrounds — neutral tint for non-limiter zones,
-                  extra saturation on the limiter zone so the chart
-                  echoes the SessionPlanner recommendation. Driven by
-                  ZONE6 so the 6-zone schema is the single source of
-                  truth for both boundaries and colors. */}
-              {ZONE6.map(z => {
-                const x1 = z.min;
-                const x2 = z.max === Infinity ? maxDur + 10 : z.max;
-                const isLimiter = limiterZoneBounds?.x1 === z.min;
-                return (
-                  <ReferenceArea
-                    key={z.key}
-                    x1={x1}
-                    x2={x2}
-                    fill={z.color}
-                    fillOpacity={isLimiter ? 0.22 : 0.07}
-                  />
-                );
-              })}
-              {/* Single-fit overlays only when NOT in per-grip split mode.
-                  In split mode they'd be ambiguous (which grip's CF? which
-                  3-exp? which 90% band?). Per-grip rendering takes over. */}
-              {/* 3-min sustainable reference from three-exp at T=180s
-                  (replaces the Monod CF asymptote, since three-exp has
-                  no true asymptote — it decays to 0). At 180s the slow
-                  curve-fit component carries essentially the whole
-                  load; this is the closest model analog to "what you
-                  can sustain for a long hold" the three-timescale
-                  fit can produce. */}
-              {!fdSplitData && threeExpRef180 != null && (
-                <ReferenceLine
-                  y={useRel ? threeExpRef180 / bodyWeight : toDisp(threeExpRef180, unit)}
-                  stroke={curveColor} strokeDasharray="6 3" strokeWidth={1.5}
-                  label={{ value: `3-min ${fmtForce(threeExpRef180)} ${forceUnit}`, position: "insideTopRight", fill: curveColor, fontSize: 10 }}
-                />
-              )}
-              {/* Primary curve — three-exp F-D. Solid line, tinted to the
-                  selected grip's color when one is filtered (matches the
-                  per-grip palette the All-Grips split-mode view uses);
-                  falls back to neutral purple in unfiltered mode. */}
-              {!fdSplitData && threeExpCurveDataRel.length > 0 && (
-                <Line data={threeExpCurveDataRel} dataKey="y" stroke={curveColor}
-                      strokeWidth={2} dot={false}
-                      legendType="none" isAnimationActive={false} />
-              )}
-              {!fdSplitData && (
-                <Scatter data={leftDotsRel} dataKey="y" fill={HAND_COLORS.L} opacity={0.9} name="Left" onClick={handleDotClick} style={{ cursor: "pointer" }} />
-              )}
-              {!fdSplitData && (
-                <Scatter data={rightDotsRel} dataKey="y" fill={HAND_COLORS.R} opacity={0.9} name="Right" onClick={handleDotClick} style={{ cursor: "pointer" }} />
-              )}
-              {/* Per-grip split mode: one curve + one set of dots per grip.
-                  Avoids the cross-muscle mudding (Micro FDP pinch ~5-10kg vs
-                  Crusher FDS crush ~15-30kg on a single curve). Failure dots
-                  retain their red/green meaning, but get a colored OUTLINE
-                  matching the grip so you can tell which is which. */}
-              {fdSplitData && (() => {
-                const grips = Object.keys(fdSplitData);
-                const elements = [];
-                const tMax = Math.max(maxDur, F_D_T_MIN + 10);
-                for (const grip of grips) {
-                  const color = GRIP_COLORS[grip] || C.blue;
-                  // (Per-grip dot data is now built from `history` directly
-                  // below — fdSplitData[grip] is only consumed for the
-                  // per-grip curve fits, not the dots.)
-                  // Three-exp PRIMARY curve — bold solid grip color. This
-                  // is the curve the engine optimizes against; Monod
-                  // (above) is just for visual comparison. Also emits a
-                  // per-grip "3-min sustainable" reference line so split
-                  // mode shows the same overlays as single-grip mode.
-                  if (threeExpPriors && threeExpPriors.get) {
-                    // Train-to-failure model: every rep with valid
-                    // actual_time_s is a (T, F) data point. fitAmpsForPts
-                    // applies the grip-aware prior + adaptive lambda
-                    // shrinkage from src/model/baselines.js.
-                    const failures = (history || []).filter(r =>
-                      r.grip === grip
-                      && r.actual_time_s > 0 && r.avg_force_kg > 0 && r.avg_force_kg < 500
-                    );
-                    if (failures.length >= 2) {
-                      const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
-                      const amps = fitAmpsForPts(pts, grip, threeExpPriors);
-                      if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
-                        const teeCurve = Array.from({ length: 80 }, (_, i) => {
-                          const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
-                          const f = predForceThreeExp(amps, t);
-                          return {
-                            x: t,
-                            y: useRel && bodyWeight > 0
-                              ? toDisp(Math.max(f, 0), unit) / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1))
-                              : toDisp(Math.max(f, 0), unit),
-                          };
-                        });
-                        elements.push(
-                          <Line key={`${grip}-tee`} data={teeCurve} dataKey="y"
-                            stroke={color} strokeWidth={2} dot={false}
-                            legendType="none" isAnimationActive={false} />
-                        );
-                        // 3-min sustainable reference for this grip — analog
-                        // of the dashed horizontal line in single-grip mode.
-                        const teeRef180 = predForceThreeExp(amps, 180);
-                        if (teeRef180 > 0) {
-                          const refY = useRel && bodyWeight > 0
-                            ? teeRef180 / bodyWeight
-                            : toDisp(teeRef180, unit);
-                          elements.push(
-                            <ReferenceLine key={`${grip}-ref180`} y={refY}
-                              stroke={color} strokeDasharray="6 3" strokeWidth={1}
-                              strokeOpacity={0.7}
-                              label={{ value: `${grip} 3-min ${fmtForce(teeRef180)} ${forceUnit}`,
-                                position: "insideRight", fill: color, fontSize: 9 }}
-                            />
-                          );
-                        }
-                      }
-                    }
-                  }
-                  // Dots: fill by hand (L = blue, R = yellow), outline
-                  // by grip color. Two-dimensional encoding — fill tells
-                  // you the hand, outline tells you the grip.
-                  // (Replaces the legacy red/green outcome encoding now
-                  // that every rep is a failure data point.)
-                  const gripReps = (history || []).filter(r =>
-                    r.grip === grip
-                    && r.actual_time_s > 0
-                    && r.avg_force_kg > 0 && r.avg_force_kg < 500
-                  );
-                  const toDot = (r) => ({
-                    x: r.actual_time_s,
-                    y: useRel && bodyWeight > 0
-                      ? r.avg_force_kg / bodyWeight
-                      : toDisp(r.avg_force_kg, unit),
-                    grip, date: r.date, hand: r.hand,
-                    session_id: r.session_id,
-                    target_duration: r.target_duration,
-                    rest_s: r.rest_s,
-                  });
-                  const lDots = gripReps.filter(r => r.hand !== "R").map(toDot);
-                  const rDots = gripReps.filter(r => r.hand === "R").map(toDot);
-                  elements.push(
-                    <Scatter key={`${grip}-L`} data={lDots} dataKey="y"
-                      fill={HAND_COLORS.L} stroke={color} strokeWidth={1.5} opacity={0.9}
-                      onClick={handleDotClick} style={{ cursor: "pointer" }} />
-                  );
-                  elements.push(
-                    <Scatter key={`${grip}-R`} data={rDots} dataKey="y"
-                      fill={HAND_COLORS.R} stroke={color} strokeWidth={1.5} opacity={0.9}
-                      onClick={handleDotClick} style={{ cursor: "pointer" }} />
-                  );
-                }
-                return elements;
-              })()}
-            </ComposedChart>
-          </ResponsiveContainer>
-          {/* Zone labels — 6-zone scheme. Wraps to two rows on narrow
-              screens so all six fit cleanly. Boundaries come from ZONE6
-              so labels stay in sync if the schema is tuned later. */}
-          <div style={{
-            display: "flex", flexWrap: "wrap", justifyContent: "center",
-            gap: "4px 12px", marginTop: 6, fontSize: 10, color: C.muted,
-          }}>
-            {ZONE6.map(z => {
-              const range = z.max === Infinity
-                ? `${z.min}s+`
-                : z.min === 0
-                  ? `<${z.max}s`
-                  : `${z.min}–${z.max}s`;
-              return (
-                <span key={z.key} style={{ color: z.color, whiteSpace: "nowrap" }}>
-                  {z.short} {range}
-                </span>
-              );
-            })}
-          </div>
-          {/* Per-grip Hand Asymmetry rows — folded in below the chart.
-              Tabular companion to the L/R dot scatter above: for each
-              grip with both L and R fits, shows weaker hand load + the
-              asymmetry %. Below ~5% reads as 'symmetric'; above ~15%
-              flags the weaker hand as the real climbing limiter on this
-              grip. Computed at T=30s (middle of curve, exercises fast +
-              middle components).
-              Auto-hide rule (May 2026): the section only renders when at
-              least one grip crosses the 5% asymmetric threshold. When
-              everything is symmetric there's no signal worth surfacing,
-              and silently hiding keeps the F-D chart tighter. The check
-              surfaces itself again automatically if asymmetry drifts in
-              (injury, asymmetric training, instrument drift), so the
-              user doesn't have to remember to look for it. */}
-          {handAsymmetry.some(h => h.asymPct >= 0.05) && (
-            <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-                Hand Asymmetry
-              </div>
-              {handAsymmetry.map(({ grip, L, R, stronger, weaker, asymPct }) => {
-                const flagColor = asymPct >= 0.15 ? C.red
-                               : asymPct >= 0.05 ? C.orange
-                               : C.green;
-                const flagText  = asymPct >= 0.15 ? "limiter"
-                               : asymPct >= 0.05 ? "asymmetric"
-                               : "symmetric";
-                const pctRound  = Math.round(asymPct * 100);
-                // L and R are in kg from the asymmetry useMemo. When
-                // normalizeOn, render both as % of current bodyweight
-                // so the per-grip strength reads in climbing units
-                // (a 35% BW micro-pinch means more to a climber than
-                // an absolute kg figure).
-                const renderForce = (kg) => {
-                  if (normalizeOn && bodyWeight > 0) {
-                    return `${Math.round((kg / bodyWeight) * 100)}% BW`;
-                  }
-                  return `${fmtW(kg, unit)} ${unit}`;
-                };
-                return (
-                  <div key={grip} style={{
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "8px 0",
-                    borderBottom: `1px solid ${C.border}`,
-                  }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: GRIP_COLORS[grip] || C.text }}>
-                        {grip}
-                      </div>
-                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-                        L {renderForce(L)} · R {renderForce(R)}
-                        {pctRound > 0 && (
-                          <> · <b style={{ color: C.text }}>{weaker}</b> is {pctRound}% behind <b style={{ color: C.text }}>{stronger}</b></>
-                        )}
-                      </div>
-                    </div>
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, color: flagColor,
-                      background: `${flagColor}1a`,
-                      padding: "3px 8px", borderRadius: 4,
-                      textTransform: "uppercase", letterSpacing: 0.5,
-                      whiteSpace: "nowrap",
-                    }}>
-                      {flagText}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* (Fit diagnostic line removed — was a vestigial training-RMSE
-              readout from the three-exp validation phase. Curve quality
-              is judged by eye on the scatter above.) */}
-        </Card>
+            switch in lockstep. Card body extracted to ForceDurationCard
+            (May 2026 BACKLOG #156 fourth pass); AnalysisView wires the
+            data props in. */}
+        <ForceDurationCard
+          unit={unit}
+          bodyWeight={bodyWeight}
+          useRel={useRel}
+          normalizeOn={normalizeOn}
+          fdSplitData={fdSplitData}
+          threeExpCurveDataRel={threeExpCurveDataRel}
+          threeExpRef180={threeExpRef180}
+          limiterZoneBounds={limiterZoneBounds}
+          curveColor={curveColor}
+          leftDotsRel={leftDotsRel}
+          rightDotsRel={rightDotsRel}
+          maxDur={maxDur}
+          maxForceRel={maxForceRel}
+          handAsymmetry={handAsymmetry}
+          history={history}
+          threeExpPriors={threeExpPriors}
+          handleDotClick={handleDotClick}
+        />
+        {/* (Inline F-D card render block was here — ~280 lines covering
+            the title + legend + ComposedChart + per-grip split-mode
+            curves/dots + zone labels + Hand Asymmetry rows. Now in
+            src/views/analysis/ForceDurationCard.jsx.) */}
 
         {/* (PrescribedLoadCard removed from Analysis — was redundant
             with the SessionPlanCard on Setup which renders the same

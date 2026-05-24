@@ -21,3 +21,9 @@ export const GRIP_COLORS = {
   Crusher: C.orange,
   Prime:   "#7c5cbf",
 };
+
+// Canonical per-hand color map. Used by the F-D scatter (dot fill),
+// the Force Curves overlay (per-hand lines), the session-detail modal
+// header, and the Hand Asymmetry rows. Lifted here so the F-D card
+// extraction and AnalysisView's other consumers don't drift apart.
+export const HAND_COLORS = { L: C.blue, R: C.yellow };
