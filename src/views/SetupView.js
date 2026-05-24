@@ -8,7 +8,6 @@
 // to one of six fixed zone reference times.
 //
 // Layout (top to bottom):
-//   • BwPrompt — inline body-weight nudge when stale.
 //   • Grip Type pills — per-grip; the curve is grip-scoped.
 //   • SessionPlanCard — the unified plan surface. It hosts:
 //       - The recommended (T, load) pick from the continuous engine
@@ -21,6 +20,8 @@
 //     PrescribedLoadCard, SessionRPECard).
 //   • Tindeq Connect slot
 //   • Start Session button — single set; multi-set was retired.
+//   • BwPrompt — inline body-weight nudge, pinned to the bottom to
+//     match the Workout tab.
 //
 // Moved to Analysis (May 2026):
 //   • CurveCoverageCard — per-zone data freshness + annual session
@@ -199,15 +200,6 @@ export function SetupView({
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
 
-      {/* Bodyweight quick-log. ClimbingLogCard used to sit immediately
-          above this row, but climb capture moved out to the dedicated
-          Climb tab in late May 2026 (Fingers was getting crowded with
-          two unrelated session-prep inputs). BW stays here because
-          it's tied to the finger-session prescription (× BW
-          normalization on Analysis, additive load on weighted hangs)
-          rather than to climbing. */}
-      <BwPrompt unit={unit} onSave={onBwSave} />
-
       {/* Grip Type — still per-grip, the curve is grip-scoped */}
       <Card>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Grip Type</div>
@@ -267,9 +259,6 @@ export function SetupView({
           the F-D chart and Prescribed Load card instead of bloating
           the Setup flow. */}
 
-      {/* (BwPrompt moved up to live alongside the climb logger so all
-          quick-log inputs sit together near the top of Setup.) */}
-
       {/* Tindeq Connect slot — rendered just above the Start button */}
       {connectSlot}
 
@@ -283,6 +272,14 @@ export function SetupView({
       >
         Start Session →
       </Btn>
+
+      {/* Bodyweight quick-log — pinned to the bottom of the page to
+          match the Workout tab's placement. Tied to the finger-session
+          prescription (× BW normalization on Analysis, additive load on
+          weighted hangs), so it stays on Fingers rather than Climb. */}
+      <div style={{ marginTop: 16 }}>
+        <BwPrompt unit={unit} onSave={onBwSave} />
+      </div>
     </div>
   );
 }
