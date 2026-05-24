@@ -144,29 +144,26 @@ header states the phenomenological-not-mechanistic caveat.
 
 ---
 
-## 5. Per-hand limiter diagnostic + audit `fitAdaptiveHandCurve` callers
+## 5. Per-hand limiter diagnostic + audit `fitAdaptiveHandCurve` callers ✓ SHIPPED (effectively done)
 
-**Problem.** `fitAdaptiveHandCurve` returns the stronger hand's fit
-when L/R CF diverges >20%. For climbing the weaker hand is often the
-actual limiter, so an "always-stronger" pooled fit is biased optimistic.
+Audited late May 2026 (post-`useGripFits` work). Both halves of this
+item are already covered:
 
-**Impact in current code.** Most modern code paths are already
-per-hand: `perHandGripBaselines`, `prescribedLoad`,
-`empiricalPrescription`, the coaching engine, and the F-D chart's
-L-vs-R split all work per-hand. The bias leaks only into pooled
-views (`liveEstimate`, `gripEstimates` no-filter, Curve Improvement
-pooled-fit fallback).
+- *Audit.* `fitAdaptiveHandCurve` no longer exists in the source
+  (`grep -r 'fitAdaptiveHandCurve' src/` returns nothing). The
+  always-stronger-when-divergent behavior was a Monod-era quirk that
+  got retired during the three-exp migration (Phases A–D). The pooled
+  three-exp fit weighs L and R together rather than picking the
+  stronger hand on divergence, so the "biased optimistic" failure
+  mode the item flagged is structurally gone. `liveEstimate` is also
+  retired; the only remaining `gripEstimates` consumers are
+  `buildGripImprovement` and `computeHandAsymmetry`, both well-behaved
+  per-grip helpers in `src/model/baselines.js`.
+- *Diagnostic surface.* The "weaker hand is X% behind stronger" copy
+  ships in the Hand Asymmetry section of the F-D card
+  (`ForceDurationCard.jsx` → handAsymmetry rows). Per-grip rather than
+  pooled, with symmetric / asymmetric / limiter pills and auto-hide
+  when every grip is symmetric (commit #234).
 
-**Three-bucket fix.**
-
-- *Global ceiling* (F-D chart no-hand-filter, headline AUC card):
-  stronger hand is fine. No change.
-- *Prescription / recommendation*: already per-hand. Audit the call
-  sites to confirm none accidentally use the pooled fit when a
-  per-hand fit was available.
-- *Limiter diagnosis*: surface "your weaker hand is X% behind your
-  stronger hand" — currently absent. Small banner on the F-D chart
-  or as a row in Curve Coverage.
-
-**Effort.** Small for the audit pass; small-medium for the new
-diagnostic surface.
+No code change needed. Closing the item out so it stops anchoring the
+post-lockout backlog.
