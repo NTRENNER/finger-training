@@ -25,12 +25,12 @@
 //   B       — Athletic Power        (FREQUENT, ~30 min, recovers fast)
 //   C       — Neural Strength Touch (FREQUENT, ~15 min, the easy yes)
 //   STRETCH — Daily Stretching      (DAILY HABIT, ~5–10 min, hip + forearm)
-//   CLIMB   — primary climbing session (INPUT ONLY — the recommender
-//             never pushes you to climb; climbing happens for its own
-//             reasons. Climbing history is consumed for tag staleness
-//             on neural/connective/finger patterns.)
-//   REST    — explicit rest day (the recommender CAN push toward this
-//             when climbing density is high; rest is real training.)
+//   CLIMB   — primary climbing session (loggable marker only — the
+//             recommender never pushes you to climb, and climbing no
+//             longer feeds the recommendation; it's logged for its own
+//             history via the climbing-activities flow.)
+//   REST    — explicit rest day (a loggable marker; never a recommender
+//             output — the user signals their own rest needs.)
 //
 // Rename history (May 2026): Old C (Positional Capacity, the dedicated
 // mobility session) was moved out of the picker rotation entirely —
@@ -659,10 +659,6 @@ const C_TOUCH_DAYS       = 4;
  *   *recommends* STRETCH — that's a user-driven daily habit, not a
  *   day-of choice.
  * @param {Object} [opts]
- * @param {Array<{type:string, date:string}>} [opts.climbingHistory=[]]
- *   Activities log (from the existing `activities` state). Entries
- *   with type === "climb" feed tag staleness for the climbing
- *   pattern bundle and the high-density REST trigger.
  * @param {string} [opts.refDate]  ISO date for testing. Defaults to today().
  *
  * @returns {{
@@ -671,14 +667,11 @@ const C_TOUCH_DAYS       = 4;
  * }}
  */
 export function recommendNextWorkout(workoutHistory = [], opts = {}) {
-  const {
-    climbingHistory = [],
-    refDate = today(),
-  } = opts;
+  const { refDate = today() } = opts;
 
   const daysSinceA = daysSinceLastOfType(workoutHistory, "A", refDate);
   const daysSinceC = daysSinceLastOfType(workoutHistory, "C", refDate);
-  const tagDays    = computeTagDaysSince(workoutHistory, climbingHistory, refDate);
+  const tagDays    = computeTagDaysSince(workoutHistory, refDate);
 
   // 1. A overdue → A. The week's reservation slot.
   if (daysSinceA >= A_OVERDUE_DAYS) {
@@ -757,11 +750,10 @@ export function daysSinceLastOfType(history, workoutId, refDate) {
 }
 
 // Map { tag → minimum days since any session producing that tag }.
-// Workout sessions contribute their template's `tags`; climbing
-// activities contribute the CLIMB template's tag bundle (climbing,
-// finger, neural, connective). Future-dated rows are ignored. Tags
-// that never appear are absent — callers use `tagDays[tag] ?? Infinity`.
-export function computeTagDaysSince(workoutHistory, climbingHistory, refDate) {
+// Workout sessions contribute their template's `tags`. Future-dated
+// rows are ignored. Tags that never appear are absent — callers use
+// `tagDays[tag] ?? Infinity`.
+export function computeTagDaysSince(workoutHistory, refDate) {
   const tagDays = {};
   const bump = (tag, d) => {
     if (d < 0) return;
@@ -776,32 +768,11 @@ export function computeTagDaysSince(workoutHistory, climbingHistory, refDate) {
     for (const tag of wo.tags) bump(tag, d);
   }
 
-  for (const a of (climbingHistory || [])) {
-    if (!a || a.type !== "climb") continue;
-    const d = daysBetween(a.date, refDate);
-    if (!Number.isFinite(d)) continue;
-    for (const tag of workouts.CLIMB.tags) bump(tag, d);
-  }
-
   return tagDays;
 }
 
-// How many DISTINCT dates in the last `withinDays` had at least one
-// climbing activity. Distinct-by-date so two climbs on the same day
-// count as one climb day (matches the user's intuition of "I climbed
-// 4 days this week" rather than "I logged 8 sessions").
-export function recentClimbDayCount(climbingHistory, refDate, withinDays) {
-  const seen = new Set();
-  for (const a of (climbingHistory || [])) {
-    if (!a || a.type !== "climb") continue;
-    const d = daysBetween(a.date, refDate);
-    if (Number.isFinite(d) && d >= 0 && d < withinDays) seen.add(a.date);
-  }
-  return seen.size;
-}
-
 // ─────────────────────────────────────────────────────────────
-// Integration sketch (for the eventual WorkoutTab wiring)
+// Integration sketch
 // ─────────────────────────────────────────────────────────────
 //
 //   import { recommendNextWorkout, workouts } from "../model/supportTraining.js";
@@ -811,14 +782,8 @@ export function recentClimbDayCount(climbingHistory, refDate, withinDays) {
 //   //   can read them. Older entries with the legacy `workout` field
 //   //   are invisible to the recommender — that's fine for a soft
 //   //   migration, the system just starts learning from new sessions.
-//   //
-//   // activities: the existing climbing/oneRM/rpe log. The
-//   //   recommender filters to type === "climb" internally; the
-//   //   full array can be passed as `climbingHistory`.
 //
-//   const rec = recommendNextWorkout(wLog, {
-//     climbingHistory: activities,
-//   });
+//   const rec = recommendNextWorkout(wLog, { refDate: today() });
 //
 //   // Render:
 //   //   rec.primary       — the recommended workout template

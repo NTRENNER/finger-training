@@ -13,8 +13,8 @@
 //
 // Flow:
 //   1. recommendNextWorkout() looks at the user's recent support
-//      sessions + climbing history and proposes one workout for
-//      today, with a one-line reason.
+//      sessions and proposes one workout for today, with a one-line
+//      reason.
 //   2. The user can accept the recommendation or override via the
 //      A/B/C picker. The StretchPill below the picker is an
 //      independent daily toggle, not a recommender output. CLIMB
@@ -89,10 +89,6 @@ export function WorkoutTab({
   onSessionSaved,
   onBwSave = () => {},
   trip = DEFAULT_TRIP,
-  // Climbing activities log (from App's `activities` state). Used
-  // by the recommender for tag staleness (climbing contributes
-  // neural/connective load) and for the high-density REST trigger.
-  activities = [],
 }) {
   // ── State ─────────────────────────────────────────────
   // wLog initial: load, then run the May 2026 D → C migration if
@@ -129,14 +125,6 @@ export function WorkoutTab({
   const [sessionData, setSessionData] = useState({}); // exId → { sets:[...] } | { done, notes }
   const [sessionNotes, setSessionNotes] = useState(""); // overall session note
 
-  // Climbing-only filter on activities. The recommender's API takes
-  // a `climbingHistory` array of type-tagged entries; pre-filter so
-  // future activity types don't accidentally pollute the signal.
-  const climbingHistory = useMemo(
-    () => (activities || []).filter(a => a?.type === "climb"),
-    [activities]
-  );
-
   // ── Recommendation ───────────────────────────────────
   // Drop pin-style rotation sessions (legacy ROTATION_PIN_KEY) so
   // they don't pollute the recommender's daysSinceLastOfType counts.
@@ -150,10 +138,9 @@ export function WorkoutTab({
   );
   const recommendation = useMemo(
     () => recommendNextWorkout(recommenderInput, {
-      climbingHistory,
       refDate: today(),
     }),
-    [recommenderInput, climbingHistory]
+    [recommenderInput]
   );
 
   // The active workout is either the user's override or the
