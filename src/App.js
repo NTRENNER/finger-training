@@ -15,6 +15,7 @@ import { SettingsView } from "./views/SettingsView.js";
 // than by App.js directly — the container hosts the Fingers / Lifts
 // pill toggle and renders one of two analysis views beneath it.
 import { SetupView } from "./views/SetupView.js";
+import { ClimbView } from "./views/ClimbView.js";
 import {
   ActiveSessionView, AutoRepSessionView,
   RestView, SwitchHandsView,
@@ -177,14 +178,32 @@ const GOAL_CONFIG = {
 // activity entries to Power.
 const RM_GRIPS = ["Micro", "Crusher", "Prime"];
 
-// Tab order. Fingers + Workout are the two "doing the work" tabs and
-// sit next to each other at the front. Analysis is the unified "look
-// back" tab — it hosts a Fingers / Lifts pill toggle internally so
-// per-exercise lift progression and Tindeq finger analysis live in
-// one place. History stays before Settings as the "everything that
-// ever happened" log. (Lifts as a top-level tab was retired May 2026
-// and folded into Analysis via AnalysisContainer.)
-const TABS = ["Fingers", "Workout", "Analysis", "History", "Settings"];
+// Tab order. Fingers + Workout + Climb are the three "doing the work"
+// tabs and sit next to each other at the front, in training-day order
+// (fingers warm-up / dedicated session → strength workout → log
+// climbs). Analysis is the unified "look back" tab — it hosts a
+// Fingers / Lifts / Climbs / Weight pill toggle internally so per-
+// domain analysis lives in one place. History is the "everything
+// that ever happened" log.
+//
+// Settings is intentionally NOT in this array — it lives behind the
+// gear icon in the top-right of the header (see SETTINGS_TAB below).
+// Reasoning: Settings is a once-a-week touchpoint (units, climbing
+// focus, sign-in) and shouldn't take a tab slot from the daily-use
+// tabs. Demoting it to a gear lets the five daily tabs fit on a
+// narrow phone without horizontal scroll.
+//
+// (Lifts as a top-level tab was retired May 2026 and folded into
+// Analysis. Climb was retired in the same wave and merged into
+// Fingers, then re-extracted in late May 2026 to give the logger +
+// recent-climbs digest its own home and stop crowding the Fingers
+// session-setup flow.)
+const TABS = ["Fingers", "Workout", "Climb", "Analysis", "History"];
+
+// Settings is reachable via the gear icon, not via the tab bar.
+// Its tab index sits just past the visible tabs so the existing
+// `tab === N` render switch keeps working without special-casing.
+const SETTINGS_TAB = 5;
 
 export default function App() {
   // ── Auth + OTP login (see src/hooks/useAuth.js) ──────────
@@ -727,9 +746,11 @@ export default function App() {
           msOverflowStyle: "none",  // IE/Edge legacy
         }}
       >
-        <div style={{ fontSize: 16, fontWeight: 800, color: C.blue, marginRight: 16, padding: "14px 0", flexShrink: 0 }}>
-          🧗 Finger
-        </div>
+        {/* Brand block (🧗 Finger title) removed late May 2026 — it
+            cost ~80px on the left for no functional value, and the
+            tab bar needed every pixel to keep Fingers/Workout/Climb/
+            Analysis/History visible without horizontal scroll on a
+            narrow phone. */}
         {TABS.map((t, i) => (
           <button
             key={t}
@@ -748,9 +769,29 @@ export default function App() {
             )}
           </button>
         ))}
-        {tindeq.connected && (
-          <div style={{ marginLeft: "auto", fontSize: 11, color: C.green }}>⚡ Tindeq</div>
-        )}
+        {/* Right cluster: Tindeq status pill (when connected) + gear
+            icon for Settings. marginLeft: auto on the wrapper pushes
+            both to the far-right edge regardless of how many tabs
+            render to the left. */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          {tindeq.connected && (
+            <span style={{ fontSize: 11, color: C.green }}>⚡ Tindeq</span>
+          )}
+          <button
+            onClick={() => setTab(SETTINGS_TAB)}
+            aria-label="Settings"
+            title="Settings"
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              padding: "10px 8px", fontSize: 18,
+              color: tab === SETTINGS_TAB ? C.blue : C.muted,
+              filter: tab === SETTINGS_TAB ? "none" : "grayscale(1)",
+              lineHeight: 1,
+            }}
+          >
+            ⚙
+          </button>
+        </div>
       </div>
 
       {/* Unsaved reps warning banner */}
@@ -826,14 +867,13 @@ export default function App() {
               unit={unit}
               onBwSave={saveBW}
               activities={activities}
-              onLogActivity={addActivity}
               connectSlot={tindeqConnectCard}
               GOAL_CONFIG={GOAL_CONFIG}
               GRIP_PRESETS={GRIP_PRESETS}
               bodyWeight={bodyWeight}
               tindeq={tindeq}
               climbingFocus={climbingFocus}
-              onNavigateToSettings={() => setTab(4)}
+              onNavigateToSettings={() => setTab(SETTINGS_TAB)}
             />
           );
         }
@@ -905,6 +945,13 @@ export default function App() {
 
       {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} activities={activities} />}
       {tab === 2 && (
+        <ClimbView
+          activities={activities}
+          onLogActivity={addActivity}
+          onNavigateToHistory={() => setTab(4)}
+        />
+      )}
+      {tab === 3 && (
         <AnalysisContainer
           history={history}
           unit={unit}
@@ -925,9 +972,11 @@ export default function App() {
           Improvement on Analysis already shows directly. Lifts
           retired as a top-level tab in May 2026 and folded into
           Analysis via AnalysisContainer's Fingers / Lifts pill.
-          Climbing tab removed in the same wave — full climb logger
-          merged into Fingers; climbing history viewed in History tab.) */}
-      {tab === 3 && (
+          Climbing tab was retired in the same wave (merged into
+          Fingers) and then re-extracted in late May 2026 as the
+          dedicated Climb tab above — full filterable climb history
+          still lives in this tab's climbing pill.) */}
+      {tab === 4 && (
         <HistoryView
           history={history}
           freshMap={freshMap}
@@ -964,7 +1013,7 @@ export default function App() {
           Analysis as Total Capacity AUC over time; body weight and
           lifts have their own homes too. Climbing trends were also
           dropped when the Climbing tab was retired.) */}
-      {tab === 4 && (
+      {tab === SETTINGS_TAB && (
         <SettingsView
           user={user}
           loginEmail={loginEmail}

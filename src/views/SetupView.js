@@ -9,9 +9,6 @@
 //
 // Layout (top to bottom):
 //   • Adaptive Warm-up entry card
-//   • ClimbingLogCard — collapsed full climb logger (discipline /
-//     grade / ascent / wall / RPE), merged here from the retired
-//     Climbing tab so all climbing capture lives on Fingers.
 //   • BwPrompt — inline body-weight nudge when stale.
 //   • Grip Type pills — per-grip; the curve is grip-scoped.
 //   • SessionPlanCard — the unified plan surface. It hosts:
@@ -45,6 +42,12 @@
 // Multi-set machinery is fully removed from the data model + runner
 // (May 2026). Sessions are single-set; the runner reads
 // config.targetTime / config.repsPerSet / config.restTime directly.
+//
+// ClimbingLogCard was hosted on this view between May 2026 (when the
+// dedicated Climbing tab was retired) and late May 2026 (when the
+// Climb tab was re-extracted). It now lives in src/views/ClimbView.js;
+// activities still flow through SetupView for SessionPlanCard's
+// today-climb fatigue read, but the capture UI no longer sits here.
 
 import React, { useMemo, useState } from "react";
 
@@ -58,7 +61,6 @@ import { WarmupView } from "./WarmupView.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.js";
-import { ClimbingLogCard } from "./cards/ClimbingLogCard.js";
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
@@ -176,7 +178,11 @@ export function SetupView({
   fatigueModel = null,
   unit = "lbs",
   onBwSave = () => {},
-  activities = [], onLogActivity = () => {},
+  // activities is still consumed (SessionPlanCard reads today's climb
+  // log for adaptive RPE). Climb capture moved to the Climb tab in
+  // late May 2026; SetupView no longer owns the logging surface, so
+  // onLogActivity isn't accepted here anymore.
+  activities = [],
   connectSlot = null,
   GOAL_CONFIG = {}, GRIP_PRESETS = [],
   bodyWeight = null, tindeq = null,
@@ -237,20 +243,13 @@ export function SetupView({
         </div>
       </Card>
 
-      {/* Quick-log row: climbing entry + bodyweight side-by-side.
-          Both are session-adjacent inputs that don't belong in the
-          main session-config flow but want easy access from Setup
-          (climbing for the lockout system, BW for the Analysis tab's
-          × BW normalization). BwPrompt has its own staleness guard
-          (returns null if logged within the last 3 days) so it auto-
-          collapses when the log is fresh. */}
-      <ClimbingLogCard activities={activities} onLog={onLogActivity} />
-      {/* SessionRPECard ("Session RPE — today") removed May 2026 — its
-          only purpose was overriding the per-climb RPE aggregation, and
-          the new "How cooked today?" slider on SessionPlanCard captures
-          the same intent in a more general / persisted-for-learning way.
-          The session_rpe field on activities is still respected by
-          climbingFatigue.computeSessionFatigue if it's set elsewhere. */}
+      {/* Bodyweight quick-log. ClimbingLogCard used to sit immediately
+          above this row, but climb capture moved out to the dedicated
+          Climb tab in late May 2026 (Fingers was getting crowded with
+          two unrelated session-prep inputs). BW stays here because
+          it's tied to the finger-session prescription (× BW
+          normalization on Analysis, additive load on weighted hangs)
+          rather than to climbing. */}
       <BwPrompt unit={unit} onSave={onBwSave} />
 
       {/* Grip Type — still per-grip, the curve is grip-scoped */}
