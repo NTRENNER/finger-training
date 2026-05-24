@@ -358,7 +358,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
                 disabled={tindeqConnected || tindeqReconnecting}
                 color={tindeqConnected ? C.green : tindeqReconnecting ? C.orange : C.blue}
               >
-                {tindeqConnected ? "Connected" : tindeqReconnecting ? "Reconnecting…" : "Connect BLE"}
+                {tindeqConnected ? "Connected" : tindeqReconnecting ? "Reconnecting…" : "Connect Tindeq"}
               </Btn>
             </div>
           </div>
