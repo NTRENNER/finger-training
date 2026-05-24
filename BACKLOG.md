@@ -118,18 +118,54 @@ risk concentrates there.
 
 ---
 
-## 3. ~~Decompose `AnalysisView`~~ (OBSOLETE)
+## 3. Decompose `AnalysisView` ✓ SHIPPED (commits 7de60e3, da73203, e71e700, 7bec2b5, 6751b50, 499db81)
 
 Originally a ~2,000-line file that mixed model derivation, chart
-prep, and rendering. Post curve-trust the file is ~1,400 lines:
+prep, and rendering. Late May 2026 second pass shipped in six
+commits:
+
+- `7de60e3` — extract `useAucHistoryByGrip` (per-grip AUC trajectory
+  hook; first pass).
+- `da73203` — extract `useGripFits` bundling six per-grip three-exp
+  derivations (gripBaselines, grip3xEstimates, gripHandFits,
+  perHandGripBaselines, gripImprovement, handAsymmetry).
+- `e71e700` — extract `useHistoryOverlay` bundling historyOverlay +
+  balanceHistory (per-hand cumulative fits feeding the Force Curves
+  overlay and Strength Balance card).
+- `7bec2b5` — extract `ForceDurationCard` component (F-D scatter,
+  3-exp curve, per-grip split-mode render, Hand Asymmetry rows);
+  `HAND_COLORS` lifted to `src/ui/grip-colors.js` along the way.
+- `6751b50` — extract `CurveImprovementCard` component (six-tile
+  Δ% grid with perGripMode / selGrip / pooled branches plus
+  baseline-unlock progress placeholders).
+- `499db81` — extract `ForceCurvesOverlayCard` component (pooled /
+  per-hand toggle, grip selector, Now slider, baseline-vs-current
+  LineChart, per-T delta tile strip); overlayActiveGrip/Dates/Last/
+  NowI derivations moved into the component since only it consumed
+  them.
+
+End state: AnalysisView 1846 → 813 lines (~56% reduction). No charts
+render directly in AnalysisView anymore — every chart lives in a
+child component. What remains is the orchestration layer (props,
+view-state, click-to-expand session-detail modal, filter card, and
+the wire-up of all extracted child cards) — which is what the view
+file should be.
+
+Pre-decomposition deletions still apply:
 - gripRecs / per-grip Train cards: deleted (commit 74f18ea)
 - Per-Compartment Dose AUC chart: deleted (commit c246834)
 - EnergySystemBreakdownCard: deleted (commit c246834)
 - recommendation / personalResponse / zones memos: deleted (74f18ea)
 
-What remains is mostly view code with a few useMemos. Decomposition
-no longer earns its complexity. Drop from backlog unless
-AnalysisView grows again.
+**Deliberately NOT extracted:**
+
+- `SelectionDetailModal` (the click-a-dot session-detail modal).
+  ~70 lines of one-off modal markup that doesn't recur. Extracting
+  it would require passing 7-8 props for a single-call-site
+  component; the savings don't justify the indirection.
+- The filter card. ~50 lines that bundles grip pills + the
+  Absolute/×BW toggle. Same one-off shape; the page-level filter
+  state lives in AnalysisView, so the markup naturally lives with it.
 
 ---
 
