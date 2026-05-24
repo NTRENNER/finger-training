@@ -33,6 +33,7 @@ import {
 } from "../lib/storage.js";
 import { WorkoutHistoryView } from "./WorkoutHistoryView.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
+import { CalendarHeatmap } from "./CalendarHeatmap.jsx";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
@@ -62,6 +63,10 @@ export function HistoryView({
 }) {
   const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
   const switchDomain = (d) => { setDomain(d); saveLS(LS_HISTORY_DOMAIN_KEY, d); };
+  // Read wLog from LS for the year-at-a-glance heatmap. Updated on
+  // every render so newly-saved workouts surface immediately without
+  // a remount; the heatmap memoizes the expensive per-day rollup.
+  const wLogForCalendar = loadLS(LS_WORKOUT_LOG_KEY) || [];
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
@@ -419,6 +424,15 @@ export function HistoryView({
           </div>
         </Card>
       )}
+
+      {/* Year-at-a-glance activity heatmap. Sits above the domain
+          toggle because it's the "everything I did this year"
+          surface — independent of which domain is selected below. */}
+      <CalendarHeatmap
+        history={history}
+        activities={activities}
+        wLog={wLogForCalendar}
+      />
 
       {/* Domain toggle */}
       <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
