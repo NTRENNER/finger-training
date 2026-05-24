@@ -41,16 +41,18 @@ import { useAuth } from "./hooks/useAuth.js";
 import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import { useUserSettings } from "./hooks/useUserSettings.js";
+import { useActivities } from "./hooks/useActivities.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue, LS_QUEUE_KEY,
   fetchRepTombstoneIds, fetchRepSlotTombstoneKeys, fetchSessionTombstoneIds,
   fetchWorkoutSessions, deleteWorkoutSession,
-  pushActivity, deleteActivityCloud, fetchActivities,
   fetchUserSettings,
 } from "./lib/sync.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
-import { uid } from "./util.js";
+// (uid + nowISO live in src/util.js; pulled into useActivities and
+// useSessionRunner where they're consumed. App.js no longer needs
+// either directly.)
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS / UTILITIES
@@ -92,17 +94,17 @@ import { uid } from "./util.js";
 
 const GRIP_PRESETS = ["Crusher", "Micro", "Prime"];
 
-// localStorage keys for App-level state. unit / bodyweight / trip /
-// climbingFocus / pyramid pin LS keys moved into useUserSettings
-// (late May 2026 BACKLOG #154 extraction). What stays here are the
-// keys for state that isn't owned by useUserSettings.
+// localStorage keys for App-level state. Most LS keys moved into
+// the hooks that own their state (useUserSettings, useActivities,
+// useRepHistory) as part of the late May 2026 #154 decomp. What
+// stays here is the small handful of keys for state still owned
+// directly by App.js — currently just session notes.
 //
 // Orphan LS keys (nothing reads them, kept here so future devs don't
 // chase ghost values they spot in DevTools): "ft_readiness" (old
 // subjective check-in + a brief computed-readiness score), "ft_baseline"
 // (Monod CF/W' snapshot), "ft_genesis" (Journey/BadgesView snapshot).
 const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
-const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }]
 
 // Small App-local helpers.
 // uid + nowISO now live in src/util.js (uid is used by addActivity
@@ -228,39 +230,11 @@ export default function App() {
     fatigueModel, setFatigueModel,
   } = useUserSettings({ user });
 
-  // ── Activities cloud reconcile ───────────────────────────
-  // Same shape as the BW reconcile above. Activities are id-keyed
-  // (the local uid()), so the merge dedupes on id rather than date —
-  // a user can log multiple climbs in one day and each gets its own
-  // record. Cloud-only entries get added to the local set; local-only
-  // entries get pushed up. No tombstone tracking yet, so a deleted-
-  // on-phone climb might come back on next sign-in if the cloud delete
-  // hadn't reached the server before the device went offline; rare
-  // enough to not be worth the LS_ACTIVITY_DELETED_KEY plumbing yet.
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    (async () => {
-      const cloud = await fetchActivities();
-      if (cancelled || !cloud) return;
-      const local = loadLS(LS_ACTIVITY_KEY) || [];
-      const byId = new Map();
-      for (const a of cloud) byId.set(a.id, a);
-      // Local writes are most recent on this device — same convention
-      // as the BW reconcile. If the user edited a climb on this device
-      // between sign-ins, the local copy wins.
-      for (const a of local) byId.set(a.id, a);
-      const merged = [...byId.values()];
-      saveLS(LS_ACTIVITY_KEY, merged);
-      setActivities(merged);
-      // Backfill any local-only entries to the cloud.
-      const cloudIds = new Set(cloud.map(a => a.id));
-      for (const a of local) {
-        if (a?.id && !cloudIds.has(a.id)) pushActivity(a);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [user]);
+  // ── Activities (climbing log + 1RM) ──────────────────────
+  // (see src/hooks/useActivities.js)
+  const {
+    activities, addActivity, deleteActivity, updateActivity,
+  } = useActivities({ user });
 
   // (Trip / climbing focus / pyramid pin maps / fatigue model state +
   // their cloud reconcile all moved to useUserSettings — see hook
@@ -299,53 +273,9 @@ export default function App() {
   // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
 
-  const [activities, setActivities] = useState(() => loadLS(LS_ACTIVITY_KEY) || []);
-
-  const addActivity = useCallback((act) => {
-    const stamped = { ...act, id: uid() };
-    setActivities(prev => {
-      const next = [...prev, stamped];
-      saveLS(LS_ACTIVITY_KEY, next);
-      return next;
-    });
-    // Best-effort cloud push (fire-and-forget). Failures are silent —
-    // local write is durable and the next sign-in reconcile backfills
-    // anything that didn't make it. Mirrors the saveBW pattern.
-    pushActivity(stamped);
-  }, []);
-
-  const deleteActivity = useCallback((id) => {
-    setActivities(prev => {
-      const next = prev.filter(a => a.id !== id);
-      saveLS(LS_ACTIVITY_KEY, next);
-      return next;
-    });
-    // Cloud delete by id. If it fails, the next reconcile will resurrect
-    // the entry from the cloud — that's acceptable for now (no tombstone
-    // tracking yet for activities; rep deletes use LS_REP_DELETED_KEY,
-    // and we can add the same pattern here if delete-resurrection
-    // becomes a real problem).
-    deleteActivityCloud(id);
-  }, []);
-
-  // Edit an existing activity. Same id → same Supabase row → upsert
-  // replaces the cloud copy on conflict. Used by the History tab's
-  // climb editor so you can fix a mis-typed grade or wrong date
-  // without deleting + re-logging.
-  const updateActivity = useCallback((id, updates) => {
-    let updated = null;
-    setActivities(prev => {
-      const next = prev.map(a => {
-        if (a.id !== id) return a;
-        const merged = { ...a, ...updates, id: a.id };
-        updated = merged;
-        return merged;
-      });
-      saveLS(LS_ACTIVITY_KEY, next);
-      return next;
-    });
-    if (updated) pushActivity(updated);
-  }, []);
+  // (activities + addActivity + deleteActivity + updateActivity all
+  // come from useActivities — see hook call above. Hook owns the
+  // LS key and the cloud reconcile.)
 
   // Note: setSessionRPE no longer exists (SessionPlanCard now hosts
   // the climb-fatigue UI directly). The session_rpe column on
