@@ -31,9 +31,12 @@
 //      log shape. HistoryView reads `workout` first, so legacy
 //      sessions render unchanged.
 //
-// LEGACY_WORKOUTS / DEFAULT_WORKOUTS / ALL_WORKOUTS_LOOKUP moved
-// to src/views/workout/workoutLegacy.js (May 2026 decomp). The
-// History surfaces import the lookup map from there now.
+// LEGACY_WORKOUTS / DEFAULT_WORKOUTS / ALL_WORKOUTS_LOOKUP live in
+// src/data/legacyWorkouts.js (extracted May 2026, relocated from
+// src/views/workout/workoutLegacy.js to src/data/ in late May 2026
+// since it's pure data, not a view component). App.js imports
+// ALL_WORKOUTS_LOOKUP from there and threads it through to the
+// History / Analysis surfaces that need it.
 //
 // Plan editor and exercise substitutes are gone — the supportTraining
 // workouts are opinionated about which exercises do what, and the

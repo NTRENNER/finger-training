@@ -10,8 +10,14 @@
 //
 // Don't add new templates here. New templates go in
 // src/model/supportTraining.js.
+//
+// Lives in src/data/ rather than src/views/workout/ because it's
+// pure data, not a view component (move late May 2026; was previously
+// in src/views/workout/workoutLegacy.js). Anyone — view, hook, model
+// helper — can import it directly without conceptually crossing into
+// "the workout view's internals."
 
-import { workouts as SUPPORT_WORKOUTS } from "../../model/supportTraining.js";
+import { workouts as SUPPORT_WORKOUTS } from "../model/supportTraining.js";
 
 export const LEGACY_WORKOUTS = {
   A: {
