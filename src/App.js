@@ -29,12 +29,9 @@ import { AnalysisContainer } from "./views/AnalysisContainer.js";
 import {
   loadLS, saveLS,
   LS_HISTORY_KEY, LS_REP_DELETED_KEY,
-  LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY,
+  LS_WORKOUT_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
-  LS_PYRAMID_PROJECT_KEY, LS_PYRAMID_WARMUP_KEY,
-  migrateLegacyPyramidPins,
 } from "./lib/storage.js";
-import { DEFAULT_TRIP } from "./lib/trip.js";
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
 import { exerciseName, buildExerciseDefIndex } from "./model/exerciseIds.js";
@@ -43,18 +40,17 @@ import { exerciseName, buildExerciseDefIndex } from "./model/exerciseIds.js";
 import { useAuth } from "./hooks/useAuth.js";
 import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
+import { useUserSettings } from "./hooks/useUserSettings.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue, LS_QUEUE_KEY,
   fetchRepTombstoneIds, fetchRepSlotTombstoneKeys, fetchSessionTombstoneIds,
   fetchWorkoutSessions, deleteWorkoutSession,
-  pushBW, fetchBWLog,
   pushActivity, deleteActivityCloud, fetchActivities,
-  fetchUserSettings, pushUserSettings,
+  fetchUserSettings,
 } from "./lib/sync.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
-import { today, uid } from "./util.js";
-import { defaultFatigueModel } from "./model/fatigueBeta.js";
+import { uid } from "./util.js";
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS / UTILITIES
@@ -96,17 +92,17 @@ import { defaultFatigueModel } from "./model/fatigueBeta.js";
 
 const GRIP_PRESETS = ["Crusher", "Micro", "Prime"];
 
-// localStorage keys for App-level state. The workout-plan / state /
-// trip keys live in their respective view modules (WorkoutTab, etc.).
-const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
-const LS_BW_KEY        = "ft_bw";        // body weight in kg (number)
+// localStorage keys for App-level state. unit / bodyweight / trip /
+// climbingFocus / pyramid pin LS keys moved into useUserSettings
+// (late May 2026 BACKLOG #154 extraction). What stays here are the
+// keys for state that isn't owned by useUserSettings.
+//
 // Orphan LS keys (nothing reads them, kept here so future devs don't
 // chase ghost values they spot in DevTools): "ft_readiness" (old
 // subjective check-in + a brief computed-readiness score), "ft_baseline"
 // (Monod CF/W' snapshot), "ft_genesis" (Journey/BadgesView snapshot).
+const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 const LS_ACTIVITY_KEY  = "ft_activity";  // [{ id, date, type: "climbing", discipline, grade, ascent }]
-const LS_TRIP_KEY      = "ft_trip";      // { date: "YYYY-MM-DD", name } — user-configurable target date
-const LS_CLIMBING_FOCUS_KEY = "ft_climbing_focus";  // "balanced" | "bouldering" | "power_endurance" | "endurance" — feeds coaching engine focusBoost
 
 // Small App-local helpers.
 // uid + nowISO now live in src/util.js (uid is used by addActivity
@@ -214,84 +210,23 @@ export default function App() {
     sendOtp, verifyOtp, cancelOtp, signOut,
   } = useAuth();
 
-  // ── Unit preference ───────────────────────────────────────
-  const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
-  const saveUnit = (u) => { setUnit(u); saveLS("unit_pref", u); };
-
-  // ── Body weight ───────────────────────────────────────────
-  // Two storage keys: LS_BW_KEY is the scalar current weight that
-  // every consumer reads, LS_BW_LOG_KEY is the per-date history that
-  // the trends + per-session-date normalization paths consume. saveBW
-  // writes to both. On boot we hydrate the scalar from the latest log
-  // entry when it's missing — handles the case where cloud sync only
-  // restored the log (or the scalar got cleared independently). Without
-  // this guard the F-D chart's BW-relative toggle and any future BW
-  // normalization stay silently hidden even though the data is present.
-  const [bodyWeight, setBodyWeight] = useState(() => {
-    const scalar = loadLS(LS_BW_KEY);
-    if (scalar != null) return scalar;
-    const log = loadLS(LS_BW_LOG_KEY) || [];
-    if (log.length === 0) return null;
-    const latest = [...log].sort((a, b) => a.date < b.date ? -1 : 1).at(-1);
-    const kg = latest?.kg ?? null;
-    if (kg != null) saveLS(LS_BW_KEY, kg);  // hydrate so subsequent loads are O(1)
-    return kg;
-  });
-  const saveBW = (kg) => {
-    setBodyWeight(kg);
-    saveLS(LS_BW_KEY, kg);
-    if (kg != null) {
-      const log = loadLS(LS_BW_LOG_KEY) || [];
-      const d = today();
-      // Replace existing entry for today if present, otherwise append
-      const updated = log.filter(e => e.date !== d);
-      saveLS(LS_BW_LOG_KEY, [...updated, { date: d, kg }].sort((a, b) => a.date < b.date ? -1 : 1));
-      // Best-effort cloud push (fire-and-forget). Failures are
-      // logged but otherwise silent — the local write is already
-      // durable, and the next sign-in reconcile will catch any
-      // entries that didn't make it to the server.
-      pushBW(d, kg);
-    }
-  };
-
-  // ── BW cloud reconcile ───────────────────────────────────
-  // Runs when `user` flips from null → signed-in. Mirrors the
-  // useRepHistory reconcile pattern: fetch cloud log, union with
-  // local log on date-key (later-write wins for same-day collisions —
-  // we trust local since the user just opened the app there), save
-  // the merged set back to LS, and re-derive the scalar from the
-  // latest entry. Also fires a push for any local-only entries the
-  // cloud doesn't yet know about, so a previously-offline device's
-  // BW history gets backfilled on first sign-in.
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    (async () => {
-      const cloud = await fetchBWLog();
-      if (cancelled || !cloud) return;
-      const local = loadLS(LS_BW_LOG_KEY) || [];
-      // Merge: same-date local wins (assumption: local is the device
-      // the user is actively using, so its writes are most recent).
-      const byDate = new Map();
-      for (const e of cloud) byDate.set(e.date, e);
-      for (const e of local) byDate.set(e.date, e);
-      const merged = [...byDate.values()].sort((a, b) => a.date < b.date ? -1 : 1);
-      saveLS(LS_BW_LOG_KEY, merged);
-      // Hydrate the scalar from the latest merged entry.
-      const latest = merged.at(-1);
-      if (latest?.kg > 0) {
-        setBodyWeight(latest.kg);
-        saveLS(LS_BW_KEY, latest.kg);
-      }
-      // Backfill any local-only entries to the cloud (one push per
-      // missing date). Fire-and-forget; same as saveBW's push path.
-      const cloudDates = new Set(cloud.map(e => e.date));
-      for (const e of local) {
-        if (!cloudDates.has(e.date) && e.kg > 0) pushBW(e.date, e.kg);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [user]);
+  // ── User settings (see src/hooks/useUserSettings.js) ─────
+  // Owns unit, bodyWeight + bwLog reconcile, trip, climbingFocus,
+  // pyramid pin maps, and the per-grip fatigue β model. Extracted
+  // from App.js in late May 2026 (BACKLOG #154) — same shape as the
+  // useRepHistory and useAuth extractions: local-first + cloud
+  // reconcile on sign-in. setFatigueModel is exposed (vs a save
+  // wrapper) because the post-session refresh below applies a
+  // server-trigger update that doesn't need a client push.
+  const {
+    unit, saveUnit,
+    bodyWeight, saveBW,
+    trip, saveTrip,
+    climbingFocus, saveClimbingFocus,
+    pyramidProjectMap, savePyramidProjectMap,
+    pyramidWarmupMap, savePyramidWarmupMap,
+    fatigueModel, setFatigueModel,
+  } = useUserSettings({ user });
 
   // ── Activities cloud reconcile ───────────────────────────
   // Same shape as the BW reconcile above. Activities are id-keyed
@@ -327,121 +262,9 @@ export default function App() {
     return () => { cancelled = true; };
   }, [user]);
 
-  // ── Trip (user-editable target trip) ──────────────────────
-  const [trip, setTrip] = useState(() => {
-    const stored = loadLS(LS_TRIP_KEY);
-    return (stored && typeof stored === "object" && stored.date) ? stored : DEFAULT_TRIP;
-  });
-  const saveTrip = (next) => {
-    const merged = { ...trip, ...next };
-    setTrip(merged);
-    saveLS(LS_TRIP_KEY, merged);
-  };
-
-  // ── Climbing focus (cloud-synced training goal bias) ──────
-  // "balanced" (default), "bouldering", "power_endurance", "endurance"
-  // — feeds focusBoost() in coaching.js with gentle multipliers
-  // (1.10–1.20× boost, 0.90× de-emphasis) that nudge close calls.
-  // Strong signals (curve-coverage debt, recent climbing fatigue)
-  // still dominate; this is intentionally a tiebreaker, not an
-  // override. Synced to user_settings so the selection follows the
-  // user across devices.
-  const [climbingFocus, setClimbingFocusState] = useState(() => {
-    const stored = loadLS(LS_CLIMBING_FOCUS_KEY);
-    return (typeof stored === "string" && stored) ? stored : "balanced";
-  });
-  const saveClimbingFocus = (next) => {
-    setClimbingFocusState(next);
-    saveLS(LS_CLIMBING_FOCUS_KEY, next);
-    // Fire-and-forget cloud push so cross-device sync is automatic.
-    // Merge with existing cloud settings so we don't clobber any
-    // future keys the user has set.
-    if (user) {
-      (async () => {
-        const current = (await fetchUserSettings()) || {};
-        await pushUserSettings({ ...current, climbing_focus: next });
-      })().catch(() => {});
-    }
-  };
-
-  // ── Climbing pyramid pins (per filter combination) ─────────
-  // Both stored as { [composite-key]: grade } maps where the key is
-  // `${discipline}|${venue}|${wall}` (built via pyramidPinKey). Each
-  // (boulder, indoor, commercial) vs (boulder, indoor, moonboard)
-  // vs (boulder, outdoor, all) etc. gets its own slot because V4 on
-  // a MoonBoard isn't the same climb as V4 on a commercial set.
-  //
-  // Synced to user_settings.{ pyramid_project, pyramid_warmup } so
-  // the pins follow the user across devices. Local LS is the read
-  // cache for fast first paint; cloud is the authority. Legacy
-  // discipline-keyed pins get migrated to composite shape on load
-  // so existing users don't lose their previous pins.
-  const [pyramidProjectMap, setPyramidProjectMapState] = useState(
-    () => migrateLegacyPyramidPins(loadLS(LS_PYRAMID_PROJECT_KEY))
-  );
-  const [pyramidWarmupMap, setPyramidWarmupMapState] = useState(
-    () => migrateLegacyPyramidPins(loadLS(LS_PYRAMID_WARMUP_KEY))
-  );
-  const savePyramidProjectMap = (next) => {
-    setPyramidProjectMapState(next);
-    saveLS(LS_PYRAMID_PROJECT_KEY, next);
-    if (user) {
-      (async () => {
-        const current = (await fetchUserSettings()) || {};
-        await pushUserSettings({ ...current, pyramid_project: next });
-      })().catch(() => {});
-    }
-  };
-  const savePyramidWarmupMap = (next) => {
-    setPyramidWarmupMapState(next);
-    saveLS(LS_PYRAMID_WARMUP_KEY, next);
-    if (user) {
-      (async () => {
-        const current = (await fetchUserSettings()) || {};
-        await pushUserSettings({ ...current, pyramid_warmup: next });
-      })().catch(() => {});
-    }
-  };
-
-  // Pull climbing focus + pyramid pins + fatigue model from cloud on
-  // sign-in. Cloud-wins for scalars/maps that already exist on the
-  // cloud row — keeps cross-device state coherent without a more
-  // elaborate merge protocol.
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    (async () => {
-      const cloud = await fetchUserSettings();
-      if (cancelled || !cloud) return;
-      const cf = cloud.climbing_focus;
-      if (typeof cf === "string" && cf && cf !== climbingFocus) {
-        setClimbingFocusState(cf);
-        saveLS(LS_CLIMBING_FOCUS_KEY, cf);
-      }
-      // Pyramid pin maps — apply if cloud has them. Migration runs on
-      // the cloud side too so a row last written under the legacy
-      // discipline-keyed shape gets normalized before it lands in
-      // local state.
-      if (cloud.pyramid_project && typeof cloud.pyramid_project === "object") {
-        const migrated = migrateLegacyPyramidPins(cloud.pyramid_project);
-        setPyramidProjectMapState(migrated);
-        saveLS(LS_PYRAMID_PROJECT_KEY, migrated);
-      }
-      if (cloud.pyramid_warmup && typeof cloud.pyramid_warmup === "object") {
-        const migrated = migrateLegacyPyramidPins(cloud.pyramid_warmup);
-        setPyramidWarmupMapState(migrated);
-        saveLS(LS_PYRAMID_WARMUP_KEY, migrated);
-      }
-      // Pull fatigue_model so the client uses the same β the server
-      // trigger is updating. Falls back to local defaults if cloud
-      // has no value yet (first-run before any rep-1 insert).
-      if (cloud.fatigue_model && typeof cloud.fatigue_model === "object") {
-        setFatigueModel(cloud.fatigue_model);
-      }
-    })();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  // (Trip / climbing focus / pyramid pin maps / fatigue model state +
+  // their cloud reconcile all moved to useUserSettings — see hook
+  // call above.)
 
   // ── Session notes ─────────────────────────────────────────
   const [notes, setNotes] = useState(() => loadLS(LS_NOTES_KEY) || {});
@@ -469,12 +292,9 @@ export default function App() {
   } = useRepHistory({ user });
 
   // Per-grip fatigue β model (replaces perceivedFatigueLearning's
-  // per-zone shrinkage). Stored in user_settings.settings.fatigue_model
-  // so it persists across devices. Updated server-side by the
-  // update_fatigue_beta_from_rep_trg trigger on every rep-1 insert;
-  // the client re-fetches user_settings on sign-in to pick up changes.
-  // See src/model/fatigueBeta.js for the math.
-  const [fatigueModel, setFatigueModel] = useState(() => defaultFatigueModel());
+  // (fatigueModel + setFatigueModel come from useUserSettings above —
+  // it's part of the same user_settings cloud row as climbingFocus
+  // and the pyramid pin maps.)
 
   // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
@@ -575,7 +395,7 @@ export default function App() {
       }
     }, 1500);
     return () => clearTimeout(t);
-  }, [phase, user]);
+  }, [phase, user, setFatigueModel]);
 
   // ── Manual cloud pull ─────────────────────────────────────
   // User-triggered refresh. Flushes any queued local reps first, then
