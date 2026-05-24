@@ -138,8 +138,15 @@ export function AnalysisView({
         // Pass freshMap + threeExpPriors so prescription() uses its
         // curve-fit path rather than the over-extrapolating anchored-
         // linear fallback. Same fix as HistoryView.
+        //
+        // referenceDate = sessDate so the 30-day anchor lookback
+        // matches what was visible at SESSION time, not today. Without
+        // this, old sessions reconstruct against today-30d and fall
+        // through to the conservative unanchored-curve prediction —
+        // the modal would show much lower targets than were actually
+        // displayed during the live session.
         const target = prescription(priorHistory, handKey, grip, targetDuration,
-          { freshMap, threeExpPriors });
+          { freshMap, threeExpPriors, referenceDate: sessDate });
         return {
           handKey,
           handRep1,

@@ -385,14 +385,29 @@ export const EMPIRICAL_LOOKBACK_DAYS = 30;
 
 export function prescription(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
-  const { freshMap = null, threeExpPriors = null } = opts;
+  const { freshMap = null, threeExpPriors = null, referenceDate = null } = opts;
 
   // Anchor: most recent rep 1 (any T) at this (hand, grip), within
   // EMPIRICAL_LOOKBACK_DAYS. Earlier code matched on EXACT
   // target_duration; the unified prescription deliberately drops that
   // — a recent overshoot at any T is a legitimate amplitude signal
   // for every T via the curve shape.
-  const cutoffMs = Date.now() - EMPIRICAL_LOOKBACK_DAYS * 86400 * 1000;
+  //
+  // referenceDate controls which day "recent" is measured from:
+  //   - null / unset → today (LIVE prescription path; what the user
+  //     should aim at for their next session).
+  //   - ymd string ("YYYY-MM-DD") → that date (RETROSPECTIVE path;
+  //     used by the AnalysisView session-detail modal and HistoryView
+  //     reconstruction to answer "what would the engine have shown
+  //     at the time of THIS session?"). Without this, an old session
+  //     reconstructs against today-30d, which usually has no anchor-
+  //     eligible rep in priorHistory and falls through to the
+  //     conservative unanchored-curve prediction. That made the modal
+  //     show targets dramatically lower than what was displayed live.
+  const refMs = referenceDate
+    ? new Date(`${referenceDate}T00:00:00`).getTime()
+    : Date.now();
+  const cutoffMs = refMs - EMPIRICAL_LOOKBACK_DAYS * 86400 * 1000;
   const cutoff = ymdLocal(new Date(cutoffMs));
   const sessionRep1 = new Map();
   for (const r of history) {

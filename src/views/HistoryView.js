@@ -766,8 +766,16 @@ export function HistoryView({
                     // freshMap/priors is fine — the population priors
                     // barely move from session to session, and we
                     // want the most accurate retrospective read.
+                    //
+                    // referenceDate = sess.date so the 30-day anchor
+                    // lookback matches what was visible at SESSION
+                    // time. Without this, old sessions show targets
+                    // dramatically lower than were actually displayed
+                    // live (the anchor falls outside today-30d so the
+                    // engine drops to its unanchored-curve fallback).
                     const target = prescription(priorHistory, handKey, sess.grip,
-                      sess.target_duration, { freshMap, threeExpPriors });
+                      sess.target_duration,
+                      { freshMap, threeExpPriors, referenceDate: sess.date });
                     return (
                       <div key={handKey} style={{ marginBottom: hands.length > 1 ? 12 : 0 }}>
                         {hands.length > 1 && (

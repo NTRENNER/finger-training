@@ -433,6 +433,64 @@ describe("prescription (unified)", () => {
     expect(power.potential).toBeGreaterThan(cap.potential);
   });
 
+  test("referenceDate shifts the anchor lookback window", () => {
+    // Reproduces the retrospective-modal bug: a session 60 days old
+    // with an anchor rep 50 days old. Without referenceDate, the
+    // anchor is too old (outside today-30d) and the modal collapses
+    // to the unanchored-curve prediction. With referenceDate set to
+    // the session date, the anchor falls inside session-30d and the
+    // anchored-curve path fires — matching what the user saw live.
+    const sessDate = new Date(Date.now() - 60 * 86400 * 1000)
+      .toISOString().slice(0, 10);
+    const anchorDate = new Date(Date.now() - 50 * 86400 * 1000)
+      .toISOString().slice(0, 10);
+    const olderDate = new Date(Date.now() - 80 * 86400 * 1000)
+      .toISOString().slice(0, 10);
+
+    // priorHistory mimics what AnalysisView passes the modal —
+    // history strictly before sessDate. The anchor rep at -50d is a
+    // strong rep 1 (high force × long T); the older reps build a fit.
+    const history = [
+      // Older fit-supporting reps (well outside the today-30d window).
+      ...Array.from({ length: 5 }, (_, i) => ({
+        hand: "L", grip: "Crusher",
+        target_duration: 30, rep_num: 1, set_num: 1,
+        actual_time_s: 30 + i * 5, avg_force_kg: 24,
+        failed: false, date: olderDate, session_id: `older${i}`,
+      })),
+      // The anchor rep itself — recent enough relative to sessDate
+      // (10 days before) but well outside today-30d.
+      {
+        hand: "L", grip: "Crusher",
+        target_duration: 30, rep_num: 1, set_num: 1,
+        actual_time_s: 30, avg_force_kg: 30,
+        failed: false, date: anchorDate, session_id: "anchor",
+      },
+    ];
+    const priors = buildThreeExpPriors(history);
+
+    // Without referenceDate → today-30d cutoff → anchor at -50d is
+    // outside → unanchored-curve.
+    const withoutRef = prescription(history, "L", "Crusher", 30,
+      { threeExpPriors: priors });
+    expect(withoutRef).not.toBeNull();
+    expect(withoutRef.source).toBe("unanchored-curve");
+
+    // With referenceDate = sessDate (-60d) → cutoff is -90d → anchor
+    // at -50d is inside → anchored-curve. The value reflects the
+    // amplitude shift from the strong anchor rep.
+    const withRef = prescription(history, "L", "Crusher", 30,
+      { threeExpPriors: priors, referenceDate: sessDate });
+    expect(withRef).not.toBeNull();
+    expect(withRef.source).toBe("anchored-curve");
+    expect(withRef.anchor).not.toBeNull();
+    expect(withRef.anchor.date).toBe(anchorDate);
+    // The anchored value should be higher than the unanchored one
+    // because the anchor rep (30 kg) is well above the curve's
+    // unscaled prediction.
+    expect(withRef.value).toBeGreaterThan(withoutRef.value);
+  });
+
   test("uses fresh-adjusted loads (freshMap consistency)", () => {
     // Synthetic within-set sequence — late reps are higher fresh-
     // equivalent loads.
