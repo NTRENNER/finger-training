@@ -43,13 +43,12 @@
 //     training-progress story; the kg·s axis was opaque.
 
 import React, { useMemo, useState } from "react";
-import {
-  ResponsiveContainer, LineChart, Line,
-  XAxis, YAxis, Tooltip, CartesianGrid,
-} from "recharts";
+// recharts imports moved out with ForceDurationCard / ForceCurvesOverlayCard
+// (May 2026 BACKLOG #156). AnalysisView no longer renders any chart
+// directly — child cards own their own chart machinery.
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
-import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../ui/format.js";
+import { KG_TO_LBS, toDisp } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
 import { STRENGTH_MAX, ZONE6 } from "../model/zones.js";
 import {
@@ -75,9 +74,10 @@ import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
 // the 3-min hold weight is shown on the Strength Balance card.
 import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
 import { RecoveryTrendCard, RecoveryObservedTrendCard } from "./analysis/RecoveryTrendCard.jsx";
-import { GRIP_COLORS, HAND_COLORS } from "../ui/grip-colors.js";
+import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
+import { ForceCurvesOverlayCard } from "./analysis/ForceCurvesOverlayCard.jsx";
 import { useAucHistoryByGrip } from "../hooks/useAucHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
 import { useHistoryOverlay } from "../hooks/useHistoryOverlay.js";
@@ -512,29 +512,9 @@ export function AnalysisView({
     history, grips, gripBaselines, perHandGripBaselines, threeExpPriors,
   });
 
-  // Resolve the active grip for the history overlay. Priority:
-  //   1) explicit user pick (historyGrip)
-  //   2) selGrip when the global filter is set and that grip has overlay data
-  //   3) first overlay-eligible grip alphabetically
-  const overlayActiveGrip = useMemo(() => {
-    const eligible = Object.keys(historyOverlay);
-    if (eligible.length === 0) return null;
-    if (historyGrip && eligible.includes(historyGrip)) return historyGrip;
-    if (selGrip && eligible.includes(selGrip)) return selGrip;
-    return eligible[0];
-  }, [historyOverlay, historyGrip, selGrip]);
-
-  // Active grip's post-baseline date list + clamped Now index.
-  // Default to last (most-recent date) on first render; clamp into
-  // range when the list grows so user scrubs survive new sessions.
-  const overlayDates = overlayActiveGrip ? historyOverlay[overlayActiveGrip].dates : [];
-  const overlayLast = Math.max(0, overlayDates.length - 1);
-  const overlayNowI = historyNowIdx == null
-    ? overlayLast
-    : Math.max(0, Math.min(overlayLast, historyNowIdx));
-
-  // (ScatterTooltip moved into ForceDurationCard — only that card
-  // consumed it.)
+  // (overlayActiveGrip / overlayDates / overlayLast / overlayNowI
+  // moved into ForceCurvesOverlayCard — only that card consumed them.
+  // ScatterTooltip likewise moved into ForceDurationCard.)
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -746,255 +726,22 @@ export function AnalysisView({
             Baseline three-exp curve (dashed, muted) overlaid against
             the cumulative fit at any post-baseline date (solid, grip
             color). Per-T deltas underneath show where on the curve
-            the gains/losses landed. Single slider for "Now";
-            "Baseline" is anchored to gripBaselines[grip] so this
-            card agrees with Capacity % and Curve Improvement. */}
-        {overlayActiveGrip && overlayDates.length >= 1 && (() => {
-          const overlay = historyOverlay[overlayActiveGrip];
-          const eligibleGrips = Object.keys(historyOverlay);
-          const pastDate = overlay.baselineDate;
-          const nowDate  = overlayDates[overlayNowI];
-          const gripColor = GRIP_COLORS[overlayActiveGrip] || C.blue;
-
-          // Per-hand only available when at least one hand has its
-          // own qualifying baseline AND has a fit at the selected
-          // "now" date. Falls back to pooled when toggle is "per-
-          // hand" but data doesn't support it (e.g. user just
-          // started training one of the hands).
-          const handsWithData = ["L", "R"].filter(h =>
-            overlay.perHand?.[h]?.baselineAmps &&
-            overlay.perHand[h].ampsByDate.size > 0
-          );
-          const perHandAvailable = handsWithData.length > 0;
-          const mode = (historyViewMode === "per-hand" && perHandAvailable)
-            ? "per-hand"
-            : "pooled";
-
-          // Series description: one entry per curve-pair to draw.
-          // Pooled mode: 1 entry (whole-grip pooled fit). Per-hand
-          // mode: 1 entry per hand that has both baseline + a fit
-          // at the selected Now date.
-          const series = mode === "pooled"
-            ? [{
-                key: "pooled",
-                label: "Pooled",
-                pastAmps: overlay.baselineAmps,
-                nowAmps:  overlay.ampsByDate.get(nowDate),
-                pastColor: C.muted,
-                nowColor:  gripColor,
-                pastName: `Baseline (${pastDate})`,
-                nowName:  `Now (${nowDate})`,
-              }]
-            : handsWithData
-                .filter(h => overlay.perHand[h].ampsByDate.get(nowDate))
-                .map(h => ({
-                  key: h,
-                  label: h === "L" ? "Left" : "Right",
-                  pastAmps: overlay.perHand[h].baselineAmps,
-                  nowAmps:  overlay.perHand[h].ampsByDate.get(nowDate),
-                  // Same hand color for both past + now; the dashed
-                  // pattern distinguishes baseline from current.
-                  pastColor: HAND_COLORS[h],
-                  nowColor:  HAND_COLORS[h],
-                  pastName: `${h} baseline`,
-                  nowName:  `${h} now`,
-                }));
-
-          // Curve sampling — 80 points from 5s to a reasonable max.
-          // Same range the F-D chart uses (≥5s + a little headroom
-          // past the long endurance reps).
-          const tMin = 5;
-          const tMaxLocal = Math.max(180, maxDur);
-          const samples = [];
-          for (let i = 0; i < 80; i++) {
-            const t = tMin + ((tMaxLocal - tMin) / 79) * i;
-            const row = { x: t };
-            for (const s of series) {
-              const fp = s.pastAmps ? predForceThreeExp(s.pastAmps, t) : null;
-              const fn = s.nowAmps  ? predForceThreeExp(s.nowAmps,  t) : null;
-              row[`${s.key}_past`] = fp != null ? toDisp(Math.max(fp, 0), unit) : null;
-              row[`${s.key}_now`]  = fn != null ? toDisp(Math.max(fn, 0), unit) : null;
-            }
-            samples.push(row);
-          }
-          const allYs = samples.flatMap(row => series.flatMap(s =>
-            [row[`${s.key}_past`] || 0, row[`${s.key}_now`] || 0]
-          ));
-          const yMax = Math.max(...allYs, 1);
-          const yDomain = [0, Math.ceil(yMax * 1.1 / 10) * 10];
-
-          // Per-T delta strip — fixed reference durations spanning
-          // power → endurance. Deltas signed (negative = lost
-          // capacity). One row per series.
-          const refTs = [10, 30, 60, 120, 180];
-          const deltaRows = series.map(s => ({
-            key: s.key,
-            label: s.label,
-            color: s.nowColor,
-            cells: refTs.map(t => {
-              const fp = s.pastAmps ? predForceThreeExp(s.pastAmps, t) : null;
-              const fn = s.nowAmps  ? predForceThreeExp(s.nowAmps,  t) : null;
-              const pct = (fp && fp > 0 && fn != null)
-                ? Math.round((fn / fp - 1) * 100)
-                : null;
-              return { t, pct };
-            }),
-          }));
-
-          const sliderStyle = {
-            width: "100%",
-            accentColor: gripColor,
-            cursor: "pointer",
-          };
-
-          // Toggle pill renderer — also used by the grip selector.
-          const Pill = ({ active, disabled, onClick, color, children }) => (
-            <button
-              onClick={() => !disabled && onClick()}
-              disabled={disabled}
-              style={{
-                background: active ? color : "transparent",
-                color: active ? "#fff" : disabled ? C.border : C.muted,
-                border: `1px solid ${active ? color : C.border}`,
-                borderRadius: 4,
-                padding: "4px 10px",
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: disabled ? "not-allowed" : "pointer",
-                opacity: disabled ? 0.5 : 1,
-              }}>{children}</button>
-          );
-
-          return (
-            <Card style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>
-                  Force Curves — vs baseline
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  {/* View mode toggle: pooled / per-hand */}
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <Pill active={mode === "pooled"} color={C.purple}
-                      onClick={() => setHistoryViewMode("pooled")}>
-                      Pooled
-                    </Pill>
-                    <Pill active={mode === "per-hand"} color={C.purple}
-                      disabled={!perHandAvailable}
-                      onClick={() => setHistoryViewMode("per-hand")}>
-                      Per-hand
-                    </Pill>
-                  </div>
-                  {/* Grip selector */}
-                  {eligibleGrips.length > 1 && (
-                    <div style={{ display: "flex", gap: 4 }}>
-                      {eligibleGrips.map(g => (
-                        <Pill key={g}
-                          active={g === overlayActiveGrip}
-                          color={GRIP_COLORS[g] || C.blue}
-                          onClick={() => {
-                            setHistoryGrip(g);
-                            setHistoryNowIdx(null);
-                          }}>
-                          {g}
-                        </Pill>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-                {mode === "pooled"
-                  ? "Dashed line is your pooled baseline curve (anchored to gripBaselines — same baseline the Capacity % and Curve Improvement cards use). Slide to compare any post-baseline date."
-                  : "Per-hand mode: each hand's own baseline (dashed) vs current (solid). Reveals asymmetric progress — one hand growing while the other plateaus tells you where to spend your next session."}
-              </div>
-
-              {/* Baseline label + Now slider. Past is anchored. */}
-              <div style={{ marginBottom: 10, fontSize: 11, color: C.muted }}>
-                Baseline: <b style={{ color: C.muted }}>{pastDate}</b>
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: gripColor, marginBottom: 4 }}>
-                  <span>Now: <b>{nowDate}</b></span>
-                  <span style={{ color: C.muted }}>{overlayDates.length} sessions since baseline</span>
-                </div>
-                <input type="range"
-                  min={0} max={overlayLast} step={1}
-                  value={overlayNowI}
-                  onChange={(e) => setHistoryNowIdx(parseInt(e.target.value, 10))}
-                  style={sliderStyle}
-                />
-              </div>
-
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={samples} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                  <XAxis type="number" dataKey="x"
-                    domain={[tMin, tMaxLocal]}
-                    tick={{ fill: C.muted, fontSize: 11 }}
-                    label={{ value: "Duration (s)", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
-                  />
-                  <YAxis domain={yDomain}
-                    tick={{ fill: C.muted, fontSize: 11 }}
-                    width={44} unit={` ${unit}`}
-                  />
-                  <Tooltip
-                    contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
-                    formatter={(val, name) => [val == null ? "—" : `${fmtW(val, unit)} ${unit}`, name]}
-                    labelFormatter={(t) => `${fmt1(t)}s`}
-                  />
-                  {series.flatMap(s => [
-                    <Line key={`${s.key}_past`} dataKey={`${s.key}_past`}
-                      stroke={s.pastColor} strokeWidth={2}
-                      strokeDasharray="6 4" dot={false} connectNulls
-                      name={s.pastName} isAnimationActive={false} />,
-                    <Line key={`${s.key}_now`} dataKey={`${s.key}_now`}
-                      stroke={s.nowColor} strokeWidth={3}
-                      dot={false} connectNulls
-                      name={s.nowName} isAnimationActive={false} />,
-                  ])}
-                </LineChart>
-              </ResponsiveContainer>
-
-              {/* Per-T delta strip(s). One row in pooled mode; one
-                  per hand in per-hand mode with a small label. */}
-              {deltaRows.map(({ key, label, color, cells }) => (
-                <div key={key} style={{ marginTop: 12 }}>
-                  {deltaRows.length > 1 && (
-                    <div style={{ fontSize: 11, fontWeight: 600, color, marginBottom: 4 }}>
-                      {label}
-                    </div>
-                  )}
-                  <div style={{
-                    display: "grid",
-                    gridTemplateColumns: `repeat(${refTs.length}, 1fr)`,
-                    gap: 6,
-                  }}>
-                    {cells.map(({ t, pct }) => {
-                      const tileColor = pct == null ? C.muted
-                                      : pct > 0     ? C.green
-                                      : pct < 0     ? C.red
-                                                    : C.muted;
-                      const sign = pct == null ? "" : pct > 0 ? "+" : "";
-                      return (
-                        <div key={t} style={{
-                          background: C.bg, border: `1px solid ${C.border}`,
-                          borderRadius: 6, padding: "6px 8px", textAlign: "center",
-                        }}>
-                          <div style={{ fontSize: 10, color: C.muted, marginBottom: 2 }}>
-                            {t}s
-                          </div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: tileColor }}>
-                            {pct == null ? "—" : `${sign}${pct}%`}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </Card>
-          );
-        })()}
+            the gains/losses landed. Card extracted to
+            ForceCurvesOverlayCard (May 2026 BACKLOG #156 sixth pass);
+            overlayActiveGrip/Dates/Last/NowI derivations live in the
+            component since they're only consumed there. */}
+        <ForceCurvesOverlayCard
+          historyOverlay={historyOverlay}
+          maxDur={maxDur}
+          unit={unit}
+          selGrip={selGrip}
+          historyGrip={historyGrip}
+          setHistoryGrip={setHistoryGrip}
+          historyNowIdx={historyNowIdx}
+          setHistoryNowIdx={setHistoryNowIdx}
+          historyViewMode={historyViewMode}
+          setHistoryViewMode={setHistoryViewMode}
+        />
 
         {/* (CurveCoverageCard moved to the bottom of Analysis — see
             the closing block. Lives last so the freshness rundown
