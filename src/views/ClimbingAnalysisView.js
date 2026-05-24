@@ -438,7 +438,8 @@ export function ClimbingAnalysisView({
             <Stat label="Avg RPE (30d)" value={headline.avgRpe30d != null ? headline.avgRpe30d.toFixed(1) : "—"} />
           </div>
           <div style={{ marginTop: 10, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
-            "Clean sends" counts onsight, flash, and redpoint — the route went
+            "Clean sends" counts onsight, flash, and send (sent clean after
+            working) — the route went
             without taking weight. {headline.totalClimbs - headline.sends} entries
             ({headline.totalClimbs > 0 ? Math.round(((headline.totalClimbs - headline.sends) / headline.totalClimbs) * 100) : 0}%)
             were rests or attempts and aren't included in send-grade metrics.
@@ -730,7 +731,7 @@ export function ClimbingAnalysisView({
           <Card>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Ascent style mix</div>
             <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-              Where your climbing time goes. Heavy redpoint share = working
+              Where your climbing time goes. Heavy send share = working
               your limit; heavy onsight/flash share = volume + mileage.
             </div>
             {/* Stacked horizontal bar — single 100%-width bar split by style. */}

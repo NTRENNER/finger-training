@@ -61,6 +61,12 @@ export function ClimbingLogCard({ activities = [], onLog }) {
   const [routeName, setRouteName] = useState("");
   const [crag,      setCrag]      = useState("");
   const [area,      setArea]      = useState("");
+  // Quality rating + notes — both optional, applicable to any climb
+  // (gym project worth a 5★ rave just as much as an outdoor route).
+  // 0 = unset; only 1–5 inclusive get persisted. Notes are trimmed at
+  // save; empty notes don't write a field.
+  const [stars,     setStars]     = useState(0);
+  const [notes,     setNotes]     = useState("");
 
   const todayClimbing = activities.filter(a => a.date === today() && a.type === "climbing");
 
@@ -100,11 +106,21 @@ export function ClimbingLogCard({ activities = [], onLog }) {
       if (cr) entry.crag = cr;
       if (ar) entry.area = ar;
     }
+    // Stars + notes are optional on every climb. Only write a stars
+    // value if the user actually picked one (1-5); 0 is the "unset"
+    // sentinel from the picker. Notes get trimmed; whitespace-only
+    // input doesn't make it to storage.
+    if (stars >= 1 && stars <= 5) entry.stars = stars;
+    const nt = notes.trim();
+    if (nt) entry.notes = nt;
     onLog(entry);
     setLogged(true);
     setOpen(false);
-    // Reset outdoor fields so the next log isn't pre-populated.
+    // Reset all the per-climb fields so the next log starts clean.
+    // Discipline / venue / wall / RPE persist (they're closer to
+    // user-session defaults than per-climb data).
     setRouteName(""); setCrag(""); setArea("");
+    setStars(0); setNotes("");
     setTimeout(() => setLogged(false), 2500);
   };
 
@@ -330,6 +346,55 @@ export function ClimbingLogCard({ activities = [], onLog }) {
       }}>
         {RPE_DESCRIPTIONS[rpe]}
       </div>
+
+      {/* Quality rating — five tappable stars. Tap a filled star again
+          to clear back to "unset" so users can change their mind to
+          "no opinion" without having to long-press or hunt for a
+          reset. Stored as integer 1–5; 0 = unset (not persisted). */}
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Quality (optional)
+      </div>
+      <div style={{ display: "flex", gap: 4, marginBottom: 14, alignItems: "center" }}>
+        {[1, 2, 3, 4, 5].map(n => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => setStars(stars === n ? 0 : n)}
+            aria-label={`${n} star${n > 1 ? "s" : ""}`}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              padding: "4px 2px", fontSize: 24, lineHeight: 1,
+              color: n <= stars ? C.orange : C.border,
+            }}
+          >
+            {n <= stars ? "★" : "☆"}
+          </button>
+        ))}
+        {stars > 0 && (
+          <span style={{ fontSize: 11, color: C.muted, marginLeft: 8 }}>
+            {stars}/5 — tap again to clear
+          </span>
+        )}
+      </div>
+
+      {/* Notes — free text. Multiline. Trimmed at save; empty doesn't
+          persist. Use for beta, conditions, what felt off, etc. */}
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Notes (optional)
+      </div>
+      <textarea
+        value={notes}
+        onChange={e => setNotes(e.target.value)}
+        placeholder="Beta, conditions, what felt good or off…"
+        rows={3}
+        style={{
+          width: "100%", padding: "8px 10px", marginBottom: 14,
+          background: C.bg, color: C.text,
+          border: `1px solid ${C.border}`, borderRadius: 8,
+          fontSize: 13, fontFamily: "inherit", resize: "vertical",
+          boxSizing: "border-box",
+        }}
+      />
 
       <Btn onClick={handleSave} color={C.green} style={{ width: "100%" }}>
         Log Climb

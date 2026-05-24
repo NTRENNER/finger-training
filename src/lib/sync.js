@@ -673,6 +673,16 @@ export async function pushActivity(act) {
       area:       act.area       ?? null,
       rpe:         Number.isFinite(act.rpe) ? act.rpe : null,
       session_rpe: Number.isFinite(act.session_rpe) ? act.session_rpe : null,
+      // 1–5 star rating for climb quality (optional). Migration:
+      // activities_add_stars_and_notes (May 2026). Null clears the
+      // column on edit; sane-bounded server-side via CHECK constraint.
+      stars: Number.isFinite(act.stars) && act.stars >= 1 && act.stars <= 5
+        ? Math.round(act.stars) : null,
+      // Free-text notes (optional). Empty string normalized to null
+      // so deleted notes actually clear the column rather than leaving
+      // a sticky "" that disagrees with the local LS shape.
+      notes: typeof act.notes === "string" && act.notes.trim().length > 0
+        ? act.notes.trim() : null,
     }, { onConflict: "id" });
     if (error) { console.warn("Supabase activity push:", error.message); return false; }
     return true;

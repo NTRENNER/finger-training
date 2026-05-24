@@ -106,7 +106,7 @@ export function downloadWorkoutCSV(log, resolveName) {
 export function downloadClimbingCSV(activities) {
   const climbs = (activities || []).filter(a => a?.type === "climbing");
   const cols = ["id","date","discipline","venue","wall","grade","ascent","rpe",
-                "session_rpe","route_name","crag","area"];
+                "session_rpe","route_name","crag","area","stars","notes"];
   const esc = (v) => {
     const s = String(v ?? "");
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

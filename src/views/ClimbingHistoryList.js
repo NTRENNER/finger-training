@@ -435,10 +435,14 @@ function ClimbRow({ climb: c, onEdit, onDelete, showDate = false, hideRouteName 
   // pieces that exist render; typically only on outdoor climbs.
   const showRouteName = !hideRouteName && c.route_name;
   const locationParts = [showRouteName && c.route_name, c.crag, c.area].filter(Boolean);
+  // Optional star rating + notes — render only when set so blank
+  // climbs stay visually compact.
+  const stars = Number.isFinite(c.stars) && c.stars >= 1 && c.stars <= 5 ? c.stars : 0;
+  const notes = typeof c.notes === "string" && c.notes.trim().length > 0 ? c.notes.trim() : null;
 
   return (
     <div style={{
-      display: "flex", alignItems: "center", gap: 10,
+      display: "flex", alignItems: "flex-start", gap: 10,
       padding: "8px 0",
       borderTop: `1px solid ${C.border}`,
     }}>
@@ -451,6 +455,12 @@ function ClimbRow({ climb: c, onEdit, onDelete, showDate = false, hideRouteName 
             {venueLabel ? ` · ${venueLabel}` : ""}
             {wall ? ` · ${wall.label}` : ""}
           </span>
+          {stars > 0 && (
+            <span style={{ marginLeft: 6, color: C.orange, fontSize: 12, letterSpacing: 1 }}
+                  title={`Quality: ${stars}/5`}>
+              {"★".repeat(stars)}
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 11, color: isSend ? C.green : C.muted }}>
           {showDate && c.date ? `${c.date} · ` : ""}
@@ -467,6 +477,14 @@ function ClimbRow({ climb: c, onEdit, onDelete, showDate = false, hideRouteName 
             <span style={{ color: C.muted }}>
               {[c.crag, c.area].filter(Boolean).join(", ")}
             </span>
+          </div>
+        )}
+        {notes && (
+          <div style={{
+            fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.4,
+            fontStyle: "italic", whiteSpace: "pre-wrap",
+          }}>
+            {notes}
           </div>
         )}
       </div>
@@ -519,6 +537,13 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
   const [routeName,  setRouteName]  = useState(climb.route_name || "");
   const [crag,       setCrag]       = useState(climb.crag || "");
   const [area,       setArea]       = useState(climb.area || "");
+  // Quality + notes parity with ClimbingLogCard. 0 = unset; only 1-5
+  // round-trip to the DB. Notes trim on save and clear (null) when
+  // emptied so deletes propagate.
+  const [stars,      setStars]      = useState(
+    Number.isFinite(climb.stars) && climb.stars >= 1 && climb.stars <= 5 ? climb.stars : 0
+  );
+  const [notes,      setNotes]      = useState(climb.notes || "");
 
   const handleDiscipline = (key) => {
     setDiscipline(key);
@@ -546,6 +571,11 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
       updates.crag = null;
       updates.area = null;
     }
+    // Stars + notes — null on either edge so the DB column clears
+    // properly when the user reduces a rated climb back to 0 or
+    // wipes the notes field.
+    updates.stars = stars >= 1 && stars <= 5 ? stars : null;
+    updates.notes = notes.trim() || null;
     onSave(updates);
   };
 
@@ -676,6 +706,48 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
         value={rpe}
         onChange={e => setRpe(Number(e.target.value))}
         style={{ width: "100%", accentColor: C.purple, marginBottom: 12 }}
+      />
+
+      {/* Quality — same 5-star picker as ClimbingLogCard. Tap a star
+          to set; tap it again to clear back to 0 = unset. */}
+      {sectionLabel("Quality (optional)")}
+      <div style={{ display: "flex", gap: 4, marginBottom: 12, alignItems: "center" }}>
+        {[1, 2, 3, 4, 5].map(n => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => setStars(stars === n ? 0 : n)}
+            aria-label={`${n} star${n > 1 ? "s" : ""}`}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              padding: "2px", fontSize: 20, lineHeight: 1,
+              color: n <= stars ? C.orange : C.border,
+            }}
+          >
+            {n <= stars ? "★" : "☆"}
+          </button>
+        ))}
+        {stars > 0 && (
+          <span style={{ fontSize: 10, color: C.muted, marginLeft: 6 }}>
+            {stars}/5
+          </span>
+        )}
+      </div>
+
+      {/* Notes — free text. Trimmed at save; empty clears. */}
+      {sectionLabel("Notes (optional)")}
+      <textarea
+        value={notes}
+        onChange={e => setNotes(e.target.value)}
+        placeholder="Beta, conditions, what felt good or off…"
+        rows={2}
+        style={{
+          width: "100%", padding: "6px 8px", marginBottom: 12,
+          background: C.bg, color: C.text,
+          border: `1px solid ${C.border}`, borderRadius: 6,
+          fontSize: 12, fontFamily: "inherit", resize: "vertical",
+          boxSizing: "border-box",
+        }}
       />
 
       {/* Actions */}

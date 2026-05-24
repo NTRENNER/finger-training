@@ -17,13 +17,20 @@ export const CLIMB_DISCIPLINES = [
 // Ascent styles ordered from cleanest (onsight) to messiest (attempt).
 // "attempt" is the only non-send entry — used by analytics to filter
 // out unsent climbs from hardest-grade computations. "rest" counts as
-// a send (the route was completed) but is distinct from a redpoint
+// a send (the route was completed) but is distinct from a clean Send
 // because the climber took weight on the rope (or stepped off the
 // wall on a boulder) at least once between bottom and top.
+//
+// NAMING NOTE (May 2026): the UI-facing label for the "sent clean after
+// working" style is "Send" — universal across boulders / top rope /
+// lead, since "redpoint" technically applies only to lead climbs.
+// The persisted key stays "redpoint" so historical data and existing
+// downstream consumers (gradePyramid, ClimbingAnalysisView) don't
+// need a migration; labels are looked up via ascentMeta(key).label.
 export const ASCENT_STYLES = [
   { key: "onsight",  label: "Onsight",          desc: "1st try, no beta"          },
   { key: "flash",    label: "Flash",            desc: "1st try, with beta"        },
-  { key: "redpoint", label: "Redpoint",         desc: "Sent clean after working"  },
+  { key: "redpoint", label: "Send",             desc: "Sent clean after working"  },
   { key: "rest",     label: "Completed w/ rest",desc: "Sent with mid-route rest"  },
   { key: "attempt",  label: "Attempt",          desc: "Worked but didn't send"    },
 ];
