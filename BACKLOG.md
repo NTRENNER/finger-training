@@ -39,9 +39,29 @@ shared hook is now pure code-organization work, not dedup work.
 
 ---
 
-## 2. Split `weight_kg` into separate prescribed / actual / manual fields
+## 2. Split `weight_kg` into separate prescribed / actual / manual fields ✓ SHIPPED (commit 83d8e1c)
 
-**Problem.** `weight_kg` is doing double duty in the schema:
+Delivered: Supabase schema gained `prescribed_load_kg` + `manual_load_kg`
+(backfilled from `weight_kg` for 321 historical rows). `weight_kg`
+stays as a vestigial safety net for unsynced offline rows; drop in
+a follow-up commit after a confidence period. All model layer
+readers go through the central `effectiveLoad()` fallback chain:
+`avg_force_kg ?? manual_load_kg ?? prescribed_load_kg ?? weight_kg`.
+A new `prescribedLoad(r)` helper names "what the program suggested"
+distinctly for callers that don't want Tindeq effort variance
+swinging the displayed value (e.g. the session summary "Top weight"
+row). Sync layer round-trips all three columns with fallbacks on
+both push and pull. History rep editor writes `manual_load_kg` for
+non-Tindeq reps (was overwriting `weight_kg`). Manual rep/session
+add flows leave `avg_force_kg` null (no Tindeq measurement happened
+— don't fabricate one). Tests 318 (313 → 318 with 5 new for the
+extended fallback chain). Build clean.
+
+Deferred to a separate task: surface the prescribed-vs-actual gap
+as a coaching signal. Need a few weeks of manual_load_kg entries
+before the diagnostic is meaningful.
+
+**Problem.** `weight_kg` was doing double duty in the schema:
 
 - *On writes* — `handleRepDone()` records what the program **suggested**
   the athlete lift.
