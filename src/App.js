@@ -884,8 +884,6 @@ export default function App() {
               connectSlot={tindeqConnectCard}
               GOAL_CONFIG={GOAL_CONFIG}
               GRIP_PRESETS={GRIP_PRESETS}
-              bodyWeight={bodyWeight}
-              tindeq={tindeq}
               climbingFocus={climbingFocus}
               onNavigateToSettings={() => setTab(SETTINGS_TAB)}
             />
@@ -963,6 +961,10 @@ export default function App() {
           activities={activities}
           onLogActivity={addActivity}
           onNavigateToHistory={() => setTab(4)}
+          history={history}
+          bodyWeight={bodyWeight}
+          tindeq={tindeq}
+          unit={unit}
         />
       )}
       {tab === 3 && (

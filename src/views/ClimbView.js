@@ -8,21 +8,26 @@
 // inputs, so this view restores the dedicated home: logger on top,
 // recent-climbs digest below.
 //
-// Scope here is deliberately small — just the capture surface plus
-// a glanceable digest. Deeper climbing surfaces (full filterable
+// Scope here is the climb-prep + capture surface: an Adaptive
+// Warm-up entry at the top (used before a climbing session; moved
+// here from Fingers since that's the activity it precedes), the
+// climb logger, and a glanceable recent-climbs digest. Deeper
+// climbing surfaces (full filterable
 // history, grade pyramid, etc.) still live in the History tab's
 // climbing pill and the Analysis tab's Climbs pill respectively;
 // this view points at History for the full log when the digest
 // runs out of rows.
 
-import React from "react";
+import React, { useState } from "react";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import { ClimbingLogCard } from "./cards/ClimbingLogCard.js";
+import { WarmupView } from "./WarmupView.js";
 import {
   disciplineMeta, ascentMeta, wallMeta, describeClimb,
 } from "../lib/climbing-grades.js";
 import { today } from "../util.js";
+import { loadLS, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 
 // How many recent climbs to surface inline before pointing the
 // user at the full History tab. Picked to fit comfortably on a
@@ -112,7 +117,33 @@ export function ClimbView({
   // tab. App.js wires it to setTab(historyTabIndex) so the user
   // doesn't have to find History manually after the digest fills.
   onNavigateToHistory = null,
+  // Adaptive Warm-up inputs — the warm-up generates force-curve-derived
+  // hangs from finger history and cross-loaded pullups, used before a
+  // climbing session. Self-contained (its own Connect Tindeq button).
+  history = [],
+  bodyWeight = null,
+  tindeq = null,
+  unit = "lbs",
 }) {
+  const [warmupActive, setWarmupActive] = useState(false);
+
+  // Adaptive Warm-up takeover — replaces ClimbView until closed.
+  if (warmupActive) {
+    const wLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    return (
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+        <WarmupView
+          history={history}
+          wLog={wLog}
+          bodyWeightKg={bodyWeight}
+          tindeq={tindeq}
+          unit={unit}
+          onClose={() => setWarmupActive(false)}
+        />
+      </div>
+    );
+  }
+
   // Sort climbs date-descending and cap at RECENT_LIMIT. ISO date
   // strings sort lexicographically so localeCompare on .date does
   // the right thing without parsing.
@@ -125,6 +156,29 @@ export function ClimbView({
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Climb</h2>
+
+      {/* Adaptive Warm-up entry point — warm up your fingers before
+          climbing. Force-curve-derived hangs + cross-loaded pullups. */}
+      <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Adaptive Warm-up</div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.4 }}>
+              Force-curve-derived hangs + cross-loaded pullups. Same feel every session, never near failure.
+            </div>
+          </div>
+          <button
+            onClick={() => setWarmupActive(true)}
+            style={{
+              background: C.purple, color: "#fff", border: "none", borderRadius: 8,
+              padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Generate
+          </button>
+        </div>
+      </Card>
 
       {/* Logger — same single-card component used elsewhere. Tapping
           expands the form inline; saves go through onLogActivity which
