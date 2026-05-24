@@ -55,6 +55,7 @@ export function HistoryView({
   activities = [], onDeleteActivity = () => {}, onUpdateActivity = () => {},
   defaultWorkouts = {},
   onDeleteWorkoutSession = () => {},
+  onUpdateWorkoutSession = () => {},
   onDownloadWorkoutCSV = () => {},
   onDownloadClimbingCSV = () => {},
   gripPresets = [],
@@ -438,6 +439,7 @@ export function HistoryView({
           bodyWeight={bodyWeight}
           defaultWorkouts={defaultWorkouts}
           onDeleteWorkoutSession={onDeleteWorkoutSession}
+          onUpdateWorkoutSession={onUpdateWorkoutSession}
           onDownloadWorkoutCSV={onDownloadWorkoutCSV}
         />
       )}

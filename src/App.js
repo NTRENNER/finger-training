@@ -762,6 +762,7 @@ export default function App() {
           onUpdateActivity={updateActivity}
           defaultWorkouts={ALL_WORKOUTS_LOOKUP}
           onDeleteWorkoutSession={deleteWorkoutSession}
+          onUpdateWorkoutSession={handleWorkoutSessionSaved}
           onDownloadWorkoutCSV={(log) => {
             // Build the migrated name index here so the CSV column for
             // each exercise uses the same canonical "Med Ball Slams"

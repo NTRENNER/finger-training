@@ -32,18 +32,57 @@ import {
   migrateExerciseId, buildExerciseDefIndex,
 } from "../model/exerciseIds.js";
 import { BAND_COLOR_LOOKUP, normalizeBands } from "./workout/workoutConstants.js";
+import { SessionExRow } from "./workout/SessionExRow.js";
+import { SimpleExRow } from "./workout/SimpleExRow.js";
+import { ExercisePicker } from "./workout/ExercisePicker.js";
+
+// Build an empty seed for an exercise added to an existing logged
+// session. Unlike WorkoutTab's seedExercise (which calls recommendSet
+// to populate suggested loads for a NEW session), retroactive edits
+// should start blank so the user types in what they actually did —
+// no recommender hint that might mislead the retrospective log.
+function seedExerciseEmpty(ex) {
+  if (!ex.loggable) return { done: false, notes: "" };
+  const sets = Array.from({ length: ex.sets || 1 }, () => {
+    if (ex.circlesOnly) return ex.reps ? { reps: "", done: false } : { done: false };
+    if (ex.logBand) {
+      if (ex.unilateral) {
+        return { leftReps: "", leftBand: "", rightReps: "", rightBand: "", done: false };
+      }
+      return { reps: "", band: "", done: false };
+    }
+    if (ex.unilateral) {
+      return { leftReps: "", leftWeight: "", rightReps: "", rightWeight: "", done: false };
+    }
+    return { reps: "", weight: "", done: false };
+  });
+  return { sets };
+}
 
 export function WorkoutHistoryView({
   unit = "lbs", bodyWeight = null,
   defaultWorkouts = {},
   onDeleteWorkoutSession = () => {},
+  onUpdateWorkoutSession = () => {},
   onDownloadWorkoutCSV = () => {},
 }) {
   // Always read fresh from localStorage — no useState wrapper so newly
   // completed sessions appear immediately without needing a remount.
   const [tick,           setTick]           = useState(0); // increment to force re-read
+  // Edit mode holds a deep-copy of the session being edited. Save
+  // writes it back into the log; cancel discards. editIdx tracks the
+  // original index in the log so saveEdit knows where to splice.
+  // (Workout-type-only edits used to live in a separate editWorkout
+  // string here; the unified mode now holds the whole session shape
+  // so set-data edits, add/remove exercises, date and notes edits all
+  // share one buffer.)
   const [editIdx,        setEditIdx]        = useState(null);
-  const [editWorkout,    setEditWorkout]    = useState(null);
+  const [editSession,    setEditSession]    = useState(null);
+  // Mid-edit exercise picker. null = closed; otherwise { mode: 'add' }
+  // (the existing rows have their own × remove button rather than
+  // routing through the picker for the "swap" case — retroactive
+  // edits are usually "I forgot to log dips" not "swap A for B").
+  const [editPickerOpen, setEditPickerOpen] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [filterEx,   setFilterEx]   = useState("");  // "" = all, or exercise id
   const [filterDays, setFilterDays] = useState(0);   // 0 = all time, else last N days
@@ -126,12 +165,105 @@ export function WorkoutHistoryView({
     [filtered, log]
   );
 
+  // Open the unified editor for a session. Deep-clones the exercises
+  // map (and per-exercise sets arrays) so the user's in-flight edits
+  // don't mutate the live log entry until Save commits.
+  const beginEdit = (origIdx, session) => {
+    const cloneEx = (data) => {
+      if (!data || typeof data !== "object") return { done: false, notes: "" };
+      if (Array.isArray(data.sets)) {
+        return { ...data, sets: data.sets.map(s => ({ ...s })) };
+      }
+      return { ...data };
+    };
+    const exercisesClone = {};
+    for (const [id, data] of Object.entries(session.exercises || {})) {
+      exercisesClone[id] = cloneEx(data);
+    }
+    setEditIdx(origIdx);
+    setEditSession({
+      ...session,
+      exercises: exercisesClone,
+      notes: session.notes || "",
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditIdx(null);
+    setEditSession(null);
+    setEditPickerOpen(false);
+  };
+
+  // Save the in-flight edit back to LS and push to the cloud.
+  // workoutId mirrors the workout label so the recommender's
+  // workout-history lookup keeps pointing at the canonical key
+  // (legacy sessions may only have `workout`; we set both so a
+  // re-classification works for both old and new readers).
   const saveEdit = (origIdx) => {
-    const updated = log.map((s, i) => i === origIdx ? { ...s, workout: editWorkout } : s);
+    if (!editSession) return;
+    const session = {
+      ...editSession,
+      workout:   editSession.workout,
+      workoutId: editSession.workout,
+      notes:     editSession.notes || "",
+    };
+    const updated = log.map((s, i) => i === origIdx ? session : s);
     saveLS(LS_WORKOUT_LOG_KEY, updated);
     setTick(t => t + 1);
-    setEditIdx(null);
-    setEditWorkout(null);
+    // Best-effort cloud push. Fires through the same callback the
+    // initial save uses (App.js's handleWorkoutSessionSaved), so an
+    // upsert by id replaces the existing row and marks it synced.
+    onUpdateWorkoutSession(session);
+    cancelEdit();
+  };
+
+  // ── Edit-mode mutation helpers ─────────────────────────────
+  // Each one takes a state-shape transform and applies it to
+  // editSession.exercises so the render binds to fresh refs.
+  const editUpdateExerciseSets = (exId, next) => {
+    setEditSession(prev => ({
+      ...prev,
+      exercises: { ...prev.exercises, [exId]: next },
+    }));
+  };
+  const editToggleExerciseDone = (exId) => {
+    setEditSession(prev => ({
+      ...prev,
+      exercises: {
+        ...prev.exercises,
+        [exId]: { ...prev.exercises[exId], done: !prev.exercises[exId]?.done },
+      },
+    }));
+  };
+  const editUpdateExerciseNotes = (exId, notes) => {
+    setEditSession(prev => ({
+      ...prev,
+      exercises: {
+        ...prev.exercises,
+        [exId]: { ...prev.exercises[exId], notes },
+      },
+    }));
+  };
+  const editRemoveExercise = (exId) => {
+    setEditSession(prev => {
+      const next = { ...prev.exercises };
+      delete next[exId];
+      return { ...prev, exercises: next };
+    });
+  };
+  const editAddExercise = (newEx) => {
+    setEditPickerOpen(false);
+    if (!newEx) return;
+    setEditSession(prev => {
+      // Avoid stomping an existing row with the same id; if the
+      // exercise is already present, no-op rather than wiping its
+      // logged sets.
+      if (prev.exercises[newEx.id]) return prev;
+      return {
+        ...prev,
+        exercises: { ...prev.exercises, [newEx.id]: seedExerciseEmpty(newEx) },
+      };
+    });
   };
 
   const deleteSession = (sessionId) => {
@@ -239,9 +371,9 @@ export function WorkoutHistoryView({
                 </span>
                 {!isEditing && confirmDeleteId !== session.id && (
                   <button
-                    onClick={() => { setEditIdx(origIdx); setEditWorkout(session.workout); }}
+                    onClick={() => beginEdit(origIdx, session)}
                     style={{ background: "none", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
-                    title="Edit workout type"
+                    title="Edit session"
                   >✏️</button>
                 )}
                 {!isEditing && confirmDeleteId !== session.id && (
@@ -267,22 +399,24 @@ export function WorkoutHistoryView({
               </div>
             </div>
 
-            {/* Edit: reclassify workout type */}
-            {isEditing && (
+            {/* Unified edit mode — workout type pills, date input,
+                per-exercise editable rows with remove buttons, add
+                button, and session notes. All edits buffered in
+                editSession and committed on Save (which also pushes
+                to the cloud via onUpdateWorkoutSession). */}
+            {isEditing && editSession && (
               <div style={{ marginBottom: 12, padding: 10, background: C.bg, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Change workout type:</div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-                  {/* Filter to non-legacy keys — the reclassify dropdown
-                      should only show workouts the user can actively
-                      assign today, not legacy A/B/C definitions kept
-                      in the lookup for historical-session resolution. */}
+                <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Workout type</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
                   {Object.keys(defaultWorkouts).filter(k => !k.startsWith("legacy_")).map(key => (
-                    <button key={key} onClick={() => setEditWorkout(key)} style={{
-                      padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer",
-                      fontWeight: 700, fontSize: 13, textAlign: "center",
-                      background: editWorkout === key ? C.blue : C.border,
-                      color: editWorkout === key ? "#fff" : C.muted,
-                    }}>
+                    <button key={key}
+                      onClick={() => setEditSession(prev => ({ ...prev, workout: key }))}
+                      style={{
+                        padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+                        fontWeight: 700, fontSize: 13, textAlign: "center",
+                        background: editSession.workout === key ? C.blue : C.border,
+                        color: editSession.workout === key ? "#fff" : C.muted,
+                      }}>
                       <div>{key}</div>
                       <div style={{ fontSize: 9, fontWeight: 400, marginTop: 1, opacity: 0.8 }}>
                         {defaultWorkouts[key]?.name || ""}
@@ -290,16 +424,135 @@ export function WorkoutHistoryView({
                     </button>
                   ))}
                 </div>
+
+                {/* Date editor — useful when you forgot to log on the
+                    actual training day and want to attribute the
+                    session to yesterday. */}
+                <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>Date</div>
+                <input
+                  type="date"
+                  value={editSession.date || ""}
+                  onChange={e => setEditSession(prev => ({ ...prev, date: e.target.value }))}
+                  style={{
+                    padding: "6px 8px", borderRadius: 6, marginBottom: 12,
+                    background: C.card, color: C.text,
+                    border: `1px solid ${C.border}`, fontSize: 12,
+                  }}
+                />
+
+                {/* Exercises — reuse SessionExRow / SimpleExRow from
+                    the in-progress workout view. Each row gets a
+                    small × remove button. Per-set recommendations
+                    are passed as empty since retroactive edits
+                    shouldn't surface "next time" suggestions. */}
+                <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Exercises</div>
+                <div style={{ background: C.card, borderRadius: 8, padding: "0 10px" }}>
+                  {Object.entries(editSession.exercises || {}).length === 0 && (
+                    <div style={{ padding: "16px 0", fontSize: 12, color: C.muted, textAlign: "center" }}>
+                      No exercises — add one below.
+                    </div>
+                  )}
+                  {Object.entries(editSession.exercises || {}).map(([id, data], i, arr) => {
+                    const curId = migrateExerciseId(id);
+                    const ex = exDefs[curId] || { id, name: nameFor(id), loggable: data.sets != null };
+                    const last = i === arr.length - 1;
+                    // Tiny × in the top-right of each row. Doesn't
+                    // confirm — paired with the broader Save/Cancel,
+                    // the user can still bail out without committing.
+                    const removeBar = (
+                      <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 4 }}>
+                        <button
+                          onClick={() => editRemoveExercise(id)}
+                          title="Remove this exercise from the session"
+                          style={{
+                            background: "none", border: `1px solid ${C.border}`,
+                            color: C.muted, fontSize: 10, fontWeight: 600,
+                            letterSpacing: 0.4, padding: "2px 8px",
+                            borderRadius: 4, cursor: "pointer",
+                          }}
+                        >× Remove</button>
+                      </div>
+                    );
+                    if (data.sets) {
+                      return (
+                        <div key={id}>
+                          {removeBar}
+                          <SessionExRow
+                            ex={ex}
+                            unit={unit}
+                            prevSets={[]}
+                            setsData={data}
+                            onSetsChange={(next) => editUpdateExerciseSets(id, next)}
+                            recommendations={[]}
+                            last={last}
+                          />
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={id}>
+                        {removeBar}
+                        <SimpleExRow
+                          ex={ex}
+                          done={!!data.done}
+                          notes={data.notes || ""}
+                          onToggle={() => editToggleExerciseDone(id)}
+                          onNotesChange={(v) => editUpdateExerciseNotes(id, v)}
+                          last={last}
+                        />
+                      </div>
+                    );
+                  })}
+                  <button
+                    onClick={() => setEditPickerOpen(true)}
+                    style={{
+                      marginTop: 12, marginBottom: 12,
+                      width: "100%", padding: "8px 0",
+                      background: "none", border: `1px dashed ${C.border}`,
+                      color: C.muted, borderRadius: 8, fontSize: 12,
+                      fontWeight: 600, cursor: "pointer",
+                    }}
+                  >+ Add exercise</button>
+                </div>
+
+                {/* Session notes — round-trips via the
+                    workout_sessions_add_notes migration. */}
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 12, marginBottom: 4 }}>
+                  Session notes
+                </div>
+                <textarea
+                  value={editSession.notes || ""}
+                  onChange={e => setEditSession(prev => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Notes (optional)"
+                  rows={2}
+                  style={{
+                    width: "100%", padding: "8px 10px", marginBottom: 12,
+                    background: C.card, color: C.text,
+                    border: `1px solid ${C.border}`, borderRadius: 8,
+                    fontSize: 13, fontFamily: "inherit", resize: "vertical",
+                    boxSizing: "border-box",
+                  }}
+                />
+
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={() => saveEdit(origIdx)} style={{
                     background: C.green, border: "none", borderRadius: 6, color: "#000",
-                    fontSize: 12, fontWeight: 700, padding: "5px 14px", cursor: "pointer",
+                    fontSize: 12, fontWeight: 700, padding: "6px 14px", cursor: "pointer",
                   }}>Save</button>
-                  <button onClick={() => { setEditIdx(null); setEditWorkout(null); }} style={{
+                  <button onClick={cancelEdit} style={{
                     background: C.border, border: "none", borderRadius: 6, color: C.muted,
-                    fontSize: 12, padding: "5px 10px", cursor: "pointer",
+                    fontSize: 12, padding: "6px 10px", cursor: "pointer",
                   }}>Cancel</button>
                 </div>
+
+                {editPickerOpen && (
+                  <ExercisePicker
+                    title="Add exercise"
+                    excludeIds={Object.keys(editSession.exercises || {})}
+                    onPick={editAddExercise}
+                    onCancel={() => setEditPickerOpen(false)}
+                  />
+                )}
               </div>
             )}
 

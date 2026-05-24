@@ -133,6 +133,11 @@ export async function pushWorkoutSession(session) {
       // in the common case).
       was_recommended:  session.wasRecommended ?? null,
       exercises:        session.exercises,
+      // Notes round-trip via the workout_sessions_add_notes migration
+      // (May 2026). Empty string normalized to null so a wiped-out
+      // notes field actually clears the column.
+      notes:            (typeof session.notes === "string" && session.notes.trim().length > 0)
+                          ? session.notes : null,
     }, { onConflict: "id" });
     if (error) { console.warn("Supabase workout push:", error.message); return false; }
     return true;
@@ -160,6 +165,7 @@ export async function fetchWorkoutSessions() {
     // false suppresses advancement.
     wasRecommended:  s.was_recommended ?? undefined,
     exercises:       s.exercises || {},
+    notes:           s.notes ?? "",
   }));
 }
 
