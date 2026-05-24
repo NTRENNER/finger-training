@@ -55,7 +55,10 @@ CREATE TABLE reps (
   created_at timestamptz DEFAULT now(),
   date text, grip text, hand text,
   target_duration integer,
-  weight_kg real, actual_time_s real,
+  prescribed_load_kg real,  -- program-suggested kg load (every write)
+  manual_load_kg real,      -- user-entered actual kg for non-Tindeq sessions
+  weight_kg real,           -- LEGACY: equivalent to prescribed_load_kg
+  actual_time_s real,
   avg_force_kg real, peak_force_kg real,
   set_num integer, rep_num integer,
   rest_s integer, session_id text,
@@ -66,7 +69,10 @@ CREATE POLICY "auth_all" ON reps
   FOR ALL USING (auth.uid() IS NOT NULL);
 
 -- If upgrading an existing table, run this instead:
--- ALTER TABLE reps ADD COLUMN IF NOT EXISTS failed boolean DEFAULT false;`;
+-- ALTER TABLE reps ADD COLUMN IF NOT EXISTS failed boolean DEFAULT false;
+-- ALTER TABLE reps ADD COLUMN IF NOT EXISTS prescribed_load_kg real;
+-- ALTER TABLE reps ADD COLUMN IF NOT EXISTS manual_load_kg real;
+-- UPDATE reps SET prescribed_load_kg = weight_kg WHERE prescribed_load_kg IS NULL;`;
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>

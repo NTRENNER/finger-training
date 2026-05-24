@@ -51,32 +51,63 @@ import {
 // ─────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
 // ─────────────────────────────────────────────────────────────
+//
+// Schema split (commit shipping with #155): the legacy `weight_kg`
+// field used to be overloaded — written as "what the program
+// prescribed", read as "what actually happened". As of late May 2026
+// it's split into:
+//   - prescribed_load_kg → what the program suggested (set on every write)
+//   - manual_load_kg     → user-entered actual load for non-Tindeq sessions
+//   - avg_force_kg       → Tindeq-measured actual average (preferred when present)
+//   - weight_kg          → LEGACY tail; kept for unsynced offline reps + as a
+//                          safety net for any missed read site
+//
+// The fallback chain below encodes "what actually happened" in priority order:
+//   Tindeq measurement > user manual override > prescribed value > legacy
 
-// Effective load for a rep — prefer Tindeq avg_force_kg, fall back
-// to weight_kg. Used for CURVE FITTING (the actual force delivered
-// during the hang is what shapes the F-D curve, regardless of
-// whether there was load on a pin or not).
-export function effectiveLoad(r) {
-  const f = Number(r.avg_force_kg);
-  const w = Number(r.weight_kg);
-  if (f > 0 && f < 500) return f;
-  if (w > 0) return w;
-  return 0;
+// Pull a positive, sane kg load value out of a field (0–499 kg range).
+// Used by both effectiveLoad and loadedWeight for the same sanity bounds.
+function sane(v) {
+  const n = Number(v);
+  return n > 0 && n < 500 ? n : null;
 }
 
-// Prescribable load for a rep — what the user should aim to produce
-// next session. For Tindeq-isometric setups (spring/anchor, no pin),
+// Pull the prescribed value with legacy fallback. Helper so callers
+// that explicitly want "what the program suggested" (separate from
+// "what actually happened") stay readable.
+export function prescribedLoad(r) {
+  return sane(r.prescribed_load_kg) ?? sane(r.weight_kg) ?? 0;
+}
+
+// Effective load for a rep — "what actually happened" in priority order:
+//   avg_force_kg (Tindeq actual)
+//     ?? manual_load_kg (user entry)
+//     ?? prescribed_load_kg (program suggestion)
+//     ?? weight_kg (legacy fallback for unmigrated rows)
+// Used for CURVE FITTING — the F-D curve is shaped by actual force
+// delivered, so Tindeq wins, then a manual override, then the
+// prescribed value as a best-guess when neither is available.
+export function effectiveLoad(r) {
+  return sane(r.avg_force_kg)
+      ?? sane(r.manual_load_kg)
+      ?? sane(r.prescribed_load_kg)
+      ?? sane(r.weight_kg)
+      ?? 0;
+}
+
+// Prescribable load — what the user should aim to produce next
+// session. For Tindeq-isometric setups (spring/anchor, no pin),
 // avg_force_kg IS the actual load delivered, AND it's what the
 // prescription should be in. Kept distinct from effectiveLoad so the
 // semantic is named — when we add weighted-rep support (hangboard
 // with pulley + weight pin + inline Tindeq), this is what flips to
-// prefer weight_kg.
+// prefer prescribed_load_kg. Same fallback shape as effectiveLoad.
 export function loadedWeight(r) {
-  const f = Number(r.avg_force_kg);
-  if (f > 0 && f < 500) return f;
-  const w = Number(r.weight_kg);
-  if (w > 0) return w;
-  return 0;
+  return sane(r.avg_force_kg)
+      ?? sane(r.manual_load_kg)
+      ?? sane(r.prescribed_load_kg)
+      ?? sane(r.weight_kg)
+      ?? 0;
 }
 
 // Stable identity for a rep. Used as the key in freshMap.

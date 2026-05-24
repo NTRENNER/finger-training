@@ -27,7 +27,7 @@ import { Card, Btn, Label } from "../ui/components.js";
 import { fmtW, fmtTime, fromDisp } from "../ui/format.js";
 import { clamp } from "../util.js";
 
-import { suggestWeight } from "../model/prescription.js";
+import { suggestWeight, prescribedLoad } from "../model/prescription.js";
 import { levelTitle } from "../model/levels.js";
 import { downloadCSV } from "../lib/csv.js";
 import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
@@ -609,7 +609,12 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
 
   const totalReps  = reps.length;
   const avgTime    = totalReps > 0 ? reps.reduce((a, r) => a + r.actual_time_s, 0) / totalReps : 0;
-  const maxWeight  = Math.max(...reps.map(r => r.weight_kg), 0);
+  // "Top weight" here means the heaviest prescribed load across the
+  // set — what the program told the athlete to lift. Tindeq avg force
+  // varies rep-to-rep with effort, so reading prescribed_load_kg (with
+  // legacy fallback) keeps this row reading "today's session was @ 33kg"
+  // rather than swinging with effort fluctuations.
+  const maxWeight  = Math.max(...reps.map(r => prescribedLoad(r)), 0);
   const hasForce   = reps.some(r => r.avg_force_kg > 0 && r.avg_force_kg < 500);
   // Peak across the whole session — only meaningful when we have
   // any peak readings at all. The Tindeq stream populates it for
@@ -689,7 +694,7 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
               {sReps.map(r => (
                 <tr key={r.rep_num} style={{ borderTop: `1px solid ${C.border}` }}>
                   <td style={{ padding: "6px 0" }}>{r.rep_num}</td>
-                  <td style={{ textAlign: "right" }}>{fmtW(r.weight_kg, unit)} {unit}</td>
+                  <td style={{ textAlign: "right" }}>{fmtW(prescribedLoad(r), unit)} {unit}</td>
                   <td style={{ textAlign: "right", color: r.actual_time_s >= config.targetTime ? C.green : C.red }}>
                     {fmtTime(r.actual_time_s)}
                   </td>

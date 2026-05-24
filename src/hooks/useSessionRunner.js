@@ -188,13 +188,26 @@ export function useSessionRunner({
 
     const roundedActual = Math.round(actualTime * 10) / 10;
     const derivedFailed = failed || isShortfall(roundedActual, config.targetTime);
+    const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {
       id:              uid(),
       date:            today(),
       grip:            config.grip,
       hand:            effectiveHand,
       target_duration: config.targetTime,
-      weight_kg:       Math.round(weight * 10) / 10,
+      // Prescribed (what the program suggested). Schema split in late
+      // May 2026 — was `weight_kg`, which doubled as "what actually
+      // happened" on reads. weight_kg is still set so legacy readers
+      // (and any unsynced offline reads) keep working through the
+      // transition; it'll be dropped in a follow-up commit once
+      // every read site is confirmed using effectiveLoad's fallback chain.
+      prescribed_load_kg: roundedPrescribed,
+      weight_kg:          roundedPrescribed,
+      // manual_load_kg stays null on session writes — the only entry
+      // point for a manual actual is the History rep editor's "Manual
+      // load" field, populated after the fact when the user lifted
+      // something other than prescribed in a non-Tindeq session.
+      manual_load_kg:     null,
       actual_time_s:   roundedActual,
       avg_force_kg:    (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
                          ? Math.round(avgForce * 10) / 10

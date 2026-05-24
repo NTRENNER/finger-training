@@ -101,8 +101,16 @@ export function HistoryView({
     const loadKg = fromDisp(parseFloat(editRepLoad), unit);
     const newTime = parseFloat(editRepTime);
     const updates = { actual_time_s: newTime };
+    // Schema split (late May 2026). The "Load" field in the editor
+    // means "what actually happened" — for Tindeq reps that's the
+    // measured average force; for non-Tindeq reps that's the user's
+    // manual entry. Writing to the right column keeps the read-side
+    // fallback chain (effectiveLoad) returning the value the user
+    // just typed in either case. prescribed_load_kg is intentionally
+    // left untouched — the program's suggestion at write time is a
+    // historical fact, not something to retconned via the editor.
     if (editingRep.rep.avg_force_kg > 0) updates.avg_force_kg = loadKg;
-    else updates.weight_kg = loadKg;
+    else updates.manual_load_kg = loadKg;
     if (editRepHand === "L" || editRepHand === "R") updates.hand = editRepHand;
     // Re-derive failed from the new time so edits keep the flag honest.
     const tgt = editingRep.rep.target_duration;
@@ -158,9 +166,19 @@ export function HistoryView({
       hand:            newHand,
       target_duration: sess.target_duration,
       actual_time_s:   time,
-      avg_force_kg:    loadKg,
-      weight_kg:       loadKg,
-      peak_force_kg:   null,  // unknown for manual entries (Tindeq captures it live)
+      // Manual rep entry from History — no Tindeq measurement happened,
+      // so avg_force_kg stays null (don't fabricate "Tindeq data" by
+      // mirroring the typed value into it). manual_load_kg captures
+      // "what you lifted" and prescribed_load_kg captures the same value
+      // as a best-guess fallback (since there's no real prescription
+      // context for manually-added historical reps). weight_kg is
+      // mirrored for legacy reader safety; will be dropped when the
+      // weight_kg column is retired in a follow-up.
+      avg_force_kg:       null,
+      manual_load_kg:     loadKg,
+      prescribed_load_kg: loadKg,
+      weight_kg:          loadKg,
+      peak_force_kg:      null,  // unknown for manual entries (Tindeq captures it live)
       set_num:         maxSetNum,
       rep_num:         maxRepNum + 1,
       // rest_s: prefer the user's typed value if present, otherwise
@@ -192,9 +210,16 @@ export function HistoryView({
         hand:            r.hand || (i % 2 === 0 ? "L" : "R"),
         target_duration: newSessTarget,
         actual_time_s:   parseFloat(r.time),
-        avg_force_kg:    loadKg,
-        weight_kg:       loadKg,
-        peak_force_kg:   null,  // unknown for manual entries (Tindeq captures it live)
+        // Manual session entry — see comment on the rep-add path above
+        // for the schema-split rationale. avg_force_kg null because
+        // no Tindeq; manual_load_kg captures "what was lifted";
+        // prescribed_load_kg mirrors it as a best-guess (no real
+        // prescription happened); weight_kg mirrored for legacy safety.
+        avg_force_kg:       null,
+        manual_load_kg:     loadKg,
+        prescribed_load_kg: loadKg,
+        weight_kg:          loadKg,
+        peak_force_kg:      null,  // unknown for manual entries (Tindeq captures it live)
         set_num:         1,
         rep_num:         i + 1,
         rest_s:          0,
@@ -761,7 +786,7 @@ export function HistoryView({
                           asymptoticHold={bundle.asymptoticHold}
                           targetS={bundle.targetS}
                           targetWeightKg={target?.value ?? null}
-                          usedWeightKg={rep1.weight_kg ?? null}
+                          usedWeightKg={effectiveLoad(rep1) || null}
                           unit={unit}
                           height={180}
                         />

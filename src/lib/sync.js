@@ -49,7 +49,11 @@
 //     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
 //     created_at timestamptz DEFAULT now(),
 //     date text, grip text, hand text,
-//     target_duration integer, weight_kg real, actual_time_s real,
+//     target_duration integer,
+//     prescribed_load_kg real,  -- program-suggested kg load (set on every write)
+//     manual_load_kg real,      -- user-entered actual kg for non-Tindeq sessions (nullable)
+//     weight_kg real,           -- LEGACY: equivalent to prescribed_load_kg, kept for safety
+//     actual_time_s real,
 //     avg_force_kg real, peak_force_kg real,
 //     set_num integer, rep_num integer,
 //     rest_s integer, session_id text,
@@ -193,7 +197,16 @@ export function repPayload(rep, userId) {
     ...(rep.id ? { id: rep.id } : {}),
     user_id: userId,
     date: rep.date, grip: rep.grip, hand: rep.hand,
-    target_duration: rep.target_duration, weight_kg: rep.weight_kg,
+    target_duration: rep.target_duration,
+    // Schema split (late May 2026): prescribed_load_kg is the new
+    // "what the program suggested" field; manual_load_kg is the new
+    // "what the user actually lifted" field for non-Tindeq sessions.
+    // weight_kg is mirrored from prescribed_load_kg as a legacy safety
+    // net; will be dropped in a follow-up commit once the read sweep
+    // is confirmed clean.
+    prescribed_load_kg: rep.prescribed_load_kg ?? rep.weight_kg ?? null,
+    manual_load_kg:     rep.manual_load_kg ?? null,
+    weight_kg:          rep.prescribed_load_kg ?? rep.weight_kg ?? null,
     actual_time_s: rep.actual_time_s, avg_force_kg: rep.avg_force_kg,
     peak_force_kg: rep.peak_force_kg ?? 0,
     set_num: rep.set_num, rep_num: rep.rep_num,
@@ -383,7 +396,15 @@ export async function fetchReps() {
     id: r.id, date: r.date ?? today(),
     grip: r.grip ?? "", hand: r.hand ?? "L",
     target_duration: Number(r.target_duration) || 45,
-    weight_kg: Number(r.weight_kg) || 0,
+    // Schema split (late May 2026). prescribed_load_kg falls back to
+    // weight_kg for legacy rows that pre-date the split (the migration
+    // backfilled cloud rows, but offline-cached rows on this device
+    // may still have only weight_kg until the next pull). manual_load_kg
+    // stays null when unset — effectiveLoad's fallback chain handles
+    // the "no manual override" case naturally.
+    prescribed_load_kg: Number(r.prescribed_load_kg ?? r.weight_kg) || 0,
+    manual_load_kg:     r.manual_load_kg != null ? Number(r.manual_load_kg) : null,
+    weight_kg: Number(r.weight_kg ?? r.prescribed_load_kg) || 0,
     actual_time_s: Number(r.actual_time_s) || 0,
     avg_force_kg: Number(r.avg_force_kg) || 0,
     peak_force_kg: Number(r.peak_force_kg) || 0,

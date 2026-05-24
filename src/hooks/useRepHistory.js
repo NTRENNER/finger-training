@@ -111,9 +111,16 @@ export function useRepHistory({ user }) {
   //
   // Fields included: those that feed the fit functions
   // (target_duration, actual_time_s, avg_force_kg, peak_force_kg,
-  // weight_kg, failed, rep_num, rest_s) plus filter/identity
-  // fields (id, date, hand, grip). set_num is not consumed by the
-  // fit code paths so it's omitted to keep the string smaller.
+  // prescribed_load_kg, manual_load_kg, weight_kg [legacy], failed,
+  // rep_num, rest_s) plus filter/identity fields (id, date, hand,
+  // grip). set_num is not consumed by the fit code paths so it's
+  // omitted to keep the string smaller.
+  //
+  // prescribed_load_kg + manual_load_kg added late May 2026 with the
+  // weight_kg schema split — editing either now invalidates the fit
+  // memos correctly. weight_kg stays in the fingerprint so any legacy
+  // edit that still touches it (shouldn't happen post-split, but
+  // belts and braces) also triggers re-fit.
   const freshMapFp = useMemo(() => {
     return history.map(r => [
       r.id,
@@ -124,6 +131,8 @@ export function useRepHistory({ user }) {
       r.actual_time_s,
       r.avg_force_kg,
       r.peak_force_kg,
+      r.prescribed_load_kg,
+      r.manual_load_kg,
       r.weight_kg,
       r.failed ? 1 : 0,
       r.rep_num,

@@ -64,7 +64,7 @@ import {
 } from "../model/baselines.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
-import { prescription } from "../model/prescription.js";
+import { prescription, effectiveLoad } from "../model/prescription.js";
 import { computeLimiterZone } from "../model/limiter.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
@@ -960,7 +960,7 @@ export function AnalysisView({
                   asymptoticHold={h.bundle.asymptoticHold}
                   targetS={h.bundle.targetS}
                   targetWeightKg={h.target}
-                  usedWeightKg={h.handRep1.weight_kg ?? null}
+                  usedWeightKg={effectiveLoad(h.handRep1) || null}
                   unit={unit}
                   height={220}
                 />

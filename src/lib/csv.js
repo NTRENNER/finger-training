@@ -21,7 +21,15 @@
 // curve fit, so leaving it out of the export made it impossible to
 // reconstruct the model's view of which reps mattered.
 export function toCSV(reps) {
-  const cols = ["id","date","grip","hand","target_duration","weight_kg",
+  // Load fields (post late-May-2026 schema split):
+  //   prescribed_load_kg — what the program suggested
+  //   manual_load_kg     — user-entered actual for non-Tindeq sessions
+  //   weight_kg          — LEGACY tail (= prescribed_load_kg for new rows)
+  // The model layer picks an "effective load" via the fallback chain
+  // avg_force_kg ?? manual_load_kg ?? prescribed_load_kg ?? weight_kg
+  // (see effectiveLoad() in src/model/prescription.js).
+  const cols = ["id","date","grip","hand","target_duration",
+                "prescribed_load_kg","manual_load_kg","weight_kg",
                 "actual_time_s","avg_force_kg","peak_force_kg",
                 "set_num","rep_num","rest_s","session_id","failed"];
   const esc  = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };

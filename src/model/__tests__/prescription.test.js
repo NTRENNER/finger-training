@@ -4,6 +4,7 @@
 
 import {
   effectiveLoad, loadedWeight, repKey,
+  prescribedLoad,
   isShortfall, SHORTFALL_TOL,
   buildSMaxIndex, buildFreshLoadMap, freshLoadFor, fitDoseK,
   estimateRefWeight,
@@ -18,24 +19,70 @@ import { buildThreeExpPriors } from "../threeExp.js";
 describe("effectiveLoad", () => {
   test("prefers avg_force_kg when in valid range (0-500)", () => {
     expect(effectiveLoad({ avg_force_kg: 25, weight_kg: 30 })).toBe(25);
+    // Also wins over prescribed + manual when all four are present.
+    expect(effectiveLoad({
+      avg_force_kg: 25, manual_load_kg: 28,
+      prescribed_load_kg: 30, weight_kg: 30,
+    })).toBe(25);
   });
 
-  test("falls back to weight_kg when avg_force_kg is invalid", () => {
+  test("falls back to manual_load_kg when no Tindeq reading", () => {
+    expect(effectiveLoad({
+      manual_load_kg: 28, prescribed_load_kg: 30,
+    })).toBe(28);
+    // Invalid avg_force_kg (0 or > 500) still falls through to manual.
+    expect(effectiveLoad({
+      avg_force_kg: 0, manual_load_kg: 28, prescribed_load_kg: 30,
+    })).toBe(28);
+  });
+
+  test("falls back to prescribed_load_kg when no actual recorded", () => {
+    expect(effectiveLoad({ prescribed_load_kg: 30 })).toBe(30);
+    // Skips null/zero manual and goes to prescribed.
+    expect(effectiveLoad({
+      manual_load_kg: null, prescribed_load_kg: 30,
+    })).toBe(30);
+  });
+
+  test("falls back to legacy weight_kg for unmigrated rows", () => {
+    // Old localStorage rep that pre-dates the schema split — only
+    // has weight_kg. Must still return a usable value.
+    expect(effectiveLoad({ weight_kg: 30 })).toBe(30);
     expect(effectiveLoad({ avg_force_kg: 0, weight_kg: 30 })).toBe(30);
     expect(effectiveLoad({ avg_force_kg: 600, weight_kg: 30 })).toBe(30);
-    expect(effectiveLoad({ weight_kg: 30 })).toBe(30);
   });
 
-  test("returns 0 when neither field is usable", () => {
+  test("returns 0 when nothing is usable", () => {
     expect(effectiveLoad({})).toBe(0);
-    expect(effectiveLoad({ avg_force_kg: 0, weight_kg: 0 })).toBe(0);
+    expect(effectiveLoad({
+      avg_force_kg: 0, manual_load_kg: 0,
+      prescribed_load_kg: 0, weight_kg: 0,
+    })).toBe(0);
+  });
+});
+
+describe("prescribedLoad", () => {
+  test("reads prescribed_load_kg directly when present", () => {
+    expect(prescribedLoad({
+      prescribed_load_kg: 30, avg_force_kg: 25, manual_load_kg: 28,
+    })).toBe(30);
+  });
+
+  test("falls back to legacy weight_kg for unmigrated rows", () => {
+    expect(prescribedLoad({ weight_kg: 30 })).toBe(30);
+  });
+
+  test("returns 0 when neither is present", () => {
+    expect(prescribedLoad({})).toBe(0);
+    expect(prescribedLoad({ avg_force_kg: 25 })).toBe(0);
   });
 });
 
 describe("loadedWeight", () => {
-  test("matches effectiveLoad's preference order (today)", () => {
+  test("same fallback chain as effectiveLoad", () => {
     // For Tindeq-isometric setup, loadedWeight === effectiveLoad
     expect(loadedWeight({ avg_force_kg: 25, weight_kg: 30 })).toBe(25);
+    expect(loadedWeight({ manual_load_kg: 28, prescribed_load_kg: 30 })).toBe(28);
     expect(loadedWeight({ weight_kg: 30 })).toBe(30);
   });
 });

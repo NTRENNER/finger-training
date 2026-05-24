@@ -143,8 +143,18 @@ export function sessionComponentAUC(reps, physModel = PHYS_MODEL_DEFAULT) {
   const out = { fast: 0, medium: 0, slow: 0 };
   for (const r of reps || []) {
     const t = r.actual_time_s;
-    // Use raw weight_kg or avg_force_kg as load; effectiveLoad lives in prescription.js
-    const L = (r.avg_force_kg > 0 && r.avg_force_kg < 500) ? r.avg_force_kg : (r.weight_kg || 0);
+    // Same fallback chain as effectiveLoad() in prescription.js — inlined
+    // here to keep fatigue.js dependency-free (it sits below prescription
+    // in the import graph). Tindeq actual ?? manual ?? prescribed ?? legacy.
+    let L = 0;
+    const af = Number(r.avg_force_kg);
+    const ml = Number(r.manual_load_kg);
+    const pl = Number(r.prescribed_load_kg);
+    const wk = Number(r.weight_kg);
+    if (af > 0 && af < 500) L = af;
+    else if (ml > 0 && ml < 500) L = ml;
+    else if (pl > 0 && pl < 500) L = pl;
+    else if (wk > 0 && wk < 500) L = wk;
     if (!t || !L || t <= 0 || L <= 0) continue;
     for (const c of comps) {
       out[c.key] += L * c.A * c.tauD * (1 - Math.exp(-t / c.tauD));
