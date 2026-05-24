@@ -257,7 +257,7 @@ export function SetupView({
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Grip Type</div>
         {!config.grip && (
           <div style={{ fontSize: 12, color: C.blue, fontWeight: 600, marginBottom: 8 }}>
-            Select a grip type
+            Select a grip to start
           </div>
         )}
         <div>
@@ -326,11 +326,9 @@ export function SetupView({
         disabled={!config.grip || config.cooked == null}
         style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12 }}
       >
-        {!config.grip
-          ? "Select a grip to start"
-          : config.cooked == null
-            ? "Set cookedness to start"
-            : "Start Session →"}
+        {config.cooked == null
+          ? "Set cookedness to start"
+          : "Start Session →"}
       </Btn>
     </div>
   );
