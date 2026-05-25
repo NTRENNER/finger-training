@@ -273,7 +273,7 @@ export default function App() {
     history,
     freshMap, threeExpPriors,
     pendingCount, refreshPending,
-    addReps, updateRep, deleteRep, updateSession, deleteSession,
+    addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
     replaceHistory,
     handleWorkoutSessionSaved,
   } = useRepHistory({ user, fatigueModel, dailyState });
@@ -778,6 +778,7 @@ export default function App() {
           onUpdateWorkoutSession={handleWorkoutSessionSaved}
           cookedOnDate={cookedOnDate}
           onSaveCooked={saveCooked}
+          onSaveSessionCooked={updateSessionCooked}
           onDownloadWorkoutCSV={(log) => {
             // Build the migrated name index here so the CSV column for
             // each exercise uses the same canonical "Med Ball Slams"

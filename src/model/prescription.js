@@ -240,13 +240,25 @@ export function buildFreshLoadMap(history, opts = {}) {
       // availFrac to recover the fresh-equivalent load given how
       // fatigued the user was at this point in the set.
       let fresh = af > 0 && load > 0 ? load / af : load;
-      // External (per-day) cookedness compensation: also divide by
-      // the capacity multiplier that was active on this rep's date.
-      // Requires both the cookedByDate map AND the fatigueModel —
-      // either alone is a no-op (capacityMultiplier returns 1.0
-      // when cooked is null or model is missing).
-      if (cookedByDate && fatigueModel && r?.date) {
-        const cooked = cookedByDate[r.date];
+      // External cookedness compensation: divide by the capacity
+      // multiplier that was active for this rep. Resolution order:
+      //   1. Per-session override (r.session_cooked) — set on every
+      //      rep at session save time from the pre-session slider,
+      //      or via the History "override for this session" action.
+      //      Wins because the user explicitly tagged THIS session's
+      //      systemic state (e.g. "I was cooked by the evening hang
+      //      even though the morning was fine").
+      //   2. Day-level (cookedByDate[r.date]) — the broad-strokes
+      //      day default the slider sets.
+      //   3. Null/zero — no compensation applied.
+      // Both paths still need fatigueModel; without it, capacityMultiplier
+      // returns 1.0 and the path is a no-op.
+      if (fatigueModel) {
+        let cooked = null;
+        if (r?.session_cooked != null) cooked = Number(r.session_cooked);
+        else if (cookedByDate && r?.date && cookedByDate[r.date] != null) {
+          cooked = Number(cookedByDate[r.date]);
+        }
         if (cooked != null && cooked > 0) {
           const mult = capacityMultiplier(fatigueModel, r.grip, cooked);
           if (mult > 0) fresh = fresh / mult;

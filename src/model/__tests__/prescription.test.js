@@ -220,6 +220,57 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     expect(cooked).toBeCloseTo(25 / Math.exp(-0.03 * 7), 2);
   });
 
+  test("r.session_cooked wins over cookedByDate for that day", () => {
+    // Two reps on the same date — one carries an explicit
+    // session_cooked override, one uses the day default. The
+    // override-bearing rep should scale fresh using its own value,
+    // not the day default; the other rep falls back to the day.
+    const history = [
+      { id: "morning", hand: "L", grip: "Crusher",
+        session_id: "s_morning", set_num: 1, rep_num: 1,
+        avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
+        date: "2026-05-02",
+        session_cooked: 2 },  // morning was actually fresh
+      { id: "evening", hand: "L", grip: "Crusher",
+        session_id: "s_evening", set_num: 1, rep_num: 1,
+        avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
+        date: "2026-05-02",
+        session_cooked: null },  // evening falls back to day default
+    ];
+    const fatigueModel = { Crusher: { beta: 0.03 } };
+    const cookedByDate = { "2026-05-02": 8 };  // day-level says cooked
+    const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
+    const morning = map.get("id:morning").fresh;
+    const evening = map.get("id:evening").fresh;
+    // Morning uses override (cooked=2 → mult≈0.94, fresh≈26.6)
+    expect(morning).toBeCloseTo(25 / Math.exp(-0.03 * 2), 2);
+    // Evening uses day default (cooked=8 → mult≈0.79, fresh≈31.8)
+    expect(evening).toBeCloseTo(25 / Math.exp(-0.03 * 8), 2);
+    // Sanity: override should yield a LOWER fresh-equivalent than
+    // the day default in this case (morning was less cooked than
+    // the day baseline).
+    expect(morning).toBeLessThan(evening);
+  });
+
+  test("session_cooked: 0 explicitly suppresses day-level compensation", () => {
+    // Override of 0 isn't null — it's an explicit "this session was
+    // fresh." The day default should NOT leak through. Important so
+    // a user who toggles to per-session and sets 0 actually gets
+    // "fresh" behavior, not the day default.
+    const history = [
+      { id: "fresh", hand: "L", grip: "Crusher",
+        session_id: "s1", set_num: 1, rep_num: 1,
+        avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
+        date: "2026-05-02",
+        session_cooked: 0 },
+    ];
+    const fatigueModel = { Crusher: { beta: 0.03 } };
+    const cookedByDate = { "2026-05-02": 8 };
+    const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
+    // cooked=0 → multiplier=1.0 → fresh = load unchanged
+    expect(map.get("id:fresh").fresh).toBeCloseTo(25, 4);
+  });
+
   test("cookedByDate without fatigueModel is a no-op", () => {
     // Both opts are required for compensation to fire — passing one
     // without the other should leave fresh = load (within-set

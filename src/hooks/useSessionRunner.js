@@ -242,6 +242,15 @@ export function useSessionRunner({
       // Always null on new writes — column preserved for back-compat
       // with historical rows and the History view's rep editor.
       perceived_rpe:      null,
+      // Per-session cookedness — stamped on every rep in the session
+      // (same value across rep 1..N) so the curve fit can apply
+      // per-rep compensation without a separate join. Reads from the
+      // pre-session slider via config.cooked. Null when the user left
+      // the slider at "no opinion" — the fit then falls back to
+      // daily_state.cooked for the rep's date.
+      session_cooked:     (config.cooked != null && Number.isFinite(Number(config.cooked)))
+                            ? Number(config.cooked)
+                            : null,
     };
 
     setLastRepResult({ actualTime, avgForce, peakForce, targetTime: config.targetTime });

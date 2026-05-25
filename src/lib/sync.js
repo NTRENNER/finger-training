@@ -239,6 +239,14 @@ export function repPayload(rep, userId) {
     // back-compat with historical reads and to avoid dropping the
     // column from the table — always null on new writes.
     perceived_rpe: rep.perceived_rpe ?? null,
+    // Per-session cookedness override (migration: reps_add_session_cooked,
+    // late May 2026). Same value across every rep in the session — stamped
+    // at session start from the cookedness slider. Null = no override; the
+    // curve fit falls back to daily_state.cooked for the rep's date.
+    session_cooked: (rep.session_cooked != null
+                      && Number.isFinite(Number(rep.session_cooked)))
+      ? Number(rep.session_cooked)
+      : null,
   };
 }
 
@@ -441,6 +449,9 @@ export async function fetchReps() {
     // Null for legacy rows / sessions where the user didn't dial the
     // RPE slider. Numbers > 1 carry a learning signal.
     perceived_rpe: r.perceived_rpe ?? null,
+    // Per-session cookedness override — null falls back to
+    // daily_state.cooked when the curve fit looks up r.date.
+    session_cooked: r.session_cooked != null ? Number(r.session_cooked) : null,
   }));
 }
 

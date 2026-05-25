@@ -137,6 +137,10 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
       r.failed ? 1 : 0,
       r.rep_num,
       r.rest_s,
+      // Per-session cookedness override — when this changes (the
+      // user edited the session's override slider) the freshMap
+      // needs to rebuild so the new override flows into the curve fit.
+      r.session_cooked,
     ].join(":")).join("|");
   }, [history]);
 
@@ -539,6 +543,17 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
     }
   }, [user]);
 
+  // Per-session cookedness override (null clears). Updates every rep
+  // in the session via updateSession's bulk path. Stays separate
+  // from updateSession because consumers that don't care about
+  // cookedness shouldn't have to construct an `{ session_cooked }`
+  // object — and because the LS write also needs to refresh the
+  // freshMap (handled implicitly by setHistory triggering the memo).
+  const updateSessionCooked = useCallback(async (sessionKey, cooked) => {
+    const v = cooked == null ? null : Number(cooked);
+    await updateSession(sessionKey, { session_cooked: v });
+  }, [updateSession]);
+
   const deleteRep = useCallback(async (rep) => {
     const k = repMatchKey(rep);
     setHistory(h => h.filter(r => repMatchKey(r) !== k));
@@ -621,7 +636,7 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
     history,
     freshMap, freshMapFp, threeExpPriors,
     pendingCount, refreshPending,
-    addReps, updateRep, deleteRep, updateSession, deleteSession,
+    addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
     replaceHistory,
     handleWorkoutSessionSaved,
   };

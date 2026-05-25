@@ -59,13 +59,15 @@ export function HistoryView({
   onDeleteWorkoutSession = () => {},
   onUpdateWorkoutSession = () => {},
   onDownloadWorkoutCSV = () => {},
-  // Retroactive cookedness — per-day. The finger session cards in
-  // History expose a slider that calls onSaveCooked(date, cooked|null).
-  // cookedOnDate(date) reads the current value for the slider's initial
-  // position. Both default to no-ops so the view still mounts cleanly
-  // without these wired in.
+  // Retroactive cookedness wiring. Day-level: cookedOnDate(date)
+  // reads, onSaveCooked(date, cooked|null) writes daily_state.
+  // Session-level override: onSaveSessionCooked(sessionKey, cooked|null)
+  // updates the session_cooked column on every rep in the session.
+  // All default to no-ops so the view still mounts cleanly without
+  // these wired in.
   cookedOnDate = () => null,
   onSaveCooked = () => {},
+  onSaveSessionCooked = () => {},
   onDownloadClimbingCSV = () => {},
   gripPresets = [],
 }) {
@@ -1091,16 +1093,27 @@ export function HistoryView({
                 </div>
               </div>
             )}
-            {/* Retroactive cookedness — per-day, so multiple sessions
-                on the same date share one value. Edits flow through
-                onSaveCooked → useDailyState → freshMap rebuild so the
-                curve fit treats this day's reps as fresh-equivalent
-                and future prescriptions don't drift down from a
-                forgot-to-declare cooked session. */}
+            {/* Retroactive cookedness — day-default with per-session
+                override. Day mode edits daily_state.cooked (affects
+                every session that day); session mode edits the
+                session_cooked column on this session's reps only
+                (multi-session days where the cookedness changed
+                between sessions: morning fresh, midday climb, evening
+                cooked). Either path triggers a freshMap rebuild so
+                the curve fit absorbs the correction immediately. */}
             <CookednessSlider
               date={sess.date}
-              value={cookedOnDate(sess.date)}
-              onChange={(v) => onSaveCooked(sess.date, v)}
+              dayValue={cookedOnDate(sess.date)}
+              sessionValue={(() => {
+                // session_cooked is stamped on every rep — read from
+                // the first rep to get this session's value. Falls
+                // through to null for legacy sessions where no rep
+                // carries the column yet.
+                const v = sess.reps?.[0]?.session_cooked;
+                return v == null ? null : Number(v);
+              })()}
+              onSaveDay={(v) => onSaveCooked(sess.date, v)}
+              onSaveSessionOverride={(v) => onSaveSessionCooked(sessKey, v)}
             />
           </Card>
         );
