@@ -11,8 +11,21 @@
 // (now deeper) depletion, so observed trends down even when the
 // recovery side is unchanged. The model's predicted fraction drops
 // in the same way, so the GAP (observed − predicted) stays flat
-// when recovery is unchanged. A widening negative gap is the real
-// "recovery is degrading" signal worth chasing.
+// when recovery is unchanged.
+//
+// What a negative gap actually means — two interpretations the data
+// alone can't always separate:
+//   1. Genuine recovery deficit — systemic fatigue, sleep debt, prior
+//      climbing. The recovery side is degraded, taus held, observed
+//      undershoots prediction.
+//   2. Effort-profile distortion — an unusually hard rep 1 (heavier,
+//      longer hold, deeper depletion) imposes more fatigue dose than
+//      the taus were fit on. The model anchors to a "typical" rep 1;
+//      a harder one naturally produces a lower rep 2 percent even
+//      with normal recovery quality. Negative gap is a side-effect
+//      of the day's effort shape, not of the recovery system.
+// Both are signal worth watching, but the user's interpretation should
+// be "data about today's session" rather than "verdict on your recovery."
 //
 // Inputs (props):
 //   history — full rep history (App-level state). Used to compute
@@ -107,10 +120,14 @@ export function RecoveryTrendCard({ history, grips = ["Crusher", "Micro"] }) {
         How much your rep 2 over- or under-performs what the personalized
         recovery model predicts, per session, per grip. 0 = matches model.
         Blue band marks the ±{Math.round(GAP_NOISE_BAND * 100)}% noise floor;
-        gaps inside it are indistinguishable from "as expected." A widening
-        negative gap means recovery is degrading independent of how rep 1
-        is going — the signal raw observed misses as you get stronger.
-        Bold line is a 3-session rolling mean; dots are raw per-session values.
+        gaps inside it are indistinguishable from "as expected." A negative
+        gap can mean either (a) you're genuinely under-recovered today
+        (systemic fatigue, sleep deficit, prior climbing) or (b) your early
+        effort profile distorted downstream recovery more than the model
+        predicted — e.g. an unusually hard rep 1 imposes more dose than the
+        taus were fit on, so rep 2 lags. Either way it's data worth watching;
+        the model can't always tell them apart. Bold line is a 3-session
+        rolling mean; dots are raw per-session values.
       </div>
       <ResponsiveContainer width="100%" height={200}>
         <ComposedChart data={merged} margin={{ top: 6, right: 14, bottom: 28, left: 0 }}>
