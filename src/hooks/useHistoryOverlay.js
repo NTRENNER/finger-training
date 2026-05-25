@@ -93,6 +93,21 @@ export function useHistoryOverlay({
         validDates.push(date);
       }
       if (validDates.length === 0) continue;
+      // The cumulative fit AT the baseline date can drift from the
+      // baseline fit itself because gripBaselines' seed window may
+      // extend past baseline.date (the window closes when ≥5 reps ×
+      // ≥3 durations is hit, which can land on a later date), while
+      // this loop only sees reps with date <= baseline.date. Different
+      // fit on a subset of points → small non-zero deltas at the
+      // slider's leftmost position even though Now and Baseline are
+      // by definition the same point. Override to baseline.amps so
+      // the leftmost slider position renders an honest 0% across
+      // every reference time. Sign of the drift wasn't systematic —
+      // Crusher leaked +5%, Micro leaked −5% — so the fix needs to
+      // be a hard clamp, not a heuristic.
+      if (ampsByDate.has(baseline.date)) {
+        ampsByDate.set(baseline.date, baseline.amps);
+      }
 
       // Per-hand fits. For each hand with its own qualifying baseline
       // (≥5 reps × ≥3 distinct durations from perHandGripBaselines),
@@ -118,6 +133,13 @@ export function useHistoryOverlay({
             threeExpPriors,
           );
           if (amps) handByDate.set(date, amps);
+        }
+        // Same Now=Baseline clamp as the pooled path above —
+        // perHandGripBaselines' seed window can extend past
+        // handBaseline.date, so the cumulative subset fit drifts
+        // unless we override at the slider's leftmost position.
+        if (handByDate.has(handBaseline.date)) {
+          handByDate.set(handBaseline.date, handBaseline.amps);
         }
         perHand[hand] = {
           baselineAmps: handBaseline.amps,
