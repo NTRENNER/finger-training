@@ -78,7 +78,17 @@ export function useAucHistoryByGrip({
           threeExpPriors,
         );
         if (!amps) continue;
-        const abs = computeAUCThreeExp(amps);
+        // At the baseline date itself the cumulative-subset fit drifts
+        // from the baseline fit (which uses the full seed window that
+        // can extend past base.date). Clamp to baseline AUC so the
+        // first plotted point reads exactly 0% — matches the
+        // equivalent clamp in useHistoryOverlay. Same issue: sign of
+        // the drift wasn't systematic (Crusher leaks +, Micro leaks −),
+        // so a hard override is the right fix.
+        const isBaselineDate = base?.date && date === base.date;
+        const abs = isBaselineDate
+          ? baselineByGrip[g]?.auc
+          : computeAUCThreeExp(amps);
         if (!(abs > 0)) continue;
         const baseAUC = baselineByGrip[g]?.auc;
         const baseBW  = baselineByGrip[g]?.bw;
