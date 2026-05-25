@@ -61,7 +61,7 @@ import {
 } from "../model/baselines.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
-import { prescription, effectiveLoad } from "../model/prescription.js";
+import { prescription, prescribedLoad, effectiveLoad } from "../model/prescription.js";
 import { computeLimiterZone } from "../model/limiter.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
@@ -134,22 +134,29 @@ export function AnalysisView({
         const handReps = sortedAll.filter(r => r.hand === handKey);
         const handRep1 = handReps[0];
         if (!handRep1) return null;
-        // Pass freshMap + threeExpPriors so prescription() uses its
-        // curve-fit path rather than the over-extrapolating anchored-
-        // linear fallback. Same fix as HistoryView.
+        // The stored prescribed_load_kg on rep 1 IS what was actually
+        // displayed to the user at session time — read it directly
+        // instead of recomputing prescription(). Recompute drifts as
+        // the engine state evolves (new sessions update the grip
+        // prior, freshMap, etc.), so even with referenceDate=sessDate
+        // the recomputed Target can differ substantially from what
+        // was live — and the user reasonably expects "Target" to mean
+        // "what the app told me to lift," not "what the app would
+        // tell me to lift if it asked itself again right now."
         //
-        // referenceDate = sessDate so the 30-day anchor lookback
-        // matches what was visible at SESSION time, not today. Without
-        // this, old sessions reconstruct against today-30d and fall
-        // through to the conservative unanchored-curve prediction —
-        // the modal would show much lower targets than were actually
-        // displayed during the live session.
-        const target = prescription(priorHistory, handKey, grip, targetDuration,
-          { freshMap, threeExpPriors, referenceDate: sessDate });
+        // Fall back to live recompute only for pre-#155-schema-split
+        // sessions where prescribed_load_kg is absent.
+        const storedTargetKg = prescribedLoad(handRep1);
+        let targetKg = storedTargetKg > 0 ? storedTargetKg : null;
+        if (targetKg == null) {
+          const recomputed = prescription(priorHistory, handKey, grip, targetDuration,
+            { freshMap, threeExpPriors, referenceDate: sessDate });
+          targetKg = recomputed?.value ?? null;
+        }
         return {
           handKey,
           handRep1,
-          target: target?.value ?? null,
+          target: targetKg,
           bundle: buildRepCurveBundle({
             history, grip, hand: handKey,
             numReps: handReps.length,

@@ -25,7 +25,7 @@ import {
   fmt1, fmtW, fmtTime, toDisp, fromDisp, fmtClock, bwOnDate,
 } from "../ui/format.js";
 import { ymdLocal } from "../util.js";
-import { effectiveLoad, isShortfall, prescription } from "../model/prescription.js";
+import { effectiveLoad, isShortfall, prescription, prescribedLoad } from "../model/prescription.js";
 import { TARGET_OPTIONS } from "../model/zones.js";
 import {
   loadLS, saveLS,
@@ -782,24 +782,24 @@ export function HistoryView({
                       targetDuration: sess.target_duration,
                       beforeDate: sess.date,
                     });
-                    // Pass freshMap + threeExpPriors so the engine
-                    // can use its full curve-fit path rather than
-                    // falling through to the anchored-linear fallback
-                    // (which can over-extrapolate by 70–80% off a
-                    // short heavy anchor rep). Using the current-state
-                    // freshMap/priors is fine — the population priors
-                    // barely move from session to session, and we
-                    // want the most accurate retrospective read.
-                    //
-                    // referenceDate = sess.date so the 30-day anchor
-                    // lookback matches what was visible at SESSION
-                    // time. Without this, old sessions show targets
-                    // dramatically lower than were actually displayed
-                    // live (the anchor falls outside today-30d so the
-                    // engine drops to its unanchored-curve fallback).
-                    const target = prescription(priorHistory, handKey, sess.grip,
-                      sess.target_duration,
-                      { freshMap, threeExpPriors, referenceDate: sess.date });
+                    // The stored prescribed_load_kg on rep 1 IS the
+                    // prescription the user saw at session time. Read
+                    // it directly instead of recomputing — recompute
+                    // drifts as the engine state evolves (priors,
+                    // freshMap, anchor logic), so the modal Target can
+                    // end up dramatically lower than what was actually
+                    // displayed live. Fall back to live recompute only
+                    // for pre-schema-split sessions where the stored
+                    // value is absent.
+                    const storedTargetKg = prescribedLoad(rep1);
+                    let targetKg = storedTargetKg > 0 ? storedTargetKg : null;
+                    if (targetKg == null) {
+                      const recomputed = prescription(priorHistory, handKey, sess.grip,
+                        sess.target_duration,
+                        { freshMap, threeExpPriors, referenceDate: sess.date });
+                      targetKg = recomputed?.value ?? null;
+                    }
+                    const target = { value: targetKg };
                     return (
                       <div key={handKey} style={{ marginBottom: hands.length > 1 ? 12 : 0 }}>
                         {hands.length > 1 && (
