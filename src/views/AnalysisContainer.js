@@ -45,9 +45,8 @@ export function AnalysisContainer(props) {
     // WorkoutAnalysisView (lifts) props
     defaultWorkouts,
     // ClimbingAnalysisView (climbs) props — pyramid pins synced via App
-    pyramidProjectMap = {}, pyramidWarmupMap = {},
+    pyramidProjectMap = {},
     onPyramidProjectChange = () => {},
-    onPyramidWarmupChange = () => {},
   } = props;
 
   const [sub, setSub] = useState(() => {
@@ -115,9 +114,7 @@ export function AnalysisContainer(props) {
         <ClimbingAnalysisView
           activities={activities}
           pyramidProjectMap={pyramidProjectMap}
-          pyramidWarmupMap={pyramidWarmupMap}
           onPyramidProjectChange={onPyramidProjectChange}
-          onPyramidWarmupChange={onPyramidWarmupChange}
         />
       )}
       {sub === "weight" && (

@@ -115,9 +115,7 @@ export function ClimbingAnalysisView({
   // user_settings (climbing focus pattern). Without sync, pins set
   // on one device wouldn't follow the user to another.
   pyramidProjectMap = {},
-  pyramidWarmupMap = {},
   onPyramidProjectChange = () => {},
-  onPyramidWarmupChange = () => {},
 }) {
   const [pyramidDiscipline, setPyramidDiscipline] = useState("boulder");
   const [pyramidVenue,      setPyramidVenue]      = useState("all");  // "all" | "indoor" | "outdoor"
@@ -139,21 +137,13 @@ export function ClimbingAnalysisView({
   // just read the slot for the active filter combination and forward
   // edits via the prop handlers.
   const pinKey = pyramidPinKey(pyramidDiscipline, pyramidVenue, pyramidWall);
-  const pinnedProject    = pyramidProjectMap[pinKey] || null;
-  const warmupFloorGrade = pyramidWarmupMap[pinKey]  || null;
-  const warmupFloorRank  = warmupFloorGrade ? gradeRank(warmupFloorGrade) : null;
+  const pinnedProject = pyramidProjectMap[pinKey] || null;
 
   const updatePinnedProject = (grade) => {
     const next = { ...pyramidProjectMap };
     if (grade) next[pinKey] = grade;
     else delete next[pinKey];
     onPyramidProjectChange(next);
-  };
-  const updateWarmupFloor = (grade) => {
-    const next = { ...pyramidWarmupMap };
-    if (grade) next[pinKey] = grade;
-    else delete next[pinKey];
-    onPyramidWarmupChange(next);
   };
 
   // ── Max sends card state ────────────────────────────────────
@@ -279,29 +269,6 @@ export function ClimbingAnalysisView({
     return { rows, total: climbs.length };
   }, [allClimbs, pyramidDiscipline, pyramidVenue, pyramidWall, wallFilterActive, pyramidWindow]);
 
-  // ── Warmup partition ──
-  // Split the filtered pyramid rows into (display, warmup) based on the
-  // per-discipline warmup floor. Floor is inclusive — a floor of V3
-  // excludes V0/V1/V2/V3 from the chart. Aggregated warmup counts
-  // surface as a caption below the pyramid so the climber can see
-  // their warmup mileage without it inflating the base tier.
-  const pyramidPartition = useMemo(() => {
-    if (warmupFloorRank == null) {
-      return { displayRows: pyramid.rows, warmupRows: [], warmupSends: 0 };
-    }
-    const display = [];
-    const warmups = [];
-    for (const r of pyramid.rows) {
-      if (r.rank <= warmupFloorRank) warmups.push(r);
-      else display.push(r);
-    }
-    return {
-      displayRows: display,
-      warmupRows: warmups,
-      warmupSends: warmups.reduce((s, r) => s + r.count, 0),
-    };
-  }, [pyramid.rows, warmupFloorRank]);
-
   // ── Effective project + tier step size ──
   // Project = pinned grade if set, else the highest grade with at
   // least one clean send. The user is the source of truth — they
@@ -313,8 +280,8 @@ export function ClimbingAnalysisView({
   // Step size determines how big each tier offset is in rank units.
   // Boulder: 1 V-grade per tier. YDS: 1 letter subgrade per tier.
   const inferredProject = useMemo(
-    () => inferProjectGrade(pyramidPartition.displayRows),
-    [pyramidPartition.displayRows]
+    () => inferProjectGrade(pyramid.rows),
+    [pyramid.rows]
   );
   const effectiveProject = pinnedProject || inferredProject;
   const effectiveProjectRank = effectiveProject ? gradeRank(effectiveProject) : null;
@@ -556,35 +523,30 @@ export function ClimbingAnalysisView({
             </div>
           )}
 
-          {/* Pyramid settings: project pin + warmup floor for the
-              ACTIVE filter combination (discipline · venue · wall).
-              Each combo gets its own pin slot — pinning V7 on
-              MoonBoard doesn't affect your commercial-set pin. */}
+          {/* Pyramid settings: project pin for the ACTIVE filter
+              combination (discipline · venue · wall). Each combo
+              gets its own pin slot — pinning V7 on MoonBoard
+              doesn't affect your commercial-set pin. */}
           <PyramidSettings
             discipline={pyramidDiscipline}
             venue={pyramidVenue}
             wall={wallFilterActive ? pyramidWall : "all"}
             pinnedProject={pinnedProject}
             inferredProject={inferredProject}
-            warmupFloorGrade={warmupFloorGrade}
             onPinProject={updatePinnedProject}
-            onSetWarmupFloor={updateWarmupFloor}
           />
 
-          {pyramidPartition.displayRows.length === 0 ? (
+          {pyramid.rows.length === 0 ? (
             <div style={{ color: C.muted, fontSize: 12, padding: "12px 0" }}>
-              {pyramid.rows.length === 0
-                ? "No clean sends match these filters. Widen the window or loosen the venue / wall filter above."
-                : `All ${pyramid.total} clean send${pyramid.total === 1 ? "" : "s"} are in your warmup zone (≤ ${warmupFloorGrade}). Lower the warmup floor to see them in the pyramid.`}
+              No clean sends match these filters. Widen the window or loosen the venue / wall filter above.
             </div>
           ) : (
             <>
-              {/* True centered pyramid with per-tier coaching status.
-                  Forward-looking tier labels (Project / Push / Consolidate
-                  / Volume). stepSize varies by discipline so YDS tiers
-                  step by letter subgrades and boulder steps by V-grades. */}
+              {/* 5-tier outline silhouette. stepSize varies by
+                  discipline so YDS tiers step by letter subgrades
+                  and boulder steps by V-grades. */}
               <PyramidChart
-                rows={pyramidPartition.displayRows}
+                rows={pyramid.rows}
                 fill={DISCIPLINE_COLORS[pyramidDiscipline]}
                 projectGrade={effectiveProject}
                 projectRank={effectiveProjectRank}
@@ -593,9 +555,6 @@ export function ClimbingAnalysisView({
               />
               <div style={{ marginTop: 6, fontSize: 11, color: C.muted, textAlign: "right" }}>
                 {pyramid.total} clean send{pyramid.total === 1 ? "" : "s"} total
-                {pyramidPartition.warmupSends > 0
-                  ? ` · ${pyramidPartition.warmupSends} warmup${pyramidPartition.warmupSends === 1 ? "" : "s"} at ${pyramidPartition.warmupRows.map(r => r.grade).join(", ")} (hidden)`
-                  : ""}
               </div>
             </>
           )}
@@ -799,27 +758,18 @@ function Stat({ label, value }) {
   );
 }
 
-// Per-(discipline, venue, wall) pyramid settings — pinned project
-// grade + warmup floor. Each filter combination gets its own pin
-// slot, so a V4 commercial-set pin doesn't bleed into the MoonBoard
-// view (each context is its own climb). A small "For: Boulder ·
-// Indoor · MoonBoard" label sits above the pickers so the user
-// knows which combination the pin applies to.
-//
-// The warmup floor list is clamped to grades strictly below the active
-// project. A floor at or above the project would either exclude the
-// project tier (silly) or do nothing useful.
+// Per-(discipline, venue, wall) pyramid project pin. Each filter
+// combination gets its own pin slot, so a V4 commercial-set pin
+// doesn't bleed into the MoonBoard view (each context is its own
+// climb). A small "For: Boulder · Indoor · MoonBoard" label sits
+// above the pickers so the user knows which combination the pin
+// applies to.
 function PyramidSettings({
   discipline, venue, wall,
   pinnedProject, inferredProject,
-  warmupFloorGrade, onPinProject, onSetWarmupFloor,
+  onPinProject,
 }) {
   const allGrades = discipline === "boulder" ? V_GRADES : YDS_GRADES;
-  const activeProject = pinnedProject || inferredProject;
-  const projectRank = activeProject ? gradeRank(activeProject) : null;
-  const warmupOptions = projectRank != null
-    ? allGrades.filter(g => gradeRank(g) < projectRank)
-    : allGrades;
 
   const selectStyle = {
     padding: "3px 6px", borderRadius: 6, fontSize: 11,
@@ -856,19 +806,6 @@ function PyramidSettings({
         >
           <option value="">Auto{inferredProject ? ` (${inferredProject})` : ""}</option>
           {allGrades.map(g => (
-            <option key={g} value={g}>{g}</option>
-          ))}
-        </select>
-
-        <span style={{ marginLeft: 8 }}>Warmups ≤</span>
-        <select
-          value={warmupFloorGrade || ""}
-          onChange={(e) => onSetWarmupFloor(e.target.value || null)}
-          style={selectStyle}
-          title="Hide easy grades from the pyramid for this combination. Sends at or below this grade are tallied separately as warmups."
-        >
-          <option value="">None</option>
-          {warmupOptions.map(g => (
             <option key={g} value={g}>{g}</option>
           ))}
         </select>

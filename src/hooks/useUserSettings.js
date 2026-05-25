@@ -28,7 +28,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   loadLS, saveLS,
   LS_BW_LOG_KEY,
-  LS_PYRAMID_PROJECT_KEY, LS_PYRAMID_WARMUP_KEY,
+  LS_PYRAMID_PROJECT_KEY,
   migrateLegacyPyramidPins,
 } from "../lib/storage.js";
 import { today } from "../util.js";
@@ -170,23 +170,27 @@ export function useUserSettings({ user }) {
     }
   }, [user]);
 
-  // ── Climbing pyramid pins (per filter combination) ─────────
-  // Both stored as { [composite-key]: grade } maps where the key is
+  // ── Climbing pyramid project pin (per filter combination) ──
+  // Stored as a { [composite-key]: grade } map where the key is
   // `${discipline}|${venue}|${wall}` (built via pyramidPinKey). Each
   // (boulder, indoor, commercial) vs (boulder, indoor, moonboard)
   // vs (boulder, outdoor, all) etc. gets its own slot because V4 on
   // a MoonBoard isn't the same climb as V4 on a commercial set.
   //
-  // Synced to user_settings.{ pyramid_project, pyramid_warmup } so
-  // the pins follow the user across devices. Local LS is the read
-  // cache for fast first paint; cloud is the authority. Legacy
-  // discipline-keyed pins get migrated to composite shape on load
-  // so existing users don't lose their previous pins.
+  // Synced to user_settings.pyramid_project so the pin follows the
+  // user across devices. Local LS is the read cache for fast first
+  // paint; cloud is the authority. Legacy discipline-keyed pins get
+  // migrated to composite shape on load so existing users don't lose
+  // their previous pins.
+  //
+  // (A `pyramid_warmup` companion map existed when the pyramid card
+  // had a "Warmups ≤ Vx" floor selector — May 2026. The redesigned
+  // 5-tier silhouette doesn't filter by warmup, so the map and its
+  // sync were removed. Any leftover values on `user_settings.pyramid_
+  // warmup` and `localStorage[LS_PYRAMID_WARMUP_KEY]` are now ignored,
+  // harmless, and can be cleared by a future migration if desired.)
   const [pyramidProjectMap, setPyramidProjectMapState] = useState(
     () => migrateLegacyPyramidPins(loadLS(LS_PYRAMID_PROJECT_KEY))
-  );
-  const [pyramidWarmupMap, setPyramidWarmupMapState] = useState(
-    () => migrateLegacyPyramidPins(loadLS(LS_PYRAMID_WARMUP_KEY))
   );
   const savePyramidProjectMap = useCallback((next) => {
     setPyramidProjectMapState(next);
@@ -195,16 +199,6 @@ export function useUserSettings({ user }) {
       (async () => {
         const current = (await fetchUserSettings()) || {};
         await pushUserSettings({ ...current, pyramid_project: next });
-      })().catch(() => {});
-    }
-  }, [user]);
-  const savePyramidWarmupMap = useCallback((next) => {
-    setPyramidWarmupMapState(next);
-    saveLS(LS_PYRAMID_WARMUP_KEY, next);
-    if (user) {
-      (async () => {
-        const current = (await fetchUserSettings()) || {};
-        await pushUserSettings({ ...current, pyramid_warmup: next });
       })().catch(() => {});
     }
   }, [user]);
@@ -236,19 +230,15 @@ export function useUserSettings({ user }) {
         setClimbingFocusState(cf);
         saveLS(LS_CLIMBING_FOCUS_KEY, cf);
       }
-      // Pyramid pin maps — apply if cloud has them. Migration runs on
-      // the cloud side too so a row last written under the legacy
+      // Pyramid project pin — apply if cloud has it. Migration runs
+      // on the cloud side too so a row last written under the legacy
       // discipline-keyed shape gets normalized before it lands in
-      // local state.
+      // local state. (cloud.pyramid_warmup is ignored as of the
+      // warmup-floor removal — see comment above the pin map state.)
       if (cloud.pyramid_project && typeof cloud.pyramid_project === "object") {
         const migrated = migrateLegacyPyramidPins(cloud.pyramid_project);
         setPyramidProjectMapState(migrated);
         saveLS(LS_PYRAMID_PROJECT_KEY, migrated);
-      }
-      if (cloud.pyramid_warmup && typeof cloud.pyramid_warmup === "object") {
-        const migrated = migrateLegacyPyramidPins(cloud.pyramid_warmup);
-        setPyramidWarmupMapState(migrated);
-        saveLS(LS_PYRAMID_WARMUP_KEY, migrated);
       }
       // Pull fatigue_model so the client uses the same β the server
       // trigger is updating. Falls back to local defaults if cloud
@@ -266,7 +256,6 @@ export function useUserSettings({ user }) {
     trip, saveTrip,
     climbingFocus, saveClimbingFocus,
     pyramidProjectMap, savePyramidProjectMap,
-    pyramidWarmupMap, savePyramidWarmupMap,
     fatigueModel, setFatigueModel,
   };
 }

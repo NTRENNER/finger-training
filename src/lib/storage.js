@@ -130,13 +130,11 @@ export const LS_CLIMBING_HISTORY_FILTERS_KEY = "ft_climbing_history_filters";
 // project anchor.
 export const LS_PYRAMID_PROJECT_KEY = "ft_pyramid_project";
 
-// Climbing grade pyramid — warmup floor per (discipline, venue, wall).
-// Same composite-key shape as LS_PYRAMID_PROJECT_KEY. Grades at or
-// below the floor are excluded from the pyramid chart and surfaced as
-// a small "plus N warmup sends" caption underneath. Per-combination
-// because warmup grades differ across walls (V3 is a warmup on
-// commercial sets but a real climb on a MoonBoard).
-export const LS_PYRAMID_WARMUP_KEY = "ft_pyramid_warmup";
+// (LS_PYRAMID_WARMUP_KEY existed when the pyramid card had a
+// "Warmups ≤ Vx" floor selector — May 2026. The redesigned 5-tier
+// silhouette doesn't filter by warmup, so the key was removed. Any
+// orphaned `ft_pyramid_warmup` entries in localStorage are now
+// ignored and can be cleared by a future migration if desired.)
 
 // Build a stable composite key for the pyramid pin maps from the
 // active filter set. Wall only matters for indoor boulder; for any
