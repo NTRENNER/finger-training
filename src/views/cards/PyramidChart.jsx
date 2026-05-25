@@ -1,87 +1,87 @@
 // ─────────────────────────────────────────────────────────────
-// PYRAMID CHART — true centered grade pyramid
+// PYRAMID CHART — fixed-outline 5-tier silhouette
 // ─────────────────────────────────────────────────────────────
-// Replaces the horizontal bar-chart "pyramid" with one that
-// actually looks like a pyramid: each row is centered on a
-// vertical axis, with N blocks per row matching the send count.
-// Reads pyramid plan from model/gradePyramid.js for tier labels,
-// targets, and per-tier coaching status.
+// Renders the 5-tier pyramid from model/gradePyramid.js as an
+// outlined silhouette (1-2-3-4-7 blocks per tier) that shades in
+// from the left as sends accrue. The shape itself communicates
+// progress — no coaching status text, no per-tier chips, no
+// headline recommendation banner.
 //
-// Renders two passes:
-//   1. The pyramid itself — every grade row with sends, centered.
-//      Coaching tiers (project, P-1, P-2, P-3) get the article's
-//      labels and target-band callouts.
-//   2. A compact coaching panel below — top recommendation +
-//      per-tier status chips.
+// The one piece of context the shape can't show is climbs above
+// the apex grade (the pyramid stops there). When `plan.overgrew`
+// is true, a small re-pin hint sits above the silhouette.
 //
-// No charting library; pure CSS flex. Stays responsive at narrow
-// (340px) widths.
+// Tap any shaded block to open a modal listing every clean send
+// at that grade — route name, date, ascent style, venue/wall,
+// RPE, stars, notes. The popover lists ALL climbs at the grade
+// (including capped extras above the tier's target width), since
+// the block-shading view drops those visually but the climbs
+// themselves are still real and the user wants to see them.
+//
+// No charting library; pure CSS flex. Stays readable at narrow
+// (340px) widths — the base tier at 7 blocks × 14px + 6 × 3px gap
+// = ~116px, well under the available content width even with the
+// grade-label gutter mirrored on both sides for centering.
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
 import {
   buildPyramidPlan,
-  topPyramidRecommendation,
   inferProjectGrade,
 } from "../../model/gradePyramid.js";
+import {
+  ascentMeta, venueMeta, wallMeta,
+} from "../../lib/climbing-grades.js";
 
-// Status → color. Used for the tier badge + the row's coaching tag.
-const STATUS_COLOR = {
-  on_track: "#22c55e",  // green
-  light:    "#f59e0b",  // amber
-  heavy:    "#a78bfa",  // violet — "consider shifting up"
-  missing:  "#6b7280",  // gray
-};
-const STATUS_LABEL = {
-  on_track: "on track",
-  light:    "light",
-  heavy:    "heavy",
-  missing:  "no sends",
-};
-
-// Block sizing tuned so a base tier with 12+ sends still fits in
-// ~340px without wrapping. The container is set to flex-wrap so
-// extreme counts (50+ ATB sends) wrap cleanly across multiple rows.
+// Block sizing — tuned so the 7-wide base fits cleanly at mobile
+// widths with room for the symmetric grade-label gutters.
 const BLOCK = { size: 14, gap: 3 };
+// Gutter width on each side of the centered block row. Mirrored
+// left/right so the pyramid axis lands on the card's true center,
+// not the post-label center, which would shift everything right
+// by ~26px and look subtly off-balance.
+const GUTTER = 44;
+
+// Short month labels for the popover date display. Inline rather
+// than pulling Intl.DateTimeFormat — three-letter month is the only
+// formatting choice needed here and a 12-entry array is lighter
+// than locale machinery the rest of the codebase doesn't use.
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+// Format an ISO date string (YYYY-MM-DD) as "May 18" for the current
+// year or "May 18, 2025" for older. Falls back to the raw string for
+// anything unparseable so legacy malformed entries still render.
+function fmtDate(date) {
+  if (!date || typeof date !== "string") return "—";
+  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return date;
+  const [, y, mo, d] = m;
+  const month = MONTHS[Number(mo) - 1] ?? mo;
+  const day = Number(d);
+  const year = Number(y);
+  const nowYear = new Date().getFullYear();
+  return year === nowYear ? `${month} ${day}` : `${month} ${day}, ${year}`;
+}
 
 export function PyramidChart({
   rows = [],
-  fill = "#f59e0b",   // tier-agnostic fallback color (matches the old bar chart's orange)
+  fill = "#f59e0b",   // discipline color; falls through from ClimbingAnalysisView
   projectGrade = null, // explicit; otherwise inferred from rows (send-anchored)
-  projectRank = null,  // required when projectGrade has 0 rows (flash-anchored, forward-looking)
-  anchorMode = "send", // 'send' | 'flash' — controls tier labels + bands
+  projectRank = null,  // required when projectGrade has 0 rows (flash-anchored)
+  anchorMode = "send", // 'send' | 'flash' — passed through to the model
+  stepSize = 1,        // tier offset in rank units (V = 1, YDS letter = 0.25)
 }) {
   const plan = useMemo(
-    () => buildPyramidPlan(rows, projectGrade, { anchorMode, projectRank }),
-    [rows, projectGrade, anchorMode, projectRank]
+    () => buildPyramidPlan(rows, projectGrade, { anchorMode, projectRank, stepSize }),
+    [rows, projectGrade, anchorMode, projectRank, stepSize]
   );
-  const headline = useMemo(() => topPyramidRecommendation(plan), [plan]);
   const inferredProject = useMemo(() => inferProjectGrade(rows), [rows]);
   const activeProject = projectGrade || inferredProject;
 
-  // Build the per-grade render list. Show:
-  //   - every grade present in `rows`, top → bottom (descending rank)
-  //   - any "missing" tier grades that have rank set (so the pyramid
-  //     shows gaps visually instead of silently skipping them)
-  const renderRows = useMemo(() => {
-    const byRank = new Map();
-    for (const r of rows || []) {
-      if (Number.isFinite(r.rank)) {
-        byRank.set(r.rank, { grade: r.grade, rank: r.rank, count: r.count });
-      }
-    }
-    // Inject zero-count rows for any tier in the plan that has a
-    // null grade so the pyramid shows the gap.
-    for (const t of plan) {
-      if (t.rank != null && !byRank.has(t.rank)) {
-        // synthesize a grade label from the closest known scale —
-        // we don't have a grade name for empty tiers (the rows array
-        // didn't have it), so leave it blank.
-        byRank.set(t.rank, { grade: `(${t.label})`, rank: t.rank, count: 0, ghost: true });
-      }
-    }
-    return [...byRank.values()].sort((a, b) => b.rank - a.rank);
-  }, [rows, plan]);
+  // Tier currently surfaced in the detail popover (null = closed).
+  // Stored as the whole tier object so the modal has direct access
+  // to grade label + climbs without a second lookup.
+  const [openTier, setOpenTier] = useState(null);
 
   if (rows.length === 0 || !activeProject) {
     return (
@@ -91,135 +91,270 @@ export function PyramidChart({
     );
   }
 
-  // Lookup tier metadata by rank so we can decorate the matching rows
-  // in the pyramid with project/consolidate/cleanup/base badges.
-  const tierByRank = new Map();
-  for (const t of plan) {
-    if (t.rank != null) tierByRank.set(t.rank, t);
-  }
-
   return (
     <div>
-      {/* Headline recommendation */}
-      {headline && (
+      {/* Re-pin hint — only when there are sends above the apex.
+          Uses a neutral violet so it reads as "informational nudge"
+          rather than "status warning" (no red/amber). */}
+      {plan.overgrew && (
         <div style={{
           padding: "8px 10px", marginBottom: 12,
-          background: STATUS_COLOR[plan.find(p => p.tier === headline.tier)?.status ?? "on_track"] + "22",
-          border: `1px solid ${STATUS_COLOR[plan.find(p => p.tier === headline.tier)?.status ?? "on_track"]}66`,
+          background: C.purple + "22",
+          border: `1px solid ${C.purple}66`,
           borderRadius: 8,
           fontSize: 12, lineHeight: 1.4,
         }}>
-          <span style={{ fontWeight: 700, marginRight: 6 }}>Next:</span>
-          {headline.message}
+          <span style={{ fontWeight: 700, marginRight: 6 }}>Outgrew the pin:</span>
+          {plan.overgrewSends} send{plan.overgrewSends === 1 ? "" : "s"} above {plan.projectGrade}
+          {plan.overgrewMaxGrade && plan.overgrewMaxGrade !== plan.projectGrade
+            ? ` (up to ${plan.overgrewMaxGrade})`
+            : ""}
+          {" — time to re-pin?"}
         </div>
       )}
 
-      {/* The pyramid itself — each row centered on the vertical axis */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 14 }}>
-        {renderRows.map(r => {
-          const tier = tierByRank.get(r.rank);
-          const isProject = tier?.tier === 0;
-          const isBase    = tier?.tier === -3;
-          const statusColor = tier ? STATUS_COLOR[tier.status] : C.muted;
+      {/* The silhouette — five centered rows of outlined blocks,
+          shaded left-to-right as sends accrue. Shaded blocks are
+          tappable (when climbs metadata is available) and open the
+          per-grade detail popover. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
+        {plan.tiers.map(t => {
+          const isApex = t.tier === 0;
+          // Tappable when there's at least one shaded block AND we
+          // actually have per-climb metadata to show. Older callers
+          // that don't thread `climbs` through will see the static
+          // silhouette without an interaction affordance.
+          const tappable = t.shaded > 0 && Array.isArray(t.climbs) && t.climbs.length > 0;
           return (
-            <div key={r.rank} style={{
-              display: "flex", alignItems: "center", gap: 8,
+            <div key={t.tier} style={{
+              display: "flex", alignItems: "center",
             }}>
-              {/* Grade label — fixed-width gutter on the left */}
+              {/* Left gutter — grade label for this tier. */}
               <div style={{
-                width: 44, flex: "0 0 44px", textAlign: "right",
-                fontSize: 12, color: tier ? "#fff" : C.muted,
-                fontWeight: tier ? 700 : 400,
-                opacity: r.ghost ? 0.5 : 1,
+                width: GUTTER, flex: `0 0 ${GUTTER}px`, textAlign: "right",
+                paddingRight: 8, boxSizing: "border-box",
+                fontSize: 12,
+                color: t.grade ? (isApex ? "#fde68a" : "#fff") : C.muted,
+                fontWeight: t.grade ? 700 : 400,
               }}>
-                {r.ghost ? "—" : r.grade}
+                {t.grade ?? "—"}
               </div>
 
-              {/* Centered block row */}
+              {/* Centered block row — outline + left-to-right shading. */}
               <div style={{
                 flex: 1, display: "flex", justifyContent: "center",
               }}>
-                <div style={{
-                  display: "flex", flexWrap: "wrap", justifyContent: "center",
-                  gap: BLOCK.gap, maxWidth: "100%",
-                  // Subtle bg for the base tier to visually echo "this
-                  // is the foundation" without being heavy-handed.
-                  padding: isBase ? "3px 6px" : 0,
-                  borderRadius: isBase ? 4 : 0,
-                  background: isBase ? statusColor + "10" : "transparent",
-                }}>
-                  {r.count === 0 ? (
-                    <span style={{ fontSize: 11, color: C.muted, fontStyle: "italic" }}>
-                      no sends
-                    </span>
-                  ) : (
-                    Array.from({ length: r.count }).map((_, i) => (
-                      <span key={i} style={{
-                        display: "inline-block",
-                        width: BLOCK.size, height: BLOCK.size,
-                        background: tier ? statusColor : fill,
-                        border: isProject ? `1.5px solid #fde68a` : "none",
-                        borderRadius: 2,
-                        opacity: tier ? 1 : 0.7,
-                      }} />
-                    ))
-                  )}
+                <div style={{ display: "flex", gap: BLOCK.gap }}>
+                  {Array.from({ length: t.target }).map((_, i) => {
+                    const isShaded = i < t.shaded;
+                    const interactive = tappable && isShaded;
+                    return (
+                      <span
+                        key={i}
+                        onClick={interactive ? () => setOpenTier(t) : undefined}
+                        title={interactive
+                          ? `${t.actualCount} send${t.actualCount === 1 ? "" : "s"} at ${t.grade} — tap for details`
+                          : undefined}
+                        style={{
+                          display: "inline-block",
+                          width: BLOCK.size, height: BLOCK.size,
+                          background: isShaded ? fill : "transparent",
+                          // Apex outline gets a warm-yellow tint so the
+                          // "project" position is identifiable even in
+                          // the empty state (no shading yet). Below the
+                          // apex, unshaded outlines use the muted border
+                          // color so empty rows recede visually.
+                          border: `1.5px solid ${
+                            isShaded ? fill : (isApex ? "#fde68a" : C.border)
+                          }`,
+                          borderRadius: 2,
+                          cursor: interactive ? "pointer" : "default",
+                        }}
+                      />
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Right-side tier badge — only on the four coaching tiers */}
+              {/* Right gutter — empty, mirrors the left so the
+                  pyramid axis stays centered on the card. */}
               <div style={{
-                width: 72, flex: "0 0 72px", textAlign: "left",
-                fontSize: 9, color: tier ? statusColor : "transparent",
-                fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4,
-                lineHeight: 1.2,
-              }}>
-                {tier && (
-                  <>
-                    <div>{tier.label}</div>
-                    <div style={{ color: C.muted, fontWeight: 500, textTransform: "none", fontSize: 9 }}>
-                      {tier.actualCount}
-                      {tier.targetMax === Infinity
-                        ? ` / ${tier.targetMin}+`
-                        : ` / ${tier.targetMin}–${tier.targetMax}`}
-                    </div>
-                  </>
-                )}
-              </div>
+                width: GUTTER, flex: `0 0 ${GUTTER}px`,
+              }} />
             </div>
           );
         })}
       </div>
 
-      {/* Per-tier coaching panel */}
-      <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Pyramid · project = {activeProject}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {plan.map(t => (
-            <div key={t.tier} style={{
-              display: "flex", gap: 8, alignItems: "flex-start",
-              fontSize: 11, lineHeight: 1.4,
-            }}>
-              <span style={{
-                flex: "0 0 auto", padding: "1px 6px", borderRadius: 4,
-                background: STATUS_COLOR[t.status] + "22",
-                color: STATUS_COLOR[t.status], fontWeight: 700,
-                fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4,
-                whiteSpace: "nowrap",
-              }}>
-                {t.label} {t.grade ? `· ${t.grade}` : ""}
-              </span>
-              <span style={{ flex: 1, color: C.muted }}>
-                <b style={{ color: "#fff" }}>{STATUS_LABEL[t.status]}</b>
-                {" — "}
-                {t.advice}
-              </span>
+      {/* Minimal footer — just the project label. The visual is the
+          message; no per-tier coaching text. */}
+      <div style={{
+        borderTop: `1px solid ${C.border}`, paddingTop: 8,
+        fontSize: 11, color: C.muted, textAlign: "center",
+      }}>
+        Project pin · {plan.projectGrade}
+      </div>
+
+      {/* Per-tier climb-detail popover. Backdrop catches outside-taps
+          to close; modal body stops propagation so internal taps
+          don't dismiss. Rendered last so it overlays the silhouette
+          via the fixed-position parent. */}
+      {openTier && (
+        <ClimbDetailModal
+          tier={openTier}
+          accent={fill}
+          onClose={() => setOpenTier(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Per-grade climb-detail popover
+// ─────────────────────────────────────────────────────────────
+// Fixed-position modal listing every clean send at the tapped
+// tier's grade. Includes capped extras (climbs that didn't get a
+// visible block) because the user logged them and should be able
+// to see them. Sorted newest-first by the caller.
+function ClimbDetailModal({ tier, accent, onClose }) {
+  // Defensive sort here too — if a future caller passes climbs in a
+  // different order, the popover stays "newest first" regardless.
+  const climbs = useMemo(
+    () => [...(tier.climbs || [])].sort(
+      (a, b) => (a.date || "") < (b.date || "") ? 1 : -1
+    ),
+    [tier.climbs]
+  );
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 100,
+        background: "rgba(0,0,0,0.65)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: C.card,
+          border: `1px solid ${C.border}`,
+          borderRadius: 10,
+          width: "100%", maxWidth: 380, maxHeight: "80vh",
+          display: "flex", flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header — grade + count + close. Accent strip down the left
+            mirrors the tier's block color so the popover visually
+            "belongs" to the row that opened it. */}
+        <div style={{
+          padding: "12px 14px",
+          borderBottom: `1px solid ${C.border}`,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 8,
+          borderLeft: `4px solid ${accent}`,
+        }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>
+              {tier.grade ?? "—"} sends
             </div>
-          ))}
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+              {tier.actualCount} clean send{tier.actualCount === 1 ? "" : "s"}
+              {tier.capped ? ` · ${tier.actualCount - tier.target} above pyramid target` : ""}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: "transparent", border: "none", color: C.muted,
+              fontSize: 22, cursor: "pointer", padding: "0 4px",
+              lineHeight: 1,
+            }}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Scrollable list of climbs. Each row is a compact card with
+            ascent badge, route name (or grade fallback), date, venue/
+            wall, RPE, stars, and notes. */}
+        <div style={{ overflowY: "auto", padding: "4px 0" }}>
+          {climbs.length === 0 ? (
+            <div style={{ padding: 16, color: C.muted, fontSize: 12, textAlign: "center" }}>
+              No detail captured for this grade.
+            </div>
+          ) : (
+            climbs.map((c, i) => <ClimbRow key={i} climb={c} />)
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// One row inside the detail modal. Compact enough that several fit on
+// a phone screen but spacious enough that each climb's metadata reads
+// without a second tap.
+function ClimbRow({ climb }) {
+  const ascent = ascentMeta(climb.ascent);
+  const venue  = climb.venue ? venueMeta(climb.venue) : null;
+  const wall   = climb.wall  ? wallMeta(climb.wall)   : null;
+  const stars  = Number.isFinite(climb.stars) ? climb.stars : 0;
+  const rpe    = Number(climb.rpe);
+  // Title line: route name if present, otherwise the grade. Falling
+  // back to grade keeps the row from feeling empty for gym climbs
+  // the user didn't name.
+  const title  = climb.route_name || climb.grade || "Climb";
+
+  return (
+    <div style={{
+      padding: "10px 14px",
+      borderBottom: `1px solid ${C.border}33`,
+      fontSize: 12, lineHeight: 1.4,
+    }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 2 }}>
+        <span style={{ fontWeight: 700, color: "#fff", fontSize: 13, flex: 1 }}>
+          {title}
+        </span>
+        <span style={{ color: C.muted, fontSize: 11, whiteSpace: "nowrap" }}>
+          {fmtDate(climb.date)}
+        </span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, color: C.muted, fontSize: 11 }}>
+        {/* Ascent style — colored to echo the success-vs-grind palette
+            used elsewhere (green for onsight/flash, orange for
+            redpoint/rest). */}
+        <span style={{
+          color: climb.ascent === "onsight" || climb.ascent === "flash"
+            ? C.green
+            : climb.ascent === "redpoint" ? C.orange : C.muted,
+          fontWeight: 600,
+        }}>
+          {ascent.label}
+        </span>
+        {venue && <span>· {venue.emoji} {venue.label}</span>}
+        {wall && <span>· {wall.emoji} {wall.label}</span>}
+        {climb.crag && <span>· {climb.crag}</span>}
+        {climb.area && <span>· {climb.area}</span>}
+        {rpe > 0 && <span>· RPE {rpe}</span>}
+        {stars > 0 && (
+          <span style={{ color: C.orange }}>
+            {"★".repeat(stars)}{"☆".repeat(5 - stars)}
+          </span>
+        )}
+      </div>
+      {climb.notes && (
+        <div style={{
+          marginTop: 4, fontSize: 11, color: C.muted, fontStyle: "italic",
+        }}>
+          “{climb.notes}”
+        </div>
+      )}
     </div>
   );
 }

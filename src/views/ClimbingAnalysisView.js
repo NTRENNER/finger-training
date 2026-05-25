@@ -250,15 +250,31 @@ export function ClimbingAnalysisView({
         return c.wall === pyramidWall;
       })
       .filter(isCleanSend);
+    // Aggregate count + per-grade climb list in one pass so the chart
+    // can render block-tap popovers without re-filtering downstream.
+    // Sort each grade's climbs newest first — the popover reads
+    // recent-first, which matches the "what have I been climbing"
+    // mental model better than chronological-first for the top of
+    // the list.
     const counts = {};
+    const climbsByGrade = {};
     for (const c of climbs) {
       if (!c.grade) continue;
       counts[c.grade] = (counts[c.grade] || 0) + 1;
+      (climbsByGrade[c.grade] ||= []).push(c);
+    }
+    for (const g of Object.keys(climbsByGrade)) {
+      climbsByGrade[g].sort((a, b) => (a.date || "") < (b.date || "") ? 1 : -1);
     }
     const allGrades = pyramidDiscipline === "boulder" ? V_GRADES : YDS_GRADES;
     const rows = allGrades
       .filter(g => counts[g])
-      .map(g => ({ grade: g, count: counts[g], rank: gradeRank(g) }))
+      .map(g => ({
+        grade: g,
+        count: counts[g],
+        rank: gradeRank(g),
+        climbs: climbsByGrade[g],
+      }))
       .sort((a, b) => a.rank - b.rank);
     return { rows, total: climbs.length };
   }, [allClimbs, pyramidDiscipline, pyramidVenue, pyramidWall, wallFilterActive, pyramidWindow]);

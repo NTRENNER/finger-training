@@ -1,12 +1,10 @@
-// Tests for src/model/gradePyramid.js — Power Company Climbing
-// pyramid logic (project, consolidate, cleanup, base ATB).
+// Tests for src/model/gradePyramid.js — 5-tier outline pyramid
+// (apex, -1, -2, -3, base) with fixed targets [1, 2, 3, 4, 7].
 
 import {
   inferProjectGrade,
   buildPyramidPlan,
-  topPyramidRecommendation,
   TIER_DEFINITIONS,
-  FLASH_TIER_DEFINITIONS,
 } from "../gradePyramid.js";
 
 // Helper: build the row shape ClimbingAnalysisView produces.
@@ -41,191 +39,217 @@ describe("inferProjectGrade", () => {
   });
 });
 
-describe("buildPyramidPlan", () => {
-  test("returns 4 tiers in project → base order", () => {
+describe("buildPyramidPlan — tier shape", () => {
+  test("returns 5 tiers in project → base order", () => {
     const plan = buildPyramidPlan([row("V6", 6, 2)]);
-    expect(plan).toHaveLength(4);
-    expect(plan.map(p => p.tier)).toEqual([0, -1, -2, -3]);
-    expect(plan[0].grade).toBe("V6");
-    expect(plan[3].rank).toBe(3); // V6 - 3
+    expect(plan.tiers).toHaveLength(5);
+    expect(plan.tiers.map(t => t.tier)).toEqual([0, -1, -2, -3, -4]);
   });
 
-  test("fills counts from rows by rank", () => {
-    const rows = [
-      row("V3", 3, 4), row("V4", 4, 6),
-      row("V5", 5, 3), row("V6", 6, 2),
-    ];
-    const plan = buildPyramidPlan(rows);
-    expect(plan[0]).toMatchObject({ grade: "V6", actualCount: 2 }); // project
-    expect(plan[1]).toMatchObject({ grade: "V5", actualCount: 3 }); // P-1
-    expect(plan[2]).toMatchObject({ grade: "V4", actualCount: 6 }); // P-2
-    expect(plan[3]).toMatchObject({ grade: "V3", actualCount: 4 }); // P-3
+  test("apex target = 1, base target = 7, middle = 2/3/4", () => {
+    const plan = buildPyramidPlan([row("V6", 6, 2)]);
+    expect(plan.tiers.map(t => t.target)).toEqual([1, 2, 3, 4, 7]);
   });
 
-  test("tiers with no sends get count 0 and grade null", () => {
-    // Project at V6, but nothing sent at V4 (P-2) — gap tier
-    const rows = [
-      row("V3", 3, 5), row("V5", 5, 2), row("V6", 6, 2),
-    ];
-    const plan = buildPyramidPlan(rows);
-    expect(plan[2].grade).toBeNull();
-    expect(plan[2].actualCount).toBe(0);
-    expect(plan[2].status).toBe("missing");
+  test("anchors to the inferred project and walks tiers down by stepSize", () => {
+    const plan = buildPyramidPlan([row("V6", 6, 1)]);
+    expect(plan.projectGrade).toBe("V6");
+    expect(plan.projectRank).toBe(6);
+    expect(plan.tiers[0].rank).toBe(6);
+    expect(plan.tiers[4].rank).toBe(2);    // V6 − 4
   });
 
-  test("classifies status correctly per tier targets", () => {
-    const rows = [
-      row("V3", 3, 4),  // base: light (need 10+)
-      row("V4", 4, 7),  // P-2: on_track (5-10)
-      row("V5", 5, 4),  // P-1: on_track (3-5)
-      row("V6", 6, 2),  // project: on_track (1-2)
-    ];
-    const plan = buildPyramidPlan(rows);
-    expect(plan[0].status).toBe("on_track"); // project = 2
-    expect(plan[1].status).toBe("on_track"); // P-1 = 4
-    expect(plan[2].status).toBe("on_track"); // P-2 = 7
-    expect(plan[3].status).toBe("light");    // base = 4 < 10
-  });
-
-  test("heavy when actualCount exceeds tier max", () => {
-    const rows = [row("V6", 6, 5)]; // project should be 1-2
-    const plan = buildPyramidPlan(rows);
-    expect(plan[0].status).toBe("heavy");
-  });
-
-  test("returns empty-shape tiers when no project grade can be inferred", () => {
-    const plan = buildPyramidPlan([]);
-    expect(plan).toHaveLength(4);
-    for (const t of plan) {
-      expect(t.grade).toBeNull();
-      expect(t.actualCount).toBe(0);
-      expect(t.status).toBe("missing");
-    }
-  });
-
-  test("respects explicit projectGrade override", () => {
+  test("respects explicit projectGrade override over inferred", () => {
     const rows = [
       row("V3", 3, 4), row("V4", 4, 4),
       row("V5", 5, 3), row("V6", 6, 1),
     ];
     const plan = buildPyramidPlan(rows, "V5");
-    expect(plan[0].grade).toBe("V5"); // project = V5, not V6
-    expect(plan[1].grade).toBe("V4"); // P-1 = V4
+    expect(plan.projectGrade).toBe("V5");
+    expect(plan.tiers[0].grade).toBe("V5");
+    expect(plan.tiers[1].grade).toBe("V4");
   });
 });
 
-describe("topPyramidRecommendation", () => {
-  test("flags base first when it's light", () => {
+describe("buildPyramidPlan — shading & status", () => {
+  test("shaded = min(actualCount, target); status = 'partial' below target", () => {
+    // V6 project, V5 with 1 send (target 2)
+    const rows = [row("V5", 5, 1), row("V6", 6, 1)];
+    const plan = buildPyramidPlan(rows);
+    expect(plan.tiers[0]).toMatchObject({ actualCount: 1, shaded: 1, capped: false, status: "complete" });
+    expect(plan.tiers[1]).toMatchObject({ actualCount: 1, shaded: 1, capped: false, status: "partial" });
+  });
+
+  test("status = 'complete' when actualCount === target, capped = false", () => {
+    // V6 project, V4 (tier -2, target 3) with exactly 3 sends
+    const rows = [row("V4", 4, 3), row("V6", 6, 1)];
+    const plan = buildPyramidPlan(rows);
+    expect(plan.tiers[2]).toMatchObject({ actualCount: 3, shaded: 3, capped: false, status: "complete" });
+  });
+
+  test("status = 'complete' AND capped = true when actualCount > target", () => {
+    // V6 project, V3 (tier -3, target 4) with 9 sends
+    const rows = [row("V3", 3, 9), row("V6", 6, 1)];
+    const plan = buildPyramidPlan(rows);
+    expect(plan.tiers[3]).toMatchObject({ actualCount: 9, shaded: 4, capped: true, status: "complete" });
+  });
+
+  test("status = 'empty' when no sends at that tier", () => {
+    const plan = buildPyramidPlan([row("V6", 6, 1)]);
+    // V5/V4/V3/V2 all empty
+    for (const t of plan.tiers.slice(1)) {
+      expect(t.status).toBe("empty");
+      expect(t.shaded).toBe(0);
+      expect(t.actualCount).toBe(0);
+    }
+  });
+
+  test("missing tiers expose grade=null but keep the outline row", () => {
+    // Project V6, V4 missing (gap tier)
     const rows = [
-      row("V3", 3, 2),  // base: light (need 10)
-      row("V4", 4, 7),  // P-2: on_track
-      row("V5", 5, 4),  // P-1: on_track
-      row("V6", 6, 2),  // project: on_track
+      row("V3", 3, 5), row("V5", 5, 2), row("V6", 6, 1),
     ];
-    const rec = topPyramidRecommendation(buildPyramidPlan(rows));
-    expect(rec).toBeTruthy();
-    expect(rec.tier).toBe(-3);
-    expect(rec.message).toMatch(/V3/);
+    const plan = buildPyramidPlan(rows);
+    // tier -2 = V4 → no row, grade null, actualCount 0
+    expect(plan.tiers[2].grade).toBeNull();
+    expect(plan.tiers[2].actualCount).toBe(0);
+    expect(plan.tiers[2].status).toBe("empty");
   });
 
-  test("missing tier gets a 'build it' message", () => {
-    const rows = [row("V6", 6, 2)];
-    const rec = topPyramidRecommendation(buildPyramidPlan(rows));
-    expect(rec.message).toMatch(/start sending/i);
-  });
-
-  test("balanced pyramid suggests pushing the project", () => {
-    const rows = [
-      row("V3", 3, 12), row("V4", 4, 7),
-      row("V5", 5, 4),  row("V6", 6, 2),
-    ];
-    const rec = topPyramidRecommendation(buildPyramidPlan(rows));
-    expect(rec.tier).toBe(0);
-    expect(rec.message).toMatch(/push the project|shifting the pyramid/i);
-  });
-
-  test("heavy project tier suggests shifting up a grade", () => {
-    const rows = [
-      row("V3", 3, 12), row("V4", 4, 7),
-      row("V5", 5, 4),  row("V6", 6, 5), // project way over band
-    ];
-    const rec = topPyramidRecommendation(buildPyramidPlan(rows));
-    expect(rec.message).toMatch(/shifting the pyramid up/i);
-  });
-
-  test("returns null for empty plan", () => {
-    expect(topPyramidRecommendation([])).toBeNull();
-    expect(topPyramidRecommendation(null)).toBeNull();
+  test("empty rows still return a 5-row outline silhouette", () => {
+    const plan = buildPyramidPlan([]);
+    expect(plan.tiers).toHaveLength(5);
+    expect(plan.tiers.map(t => t.target)).toEqual([1, 2, 3, 4, 7]);
+    for (const t of plan.tiers) {
+      expect(t.grade).toBeNull();
+      expect(t.actualCount).toBe(0);
+      expect(t.status).toBe("empty");
+    }
   });
 });
 
-describe("TIER_DEFINITIONS", () => {
-  test("exports 4 tiers with min/max/advice", () => {
-    expect(TIER_DEFINITIONS).toHaveLength(4);
-    for (const t of TIER_DEFINITIONS) {
-      expect(typeof t.label).toBe("string");
-      expect(typeof t.min).toBe("number");
-      expect(typeof t.max).toBe("number");
-      expect(typeof t.advice).toBe("string");
-    }
+describe("buildPyramidPlan — overgrew (re-pin signal)", () => {
+  test("overgrew = false when no sends above the apex", () => {
+    const plan = buildPyramidPlan([
+      row("V3", 3, 5), row("V4", 4, 2), row("V6", 6, 1),
+    ]);
+    expect(plan.overgrew).toBe(false);
+    expect(plan.overgrewSends).toBe(0);
+    expect(plan.overgrewMaxGrade).toBeNull();
   });
 
-  test("flash-anchored tiers also export 4 entries with min/max/advice", () => {
-    expect(FLASH_TIER_DEFINITIONS).toHaveLength(4);
-    for (const t of FLASH_TIER_DEFINITIONS) {
-      expect(typeof t.label).toBe("string");
-      expect(typeof t.min).toBe("number");
-      expect(typeof t.max).toBe("number");
-      expect(typeof t.advice).toBe("string");
-    }
-    // Project tier may have 0 sends (it's forward-looking).
-    expect(FLASH_TIER_DEFINITIONS[0].min).toBe(0);
+  test("overgrew = true when there are sends above the pinned apex", () => {
+    // Pinned at V6, but V7 has 2 sends and V8 has 1
+    const rows = [
+      row("V5", 5, 3), row("V6", 6, 1),
+      row("V7", 7, 2), row("V8", 8, 1),
+    ];
+    const plan = buildPyramidPlan(rows, "V6");
+    expect(plan.overgrew).toBe(true);
+    expect(plan.overgrewSends).toBe(3);
+    expect(plan.overgrewMaxGrade).toBe("V8");
+  });
+
+  test("overgrew ignores rows with zero count above the apex", () => {
+    const rows = [row("V6", 6, 1), row("V7", 7, 0)];
+    const plan = buildPyramidPlan(rows, "V6");
+    expect(plan.overgrew).toBe(false);
   });
 });
 
 describe("buildPyramidPlan — flash-anchored", () => {
-  test("uses flash-anchored tier labels and bands", () => {
+  test("explicit projectRank lets the apex tier exist with 0 sends", () => {
     // Project = V7 (flash V4 + gap 3). User has 0 sends at V7.
     const rows = [
-      row("V4", 4, 20),  // volume (ATB): 10+ on track
-      row("V5", 5, 4),   // consolidate (flash+1): 3-5 on track
-      row("V6", 6, 2),   // push (flash+2): 1-3 on track
+      row("V4", 4, 20),  // tier -3 (target 4 — capped from 20)
+      row("V5", 5, 4),   // tier -2 (target 3 — capped from 4)
+      row("V6", 6, 2),   // tier -1 (target 2 — complete)
     ];
     const plan = buildPyramidPlan(rows, "V7", { anchorMode: "flash", projectRank: 7 });
-    expect(plan[0]).toMatchObject({ label: "Project",     grade: "V7", actualCount: 0, targetMin: 0 });
-    expect(plan[1]).toMatchObject({ label: "Push",        grade: "V6", actualCount: 2 });
-    expect(plan[2]).toMatchObject({ label: "Consolidate", grade: "V5", actualCount: 4 });
-    expect(plan[3]).toMatchObject({ label: "Volume (ATB)", grade: "V4", actualCount: 20 });
+    expect(plan.projectGrade).toBe("V7");
+    expect(plan.tiers[0]).toMatchObject({ grade: "V7", actualCount: 0, shaded: 0, status: "empty" });
+    expect(plan.tiers[1]).toMatchObject({ grade: "V6", actualCount: 2, shaded: 2, status: "complete" });
+    expect(plan.tiers[2]).toMatchObject({ grade: "V5", actualCount: 4, shaded: 3, capped: true });
+    expect(plan.tiers[3]).toMatchObject({ grade: "V4", actualCount: 20, shaded: 4, capped: true });
   });
 
-  test("project with 0 sends is on_track (band min is 0), not missing", () => {
-    const rows = [row("V4", 4, 20)];
-    const plan = buildPyramidPlan(rows, "V7", { anchorMode: "flash", projectRank: 7 });
-    expect(plan[0].actualCount).toBe(0);
-    expect(plan[0].status).toBe("on_track");
-  });
-
-  test("project tier still gets a grade label even with no rows at that rank", () => {
-    const rows = [row("V4", 4, 5)];
-    const plan = buildPyramidPlan(rows, "V7", { anchorMode: "flash", projectRank: 7 });
-    expect(plan[0].grade).toBe("V7"); // forward-looking label
-  });
-
-  test("YDS: stepSize 0.25 walks tiers by single letter subgrades", () => {
-    // Flash 5.12a (rank 12.0) → project 5.13a (rank 13.0).
-    // Tier -1 at rank 12.75 = 5.12d, -2 at 12.5 = 5.12c, -3 at 12.25 = 5.12b.
+  test("YDS: stepSize 0.25 walks tiers by letter subgrades", () => {
+    // Flash 5.12a → project 5.13a (rank 13.0). Tier -4 lands on 5.12a (rank 12.0).
     const rows = [
-      { grade: "5.12b", rank: 12.25, count: 12 }, // volume
-      { grade: "5.12c", rank: 12.5,  count: 4 },  // consolidate
-      { grade: "5.12d", rank: 12.75, count: 2 },  // push
-      { grade: "5.13a", rank: 13.0,  count: 0 },  // project (no sends yet)
+      { grade: "5.12a", rank: 12.0,  count: 8 },  // tier -4 (target 7 — capped from 8)
+      { grade: "5.12b", rank: 12.25, count: 3 },  // tier -3 (target 4 — partial)
+      { grade: "5.12c", rank: 12.5,  count: 3 },  // tier -2 (target 3 — complete)
+      { grade: "5.12d", rank: 12.75, count: 2 },  // tier -1 (target 2 — complete)
+      { grade: "5.13a", rank: 13.0,  count: 0 },  // apex  (target 1 — empty)
     ];
     const plan = buildPyramidPlan(rows, "5.13a", {
       anchorMode: "flash", projectRank: 13.0, stepSize: 0.25,
     });
-    expect(plan[0]).toMatchObject({ label: "Project",      grade: "5.13a", actualCount: 0 });
-    expect(plan[1]).toMatchObject({ label: "Push",         grade: "5.12d", actualCount: 2 });
-    expect(plan[2]).toMatchObject({ label: "Consolidate",  grade: "5.12c", actualCount: 4 });
-    expect(plan[3]).toMatchObject({ label: "Volume (ATB)", grade: "5.12b", actualCount: 12 });
+    expect(plan.tiers[0]).toMatchObject({ grade: "5.13a", actualCount: 0, status: "empty" });
+    expect(plan.tiers[1]).toMatchObject({ grade: "5.12d", actualCount: 2, shaded: 2, status: "complete" });
+    expect(plan.tiers[2]).toMatchObject({ grade: "5.12c", actualCount: 3, shaded: 3, status: "complete" });
+    expect(plan.tiers[3]).toMatchObject({ grade: "5.12b", actualCount: 3, shaded: 3, status: "partial" });
+    expect(plan.tiers[4]).toMatchObject({ grade: "5.12a", actualCount: 8, shaded: 7, capped: true });
+  });
+});
+
+describe("buildPyramidPlan — climbs metadata pass-through", () => {
+  // Caller may attach a per-row `climbs` array; the model should
+  // surface it on the matching tier so the chart can show details
+  // on tap. Rows without `climbs` get an empty array (not undefined)
+  // so the consumer's `.length`/`.map` checks stay safe.
+  const climb = (date, ascent, extra = {}) => ({ date, ascent, ...extra });
+
+  test("threads each row's climbs array onto the matching tier", () => {
+    const rows = [
+      { grade: "V3", rank: 3, count: 2, climbs: [climb("2026-05-01", "flash"), climb("2026-05-02", "redpoint")] },
+      { grade: "V6", rank: 6, count: 1, climbs: [climb("2026-05-20", "redpoint", { route_name: "Apex" })] },
+    ];
+    const plan = buildPyramidPlan(rows);
+    expect(plan.tiers[0].climbs).toHaveLength(1);                     // V6 apex
+    expect(plan.tiers[0].climbs[0].route_name).toBe("Apex");
+    expect(plan.tiers[3].climbs).toHaveLength(2);                     // V3 tier -3
+    expect(plan.tiers[3].climbs.map(c => c.ascent)).toEqual(["flash", "redpoint"]);
+  });
+
+  test("tiers without a matching row get an empty climbs array", () => {
+    const rows = [
+      { grade: "V6", rank: 6, count: 1, climbs: [climb("2026-05-20", "redpoint")] },
+    ];
+    const plan = buildPyramidPlan(rows);
+    // Apex has the climb, lower tiers have no rows → empty arrays
+    expect(plan.tiers[0].climbs).toHaveLength(1);
+    for (const t of plan.tiers.slice(1)) {
+      expect(t.climbs).toEqual([]);
+    }
+  });
+
+  test("rows without climbs default to empty array (back-compat)", () => {
+    const plan = buildPyramidPlan([{ grade: "V6", rank: 6, count: 1 }]);
+    for (const t of plan.tiers) {
+      expect(t.climbs).toEqual([]);
+    }
+  });
+
+  test("preserves capped extras in climbs (visual cap doesn't drop data)", () => {
+    // 9 sends at V3 (tier -3, target 4) — all 9 climbs should survive
+    // on tier.climbs so the popover can list them, even though only
+    // 4 blocks shade in the chart.
+    const rows = [
+      { grade: "V3", rank: 3, count: 9, climbs: Array.from({ length: 9 }, (_, i) => climb(`2026-05-${10+i}`, "redpoint")) },
+      { grade: "V6", rank: 6, count: 1, climbs: [climb("2026-05-20", "redpoint")] },
+    ];
+    const plan = buildPyramidPlan(rows);
+    expect(plan.tiers[3].shaded).toBe(4);                              // blocks capped
+    expect(plan.tiers[3].capped).toBe(true);
+    expect(plan.tiers[3].climbs).toHaveLength(9);                      // data preserved
+  });
+});
+
+describe("TIER_DEFINITIONS", () => {
+  test("exports the 5 canonical tiers with target widths", () => {
+    expect(TIER_DEFINITIONS).toHaveLength(5);
+    expect(TIER_DEFINITIONS.map(t => t.target)).toEqual([1, 2, 3, 4, 7]);
+    expect(TIER_DEFINITIONS.map(t => t.tier)).toEqual([0, -1, -2, -3, -4]);
   });
 });
