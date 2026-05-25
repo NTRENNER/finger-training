@@ -39,7 +39,7 @@ import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { GRIP_COLORS, HAND_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, fmtW, toDisp } from "../../ui/format.js";
-import { predForceThreeExp } from "../../model/threeExp.js";
+import { predForceThreeExp, computeAUCThreeExp } from "../../model/threeExp.js";
 
 // Toggle / grip-selector pill renderer. Lives here because it's only
 // consumed by this card (and the visual is specific to the chip-row
@@ -177,20 +177,35 @@ export function ForceCurvesOverlayCard({
   // Per-T delta strip — fixed reference durations spanning power →
   // endurance. Deltas signed (negative = lost capacity). One row per
   // series.
+  //
+  // Total AUC delta lives alongside the per-T cells: the per-T
+  // numbers are a zone-by-zone breakdown ("where did the gain come
+  // from?"), but a single integrated number answers "is the whole
+  // curve moving up?" which is the question the slider is for.
+  // AUC ratio matches what CurveImprovementCard already shows as the
+  // headline so the two surfaces agree on what "total" means.
   const refTs = [10, 30, 60, 120, 180];
-  const deltaRows = series.map(s => ({
-    key: s.key,
-    label: s.label,
-    color: s.nowColor,
-    cells: refTs.map(t => {
-      const fp = s.pastAmps ? predForceThreeExp(s.pastAmps, t) : null;
-      const fn = s.nowAmps  ? predForceThreeExp(s.nowAmps,  t) : null;
-      const pct = (fp && fp > 0 && fn != null)
-        ? Math.round((fn / fp - 1) * 100)
-        : null;
-      return { t, pct };
-    }),
-  }));
+  const deltaRows = series.map(s => {
+    const aucPast = s.pastAmps ? computeAUCThreeExp(s.pastAmps) : null;
+    const aucNow  = s.nowAmps  ? computeAUCThreeExp(s.nowAmps)  : null;
+    const totalPct = (aucPast && aucPast > 0 && aucNow != null)
+      ? Math.round((aucNow / aucPast - 1) * 100)
+      : null;
+    return {
+      key: s.key,
+      label: s.label,
+      color: s.nowColor,
+      totalPct,
+      cells: refTs.map(t => {
+        const fp = s.pastAmps ? predForceThreeExp(s.pastAmps, t) : null;
+        const fn = s.nowAmps  ? predForceThreeExp(s.nowAmps,  t) : null;
+        const pct = (fp && fp > 0 && fn != null)
+          ? Math.round((fn / fp - 1) * 100)
+          : null;
+        return { t, pct };
+      }),
+    };
+  });
 
   const sliderStyle = {
     width: "100%",
@@ -289,14 +304,32 @@ export function ForceCurvesOverlayCard({
       </ResponsiveContainer>
 
       {/* Per-T delta strip(s). One row in pooled mode; one per hand
-          in per-hand mode with a small label. */}
-      {deltaRows.map(({ key, label, color, cells }) => (
+          in per-hand mode with a small label. Total-AUC headline
+          renders alongside the row label so it's visible regardless
+          of mode and ticks as the slider moves. */}
+      {deltaRows.map(({ key, label, color, cells, totalPct }) => {
+        const totalColor = totalPct == null ? C.muted
+                         : totalPct > 0     ? C.green
+                         : totalPct < 0     ? C.red
+                                            : C.muted;
+        const totalSign = totalPct == null ? "" : totalPct > 0 ? "+" : "";
+        return (
         <div key={key} style={{ marginTop: 12 }}>
-          {deltaRows.length > 1 && (
-            <div style={{ fontSize: 11, fontWeight: 600, color, marginBottom: 4 }}>
-              {label}
-            </div>
-          )}
+          {/* Always render a header line so the total is visible in
+              both pooled mode (one row, no per-hand label) and
+              per-hand mode (label + per-hand total). In pooled mode
+              the label slot is empty; the total floats right. */}
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "baseline",
+            marginBottom: 4,
+          }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color }}>
+              {deltaRows.length > 1 ? label : "Total capacity"}
+            </span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: totalColor, lineHeight: 1 }}>
+              {totalPct == null ? "—" : `${totalSign}${totalPct}%`}
+            </span>
+          </div>
           <div style={{
             display: "grid",
             gridTemplateColumns: `repeat(${refTs.length}, 1fr)`,
@@ -324,7 +357,8 @@ export function ForceCurvesOverlayCard({
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
     </Card>
   );
 }
