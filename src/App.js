@@ -744,8 +744,6 @@ export default function App() {
           pyramidWarmupMap={pyramidWarmupMap}
           onPyramidProjectChange={savePyramidProjectMap}
           onPyramidWarmupChange={savePyramidWarmupMap}
-          cookedOnDate={cookedOnDate}
-          onSaveCooked={saveCooked}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
@@ -778,6 +776,8 @@ export default function App() {
           defaultWorkouts={ALL_WORKOUTS_LOOKUP}
           onDeleteWorkoutSession={deleteWorkoutSession}
           onUpdateWorkoutSession={handleWorkoutSessionSaved}
+          cookedOnDate={cookedOnDate}
+          onSaveCooked={saveCooked}
           onDownloadWorkoutCSV={(log) => {
             // Build the migrated name index here so the CSV column for
             // each exercise uses the same canonical "Med Ball Slams"

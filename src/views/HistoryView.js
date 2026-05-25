@@ -34,6 +34,7 @@ import {
 import { WorkoutHistoryView } from "./WorkoutHistoryView.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
 import { CalendarHeatmap } from "./CalendarHeatmap.jsx";
+import { CookednessSlider } from "./cards/CookednessSlider.jsx";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
@@ -58,6 +59,13 @@ export function HistoryView({
   onDeleteWorkoutSession = () => {},
   onUpdateWorkoutSession = () => {},
   onDownloadWorkoutCSV = () => {},
+  // Retroactive cookedness — per-day. The finger session cards in
+  // History expose a slider that calls onSaveCooked(date, cooked|null).
+  // cookedOnDate(date) reads the current value for the slider's initial
+  // position. Both default to no-ops so the view still mounts cleanly
+  // without these wired in.
+  cookedOnDate = () => null,
+  onSaveCooked = () => {},
   onDownloadClimbingCSV = () => {},
   gripPresets = [],
 }) {
@@ -1083,6 +1091,17 @@ export function HistoryView({
                 </div>
               </div>
             )}
+            {/* Retroactive cookedness — per-day, so multiple sessions
+                on the same date share one value. Edits flow through
+                onSaveCooked → useDailyState → freshMap rebuild so the
+                curve fit treats this day's reps as fresh-equivalent
+                and future prescriptions don't drift down from a
+                forgot-to-declare cooked session. */}
+            <CookednessSlider
+              date={sess.date}
+              value={cookedOnDate(sess.date)}
+              onChange={(v) => onSaveCooked(sess.date, v)}
+            />
           </Card>
         );
       })}
