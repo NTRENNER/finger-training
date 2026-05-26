@@ -287,6 +287,26 @@ export function ClimbingAnalysisView({
   const effectiveProjectRank = effectiveProject ? gradeRank(effectiveProject) : null;
   const stepSize = RANK_STEP_BY_DISCIPLINE[pyramidDiscipline] ?? 1;
 
+  // Rank → grade resolver for the active discipline. Used by the
+  // pyramid model to label empty tiers (no clean sends at that rank)
+  // with the grade they represent — V7 instead of "—" for a gap
+  // between the V8 project and the V6 row below it. Built from the
+  // discipline's canonical grade list and rounded to 2 decimals so
+  // YDS letter-step ranks (0.25 increments) hit cleanly without
+  // float-precision wobble.
+  const rankToGrade = useMemo(() => {
+    const all = pyramidDiscipline === "boulder" ? V_GRADES : YDS_GRADES;
+    const m = new Map();
+    for (const g of all) {
+      const r = gradeRank(g);
+      if (r >= 0) m.set(Math.round(r * 100) / 100, g);
+    }
+    return (rank) => {
+      if (!Number.isFinite(rank)) return null;
+      return m.get(Math.round(rank * 100) / 100) ?? null;
+    };
+  }, [pyramidDiscipline]);
+
   // ── Max sends by ascent style ──
   // For each clean-send style (onsight / flash / redpoint), find the
   // hardest grade you've achieved within the current filter set and
@@ -552,6 +572,7 @@ export function ClimbingAnalysisView({
                 projectRank={effectiveProjectRank}
                 stepSize={stepSize}
                 anchorMode="flash"
+                rankToGrade={rankToGrade}
               />
               <div style={{ marginTop: 6, fontSize: 11, color: C.muted, textAlign: "right" }}>
                 {pyramid.total} clean send{pyramid.total === 1 ? "" : "s"} total

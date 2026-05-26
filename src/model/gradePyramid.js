@@ -114,6 +114,13 @@ export function buildPyramidPlan(rows, projectGrade = null, {
   // YDS at 5.10+ = 0.25 (each tier = 1 letter subgrade). Caller picks
   // based on discipline; this function stays scheme-agnostic.
   stepSize = 1,
+  // Optional resolver `(rank) => gradeLabel | null` so empty tiers
+  // (no rows at that rank) can still display the grade they
+  // represent. The model stays scheme-agnostic — the caller, which
+  // knows the V / YDS scale for the active discipline, owns the
+  // mapping. Without this, empty tiers fall back to grade=null and
+  // render as "—" in the chart.
+  rankToGrade = null,
 } = {}) {
   const projectRank = (() => {
     if (Number.isFinite(explicitRank)) return explicitRank;
@@ -145,6 +152,14 @@ export function buildPyramidPlan(rows, projectGrade = null, {
     const lookupKey = tierRank != null ? rankKey(tierRank) : null;
     const actualCount = lookupKey != null ? (countByRank.get(lookupKey) ?? 0) : 0;
     let grade = lookupKey != null ? (gradeByRank.get(lookupKey) ?? null) : null;
+    // Empty-tier fallback: ask the caller-provided resolver to name
+    // the grade at this rank. Without sends at the rank there's no
+    // row to read the label from, but the climber still expects to
+    // see "V7" or "5.11d" instead of "—" on tiers between the apex
+    // and a partly-filled lower tier.
+    if (!grade && tierRank != null && typeof rankToGrade === "function") {
+      grade = rankToGrade(tierRank);
+    }
     // Apex fallback: if there are no rows at the project rank yet
     // (e.g. flash-anchored "you haven't sent V7 yet"), still label
     // the row with the pinned project grade so the chart reads

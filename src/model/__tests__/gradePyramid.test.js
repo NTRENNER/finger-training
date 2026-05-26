@@ -193,6 +193,54 @@ describe("buildPyramidPlan — flash-anchored", () => {
   });
 });
 
+describe("buildPyramidPlan — rankToGrade fallback", () => {
+  // Caller-provided resolver lets empty tiers carry their grade
+  // label so the chart can read "V7" on a gap row instead of "—".
+  const vResolver = (rank) => {
+    if (!Number.isFinite(rank)) return null;
+    const n = Math.round(rank);
+    return n >= 0 && n <= 13 ? `V${n}` : null;
+  };
+
+  test("labels empty tiers with their grade when resolver is provided", () => {
+    // Project V8, sends only at V4/V5/V6 — V7 (tier -1) is empty
+    const rows = [
+      row("V4", 4, 7), row("V5", 5, 6), row("V6", 6, 2), row("V8", 8, 1),
+    ];
+    const plan = buildPyramidPlan(rows, "V8", {
+      anchorMode: "flash", projectRank: 8, rankToGrade: vResolver,
+    });
+    expect(plan.tiers[0].grade).toBe("V8");                            // apex (had a row)
+    expect(plan.tiers[1].grade).toBe("V7");                            // empty tier — resolver fills it
+    expect(plan.tiers[1].actualCount).toBe(0);                         // still no sends
+    expect(plan.tiers[2].grade).toBe("V6");                            // had a row
+    expect(plan.tiers[3].grade).toBe("V5");
+    expect(plan.tiers[4].grade).toBe("V4");
+  });
+
+  test("row labels still win over resolver output (resolver is a fallback only)", () => {
+    // If the resolver returned the "wrong" label, the actual row's
+    // grade should still be used. Guards against a stale resolver
+    // contradicting authoritative data.
+    const wrongResolver = (rank) => `WRONG-${rank}`;
+    const plan = buildPyramidPlan(
+      [row("V6", 6, 2)],
+      null,
+      { rankToGrade: wrongResolver },
+    );
+    expect(plan.tiers[0].grade).toBe("V6");                            // row wins
+  });
+
+  test("without resolver, empty tiers still expose grade=null (back-compat)", () => {
+    const plan = buildPyramidPlan([row("V8", 8, 1)], "V8", {
+      anchorMode: "flash", projectRank: 8,
+    });
+    // No resolver → empty middle tiers stay null
+    expect(plan.tiers[1].grade).toBeNull();
+    expect(plan.tiers[4].grade).toBeNull();
+  });
+});
+
 describe("buildPyramidPlan — climbs metadata pass-through", () => {
   // Caller may attach a per-row `climbs` array; the model should
   // surface it on the matching tier so the chart can show details

@@ -70,10 +70,14 @@ export function PyramidChart({
   projectRank = null,  // required when projectGrade has 0 rows (flash-anchored)
   anchorMode = "send", // 'send' | 'flash' — passed through to the model
   stepSize = 1,        // tier offset in rank units (V = 1, YDS letter = 0.25)
+  rankToGrade = null,  // (rank) => gradeLabel — labels empty tiers with the
+                       // grade they represent instead of "—". Caller in
+                       // ClimbingAnalysisView builds it from V_GRADES /
+                       // YDS_GRADES so the chart stays scheme-agnostic.
 }) {
   const plan = useMemo(
-    () => buildPyramidPlan(rows, projectGrade, { anchorMode, projectRank, stepSize }),
-    [rows, projectGrade, anchorMode, projectRank, stepSize]
+    () => buildPyramidPlan(rows, projectGrade, { anchorMode, projectRank, stepSize, rankToGrade }),
+    [rows, projectGrade, anchorMode, projectRank, stepSize, rankToGrade]
   );
   const inferredProject = useMemo(() => inferProjectGrade(rows), [rows]);
   const activeProject = projectGrade || inferredProject;
