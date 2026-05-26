@@ -737,11 +737,22 @@ export function daysBetween(aISO, bISO) {
   return Math.floor((b - a) / (1000 * 60 * 60 * 24));
 }
 
+// Read the canonical workout key from a session. Modern sessions
+// stamp `workoutId`; legacy and cloud-pulled-before-mirror sessions
+// only have `workout`. Accept either so a missing field from any
+// older client version doesn't render a real A/B/C session invisible
+// to the recommender. Returns null when neither is set so the caller
+// can skip the entry cleanly.
+function sessionWorkoutKey(s) {
+  if (!s) return null;
+  return s.workoutId || s.workout || null;
+}
+
 // Days since the most recent session of a given workout type.
 // Returns Infinity when no such session exists (so "never" reads
 // as "infinitely stale" in numeric comparisons).
 export function daysSinceLastOfType(history, workoutId, refDate) {
-  const matches = (history || []).filter(s => s && s.workoutId === workoutId);
+  const matches = (history || []).filter(s => sessionWorkoutKey(s) === workoutId);
   if (matches.length === 0) return Infinity;
   const latest = matches.reduce((mx, s) => (s.date > mx ? s.date : mx), "");
   if (!latest) return Infinity;
@@ -761,7 +772,7 @@ export function computeTagDaysSince(workoutHistory, refDate) {
   };
 
   for (const s of (workoutHistory || [])) {
-    const wo = s && workouts[s.workoutId];
+    const wo = workouts[sessionWorkoutKey(s)];
     if (!wo || !wo.tags) continue;
     const d = daysBetween(s.date, refDate);
     if (!Number.isFinite(d)) continue;

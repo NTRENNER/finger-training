@@ -145,12 +145,14 @@ export function WorkoutTab({
   // ── Recommendation ───────────────────────────────────
   // Drop pin-style rotation sessions (legacy ROTATION_PIN_KEY) so
   // they don't pollute the recommender's daysSinceLastOfType counts.
-  // Also drop sessions that don't carry workoutId — those are legacy
-  // OLD A/B/C sessions; intentionally invisible to the recommender
-  // (per user preference: "keep visible in History, invisible to
-  // recommender").
+  // Accept either workoutId (modern stamp) OR the legacy `workout`
+  // field — a session saved by an older client version, or one
+  // cloud-pulled before sync.js's mirror caught up in local LS,
+  // would otherwise be invisible to the recommender even though
+  // it's clearly an A/B/C session. Sessions that lack BOTH keys
+  // (truly unclassified historical entries) stay invisible.
   const recommenderInput = useMemo(() =>
-    wLog.filter(s => s && s.workoutId && s.workout !== ROTATION_PIN_KEY),
+    wLog.filter(s => s && (s.workoutId || s.workout) && s.workout !== ROTATION_PIN_KEY),
     [wLog]
   );
   const recommendation = useMemo(

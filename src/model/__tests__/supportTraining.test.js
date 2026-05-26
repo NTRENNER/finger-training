@@ -104,6 +104,33 @@ describe("daysSinceLastOfType", () => {
     expect(daysSinceLastOfType(history, "C", REF_DATE)).toBe(8);
     expect(daysSinceLastOfType(history, "D", REF_DATE)).toBe(Infinity);
   });
+
+  test("accepts legacy sessions with only `workout` (no workoutId)", () => {
+    // Older clients (and cloud-pulled sessions before the sync mirror
+    // caught up) may carry `workout: "A"` without `workoutId`. They
+    // should still count toward the recommender's days-since math —
+    // an A session two days ago shouldn't appear as "no A on record"
+    // just because a field name drifted.
+    const legacyA = {
+      id: "legacy-A", workout: "A", date: daysBefore(REF_DATE, 2),
+    };
+    const legacyB = {
+      id: "legacy-B", workout: "B", date: daysBefore(REF_DATE, 1),
+    };
+    expect(daysSinceLastOfType([legacyA, legacyB], "A", REF_DATE)).toBe(2);
+    expect(daysSinceLastOfType([legacyA, legacyB], "B", REF_DATE)).toBe(1);
+  });
+
+  test("workoutId wins when both fields are present and differ", () => {
+    // If a session somehow has both fields with different values
+    // (shouldn't happen, but defensive), workoutId is the authority.
+    const weird = {
+      id: "weird", workoutId: "A", workout: "B",
+      date: daysBefore(REF_DATE, 3),
+    };
+    expect(daysSinceLastOfType([weird], "A", REF_DATE)).toBe(3);
+    expect(daysSinceLastOfType([weird], "B", REF_DATE)).toBe(Infinity);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────
