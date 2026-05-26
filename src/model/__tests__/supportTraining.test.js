@@ -192,137 +192,101 @@ describe("computeTagDaysSince", () => {
 // recommendNextWorkout — rule-by-rule
 // ─────────────────────────────────────────────────────────────
 
-describe("recommendNextWorkout: Rule 1 (A overdue → A)", () => {
-  test("recommends A when last A was 7+ days ago", () => {
-    const history = [sess("A", 7)];
-    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("A");
-    expect(rec.reason).toMatch(/7 days ago/);
-  });
-
-  test("recommends A when no A has ever been done", () => {
+describe("recommendNextWorkout: A→B→C round-robin", () => {
+  test("empty history starts the cycle at A", () => {
     const rec = recommendNextWorkout([], { refDate: REF_DATE });
     expect(rec.primary.id).toBe("A");
-    expect(rec.reason).toMatch(/No A on record/);
+    expect(rec.reason).toMatch(/No A\/B\/C on record/);
   });
 
-  test("does NOT recommend A when last A was 6 days ago", () => {
-    const history = [sess("A", 6)];
+  test("after A → recommends B", () => {
+    const rec = recommendNextWorkout([sess("A", 2)], { refDate: REF_DATE });
+    expect(rec.primary.id).toBe("B");
+    expect(rec.reason).toMatch(/Last support workout was A/);
+  });
+
+  test("after B → recommends C", () => {
+    const rec = recommendNextWorkout([sess("B", 2)], { refDate: REF_DATE });
+    expect(rec.primary.id).toBe("C");
+  });
+
+  test("after C → recommends A (cycle wraps)", () => {
+    const rec = recommendNextWorkout([sess("C", 2)], { refDate: REF_DATE });
+    expect(rec.primary.id).toBe("A");
+  });
+
+  test("Nathan's example: A,B this week, no C — next is C", () => {
+    // A 4 days ago, B 2 days ago → most recent is B → next is C
+    const history = [sess("A", 4), sess("B", 2)];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).not.toBe("A");
+    expect(rec.primary.id).toBe("C");
   });
-});
 
-describe("recommendNextWorkout: Rule 2 (power stale → B)", () => {
-  test("recommends B when power is 10+ days old and other rules don't fire", () => {
-    // A fresh (so rule 1/2 don't fire), B old.
-    const history = [
-      sess("A", 2),
-      sess("B", 11),
-    ];
+  test("Nathan's example: A,B,C,A in one week — next week starts with B", () => {
+    // Sequence in a week: A 6d, B 4d, C 2d, A 0d → most recent is A → next is B
+    const history = [sess("A", 6), sess("B", 4), sess("C", 2), sess("A", 0)];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     expect(rec.primary.id).toBe("B");
   });
 
-  test("does NOT fire when power is only 9 days old", () => {
-    const history = [
-      sess("A", 2),
-      sess("B", 9),
-      sess("C", 1), // keep C fresh so Rule 4 doesn't fire either
-    ];
+  test("STRETCH does NOT advance the rotation", () => {
+    // Last A/B/C was C two days ago. A STRETCH yesterday shouldn't
+    // bump the rotation off C — next is still A (the letter after C).
+    const history = [sess("C", 2), sess("STRETCH", 1)];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).not.toBe("B");
+    expect(rec.primary.id).toBe("A");
+  });
+
+  test("REST does NOT advance the rotation", () => {
+    // Last A/B/C was A → next is B, regardless of a REST marker after.
+    const history = [sess("A", 2), sess("REST", 0)];
+    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
+    expect(rec.primary.id).toBe("B");
+  });
+
+  test("alternatives expose the other two letters in the rotation", () => {
+    // After A, primary=B → alternatives should be A and C (some order)
+    const rec = recommendNextWorkout([sess("A", 2)], { refDate: REF_DATE });
+    const altIds = rec.alternatives.map(a => a.id).sort();
+    expect(altIds).toEqual(["A", "C"]);
   });
 });
 
-describe("recommendNextWorkout: Rule 3 (C touch stale → C)", () => {
-  test("recommends C when last C was 4+ days ago and nothing else is overdue", () => {
-    // A fresh, B fresh, C 5 days ago.
+describe("recommendNextWorkout: same-day tiebreaks", () => {
+  // Multiple A/B/C sessions on the same date — the LATEST one should
+  // win the rotation pointer. Tiebreak order: completedAt timestamp,
+  // then array index.
+  test("completedAt tiebreaks same-date sessions (later completedAt wins)", () => {
     const history = [
-      sess("A", 2),
-      sess("B", 3),
-      sess("C", 5),
+      { id: "x1", workoutId: "A", date: REF_DATE, completedAt: `${REF_DATE}T08:00:00Z` },
+      { id: "x2", workoutId: "B", date: REF_DATE, completedAt: `${REF_DATE}T18:00:00Z` },
     ];
+    // Both today, B finished later → next is C
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     expect(rec.primary.id).toBe("C");
-    expect(rec.reason).toMatch(/5 days ago/);
   });
 
-  test("recommends C when no C has ever been done and earlier rules don't fire", () => {
-    // A done recently (so rule 2 doesn't fire) but C never done →
-    // daysSinceC = Infinity, well past the 4-day threshold.
-    const history = [sess("A", 2), sess("B", 3)];
+  test("array order tiebreaks when completedAt is missing/equal", () => {
+    const history = [
+      { id: "x1", workoutId: "A", date: REF_DATE },
+      { id: "x2", workoutId: "B", date: REF_DATE },
+    ];
+    // No completedAt → array order wins, B is later → next is C
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     expect(rec.primary.id).toBe("C");
-    expect(rec.reason).toMatch(/No C on record/);
   });
 });
 
-describe("recommendNextWorkout: REST is never recommended", () => {
-  // The user signals their own rest needs — the engine doesn't
-  // prompt REST. Pin the invariant: with everything fresh it falls
-  // through to a real workout, never REST.
-  test("does NOT recommend REST when everything is fresh", () => {
-    const history = [
-      sess("A", 2),
-      sess("B", 3),
-      sess("C", 1),
-    ];
-    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).not.toBe("REST");
-  });
-});
-
-describe("recommendNextWorkout: STRETCH is never recommended", () => {
-  // Pin the invariant that the recommender never emits STRETCH as
-  // primary. STRETCH is the daily-habit pill — user-driven, not a
-  // recommender output. Even when mobility tags are deeply stale
-  // (the case that used to fire the dropped Rule 3 → C), the engine
-  // ignores it and falls through to a normal A/B/C choice.
-  test("does NOT recommend STRETCH even with no mobility on record", () => {
-    // Nothing on record → all tags Infinity-stale. Pre-rename, this
-    // case would have hit Rule 3 (mobility stale → old C). Now it
-    // falls through to Rule 2 (no A on record → A) because the
-    // mobility-stale rule no longer exists.
-    const rec = recommendNextWorkout([], { refDate: REF_DATE });
-    expect(rec.primary.id).not.toBe("STRETCH");
-  });
-
-  test("does NOT recommend STRETCH when fresh STRETCH sessions exist", () => {
-    const history = [
-      sess("A", 2),
-      sess("B", 3),
-      sess("C", 1),
-      sess("STRETCH", 0), // logged today via the pill
-    ];
-    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).not.toBe("STRETCH");
-  });
-});
-
-describe("recommendNextWorkout: Rule 4 (fallback → C)", () => {
-  test("recommends C when nothing is strictly overdue", () => {
-    // A fresh, B fresh, C fresh (within touch window).
-    const history = [
-      sess("A", 2),
-      sess("B", 3),
-      sess("C", 2),
-    ];
-    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("C");
-    expect(rec.reason).toMatch(/low-fatigue default/);
-  });
-
-  test("falls back to C when nothing is overdue", () => {
-    // C is the lowest-fatigue real workout in the rotation; the safe
-    // default when no rule fires.
-    const history = [
-      sess("A", 2),
-      sess("B", 3),
-      sess("C", 2),
-    ];
-    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("C");
+describe("recommendNextWorkout: legacy field fallback", () => {
+  test("legacy session with only `workout` (no workoutId) still advances the rotation", () => {
+    // The 5/24 A-session bug: a session missing workoutId but with
+    // `workout: "A"` should still count as the most-recent A and
+    // make the next recommendation B.
+    const legacyA = {
+      id: "legacy", workout: "A", date: daysBefore(REF_DATE, 2),
+    };
+    const rec = recommendNextWorkout([legacyA], { refDate: REF_DATE });
+    expect(rec.primary.id).toBe("B");
   });
 });
 

@@ -44,7 +44,13 @@
 // never used the dedicated mobility session, which is part of why we
 // know the daily-habit framing is the right shape for the adaptation).
 
-import { today } from "../util.js";
+// `today` was imported here when the recommender's refDate option
+// defaulted to it (frequency-based engine, May 2026 and earlier).
+// The round-robin rewrite doesn't compute against a clock — the
+// rotation pointer is purely a function of the most-recent A/B/C
+// in history — so the import is dropped. The refDate option signature
+// is still accepted for back-compat with existing test fixtures, just
+// ignored.
 
 // Valid stimulus tags (string union):
 //   climbing, strength, power, neural, connective, explosive,
@@ -624,6 +630,29 @@ export const workouts = {
 // recommender could re-introduce structured rest at a higher
 // level (weeks, not days).
 //
+// May 2026 rewrite — round-robin model:
+//   The earlier engine was frequency-based: A treated as the week's
+//   strength slot (≥7-day staleness), B as power refresh (≥10-day
+//   staleness on power/explosive tags), C as the 4-day strength
+//   touch-up. Each branch had its own clock. That sounded principled
+//   but in practice the clocks didn't align with how the user
+//   actually trained: after an A + B in a single week, the engine
+//   would re-recommend A on day 8 because the A clock had elapsed,
+//   even though the user clearly wanted C next.
+//
+//   The new model is dead-simple A → B → C → A rotation: whichever
+//   letter was logged most recently, the next one in the cycle is
+//   what gets recommended. No frequency clocks, no tag staleness,
+//   no separate budget per letter. Users who skip a session in the
+//   cycle just resume from where they left off — if they did A and
+//   B this week but didn't make it to C, next session is C; if they
+//   did A, B, C, A in a single week, next week starts with B.
+//
+//   STRETCH and REST never count toward rotation advancement —
+//   STRETCH is a daily habit the user toggles directly, and REST
+//   is an explicit "no workout" marker. The engine still won't ever
+//   *recommend* STRETCH or REST.
+//
 // What happened to the old "energyLow" rule (A overdue + low
 // energy → C with caution)? Retired May 2026. The toggle was
 // theoretical: if the user is wiped enough to want a lighter
@@ -635,91 +664,84 @@ export const workouts = {
 // What happened to the old hip/positional-capacity rule? Retired
 // when the dedicated mobility session moved out of the picker
 // rotation into the daily-stretching pill (May 2026). Mobility
-// staleness is still computed via computeTagDaysSince and
-// surfaces visually on the pill itself — gray default, yellow at
-// 3–5 days, orange at 6+ — instead of elbowing a weekly workout
-// slot. STRETCH is never a recommender output; it's a daily
-// habit the user toggles directly.
-//
-// Tunable thresholds live as constants below so tweaking doesn't
-// require touching the decision tree.
+// staleness still surfaces visually on the pill itself — gray
+// default, yellow at 3–5 days, orange at 6+ — instead of elbowing
+// a weekly workout slot.
 
-const A_OVERDUE_DAYS     = 7;
-const POWER_STALE_DAYS   = 10;
-const C_TOUCH_DAYS       = 4;
+// Rotation order. The recommender returns the letter that comes
+// AFTER the most-recently-logged one in this list, wrapping back
+// to the start at the end.
+const ROTATION = ["A", "B", "C"];
 
 /**
- * Recommend the next support-training session.
+ * Recommend the next support-training session via A → B → C
+ * round-robin advancement.
  *
- * @param {Array<{id:string, workoutId:string, date:string}>} workoutHistory
- *   Completed support sessions. `workoutId` is one of
- *   A/B/C/STRETCH/CLIMB/REST. Order doesn't matter; the recommender
- *   scans for most-recent matches. STRETCH sessions are accepted in
- *   history (they're real marker sessions) but the engine never
- *   *recommends* STRETCH — that's a user-driven daily habit, not a
- *   day-of choice.
+ * Finds the most recent A/B/C session in `workoutHistory` (by date,
+ * with completedAt + array-order tiebreaks for same-day workouts)
+ * and returns the next letter in the cycle. Sessions that aren't
+ * in the rotation (STRETCH, REST, climbing, anything unknown) are
+ * ignored entirely — they don't advance the rotation pointer and
+ * they don't reset it.
+ *
+ * @param {Array<{id:string, workoutId?:string, workout?:string, date:string, completedAt?:string}>} workoutHistory
+ *   Completed support sessions. Accepts either `workoutId` (modern)
+ *   or `workout` (legacy/cloud-mirror); see sessionWorkoutKey.
  * @param {Object} [opts]
  * @param {string} [opts.refDate]  ISO date for testing. Defaults to today().
  *
  * @returns {{
  *   primary: object, reason: string,
- *   caution?: string, alternatives: object[]
+ *   alternatives: object[]
  * }}
  */
+// eslint-disable-next-line no-unused-vars
 export function recommendNextWorkout(workoutHistory = [], opts = {}) {
-  const { refDate = today() } = opts;
+  // refDate is no longer used internally (no day-budget math), but
+  // we keep the option signature so older callers and tests don't
+  // need to change their call sites.
 
-  const daysSinceA = daysSinceLastOfType(workoutHistory, "A", refDate);
-  const daysSinceC = daysSinceLastOfType(workoutHistory, "C", refDate);
-  const tagDays    = computeTagDaysSince(workoutHistory, refDate);
+  // Walk the history once and pick the latest A/B/C session. Tiebreaks:
+  //   1. Later `date` wins.
+  //   2. Within a day, later `completedAt` wins (sessions logged in
+  //      the same day still resolve to the one finished most recently).
+  //   3. Same date + same/missing completedAt → later array index wins
+  //      (the log grows append-only locally, so later index == later log).
+  let latest = null;
+  let latestIdx = -1;
+  for (let i = 0; i < (workoutHistory || []).length; i++) {
+    const s = workoutHistory[i];
+    const key = sessionWorkoutKey(s);
+    if (!ROTATION.includes(key) || !s.date) continue;
+    const isLater =
+      !latest
+      || s.date > latest.date
+      || (s.date === latest.date && (s.completedAt || "") > (latest.completedAt || ""))
+      || (s.date === latest.date && (s.completedAt || "") === (latest.completedAt || "") && i > latestIdx);
+    if (isLater) {
+      latest = s;
+      latestIdx = i;
+    }
+  }
 
-  // 1. A overdue → A. The week's reservation slot.
-  if (daysSinceA >= A_OVERDUE_DAYS) {
+  // No A/B/C on record yet → seed the rotation at A.
+  if (!latest) {
     return {
       primary: workouts.A,
-      reason: daysSinceA === Infinity
-        ? "No A on record yet. This is the week's one big strength day."
-        : `Last A was ${daysSinceA} days ago — time to claim the week's strength slot.`,
-      alternatives: [workouts.C, workouts.B],
+      reason: "No A/B/C on record yet. Start the rotation with A.",
+      alternatives: [workouts.B, workouts.C],
     };
   }
 
-  // 2. Power / explosive stale → B.
-  const powerDays = Math.min(
-    tagDays.power     ?? Infinity,
-    tagDays.explosive ?? Infinity,
-  );
-  if (powerDays >= POWER_STALE_DAYS) {
-    return {
-      primary: workouts.B,
-      reason: powerDays === Infinity
-        ? "No athletic power work on record yet. Stay fast and springy."
-        : `Athletic power is due (~${powerDays} days). Keep it fast and low-fatigue.`,
-      alternatives: [workouts.C, workouts.A],
-    };
-  }
+  const lastKey = sessionWorkoutKey(latest);
+  const nextKey = ROTATION[(ROTATION.indexOf(lastKey) + 1) % ROTATION.length];
 
-  // 3. Strength touch stale → C.
-  if (daysSinceC >= C_TOUCH_DAYS) {
-    return {
-      primary: workouts.C,
-      reason:
-        daysSinceC === Infinity
-          ? "No C on record yet. Brief strength touch maintains the pull/press pattern between A sessions."
-          : `Last C was ${daysSinceC} days ago. Brief strength touch.`,
-      alternatives: [workouts.B, workouts.REST],
-    };
-  }
-
-  // 4. Fallback — nothing strictly overdue, default to C.
-  // C is the lowest-fatigue real workout in the rotation; safe to
-  // do on top of climbing or in a fresher window. The user signals
-  // their own rest needs and doesn't want the engine prompting REST,
-  // so REST is offered as an alternative rather than the primary.
   return {
-    primary: workouts.C,
-    reason: "Nothing's strictly overdue. C is the low-fatigue default — brief, doesn't bury you.",
-    alternatives: [workouts.B, workouts.REST],
+    primary: workouts[nextKey],
+    reason: `Last support workout was ${lastKey} — next in the rotation is ${nextKey}.`,
+    alternatives: ROTATION
+      .filter(k => k !== nextKey)
+      .map(k => workouts[k]),
   };
 }
 
