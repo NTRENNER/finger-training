@@ -2,7 +2,7 @@
 // GRADE PYRAMID — 5-tier outline model
 // ─────────────────────────────────────────────────────────────
 // Visual-first pyramid: 5 tiers from project (apex) down, with a
-// fixed outline of 1-2-3-4-7 blocks per tier. Logged sends shade
+// fixed outline of 1-4-7-10-13 blocks per tier. Logged sends shade
 // blocks in from the left at each tier. Extras above a tier's
 // target don't extend the row — the pyramid keeps its shape, and
 // the "no need to record in the pyramid" stance means over-volume
@@ -19,12 +19,18 @@
 //     a full apex with thin base is "go log easier mileage."
 //     No text needed.
 //
-// Tier target widths [1, 2, 3, 4, 7]:
-//   - Top four follow the clean 1-2-3-4 geometric stack that's
-//     immediately recognizable as a pyramid silhouette.
-//   - Base widens to 7 to preserve the Power Company insight that
-//     base mileage matters most — a substantial but finite floor
-//     instead of "10+ ATB" with no visual ceiling.
+// Tier target widths [1, 4, 7, 10, 13]:
+//   - Strict +3 arithmetic progression from apex to base. Each
+//     grade below the project demands proportionally more volume
+//     than the one above it; you can't credibly advance to a grade
+//     until you've consolidated a real base at the grades below.
+//   - Apex stays at 1 — the project is one specific route, by
+//     definition. The pyramid won't come to a perfectly crafted
+//     peak (the apex-to-tier-1 jump is 1 → 4), but that's a feature:
+//     "log lots of mileage at the supporting grades" is the message.
+//   - Minimum 4 sends one grade below project pins the coaching
+//     principle that 2-3 isn't enough — you should feel comfortable
+//     at a grade before pushing through it.
 //
 // "Overgrew the project" signal: when sends exist ABOVE the apex
 // rank, that's the one piece of coaching the shape alone can't
@@ -41,11 +47,11 @@
 // subgrades (0.25 rank/tier) and boulder pyramids step by V-grades
 // (1 rank/tier).
 const TIER_TARGETS = [
-  { tier:  0, target: 1 },   // apex (project)
-  { tier: -1, target: 2 },
-  { tier: -2, target: 3 },
-  { tier: -3, target: 4 },
-  { tier: -4, target: 7 },   // base
+  { tier:  0, target:  1 },   // apex (project)
+  { tier: -1, target:  4 },
+  { tier: -2, target:  7 },
+  { tier: -3, target: 10 },
+  { tier: -4, target: 13 },   // base
 ];
 
 // Pick the project grade as the highest-rank grade with at least
@@ -75,7 +81,7 @@ export function inferProjectGrade(rows, { minSends = 1 } = {}) {
 //     tiers: [                 // project → base, length 5
 //       {
 //         tier,                // 0, -1, -2, -3, -4
-//         target,              // 1, 2, 3, 4, 7
+//         target,              // 1, 4, 7, 10, 13
 //         grade,               // grade label at this rank (or null)
 //         rank,                // rank for this tier (or null)
 //         actualCount,         // total sends at this rank
