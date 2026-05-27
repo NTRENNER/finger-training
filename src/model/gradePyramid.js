@@ -63,23 +63,32 @@ const TIER_TARGETS = [
 const MAX_GRADUATION = 5;
 
 // Compute how many grades the visual pyramid should sit above the
-// user's pinned project, based on how many top-of-pyramid tiers
-// have already been filled to target.
+// user's pinned project, based on top- or bottom-driven consolidation
+// signals.
 //
-// Loop:
-//   1. Start with graduation = 0 (apex = pin).
-//   2. Look up the apex tier's count at apexRank.
-//   3. If count >= apex target (3), bump graduation by one and
-//      step apexRank up by stepSize, then repeat.
-//   4. Stop when the apex tier isn't full, or when graduation
-//      hits MAX_GRADUATION (defensive cap).
+// Two triggers, OR'd together:
+//
+//   1. Apex full (ceiling moved up). The user has sent the project
+//      grade at least `apexTarget` times (3 in current shape). They've
+//      operationally outgrown the project — V9 should be apex, V8 a
+//      regular tier below.
+//
+//   2. Tier -3 full (floor moved up). The user has consolidated the
+//      grade just above their base — `tierMinus3Target` sends (9 in
+//      current shape). The base grade (V4 in a V8-pinned pyramid) is
+//      now warmup territory; the V5 grade IS their new base.
+//
+//   Either signal graduates the pyramid by one. The loop chains: if
+//   the post-shift pyramid ALSO meets a trigger condition, graduate
+//   again. Hard cap at MAX_GRADUATION (5).
 //
 // Pure function — takes the raw rows (same shape as buildPyramidPlan)
 // and returns just the integer offset. ClimbingAnalysisView uses
 // this to compute the visualApex passed to PyramidChart.
 export function computeGraduation(rows, pinnedRank, stepSize = 1) {
   if (!Number.isFinite(pinnedRank) || !Array.isArray(rows)) return 0;
-  const apexTarget = TIER_TARGETS[0].target;   // 3 in the current shape
+  const apexTarget       = TIER_TARGETS[0].target;   // tier  0 target (3)
+  const tierMinus3Target = TIER_TARGETS[3].target;   // tier -3 target (9)
   const rankKey = (r) => Math.round(r * 100) / 100;
   const countByRank = new Map();
   for (const r of rows) {
@@ -88,8 +97,10 @@ export function computeGraduation(rows, pinnedRank, stepSize = 1) {
   let graduation = 0;
   while (graduation < MAX_GRADUATION) {
     const apexRank = pinnedRank + graduation * stepSize;
-    const count = countByRank.get(rankKey(apexRank)) ?? 0;
-    if (count >= apexTarget) {
+    const tierMinus3Rank = apexRank - 3 * stepSize;
+    const apexCount       = countByRank.get(rankKey(apexRank)) ?? 0;
+    const tierMinus3Count = countByRank.get(rankKey(tierMinus3Rank)) ?? 0;
+    if (apexCount >= apexTarget || tierMinus3Count >= tierMinus3Target) {
       graduation += 1;
     } else {
       break;

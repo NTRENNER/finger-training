@@ -123,40 +123,59 @@ describe("buildPyramidPlan — shading & status", () => {
 });
 
 describe("computeGraduation", () => {
-  // Apex target is 3 — graduation fires when the apex grade has
-  // ≥ 3 sends. Chains while each successive apex stays full.
-  test("returns 0 when the apex isn't full", () => {
-    const rows = [row("V8", 8, 2)];        // only 2/3 at the apex
+  // Two triggers, OR'd: apex full (3 sends at pin) or tier -3 full
+  // (9 sends 3 grades below pin). Either fires a one-grade shift up;
+  // chains as long as the new pyramid still satisfies a trigger.
+
+  test("returns 0 when neither apex nor tier -3 is full", () => {
+    const rows = [row("V8", 8, 2), row("V5", 5, 8)];   // both partial
     expect(computeGraduation(rows, 8, 1)).toBe(0);
   });
 
-  test("returns 1 when the apex has been sent 3 times", () => {
-    const rows = [row("V8", 8, 3)];        // 3/3 apex → graduate one
+  test("apex full (project sent 3 times) graduates one", () => {
+    const rows = [row("V8", 8, 3)];                    // apex 3/3
     expect(computeGraduation(rows, 8, 1)).toBe(1);
   });
 
-  test("counts ≥ target also graduate (4 sends still triggers)", () => {
-    const rows = [row("V8", 8, 4)];
+  test("tier -3 full (V5 9 sends) graduates one — Nathan's case", () => {
+    // V8 pinned, no V8 sends, but V5 (tier -3) is full at 9.
+    const rows = [
+      row("V4", 4, 8), row("V5", 5, 9), row("V6", 6, 4),
+    ];
     expect(computeGraduation(rows, 8, 1)).toBe(1);
   });
 
-  test("chains: V8 has 3 AND V9 has 3 → graduate twice", () => {
-    const rows = [row("V8", 8, 5), row("V9", 9, 3)];
+  test("counts ≥ target also graduate (4 apex sends, 10 V5 sends)", () => {
+    expect(computeGraduation([row("V8", 8, 4)], 8, 1)).toBe(1);
+    expect(computeGraduation([row("V5", 5, 10)], 8, 1)).toBe(1);
+  });
+
+  test("chains: V5 full + V6 full → graduate twice", () => {
+    // After first graduation, new tier -3 = V6. V6 also full at 9 → again.
+    const rows = [row("V5", 5, 9), row("V6", 6, 9)];
     expect(computeGraduation(rows, 8, 1)).toBe(2);
   });
 
-  test("chain stops as soon as a tier isn't full", () => {
-    const rows = [row("V8", 8, 3), row("V9", 9, 2)];
-    expect(computeGraduation(rows, 8, 1)).toBe(1);   // V8 full, V9 partial
+  test("chains: apex full at V8 AND V9 → graduate twice", () => {
+    const rows = [row("V8", 8, 3), row("V9", 9, 3)];
+    expect(computeGraduation(rows, 8, 1)).toBe(2);
+  });
+
+  test("chain stops as soon as neither trigger fires on new pyramid", () => {
+    // V5 full triggers grad #1 (apex moves to V9). Post-shift checks:
+    // V9 count? 0. V6 (new tier -3) count? 4. Neither full → stop at 1.
+    const rows = [row("V5", 5, 9), row("V6", 6, 4)];
+    expect(computeGraduation(rows, 8, 1)).toBe(1);
   });
 
   test("YDS stepSize 0.25 walks one letter subgrade per chain step", () => {
-    // 5.12c at 3 sends + 5.12d at 3 sends → chain twice → apex moves to 5.13a
+    // Project 5.13a. V(5.12d-3) = 5.12a wouldn't be a real tier -3 in
+    // YDS because stepSize is 0.25; tier -3 of 5.13a is 5.12b.
+    // Set up: 5.12b has 9 sends → tier -3 full at pin = 5.13a.
     const rows = [
-      { grade: "5.12c", rank: 12.5,  count: 3 },
-      { grade: "5.12d", rank: 12.75, count: 3 },
+      { grade: "5.12b", rank: 12.25, count: 9 },
     ];
-    expect(computeGraduation(rows, 12.5, 0.25)).toBe(2);
+    expect(computeGraduation(rows, 13.0, 0.25)).toBe(1);
   });
 
   test("invalid input returns 0", () => {
@@ -166,8 +185,8 @@ describe("computeGraduation", () => {
   });
 
   test("hard cap at MAX_GRADUATION = 5 prevents runaway loops", () => {
-    // Pathological: every successive grade is full. Graduation should
-    // stop at 5 even if more grades are above.
+    // Pathological: every grade is over the tier -3 target. Graduation
+    // should stop at 5 even if more grades are below.
     const rows = Array.from({ length: 10 }, (_, i) => row(`V${i}`, i, 99));
     expect(computeGraduation(rows, 0, 1)).toBe(5);
   });

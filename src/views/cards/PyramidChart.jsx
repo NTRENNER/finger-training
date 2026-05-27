@@ -129,10 +129,27 @@ export function PyramidChart({
       {/* The silhouette — five centered rows of outlined blocks,
           shaded left-to-right as sends accrue. Shaded blocks are
           tappable (when climbs metadata is available) and open the
-          per-grade detail popover. */}
+          per-grade detail popover.
+
+          Pin highlight vs reach apex:
+          - The pinned project (user's stated goal) gets the solid
+            warm-yellow outline. When the pyramid hasn't graduated,
+            that's the apex (tier 0). When it has, the pin slides
+            down by `graduation` tiers — so pinTierOffset == -graduation.
+          - The visual apex above the pin, when graduation > 0, is a
+            "reach goal": same warm-yellow hue but DASHED so it reads
+            as aspirational rather than current. */}
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
         {plan.tiers.map(t => {
           const isApex = t.tier === 0;
+          const isPin = t.tier === -graduation;
+          const isReachApex = isApex && graduation > 0;
+          // Outline color: yellow for the pin OR the reach apex,
+          // muted border for non-pin, non-reach tiers.
+          const outlineColor = isPin || isReachApex ? "#fde68a" : C.border;
+          // Dashed border for reach apex (aspirational); solid for the
+          // pin (your current project) and everything else.
+          const outlineStyle = isReachApex ? "dashed" : "solid";
           // Tappable when there's at least one shaded block AND we
           // actually have per-climb metadata to show. Older callers
           // that don't thread `climbs` through will see the static
@@ -142,13 +159,21 @@ export function PyramidChart({
             <div key={t.tier} style={{
               display: "flex", alignItems: "center",
             }}>
-              {/* Left gutter — grade label for this tier. */}
+              {/* Left gutter — grade label for this tier. The pin
+                  label is the warm yellow; reach apex uses the same
+                  yellow but at reduced opacity to echo the dashed
+                  block outline. */}
               <div style={{
                 width: GUTTER, flex: `0 0 ${GUTTER}px`, textAlign: "right",
                 paddingRight: 8, boxSizing: "border-box",
                 fontSize: 12,
-                color: t.grade ? (isApex ? "#fde68a" : "#fff") : C.muted,
+                color: t.grade
+                  ? (isPin
+                    ? "#fde68a"
+                    : isReachApex ? "#fde68a99" : "#fff")
+                  : C.muted,
                 fontWeight: t.grade ? 700 : 400,
+                fontStyle: isReachApex ? "italic" : "normal",
               }}>
                 {t.grade ?? "—"}
               </div>
@@ -172,13 +197,8 @@ export function PyramidChart({
                           display: "inline-block",
                           width: BLOCK.size, height: BLOCK.size,
                           background: isShaded ? fill : "transparent",
-                          // Apex outline gets a warm-yellow tint so the
-                          // "project" position is identifiable even in
-                          // the empty state (no shading yet). Below the
-                          // apex, unshaded outlines use the muted border
-                          // color so empty rows recede visually.
-                          border: `1.5px solid ${
-                            isShaded ? fill : (isApex ? "#fde68a" : C.border)
+                          border: `1.5px ${outlineStyle} ${
+                            isShaded ? fill : outlineColor
                           }`,
                           borderRadius: 2,
                           cursor: interactive ? "pointer" : "default",
@@ -199,12 +219,13 @@ export function PyramidChart({
         })}
       </div>
 
-      {/* Minimal footer — project pin label, plus a graduation tag
+      {/* Minimal footer — project pin label, plus a reach-goal tag
           when the visual apex has shifted above the pin (climber
           consolidated and the silhouette auto-graduated up). The
           pinned label stays so the climber always sees what they
-          explicitly chose; the "graduated to" tag tells them where
-          the visual apex sits. */}
+          explicitly chose; the "Reach" tag tells them what the
+          (dashed) reach apex represents — a stretch grade beyond
+          the stated project. */}
       <div style={{
         borderTop: `1px solid ${C.border}`, paddingTop: 8,
         fontSize: 11, color: C.muted, textAlign: "center",
@@ -213,8 +234,8 @@ export function PyramidChart({
         {graduation > 0 && plan.projectGrade && (
           <>
             {" · "}
-            <span style={{ color: C.purple, fontWeight: 700 }}>
-              Graduated to {plan.projectGrade}
+            <span style={{ color: "#fde68a", fontStyle: "italic" }}>
+              Reach: {plan.projectGrade}
             </span>
           </>
         )}
