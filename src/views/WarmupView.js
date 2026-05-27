@@ -75,13 +75,41 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   const currentStep = steps[stepIdx];
 
   // ── Hang timer (count up while force is held above threshold) ──
+  // The hang phase auto-advances when elapsed reaches the prescribed
+  // targetSec — same intent as the rest countdown auto-advancing at
+  // 0. Without this, the warmup just *suggests* a 30s hold and waits
+  // for the user to release; with it, the protocol enforces the
+  // prescribed schedule. If the user releases before target, the
+  // auto-detect rep-end still fires (handleHangComplete from the BLE
+  // callback), so an early release is graceful, not blocked.
+  //
+  // When auto-end fires while the user is still pulling, we also tell
+  // the Tindeq to require a real release before re-arming pull-detect
+  // (see tindeq.endRepAndRequireRelease). Otherwise their continued
+  // grip on the L hand would immediately trigger an onRepStart for the
+  // R hand the moment we transition to hang-armed.
   useEffect(() => {
     if (tickRef.current) clearInterval(tickRef.current);
     if (phase === "hang-active") {
+      const targetSec = currentStep?.targetSec || 0;
       startTimeRef.current = Date.now();
       setElapsed(0);
       tickRef.current = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+        const ms = Date.now() - startTimeRef.current;
+        const secs = Math.floor(ms / 1000);
+        setElapsed(secs);
+        // Auto-advance once we've held to target. Check on the
+        // millisecond clock (not `secs`) so a tick that lands a
+        // hair past target still fires — setInterval drift can
+        // skip a 1s boundary otherwise.
+        if (targetSec > 0 && ms >= targetSec * 1000) {
+          clearInterval(tickRef.current);
+          tickRef.current = null;
+          if (tindeq?.endRepAndRequireRelease) {
+            tindeq.endRepAndRequireRelease();
+          }
+          handleHangComplete();
+        }
       }, 200);
     } else if (phase === "rest") {
       const startedAt = Date.now();

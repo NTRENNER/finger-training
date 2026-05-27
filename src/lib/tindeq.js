@@ -204,6 +204,12 @@ export function useTindeq() {
   const adCountRef      = useRef(0);      // sample count for live avg display
   const adSamplesRef    = useRef([]);     // raw {kg, ts} buffer for plateau-trim at rep end
   const adBelowRef      = useRef(null);   // timestamp when force first dipped below end-threshold
+  // Set true by endRepAndRequireRelease() — used by the adaptive
+  // warmup when it auto-ends a hang at target time while the user is
+  // still pulling. Blocks onRepStart from firing on the user's
+  // continued grip; cleared automatically once force drops below
+  // AD_END_KG (a real release).
+  const adAwaitReleaseRef = useRef(false);
   const AD_START_KG  = 4;    // force must exceed this to begin auto-rep
   const AD_END_KG    = 3;    // force must drop below this to end auto-rep
   const AD_END_MS    = 500;  // ms below end-threshold before rep is confirmed done
@@ -290,7 +296,16 @@ export function useTindeq() {
       if (adOnStartRef.current || adOnEndRef.current) {
         const now = Date.now();
         if (!adActiveRef.current) {
-          if (kg >= AD_START_KG) {
+          // "Await release" guard. Set by endRepAndRequireRelease()
+          // — the warmup uses it when it auto-ends a hang at target
+          // while the user is still pulling. We don't want their
+          // continued grip to trigger an immediate new rep on the
+          // next hand; we wait for force to drop below AD_END_KG
+          // (real release) before re-arming.
+          if (adAwaitReleaseRef.current) {
+            if (kg < AD_END_KG) adAwaitReleaseRef.current = false;
+            // Either way, skip the AD_START_KG check this packet.
+          } else if (kg >= AD_START_KG) {
             adActiveRef.current    = true;
             adStartTimeRef.current = now;
             // Reset live-display accumulators and the raw sample buffer
@@ -463,12 +478,42 @@ export function useTindeq() {
     if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_START);
   }, []);
 
+  // Programmatically end the current auto-detect rep and require the
+  // user to fully release before the next pull is treated as a new
+  // rep. Used by the adaptive warmup when it auto-advances at the
+  // prescribed hold target time while the user is still gripping —
+  // without the "await release" guard, the user's continued force
+  // would immediately retrigger onRepStart for the next hand.
+  //
+  // Does NOT writeValue(CMD_STOP) — keeps the BLE stream alive so
+  // tindeq.force keeps updating during the hand swap. Returns the
+  // same { actualTime, avgForce, peakForce } shape as the natural
+  // rep-end callback so the caller can record the rep if it wants
+  // (the warmup doesn't, but the contract stays consistent).
+  const endRepAndRequireRelease = useCallback(() => {
+    const now = Date.now();
+    const actualTime = adStartTimeRef.current
+      ? (now - adStartTimeRef.current) / 1000
+      : 0;
+    const avg = computePlateauAvg(adSamplesRef.current);
+    const peakF = peakRef.current;
+    adActiveRef.current     = false;
+    adStartTimeRef.current  = null;
+    adSumRef.current        = 0;
+    adCountRef.current      = 0;
+    adSamplesRef.current    = [];
+    adBelowRef.current      = null;
+    adAwaitReleaseRef.current = true;
+    return { actualTime, avgForce: avg, peakForce: peakF };
+  }, []);
+
   const stopAutoDetect = useCallback(async () => {
     adOnStartRef.current = null;
     adOnEndRef.current   = null;
     adActiveRef.current  = false;
+    adAwaitReleaseRef.current = false;
     if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_STOP);
   }, []);
 
-  return { connected, reconnecting, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect };
+  return { connected, reconnecting, force, peak, avgForce, bleError, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
 }
