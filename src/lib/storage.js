@@ -130,6 +130,13 @@ export const LS_CLIMBING_HISTORY_FILTERS_KEY = "ft_climbing_history_filters";
 // project anchor.
 export const LS_PYRAMID_PROJECT_KEY = "ft_pyramid_project";
 
+// Adaptive warmup mode — "boulder" (perfusion + BORK potentiation)
+// or "route" (perfusion only, longer holds). The WarmupView surfaces
+// a pill toggle on the preview screen; this LS key remembers the
+// last choice so it persists across sessions on the same device.
+// Unset / unrecognized values default to "boulder" in the view.
+export const LS_WARMUP_MODE_KEY = "ft_warmup_mode";
+
 // (LS_PYRAMID_WARMUP_KEY existed when the pyramid card had a
 // "Warmups ≤ Vx" floor selector — May 2026. The redesigned 5-tier
 // silhouette doesn't filter by warmup, so the key was removed. Any

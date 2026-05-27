@@ -5,31 +5,50 @@
 // Builds a personalized warm-up protocol on demand from the user's
 // per-grip three-exp force curves + bodyweight + recent pullup max.
 //
+// Two modes:
+//   - 'boulder' (default): perfusion + BORK potentiation primer
+//   - 'route':             perfusion only, longer holds
+//
+// Sports-science skeleton:
+//   - Perfusion phase: sustained sub-failure holds anchored to F(60s),
+//     not peak. F(60s) is what the user can hold for ~60s before
+//     failing — their "second rep" sustainable level. Intensities at
+//     70-80% of F(60s) sit well below failure for the prescribed
+//     hold (30-60s), so the climber finishes each rep with margin.
+//     Raises tissue temp, increases blood flow, mobilizes glycogen
+//     WITHOUT fatiguing the contractile machinery. The earlier
+//     protocol (60% × peak) was actually a near-failure load for the
+//     60s step — quietly defeating its own warmup goal.
+//
+//   - BORK potentiation (boulder mode only, last step before pullups):
+//     5 reps of brief (~5s) MAX voluntary contractions on the Micro
+//     gripper, 45s rest between. Classical Post-Activation
+//     Potentiation: short heavy stimulus → enhanced motor unit
+//     recruitment + CNS facilitation in a 4-10 minute window.
+//     Micro (not Crusher) because the small-edge crimp pattern is
+//     what climbing demands; PAP transfers best when the primer
+//     matches the target movement. No target load — the user just
+//     pulls hard for each rep. First rep typically hits below peak;
+//     reps 3-5 ride the potentiation curve upward.
+//
+//   Route mode skips BORK (the potentiation window fades faster than
+//   the perfusion benefit, and route climbing rewards endurance
+//   prep more than CNS priming) and stretches the Micro perfusion
+//   hold to 60s for a deeper endurance-system warmup.
+//
 // Tindeq-driven design: each hang step prescribes a target LOAD (in kg)
 // derived from the curve at a fixed reference time, and a target HOLD
 // duration. The user pulls into the Tindeq until they reach the target
-// load, holds for the prescribed time, releases. No bodyweight hanging,
-// no extrapolation — loads always come from the curve at durations the
-// curve has actually seen.
+// load, holds for the prescribed time, releases. No extrapolation —
+// loads always come from the curve at durations the curve has seen.
 //
 // IMPORTANT: warm-up reps DO NOT get logged or counted as training data.
 // Pure prescription — nothing flows back into the F-D fit.
 //
-// Protocol structure (4 steps):
-//   1. Two-Handed Crusher · 25%  — 25% × F_crusher(30s) per hand, 30s hold
-//   2. Two-Handed Crusher · 50%  — 50% × F_crusher(60s) per hand, 60s hold
-//   3. Two-Handed Micro   · 30%  — 30% × F_micro(30s)   per hand, 30s hold
-//   4. Pullup finisher           — bodyweight, 40% of recent max × 2 sets
-//
-// Each hang step alternates L → R using one Tindeq. Between step 2 and
-// step 3 the Tindeq swaps from the Crusher to the Micro gripper (the
-// view prompts for this).
-//
 // Math:
 //   F_grip(T) = three-exp prediction at duration T on that grip's curve.
-//   Step load = intensity_pct × F_grip(reference_time).
-//   These are loads the curve has covered, so no extrapolation issues
-//   regardless of how strong the user is relative to bodyweight.
+//   Step load = intensity_pct × F_grip(60s)  [perfusion]
+//   BORK has no target — display "Pull MAX" and capture peak.
 
 import {
   fitThreeExpAmps,
@@ -184,20 +203,27 @@ function getRecentPeakMVC(history, grip, daysOld = 90) {
  * @param {Array}  args.history       - finger-training rep history (App-level)
  * @param {Array}  args.wLog          - workout log array (Lifts data)
  * @param {number} args.bodyWeightKg  - user's bodyweight in kg
- * @returns {Object} { ok, reason?, bodyWeightKg, bodyWeightLbs, pullupSource, steps[] }
+ * @param {'boulder'|'route'} [args.mode='boulder'] - what climbing you're warming up FOR
+ * @returns {Object} { ok, reason?, mode, bodyWeightKg, bodyWeightLbs,
+ *                     mvcSource, perfusionSource, pullupSource, steps[] }
  *
- * Each hang step has:
+ * Hang step shape:
  *   { id, title, intensityLabel, type: 'hang',
- *     grip,                  - "Crusher" or "Micro" (single grip per step)
- *     targetLoadKg,          - per-hand target force in kg
- *     targetSec,             - target hold duration
+ *     grip, targetLoadKg, targetSec, restAfterSec, description }
+ *
+ * BORK step shape (boulder mode only, last hang step before pullups):
+ *   { id, title, intensityLabel, type: 'bork',
+ *     grip,                  - "Micro"
+ *     reps,                  - 5
+ *     holdSec,               - 5 (each rep)
+ *     restBetweenSec,        - 45 (between reps)
  *     restAfterSec,
  *     description }
  *
- * The pullup finisher step:
+ * Pullup finisher step:
  *   { id, title, type: 'pullup', targetReps, sets, restAfterSec, description }
  */
-export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
+export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "boulder" }) {
   if (!bodyWeightKg || bodyWeightKg <= 0) {
     return {
       ok: false,
@@ -213,12 +239,9 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
   }
   const microAmps = fitGripAmps(history, "Micro");
 
-  // ── MVC reference per grip ──
-  // Peak force across recent reps gives a near-MVC reference that's
-  // calibrated to the user's actual high-effort moments (no ramp-up
-  // bias, captures spikes the sustained-force curve never sees). Fall
-  // back to F(30s) on the curve if no peak data is available (legacy
-  // reps from before peak capture).
+  // ── Per-grip MVC reference (used only for the BORK potentiation
+  // step's display target, since BORK itself has no target load — the
+  // user just pulls max). Peak across recent reps; fall back to curve.
   const crusherPeak = getRecentPeakMVC(history, "Crusher");
   const microPeak   = getRecentPeakMVC(history, "Micro");
   const crusherMVC  = crusherPeak ?? targetLoadFromCurve(crusherAmps, 30, 1.0);
@@ -226,54 +249,92 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
   const crusherSource = crusherPeak ? "peak" : "curve";
   const microSource   = microPeak ? "peak" : (microAmps ? "curve" : null);
 
+  // ── Per-grip F(60s) reference (sustainable "second-rep" capacity) ──
+  // This is the perfusion anchor. Force the user can hold for ~60s
+  // before failing — a robust population stat (not a noise-sensitive
+  // peak sample) that matches the working force during real climbing.
+  const crusherF60 = targetLoadFromCurve(crusherAmps, 60, 1.0);
+  const microF60   = microAmps ? targetLoadFromCurve(microAmps, 60, 1.0) : null;
+
+  const isRoute = mode === "route";
   const steps = [];
 
-  // ── Step 1: Crusher · 40% × MVC for 30s ──
-  // Light activation set. 40% of MVC is a standard hangboard warm-up
-  // intensity — engages the muscle without going near failure.
+  // ── Perfusion 1: Crusher · 70% × F(60s) · 45s hold ──
+  // Sub-failure long hold. Loaded enough to drive blood flow into
+  // the working tissues; finishes with margin so the contractile
+  // machinery stays fresh.
   steps.push({
-    id: "crusher-40pct-30s",
+    id: "perfusion-crusher-easy",
     title: "Two-Handed Crusher",
-    intensityLabel: "40% MVC",
+    intensityLabel: "70% × F(60s)",
     type: "hang",
     grip: "Crusher",
-    targetLoadKg: Math.max(1, crusherMVC * 0.40),
-    targetSec: 30,
+    targetLoadKg: Math.max(1, crusherF60 * 0.70),
+    targetSec: 45,
     restAfterSec: 60,
     description:
-      "Moderate two-handed squeeze at 40% of your max effort. Pull to the target load, hold 30s, release.",
+      "Sustained two-handed squeeze for tissue perfusion. Loaded enough to drive blood flow, easy enough to finish with margin.",
   });
 
-  // ── Step 2: Crusher · 60% × MVC for 60s ──
-  // Working set at 60% MVC — meaningfully harder than Step 1 in both
-  // load and duration. Still below failure for a sustained 60s hold.
+  // ── Perfusion 2: Crusher · 80% × F(60s) ──
+  // Bouldering: 30s hold (briefer ramp into working intensity).
+  // Routes: 45s hold (longer sustained loading for endurance prep).
   steps.push({
-    id: "crusher-60pct-60s",
+    id: "perfusion-crusher-hard",
     title: "Two-Handed Crusher",
-    intensityLabel: "60% MVC",
+    intensityLabel: "80% × F(60s)",
     type: "hang",
     grip: "Crusher",
-    targetLoadKg: Math.max(1, crusherMVC * 0.60),
-    targetSec: 60,
-    restAfterSec: 180,
+    targetLoadKg: Math.max(1, crusherF60 * 0.80),
+    targetSec: isRoute ? 45 : 30,
+    restAfterSec: 90,
     description:
-      "Same Crusher gripper, 60% of max effort for a longer hold. Forearms get a working pump, well below failure.",
+      "Same Crusher gripper, a touch harder. Working pump territory — still well below failure for the prescribed hold.",
   });
 
-  // ── Step 3: Micro · 40% × MVC for 30s ──
-  // Light Micro introduction. Skipped if no Micro data at all.
-  if (microMVC) {
+  // ── Perfusion 3: Micro · 70% × F(60s) ──
+  // Switch grippers (the view prompts for the Tindeq swap before
+  // this step). Same intensity as Crusher perfusion 1, but on the
+  // small edge so the climbing-specific finger position gets warmed.
+  // Routes get a longer hold (60s) for endurance prep since they
+  // skip the BORK that follows for boulderers.
+  if (microF60) {
     steps.push({
-      id: "micro-40pct-30s",
+      id: "perfusion-micro",
       title: "Two-Handed Micro",
-      intensityLabel: "40% MVC",
+      intensityLabel: "70% × F(60s)",
       type: "hang",
       grip: "Micro",
-      targetLoadKg: Math.max(1, microMVC * 0.40),
-      targetSec: 30,
+      targetLoadKg: Math.max(1, microF60 * 0.70),
+      targetSec: isRoute ? 60 : 45,
       restAfterSec: 60,
+      description: isRoute
+        ? "Swap the Tindeq to the Micro gripper. Longer hold on the small edge to warm the climbing-specific finger position for sustained climbing."
+        : "Swap the Tindeq to the Micro gripper. Warms the climbing-specific finger position before the BORK potentiation primer.",
+    });
+  }
+
+  // ── BORK potentiation (boulder mode only) ──
+  // 5 reps of brief max-effort pulls on the Micro. No target load —
+  // pull as hard as possible for ~5 seconds, rest 45s, repeat. PAP
+  // window opens 4-10 min after the last rep; that's the climb.
+  if (!isRoute && microMVC) {
+    steps.push({
+      id: "bork-micro",
+      title: "Micro BORK (potentiation primer)",
+      intensityLabel: "5 × ~5s MVC",
+      type: "bork",
+      grip: "Micro",
+      reps: 5,
+      holdSec: 5,
+      restBetweenSec: 45,
+      restAfterSec: 60,
+      // Reference MVC the user can expect to approach. Not a TARGET —
+      // BORK reps have no target line. Just for display so the user
+      // knows roughly what "max" looks like on the gauge.
+      referenceMvcKg: microMVC,
       description:
-        "Swap the Tindeq to the Micro gripper. Light pull on the smaller hold introduces the skin and finger position.",
+        "Pull as hard as you can for ~5 seconds, rest 45s, repeat 5 times. No target — go full effort each rep. CNS primer for hard climbing.",
     });
   }
 
@@ -327,16 +388,24 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
 
   return {
     ok: true,
+    mode,
     bodyWeightKg,
     bodyWeightLbs,
     mvcSource: {
       // "peak" = derived from peak_force_kg in recent reps (preferred).
-      // "curve" = fell back to F(30s) on the three-exp curve (legacy
-      //          reps without peak data, or peak_force_kg never captured).
+      // "curve" = fell back to F(30s) on the three-exp curve.
+      // Reference for the BORK step's display number — BORK has no
+      // target, but the user sees the expected ballpark MVC.
       crusher: crusherSource,
       micro: microSource,
       crusherKg: crusherMVC,
       microKg: microMVC,
+    },
+    perfusionSource: {
+      // F(60s) on the fitted curve — the "second-rep" sustainable
+      // capacity that anchors the perfusion intensities.
+      crusherF60Kg: crusherF60,
+      microF60Kg: microF60,
     },
     pullupSource: {
       count: unweightedMax,
