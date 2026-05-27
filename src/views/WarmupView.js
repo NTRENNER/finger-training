@@ -56,7 +56,11 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   // ── State machine ──
   const [phase, setPhase] = useState("preview"); // preview|needs-tindeq|swap-prompt|hang-armed|hang-active|rest|pullup|done
   const [stepIdx, setStepIdx] = useState(0);
-  const [activeHand, setActiveHand] = useState("L"); // L → R within a hang step
+  // Each warmup hang is a single two-handed pull (titles literally
+  // say "Two-Handed Crusher" / "Two-Handed Micro"). An earlier version
+  // tracked activeHand and alternated L → R within a step; that's
+  // been removed since the protocol's intent is one bilateral hold
+  // per step.
   const [setIdx, setSetIdx] = useState(0);            // for multi-set pullup
   const [pullupReps, setPullupReps] = useState(0);
   const [elapsed, setElapsed] = useState(0);          // sec since hang started
@@ -128,30 +132,28 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
       if (tickRef.current) clearInterval(tickRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, stepIdx, activeHand, setIdx]);
+  }, [phase, stepIdx, setIdx]);
 
   // ── Tindeq auto-detect wiring ──
-  // The previous version re-ran this effect on every change to
-  // [phase, stepIdx, activeHand]. That tore down (stopAutoDetect) and
-  // immediately re-armed (startAutoDetect) the BLE stream on each
-  // hand swap and on every armed↔active flip, which on some clients
-  // raced the queued writeValue(CMD_STOP) and writeValue(CMD_START)
-  // calls — the Tindeq could end up stopped while the user was still
-  // pulling, freezing tindeq.force at the last sampled value (Nathan
-  // saw the live weight cap mid-hang). The finger-training side
-  // avoids this entirely by registering autoDetect once on mount.
+  // The earlier version re-ran this effect on every phase change.
+  // That tore down (stopAutoDetect) and immediately re-armed
+  // (startAutoDetect) the BLE stream on every armed↔active flip,
+  // which on some clients raced the queued writeValue(CMD_STOP)
+  // and writeValue(CMD_START) calls — the Tindeq could end up
+  // stopped while the user was still pulling, freezing tindeq.force
+  // at the last sampled value. The finger-training side avoids this
+  // by registering autoDetect once on mount.
   //
   // Mirror that pattern here: register/unregister only when the user
-  // enters or leaves the hang lifecycle (boolean inHangPhase). The L→R
-  // hand swap and the armed→active transition stay inside that
-  // lifecycle, so the BLE stream stays up continuously and force keeps
-  // updating.
+  // enters or leaves the hang lifecycle (boolean inHangPhase). The
+  // armed→active transition stays inside that lifecycle, so the BLE
+  // stream stays up continuously and force keeps updating.
   //
-  // The auto-detect callbacks need to read fresh React state (the
-  // current activeHand, currentStep, etc.). We can't re-register them
-  // without restarting the stream, so we keep them in refs and have
-  // a stable wrapper dispatch to whatever ref is current. Refs are
-  // updated on every render — see the assignments below the effect.
+  // The auto-detect callbacks need to read fresh React state. We can't
+  // re-register them without restarting the stream, so we keep them
+  // in refs and have a stable wrapper dispatch to whatever ref is
+  // current. Refs are updated on every render — see the assignments
+  // below the effect.
   const onRepStartRef = useRef(null);
   const onRepEndRef   = useRef(null);
   onRepStartRef.current = () => setPhase("hang-active");
@@ -174,14 +176,14 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inHangPhase, stepIdx, tindeq?.connected]);
 
-  // Keep the target ref in sync when activeHand or step changes inside
-  // the hang lifecycle (the effect above only runs on lifecycle entry,
+  // Keep the target ref in sync when the step changes inside the
+  // hang lifecycle (the effect above only runs on lifecycle entry,
   // not on intra-lifecycle transitions). Cheap ref write — no rerender.
   useEffect(() => {
     if (tindeq && inHangPhase) {
       tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
     }
-  }, [tindeq, inHangPhase, currentStep, activeHand]);
+  }, [tindeq, inHangPhase, currentStep]);
 
   if (!protocol.ok) {
     return (
@@ -201,19 +203,22 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   // (steps + currentStep hoisted above the effects — see comment up top.)
 
   // ── Flow control ──
+  // Each warmup hang is a single two-handed hold (the steps are titled
+  // "Two-Handed Crusher" / "Two-Handed Micro"). Earlier versions did
+  // separate L then R reps per step; that's been removed — one pull,
+  // one hold, advance to rest.
   function startProtocol() {
     if (!tindeq?.connected) {
       setPhase("needs-tindeq");
       return;
     }
     setStepIdx(0);
-    setActiveHand("L");
     setSetIdx(0);
     setPullupReps(0);
-    enterStep(0, "L");
+    enterStep(0);
   }
 
-  function enterStep(idx, hand = "L") {
+  function enterStep(idx) {
     const step = steps[idx];
     if (!step) {
       setPhase("done");
@@ -223,10 +228,9 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
       // If switching from one grip to another (Crusher → Micro), insert
       // a swap-prompt before arming the next hang.
       const prevStep = steps[idx - 1];
-      if (prevStep && prevStep.type === "hang" && prevStep.grip !== step.grip && hand === "L") {
+      if (prevStep && prevStep.type === "hang" && prevStep.grip !== step.grip) {
         setPhase("swap-prompt");
       } else {
-        setActiveHand(hand);
         setPhase("hang-armed");
       }
     } else if (step.type === "pullup") {
@@ -235,23 +239,15 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
     }
   }
 
-  // Called when the Tindeq auto-detect signals a rep has ended (user
-  // released). Advance L → R within step, or move to rest after R.
+  // Called when the hang ends — either auto-advanced at targetSec or
+  // released early. One two-handed hold per step, so we always go
+  // straight to rest (or directly to the next step if no rest set).
   function handleHangComplete() {
     setElapsed(0);
-    if (activeHand === "L") {
-      // Move to right hand. Brief inter-hand pause uses the rest path
-      // with a short 5s breather.
-      setActiveHand("R");
-      // Skip rest; go straight back to armed for the right hand.
-      setPhase("hang-armed");
+    if (stepIdx < steps.length - 1 && currentStep?.restAfterSec > 0) {
+      setPhase("rest");
     } else {
-      // Right hand done — rest before next step.
-      if (stepIdx < steps.length - 1 && currentStep.restAfterSec > 0) {
-        setPhase("rest");
-      } else {
-        advanceToNextStep();
-      }
+      advanceToNextStep();
     }
   }
 
@@ -267,7 +263,6 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
 
   function advanceToNextStep() {
     const next = stepIdx + 1;
-    setActiveHand("L");
     setSetIdx(0);
     setPullupReps(0);
     if (next >= steps.length) {
@@ -275,7 +270,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
       setStepIdx(next);
     } else {
       setStepIdx(next);
-      enterStep(next, "L");
+      enterStep(next);
     }
   }
 
@@ -293,8 +288,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   }
 
   function confirmSwap() {
-    // After swap-prompt, move on into the hang for the new grip, left hand.
-    setActiveHand("L");
+    // After swap-prompt, move on into the hang for the new grip.
     setPhase("hang-armed");
   }
 
@@ -450,7 +444,6 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   // before the auto-detect catches the pull-start.
   if (phase === "hang-armed" || phase === "hang-active") {
     const target = currentStep.targetSec;
-    const handLabel = activeHand === "L" ? "Left Hand" : "Right Hand";
     return (
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
@@ -458,7 +451,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
             Step {stepIdx + 1} of {steps.length} · {currentStep.intensityLabel}
           </div>
           <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>
-            <span style={{ color: GRIP_COLORS[currentStep.grip] }}>{currentStep.grip}</span> · {handLabel}
+            <span style={{ color: GRIP_COLORS[currentStep.grip] }}>{currentStep.grip}</span> · Both Hands
           </div>
         </div>
         <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>{currentStep.title}</div>

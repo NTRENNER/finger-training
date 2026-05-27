@@ -241,7 +241,7 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg }) {
     targetSec: 30,
     restAfterSec: 60,
     description:
-      "Moderate squeeze at 40% of your max effort. Pull to the target load, hold 30s, release. Alternates Left → Right.",
+      "Moderate two-handed squeeze at 40% of your max effort. Pull to the target load, hold 30s, release.",
   });
 
   // ── Step 2: Crusher · 60% × MVC for 60s ──
