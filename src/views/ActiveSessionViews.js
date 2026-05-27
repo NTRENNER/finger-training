@@ -25,7 +25,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { C } from "../ui/theme.js";
 import { Card, Btn, Label } from "../ui/components.js";
 import { fmtW, fmtTime, fromDisp } from "../ui/format.js";
-import { clamp } from "../util.js";
+import { BigTimer, ForceGauge } from "./cards/LiveForceCard.jsx";
 
 import { suggestWeight, prescribedLoad } from "../model/prescription.js";
 import { levelTitle } from "../model/levels.js";
@@ -122,71 +122,10 @@ const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","�
 
 // ─────────────────────────────────────────────────────────────
 
-function BigTimer({ seconds, targetSeconds, running }) {
-  const pct = targetSeconds ? Math.min(seconds / targetSeconds, 1) : 0;
-  const over = seconds >= targetSeconds;
-  const color = running ? (over ? C.green : C.blue) : C.muted;
-  return (
-    <div style={{ textAlign: "center", padding: "24px 0" }}>
-      <div style={{ fontSize: 108, fontWeight: 800, fontVariantNumeric: "tabular-nums", color, lineHeight: 1 }}>
-        {fmtTime(seconds)}
-      </div>
-      <div style={{ marginTop: 12, fontSize: 13, color: C.muted }}>
-        target: {fmtTime(targetSeconds)}
-      </div>
-      <div style={{ marginTop: 10, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${pct * 100}%`, background: color, borderRadius: 3, transition: "width 0.2s" }} />
-      </div>
-    </div>
-  );
-}
-
-// targetKg: the weight the user is aiming to hit (suggested or manual, in kg)
-function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs" }) {
-  const fPct    = clamp(force / maxDisplay, 0, 1);
-  const avgPct  = clamp(avg   / maxDisplay, 0, 1);
-  const tgtPct  = targetKg != null ? clamp(targetKg / maxDisplay, 0, 1) : null;
-
-  // Color zones relative to target:
-  //   below target         → orange
-  //   at/above target      → green
-  //   10%+ above target    → purple
-  let barColor = C.blue; // no target = neutral blue
-  let numColor = C.blue;
-  if (targetKg != null && targetKg > 0) {
-    if (force >= targetKg * 1.10) { barColor = C.purple; numColor = C.purple; }
-    else if (force >= targetKg * 0.99) { barColor = C.green;  numColor = C.green;  }
-    else                               { barColor = C.orange; numColor = C.orange; }
-  }
-
-  return (
-    <div style={{ marginTop: 8 }}>
-      {/* Large live-force number, same scale as BigTimer */}
-      <div style={{ textAlign: "center", fontSize: 108, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: numColor, lineHeight: 1 }}>
-        {fmtW(force, unit)}
-      </div>
-      <div style={{ textAlign: "center", fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 10 }}>
-        live {unit}{targetKg != null ? ` · target ${fmtW(targetKg, unit)} ${unit}` : ""}
-      </div>
-      {/* Stats row — running averages over the active rep so user can
-          see at a glance how steady their pull has been (avg) and
-          where they peaked (max). Labels are explicit about which is
-          which since the big number above is "live current force." */}
-      <div style={{ display: "flex", justifyContent: "space-around", fontSize: 12, color: C.muted, marginBottom: 6 }}>
-        <span>Avg: <b style={{ color: C.green, fontVariantNumeric: "tabular-nums" }}>{fmtW(avg, unit)}</b></span>
-        <span>Max: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(peak, unit)}</b></span>
-      </div>
-      {/* Bar */}
-      <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
-        <div style={{ position: "absolute", height: "100%", width: `${fPct * 100}%`, background: barColor, borderRadius: 6, transition: "width 0.05s" }} />
-        <div style={{ position: "absolute", top: 0, bottom: 0, left: `${avgPct * 100}%`, width: 3, background: C.green }} />
-        {tgtPct != null && (
-          <div style={{ position: "absolute", top: 0, bottom: 0, left: `${tgtPct * 100}%`, width: 2, background: "#ffffff60" }} />
-        )}
-      </div>
-    </div>
-  );
-}
+// BigTimer + ForceGauge moved to ./cards/LiveForceCard.jsx so the
+// adaptive warmup hang can use the same primitives. The contracts
+// here are unchanged — they're just imported at the top of the file
+// now instead of defined inline.
 
 function RepDots({ total, done, current }) {
   return (

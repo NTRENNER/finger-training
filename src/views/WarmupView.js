@@ -34,57 +34,17 @@ import { C } from "../ui/theme.js";
 import { fmtW } from "../ui/format.js";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { generateWarmupProtocol } from "../model/warmup.js";
+// Same big-timer + force-gauge primitives the finger-training active
+// rep uses. Sharing the components keeps the warmup hang visually
+// identical to a real rep: same font scale, same color thresholds,
+// same Avg/Max sub-row. Lives in cards/LiveForceCard.jsx.
+import { BigTimer, ForceGauge } from "./cards/LiveForceCard.jsx";
 
 function fmtSec(s) {
   if (s == null || !isFinite(s)) return "0";
   const sec = Math.max(0, Math.round(s));
   if (sec < 60) return `${sec}`;
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
-}
-
-// Compact live-force display showing current force, target, average,
-// and peak — mirrors the finger-session ForceGauge so the user sees
-// the same set of summary numbers (avg + peak) during a warm-up hang.
-// Colors green when within ±15% of target so the user sees they're
-// at the prescribed load.
-function ForceReadout({ force, avg, peak, targetKg, unit = "lbs" }) {
-  const inWindow = targetKg && Math.abs((force || 0) - targetKg) <= targetKg * 0.15;
-  const display = (kg) => kg == null ? "—" : fmtW(kg, unit);
-  const cellLabel = { fontSize: 11, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4 };
-  const cellValue = { fontSize: 32, fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums" };
-  return (
-    <div style={{
-      background: C.bg, border: `1px solid ${C.border}`,
-      borderRadius: 12, padding: "18px 14px",
-      display: "flex", justifyContent: "space-around", alignItems: "baseline",
-      gap: 8,
-    }}>
-      <div style={{ textAlign: "center" }}>
-        <div style={cellLabel}>Now</div>
-        <div style={{ ...cellValue, color: inWindow ? C.green : (force > 0 ? C.text : C.muted) }}>
-          {display(force)}
-        </div>
-      </div>
-      <div style={{ textAlign: "center" }}>
-        <div style={cellLabel}>Target</div>
-        <div style={{ ...cellValue, color: C.purple }}>
-          {display(targetKg)}
-        </div>
-      </div>
-      <div style={{ textAlign: "center" }}>
-        <div style={cellLabel}>Avg</div>
-        <div style={{ ...cellValue, color: C.muted }}>
-          {display(avg)}
-        </div>
-      </div>
-      <div style={{ textAlign: "center" }}>
-        <div style={cellLabel}>Peak</div>
-        <div style={{ ...cellValue, color: C.muted }}>
-          {display(peak)}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", onClose }) {
@@ -417,9 +377,13 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   }
 
   // ── RENDER: HANG (armed or active) ──
+  // Layout mirrors the finger-training active-rep card so the warmup
+  // hang feels identical to a real rep: BigTimer up top, ForceGauge
+  // below. Pre-pull (hang-armed) shows a target-load callout instead
+  // of the timer/gauge so the user knows what they're aiming for
+  // before the auto-detect catches the pull-start.
   if (phase === "hang-armed" || phase === "hang-active") {
     const target = currentStep.targetSec;
-    const reached = elapsed >= target;
     const handLabel = activeHand === "L" ? "Left Hand" : "Right Hand";
     return (
       <Card>
@@ -434,6 +398,9 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
         <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>{currentStep.title}</div>
 
         {phase === "hang-armed" ? (
+          // Pre-pull callout — target load and duration. Once the
+          // user pulls (force ≥ 4 kg) the auto-detect flips to
+          // hang-active and the BigTimer/ForceGauge replace this.
           <div style={{
             background: C.bg, border: `1px solid ${C.border}`,
             borderRadius: 12, padding: "20px 16px", marginBottom: 12,
@@ -448,38 +415,39 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
             <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
               hold for {target}s
             </div>
+            {/* Live force readout while armed but not yet pulling, so
+                the user can confirm the Tindeq is reading and tare if
+                needed. Number stays gray until the pull-detect fires. */}
+            {tindeq?.connected && (
+              <div style={{ marginTop: 14, fontSize: 12, color: C.muted }}>
+                Live: <b style={{
+                  color: C.text, fontVariantNumeric: "tabular-nums",
+                }}>{fmtW(tindeq.force, unit)} {unit}</b>
+              </div>
+            )}
           </div>
         ) : (
-          <div style={{
-            background: C.bg, border: `1px solid ${C.border}`,
-            borderRadius: 12, padding: "20px 16px", marginBottom: 12,
-            textAlign: "center",
-          }}>
-            <div style={{ fontSize: 11, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
-              {reached ? "Release when ready" : "Holding"}
-            </div>
-            <div style={{
-              fontSize: 64, fontWeight: 900,
-              color: reached ? C.green : C.purple,
-              lineHeight: 1, fontVariantNumeric: "tabular-nums",
-            }}>
-              {fmtSec(elapsed)}s
-            </div>
-            <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
-              target {target}s
-              {reached && <span style={{ color: C.green, marginLeft: 8 }}>✓ done</span>}
-            </div>
-          </div>
-        )}
-
-        {tindeq?.connected && (
-          <ForceReadout
-            force={tindeq.force}
-            avg={tindeq.avgForce}
-            peak={tindeq.peak}
-            targetKg={currentStep.targetLoadKg}
-            unit={unit}
-          />
+          // Active hold — same primitives as finger training.
+          <>
+            <BigTimer
+              seconds={elapsed}
+              targetSeconds={target}
+              running={true}
+            />
+            {tindeq?.connected ? (
+              <ForceGauge
+                force={tindeq.force}
+                avg={tindeq.avgForce}
+                peak={tindeq.peak}
+                targetKg={currentStep.targetLoadKg}
+                unit={unit}
+              />
+            ) : (
+              <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
+                Tindeq disconnected — release when target hold time is reached.
+              </div>
+            )}
+          </>
         )}
 
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
