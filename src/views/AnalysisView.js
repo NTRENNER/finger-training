@@ -89,6 +89,12 @@ export function AnalysisView({
   // module doesn't reach back into App.js for view-level constants.
   GOAL_CONFIG = {},
   RM_GRIPS = [],
+  // Frozen per-grip baselines + save callback, threaded down from App
+  // via useUserSettings. Pass-through to useGripFits, which owns the
+  // pin-on-first-seed effect. See LS_PINNED_GRIP_BASELINES_KEY for
+  // the why this exists.
+  pinnedGripBaselines = null,
+  onSavePinnedGripBaselines = null,
 }) {
   // Grip filter — null/"" means "Both grips pooled" (default view).
   // The hand-filter sibling state (selHand) was retired with the L/R/Both
@@ -301,7 +307,10 @@ export function AnalysisView({
   const {
     gripBaselines, grip3xEstimates, gripHandFits,
     perHandGripBaselines, gripImprovement, handAsymmetry,
-  } = useGripFits({ history, threeExpPriors, grips });
+  } = useGripFits({
+    history, threeExpPriors, grips,
+    pinnedGripBaselines, onSavePinnedGripBaselines,
+  });
 
   // (baselineProgress + FAIL_THRESHOLD/DUR_THRESHOLD moved into
   // CurveImprovementCard along with the inline Curve Improvement

@@ -30,23 +30,71 @@
 //     handAsymmetry:        [{ grip, L, R, stronger, weaker, asymPct }],
 //   }
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   fitAmpsForPts,
   buildGripBaselines, buildPerHandGripBaselines,
   buildGripEstimates, buildGripImprovement, computeHandAsymmetry,
 } from "../model/baselines.js";
 
-export function useGripFits({ history, threeExpPriors, grips }) {
-  // Per-grip baselines — earliest 5-rep/3-dur window per grip. The
-  // shared anchor for Curve Improvement deltas, the Capacity AUC
-  // trajectory % (via useAucHistoryByGrip), and the Force Curves
-  // overlay baseline curve. One source of "where each grip started"
-  // for the whole page.
-  const gripBaselines = useMemo(
+export function useGripFits({
+  history, threeExpPriors, grips,
+  // Optional: { [grip]: { date, amps } } from useUserSettings. When
+  // present, takes precedence over the freshly-computed baseline so
+  // the comparison frame doesn't slide backward if older reps land
+  // in history later (stale-device sync, accidental import, etc.).
+  // See LS_PINNED_GRIP_BASELINES_KEY for the why.
+  pinnedGripBaselines = null,
+  // Optional: callback to persist a newly-seeded baseline. Called
+  // from the auto-pin effect below the first time each grip's seed
+  // window is satisfied. No-op if the caller doesn't pass it (the
+  // hook still works, just without persistence — useful for tests).
+  onSavePinnedGripBaselines = null,
+}) {
+  // Freshly-computed candidate baseline from the current rep history.
+  // The earliest 5-rep / 3-distinct-duration window per grip. This is
+  // the "computed from raw data" version that the older single-source-
+  // of-truth model returned directly; with the freeze, it's now just
+  // a candidate that gets pinned on first seed.
+  const candidateGripBaselines = useMemo(
     () => buildGripBaselines(history, threeExpPriors),
     [history, threeExpPriors]
   );
+
+  // Effective baseline used downstream — pinned wins, candidate fills
+  // gaps for grips that haven't been seeded yet. This is what every
+  // existing consumer (Curve Improvement card, AUC trajectory, Force
+  // Curves overlay) reads.
+  const gripBaselines = useMemo(() => {
+    const out = { ...candidateGripBaselines };
+    if (pinnedGripBaselines && typeof pinnedGripBaselines === "object") {
+      for (const [grip, pinned] of Object.entries(pinnedGripBaselines)) {
+        if (pinned && Array.isArray(pinned.amps) && pinned.amps.length === 3 && pinned.date) {
+          out[grip] = pinned;
+        }
+      }
+    }
+    return out;
+  }, [candidateGripBaselines, pinnedGripBaselines]);
+
+  // Auto-pin on first seed. Each render after a grip's seed window
+  // gets satisfied, the candidate appears for that grip; if there's
+  // no pin yet, we persist it. From then on the pin is the source of
+  // truth and changes to history (backdated reps, edits) don't
+  // re-derive the baseline.
+  useEffect(() => {
+    if (!onSavePinnedGripBaselines) return;
+    if (!candidateGripBaselines || typeof candidateGripBaselines !== "object") return;
+    let changed = false;
+    const next = { ...(pinnedGripBaselines || {}) };
+    for (const [grip, baseline] of Object.entries(candidateGripBaselines)) {
+      if (next[grip]) continue;       // already pinned, never overwrite
+      if (!baseline || !Array.isArray(baseline.amps) || !baseline.date) continue;
+      next[grip] = { date: baseline.date, amps: baseline.amps };
+      changed = true;
+    }
+    if (changed) onSavePinnedGripBaselines(next);
+  }, [candidateGripBaselines, pinnedGripBaselines, onSavePinnedGripBaselines]);
 
   // Per-grip CURRENT amps — the "now" side of the per-grip improvement
   // comparison. Both halves of the Δ% live in the same model so the

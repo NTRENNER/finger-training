@@ -137,6 +137,28 @@ export const LS_PYRAMID_PROJECT_KEY = "ft_pyramid_project";
 // Unset / unrecognized values default to "boulder" in the view.
 export const LS_WARMUP_MODE_KEY = "ft_warmup_mode";
 
+// Per-grip baselines, frozen at first seed. Shape:
+//   { [grip]: { date: "YYYY-MM-DD", amps: [a, b, c] } }
+//
+// Why frozen: useGripFits used to recompute the baseline window from
+// raw history on every render. The window was "earliest 5 reps spanning
+// 3 distinct target_durations" sorted by date ascending, so adding an
+// older rep (e.g., a stale device finally syncing up backdated data,
+// or an accidental import) would slide the anchor backward and crash
+// the Curve Improvement % overnight — the user's "now" curve was
+// suddenly being compared against an earlier, weaker baseline.
+//
+// With this key, the first time a grip's seed window is satisfied,
+// the {date, amps} get pinned here AND mirrored to
+// user_settings.pinned_grip_baselines on cloud. Subsequent renders
+// read the pinned baseline directly; backdated reps add to the AUC
+// trajectory and history overlay but don't shift the comparison frame.
+//
+// To rebuild a baseline intentionally (e.g., a multi-week layoff
+// followed by a deload reset), drop the corresponding key from
+// localStorage / user_settings and the next render reseeds.
+export const LS_PINNED_GRIP_BASELINES_KEY = "ft_pinned_grip_baselines";
+
 // (LS_PYRAMID_WARMUP_KEY existed when the pyramid card had a
 // "Warmups ≤ Vx" floor selector — May 2026. The redesigned 5-tier
 // silhouette doesn't filter by warmup, so the key was removed. Any

@@ -29,6 +29,7 @@ import {
   loadLS, saveLS,
   LS_BW_LOG_KEY,
   LS_PYRAMID_PROJECT_KEY,
+  LS_PINNED_GRIP_BASELINES_KEY,
   migrateLegacyPyramidPins,
 } from "../lib/storage.js";
 import { today } from "../util.js";
@@ -203,6 +204,30 @@ export function useUserSettings({ user }) {
     }
   }, [user]);
 
+  // ── Pinned per-grip baselines ─────────────────────────────
+  // The frozen { [grip]: { date, amps } } map that anchors Curve
+  // Improvement. Once a grip's baseline is seeded (≥5 failures × ≥3
+  // distinct durations), it gets written here and never re-derived
+  // unless explicitly cleared. Prevents stale-device-sync backdating
+  // from shifting the comparison frame retroactively.
+  //
+  // See LS_PINNED_GRIP_BASELINES_KEY's comment for the why. useGripFits
+  // owns the pin-on-first-seed effect; this hook is just the storage
+  // wiring (LS + cloud round-trip).
+  const [pinnedGripBaselines, setPinnedGripBaselinesState] = useState(
+    () => loadLS(LS_PINNED_GRIP_BASELINES_KEY) || {}
+  );
+  const savePinnedGripBaselines = useCallback((next) => {
+    setPinnedGripBaselinesState(next);
+    saveLS(LS_PINNED_GRIP_BASELINES_KEY, next);
+    if (user) {
+      (async () => {
+        const current = (await fetchUserSettings()) || {};
+        await pushUserSettings({ ...current, pinned_grip_baselines: next });
+      })().catch(() => {});
+    }
+  }, [user]);
+
   // ── Fatigue β model (per-grip) ───────────────────────────
   // Stored in user_settings.settings.fatigue_model so it persists
   // across devices. Updated server-side by the
@@ -240,6 +265,15 @@ export function useUserSettings({ user }) {
         setPyramidProjectMapState(migrated);
         saveLS(LS_PYRAMID_PROJECT_KEY, migrated);
       }
+      // Pinned grip baselines — frozen { [grip]: {date, amps} } map.
+      // Cloud-wins for the same reason as pyramid pins: the user might
+      // have seeded baselines on a different device and we want those
+      // to follow them, not get clobbered by a freshly-computed local
+      // baseline from a leaner local rep history.
+      if (cloud.pinned_grip_baselines && typeof cloud.pinned_grip_baselines === "object") {
+        setPinnedGripBaselinesState(cloud.pinned_grip_baselines);
+        saveLS(LS_PINNED_GRIP_BASELINES_KEY, cloud.pinned_grip_baselines);
+      }
       // Pull fatigue_model so the client uses the same β the server
       // trigger is updating. Falls back to local defaults if cloud
       // has no value yet (first-run before any rep-1 insert).
@@ -256,6 +290,7 @@ export function useUserSettings({ user }) {
     trip, saveTrip,
     climbingFocus, saveClimbingFocus,
     pyramidProjectMap, savePyramidProjectMap,
+    pinnedGripBaselines, savePinnedGripBaselines,
     fatigueModel, setFatigueModel,
   };
 }

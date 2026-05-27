@@ -42,6 +42,10 @@ export function AnalysisContainer(props) {
     history, unit, bodyWeight, activities,
     freshMap,
     GOAL_CONFIG, RM_GRIPS,
+    // Frozen per-grip baselines threaded from App.useUserSettings — see
+    // LS_PINNED_GRIP_BASELINES_KEY for the rationale.
+    pinnedGripBaselines = null,
+    onSavePinnedGripBaselines = () => {},
     // WorkoutAnalysisView (lifts) props
     defaultWorkouts,
     // ClimbingAnalysisView (climbs) props — pyramid pins synced via App
@@ -101,6 +105,8 @@ export function AnalysisContainer(props) {
           freshMap={freshMap}
           GOAL_CONFIG={GOAL_CONFIG}
           RM_GRIPS={RM_GRIPS}
+          pinnedGripBaselines={pinnedGripBaselines}
+          onSavePinnedGripBaselines={onSavePinnedGripBaselines}
         />
       )}
       {sub === "lifts" && (

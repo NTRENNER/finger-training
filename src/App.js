@@ -227,6 +227,7 @@ export default function App() {
     trip, saveTrip,
     climbingFocus, saveClimbingFocus,
     pyramidProjectMap, savePyramidProjectMap,
+    pinnedGripBaselines, savePinnedGripBaselines,
     fatigueModel, setFatigueModel,
   } = useUserSettings({ user });
 
@@ -741,6 +742,8 @@ export default function App() {
           defaultWorkouts={ALL_WORKOUTS_LOOKUP}
           pyramidProjectMap={pyramidProjectMap}
           onPyramidProjectChange={savePyramidProjectMap}
+          pinnedGripBaselines={pinnedGripBaselines}
+          onSavePinnedGripBaselines={savePinnedGripBaselines}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
