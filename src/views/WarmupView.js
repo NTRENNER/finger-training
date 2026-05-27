@@ -42,12 +42,16 @@ function fmtSec(s) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-// Compact live-force display showing current force, peak, and target.
+// Compact live-force display showing current force, target, average,
+// and peak — mirrors the finger-session ForceGauge so the user sees
+// the same set of summary numbers (avg + peak) during a warm-up hang.
 // Colors green when within ±15% of target so the user sees they're
 // at the prescribed load.
-function ForceReadout({ force, peak, targetKg, unit = "lbs" }) {
+function ForceReadout({ force, avg, peak, targetKg, unit = "lbs" }) {
   const inWindow = targetKg && Math.abs((force || 0) - targetKg) <= targetKg * 0.15;
   const display = (kg) => kg == null ? "—" : fmtW(kg, unit);
+  const cellLabel = { fontSize: 9, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 };
+  const cellValue = { fontSize: 24, fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums" };
   return (
     <div style={{
       background: C.bg, border: `1px solid ${C.border}`,
@@ -55,32 +59,26 @@ function ForceReadout({ force, peak, targetKg, unit = "lbs" }) {
       display: "flex", justifyContent: "space-around", alignItems: "baseline",
     }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 9, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Now</div>
-        <div style={{
-          fontSize: 28, fontWeight: 800, lineHeight: 1,
-          color: inWindow ? C.green : (force > 0 ? C.text : C.muted),
-          fontVariantNumeric: "tabular-nums",
-        }}>
+        <div style={cellLabel}>Now</div>
+        <div style={{ ...cellValue, color: inWindow ? C.green : (force > 0 ? C.text : C.muted) }}>
           {display(force)}
         </div>
       </div>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 9, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Target</div>
-        <div style={{
-          fontSize: 28, fontWeight: 800, lineHeight: 1,
-          color: C.purple,
-          fontVariantNumeric: "tabular-nums",
-        }}>
+        <div style={cellLabel}>Target</div>
+        <div style={{ ...cellValue, color: C.purple }}>
           {display(targetKg)}
         </div>
       </div>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 9, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 }}>Peak</div>
-        <div style={{
-          fontSize: 28, fontWeight: 800, lineHeight: 1,
-          color: C.muted,
-          fontVariantNumeric: "tabular-nums",
-        }}>
+        <div style={cellLabel}>Avg</div>
+        <div style={{ ...cellValue, color: C.muted }}>
+          {display(avg)}
+        </div>
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <div style={cellLabel}>Peak</div>
+        <div style={{ ...cellValue, color: C.muted }}>
           {display(peak)}
         </div>
       </div>
@@ -476,6 +474,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
         {tindeq?.connected && (
           <ForceReadout
             force={tindeq.force}
+            avg={tindeq.avgForce}
             peak={tindeq.peak}
             targetKg={currentStep.targetLoadKg}
             unit={unit}
