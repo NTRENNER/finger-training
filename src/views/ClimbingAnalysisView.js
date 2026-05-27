@@ -35,7 +35,7 @@ import {
   gradeRank, weekKey,
   disciplineMeta,
 } from "../lib/climbing-grades.js";
-import { inferProjectGrade } from "../model/gradePyramid.js";
+import { inferProjectGrade, computeGraduation } from "../model/gradePyramid.js";
 import { pyramidPinKey } from "../lib/storage.js";
 
 // Tier step size in rank units, per discipline. Boulder steps by
@@ -307,6 +307,24 @@ export function ClimbingAnalysisView({
     };
   }, [pyramidDiscipline]);
 
+  // ── Auto-graduation ──
+  // Pyramid shifts its visual apex up by `graduation` grades when
+  // the user has consolidated the project (sent it 3×, filling the
+  // apex tier). Chains through consecutive consolidations. The
+  // pinned project (`effectiveProject`) stays at whatever the user
+  // chose; only the visual apex moves. See model/gradePyramid.js
+  // computeGraduation() for the loop.
+  const graduation = useMemo(
+    () => computeGraduation(pyramid.rows, effectiveProjectRank, stepSize),
+    [pyramid.rows, effectiveProjectRank, stepSize]
+  );
+  const visualApexRank = Number.isFinite(effectiveProjectRank)
+    ? effectiveProjectRank + graduation * stepSize
+    : null;
+  const visualApex = visualApexRank != null
+    ? (rankToGrade(visualApexRank) ?? effectiveProject)
+    : effectiveProject;
+
   // ── Max sends by ascent style ──
   // For each clean-send style (onsight / flash / redpoint), find the
   // hardest grade you've achieved within the current filter set and
@@ -562,14 +580,22 @@ export function ClimbingAnalysisView({
             </div>
           ) : (
             <>
-              {/* 5-tier outline silhouette. stepSize varies by
+              {/* 5-tier outline silhouette. The visualApex/Rank are
+                  the user's pin shifted up by `graduation` grades —
+                  the pyramid shifts up when the climber consolidates
+                  (apex tier filled), while the pinned project stays
+                  where the user set it. PyramidChart renders the
+                  graduated apex; pinnedProjectGrade + graduation
+                  feed the footer caption. stepSize varies by
                   discipline so YDS tiers step by letter subgrades
                   and boulder steps by V-grades. */}
               <PyramidChart
                 rows={pyramid.rows}
                 fill={DISCIPLINE_COLORS[pyramidDiscipline]}
-                projectGrade={effectiveProject}
-                projectRank={effectiveProjectRank}
+                projectGrade={visualApex}
+                projectRank={visualApexRank}
+                pinnedProjectGrade={effectiveProject}
+                graduation={graduation}
                 stepSize={stepSize}
                 anchorMode="flash"
                 rankToGrade={rankToGrade}

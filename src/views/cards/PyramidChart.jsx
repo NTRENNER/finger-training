@@ -66,8 +66,17 @@ function fmtDate(date) {
 export function PyramidChart({
   rows = [],
   fill = "#f59e0b",   // discipline color; falls through from ClimbingAnalysisView
-  projectGrade = null, // explicit; otherwise inferred from rows (send-anchored)
-  projectRank = null,  // required when projectGrade has 0 rows (flash-anchored)
+  projectGrade = null, // visual apex (graduation-shifted in ClimbingAnalysisView)
+  projectRank = null,  // visual apex rank
+  // The user's actually-pinned project, before graduation shifts it.
+  // Used only by the footer caption so the user always sees what they
+  // explicitly chose, even when the pyramid is graduated above it.
+  // Falls back to projectGrade when omitted (back-compat).
+  pinnedProjectGrade = null,
+  // How many grades the visual apex sits above the pinned project,
+  // computed via model/gradePyramid.js computeGraduation. Drives the
+  // graduation caption when > 0.
+  graduation = 0,
   anchorMode = "send", // 'send' | 'flash' — passed through to the model
   stepSize = 1,        // tier offset in rank units (V = 1, YDS letter = 0.25)
   rankToGrade = null,  // (rank) => gradeLabel — labels empty tiers with the
@@ -190,13 +199,25 @@ export function PyramidChart({
         })}
       </div>
 
-      {/* Minimal footer — just the project label. The visual is the
-          message; no per-tier coaching text. */}
+      {/* Minimal footer — project pin label, plus a graduation tag
+          when the visual apex has shifted above the pin (climber
+          consolidated and the silhouette auto-graduated up). The
+          pinned label stays so the climber always sees what they
+          explicitly chose; the "graduated to" tag tells them where
+          the visual apex sits. */}
       <div style={{
         borderTop: `1px solid ${C.border}`, paddingTop: 8,
         fontSize: 11, color: C.muted, textAlign: "center",
       }}>
-        Project pin · {plan.projectGrade}
+        Project pin · {pinnedProjectGrade ?? plan.projectGrade}
+        {graduation > 0 && plan.projectGrade && (
+          <>
+            {" · "}
+            <span style={{ color: C.purple, fontWeight: 700 }}>
+              Graduated to {plan.projectGrade}
+            </span>
+          </>
+        )}
       </div>
 
       {/* Per-tier climb-detail popover. Backdrop catches outside-taps

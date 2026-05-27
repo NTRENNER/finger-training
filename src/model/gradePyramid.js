@@ -1,42 +1,44 @@
 // ─────────────────────────────────────────────────────────────
-// GRADE PYRAMID — 5-tier outline model
+// GRADE PYRAMID — 5-tier outline model with auto-graduation
 // ─────────────────────────────────────────────────────────────
 // Visual-first pyramid: 5 tiers from project (apex) down, with a
-// fixed outline of 1-4-7-10-13 blocks per tier. Logged sends shade
-// blocks in from the left at each tier. Extras above a tier's
-// target don't extend the row — the pyramid keeps its shape, and
-// the "no need to record in the pyramid" stance means over-volume
-// at a band is invisible noise rather than a coaching signal.
+// fixed outline of 3-5-7-9-11 blocks per tier (+2 per row, wider
+// apex). Logged sends shade blocks in from the left at each tier.
+// Extras above a tier's target don't extend the row — the pyramid
+// keeps its shape, and the "no need to record in the pyramid"
+// stance means over-volume at a band is invisible noise rather
+// than a coaching signal.
 //
-// Why fixed shape vs the older count-tier model (Power Company,
-// 2020):
-//   - The article's bands (1-2 project / 3-5 consolidate /
-//     5-10 cleanup / 10+ ATB) were useful but UI-noisy: five
-//     status chips and an explainer paragraph competing with the
-//     picture for attention.
-//   - The new shape reads at a glance: a full base with empty
-//     apex is "you're climbing solid, time to push the project";
-//     a full apex with thin base is "go log easier mileage."
-//     No text needed.
+// Tier target widths [3, 5, 7, 9, 11]:
+//   - Strict +2 arithmetic progression with multiple squares at
+//     the project grade. The apex of 3 means "project consolidated"
+//     — one lucky send isn't enough; you need to send the route
+//     three times to "fill" the project block. That maps the
+//     pyramid to a real coaching milestone instead of treating a
+//     single redpoint as completion.
+//   - Total target volume is 35 sends across the five tiers,
+//     identical to the older [1,4,7,10,13] shape — same effort,
+//     redistributed toward a wider apex and a slightly narrower
+//     base. The visual reads as a more balanced step pyramid.
 //
-// Tier target widths [1, 4, 7, 10, 13]:
-//   - Strict +3 arithmetic progression from apex to base. Each
-//     grade below the project demands proportionally more volume
-//     than the one above it; you can't credibly advance to a grade
-//     until you've consolidated a real base at the grades below.
-//   - Apex stays at 1 — the project is one specific route, by
-//     definition. The pyramid won't come to a perfectly crafted
-//     peak (the apex-to-tier-1 jump is 1 → 4), but that's a feature:
-//     "log lots of mileage at the supporting grades" is the message.
-//   - Minimum 4 sends one grade below project pins the coaching
-//     principle that 2-3 isn't enough — you should feel comfortable
-//     at a grade before pushing through it.
+// Auto-graduation:
+//   - When the apex is filled (project sent 3×), the climber has
+//     consolidated this project grade. The pyramid auto-shifts up
+//     one grade so the new apex is one grade above the pinned
+//     project. The pinned project itself stays where the user set
+//     it; the visual just adapts. Chains: if the post-graduation
+//     apex also fills, graduate again, up to MAX_GRADUATION.
+//   - Climbs that drop off the bottom of the pyramid (below the
+//     graduated base) aren't deleted — they're just no longer
+//     shown in the silhouette. The intent is "you've outgrown the
+//     bottom grade, it's now warmup territory."
+//   - See computeGraduation() for the per-discipline logic.
 //
-// "Overgrew the project" signal: when sends exist ABOVE the apex
-// rank, that's the one piece of coaching the shape alone can't
-// show (the pyramid stops at the apex). We expose `overgrew`,
-// `overgrewSends`, and `overgrewMaxGrade` so the card can surface
-// a "time to re-pin" hint.
+// "Overgrew the project" signal: when sends exist ABOVE the
+// effective (graduated) apex rank, that's coaching the shape
+// alone can't show. We expose `overgrew`, `overgrewSends`, and
+// `overgrewMaxGrade` so the card can surface a "time to re-pin"
+// hint.
 //
 // Pure functions over the existing `pyramid.rows` shape produced
 // by ClimbingAnalysisView ({ grade, count, rank } per row, sorted
@@ -47,12 +49,54 @@
 // subgrades (0.25 rank/tier) and boulder pyramids step by V-grades
 // (1 rank/tier).
 const TIER_TARGETS = [
-  { tier:  0, target:  1 },   // apex (project)
-  { tier: -1, target:  4 },
+  { tier:  0, target:  3 },   // apex (project — 3× to consolidate)
+  { tier: -1, target:  5 },
   { tier: -2, target:  7 },
-  { tier: -3, target: 10 },
-  { tier: -4, target: 13 },   // base
+  { tier: -3, target:  9 },
+  { tier: -4, target: 11 },   // base
 ];
+
+// Cap on how many tiers the visual pyramid can graduate above the
+// user's pinned project. Five is more than any climber should ever
+// reach without explicitly re-pinning; the cap exists to bound the
+// graduation-chain loop, not as a coaching constraint.
+const MAX_GRADUATION = 5;
+
+// Compute how many grades the visual pyramid should sit above the
+// user's pinned project, based on how many top-of-pyramid tiers
+// have already been filled to target.
+//
+// Loop:
+//   1. Start with graduation = 0 (apex = pin).
+//   2. Look up the apex tier's count at apexRank.
+//   3. If count >= apex target (3), bump graduation by one and
+//      step apexRank up by stepSize, then repeat.
+//   4. Stop when the apex tier isn't full, or when graduation
+//      hits MAX_GRADUATION (defensive cap).
+//
+// Pure function — takes the raw rows (same shape as buildPyramidPlan)
+// and returns just the integer offset. ClimbingAnalysisView uses
+// this to compute the visualApex passed to PyramidChart.
+export function computeGraduation(rows, pinnedRank, stepSize = 1) {
+  if (!Number.isFinite(pinnedRank) || !Array.isArray(rows)) return 0;
+  const apexTarget = TIER_TARGETS[0].target;   // 3 in the current shape
+  const rankKey = (r) => Math.round(r * 100) / 100;
+  const countByRank = new Map();
+  for (const r of rows) {
+    if (Number.isFinite(r.rank)) countByRank.set(rankKey(r.rank), r.count);
+  }
+  let graduation = 0;
+  while (graduation < MAX_GRADUATION) {
+    const apexRank = pinnedRank + graduation * stepSize;
+    const count = countByRank.get(rankKey(apexRank)) ?? 0;
+    if (count >= apexTarget) {
+      graduation += 1;
+    } else {
+      break;
+    }
+  }
+  return graduation;
+}
 
 // Pick the project grade as the highest-rank grade with at least
 // `minSends` clean sends. Default 1 — a single redpoint (or flash) of
