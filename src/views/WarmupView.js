@@ -50,13 +50,14 @@ function fmtSec(s) {
 function ForceReadout({ force, avg, peak, targetKg, unit = "lbs" }) {
   const inWindow = targetKg && Math.abs((force || 0) - targetKg) <= targetKg * 0.15;
   const display = (kg) => kg == null ? "—" : fmtW(kg, unit);
-  const cellLabel = { fontSize: 9, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 2 };
-  const cellValue = { fontSize: 24, fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums" };
+  const cellLabel = { fontSize: 11, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4 };
+  const cellValue = { fontSize: 32, fontWeight: 800, lineHeight: 1, fontVariantNumeric: "tabular-nums" };
   return (
     <div style={{
       background: C.bg, border: `1px solid ${C.border}`,
-      borderRadius: 10, padding: "12px 14px",
+      borderRadius: 12, padding: "18px 14px",
       display: "flex", justifyContent: "space-around", alignItems: "baseline",
+      gap: 8,
     }}>
       <div style={{ textAlign: "center" }}>
         <div style={cellLabel}>Now</div>
