@@ -65,6 +65,15 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   const tickRef = useRef(null);
   const startTimeRef = useRef(null);
 
+  // Hoisted above the effects below so the auto-detect wiring can
+  // reference `currentStep` in its dep array without tripping
+  // no-use-before-define. `steps` is read from `protocol.steps` but
+  // guarded — the protocol can be ok:false, in which case the early
+  // return below renders the can't-generate card and steps stays
+  // an empty array. The effects skip work when there's no step.
+  const steps = protocol.ok ? protocol.steps : [];
+  const currentStep = steps[stepIdx];
+
   // ── Hang timer (count up while force is held above threshold) ──
   useEffect(() => {
     if (tickRef.current) clearInterval(tickRef.current);
@@ -94,27 +103,57 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   }, [phase, stepIdx, activeHand, setIdx]);
 
   // ── Tindeq auto-detect wiring ──
-  // When phase is hang-armed or hang-active, register callbacks. Pull
-  // start (force ≥ 4 kg) flips us to hang-active; pull end flips us to
-  // rest (and advances the hand or step).
+  // The previous version re-ran this effect on every change to
+  // [phase, stepIdx, activeHand]. That tore down (stopAutoDetect) and
+  // immediately re-armed (startAutoDetect) the BLE stream on each
+  // hand swap and on every armed↔active flip, which on some clients
+  // raced the queued writeValue(CMD_STOP) and writeValue(CMD_START)
+  // calls — the Tindeq could end up stopped while the user was still
+  // pulling, freezing tindeq.force at the last sampled value (Nathan
+  // saw the live weight cap mid-hang). The finger-training side
+  // avoids this entirely by registering autoDetect once on mount.
+  //
+  // Mirror that pattern here: register/unregister only when the user
+  // enters or leaves the hang lifecycle (boolean inHangPhase). The L→R
+  // hand swap and the armed→active transition stay inside that
+  // lifecycle, so the BLE stream stays up continuously and force keeps
+  // updating.
+  //
+  // The auto-detect callbacks need to read fresh React state (the
+  // current activeHand, currentStep, etc.). We can't re-register them
+  // without restarting the stream, so we keep them in refs and have
+  // a stable wrapper dispatch to whatever ref is current. Refs are
+  // updated on every render — see the assignments below the effect.
+  const onRepStartRef = useRef(null);
+  const onRepEndRef   = useRef(null);
+  onRepStartRef.current = () => setPhase("hang-active");
+  onRepEndRef.current   = () => handleHangComplete();
+  const inHangPhase = phase === "hang-armed" || phase === "hang-active";
   useEffect(() => {
-    if (!tindeq?.connected) return;
-    const armed = phase === "hang-armed" || phase === "hang-active";
-    if (!armed) return;
+    if (!tindeq?.connected || !inHangPhase) return;
+    // targetKgRef is a plain ref on the tindeq hook — updating it
+    // doesn't restart the stream. Reassign on each effect run so the
+    // auto-fail / live-display logic sees the current step's target.
     tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
     tindeq.startAutoDetect(
-      // onRepStart — user crossed pull threshold
-      () => setPhase("hang-active"),
-      // onRepEnd — user released. Don't pass any logged data — warm-up
-      // reps don't get recorded. Just advance.
-      () => handleHangComplete(),
+      () => onRepStartRef.current?.(),
+      () => onRepEndRef.current?.(),
     );
     return () => {
       tindeq.stopAutoDetect();
       tindeq.targetKgRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, stepIdx, activeHand]);
+  }, [inHangPhase, stepIdx, tindeq?.connected]);
+
+  // Keep the target ref in sync when activeHand or step changes inside
+  // the hang lifecycle (the effect above only runs on lifecycle entry,
+  // not on intra-lifecycle transitions). Cheap ref write — no rerender.
+  useEffect(() => {
+    if (tindeq && inHangPhase) {
+      tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
+    }
+  }, [tindeq, inHangPhase, currentStep, activeHand]);
 
   if (!protocol.ok) {
     return (
@@ -131,8 +170,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
     );
   }
 
-  const steps = protocol.steps;
-  const currentStep = steps[stepIdx];
+  // (steps + currentStep hoisted above the effects — see comment up top.)
 
   // ── Flow control ──
   function startProtocol() {
