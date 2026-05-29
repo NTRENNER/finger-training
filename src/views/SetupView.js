@@ -55,11 +55,13 @@ import { C } from "../ui/theme.js";
 import { Card, Btn } from "../ui/components.js";
 import { fmt0, toDisp, fromDisp } from "../ui/format.js";
 
-import { loadLS, LS_BW_LOG_KEY } from "../lib/storage.js";
+import { loadLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 import { today } from "../util.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
+import { computeDeload } from "../model/deload.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.js";
+import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
@@ -196,9 +198,22 @@ export function SetupView({
 
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
 
+  // Deload check — cross-grip recovery decline (personal taus) with
+  // lifting-volume context. The lifting log lives in localStorage in
+  // exactly the shape computeDeload expects. Returns { deload:false }
+  // (banner renders nothing) unless a sustained, cross-grip signal
+  // clears the noise band. Detect/explain/propose only — nothing here
+  // regulates load automatically.
+  const deloadState = useMemo(
+    () => computeDeload(history, loadLS(LS_WORKOUT_LOG_KEY) || []),
+    [history]
+  );
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
+
+      <DeloadBanner deload={deloadState} />
 
       {/* Grip Type — still per-grip, the curve is grip-scoped. The
           heading doubles as the call-to-action: it reads "Select a grip
