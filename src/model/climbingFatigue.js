@@ -68,8 +68,9 @@ export function computeSessionFatigue(activities, dateStr) {
 }
 
 // Most recent climbing date in the past `withinDays` days, or null.
-// Used by coaching.js externalLoadModifier so we know which session
-// to pull fatigue from.
+// Used by the ClimbingLogCard display to surface recent session
+// fatigue. (No longer consumed by the coaching engine — the
+// externalLoadModifier term was removed May 2026.)
 export function mostRecentClimbDate(activities, today = new Date(), withinDays = 3) {
   if (!activities || activities.length === 0) return null;
   const todayMs = today instanceof Date ? today.getTime() : Date.parse(today);

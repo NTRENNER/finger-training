@@ -238,9 +238,8 @@ export function SessionPlanCard({
   if (rec.recency != null && rec.recency < 0.5) {
     whyParts.push("zone partially recovered — lighter dose is fine");
   }
-  if (rec.ext != null && rec.ext < 0.85) {
-    const pct = Math.round((1 - rec.ext) * 100);
-    whyParts.push(`recent climbing / RPE ~${pct}% scale-down`);
+  if (rec.confidence != null && rec.confidence < 0.5) {
+    whyParts.push("sparse data here — picked to anchor the curve; log a clean rep");
   }
   // Climbing-focus bias — surface only when it actually nudged a
   // non-neutral multiplier on the winning zone. Keeps the line
