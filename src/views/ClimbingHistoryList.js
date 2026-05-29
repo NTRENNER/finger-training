@@ -126,7 +126,9 @@ export function ClimbingHistoryList({
   // Wall pills only make sense for indoor boulder (or "all venues"
   // boulder). Hide the row when not applicable; auto-clear any
   // stale wall selection so it doesn't silently exclude data.
-  const wallPillsVisible = filters.discipline !== "lead" && filters.venue !== "outdoor";
+  const wallPillsVisible =
+    (filters.discipline === "boulder" || filters.discipline === "all")
+    && filters.venue !== "outdoor";
   useEffect(() => {
     if (!wallPillsVisible && filters.wall !== "all") {
       updateFilters({ ...filters, wall: "all" });
@@ -361,8 +363,11 @@ function FilterPills({
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
         {pill("Named", "named", true)}
         <span style={{ width: 6 }} />
-        {pill("Boulder", "discipline", "boulder")}
-        {pill("Lead",    "discipline", "lead")}
+        {/* Discipline pills — driven by CLIMB_DISCIPLINES so every
+            logged discipline (boulder / top rope / lead) gets a filter.
+            Previously hardcoded to Boulder/Lead, which silently dropped
+            Top rope from the filter row even though it's loggable. */}
+        {CLIMB_DISCIPLINES.map(d => pill(d.label, "discipline", d.key))}
         <span style={{ width: 6 }} />
         {pill("Indoor",  "venue", "indoor")}
         {pill("Outdoor", "venue", "outdoor")}
