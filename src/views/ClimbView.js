@@ -27,7 +27,8 @@ import {
   disciplineMeta, ascentMeta, wallMeta, describeClimb,
 } from "../lib/climbing-grades.js";
 import { today } from "../util.js";
-import { loadLS, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
+import { loadLS, LS_WORKOUT_LOG_KEY, LS_DELOAD_WEEK_KEY } from "../lib/storage.js";
+import { DELOAD_WEEK_DAYS } from "../model/deload.js";
 
 // How many recent climbs to surface inline before pointing the
 // user at the full History tab. Picked to fit comfortably on a
@@ -153,9 +154,37 @@ export function ClimbView({
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const recent = climbs.slice(0, RECENT_LIMIT);
 
+  // Deload-week reminder — set on the Setup tab when the user accepts a
+  // deload. During a strong week the plan drops climbing from 3 → 2
+  // days, so surface that here with a live count. Read-only.
+  const dw = loadLS(LS_DELOAD_WEEK_KEY) || null;
+  const dwDay = dw?.start
+    ? Math.round((new Date(today()) - new Date(dw.start)) / 86400000) + 1
+    : 0;
+  const deloadActive = !!dw?.start && dwDay >= 1 && dwDay <= DELOAD_WEEK_DAYS && dw.severity === "strong";
+  const climbDaysThisWeek = new Set(
+    climbs
+      .filter(c => {
+        const ago = Math.round((new Date(today()) - new Date(c.date)) / 86400000);
+        return ago >= 0 && ago < DELOAD_WEEK_DAYS;
+      })
+      .map(c => c.date)
+  ).size;
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Climb</h2>
+
+      {deloadActive && (
+        <div style={{
+          border: `1px solid ${C.orange}`, background: `${C.orange}14`,
+          borderRadius: 10, padding: "10px 12px", marginBottom: 16,
+          fontSize: 12.5, color: C.text, lineHeight: 1.5,
+        }}>
+          <span style={{ color: C.orange, fontWeight: 700, letterSpacing: 0.4 }}>DELOAD WEEK</span>
+          {` · aim for ${2} climbing days this week instead of 3 (you've climbed ${climbDaysThisWeek} so far). Keep intensity, cut volume.`}
+        </div>
+      )}
 
       {/* Adaptive Warm-up entry point — warm up your fingers before
           climbing. Force-curve-derived hangs + cross-loaded pullups. */}
