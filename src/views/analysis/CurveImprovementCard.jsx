@@ -31,6 +31,7 @@ import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { ZONE6 } from "../../model/zones.js";
 import { improvementForAmps } from "../../model/baselines.js";
+import { effectiveLoad } from "../../model/load.js";
 
 // Per-grip baseline-unlock thresholds. Match the gates in
 // buildGripBaselines so the "X of 5 failures" copy in the early-days
@@ -52,7 +53,7 @@ function baselineProgress(history, grip, hand = null) {
   for (const r of history || []) {
     if (r.grip !== grip) continue;
     if (hand && r.hand !== hand) continue;
-    if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+    if (!(effectiveLoad(r) > 0)) continue;
     if (!(r.actual_time_s > 0)) continue;
     failures += 1;
     if (r.target_duration) durs.add(r.target_duration);
