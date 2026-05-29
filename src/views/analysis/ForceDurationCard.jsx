@@ -75,7 +75,6 @@ export function ForceDurationCard({
   fdSplitData,
   threeExpCurveDataRel,
   threeExpRef180,
-  limiterZoneBounds,
   curveColor,
   leftDotsRel,
   rightDotsRel,
@@ -118,7 +117,6 @@ export function ForceDurationCard({
             <span style={{ color: GRIP_COLORS[g] || C.blue, opacity: 0.7 }}> ╌</span> 3-min
           </span>
         ))}
-        {!splitMode && limiterZoneBounds && <span style={{ color: limiterZoneBounds.color, fontWeight: 600 }}>● {limiterZoneBounds.label}</span>}
         {useRel && <span style={{ color: C.purple }}>× bodyweight ({fmtW(bodyWeight, unit)} {unit})</span>}
       </div>
       <ResponsiveContainer width="100%" height={260}>
@@ -138,22 +136,20 @@ export function ForceDurationCard({
             width={42}
           />
           <Tooltip content={<ScatterTooltip unit={forceUnit} />} />
-          {/* Zone backgrounds — neutral tint for non-limiter zones,
-              extra saturation on the limiter zone so the chart
-              echoes the SessionPlanner recommendation. Driven by
-              ZONE6 so the 6-zone schema is the single source of
-              truth for both boundaries and colors. */}
+          {/* Zone backgrounds — uniform neutral tint per zone. Driven by
+              ZONE6 so the 6-zone schema is the single source of truth for
+              both boundaries and colors. (The extra-saturated "limiter"
+              highlight was removed May 2026 along with computeLimiterZone.) */}
           {ZONE6.map(z => {
             const x1 = z.min;
             const x2 = z.max === Infinity ? maxDur + 10 : z.max;
-            const isLimiter = limiterZoneBounds?.x1 === z.min;
             return (
               <ReferenceArea
                 key={z.key}
                 x1={x1}
                 x2={x2}
                 fill={z.color}
-                fillOpacity={isLimiter ? 0.22 : 0.07}
+                fillOpacity={0.07}
               />
             );
           })}
