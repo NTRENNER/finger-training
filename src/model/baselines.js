@@ -27,6 +27,7 @@ import {
   computeBalancedCurveScore,
 } from "./threeExp.js";
 import { ZONE_KEYS, ZONE_REF_T } from "./zones.js";
+import { effectiveLoad } from "./load.js";
 
 // Per-zone reference times pulled into a single lookup, indexed by
 // zone key. Keeps the improvement loop tight.
@@ -98,7 +99,7 @@ export function improvementForAmps(curAmps, refAmps) {
 // Returns { date, amps } or null if the threshold is never met.
 export function buildGlobalBaseline(history) {
   const allFails = (history || [])
-    .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
+    .filter(r => effectiveLoad(r) > 0 && r.actual_time_s > 0)
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   const acc = [];
   const durs = new Set();
@@ -107,7 +108,7 @@ export function buildGlobalBaseline(history) {
     durs.add(r.target_duration);
     if (acc.length >= 3 && durs.size >= 2) {
       const amps = fitAmpsForPts(
-        acc.map(x => ({ T: x.actual_time_s, F: x.avg_force_kg })),
+        acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
         null,           // pooled across grips → no per-grip prior
         null,           // no priors map needed when grip is null
       );
@@ -130,7 +131,7 @@ export function buildGripBaselines(history, threeExpPriors) {
   const byGrip = {};
   for (const r of history || []) {
     if (!r.grip) continue;
-    if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+    if (!(effectiveLoad(r) > 0)) continue;
     if (!(r.actual_time_s > 0)) continue;
     if (!byGrip[r.grip]) byGrip[r.grip] = [];
     byGrip[r.grip].push(r);
@@ -144,7 +145,7 @@ export function buildGripBaselines(history, threeExpPriors) {
       durs.add(r.target_duration);
       if (acc.length >= 5 && durs.size >= 3) {
         const amps = fitAmpsForPts(
-          acc.map(x => ({ T: x.actual_time_s, F: x.avg_force_kg })),
+          acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
           grip,
           threeExpPriors,
         );
@@ -167,7 +168,7 @@ export function buildPerHandGripBaselines(history, threeExpPriors) {
   const byKey = {};
   for (const r of history || []) {
     if (!r.grip || !r.hand || r.hand === "Both") continue;
-    if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+    if (!(effectiveLoad(r) > 0)) continue;
     if (!(r.actual_time_s > 0)) continue;
     const key = `${r.grip}|${r.hand}`;
     if (!byKey[key]) byKey[key] = [];
@@ -183,7 +184,7 @@ export function buildPerHandGripBaselines(history, threeExpPriors) {
       if (acc.length >= 5 && durs.size >= 3) {
         const grip = key.split("|")[0];
         const amps = fitAmpsForPts(
-          acc.map(x => ({ T: x.actual_time_s, F: x.avg_force_kg })),
+          acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
           grip,
           threeExpPriors,
         );
@@ -203,14 +204,14 @@ export function buildGripEstimates(history, threeExpPriors) {
   const byGrip = {};
   for (const r of history || []) {
     if (!r.grip) continue;
-    if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+    if (!(effectiveLoad(r) > 0)) continue;
     if (!(r.actual_time_s > 0)) continue;
     if (!byGrip[r.grip]) byGrip[r.grip] = [];
     byGrip[r.grip].push(r);
   }
   for (const [grip, reps] of Object.entries(byGrip)) {
     const amps = fitAmpsForPts(
-      reps.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+      reps.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
       grip,
       threeExpPriors,
     );
@@ -245,8 +246,8 @@ export function computeHandAsymmetry(history, gripEstimates, threeExpPriors, ref
   for (const grip of Object.keys(gripEstimates || {})) {
     const buildHandPts = (hand) => (history || [])
       .filter(r => r.grip === grip && r.hand === hand)
-      .filter(r => r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0)
-      .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+      .filter(r => effectiveLoad(r) > 0 && r.actual_time_s > 0)
+      .map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
     const lPts = buildHandPts("L");
     const rPts = buildHandPts("R");
     if (lPts.length < 2 || rPts.length < 2) continue;

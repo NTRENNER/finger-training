@@ -26,6 +26,7 @@ import { useMemo } from "react";
 import { bwOnDate } from "../ui/format.js";
 import { computeBalancedCurveScore } from "../model/threeExp.js";
 import { fitAmpsForPts } from "../model/baselines.js";
+import { effectiveLoad } from "../model/load.js";
 
 export function useAucHistoryByGrip({
   history,
@@ -51,7 +52,7 @@ export function useAucHistoryByGrip({
     for (const g of grips) {
       const gripFails = (history || []).filter(r =>
         r.grip === g &&
-        r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0
+        effectiveLoad(r) > 0 && r.actual_time_s > 0
       );
       if (gripFails.length < 3) continue;
       const datesSet = new Set();
@@ -73,7 +74,7 @@ export function useAucHistoryByGrip({
         const upToFails = gripFails.filter(r => (r.date || "") <= date);
         if (upToFails.length < 3) continue;
         const amps = fitAmpsForPts(
-          upToFails.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+          upToFails.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
           g,
           threeExpPriors,
         );

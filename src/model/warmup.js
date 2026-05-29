@@ -56,6 +56,7 @@ import {
   buildThreeExpPriors,
   THREE_EXP_LAMBDA_DEFAULT,
 } from "./threeExp.js";
+import { effectiveLoad } from "./load.js";
 
 // Fit per-grip three-exp amps from the user's failure history. Mirrors
 // the AnalysisView grip3xEstimates pattern: per-grip prior + adaptive
@@ -66,10 +67,10 @@ function fitGripAmps(history, grip) {
   const pts = (history || [])
     .filter(r =>
       r.grip === grip &&
-      r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
+      effectiveLoad(r) > 0 &&
       r.actual_time_s > 0
     )
-    .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+    .map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
   if (pts.length < 2) return null;
   const priors = buildThreeExpPriors(history);
   const prior  = priors?.get?.(grip) ?? [0, 0, 0];

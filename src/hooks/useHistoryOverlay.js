@@ -1,17 +1,13 @@
 // ─────────────────────────────────────────────────────────────
-// useHistoryOverlay — Force Curves overlay + Strength Balance history
+// useHistoryOverlay — Force Curves "vs baseline" overlay history
 // ─────────────────────────────────────────────────────────────
 // Extracted from AnalysisView.js (late May 2026 BACKLOG #156, third
-// pass). Bundles the two memos that back the "Force Curves — vs
-// baseline" overlay card and the Strength Balance card's personal-
-// baseline history.
+// pass). Builds the cumulative per-grip / per-hand three-exp fits by
+// date that back the "Force Curves — vs baseline" overlay card.
 //
-// Why one hook for both: `balanceHistory` derives entirely from
-// `historyOverlay` (specifically the Crusher and Micro per-hand
-// cumulative fits). Keeping them in one hook means the consumer
-// doesn't have to pass historyOverlay around as an intermediate
-// prop, and the memoization boundary stays where it was — each
-// useMemo only re-runs when its own deps change.
+// (Previously also produced `balanceHistory` for the Strength Balance
+// card; both were removed May 2026 — the Crusher:Micro ratio was
+// edge-geometry-dominated, not a trainable balance.)
 //
 // Output shape:
 //   {
@@ -26,14 +22,11 @@
 //         },
 //       },
 //     },
-//     balanceHistory: {
-//       [hand]: { current, median, count, delta },  // Crusher/Micro ratio @ 10s
-//     } | null,
 //   }
 
 import { useMemo } from "react";
 import { fitAmpsForPts } from "../model/baselines.js";
-import { predForceThreeExp } from "../model/threeExp.js";
+import { effectiveLoad } from "../model/load.js";
 
 export function useHistoryOverlay({
   history,
@@ -66,7 +59,7 @@ export function useHistoryOverlay({
       if (!baseline?.amps) continue;     // no baseline → can't anchor
       const gripReps = (history || []).filter(r =>
         r.grip === g &&
-        r.avg_force_kg > 0 && r.avg_force_kg < 500 && r.actual_time_s > 0
+        effectiveLoad(r) > 0 && r.actual_time_s > 0
       );
       if (gripReps.length < 3) continue;
       // Restrict the Now slider to dates AT or AFTER the baseline
@@ -84,7 +77,7 @@ export function useHistoryOverlay({
         const upTo = gripReps.filter(r => (r.date || "") <= date);
         if (upTo.length < 3) continue;
         const amps = fitAmpsForPts(
-          upTo.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+          upTo.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
           g,
           threeExpPriors,
         );
@@ -128,7 +121,7 @@ export function useHistoryOverlay({
           // shrinks small-N runs (same gate as gripHandFits).
           if (upToHand.length < 2) continue;
           const amps = fitAmpsForPts(
-            upToHand.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+            upToHand.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
             g,
             threeExpPriors,
           );
@@ -162,59 +155,13 @@ export function useHistoryOverlay({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, grips, gripBaselines, perHandGripBaselines, threeExpPriors]);
 
-  // ── Open-hand vs Crimp dominance — personal-baseline calibration ──
-  // Per-hand Crusher:Micro ratio time series, plus the user's own
-  // median ratio (the "personal baseline"). The Strength Balance
-  // card classifies the CURRENT ratio by its deviation from the
-  // user's median, NOT against literature-anchored absolute bands.
-  // Anchoring on the user's own ratio sidesteps the edge-geometry
-  // problem: a very small Tindeq Micro implement pushes everyone's
-  // natural ratio higher than typical-edge literature suggests, so
-  // a 3.0× baseline is "your normal" for that gear — and the
-  // actionable signal is whether you're drifting down (FDS catching
-  // up) or up (gap widening) from YOUR normal, not from some
-  // external benchmark.
-  //
-  // Requires per-hand cumulative fits for BOTH Crusher and Micro on
-  // each date (intersection of the two grips' historyOverlay dates).
-  // Returns null when fewer than 1 shared date exists; the card
-  // gracefully falls back to a no-badge raw-ratio display below.
-  const balanceHistory = useMemo(() => {
-    const cOverlay = historyOverlay.Crusher;
-    const mOverlay = historyOverlay.Micro;
-    if (!cOverlay || !mOverlay) return null;
-    const BAL_T = 10;
-    const out = {};
-    for (const hand of ["L", "R"]) {
-      const cHand = cOverlay.perHand?.[hand];
-      const mHand = mOverlay.perHand?.[hand];
-      if (!cHand || !mHand) continue;
-      const sharedDates = [...cHand.ampsByDate.keys()]
-        .filter(d => mHand.ampsByDate.has(d))
-        .sort();
-      if (sharedDates.length === 0) continue;
-      const ratios = sharedDates.map(date => {
-        const cF = predForceThreeExp(cHand.ampsByDate.get(date), BAL_T);
-        const mF = predForceThreeExp(mHand.ampsByDate.get(date), BAL_T);
-        return cF > 0 && mF > 0 ? cF / mF : null;
-      }).filter(r => r != null);
-      if (ratios.length === 0) continue;
-      // Personal baseline = median (robust to outlier sessions —
-      // a bad-form Micro day shouldn't move your "normal" much).
-      const sorted = [...ratios].sort((a, b) => a - b);
-      const mid = sorted.length / 2;
-      const median = sorted.length % 2 === 0
-        ? (sorted[mid - 1] + sorted[mid]) / 2
-        : sorted[Math.floor(mid)];
-      out[hand] = {
-        current: ratios[ratios.length - 1],
-        median,
-        count: ratios.length,
-        delta: median > 0 ? (ratios[ratios.length - 1] - median) / median : null,
-      };
-    }
-    return Object.keys(out).length > 0 ? out : null;
-  }, [historyOverlay]);
+  // (Open-hand vs Crimp dominance / balanceHistory — the per-hand
+  // Crusher:Micro ratio time series — removed May 2026 along with the
+  // Strength Balance card it fed. The ratio was dominated by the Micro
+  // probe's much smaller edge geometry rather than trainable strength
+  // balance, so it sat ~constant against the user's own median and
+  // carried no actionable signal. Per-grip progress is visible on the
+  // Curve-Improvement trajectory.)
 
-  return { historyOverlay, balanceHistory };
+  return { historyOverlay };
 }

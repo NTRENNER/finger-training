@@ -37,6 +37,7 @@
 
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 import { ZONE_REF_T } from "./zones.js";
+import { effectiveLoad } from "./load.js";
 
 export const THREE_EXP_LAMBDA_DEFAULT = 100;
 
@@ -195,15 +196,18 @@ export function computeBalancedCurveScore(amps, taus = null) {
 //
 // Train-to-failure model (May 2026): every rep with valid
 // actual_time_s is a (T, F) failure data point. The legacy r.failed
-// filter is gone — every rep contributes uniformly.
+// filter is gone — every rep contributes uniformly. Load comes from
+// effectiveLoad (Tindeq ?? manual ?? prescribed ?? legacy) so manual /
+// non-Tindeq reps aren't silently dropped from the prior.
 export function buildThreeExpPriors(history) {
   const byGrip = {};
   for (const r of history || []) {
     if (!r.grip) continue;
-    if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+    const F = effectiveLoad(r);
+    if (!(F > 0)) continue;
     if (!(r.actual_time_s > 0)) continue;
     if (!byGrip[r.grip]) byGrip[r.grip] = [];
-    byGrip[r.grip].push({ T: r.actual_time_s, F: r.avg_force_kg });
+    byGrip[r.grip].push({ T: r.actual_time_s, F });
   }
   const out = new Map();
   for (const [grip, pts] of Object.entries(byGrip)) {

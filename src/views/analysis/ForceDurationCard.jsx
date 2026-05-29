@@ -45,6 +45,7 @@ import {
   predForceThreeExp,
 } from "../../model/threeExp.js";
 import { fitAmpsForPts } from "../../model/baselines.js";
+import { effectiveLoad } from "../../model/load.js";
 
 // Match AnalysisView's chart-min duration (5s — same lower bound as
 // the curve-sample grid in threeExpCurveData). Lives here as a local
@@ -211,10 +212,10 @@ export function ForceDurationCard({
                 // shrinkage from src/model/baselines.js.
                 const failures = (history || []).filter(r =>
                   r.grip === grip
-                  && r.actual_time_s > 0 && r.avg_force_kg > 0 && r.avg_force_kg < 500
+                  && r.actual_time_s > 0 && effectiveLoad(r) > 0
                 );
                 if (failures.length >= 2) {
-                  const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+                  const pts = failures.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
                   const amps = fitAmpsForPts(pts, grip, threeExpPriors);
                   if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
                     const teeCurve = Array.from({ length: 80 }, (_, i) => {
@@ -259,13 +260,13 @@ export function ForceDurationCard({
               const gripReps = (history || []).filter(r =>
                 r.grip === grip
                 && r.actual_time_s > 0
-                && r.avg_force_kg > 0 && r.avg_force_kg < 500
+                && effectiveLoad(r) > 0
               );
               const toDot = (r) => ({
                 x: r.actual_time_s,
                 y: useRel && bodyWeight > 0
-                  ? r.avg_force_kg / bodyWeight
-                  : toDisp(r.avg_force_kg, unit),
+                  ? effectiveLoad(r) / bodyWeight
+                  : toDisp(effectiveLoad(r), unit),
                 grip, date: r.date, hand: r.hand,
                 session_id: r.session_id,
                 target_duration: r.target_duration,

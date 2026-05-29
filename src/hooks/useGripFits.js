@@ -24,7 +24,6 @@
 //   {
 //     gripBaselines:        { [grip]: { date, amps } },
 //     grip3xEstimates:      { [grip]: amps },
-//     gripHandFits:         { [grip]: { L?, R?, pooled? } },
 //     perHandGripBaselines: { [`${grip}|${hand}`]: { date, amps } },
 //     gripImprovement:      { [grip]: { ...zoneDeltas, total, baselineDate } },
 //     handAsymmetry:        [{ grip, L, R, stronger, weaker, asymPct }],
@@ -32,7 +31,6 @@
 
 import { useEffect, useMemo } from "react";
 import {
-  fitAmpsForPts,
   buildGripBaselines, buildPerHandGripBaselines,
   buildGripEstimates, buildGripImprovement, computeHandAsymmetry,
 } from "../model/baselines.js";
@@ -104,44 +102,8 @@ export function useGripFits({
     [history, threeExpPriors]
   );
 
-  // Per-grip × per-hand three-exp fits. Used by the Strength Balance
-  // card. Falls back to a pooled fit on the grip when a hand doesn't
-  // have enough samples. Doubles as a grip-level "is this grip
-  // fitable at all?" gate (≥3 total reps).
-  //
-  // Not in baselines.js (yet) — the pooled fallback is unique to this
-  // consumer. Could be lifted once another card needs it.
-  const gripHandFits = useMemo(() => {
-    const out = {};
-    for (const grip of grips) {
-      const gripReps = (history || []).filter(r =>
-        r.grip === grip &&
-        r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
-        r.actual_time_s > 0
-      );
-      if (gripReps.length < 3) continue;
-      const entry = {};
-      for (const hand of ["L", "R"]) {
-        const pts = gripReps.filter(r => r.hand === hand)
-          .map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
-        if (pts.length >= 2) {
-          const amps = fitAmpsForPts(pts, grip, threeExpPriors);
-          if (amps) entry[hand] = amps;
-        }
-      }
-      const pooledAmps = fitAmpsForPts(
-        gripReps.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
-        grip,
-        threeExpPriors,
-      );
-      if (pooledAmps) entry.pooled = pooledAmps;
-      if (entry.pooled || entry.L || entry.R) out[grip] = entry;
-    }
-    return out;
-  // fitAmpsForPts closes over threeExpPriors; explicit dep here keeps
-  // memo honest. eslint can't see through the closure.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, grips, threeExpPriors]);
+  // (gripHandFits — per-grip × per-hand three-exp fits — removed May
+  // 2026 with its only consumer, the Strength Balance card.)
 
   // Per-(grip, hand) baselines — same seed gate as gripBaselines but
   // scoped to a single hand on a single grip. Used by the per-hand
@@ -173,7 +135,6 @@ export function useGripFits({
   return {
     gripBaselines,
     grip3xEstimates,
-    gripHandFits,
     perHandGripBaselines,
     gripImprovement,
     handAsymmetry,

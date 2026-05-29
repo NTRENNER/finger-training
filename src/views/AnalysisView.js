@@ -64,7 +64,6 @@ import { buildRepCurveBundle } from "../model/repCurveData.js";
 import { prescription, prescribedLoad, effectiveLoad } from "../model/prescription.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
-import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
 // EnduranceCeilingCard dropped May 2026 — the F(180s)/F(5s) ratio is
 // invariant to proportional strength gains (so it reads "NEEDS WORK"
 // even while the user is measurably getting stronger), the literature
@@ -229,7 +228,7 @@ export function AnalysisView({
   // that genuinely need them (Strength Balance, Hand Asymmetry).
   const reps = useMemo(() => history.filter(r =>
     (!selGrip || r.grip === selGrip) &&
-    r.avg_force_kg > 0 && r.avg_force_kg < 500 &&
+    effectiveLoad(r) > 0 &&
     r.actual_time_s > 0
   ), [history, selGrip]);
 
@@ -278,7 +277,7 @@ export function AnalysisView({
   // same selGrip filter the user has set on this view.
   const current3xAmps = useMemo(
     () => fitAmpsForPts(
-      failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg })),
+      failures.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
       selGrip,
       threeExpPriors,
     ),
@@ -304,7 +303,7 @@ export function AnalysisView({
   // crowd the AnalysisView render. See src/hooks/useGripFits.js for
   // the per-memo notes — extraction was pure relocation, no math changes.
   const {
-    gripBaselines, grip3xEstimates, gripHandFits,
+    gripBaselines, grip3xEstimates,
     perHandGripBaselines, gripImprovement, handAsymmetry,
   } = useGripFits({
     history, threeExpPriors, grips,
@@ -355,7 +354,7 @@ export function AnalysisView({
     const byGrip = {};
     for (const r of history) {
       if (!r.grip) continue;
-      if (!(r.avg_force_kg > 0 && r.avg_force_kg < 500)) continue;
+      if (!(effectiveLoad(r) > 0)) continue;
       if (!(r.actual_time_s > 0)) continue;
       byGrip[r.grip] = (byGrip[r.grip] || 0) + 1;
     }
@@ -406,7 +405,7 @@ export function AnalysisView({
   // loses to Monod by ~3% on aggregate, fine as a degenerate case).
   const threeExpFit = useMemo(() => {
     if (failures.length < 2) return null;
-    const pts = failures.map(r => ({ T: r.actual_time_s, F: r.avg_force_kg }));
+    const pts = failures.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
     const amps = fitAmpsForPts(pts, selGrip, threeExpPriors);
     if (!amps) return null;
     return { amps };
@@ -513,11 +512,9 @@ export function AnalysisView({
   // now; the F-D chart + Curve Improvement + Curve Coverage cover
   // the diagnostic ground.)
 
-  // Force Curves History overlay + Strength Balance history. Bundled
-  // into useHistoryOverlay — balanceHistory derives entirely from
-  // historyOverlay so keeping them paired collapses the dep chain.
-  // See src/hooks/useHistoryOverlay.js for the per-memo notes.
-  const { historyOverlay, balanceHistory } = useHistoryOverlay({
+  // Force Curves History overlay (cumulative per-grip / per-hand fits
+  // by date). See src/hooks/useHistoryOverlay.js for the per-memo notes.
+  const { historyOverlay } = useHistoryOverlay({
     history, grips, gripBaselines, perHandGripBaselines, threeExpPriors,
   });
 
@@ -729,10 +726,6 @@ export function AnalysisView({
           normalizeOn={normalizeOn}
         />
 
-        {/* (StrengthBalanceCard moved to the bottom of Analysis — see
-            the closing block. The user's preferred reading order is:
-            chart → per-zone deltas → time trend → exploratory overlays
-            → 1RM PRs → recovery → hand asymmetry → curve coverage.) */}
 
         {/* ── Force Curves History — vs baseline overlay ──
             Baseline three-exp curve (dashed, muted) overlaid against
@@ -794,15 +787,12 @@ export function AnalysisView({
         <RecoveryObservedTrendCard history={history} grips={grips} />
         <RecoveryTrendCard history={history} grips={grips} />
 
-        {/* Hand asymmetry — second-to-last per user preference. The
-            crusher-vs-micro ratio is more "explore when curious" than
-            "check every session," so it lives near the bottom rather
-            than competing with the metric stack up top. */}
-        <StrengthBalanceCard
-          gripHandFits={gripHandFits}
-          balanceHistory={balanceHistory}
-          unit={unit}
-        />
+        {/* (StrengthBalanceCard — the Crusher:Micro "open-hand vs crimp
+            dominance" ratio — removed May 2026. The ratio is dominated by
+            the Micro probe's much smaller edge geometry, not by trainable
+            strength balance, so it sat ~constant against the user's own
+            median and produced no actionable signal. Per-grip progress is
+            already visible on the Curve-Improvement trajectory.) */}
 
         {/* Curve Coverage — per-zone data freshness + annual pace.
             Anchors the bottom of Analysis: it's a "how good is your
