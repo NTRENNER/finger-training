@@ -6,6 +6,7 @@
 
 import {
   computeDeload, liftingVolumeByDate,
+  fingerSessionsThisWeek, deloadPlan, buildDeloadGuidance,
   DELOAD_STALE_DAYS,
 } from "../deload.js";
 
@@ -115,5 +116,37 @@ describe("computeDeload", () => {
 
   test("stale-day constant is sane", () => {
     expect(DELOAD_STALE_DAYS).toBeGreaterThan(0);
+  });
+});
+
+describe("weekly deload plan", () => {
+  test("fingerSessionsThisWeek counts distinct days in the trailing week", () => {
+    const hist = [
+      ...sess("Crusher", "L", "2026-05-20", 30, 28),
+      ...sess("Crusher", "L", "2026-05-18", 30, 28),
+      ...sess("Crusher", "L", "2026-05-18", 30, 28), // same day → still 1
+      ...sess("Crusher", "L", "2026-05-05", 30, 28), // >7d before → excluded
+    ];
+    expect(fingerSessionsThisWeek(hist, "2026-05-20")).toBe(2);
+  });
+
+  test("deloadPlan: strong = 1 session + skip A + 2 climb days; mild = cap 2", () => {
+    expect(deloadPlan("strong")).toMatchObject({ fingerCap: 1, skipWorkout: "A", climbDays: 2 });
+    expect(deloadPlan("mild")).toMatchObject({ fingerCap: 2, skipWorkout: null });
+    expect(deloadPlan("none")).toBeNull();
+  });
+
+  test("buildDeloadGuidance: strong names skip-A + climb cut + session count", () => {
+    const hist = sess("Crusher", "L", "2026-05-20", 30, 28);
+    const g = buildDeloadGuidance("strong", hist, { today: "2026-05-20" });
+    expect(g.severity).toBe("strong");
+    expect(g.fingerDoneThisWeek).toBe(1);
+    expect(g.action).toMatch(/skip Workout A/i);
+    expect(g.action).toMatch(/climbing days/i);
+    expect(g.action).toMatch(/cut volume, not intensity/i);
+  });
+
+  test("buildDeloadGuidance: null severity → null", () => {
+    expect(buildDeloadGuidance("none", [], {})).toBeNull();
   });
 });

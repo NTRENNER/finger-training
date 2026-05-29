@@ -178,3 +178,52 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
 
   return { deload: true, severity, signals, why };
 }
+
+// ─────────────────────────────────────────────────────────────
+// WEEKLY DELOAD PLAN
+// ─────────────────────────────────────────────────────────────
+// A deload is a WEEK-scoped intervention, not a per-session tweak. The
+// plan cuts VOLUME ~50% (Climb Strong's deload heuristic) while keeping
+// the loads you do hit near-normal — the recovery comes from less
+// volume, not from making sessions easy (that would also detrain). So
+// the plan caps sessions/days rather than scaling prescribed loads.
+
+export const DELOAD_WEEK_DAYS = 7;
+
+// Distinct finger-training days within the 7 days ending at `today`.
+// A lightweight weekly-session counter so the reminder can say
+// "you've done N this week" (the app has no weekly session target).
+export function fingerSessionsThisWeek(history, today) {
+  if (!Array.isArray(history) || !today) return 0;
+  const dates = new Set();
+  for (const r of history) {
+    if (!r.date || !(r.actual_time_s > 0)) continue;
+    const ago = daysBetween(r.date, today);
+    if (ago >= 0 && ago < DELOAD_WEEK_DAYS) dates.add(r.date);
+  }
+  return dates.size;
+}
+
+// Weekly volume prescription for a deload, by severity. Strong = a full
+// deload week (one finger session, skip the heavy lifting day "A", drop
+// a climbing day). Mild = a soft cap, no skips. Null when no deload.
+export function deloadPlan(severity) {
+  if (severity === "strong") return { fingerCap: 1, skipWorkout: "A", climbDays: 2, climbFrom: 3 };
+  if (severity === "mild")   return { fingerCap: 2, skipWorkout: null, climbDays: null, climbFrom: null };
+  return null;
+}
+
+// Banner-ready guidance: the action text + the weekly counts, derived
+// from a computeDeload result (or a stored severity during an accepted
+// deload week). Pure — the UI owns acceptance/persistence.
+export function buildDeloadGuidance(severity, history, opts = {}) {
+  const plan = deloadPlan(severity);
+  if (!plan) return null;
+  const datesAsc = (history || []).filter(r => r.date).map(r => r.date).sort();
+  const today = opts.today || datesAsc[datesAsc.length - 1] || null;
+  const done = today ? fingerSessionsThisWeek(history, today) : 0;
+  const action = severity === "strong"
+    ? `This week: limit finger training to ${plan.fingerCap} session (you've done ${done} so far), skip Workout ${plan.skipWorkout}, and drop to ${plan.climbDays} climbing days from ${plan.climbFrom}. Keep the loads you do hit near-normal — cut volume, not intensity.`
+    : `Keep it light this week — no more than ${plan.fingerCap} hard finger sessions (you've done ${done} so far) and hold off adding lifting or climbing volume.`;
+  return { severity, plan, fingerDoneThisWeek: done, action };
+}
