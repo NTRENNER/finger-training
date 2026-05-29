@@ -9,13 +9,19 @@
 //   score(T) = adaptBoost(T)
 //            × stalenessBoost(zoneOf(T))
 //            × recencyPenalty(zoneOf(T))
-//            × externalLoadModifier(zoneOf(T), activities)
 //            × focusBoost(zoneOf(T), climbingFocus)
 //
 // adaptBoost is SYMMETRIC: room = 1 − localRatio, where localRatio is
 // the Gaussian-smoothed F_actual / F_curve at T. Below-curve → boost,
-// above-curve → penalty. See coachingRecommendationContinuous() for
-// the full math.
+// above-curve → penalty. The room is CONFIDENCE-GATED by local data
+// density (confidence = effN/(effN+CONFIDENCE_K)), so thin-data zones
+// fall back to neutral and let staleness drive. See
+// coachingRecommendationContinuous() for the full math.
+//
+// The old externalLoadModifier term (recent-climbing RPE × hours-ago)
+// was removed May 2026 — finger training always follows climbing, so
+// that fatigue is a near-constant baseline rather than a deviation to
+// correct for, and readiness now lives solely on the cooked slider.
 //
 // The earlier discrete (zone × hand, gap-shifted) engine and its
 // human-readable rationale formatter were retired in May 2026 along
@@ -32,9 +38,6 @@
 import { ymdLocal } from "../util.js";
 import { zoneOf, ZONE_REF_T } from "./zones.js";
 import { getZoneStaleness, stalenessBoost } from "./lockout.js";
-import {
-  computeSessionFatigue, mostRecentClimbDate, fatigueToModifier,
-} from "./climbingFatigue.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
@@ -95,26 +98,14 @@ export function recencyPenalty(zone, history, grip) {
   return 1 - Math.exp(-daysAgo / tau);
 }
 
-// External load (climbing) adds systemic fatigue that the in-session
-// rep timing alone doesn't fully capture. Now RPE-aware: the most
-// recent climbing session's per-climb RPEs aggregate into a 1-10
-// session fatigue scalar (climbingFatigue.js), which combines with
-// hours-ago to scale per-zone prescriptions. One max-effort attempt
-// at RPE 9 (low session fatigue) and an hour of moderate RPE 7
-// volume (high session fatigue) used to look identical here — they
-// shouldn't.
-export function externalLoadModifier(zone, activities) {
-  if (!activities || activities.length === 0) return 1.0;
-  const todayDate = new Date();
-  const todayMs = todayDate.getTime();
-  // Find the most recent climbing date within the last 3 days.
-  const recentDate = mostRecentClimbDate(activities, todayDate, 3);
-  if (!recentDate) return 1.0;
-  const hoursAgo = (todayMs - Date.parse(recentDate)) / 3600000;
-  if (hoursAgo < 0 || hoursAgo > 48) return 1.0;
-  const fatigue = computeSessionFatigue(activities, recentDate);
-  return fatigueToModifier(zone, fatigue, hoursAgo);
-}
+// Confidence-gate strength for the residual signal, in units of
+// "effective nearby reps" (effN = Gaussian-weighted local sample size).
+// confidence = effN/(effN+CONFIDENCE_K): at effN=K confidence is 0.5,
+// so the adaptation room is half-weighted; it takes ~3 nearby reps to
+// reach ~2/3 weight. Tuned against Nathan's Crusher/Micro history so
+// the thin zones the jackknife flagged as unstable stop producing
+// confident limiter picks. Re-sweep if the data distribution shifts.
+export const CONFIDENCE_K = 1.5;
 
 // ─────────────────────────────────────────────────────────────
 // CONTINUOUS COACHING ENGINE  (AUC-gain pick, May 2026)
@@ -138,23 +129,22 @@ export function externalLoadModifier(zone, activities) {
 //      local "where on the curve do you fall vs the model" signal.
 //   4. score(T) = adaptBoost(T) × stalenessBoost(zoneOf(T))
 //                                × recencyPenalty(zoneOf(T))
-//                                × externalLoadModifier(zoneOf(T), activities)
 //                                × focusBoost(zoneOf(T), climbingFocus)
 //      adaptBoost is SYMMETRIC (vs. the earlier residualBoost which
-//      only rewarded limiters):
-//        room = 1 − localRatio   (positive = below curve, room to grow;
-//                                 negative = above curve, at ceiling)
-//        adaptBoost = clamp(1 + room × 3, 0.2, 3.0)
-//      So localRatio = 0.7 → adaptBoost ≈ 1.9 (limiter, train here),
-//         localRatio = 1.0 → adaptBoost = 1.0 (calibrated, neutral),
-//         localRatio = 1.2 → adaptBoost ≈ 0.4 (strength signal, skip).
+//      only rewarded limiters) and CONFIDENCE-GATED:
+//        room       = 1 − localRatio   (positive = below curve, room to
+//                                       grow; negative = at ceiling)
+//        confidence = effN / (effN + CONFIDENCE_K)   (effN = Gaussian-
+//                     weighted local sample size = weightSum)
+//        adaptBoost = clamp(1 + room × 3 × confidence, 0.2, 3.0)
+//      So with ample nearby data: localRatio 0.7 → adaptBoost ≈ 1.9
+//      (limiter, train here); 1.0 → 1.0 (neutral); 1.2 → ≈ 0.4 (skip).
+//      With thin data the confidence factor collapses the room toward 0
+//      so adaptBoost → 1.0 and staleness drives — we never act on a
+//      residual the data can't support (see jackknife instability note).
 //      stalenessBoost preserves curve coverage incentive.
 //      recencyPenalty crushes just-trained zones with the same per-zone
 //      tau the discrete engine uses (max_strength fast → endurance slow).
-//      externalLoadModifier scales prescriptions down after recent hard
-//      climbing — RPE-aware session fatigue from climbingFatigue.js
-//      pushes Power down hardest, Endurance least. Returns 1.0 when no
-//      recent climb session is found within 48h.
 //      focusBoost biases the pick toward the zones the user's current
 //      climbing goal lives in (bouldering / power_endurance / endurance).
 //      Calibrated as a tie-breaker — 1.0× neutral, 1.10–1.20× favor,
@@ -224,13 +214,16 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const {
     freshMap = null,
     threeExpPriors = null,
-    activities = [],
     today = new Date(),
     tMin = CONTINUOUS_T_MIN,
     tMax = CONTINUOUS_T_MAX,
     tStep = CONTINUOUS_T_STEP,
     bandwidth = CONTINUOUS_BANDWIDTH,
     climbingFocus = "balanced",
+    // Confidence-gate strength (effective nearby reps). Defaults to the
+    // module constant; overridable so the K-sweep harness can tune it
+    // against real history without editing the constant.
+    confidenceK = CONFIDENCE_K,
   } = opts;
   // perceivedFatigue + personalGains opts intentionally not consumed
   // here — see the per-T loop below for the rationale. The recommendation
@@ -303,14 +296,33 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // staleness drives the score in those regions).
       const localRatio = weightSum > 1e-6 ? ratioSum / weightSum : 1.0;
 
+      // CONFIDENCE GATE (May 2026): weightSum is the sum of Gaussian
+      // kernel weights from observed reps near T — i.e. an effective
+      // local sample size (a rep at T contributes ~1.0; reps within σ
+      // contribute ~0.6 each). The residual signal (localRatio vs the
+      // curve) is self-referential and noisy where data is thin: a
+      // single off rep can masquerade as a limiter. So we shrink the
+      // adaptation ROOM toward neutral in proportion to local density,
+      // confidence = effN/(effN+K). With little nearby data the room
+      // fades to 0, adaptBoost → 1.0 (neutral), and the score is handed
+      // to staleness — the right behavior, since a thin/never zone
+      // should be driven by the exploration boost, not by an
+      // untrustworthy residual. (Jackknife on real per-grip data showed
+      // the fitted amplitudes — hence the curve, hence the residuals —
+      // swing wildly when one point is dropped in sparse regions; this
+      // is the runtime guard against acting on that instability.)
+      const effN = weightSum;
+      const confidence = effN / (effN + confidenceK);
+
       // SYMMETRIC adaptation room: positive when below curve (limiter,
       // adaptation headroom), negative when above curve (already strong,
       // less room to grow). The earlier residualBoost only rewarded
       // limiters; under Reading B (train where AUC will most improve),
       // we ALSO actively skip strength zones since training there
-      // contributes less marginal AUC than training a limiter.
+      // contributes less marginal AUC than training a limiter. The room
+      // is confidence-gated so this only fires on trustworthy data.
       const room = 1 - localRatio;
-      let adaptBoost = Math.max(0.2, Math.min(3.0, 1 + room * 3));
+      let adaptBoost = Math.max(0.2, Math.min(3.0, 1 + room * 3 * confidence));
 
       const zoneKey = zoneOf(T);
       const zoneStatus = stalenessMap[zoneKey]?.status ?? "ok";
@@ -334,23 +346,24 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // training, recovering to 1.0 over the zone's tau). Same per-zone
       // tau map the discrete engine uses — see COACH_RECOVERY_TAU_DAYS.
       const recency = recencyPenalty(zoneKey, history, grip);
-      // External climbing load: RPE-aware session fatigue from
-      // src/model/climbingFatigue.js, scaled by zone (max_strength
-      // most sensitive, endurance least). 1.0 when no recent climb
-      // session is found within 48h — see externalLoadModifier above.
-      // NOTE: in-the-moment perceivedFatigue (the slider on Setup) is
+      // NOTE on fatigue: recent-climbing and in-the-moment readiness are
       // INTENTIONALLY NOT factored into the recommendation pick. The
       // recommendation answers "what stimulus does the curve want next"
-      // — that's a pure-math question over staleness, recency, the F-D
-      // residual, and recent climbing. How tired the user feels today
-      // is a separate concern that scales the prescribed LOAD (in the
-      // runner / on the tiles), not which ZONE gets picked.
-      const ext = externalLoadModifier(zoneKey, activities);
+      // — a pure-math question over staleness, recency, and the
+      // confidence-gated F-D residual. Day-to-day readiness is carried
+      // by the cooked slider (which learns a per-grip β and scales the
+      // prescribed LOAD in the runner / freshMap), not by which ZONE is
+      // picked. The old externalLoadModifier (climbing RPE × hours-ago)
+      // was removed May 2026: finger training always follows climbing,
+      // so climbing fatigue is a near-constant baseline already baked
+      // into the numbers rather than a deviation to correct for, and
+      // train-to-failure self-corrects regardless — see project notes.
+      //
       // Climbing-focus multiplier — biases the engine toward zones
       // that match the user's training goal. 1.0 when focus is
       // "balanced" or unset (no behavior change for default users).
       const focus = focusBoost(zoneKey, climbingFocus);
-      const score = adaptBoost * stale * recency * ext * focus;
+      const score = adaptBoost * stale * recency * focus;
 
       // Never-zone tiebreaker: snap to the zone's reference T. The
       // adaptBoost floor (above) flattens the score across every T
@@ -388,7 +401,14 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
           localRatio,
           stalenessBoost: stale,
           recency,
-          ext,
+          // Confidence in the residual signal at this T: effN is the
+          // effective local sample size (Gaussian-weighted), confidence
+          // = effN/(effN+K) in [0,1). Low confidence means the pick was
+          // driven by staleness/exploration rather than a trusted
+          // residual — the UI uses this to label the pick "estimated /
+          // collect a clean rep here" instead of a confident limiter.
+          effN,
+          confidence,
           focus,           // climbing-focus multiplier at this zone
           climbingFocus,   // the focus key (for "Why" line surfacing)
           staleStatus: zoneStatus,

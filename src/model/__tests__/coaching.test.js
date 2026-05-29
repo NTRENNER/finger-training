@@ -1,15 +1,18 @@
 // Tests for src/model/coaching.js — continuous coaching engine.
-// Covers recencyPenalty, externalLoadModifier, and the
-// coachingRecommendationContinuous AUC-gain picker.
+// Covers recencyPenalty and the coachingRecommendationContinuous
+// AUC-gain picker (including the confidence gate on adaptBoost).
 //
 // The earlier discrete (zone × hand) engine and its rationale formatter
 // were retired May 2026 along with the SessionPlannerCard surface they
 // backed; the tests for coachingRecommendation, coachingRationale, and
-// zoneResidualFactor were dropped at the same time.
+// zoneResidualFactor were dropped at the same time. externalLoadModifier
+// and its tests were removed May 2026 — finger training always follows
+// climbing, so climbing fatigue is a baseline carried by the cooked
+// slider, not a per-recommendation modifier.
 
 import {
   COACH_RECOVERY_TAU_DAYS,
-  recencyPenalty, externalLoadModifier,
+  recencyPenalty,
   coachingRecommendationContinuous,
 } from "../coaching.js";
 import { buildThreeExpPriors } from "../threeExp.js";
@@ -85,75 +88,6 @@ describe("recencyPenalty", () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// externalLoadModifier — climbing in last 48h depresses zones
-// ─────────────────────────────────────────────────────────────
-describe("externalLoadModifier", () => {
-  test("returns 1.0 with no activities", () => {
-    expect(externalLoadModifier("power", [])).toBe(1.0);
-    expect(externalLoadModifier("power", null)).toBe(1.0);
-  });
-
-  test("returns 1.0 when no recent climbing", () => {
-    const longAgo = "2020-01-01";
-    expect(externalLoadModifier("power", [{ type: "climbing", date: longAgo }])).toBe(1.0);
-  });
-
-  test("recent climbing depresses power more than endurance", () => {
-    // Yesterday avoids TZ edge cases. RPE drives session fatigue under
-    // the new logic, so we put a moderate session in to get a signal.
-    const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const acts = [
-      { type: "climbing", date: yday, rpe: 8 },
-      { type: "climbing", date: yday, rpe: 7 },
-      { type: "climbing", date: yday, rpe: 7 },
-      { type: "climbing", date: yday, rpe: 8 },
-    ];
-    const power = externalLoadModifier("power", acts);
-    const end   = externalLoadModifier("endurance", acts);
-    expect(power).toBeLessThan(end);
-    // Both should be < 1 — climbing happened recently with real load.
-    expect(power).toBeLessThan(1.0);
-    expect(end).toBeLessThan(1.0);
-  });
-
-  test("low-RPE warmup day barely impacts the engine", () => {
-    const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const warmupActs = [
-      { type: "climbing", date: yday, rpe: 3 },
-      { type: "climbing", date: yday, rpe: 3 },
-    ];
-    const power = externalLoadModifier("power", warmupActs);
-    // Fatigue floor = 1-2 (two RPE-3 climbs derive a low score),
-    // decayed by ~50% over the ~24h-since-midnight window. Expect
-    // a small scale-down — definitely far from the moderate-load
-    // suppression a real session would produce. Threshold is loose
-    // because "yesterday" parses as midnight, so hours-ago depends
-    // on the time of day the test runs (anywhere ~24-48h ahead).
-    expect(power).toBeGreaterThan(0.9);
-  });
-
-  test("high-volume RPE-7 session crushes more than single RPE-9 attempt", () => {
-    // The whole point of the RPE-aware refactor. 1 climb at RPE 9 vs
-    // 8 climbs at RPE 7. The 8x7 session should leave you more cooked
-    // → smaller modifier (more suppression).
-    const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const oneMaxEffort = [{ type: "climbing", date: yday, rpe: 9 }];
-    const volumeSlogfest = Array.from({ length: 8 }, () => ({
-      type: "climbing", date: yday, rpe: 7,
-    }));
-    const oneAttemptMod = externalLoadModifier("power", oneMaxEffort);
-    const volumeMod = externalLoadModifier("power", volumeSlogfest);
-    expect(volumeMod).toBeLessThan(oneAttemptMod);
-  });
-
-  test("ignores non-climbing activities", () => {
-    const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const acts = [{ type: "rest", date: yday, rpe: 9 }];
-    expect(externalLoadModifier("power", acts)).toBe(1.0);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
 // coachingRecommendationContinuous — curve-trust continuous engine
 // ─────────────────────────────────────────────────────────────
 // Sweeps T from 5 to 240 in 5s steps, scores via Gaussian-smoothed
@@ -201,6 +135,53 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.hand).toBe("L");
     expect(rec.loadKg).toBeGreaterThan(0);
     expect(rec.loadByHand).toBeDefined();
+  });
+
+  test("surfaces confidence and effN on the pick, in range", () => {
+    const history = [buildRep("L", 30, F_curve(30)), buildRep("L", 60, F_curve(60))];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    expect(rec.confidence).toBeGreaterThan(0);
+    expect(rec.confidence).toBeLessThanOrEqual(1);
+    expect(rec.effN).toBeGreaterThan(0);
+  });
+
+  test("confidence gate: denser sampling at the limiter yields higher confidence", () => {
+    // Full on-curve coverage 8 days ago (no never-zone 3.0× boost), with
+    // a deep under-perform at 90s. The THIN history has a single rep at
+    // 90; the DENSE history clusters several reps at ~90. Both should pick
+    // near the limiter, but the gate (confidence = effN/(effN+K)) must
+    // report higher confidence for the densely-sampled pick — the runtime
+    // guard against acting on a lone, jackknife-unstable outlier.
+    const d = 8;
+    const coverage = () => [
+      buildRep("L", 5,   F_curve(5),   d),
+      buildRep("L", 10,  F_curve(10),  d),
+      buildRep("L", 20,  F_curve(20),  d),
+      buildRep("L", 30,  F_curve(30),  d),
+      buildRep("L", 45,  F_curve(45),  d),
+      buildRep("L", 60,  F_curve(60),  d),
+      buildRep("L", 120, F_curve(120), d),
+      buildRep("L", 160, F_curve(160), d),
+      buildRep("L", 180, F_curve(180), d),
+    ];
+    const thinHistory = [...coverage(), buildRep("L", 90, F_curve(90) * 0.5, d)];
+    const denseHistory = [
+      ...coverage(),
+      buildRep("L", 88, F_curve(88) * 0.5, d),
+      buildRep("L", 89, F_curve(89) * 0.5, d),
+      buildRep("L", 90, F_curve(90) * 0.5, d),
+      buildRep("L", 91, F_curve(91) * 0.5, d),
+      buildRep("L", 92, F_curve(92) * 0.5, d),
+    ];
+    const recThin = coachingRecommendationContinuous(
+      thinHistory, "Crusher", { threeExpPriors: buildThreeExpPriors(thinHistory), today });
+    const recDense = coachingRecommendationContinuous(
+      denseHistory, "Crusher", { threeExpPriors: buildThreeExpPriors(denseHistory), today });
+    expect(recThin).not.toBeNull();
+    expect(recDense).not.toBeNull();
+    expect(recDense.confidence).toBeGreaterThan(recThin.confidence);
   });
 
   test("recommends near a duration where actuals fall below the curve", () => {
@@ -477,13 +458,14 @@ describe("coachingRecommendationContinuous", () => {
     expect(cooked.zone).toBe(fresh.zone);
     expect(cooked.T).toBe(fresh.T);
     expect(cooked.score).toBe(fresh.score);
-    expect(cooked.ext).toBe(fresh.ext);
   });
 
-  test("activities (recent climbing) suppress the recommendation score", () => {
-    // Same history both runs; the only difference is whether activities
-    // include a recent hard climbing session. With it, the score should
-    // be lower (activities multiply through ext < 1.0 within 48h).
+  test("recent climbing activities do NOT change the recommendation", () => {
+    // externalLoadModifier was removed May 2026 — finger training always
+    // follows climbing, so climbing fatigue is a baseline carried by the
+    // cooked slider, not a per-recommendation modifier. Passing activities
+    // must therefore be inert: same zone, T, and score with or without a
+    // recent hard climbing session in the opts.
     const history = [
       buildRep("L", 30, F_curve(30)),
       buildRep("L", 60, F_curve(60)),
@@ -498,11 +480,9 @@ describe("coachingRecommendationContinuous", () => {
     const withClimbs = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today, activities: hardClimb });
     expect(noClimbs).not.toBeNull();
     expect(withClimbs).not.toBeNull();
-    // ext is exposed on the result for transparency
-    expect(withClimbs.ext).toBeLessThan(1.0);
-    expect(noClimbs.ext).toBe(1.0);
-    // Score should drop when climbing fatigue is in play
-    expect(withClimbs.score).toBeLessThan(noClimbs.score);
+    expect(withClimbs.zone).toBe(noClimbs.zone);
+    expect(withClimbs.T).toBe(noClimbs.T);
+    expect(withClimbs.score).toBe(noClimbs.score);
   });
 
   test("staleness is per-grip — Crusher endurance training doesn't refresh Micro endurance", () => {

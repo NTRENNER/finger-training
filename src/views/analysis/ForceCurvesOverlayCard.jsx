@@ -39,7 +39,7 @@ import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { GRIP_COLORS, HAND_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, fmtW, toDisp } from "../../ui/format.js";
-import { predForceThreeExp, computeAUCThreeExp } from "../../model/threeExp.js";
+import { predForceThreeExp, computeBalancedCurveScore } from "../../model/threeExp.js";
 
 // Toggle / grip-selector pill renderer. Lives here because it's only
 // consumed by this card (and the visual is specific to the chip-row
@@ -178,18 +178,19 @@ export function ForceCurvesOverlayCard({
   // endurance. Deltas signed (negative = lost capacity). One row per
   // series.
   //
-  // Total AUC delta lives alongside the per-T cells: the per-T
-  // numbers are a zone-by-zone breakdown ("where did the gain come
-  // from?"), but a single integrated number answers "is the whole
-  // curve moving up?" which is the question the slider is for.
-  // AUC ratio matches what CurveImprovementCard already shows as the
-  // headline so the two surfaces agree on what "total" means.
+  // Total delta lives alongside the per-T cells: the per-T numbers are
+  // a zone-by-zone breakdown ("where did the gain come from?"), but a
+  // single number answers "is the whole curve moving up?" which is the
+  // question the slider is for. Uses the balanced curve score (geometric
+  // mean across zone refTs) so the total weights every zone equally and
+  // matches what CurveImprovementCard shows as the headline — not the
+  // old τ-weighted AUC, which only reflected the slow tail.
   const refTs = [10, 30, 60, 120, 180];
   const deltaRows = series.map(s => {
-    const aucPast = s.pastAmps ? computeAUCThreeExp(s.pastAmps) : null;
-    const aucNow  = s.nowAmps  ? computeAUCThreeExp(s.nowAmps)  : null;
-    const totalPct = (aucPast && aucPast > 0 && aucNow != null)
-      ? Math.round((aucNow / aucPast - 1) * 100)
+    const scorePast = s.pastAmps ? computeBalancedCurveScore(s.pastAmps) : null;
+    const scoreNow  = s.nowAmps  ? computeBalancedCurveScore(s.nowAmps)  : null;
+    const totalPct = (scorePast && scorePast > 0 && scoreNow != null)
+      ? Math.round((scoreNow / scorePast - 1) * 100)
       : null;
     return {
       key: s.key,

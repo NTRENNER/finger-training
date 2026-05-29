@@ -24,7 +24,7 @@
 
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
-  computeAUCThreeExp,
+  computeBalancedCurveScore,
 } from "./threeExp.js";
 import { ZONE_KEYS, ZONE_REF_T } from "./zones.js";
 
@@ -52,10 +52,15 @@ export function fitAmpsForPts(pts, grip, threeExpPriors) {
   return amps;
 }
 
-// Per-zone Δ% from a current amp triple vs a reference triple, plus
-// a `total` keyed off the AUC ratio. The AUC total is what the
-// Capacity (AUC) chart uses, so headline numbers tie out across
-// surfaces. Falls back to zone-average if either AUC is degenerate.
+// Per-zone Δ% from a current amp triple vs a reference triple, plus a
+// `total` keyed off the BALANCED CURVE SCORE ratio (geometric mean of
+// force across the six zone refTs — see computeBalancedCurveScore).
+// The balanced total is what the Capacity / Curve-Improvement chart
+// uses, so headline numbers tie out across surfaces. By construction
+// the balanced total ≈ the average of the per-zone Δ%s, so a gain in
+// any zone moves it — unlike the old τ-weighted AUC total, which only
+// tracked the slow tail. Falls back to the explicit zone-average if
+// either score is degenerate.
 //
 // Returns { ...zoneKey: pct, total: pct } or null if either input
 // can't produce a positive reference force at any zone.
@@ -73,10 +78,10 @@ export function improvementForAmps(curAmps, refAmps) {
     if (v == null) return null;
     result[k] = v;
   }
-  const curAUC = computeAUCThreeExp(curAmps);
-  const refAUC = computeAUCThreeExp(refAmps);
-  if (curAUC > 0 && refAUC > 0) {
-    result.total = Math.round((curAUC / refAUC - 1) * 100);
+  const curScore = computeBalancedCurveScore(curAmps);
+  const refScore = computeBalancedCurveScore(refAmps);
+  if (curScore > 0 && refScore > 0) {
+    result.total = Math.round((curScore / refScore - 1) * 100);
   } else {
     const sum = ZONE_KEYS.reduce((s, k) => s + result[k], 0);
     result.total = Math.round(sum / ZONE_KEYS.length);

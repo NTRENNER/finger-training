@@ -24,7 +24,7 @@
 
 import { useMemo } from "react";
 import { bwOnDate } from "../ui/format.js";
-import { computeAUCThreeExp } from "../model/threeExp.js";
+import { computeBalancedCurveScore } from "../model/threeExp.js";
 import { fitAmpsForPts } from "../model/baselines.js";
 
 export function useAucHistoryByGrip({
@@ -64,7 +64,7 @@ export function useAucHistoryByGrip({
       // pctBW falls back to the raw pct in the render.
       const base = gripBaselines[g];
       if (base?.amps) {
-        const baseAUC = computeAUCThreeExp(base.amps);
+        const baseAUC = computeBalancedCurveScore(base.amps);
         const baseBwEntry = base.date ? bwOnDate(bwLog, base.date) : null;
         baselineByGrip[g] = { auc: baseAUC, bw: baseBwEntry?.kg ?? null };
       }
@@ -88,7 +88,7 @@ export function useAucHistoryByGrip({
         const isBaselineDate = base?.date && date === base.date;
         const abs = isBaselineDate
           ? baselineByGrip[g]?.auc
-          : computeAUCThreeExp(amps);
+          : computeBalancedCurveScore(amps);
         if (!(abs > 0)) continue;
         const baseAUC = baselineByGrip[g]?.auc;
         const baseBW  = baselineByGrip[g]?.bw;

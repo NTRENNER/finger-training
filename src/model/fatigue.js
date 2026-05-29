@@ -129,37 +129,12 @@ export function predictRepTimes({ numReps, firstRepTime, restSeconds, physModel 
   return times;
 }
 
-// ─────────────────────────────────────────────────────────────
-// PER-COMPONENT AUC (training dose delivered to each curve component)
-// ─────────────────────────────────────────────────────────────
-// Textbook PK-style integral: dose_i = load × A_i × τ_Di × (1 − e^(−t/τ_Di))
-// Returns { fast, medium, slow, total } in kg·s units.
-export function sessionComponentAUC(reps, physModel = PHYS_MODEL_DEFAULT) {
-  const comps = [
-    { key: "fast",   A: physModel.weights.fast,   tauD: physModel.tauD.fast   },
-    { key: "medium", A: physModel.weights.medium, tauD: physModel.tauD.medium },
-    { key: "slow",   A: physModel.weights.slow,   tauD: physModel.tauD.slow   },
-  ];
-  const out = { fast: 0, medium: 0, slow: 0 };
-  for (const r of reps || []) {
-    const t = r.actual_time_s;
-    // Same fallback chain as effectiveLoad() in prescription.js — inlined
-    // here to keep fatigue.js dependency-free (it sits below prescription
-    // in the import graph). Tindeq actual ?? manual ?? prescribed ?? legacy.
-    let L = 0;
-    const af = Number(r.avg_force_kg);
-    const ml = Number(r.manual_load_kg);
-    const pl = Number(r.prescribed_load_kg);
-    const wk = Number(r.weight_kg);
-    if (af > 0 && af < 500) L = af;
-    else if (ml > 0 && ml < 500) L = ml;
-    else if (pl > 0 && pl < 500) L = pl;
-    else if (wk > 0 && wk < 500) L = wk;
-    if (!t || !L || t <= 0 || L <= 0) continue;
-    for (const c of comps) {
-      out[c.key] += L * c.A * c.tauD * (1 - Math.exp(-t / c.tauD));
-    }
-  }
-  out.total = out.fast + out.medium + out.slow;
-  return out;
-}
+// (sessionComponentAUC removed May 2026. It attributed per-rep training
+// "dose" to the fast/medium/slow components, but jackknife on real
+// history showed the individual component amplitudes are not
+// identifiable from this data — in most grips one component pins to
+// zero and swings wildly when a single point is dropped. The
+// per-component dose split was therefore numerical noise, not signal,
+// and had no live callers. Whole-curve capacity is now tracked by
+// computeBalancedCurveScore in threeExp.js; coaching reads the
+// confidence-gated per-T residual rather than component attribution.)

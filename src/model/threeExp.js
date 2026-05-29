@@ -36,6 +36,7 @@
 //     - limiter.js cross-zone leave-one-out residual
 
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
+import { ZONE_REF_T } from "./zones.js";
 
 export const THREE_EXP_LAMBDA_DEFAULT = 100;
 
@@ -155,28 +156,35 @@ export function predForceThreeExp(amps, T, taus = null) {
   return amps[0]*Math.exp(-T/tau[0]) + amps[1]*Math.exp(-T/tau[1]) + amps[2]*Math.exp(-T/tau[2]);
 }
 
-// Definite integral of the three-exp F-D curve over [tMin, tMax]:
-//   ∫ a·e^(-t/τ) dt = a·τ·(e^(-tMin/τ) - e^(-tMax/τ))
-// Sum over the three components. Units = force·seconds (force-area).
+// BALANCED CURVE SCORE — a single "whole-curve capacity" scalar.
 //
-// Used as a single "total capacity" scalar for the Journey/AUC tracker
-// — captures the area beneath the user's whole curve from the Power
-// boundary out into deep Endurance, so growth in any component
-// contributes proportionally to how much that component dominates
-// in its zone. Default range [5, 180] covers the meaningful training
-// span (post-fast-spike at 5s, well into the slow-component plateau
-// at 3min where the medium component has decayed 6× over).
-export function computeAUCThreeExp(amps, tMin = 5, tMax = 180, taus = null) {
+// Replaces the old computeAUCThreeExp (force-time integral) as the
+// headline capacity number for the Journey / Curve-Improvement tracker.
+// Why the change (May 2026): the time-integral ∫a·τ·(…) scales with τ,
+// so the slow component (τ=180) contributed ~95–97% of the total on
+// real fits — the "total capacity" number was effectively a pure
+// endurance metric, and a genuine max-strength gain barely moved it.
+//
+// The balanced score is the GEOMETRIC MEAN of predicted force at the
+// six zone reference times (ZONE_REF_T: 5/30/70/115/160/220 s). The
+// geometric mean is the right aggregator because the % change of a
+// geometric mean equals the AVERAGE of the per-zone % changes:
+//   d·log(GM) = (1/n)·Σ d·log(F_zone) = (1/n)·Σ (ΔF/F)_zone
+// so an equal % improvement in ANY zone moves the score equally —
+// "reward improvement across the whole curve, not just the slow tail."
+// (An arithmetic mean of forces would instead be dominated by the
+// high-force short-duration zones — the opposite bias.) Units = kg.
+export function computeBalancedCurveScore(amps, taus = null) {
   if (!Array.isArray(amps) || amps.length !== 3) return 0;
-  const tau = taus || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
-  let sum = 0;
-  for (let i = 0; i < 3; i++) {
-    const a = amps[i];
-    const t = tau[i];
-    if (!isFinite(a) || a <= 0 || !isFinite(t) || t <= 0) continue;
-    sum += a * t * (Math.exp(-tMin / t) - Math.exp(-tMax / t));
+  const refTs = Object.values(ZONE_REF_T);
+  let logSum = 0;
+  let n = 0;
+  for (const t of refTs) {
+    const f = predForceThreeExp(amps, t, taus);
+    if (isFinite(f) && f > 0) { logSum += Math.log(f); n++; }
   }
-  return sum;
+  if (n === 0) return 0;
+  return Math.exp(logSum / n);
 }
 
 // Build per-grip three-exp prior by pooling all that grip's data

@@ -50,7 +50,7 @@ import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import { KG_TO_LBS, toDisp } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
-import { STRENGTH_MAX, ZONE6 } from "../model/zones.js";
+import { STRENGTH_MAX } from "../model/zones.js";
 import {
   predForceThreeExp,
   buildThreeExpPriors,
@@ -62,7 +62,6 @@ import {
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
 import { prescription, prescribedLoad, effectiveLoad } from "../model/prescription.js";
-import { computeLimiterZone } from "../model/limiter.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 import { StrengthBalanceCard } from "./analysis/StrengthBalanceCard.js";
@@ -449,24 +448,12 @@ export function AnalysisView({
   // below the chart.)
 
 
-  // Limiter zone (the zone that falls farthest below the F-D curve
-  // predicted by the other two zones). Drives the saturated background
-  // highlight on the F-D chart — visual echo of the SessionPlanner's
-  // recommendation, so the chart and the planner tell the same story.
-  const limiterZoneBounds = useMemo(() => {
-    const lim = computeLimiterZone(history);
-    if (!lim) return null;
-    // Derive bounds from ZONE6 directly so the 6-zone schema stays
-    // the single source of truth for boundaries and colors.
-    const z = ZONE6.find(zz => zz.key === lim.zone);
-    if (!z) return null;
-    return {
-      x1: z.min,
-      x2: z.max === Infinity ? maxDur + 10 : z.max,
-      color: z.color,
-      label: `Limiter: ${z.label}`,
-    };
-  }, [history, maxDur]);
+  // (Limiter-zone highlight removed May 2026. It used computeLimiterZone's
+  // per-component cross-zone residual to mark a single "limiter" zone on
+  // the F-D chart, but that attribution rested on the same non-identifiable
+  // component split that was retired elsewhere. The coaching engine's
+  // confidence-gated per-T residual is the live "what to train next"
+  // signal; the chart no longer asserts a single limiter zone.)
 
   // ── Relative strength helpers ──
   // useRel gates the absolute-vs-relative rendering path that
@@ -689,7 +676,6 @@ export function AnalysisView({
           fdSplitData={fdSplitData}
           threeExpCurveDataRel={threeExpCurveDataRel}
           threeExpRef180={threeExpRef180}
-          limiterZoneBounds={limiterZoneBounds}
           curveColor={curveColor}
           leftDotsRel={leftDotsRel}
           rightDotsRel={rightDotsRel}
