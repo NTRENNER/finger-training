@@ -108,6 +108,13 @@ export const LS_BW_NORMALIZE_KEY = "ft_bw_normalize";
 // round-trip.
 export const LS_DAILY_STATE_KEY = "ft_daily_state";
 
+// Accepted deload week — { start: "YYYY-MM-DD", severity: "mild"|"strong" }
+// or null. Set when the user accepts the deload banner's proposal;
+// keeps the weekly plan + reminder showing for DELOAD_WEEK_DAYS even as
+// the (reduced) sessions clear the recovery signal. Device-local — a
+// deload is a personal week-scoped choice, not synced training data.
+export const LS_DELOAD_WEEK_KEY = "ft_deload_week";
+
 // Climbing history filter pills — persists the active filter selection
 // (named-only toggle + per-category single-select for discipline, venue,
 // wall) so re-opening the History tab lands on the same view the user

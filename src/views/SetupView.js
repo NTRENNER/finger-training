@@ -55,11 +55,13 @@ import { C } from "../ui/theme.js";
 import { Card, Btn } from "../ui/components.js";
 import { fmt0, toDisp, fromDisp } from "../ui/format.js";
 
-import { loadLS, LS_BW_LOG_KEY } from "../lib/storage.js";
+import { loadLS, saveLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY, LS_DELOAD_WEEK_KEY } from "../lib/storage.js";
 import { today } from "../util.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
+import { computeDeload, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.js";
+import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 
 // ─────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
@@ -196,9 +198,54 @@ export function SetupView({
 
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
 
+  // ── Deload detection + weekly plan ──
+  // Cross-grip recovery decline (personal taus) + lifting-volume
+  // context. The lifting log lives in localStorage in exactly the
+  // shape computeDeload expects. Evaluated as of the real current date
+  // so the staleness guard works. Detect/explain/propose only — the
+  // accepted "deload week" is a volume-cap reminder, not a silent load
+  // scale-down.
+  const todayStr = today();
+  const deloadState = useMemo(
+    () => computeDeload(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: todayStr }),
+    [history, todayStr]
+  );
+
+  // Accepted deload-week state (device-local). Active for DELOAD_WEEK_DAYS.
+  const [deloadWeek, setDeloadWeek] = useState(() => loadLS(LS_DELOAD_WEEK_KEY) || null);
+  const dayDiff = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+  const weekDay = deloadWeek?.start ? dayDiff(deloadWeek.start, todayStr) + 1 : 0;
+  const weekActive = !!deloadWeek?.start && weekDay >= 1 && weekDay <= DELOAD_WEEK_DAYS;
+
+  // Guidance text: during an accepted week use the stored severity;
+  // otherwise the live detector's severity. Null when neither applies.
+  const guidance = useMemo(() => {
+    const sev = weekActive ? deloadWeek.severity : (deloadState.deload ? deloadState.severity : null);
+    return sev ? buildDeloadGuidance(sev, history, { today: todayStr }) : null;
+  }, [weekActive, deloadWeek, deloadState, history, todayStr]);
+
+  const startDeloadWeek = () => {
+    const next = { start: todayStr, severity: deloadState.severity };
+    saveLS(LS_DELOAD_WEEK_KEY, next);
+    setDeloadWeek(next);
+  };
+  const endDeloadWeek = () => {
+    saveLS(LS_DELOAD_WEEK_KEY, null);
+    setDeloadWeek(null);
+  };
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
+
+      <DeloadBanner
+        deload={deloadState}
+        guidance={guidance}
+        weekActive={weekActive}
+        dayOfWeek={weekDay}
+        onStartWeek={startDeloadWeek}
+        onEndWeek={endDeloadWeek}
+      />
 
       {/* Grip Type — still per-grip, the curve is grip-scoped. The
           heading doubles as the call-to-action: it reads "Select a grip

@@ -52,8 +52,9 @@ import { Card } from "../ui/components.js";
 import {
   loadLS, saveLS,
   LS_WORKOUT_LOG_KEY, LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
-  ROTATION_PIN_KEY,
+  LS_DELOAD_WEEK_KEY, ROTATION_PIN_KEY,
 } from "../lib/storage.js";
+import { DELOAD_WEEK_DAYS } from "../model/deload.js";
 import {
   pushWorkoutSession, deleteWorkoutSession,
 } from "../lib/sync.js";
@@ -167,6 +168,17 @@ export function WorkoutTab({
   // SUPPORT_WORKOUTS.
   const activeId = pickedId || recommendation?.primary?.id || "A";
   const activeWorkout = SUPPORT_WORKOUTS[activeId];
+
+  // Deload-week nudge — set on the Setup tab when the user accepts a
+  // deload. During the week, suggest skipping the heavy day (A) and
+  // keeping any session light. Read-only here; ending the week happens
+  // on the banner that started it.
+  const deloadWeek = loadLS(LS_DELOAD_WEEK_KEY) || null;
+  const deloadDay = deloadWeek?.start
+    ? Math.round((new Date(today()) - new Date(deloadWeek.start)) / 86400000) + 1
+    : 0;
+  const deloadActive = !!deloadWeek?.start && deloadDay >= 1 && deloadDay <= DELOAD_WEEK_DAYS
+    && deloadWeek.severity === "strong";
 
   // ── Daily stretching state ───────────────────────────
   // Read today's STRETCH session (if any) and the most recent
@@ -611,6 +623,16 @@ export function WorkoutTab({
       ) : (
         // ── Today / picker view ──────────────────────────
         <>
+          {deloadActive && (
+            <div style={{
+              border: `1px solid ${C.orange}`, background: `${C.orange}14`,
+              borderRadius: 10, padding: "10px 12px", marginBottom: 12,
+              fontSize: 12.5, color: C.text, lineHeight: 1.5,
+            }}>
+              <span style={{ color: C.orange, fontWeight: 700, letterSpacing: 0.4 }}>DELOAD WEEK</span>
+              {` · skip Workout A this week — take a rest day or keep the session light. Cut volume, not the loads you do hit.`}
+            </div>
+          )}
           <RecommendationCard
             recommendation={recommendation}
             onPickWorkout={(id) => setPickedId(id)}
