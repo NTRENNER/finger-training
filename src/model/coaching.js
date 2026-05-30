@@ -84,6 +84,11 @@ export function recencyPenalty(zone, history, grip) {
   const matchingDates = history
     .filter(r => {
       if (r.grip !== grip) return false;
+      // Fresh efforts only (rep_num === 1, or null for legacy/manual) —
+      // a zone is "recently trained" only when a fresh first rep landed
+      // there, not when a fatigued within-set rep died at that duration.
+      // Mirrors getLastZoneTrainedDates so coverage + recency agree.
+      if (!(r.rep_num == null || r.rep_num === 1)) return false;
       const td = r.actual_time_s > 0 ? r.actual_time_s : r.target_duration;
       return td > 0 && zoneOf(td) === zone;
     })
