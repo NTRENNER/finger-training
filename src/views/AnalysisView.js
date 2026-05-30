@@ -49,8 +49,10 @@ import React, { useMemo, useState } from "react";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import { KG_TO_LBS, toDisp } from "../ui/format.js";
-import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
+import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
+import { today } from "../util.js";
 import { STRENGTH_MAX } from "../model/zones.js";
+import { deloadStatus } from "../model/deload.js";
 import {
   predForceThreeExp,
   buildThreeExpPriors,
@@ -71,7 +73,7 @@ import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
 import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
-import { RecoveryTrendCard, RecoveryObservedTrendCard } from "./analysis/RecoveryTrendCard.jsx";
+import { DeloadGauge } from "./cards/DeloadGauge.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
@@ -108,6 +110,14 @@ export function AnalysisView({
   // path. Used by the gap-narrowing tracker and prescription-potential
   // calculation too. Could be lifted to App if it becomes hot.
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
+
+  // Recovery-readiness status for the DeloadGauge. Cross-grip recovery
+  // (personal taus) + lifting-volume context, evaluated as of today.
+  const todayStr = today();
+  const deloadStatusResult = useMemo(
+    () => deloadStatus(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: todayStr }),
+    [history, todayStr]
+  );
 
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const handleDotClick = (data) => {
@@ -775,17 +785,14 @@ export function AnalysisView({
             axis was opaque. The % vs baseline trajectory tells the
             actual training-progress story.) */}
 
-        {/* Recovery dynamics over time — paired cards.
-            Observed trend (this card) reads the direct, easy-to-feel
-            signal: raw rep 2 / rep 1 ratio smoothed over 3 sessions.
-            "How fragmented are my sets over time?" Confounded by
-            rep 1 lengthening as the user gets stronger.
-            Gap trend (below) factors that confound out by comparing
-            against the personalized recovery model. "Is my recovery
-            side underperforming what my taus predict?" Two views of
-            the same underlying signal, intentionally kept separate. */}
-        <RecoveryObservedTrendCard history={history} grips={grips} />
-        <RecoveryTrendCard history={history} grips={grips} />
+        {/* Recovery readiness gauge. Replaced the two raw recovery-trend
+            charts (May 2026) — they were diagnostic deviation metrics
+            that read like scoreboards and invited "it's going down, is
+            that bad?" misreads. Same cross-grip recovery signal, reframed
+            as a glanceable green/yellow/red light with a runway toward a
+            deload. Conservatively gated (red only at the strong-deload
+            condition) so it won't react to one rough session. */}
+        <DeloadGauge status={deloadStatusResult} />
 
         {/* (StrengthBalanceCard — the Crusher:Micro "open-hand vs crimp
             dominance" ratio — removed May 2026. The ratio is dominated by

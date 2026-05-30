@@ -7,6 +7,7 @@
 import {
   computeDeload, liftingVolumeByDate,
   fingerSessionsThisWeek, deloadPlan, buildDeloadGuidance,
+  deloadStatus,
   DELOAD_STALE_DAYS,
 } from "../deload.js";
 
@@ -148,5 +149,40 @@ describe("weekly deload plan", () => {
 
   test("buildDeloadGuidance: null severity → null", () => {
     expect(buildDeloadGuidance("none", [], {})).toBeNull();
+  });
+});
+
+describe("deloadStatus (green/yellow/red gauge)", () => {
+  test("healthy recovery across grips → green", () => {
+    const history = [...fine("Crusher"), ...fine("Micro")];
+    const s = deloadStatus(history, [], { today: TODAY });
+    expect(s.level).toBe("green");
+    expect(s.pressure).toBeLessThan(0.35);
+  });
+
+  test("both grips down + lifting spike → red (matches strong deload)", () => {
+    const history = [...fatiguedRecent("Crusher"), ...fatiguedRecent("Micro")];
+    const s = deloadStatus(history, liftSpike, { today: TODAY });
+    expect(s.level).toBe("red");
+    expect(s.deload.severity).toBe("strong");
+    expect(s.pressure).toBeGreaterThan(0.5);
+  });
+
+  test("both grips down, no lifting spike → yellow (mild), not red", () => {
+    const history = [...fatiguedRecent("Crusher"), ...fatiguedRecent("Micro")];
+    const s = deloadStatus(history, [], { today: TODAY });
+    expect(s.level).toBe("yellow");
+  });
+
+  test("single grip down → not red (conservative; stays calm)", () => {
+    const history = [...fatiguedRecent("Crusher"), ...fine("Micro")];
+    const s = deloadStatus(history, liftSpike, { today: TODAY });
+    expect(s.level).not.toBe("red");
+  });
+
+  test("insufficient data → green, flagged no signal", () => {
+    const s = deloadStatus(fine("Crusher"), [], { today: TODAY });
+    expect(s.level).toBe("green");
+    expect(s.haveSignal).toBe(false);
   });
 });
