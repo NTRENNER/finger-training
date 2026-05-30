@@ -61,11 +61,23 @@ export const ANNUAL_SESSION_GOAL = 100;
 // (140s) and hold 222s, you trained endurance, not strength_endurance.
 // Falls back to target_duration only when actual is missing (legacy
 // rows or manual entries without an actual time recorded).
+//
+// FRESH EFFORTS ONLY (rep_num === 1, May 2026): a zone counts as
+// "trained" only when a FRESH first rep landed there. Later within-set
+// reps are fatigued and fail at progressively shorter durations — a
+// depleted rep 3 dying at ~30s isn't Power training, it's just the tail
+// of a longer set, and counting it fakes coverage of zones you never
+// freshly worked (and wrongly suppresses the coaching staleness boost
+// for them). A fresh rep 1 that fails short of its target STILL counts
+// for the shorter zone it actually reached — that's a real test.
+// Matches limiter.js (rep-1 only). Rows with no rep_num (legacy /
+// manual) are treated as fresh so they aren't dropped.
 // Returns { zoneKey: "YYYY-MM-DD" | null }.
 export function getLastZoneTrainedDates(history) {
   const out = Object.fromEntries(ZONE_KEYS.map(k => [k, null]));
   for (const r of history || []) {
     if (!r?.date) continue;
+    if (!(r.rep_num == null || r.rep_num === 1)) continue;  // fresh efforts only
     const td = r.actual_time_s > 0 ? r.actual_time_s : r.target_duration;
     if (!(td > 0)) continue;
     const k = zoneOf(td);

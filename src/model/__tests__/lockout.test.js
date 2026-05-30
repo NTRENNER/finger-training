@@ -60,6 +60,38 @@ describe("getLastZoneTrainedDates", () => {
     ]);
     expect(out.power).toBe("2026-05-11");
   });
+
+  test("fresh efforts only: fatigued within-set reps don't credit short zones", () => {
+    // One Strength set to failure: rep 1 is a fresh 120s hold (Strength);
+    // reps 2-4 are fatigued and die at progressively shorter durations.
+    // Only Strength should be credited — the depleted reps are NOT fresh
+    // training of Power·Strength / Power / Max.
+    const out = getLastZoneTrainedDates([
+      { grip: "Crusher", date: "2026-05-15", rep_num: 1, actual_time_s: 120 }, // strength
+      { grip: "Crusher", date: "2026-05-15", rep_num: 2, actual_time_s: 60 },  // power_strength (fatigued)
+      { grip: "Crusher", date: "2026-05-15", rep_num: 3, actual_time_s: 30 },  // power (fatigued)
+      { grip: "Crusher", date: "2026-05-15", rep_num: 4, actual_time_s: 8 },   // max_strength (fatigued)
+    ]);
+    expect(out.strength).toBe("2026-05-15");
+    expect(out.power_strength).toBeNull();
+    expect(out.power).toBeNull();
+    expect(out.max_strength).toBeNull();
+  });
+
+  test("a fresh rep 1 that fails short still counts for the zone it reached", () => {
+    const out = getLastZoneTrainedDates([
+      { grip: "Crusher", date: "2026-05-15", rep_num: 1, target_duration: 160, actual_time_s: 30 },
+    ]);
+    expect(out.power).toBe("2026-05-15");          // real fresh test of Power
+    expect(out.strength_endurance).toBeNull();
+  });
+
+  test("rows without rep_num (legacy/manual) are treated as fresh", () => {
+    const out = getLastZoneTrainedDates([
+      { grip: "Crusher", date: "2026-05-15", actual_time_s: 30 },
+    ]);
+    expect(out.power).toBe("2026-05-15");
+  });
 });
 
 describe("getZoneStaleness", () => {
