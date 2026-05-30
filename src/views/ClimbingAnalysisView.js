@@ -32,7 +32,7 @@ import { Card, Sect } from "../ui/components.js";
 import {
   CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS, VENUES,
   V_GRADES, YDS_GRADES,
-  gradeRank, weekKey,
+  gradeRank, afaVSum, weekKey,
   disciplineMeta,
 } from "../lib/climbing-grades.js";
 import { inferProjectGrade, computeGraduation } from "../model/gradePyramid.js";
@@ -217,6 +217,32 @@ export function ClimbingAnalysisView({
       __total: byDate[date] || 0,
     }));
     return { rows, disciplines: ["boulder"] };
+  }, [allClimbs]);
+
+  // ── Route session volume (afa v-sum) ──
+  // The route analog of the boulder v-sum. Routes are YDS, so we convert
+  // each send's grade to its V-equivalent via the afa v-sum chart
+  // (afaVSum) and sum per session date — yielding a v-sum in the SAME
+  // units as the boulder chart. Lead + top rope both use YDS, so both
+  // count; afaVSum returns null for anything non-route (e.g. a stray V
+  // grade), which we skip. Same wasSent gate (sends + rest-completions)
+  // and 60-session cap as the boulder chart.
+  const routeVolume = useMemo(() => {
+    const sent = allClimbs.filter(c => c.discipline !== "boulder" && wasSent(c));
+    if (sent.length === 0) return { rows: [] };
+    const byDate = {};
+    for (const c of sent) {
+      const v = afaVSum(c.grade);
+      if (v == null) continue;
+      byDate[c.date] = (byDate[c.date] || 0) + v;
+    }
+    const sortedDates = Object.keys(byDate).sort();
+    const recent = sortedDates.slice(-60);
+    const rows = recent.map(date => ({
+      date: date.slice(5),
+      route: Math.round((byDate[date] || 0) * 10) / 10,  // afa values are fractional
+    }));
+    return { rows };
   }, [allClimbs]);
 
   // ── Grade pyramid ──
@@ -493,6 +519,38 @@ export function ClimbingAnalysisView({
                 />
                 <Bar dataKey="boulder"
                   fill={DISCIPLINE_COLORS.boulder || C.orange}
+                  isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        )}
+
+        {/* Route session volume (afa v-sum). The route analog of the
+            boulder chart — YDS sends converted to V-equivalents via the
+            afa v-sum chart, summed per session. Same V-equivalent units
+            as the boulder v-sum, so the two are directly comparable.
+            Lead + top rope both counted. */}
+        {routeVolume.rows.length >= 1 && (
+          <Card>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Route session volume (afa v-sum)</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
+              Sum of afa V-equivalents per route session — each YDS send
+              converted to its V-rating (afa chart), then summed. Same
+              units as the boulder v-sum, so they're comparable. Lead and
+              top rope both count; sends and rest-completions, not attempts.
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={routeVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
+                <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }}
+                  angle={-30} textAnchor="end" interval="preserveStartEnd" />
+                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={32} />
+                <Tooltip
+                  contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
+                  formatter={(v) => [v, "afa v-sum"]}
+                />
+                <Bar dataKey="route"
+                  fill={DISCIPLINE_COLORS.lead || C.blue}
                   isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>

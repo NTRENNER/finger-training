@@ -159,6 +159,37 @@ export function gradeRank(grade) {
   return -1;
 }
 
+// ─────────────────────────────────────────────────────────────
+// AFA V-SUM (route climbing) — YDS → V-equivalent conversion
+// ─────────────────────────────────────────────────────────────
+// The bouldering "v-sum" sums V-grade ranks per session. Routes use
+// YDS, a different scale, so they can't go in the same sum directly.
+// The "afa v-sum" conversion chart maps each YDS grade to a fractional
+// V-equivalent, letting route sessions get a v-sum in the SAME units as
+// bouldering. Values are taken verbatim from the abs-to-v-rating
+// conversion chart's "afa v-sum score" column.
+//
+// Keyed by the app's lowercase YDS strings (5.6 … 5.14d). 5.6–5.8 all
+// map to 0. Returns null for non-route / unrecognized grades so callers
+// can skip them.
+export const AFA_VSUM_BY_YDS = {
+  "5.6": 0, "5.7": 0, "5.8": 0, "5.9": 0.5,
+  "5.10a": 0.5, "5.10b": 1, "5.10c": 1.5, "5.10d": 1.5,
+  "5.11a": 2, "5.11b": 2.5, "5.11c": 3, "5.11d": 4,
+  "5.12a": 4.5, "5.12b": 5, "5.12c": 6, "5.12d": 7,
+  "5.13a": 7.5, "5.13b": 8, "5.13c": 8.5, "5.13d": 9,
+  "5.14a": 10, "5.14b": 10.5, "5.14c": 11, "5.14d": 12,
+};
+
+// AFA v-sum value for a YDS route grade, or null if not a recognized
+// route grade. Normalizes case (chart shows some uppercase subgrades;
+// the app stores lowercase).
+export function afaVSum(grade) {
+  if (!grade) return null;
+  const key = String(grade).toLowerCase();
+  return key in AFA_VSUM_BY_YDS ? AFA_VSUM_BY_YDS[key] : null;
+}
+
 // Returns the ISO date of the Monday of the week this date falls in.
 // Used as the x-axis key for weekly aggregates (climbing volume, etc).
 export function weekKey(isoDate) {
