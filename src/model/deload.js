@@ -180,6 +180,63 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// DELOAD READINESS (green / yellow / red gauge)
+// ─────────────────────────────────────────────────────────────
+// A continuous "how close to a deload am I" status, so a deload has a
+// runway instead of appearing out of nowhere. Driven by the SAME
+// conservative signal as computeDeload (cross-grip recovery gap on
+// personal taus) — pressure rises only as recovery genuinely softens,
+// and RED is reserved for the full strong-deload condition so a single
+// rough session can't flip the light.
+
+// avgGap of this much (below zero) = full pressure (1.0). The gap noise
+// band is ±0.10; -0.25 is a decisive, beyond-noise recovery deficit.
+export const DELOAD_PRESSURE_SCALE = 0.25;
+// Pressure at/above this flips green → yellow ("watch"). ~0.09 below
+// the band, i.e. recovery has started drifting past noise.
+export const DELOAD_YELLOW_AT = 0.35;
+
+// Returns:
+//   { level: "green"|"yellow"|"red", pressure: 0..1, avgGap, haveSignal,
+//     label, deload }
+// `deload` is the full computeDeload result (for the why-string / banner).
+export function deloadStatus(history, workoutSessions = [], opts = {}) {
+  const res = computeDeload(history, workoutSessions, opts);
+  const gaps = res.signals && res.signals.gripGaps ? res.signals.gripGaps : {};
+  const means = Object.values(gaps).map(g => g.mean).filter(Number.isFinite);
+  const haveSignal = means.length >= 2;
+  const avgGap = haveSignal ? means.reduce((s, v) => s + v, 0) / means.length : 0;
+
+  // Pressure rises as average cross-grip recovery degrades below zero.
+  const pressure = haveSignal
+    ? Math.max(0, Math.min(1, -avgGap / DELOAD_PRESSURE_SCALE))
+    : 0;
+
+  // Level: red only at the full strong-deload condition; yellow on a
+  // mild deload OR meaningful pressure; green otherwise. Mirrors the
+  // computeDeload severity so the gauge and the banner never disagree.
+  let level;
+  if (res.severity === "strong") level = "red";
+  else if (res.severity === "mild") level = "yellow";
+  else if (haveSignal && pressure >= DELOAD_YELLOW_AT) level = "yellow";
+  else level = "green";
+
+  const label =
+    level === "red" ? "Deload recommended" :
+    level === "yellow" ? "Recovery softening — ease up soon" :
+    haveSignal ? "Fresh — absorbing your load well" : "Not enough recent data";
+
+  return {
+    level,
+    pressure: Math.round(pressure * 100) / 100,
+    avgGap: haveSignal ? Math.round(avgGap * 100) / 100 : null,
+    haveSignal,
+    label,
+    deload: res,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
 // WEEKLY DELOAD PLAN
 // ─────────────────────────────────────────────────────────────
 // A deload is a WEEK-scoped intervention, not a per-session tweak. The
