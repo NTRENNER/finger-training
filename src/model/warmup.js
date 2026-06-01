@@ -45,10 +45,23 @@
 // IMPORTANT: warm-up reps DO NOT get logged or counted as training data.
 // Pure prescription — nothing flows back into the F-D fit.
 //
-// Math:
-//   F_grip(T) = three-exp prediction at duration T on that grip's curve.
-//   Step load = intensity_pct × F_grip(60s)  [perfusion]
-//   BORK has no target — display "Pull MAX" and capture peak.
+// Prescription model (rebuilt May 2026):
+//   - Holds are TWO-HANDED on one Tindeq, but the curve/MVC are
+//     single-hand, so every target load is one-hand × BILATERAL_FACTOR
+//     (~1.9). Fixes the old protocol, which prescribed the one-hand
+//     number to a two-handed hold (each hand worked at ~half → light).
+//   - Perfusion loads are set by MARGIN off the curve, in-range:
+//     load = F(holdSec / failFrac), so a hold uses a consistent fraction
+//     of time-to-failure regardless of curve shape (vs the old arbitrary
+//     % of F(60s)). failFrac lookup is clamped to [10,220]s — no
+//     extrapolation into the unreliable tail.
+//   - A progressive STRENGTH LADDER (short ~7-8s holds at rising % of
+//     MVC) bridges perfusion up toward the near-max BORK, so intensity
+//     ramps instead of jumping off a cliff. Boulder tops near-max; route
+//     stops lower.
+//   - Rests are scaled by the user's personal recovery taus.
+//   - BORK has no target — display the two-handed max reference, capture
+//     peak.
 
 import {
   fitThreeExpAmps,
@@ -57,6 +70,48 @@ import {
   THREE_EXP_LAMBDA_DEFAULT,
 } from "./threeExp.js";
 import { effectiveLoad } from "./load.js";
+import { computePersonalRecoveryTaus } from "./recoveryFit.js";
+import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
+
+// ─────────────────────────────────────────────────────────────
+// TWO-HANDED LOAD FACTOR
+// ─────────────────────────────────────────────────────────────
+// The F-D curve and peak MVC are fit on SINGLE-HAND reps (every finger
+// rep is logged per hand). The warm-up holds are TWO-HANDED on a single
+// Tindeq that reads the SUM of both hands. So to load EACH hand at a
+// target fraction of its single-hand capacity, the device target must be
+// ~2× the one-hand figure — shaded down for the bilateral deficit (each
+// hand produces a little less when both pull at once). Without this the
+// old protocol prescribed the one-hand number to a two-handed hold, so
+// each hand worked at ~half the intended load — why it felt light.
+export const BILATERAL_FACTOR = 1.9;
+const twoHand = (oneHandKg) => oneHandKg * BILATERAL_FACTOR;
+
+// Curve-anchored sub-failure load for a hold, by MARGIN rather than an
+// arbitrary % of F(60s). A hold of `holdSec` that uses fraction `failFrac`
+// of your time-to-failure means you'd fail at holdSec/failFrac — so the
+// load is F(holdSec / failFrac). Lower failFrac = more margin (easier).
+// The failure-time lookup is CLAMPED to the curve's trustworthy range
+// [10, 220]s so we never extrapolate into the unreliable tail (predicting
+// a 5-10 min failure at a light load). Returns one-hand kg (caller applies
+// the two-handed factor).
+function marginLoadOneHand(amps, holdSec, failFrac) {
+  if (!amps) return null;
+  const failAt = Math.max(10, Math.min(220, holdSec / failFrac));
+  const f = predForceThreeExp(amps, failAt);
+  return isFinite(f) && f > 0 ? f : null;
+}
+
+// Personalize a base rest by the user's own recovery speed. Scales by
+// their fitted medium recovery tau vs the population default (90s),
+// clamped so it stays sane. Slower recoverer → longer rests; faster →
+// shorter. Falls back to the base rest when no personal taus for the grip.
+function restForGrip(baseRestSec, grip, personalTaus) {
+  const t = personalTaus && personalTaus.get ? personalTaus.get(grip) : null;
+  if (!t || !(t.medium > 0)) return baseRestSec;
+  const scale = Math.max(0.8, Math.min(1.8, t.medium / PHYS_MODEL_DEFAULT.tauR.medium));
+  return Math.round(baseRestSec * scale);
+}
 
 // Fit per-grip three-exp amps from the user's failure history. Mirrors
 // the AnalysisView grip3xEstimates pattern: per-grip prior + adaptive
@@ -260,65 +315,99 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
   const isRoute = mode === "route";
   const steps = [];
 
-  // ── Perfusion 1: Crusher · 70% × F(60s) · 45s hold ──
-  // Sub-failure long hold. Loaded enough to drive blood flow into
-  // the working tissues; finishes with margin so the contractile
-  // machinery stays fresh.
+  // Personal recovery taus — used to scale rests to how fast the user
+  // actually recovers (slower → longer rests, and vice versa).
+  const personalTaus = computePersonalRecoveryTaus(history);
+
+  // All hold loads below are ONE-HAND figures (curve / MVC) multiplied
+  // by BILATERAL_FACTOR, because the holds are two-handed on one Tindeq.
+
+  // ── Perfusion 1: Crusher, generous-margin long hold ──
+  // Load set so a 45s hold uses ~45% of your time-to-failure (load =
+  // F(~100s)) — a consistent sub-failure margin regardless of curve
+  // shape, vs the old arbitrary "% of F(60s)." Drives blood flow; finishes
+  // with plenty of margin so the contractile machinery stays fresh.
   steps.push({
     id: "perfusion-crusher-easy",
     title: "Two-Handed Crusher",
-    intensityLabel: "70% × F(60s)",
+    intensityLabel: "Perfusion · ~45% effort",
     type: "hang",
     grip: "Crusher",
-    targetLoadKg: Math.max(1, crusherF60 * 0.70),
+    targetLoadKg: Math.max(1, twoHand(marginLoadOneHand(crusherAmps, 45, 0.45))),
     targetSec: 45,
-    restAfterSec: 60,
+    restAfterSec: restForGrip(60, "Crusher", personalTaus),
     description:
-      "Sustained two-handed squeeze for tissue perfusion. Loaded enough to drive blood flow, easy enough to finish with margin.",
+      "Sustained two-handed squeeze for tissue perfusion. Loaded enough to drive blood flow into both forearms, well below failure for the hold.",
   });
 
-  // ── Perfusion 2: Crusher · 80% × F(60s) ──
-  // Bouldering: 30s hold (briefer ramp into working intensity).
-  // Routes: 45s hold (longer sustained loading for endurance prep).
+  // ── Perfusion 2: Crusher, moderate-margin ──
+  // Holds use ~60% of TTF (load = F(holdSec/0.6)) — into working-pump
+  // territory but still sub-failure. Boulder: 30s; route: 45s.
   steps.push({
     id: "perfusion-crusher-hard",
     title: "Two-Handed Crusher",
-    intensityLabel: "80% × F(60s)",
+    intensityLabel: "Perfusion · ~60% effort",
     type: "hang",
     grip: "Crusher",
-    targetLoadKg: Math.max(1, crusherF60 * 0.80),
+    targetLoadKg: Math.max(1, twoHand(marginLoadOneHand(crusherAmps, isRoute ? 45 : 30, 0.60))),
     targetSec: isRoute ? 45 : 30,
-    restAfterSec: 90,
+    restAfterSec: restForGrip(90, "Crusher", personalTaus),
     description:
-      "Same Crusher gripper, a touch harder. Working pump territory — still well below failure for the prescribed hold.",
+      "Same gripper, a touch harder — working pump territory, still well below failure for the prescribed hold.",
   });
 
-  // ── Perfusion 3: Micro · 70% × F(60s) ──
-  // Switch grippers (the view prompts for the Tindeq swap before
-  // this step). Same intensity as Crusher perfusion 1, but on the
-  // small edge so the climbing-specific finger position gets warmed.
-  // Routes get a longer hold (60s) for endurance prep since they
-  // skip the BORK that follows for boulderers.
-  if (microF60) {
+  // ── Perfusion 3: Micro, climbing-specific small edge ──
+  if (microAmps) {
     steps.push({
       id: "perfusion-micro",
       title: "Two-Handed Micro",
-      intensityLabel: "70% × F(60s)",
+      intensityLabel: "Perfusion · ~50% effort",
       type: "hang",
       grip: "Micro",
-      targetLoadKg: Math.max(1, microF60 * 0.70),
-      targetSec: isRoute ? 60 : 45,
-      restAfterSec: 60,
+      targetLoadKg: Math.max(1, twoHand(marginLoadOneHand(microAmps, isRoute ? 60 : 40, 0.50))),
+      targetSec: isRoute ? 60 : 40,
+      restAfterSec: restForGrip(60, "Micro", personalTaus),
       description: isRoute
         ? "Swap the Tindeq to the Micro gripper. Longer hold on the small edge to warm the climbing-specific finger position for sustained climbing."
-        : "Swap the Tindeq to the Micro gripper. Warms the climbing-specific finger position before the BORK potentiation primer.",
+        : "Swap the Tindeq to the Micro gripper. Warms the climbing-specific finger position before the strength ramp.",
+    });
+  }
+
+  // ── Progressive strength ladder ──
+  // The missing on-ramp: short (~7-8s) holds at rising % of MVC, on the
+  // climbing-specific grip, bridging perfusion (~45% effort) up toward
+  // the near-max BORK that follows. Graded loading prepares the pulleys
+  // and ramps motor-unit recruitment; short holds + long rests add
+  // readiness with minimal fatigue. Boulder tops near-max; route stops
+  // lower (endurance prep doesn't need a max recruitment ramp). Anchored
+  // to peak MVC (single-hand) × the two-handed factor.
+  const ladderGrip = microAmps ? "Micro" : "Crusher";
+  const ladderMVC  = microAmps ? microMVC : crusherMVC;
+  if (ladderMVC) {
+    const rungs = isRoute
+      ? [{ pct: 0.60, sec: 8 }, { pct: 0.72, sec: 8 }]
+      : [{ pct: 0.60, sec: 8 }, { pct: 0.75, sec: 8 }, { pct: 0.88, sec: 7 }];
+    rungs.forEach((rung, i) => {
+      steps.push({
+        id: `ladder-${ladderGrip.toLowerCase()}-${i}`,
+        title: `Two-Handed ${ladderGrip} · ramp`,
+        intensityLabel: `Strength ramp · ${Math.round(rung.pct * 100)}% MVC`,
+        type: "hang",
+        grip: ladderGrip,
+        targetLoadKg: Math.max(1, twoHand(ladderMVC * rung.pct)),
+        targetSec: rung.sec,
+        restAfterSec: restForGrip(90, ladderGrip, personalTaus),
+        description:
+          "Short, heavier hold. Progressive loading toward climbing intensity — pulleys and recruitment ramp up, but the hold is brief so fatigue stays low.",
+      });
     });
   }
 
   // ── BORK potentiation (boulder mode only) ──
-  // 5 reps of brief max-effort pulls on the Micro. No target load —
-  // pull as hard as possible for ~5 seconds, rest 45s, repeat. PAP
-  // window opens 4-10 min after the last rep; that's the climb.
+  // Now the TOP of a ramp rather than a cold cliff. 5 reps of brief
+  // max-effort pulls on the Micro, no target — pull as hard as possible
+  // ~5s, rest, repeat. PAP window opens 4-10 min later: that's the climb.
+  // referenceMvcKg is two-handed (display ballpark on the gauge).
   if (!isRoute && microMVC) {
     steps.push({
       id: "bork-micro",
@@ -329,13 +418,12 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
       reps: 5,
       holdSec: 5,
       restBetweenSec: 45,
-      restAfterSec: 60,
-      // Reference MVC the user can expect to approach. Not a TARGET —
-      // BORK reps have no target line. Just for display so the user
-      // knows roughly what "max" looks like on the gauge.
-      referenceMvcKg: microMVC,
+      restAfterSec: restForGrip(60, "Micro", personalTaus),
+      // Two-handed max reference for the gauge display. BORK has no
+      // target line — the user just pulls max each rep.
+      referenceMvcKg: twoHand(microMVC),
       description:
-        "Pull as hard as you can for ~5 seconds, rest 45s, repeat 5 times. No target — go full effort each rep. CNS primer for hard climbing.",
+        "Pull as hard as you can for ~5 seconds, rest 45s, repeat 5 times. No target — full effort each rep. CNS primer for hard climbing.",
     });
   }
 
