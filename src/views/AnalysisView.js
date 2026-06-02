@@ -77,6 +77,7 @@ import { DeloadGauge } from "./cards/DeloadGauge.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
+import { PeakForceCard } from "./analysis/PeakForceCard.jsx";
 import { ForceCurvesOverlayCard } from "./analysis/ForceCurvesOverlayCard.jsx";
 import { useAucHistoryByGrip } from "../hooks/useAucHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
@@ -735,6 +736,12 @@ export function AnalysisView({
           aucHistoryByGrip={aucHistoryByGrip}
           normalizeOn={normalizeOn}
         />
+
+        {/* Peak force — direct max-strength measurement over time, from
+            short near-max reps. Complements the curve (sustained force)
+            and the AUC trajectory (whole-curve capacity) with the one
+            thing they underrepresent: instantaneous max recruitment. */}
+        <PeakForceCard history={history} unit={unit} />
 
 
         {/* ── Force Curves History — vs baseline overlay ──
