@@ -13,17 +13,36 @@
 //
 // Pure props/JSX — no callbacks, no side effects.
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { ZONE_KEYS } from "../../model/zones.js";
+import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import {
   getZoneStaleness, getRollingSessionPace,
   ANNUAL_SESSION_GOAL, LOCKOUT_WINDOW_DAYS,
 } from "../../model/lockout.js";
 
+// Canonical grip order for the selector pills (matches GRIP_PRESETS).
+const GRIP_ORDER = ["Crusher", "Micro", "Prime"];
+
 export function CurveCoverageCard({ history }) {
-  const staleness = useMemo(() => getZoneStaleness(history), [history]);
+  // Per-grip coverage: zone freshness is grip-specific (a fresh Crusher
+  // zone says nothing about Micro), so a pill picks one grip or "all"
+  // (pooled, the prior behavior). The annual session pace stays overall —
+  // it's a training-frequency stat, not grip-specific.
+  const [selGrip, setSelGrip] = useState("all");
+  const presentGrips = useMemo(() => {
+    const set = new Set((history || []).map(r => r?.grip).filter(Boolean));
+    const ordered = GRIP_ORDER.filter(g => set.has(g));
+    for (const g of set) if (!ordered.includes(g)) ordered.push(g);  // keep unknowns
+    return ordered;
+  }, [history]);
+  const gripHistory = useMemo(
+    () => (selGrip === "all" ? history : (history || []).filter(r => r?.grip === selGrip)),
+    [history, selGrip]
+  );
+  const staleness = useMemo(() => getZoneStaleness(gripHistory), [gripHistory]);
   const pace = useMemo(() => getRollingSessionPace(history), [history]);
 
   if (pace.current === 0) return null;
@@ -91,6 +110,32 @@ export function CurveCoverageCard({ history }) {
           )}
         </div>
       </div>
+
+      {/* Grip selector — coverage is per-grip. Hidden when only one
+          grip has data (nothing to switch between). */}
+      {presentGrips.length > 1 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {["all", ...presentGrips].map(g => {
+            const active = selGrip === g;
+            const color = g === "all" ? C.blue : (GRIP_COLORS[g] || C.blue);
+            return (
+              <button
+                key={g}
+                onClick={() => setSelGrip(g)}
+                style={{
+                  padding: "4px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600,
+                  cursor: "pointer",
+                  border: `1px solid ${active ? color : C.border}`,
+                  background: active ? `${color}22` : "transparent",
+                  color: active ? color : C.muted,
+                }}
+              >
+                {g === "all" ? "All" : g}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Alarm box: only for stale or aging zones — those are real
           training debts. "Never sampled" is reported descriptively
