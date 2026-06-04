@@ -429,6 +429,26 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   if (!best) return null;
   delete best._effectiveScore;
 
+  // Coverage-driven picks → target the zone's REFERENCE time, not the
+  // residual-argmax T. When a zone wins because it's stale/never (a
+  // coverage pick, not a confident in-zone limiter), the within-zone
+  // argmax often lands near the zone's UPPER boundary — e.g. T≈45s in
+  // Power's [12,50) window, where reps sit a touch below the curve. If
+  // capacity has grown even slightly, a 45s target overshoots past 50s
+  // into Power-Strength, so the stale zone never actually gets refreshed
+  // (the classic "I trained Power but it still shows stale" trap). Snap
+  // to the zone reference time (Power → 30s): mid-window with overshoot
+  // margin, and because the curve is higher at the shorter hold it
+  // naturally prescribes a HEAVIER load for a SHORTER target — the
+  // overshoot-tolerant dose that actually clears the stale flag.
+  if (best.staleStatus === "stale" || best.staleStatus === "never") {
+    const refT = ZONE_REF_T[best.zone];
+    if (refT > 0 && Math.abs(best.T - refT) > 1e-6) {
+      best.T = Math.max(tMin, Math.min(tMax, refT));
+      best.coverageSnap = true;   // surfaced in the SessionPlan "Why" line
+    }
+  }
+
   // Anchored loads via the unified prescription() — both the headline
   // loadKg (for best.hand) and the per-hand display ("L 38 / R 37").
   // This is the curve_shape × amplitude_anchor product, so a recent
