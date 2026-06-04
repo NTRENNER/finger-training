@@ -16,7 +16,7 @@
 import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
-import { ZONE_KEYS } from "../../model/zones.js";
+import { ZONE_KEYS, ZONE6 } from "../../model/zones.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import {
   getZoneStaleness, getRollingSessionPace,
@@ -25,6 +25,14 @@ import {
 
 // Canonical grip order for the selector pills (matches GRIP_PRESETS).
 const GRIP_ORDER = ["Crusher", "Micro", "Prime"];
+
+// Human-readable time domain per zone, from the ZONE6 boundaries:
+//   <12s · 12–50s · 50–90s · 90–140s · 140–180s · 180s+
+const zoneRangeLabel = (z) =>
+  !isFinite(z.max) ? `${z.min}s+`
+  : z.min === 0    ? `<${z.max}s`
+  :                  `${z.min}–${z.max}s`;
+const ZONE_RANGE = Object.fromEntries(ZONE6.map(z => [z.key, zoneRangeLabel(z)]));
 
 export function CurveCoverageCard({ history }) {
   // Per-grip coverage: zone freshness is grip-specific (a fresh Crusher
@@ -207,6 +215,9 @@ export function CurveCoverageCard({ history }) {
             }}>
               <div style={{ fontSize: 12, color: C.text }}>
                 {k.replace(/_/g, " · ").replace(/\b\w/g, c => c.toUpperCase())}
+                <span style={{ color: C.muted, fontSize: 11, marginLeft: 6, fontVariantNumeric: "tabular-nums" }}>
+                  {ZONE_RANGE[k]}
+                </span>
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                 <span style={{ fontSize: 11, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
