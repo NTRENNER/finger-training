@@ -17,8 +17,8 @@
 //
 // What stays in AnalysisView:
 //   • The data derivations that feed this card (threeExpFit,
-//     threeExpCurveData, threeExpRef180, fdSplitData, leftDotsRel,
-//     rightDotsRel, maxDur, maxForceRel, limiterZoneBounds, curveColor).
+//     threeExpCurveData, threeExpRef180, fdSplitData, dotsRel (pooled),
+//     maxDur, maxForceRel, limiterZoneBounds, curveColor).
 //     Those memos depend on view state (selGrip + normalizeOn) and
 //     the threeExpFit consumer fans out beyond this card.
 //   • The session-detail modal — separate concern, triggered by
@@ -38,7 +38,7 @@ import {
 } from "recharts";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
-import { GRIP_COLORS, HAND_COLORS } from "../../ui/grip-colors.js";
+import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../../ui/format.js";
 import { ZONE6 } from "../../model/zones.js";
 import {
@@ -51,6 +51,10 @@ import { effectiveLoad, freshFitReps } from "../../model/load.js";
 // the curve-sample grid in threeExpCurveData). Lives here as a local
 // constant since it's only used by the chart-render block below.
 const F_D_T_MIN = 5;
+
+// Single pooled dot color for single-grip mode (both hands combined).
+// A neutral blue that reads as "your reps" against the grip-tinted curve.
+const POOLED_DOT = C.blue;
 
 // Custom tooltip for the scatter chart. Lives in this file because no
 // other consumer needs it — moving it out would just add an import.
@@ -77,8 +81,7 @@ export function ForceDurationCard({
   threeExpCurveDataRel,
   threeExpRef180,
   curveColor,
-  leftDotsRel,
-  rightDotsRel,
+  dotsRel,
   maxDur,
   maxForceRel,
   // Per-grip Hand Asymmetry rows
@@ -108,8 +111,7 @@ export function ForceDurationCard({
     <Card style={{ marginBottom: 16 }}>
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Force vs. Duration</div>
       <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
-        <span><span style={{ color: HAND_COLORS.L }}>●</span> Left</span>
-        <span><span style={{ color: HAND_COLORS.R }}>●</span> Right</span>
+        {!splitMode && <span><span style={{ color: POOLED_DOT }}>●</span> reps (pooled)</span>}
         {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model: a regression fit summing three exponentials with progressively longer decay constants (≈10s / 30s / 180s). The components are labeled fast / medium / slow by timescale; treating them as specific tissue compartments would be an overclaim the fit doesn't support."><span style={{ color: curveColor }}>―</span> F-D curve (3-exp)</span>}
         {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — well past the medium component's decay, where the slow component carries essentially the whole load. The closest model analog to a 'long-duration sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
         {splitMode && Object.keys(fdSplitData).map(g => (
@@ -181,10 +183,7 @@ export function ForceDurationCard({
                   legendType="none" isAnimationActive={false} />
           )}
           {!fdSplitData && (
-            <Scatter data={leftDotsRel} dataKey="y" fill={HAND_COLORS.L} opacity={0.9} name="Left" onClick={handleDotClick} style={{ cursor: "pointer" }} />
-          )}
-          {!fdSplitData && (
-            <Scatter data={rightDotsRel} dataKey="y" fill={HAND_COLORS.R} opacity={0.9} name="Right" onClick={handleDotClick} style={{ cursor: "pointer" }} />
+            <Scatter data={dotsRel} dataKey="y" fill={POOLED_DOT} opacity={0.85} name="reps" onClick={handleDotClick} style={{ cursor: "pointer" }} />
           )}
           {/* Per-grip split mode: one curve + one set of dots per grip.
               Avoids the cross-muscle mudding (Micro FDP pinch ~5-10kg vs
@@ -252,18 +251,17 @@ export function ForceDurationCard({
                   }
                 }
               }
-              // Dots: fill by hand (L = blue, R = yellow), outline
-              // by grip color. Two-dimensional encoding — fill tells
-              // you the hand, outline tells you the grip. FRESH first
-              // reps only (matches the curve fit + every other card) —
-              // the within-set fatigue cloud lives in the click-through
+              // Dots: pooled across hands, filled in the grip's color
+              // (the same color as that grip's curve). FRESH first reps
+              // only (matches the curve fit + every other card) — the
+              // within-set fatigue cloud lives in the click-through
               // session detail, not the main scatter.
               const gripReps = freshFitReps(history).filter(r =>
                 r.grip === grip
                 && r.actual_time_s > 0
                 && effectiveLoad(r) > 0
               );
-              const toDot = (r) => ({
+              const gripDots = gripReps.map(r => ({
                 x: r.actual_time_s,
                 y: useRel && bodyWeight > 0
                   ? effectiveLoad(r) / bodyWeight
@@ -272,17 +270,10 @@ export function ForceDurationCard({
                 session_id: r.session_id,
                 target_duration: r.target_duration,
                 rest_s: r.rest_s,
-              });
-              const lDots = gripReps.filter(r => r.hand !== "R").map(toDot);
-              const rDots = gripReps.filter(r => r.hand === "R").map(toDot);
+              }));
               elements.push(
-                <Scatter key={`${grip}-L`} data={lDots} dataKey="y"
-                  fill={HAND_COLORS.L} stroke={color} strokeWidth={1.5} opacity={0.9}
-                  onClick={handleDotClick} style={{ cursor: "pointer" }} />
-              );
-              elements.push(
-                <Scatter key={`${grip}-R`} data={rDots} dataKey="y"
-                  fill={HAND_COLORS.R} stroke={color} strokeWidth={1.5} opacity={0.9}
+                <Scatter key={`${grip}-dots`} data={gripDots} dataKey="y"
+                  fill={color} opacity={0.85}
                   onClick={handleDotClick} style={{ cursor: "pointer" }} />
               );
             }

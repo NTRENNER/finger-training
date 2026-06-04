@@ -483,8 +483,10 @@ export function AnalysisView({
     target_duration: r.target_duration,
     rest_s: r.rest_s,
   });
-  const leftDotsRel  = freshFailures.filter(r => r.hand !== "R").map(buildDot);
-  const rightDotsRel = freshFailures.filter(r => r.hand === "R").map(buildDot);
+  // Pooled across hands — the F-D chart shows the grip's whole fresh
+  // cloud as one series (the curve is already a pooled L+R fit). Click a
+  // dot for the per-session L/R breakdown.
+  const dotsRel = freshFailures.map(buildDot);
   const threeExpCurveDataRel = threeExpCurveData.map(d => ({
     x: d.x,
     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
@@ -677,8 +679,7 @@ export function AnalysisView({
           threeExpCurveDataRel={threeExpCurveDataRel}
           threeExpRef180={threeExpRef180}
           curveColor={curveColor}
-          leftDotsRel={leftDotsRel}
-          rightDotsRel={rightDotsRel}
+          dotsRel={dotsRel}
           maxDur={maxDur}
           maxForceRel={maxForceRel}
           handAsymmetry={handAsymmetry}
