@@ -40,6 +40,21 @@ import {
 } from "../lib/sync.js";
 import { defaultFatigueModel } from "../model/fatigueBeta.js";
 
+// Pinned-baseline schema version. Bump to invalidate stale pins so they
+// re-seed from the current (fixed) baseline computation. v2 (May 2026)
+// retires pins frozen on duplicate-and-fatigue-contaminated early data,
+// which made improvement % inflated and de-symmetrized per hand / pooled.
+const PIN_SCHEMA_VERSION = 2;
+
+// Drop pins that don't carry the current schema version (unversioned =
+// pre-fix, contaminated). Returns the pin map untouched if current,
+// otherwise {} so useGripFits re-pins cleanly. The _v marker is a
+// non-grip key; useGripFits ignores it (its Array.isArray(amps) guard).
+function migratePins(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  return raw._v === PIN_SCHEMA_VERSION ? raw : {};
+}
+
 // Hook-internal LS keys. These used to be defined at the top of App.js
 // but every consumer was inside this hook's scope, so the constants
 // follow the state they describe. The "ft_*" prefix is shared with
@@ -215,15 +230,17 @@ export function useUserSettings({ user }) {
   // owns the pin-on-first-seed effect; this hook is just the storage
   // wiring (LS + cloud round-trip).
   const [pinnedGripBaselines, setPinnedGripBaselinesState] = useState(
-    () => loadLS(LS_PINNED_GRIP_BASELINES_KEY) || {}
+    () => migratePins(loadLS(LS_PINNED_GRIP_BASELINES_KEY))
   );
   const savePinnedGripBaselines = useCallback((next) => {
-    setPinnedGripBaselinesState(next);
-    saveLS(LS_PINNED_GRIP_BASELINES_KEY, next);
+    // Stamp the schema version so this pin survives future migratePins.
+    const stamped = { ...next, _v: PIN_SCHEMA_VERSION };
+    setPinnedGripBaselinesState(stamped);
+    saveLS(LS_PINNED_GRIP_BASELINES_KEY, stamped);
     if (user) {
       (async () => {
         const current = (await fetchUserSettings()) || {};
-        await pushUserSettings({ ...current, pinned_grip_baselines: next });
+        await pushUserSettings({ ...current, pinned_grip_baselines: stamped });
       })().catch(() => {});
     }
   }, [user]);
@@ -271,8 +288,12 @@ export function useUserSettings({ user }) {
       // to follow them, not get clobbered by a freshly-computed local
       // baseline from a leaner local rep history.
       if (cloud.pinned_grip_baselines && typeof cloud.pinned_grip_baselines === "object") {
-        setPinnedGripBaselinesState(cloud.pinned_grip_baselines);
-        saveLS(LS_PINNED_GRIP_BASELINES_KEY, cloud.pinned_grip_baselines);
+        // Drop stale, unversioned cloud pins (pre-fix contamination) so
+        // they re-seed clean instead of clobbering local with a stale
+        // frozen baseline.
+        const migrated = migratePins(cloud.pinned_grip_baselines);
+        setPinnedGripBaselinesState(migrated);
+        saveLS(LS_PINNED_GRIP_BASELINES_KEY, migrated);
       }
       // Pull fatigue_model so the client uses the same β the server
       // trigger is updating. Falls back to local defaults if cloud
