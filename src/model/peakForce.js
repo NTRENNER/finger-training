@@ -8,25 +8,23 @@
 // confounded strength metric in the app: no fit, and it honestly rises
 // as you get stronger.
 //
-// Caveat baked into the design: peak only means "near-MVC" when the rep
-// was a short, hard effort FROM a max-effort session. Two filters enforce
-// that, and BOTH are needed:
-//   1. actual_time_s ≤ PEAK_NEAR_MAX_T — the rep itself was short.
-//   2. target_duration ≤ PEAK_MAX_PROTOCOL_T — the rep came from a
-//      max/power protocol (5–10s targets), not an endurance block.
-// Filter (1) alone is not enough: on a long endurance session (e.g. a
-// 160s-target hold) the LATE reps fail in under 15s purely from fatigue,
-// not because the load was maximal — their peak force is low (you're
-// exhausted), so they plot as spurious "max strength dropped to 28 lbs"
-// dips. Those are fatigue failures, not max tests. Gating on the
-// protocol's target duration drops whole endurance sessions while
-// keeping every rep of a real max session (including ramp-up reps, which
-// can out-pull rep 1 — so we must NOT filter by rep position here).
-// Per grip, best peak per session date, plus a running best-to-date PR.
+// Caveat baked into the design: a peak is only a MAX measurement when you
+// were actually trying to hit a high. Peak force is instantaneous and
+// neuromuscular — a hard 2-second pull registers your true max just as
+// well as a 7-second one — so the REP's duration is NOT the right filter.
+// What matters is INTENT, and the protocol encodes it: a short-target
+// max/power block (5–10s) is a max effort; a long endurance hold is a
+// sub-max load held to failure, where the peak is low because you weren't
+// reaching for a high (and late reps in such a session fail early from
+// fatigue at low force). So the single filter is:
+//   target_duration ≤ PEAK_MAX_PROTOCOL_T  → max/power session only.
+// We take the best peak from ANY rep in those sessions, regardless of how
+// long the rep lasted or its position in the set (ramp-up reps can
+// out-pull rep 1). Per grip, best peak per session date, plus a running
+// best-to-date PR.
 //
 // Pure functions; no React. Tested in isolation.
 
-export const PEAK_NEAR_MAX_T = 15;        // s — rep duration at/under this ≈ MVC window
 export const PEAK_MAX_PROTOCOL_T = 12;    // s — target_duration at/under this = max/power block
 const PEAK_MAX_KG = 500;                  // sanity ceiling (matches load.js)
 
@@ -40,22 +38,21 @@ const PEAK_MAX_KG = 500;                  // sanity ceiling (matches load.js)
 //   }
 // or null when no grip has usable peak data.
 export function buildPeakForceTrend(history, {
-  nearMaxT = PEAK_NEAR_MAX_T,
   maxProtocolT = PEAK_MAX_PROTOCOL_T,
 } = {}) {
   if (!Array.isArray(history) || history.length === 0) return null;
 
-  // grip -> Map<date, bestPeakKg> over near-max reps only.
+  // grip -> Map<date, bestPeakKg> over max/power-protocol reps only.
   const byGrip = {};
   for (const r of history) {
     if (!r || !r.grip || !r.date) continue;
     const peak = Number(r.peak_force_kg);
     if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;
-    const t = Number(r.actual_time_s);
-    if (!(t > 0 && t <= nearMaxT)) continue;       // near-max efforts only
-    // Max/power protocol only — drop endurance-session reps whose short
-    // duration is fatigue, not maximal load. Missing target_duration
-    // (legacy/manual rows) is kept: we can't prove it was endurance.
+    // Max/power protocol only — exclude endurance sessions (sub-max load,
+    // peak not a max attempt). Rep duration is intentionally NOT filtered:
+    // peak force is instantaneous, so a hard short pull is a valid max
+    // sample. Missing target_duration (legacy/manual rows) is kept: we
+    // can't prove it was endurance.
     const tgt = Number(r.target_duration);
     if (Number.isFinite(tgt) && tgt > maxProtocolT) continue;
     if (!byGrip[r.grip]) byGrip[r.grip] = new Map();
