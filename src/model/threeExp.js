@@ -37,7 +37,7 @@
 
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 import { ZONE_REF_T } from "./zones.js";
-import { effectiveLoad } from "./load.js";
+import { effectiveLoad, freshFitReps } from "./load.js";
 
 export const THREE_EXP_LAMBDA_DEFAULT = 100;
 
@@ -201,7 +201,10 @@ export function computeBalancedCurveScore(amps, taus = null) {
 // non-Tindeq reps aren't silently dropped from the prior.
 export function buildThreeExpPriors(history) {
   const byGrip = {};
-  for (const r of history || []) {
+  // Fresh + de-duped, so the prior matches the baseline/estimate/overlay
+  // fits — otherwise a contaminated all-reps prior drags the small,
+  // heavily-shrunk baseline window down and inflates improvement %.
+  for (const r of freshFitReps(history)) {
     if (!r.grip) continue;
     const F = effectiveLoad(r);
     if (!(F > 0)) continue;

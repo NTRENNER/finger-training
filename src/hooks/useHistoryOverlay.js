@@ -26,7 +26,7 @@
 
 import { useMemo } from "react";
 import { fitAmpsForPts } from "../model/baselines.js";
-import { effectiveLoad } from "../model/load.js";
+import { effectiveLoad, freshFitReps } from "../model/load.js";
 
 export function useHistoryOverlay({
   history,
@@ -57,7 +57,10 @@ export function useHistoryOverlay({
     for (const g of grips) {
       const baseline = gripBaselines[g];
       if (!baseline?.amps) continue;     // no baseline → can't anchor
-      const gripReps = (history || []).filter(r =>
+      // Fresh + de-duped so the overlay's "now" curve is fit the same
+      // way as the baseline / Curve-Improvement / Capacity cards — without
+      // this the overlay used raw all-reps and disagreed (e.g. -1% vs +26%).
+      const gripReps = freshFitReps(history).filter(r =>
         r.grip === g &&
         effectiveLoad(r) > 0 && r.actual_time_s > 0
       );

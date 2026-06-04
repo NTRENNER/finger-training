@@ -453,10 +453,12 @@ describe("prescription (unified)", () => {
   });
 
   test("unanchored-curve: no recent rep 1 falls back to pure curve", () => {
-    // History is curve-supporting but rep_num is 0 / missing on every
-    // rep, so no valid anchor can be found. With a per-grip prior we
-    // still have the unscaled curve.
-    const history = buildCurveHistory().map(r => ({ ...r, rep_num: 2 }));
+    // Curve-supporting reps, but all dated far in the past — so the prior
+    // still builds from these (fresh) rep-1 points, yet no RECENT anchor
+    // can be found within the lookback window. (Reps stay rep_num 1: the
+    // curve fits / prior now use fresh reps only, so rep_num 2 would also
+    // remove the prior, which isn't what this case is testing.)
+    const history = buildCurveHistory().map(r => ({ ...r, date: "2020-01-01" }));
     const priors = buildThreeExpPriors(history);
     const out = prescription(history, "L", "Crusher", 45, { threeExpPriors: priors });
     expect(out).not.toBeNull();

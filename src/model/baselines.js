@@ -27,41 +27,12 @@ import {
   computeBalancedCurveScore,
 } from "./threeExp.js";
 import { ZONE_KEYS, ZONE_REF_T } from "./zones.js";
-import { effectiveLoad } from "./load.js";
+import { effectiveLoad, freshFitReps } from "./load.js";
 
 // Per-zone reference times pulled into a single lookup, indexed by
 // zone key. Keeps the improvement loop tight.
 const REF_T_BY_ZONE = Object.fromEntries(ZONE_KEYS.map(k => [k, ZONE_REF_T[k]]));
 
-// Reps suitable for CURVE FITTING — fresh + de-duplicated (May 2026).
-//
-//  - rep_num === 1 (or null for legacy/manual rows): only the fresh
-//    first rep of each set. Later within-set reps are fatigued and fail
-//    at shorter durations; they drag the fitted curve — and especially a
-//    small BASELINE window — downward, which inflated and de-symmetrized
-//    the improvement % (a per-hand baseline could read 10% weaker than
-//    reality, faking a big "gain"). Matches the coverage rep-1-only fix
-//    and the limiter, which already use fresh reps only.
-//  - content de-dup: some early sessions were double-logged (identical
-//    rows). Duplicates in the baseline window skewed the fit; collapse
-//    exact-duplicate content (NOT by id — duplicates are distinct rows).
-//
-// Apply to every baseline/estimate/improvement fit so they're mutually
-// consistent and not fatigue/duplicate-contaminated. (The shrinkage
-// prior in buildThreeExpPriors is left as-is — it's only a soft anchor.)
-export function freshFitReps(history) {
-  const seen = new Set();
-  const out = [];
-  for (const r of history || []) {
-    if (!r) continue;
-    if (!(r.rep_num == null || r.rep_num === 1)) continue;
-    const key = `${r.date}|${r.hand}|${r.grip}|${r.target_duration}|${r.actual_time_s}|${r.avg_force_kg}|${r.rep_num}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(r);
-  }
-  return out;
-}
 
 // Three-exp fit with adaptive grip-prior shrinkage. Falls back to a
 // flat-prior fit when the grip isn't known or has no learned prior.
