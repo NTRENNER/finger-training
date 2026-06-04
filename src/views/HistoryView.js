@@ -101,6 +101,15 @@ export function HistoryView({
   const [newSessReps,      setNewSessReps]      = useState([]);  // [{ load, time, hand }]
   const [newRepLoad,       setNewRepLoad]       = useState("");
   const [newRepTime,       setNewRepTime]       = useState("");
+  // The session list is capped for render performance (each card draws
+  // rep-curve + recovery charts). The cap used to be a silent slice(0,30),
+  // which made the "oldest" visible date depend on the active filter — all
+  // grips reached back ~30 interleaved sessions (later floor) while a single
+  // grip filter spanned ~30 of that grip's sessions (earlier floor), so the
+  // same data looked like it started on different dates. Now it's an explicit,
+  // expandable cap with a visible count.
+  const SESSION_CAP = 30;
+  const [showAllSessions, setShowAllSessions] = useState(false);
 
   const openRepEdit = (sessKey, repIdx, rep) => {
     setAddingRep(null);
@@ -569,7 +578,18 @@ export function HistoryView({
         </div>
       )}
 
-      {grouped.slice(0, 30).map((sess, i) => {
+      {/* Count + truncation note so the visible date range is never
+          mistaken for "all my data". The oldest date shown depends on
+          how many sessions match the active filter when capped. */}
+      {grouped.length > 0 && (
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+          {showAllSessions || grouped.length <= SESSION_CAP
+            ? `${grouped.length} session${grouped.length === 1 ? "" : "s"}${grip ? ` · ${grip}` : ""}`
+            : `Showing ${SESSION_CAP} most recent of ${grouped.length} sessions${grip ? ` · ${grip}` : ""}`}
+        </div>
+      )}
+
+      {(showAllSessions ? grouped : grouped.slice(0, SESSION_CAP)).map((sess, i) => {
         const sessKey = sess.reps[0]?.session_id || sess.date;
         const isEditing    = editKey    === sessKey;
         return (
@@ -1118,6 +1138,19 @@ export function HistoryView({
           </Card>
         );
       })}
+
+      {/* Expand control — reveals the full history (older sessions) so the
+          oldest visible date reflects all data, not the per-filter cap. */}
+      {!showAllSessions && grouped.length > SESSION_CAP && (
+        <button
+          onClick={() => setShowAllSessions(true)}
+          style={{
+            width: "100%", padding: "10px 0", marginTop: 4,
+            background: "none", border: `1px dashed ${C.border}`,
+            color: C.muted, borderRadius: 8, fontSize: 13, cursor: "pointer",
+          }}
+        >Show all {grouped.length} sessions</button>
+      )}
       </>}
     </div>
   );
