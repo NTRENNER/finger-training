@@ -41,10 +41,14 @@ import {
 import { defaultFatigueModel } from "../model/fatigueBeta.js";
 
 // Pinned-baseline schema version. Bump to invalidate stale pins so they
-// re-seed from the current (fixed) baseline computation. v2 (May 2026)
-// retires pins frozen on duplicate-and-fatigue-contaminated early data,
-// which made improvement % inflated and de-symmetrized per hand / pooled.
-const PIN_SCHEMA_VERSION = 2;
+// re-seed from the current (fixed) baseline computation.
+//   v2 — retired pins frozen on duplicate/fatigue-contaminated raw data.
+//   v3 — v2 still re-seeded with the all-reps shrinkage PRIOR (only the
+//        baseline data was cleaned), so the heavily-shrunk baseline was
+//        dragged toward the contaminated prior and improvement % stayed
+//        inflated (+26% vs reality). v3 re-seeds now that the prior, the
+//        overlay, and the capacity fits all run on fresh+deduped reps too.
+const PIN_SCHEMA_VERSION = 3;
 
 // Drop pins that don't carry the current schema version (unversioned =
 // pre-fix, contaminated). Returns the pin map untouched if current,

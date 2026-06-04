@@ -3,7 +3,8 @@
 // fits now run through (fixes the per-hand asymmetry + pooled-vs-per-hand
 // divergence that came from fatigue/duplicate-contaminated baselines).
 
-import { freshFitReps, buildGripBaselines } from "../baselines.js";
+import { buildGripBaselines } from "../baselines.js";
+import { freshFitReps } from "../load.js";
 
 const r = (over) => ({
   grip: "Crusher", hand: "L", date: "2026-04-20",

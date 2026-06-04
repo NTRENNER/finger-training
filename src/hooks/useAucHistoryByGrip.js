@@ -26,7 +26,7 @@ import { useMemo } from "react";
 import { bwOnDate } from "../ui/format.js";
 import { computeBalancedCurveScore } from "../model/threeExp.js";
 import { fitAmpsForPts } from "../model/baselines.js";
-import { effectiveLoad } from "../model/load.js";
+import { effectiveLoad, freshFitReps } from "../model/load.js";
 
 export function useAucHistoryByGrip({
   history,
@@ -50,7 +50,9 @@ export function useAucHistoryByGrip({
     const baselineByGrip = {};     // grip -> { auc, bw }
     const datesUnion = new Set();
     for (const g of grips) {
-      const gripFails = (history || []).filter(r =>
+      // Fresh + de-duped — same fit basis as the baseline / overlay /
+      // Curve-Improvement cards so the Capacity % agrees with them.
+      const gripFails = freshFitReps(history).filter(r =>
         r.grip === g &&
         effectiveLoad(r) > 0 && r.actual_time_s > 0
       );

@@ -64,3 +64,33 @@ export function loadedWeight(r) {
       ?? sane(r.weight_kg)
       ?? 0;
 }
+
+// Reps suitable for CURVE FITTING — fresh + de-duplicated (May 2026).
+//
+//  - rep_num === 1 (or null for legacy/manual rows): only the fresh
+//    first rep of each set. Later within-set reps are fatigued and fail
+//    at shorter durations; they drag the fitted curve — and especially a
+//    small BASELINE window — downward, inflating and de-symmetrizing the
+//    improvement %. Matches the coverage rep-1-only fix and the limiter.
+//  - content de-dup: some early sessions were double-logged (identical
+//    rows). Collapse exact-duplicate content (NOT by id — duplicates are
+//    distinct rows with the same content).
+//
+// Lives in this leaf module so EVERY fit path can share it — the prior
+// (threeExp.buildThreeExpPriors), the baselines/estimates (baselines.js),
+// AND the Force Curves overlay (useHistoryOverlay) — so they all fit the
+// same data and can't disagree. (The coaching engine uses freshMap-
+// adjusted loads, a different but compatible de-fatigue.)
+export function freshFitReps(history) {
+  const seen = new Set();
+  const out = [];
+  for (const r of history || []) {
+    if (!r) continue;
+    if (!(r.rep_num == null || r.rep_num === 1)) continue;
+    const key = `${r.date}|${r.hand}|${r.grip}|${r.target_duration}|${r.actual_time_s}|${r.avg_force_kg}|${r.rep_num}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
