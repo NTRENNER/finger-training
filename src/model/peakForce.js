@@ -49,9 +49,20 @@ export function buildPeakForceTrend(history, { nearMaxT = PEAK_NEAR_MAX_T } = {}
   const grips = Object.keys(byGrip).filter(g => byGrip[g].size > 0).sort();
   if (grips.length === 0) return null;
 
+  // First (earliest) session best per grip — the baseline for "% since".
+  const firstBest = {};
+  for (const g of grips) {
+    const earliest = [...byGrip[g].keys()].sort()[0];
+    firstBest[g] = byGrip[g].get(earliest);
+  }
+
   const allDates = [...new Set(grips.flatMap(g => [...byGrip[g].keys()]))].sort();
   const best = {};
   const latest = {};
+  // Per-grip min/max for a ZOOMED axis — both grips share one chart and
+  // Crusher (~170 lb) vs Micro (~24 lb) on a single 0-based axis makes a
+  // real climb look flat; each grip gets its own domain instead.
+  const domain = {};
   const runningPr = Object.fromEntries(grips.map(g => [g, 0]));
 
   const rows = allDates.map(date => {
@@ -63,14 +74,23 @@ export function buildPeakForceTrend(history, { nearMaxT = PEAK_NEAR_MAX_T } = {}
         if (v > runningPr[g]) runningPr[g] = v;
         latest[g] = { kg: row[g], date };
         if (!best[g] || v > best[g].kg) best[g] = { kg: row[g], date };
+        const d = domain[g] || { min: v, max: v };
+        domain[g] = { min: Math.min(d.min, v), max: Math.max(d.max, v) };
       } else {
         row[g] = null;  // no near-max sample that day → gap (recharts skips)
       }
-      // Running PR line is monotonic non-decreasing once a grip has started.
       row[`${g}_pr`] = runningPr[g] > 0 ? Math.round(runningPr[g] * 10) / 10 : null;
     }
     return row;
   });
 
-  return { grips, rows, best, latest };
+  // % climb in your max (best-ever vs first session) per grip.
+  const changePct = {};
+  for (const g of grips) {
+    changePct[g] = firstBest[g] > 0
+      ? Math.round((best[g].kg / firstBest[g] - 1) * 100)
+      : null;
+  }
+
+  return { grips, rows, best, latest, firstBest, changePct, domain };
 }

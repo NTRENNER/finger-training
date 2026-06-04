@@ -56,6 +56,18 @@ describe("buildPeakForceTrend", () => {
     expect(t.best.Micro.kg).toBe(22);
   });
 
+  test("changePct = best-ever vs first session; per-grip zoom domain", () => {
+    const t = buildPeakForceTrend([
+      rep("Crusher", "2026-04-27", 8, 66),   // first
+      rep("Crusher", "2026-05-24", 11, 77),  // best → +17%
+      rep("Micro", "2026-04-27", 8, 23),     // first
+      rep("Micro", "2026-04-29", 8, 23),     // flat → 0%
+    ]);
+    expect(t.changePct.Crusher).toBe(17);
+    expect(t.changePct.Micro).toBe(0);
+    expect(t.domain.Crusher).toEqual({ min: 66, max: 77 });
+  });
+
   test("respects the near-max threshold constant", () => {
     expect(PEAK_NEAR_MAX_T).toBeGreaterThan(0);
     const t = buildPeakForceTrend(
