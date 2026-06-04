@@ -26,6 +26,7 @@
 
 import { useMemo } from "react";
 import { fitAmpsForPts } from "../model/baselines.js";
+import { buildThreeExpPriors } from "../model/threeExp.js";
 import { effectiveLoad, freshFitReps } from "../model/load.js";
 
 export function useHistoryOverlay({
@@ -54,6 +55,17 @@ export function useHistoryOverlay({
   // Improvement by 10%+ in either direction.
   const historyOverlay = useMemo(() => {
     const byGrip = {};   // grip -> { baselineAmps, baselineDate, dates: [], ampsByDate: Map<date, [a,b,c]> }
+    // Leak-free prior cache: prior built from data on/before a given date.
+    // Reused across the pooled + per-hand loops so we fit it once per date.
+    // The whole-history prior pulls early cumulative fits up toward current
+    // strength, so the "Now" curve sat ~+22% above baseline even at the
+    // leftmost slider position; a per-date prior keeps each slider position
+    // an honest "where I was then". Same fix as the baseline + Capacity %.
+    const priorCache = new Map();
+    const priorsAt = (date) => {
+      if (!priorCache.has(date)) priorCache.set(date, buildThreeExpPriors(history, { upTo: date }));
+      return priorCache.get(date);
+    };
     for (const g of grips) {
       const baseline = gripBaselines[g];
       if (!baseline?.amps) continue;     // no baseline → can't anchor
@@ -79,31 +91,26 @@ export function useHistoryOverlay({
       for (const date of allDates) {
         const upTo = gripReps.filter(r => (r.date || "") <= date);
         if (upTo.length < 3) continue;
+        const leakPrior = priorsAt(date);
         const amps = fitAmpsForPts(
           upTo.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
           g,
-          threeExpPriors,
+          leakPrior.has(g) ? leakPrior : threeExpPriors,
         );
         if (!amps) continue;
         ampsByDate.set(date, amps);
         validDates.push(date);
       }
       if (validDates.length === 0) continue;
-      // The cumulative fit AT the baseline date can drift from the
-      // baseline fit itself because gripBaselines' seed window may
-      // extend past baseline.date (the window closes when ≥5 reps ×
-      // ≥3 durations is hit, which can land on a later date), while
-      // this loop only sees reps with date <= baseline.date. Different
-      // fit on a subset of points → small non-zero deltas at the
-      // slider's leftmost position even though Now and Baseline are
-      // by definition the same point. Override to baseline.amps so
-      // the leftmost slider position renders an honest 0% across
-      // every reference time. Sign of the drift wasn't systematic —
-      // Crusher leaked +5%, Micro leaked −5% — so the fix needs to
-      // be a hard clamp, not a heuristic.
-      if (ampsByDate.has(baseline.date)) {
-        ampsByDate.set(baseline.date, baseline.amps);
-      }
+      // Anchor the LEFTMOST slider position to the baseline curve so the
+      // "Now" line overlaps the dashed baseline at ~0% when slid fully
+      // left. We clamp validDates[0] (the first post-baseline date that's
+      // actually a slider stop) rather than baseline.date — the baseline
+      // date is often NOT a slider stop (its session may have a single
+      // fresh rep that can't meet the ≥3-rep fit gate alone), so the old
+      // date===baseline.date clamp silently never fired and the leftmost
+      // position read +22% instead of 0%.
+      ampsByDate.set(validDates[0], baseline.amps);
 
       // Per-hand fits. For each hand with its own qualifying baseline
       // (≥5 reps × ≥3 distinct durations from perHandGripBaselines),
@@ -118,25 +125,29 @@ export function useHistoryOverlay({
         if (!handBaseline?.amps) continue;
         const handReps = gripReps.filter(r => r.hand === hand);
         const handByDate = new Map();
+        let firstHandDate = null;
         for (const date of validDates) {
           const upToHand = handReps.filter(r => (r.date || "") <= date);
           // 2 is enough for a per-hand fit because the grip prior
           // shrinks small-N runs (same gate as gripHandFits).
           if (upToHand.length < 2) continue;
+          const leakPrior = priorsAt(date);
           const amps = fitAmpsForPts(
             upToHand.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
             g,
-            threeExpPriors,
+            leakPrior.has(g) ? leakPrior : threeExpPriors,
           );
-          if (amps) handByDate.set(date, amps);
+          if (amps) {
+            handByDate.set(date, amps);
+            if (!firstHandDate) firstHandDate = date;
+          }
         }
-        // Same Now=Baseline clamp as the pooled path above —
-        // perHandGripBaselines' seed window can extend past
-        // handBaseline.date, so the cumulative subset fit drifts
-        // unless we override at the slider's leftmost position.
-        if (handByDate.has(handBaseline.date)) {
-          handByDate.set(handBaseline.date, handBaseline.amps);
-        }
+        // Anchor the leftmost per-hand slider position to the hand
+        // baseline (same reasoning as the pooled path). The hand's first
+        // fittable date is often later than handBaseline.date and isn't
+        // handBaseline.date itself, so a date===handBaseline.date clamp
+        // wouldn't fire — clamp the first actual hand date instead.
+        if (firstHandDate) handByDate.set(firstHandDate, handBaseline.amps);
         perHand[hand] = {
           baselineAmps: handBaseline.amps,
           baselineDate: handBaseline.date,
