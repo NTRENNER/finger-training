@@ -199,13 +199,22 @@ export function computeBalancedCurveScore(amps, taus = null) {
 // filter is gone — every rep contributes uniformly. Load comes from
 // effectiveLoad (Tindeq ?? manual ?? prescribed ?? legacy) so manual /
 // non-Tindeq reps aren't silently dropped from the prior.
-export function buildThreeExpPriors(history) {
+// `opts.upTo` (an ISO date string) builds a LEAK-FREE prior: only reps
+// on or before that date are pooled. This matters for BASELINE fits —
+// the baseline curve must be anchored toward the data that existed when
+// the baseline window closed, NOT the whole (future-inclusive) history.
+// A whole-history prior pools your recent, stronger reps; the small,
+// heavily-shrunk baseline window then gets dragged UP toward your
+// current strength, erasing real improvement. Current/"now" fits pass
+// no cutoff (they legitimately see everything).
+export function buildThreeExpPriors(history, { upTo = null } = {}) {
   const byGrip = {};
   // Fresh + de-duped, so the prior matches the baseline/estimate/overlay
   // fits — otherwise a contaminated all-reps prior drags the small,
   // heavily-shrunk baseline window down and inflates improvement %.
   for (const r of freshFitReps(history)) {
     if (!r.grip) continue;
+    if (upTo && r.date && r.date > upTo) continue;   // leak-free cutoff
     const F = effectiveLoad(r);
     if (!(F > 0)) continue;
     if (!(r.actual_time_s > 0)) continue;

@@ -48,7 +48,13 @@ import { defaultFatigueModel } from "../model/fatigueBeta.js";
 //        dragged toward the contaminated prior and improvement % stayed
 //        inflated (+26% vs reality). v3 re-seeds now that the prior, the
 //        overlay, and the capacity fits all run on fresh+deduped reps too.
-const PIN_SCHEMA_VERSION = 3;
+//   v4 — v3 over-corrected: the baseline's shrinkage prior still pooled
+//        the WHOLE (future-inclusive) history, so it leaked recent
+//        strength backward and dragged the baseline UP, crushing real
+//        improvement to ~3% (vs ~23% Micro / ~44% Crusher). v4 re-seeds
+//        now that baseline fits use a LEAK-FREE prior (data ≤ baseline
+//        close date only). See buildThreeExpPriors({ upTo }).
+const PIN_SCHEMA_VERSION = 4;
 
 // Drop pins that don't carry the current schema version (unversioned =
 // pre-fix, contaminated). Returns the pin map untouched if current,
