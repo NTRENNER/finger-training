@@ -24,7 +24,7 @@
 
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
-  computeBalancedCurveScore,
+  computeBalancedCurveScore, buildThreeExpPriors,
 } from "./threeExp.js";
 import { ZONE_KEYS, ZONE_REF_T } from "./zones.js";
 import { effectiveLoad, freshFitReps } from "./load.js";
@@ -145,10 +145,19 @@ export function buildGripBaselines(history, threeExpPriors) {
       acc.push(r);
       durs.add(r.target_duration);
       if (acc.length >= 5 && durs.size >= 3) {
+        // LEAK-FREE prior: anchor the baseline toward only the data that
+        // existed when this window closed, not the whole (future-
+        // inclusive) history. Passing the whole-history threeExpPriors
+        // here drags the small, heavily-shrunk baseline UP toward current
+        // strength and erases real improvement. Fall back to the passed
+        // prior if the cutoff somehow yields nothing for this grip.
+        const closeDate = acc.reduce((m, x) => (x.date > m ? x.date : m), acc[0].date);
+        const leakFree = buildThreeExpPriors(history, { upTo: closeDate });
+        const priorsForFit = leakFree.has(grip) ? leakFree : threeExpPriors;
         const amps = fitAmpsForPts(
           acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
           grip,
-          threeExpPriors,
+          priorsForFit,
         );
         if (amps) out[grip] = { date: acc[0].date, amps };
         break;
@@ -184,10 +193,15 @@ export function buildPerHandGripBaselines(history, threeExpPriors) {
       durs.add(r.target_duration);
       if (acc.length >= 5 && durs.size >= 3) {
         const grip = key.split("|")[0];
+        // Leak-free prior — see buildGripBaselines. The per-hand baseline
+        // window is even smaller, so the future-leak distortion is larger.
+        const closeDate = acc.reduce((m, x) => (x.date > m ? x.date : m), acc[0].date);
+        const leakFree = buildThreeExpPriors(history, { upTo: closeDate });
+        const priorsForFit = leakFree.has(grip) ? leakFree : threeExpPriors;
         const amps = fitAmpsForPts(
           acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
           grip,
-          threeExpPriors,
+          priorsForFit,
         );
         if (amps) out[key] = { date: acc[0].date, amps };
         break;
