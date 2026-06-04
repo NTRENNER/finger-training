@@ -62,7 +62,6 @@ export function CurveCoverageCard({ history }) {
 
   if (pace.current === 0) return null;
 
-  const STATUS_ORDER = { stale: 0, warning: 1, never: 2, ok: 3 };
   const STATUS_LABEL = {
     stale:   { color: C.red,    text: "stale"    },
     warning: { color: C.orange, text: "soon"     },
@@ -75,12 +74,12 @@ export function CurveCoverageCard({ history }) {
     never:   { color: C.muted,  text: "modeled"  },
     ok:      { color: C.green,  text: "fresh"    },
   };
-  const sortedZones = [...ZONE_KEYS].sort((a, b) => {
-    const sa = STATUS_ORDER[staleness[a].status];
-    const sb = STATUS_ORDER[staleness[b].status];
-    if (sa !== sb) return sa - sb;
-    return ZONE_KEYS.indexOf(a) - ZONE_KEYS.indexOf(b);
-  });
+  // List zones in physiological (duration) order — Max Strength (<12s)
+  // → Endurance (180s+) — rather than sorting stale-first. With the
+  // duration labels now shown, the natural progression reads correctly
+  // (Max before Power), and the per-row status badges + the alarm box
+  // above already surface which zones are stale/aging.
+  const sortedZones = ZONE_KEYS;
 
   const counts = sortedZones.reduce((acc, k) => {
     acc[staleness[k].status] = (acc[staleness[k].status] || 0) + 1;
