@@ -28,19 +28,26 @@ const GRIP_ORDER = ["Crusher", "Micro", "Prime"];
 
 export function CurveCoverageCard({ history }) {
   // Per-grip coverage: zone freshness is grip-specific (a fresh Crusher
-  // zone says nothing about Micro), so a pill picks one grip or "all"
-  // (pooled, the prior behavior). The annual session pace stays overall —
-  // it's a training-frequency stat, not grip-specific.
-  const [selGrip, setSelGrip] = useState("all");
+  // zone says nothing about Micro — the two grips train different
+  // muscles), so a pill always picks ONE grip. There is no pooled "All"
+  // view: pooling zone freshness across muscle groups is misleading.
+  // Defaults to the first present grip. The annual session pace below
+  // stays overall — it's a training-frequency stat, not grip-specific.
+  const [selGrip, setSelGrip] = useState(null);
   const presentGrips = useMemo(() => {
     const set = new Set((history || []).map(r => r?.grip).filter(Boolean));
     const ordered = GRIP_ORDER.filter(g => set.has(g));
     for (const g of set) if (!ordered.includes(g)) ordered.push(g);  // keep unknowns
     return ordered;
   }, [history]);
+  // Effective grip: the user's pick if still present, else the first
+  // present grip. Never "all".
+  const activeGrip = (selGrip && presentGrips.includes(selGrip))
+    ? selGrip
+    : (presentGrips[0] || null);
   const gripHistory = useMemo(
-    () => (selGrip === "all" ? history : (history || []).filter(r => r?.grip === selGrip)),
-    [history, selGrip]
+    () => (activeGrip ? (history || []).filter(r => r?.grip === activeGrip) : (history || [])),
+    [history, activeGrip]
   );
   const staleness = useMemo(() => getZoneStaleness(gripHistory), [gripHistory]);
   const pace = useMemo(() => getRollingSessionPace(history), [history]);
@@ -111,13 +118,14 @@ export function CurveCoverageCard({ history }) {
         </div>
       </div>
 
-      {/* Grip selector — coverage is per-grip. Hidden when only one
-          grip has data (nothing to switch between). */}
+      {/* Grip selector — coverage is per-grip (no pooled "All": the
+          grips train different muscles, so pooled freshness is
+          misleading). Hidden when only one grip has data. */}
       {presentGrips.length > 1 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-          {["all", ...presentGrips].map(g => {
-            const active = selGrip === g;
-            const color = g === "all" ? C.blue : (GRIP_COLORS[g] || C.blue);
+          {presentGrips.map(g => {
+            const active = activeGrip === g;
+            const color = GRIP_COLORS[g] || C.blue;
             return (
               <button
                 key={g}
@@ -130,7 +138,7 @@ export function CurveCoverageCard({ history }) {
                   color: active ? color : C.muted,
                 }}
               >
-                {g === "all" ? "All" : g}
+                {g}
               </button>
             );
           })}
