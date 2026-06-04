@@ -2,10 +2,11 @@
 // PeakForceCard — max-strength (peak force) trajectory over time
 // ─────────────────────────────────────────────────────────────
 // Direct measurement of instantaneous max force per grip, from your
-// short near-max reps (peak_force_kg) in MAX/POWER protocol sessions.
-// The cleanest strength metric in the app — no curve fit, no confound.
-// Dots = per-session best near-max peak; solid line = running best-to-
-// date (PR). See model/peakForce.js for the two-stage rep filter.
+// MAX/POWER protocol sessions (peak_force_kg). The cleanest strength
+// metric in the app — no curve fit, no confound. Peak is neuromuscular
+// and instantaneous, so rep duration is NOT filtered; only endurance
+// PROTOCOLS (sub-max intent) are excluded. Dots = per-session best peak;
+// solid line = running best-to-date (PR). See model/peakForce.js.
 //
 // Axis: ONE shared scale for all grips. Crusher (~170 lb) and Micro
 // (~50 lb) differ ~3×, and that magnitude gap is real and worth showing
@@ -71,11 +72,12 @@ export function PeakForceCard({ history, unit = "lbs" }) {
         </div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        Best instantaneous pull per session, from short near-max reps in
-        max/power sessions — a direct max-strength measurement. Dots are
-        per-session bests; the line is your running best-to-date, and the %
-        is how much your max has climbed. One shared scale, so each grip
-        sits at its true magnitude. Endurance-session reps are excluded.
+        Best instantaneous pull per session from your max/power sessions —
+        a direct max-strength measurement (peak force is instantaneous, so
+        rep length doesn't matter). Dots are per-session bests; the line is
+        your running best-to-date, and the % is how much your max has
+        climbed. One shared scale, so each grip sits at its true magnitude.
+        Endurance sessions are excluded.
       </div>
       <ResponsiveContainer width="100%" height={220}>
         <ComposedChart data={view.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
