@@ -24,7 +24,7 @@
 
 import { useMemo } from "react";
 import { bwOnDate } from "../ui/format.js";
-import { computeBalancedCurveScore } from "../model/threeExp.js";
+import { computeBalancedCurveScore, buildThreeExpPriors } from "../model/threeExp.js";
 import { fitAmpsForPts } from "../model/baselines.js";
 import { effectiveLoad, freshFitReps } from "../model/load.js";
 
@@ -72,26 +72,37 @@ export function useAucHistoryByGrip({
         baselineByGrip[g] = { auc: baseAUC, bw: baseBwEntry?.kg ?? null };
       }
       const seriesMap = new Map();
+      let anchored = false;   // first plotted point is clamped to baseline (0%)
       for (const date of dates) {
         const upToFails = gripFails.filter(r => (r.date || "") <= date);
         if (upToFails.length < 3) continue;
+        // LEAK-FREE per-date prior — same principle as the baseline fix.
+        // The whole-history prior pulls EARLY cumulative fits up toward
+        // current strength, so the trajectory opened well above 0% (e.g.
+        // +21% / +30%) instead of starting at the baseline. A prior
+        // restricted to data on/before this date keeps each point an
+        // honest "where I was then", so the line starts ~0% and climbs to
+        // the same endpoint (the last date's prior == whole history).
+        const leakPrior = buildThreeExpPriors(history, { upTo: date });
+        const priorsForFit = leakPrior.has(g) ? leakPrior : threeExpPriors;
         const amps = fitAmpsForPts(
           upToFails.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
           g,
-          threeExpPriors,
+          priorsForFit,
         );
         if (!amps) continue;
-        // At the baseline date itself the cumulative-subset fit drifts
-        // from the baseline fit (which uses the full seed window that
-        // can extend past base.date). Clamp to baseline AUC so the
-        // first plotted point reads exactly 0% — matches the
-        // equivalent clamp in useHistoryOverlay. Same issue: sign of
-        // the drift wasn't systematic (Crusher leaks +, Micro leaks −),
-        // so a hard override is the right fix.
-        const isBaselineDate = base?.date && date === base.date;
-        const abs = isBaselineDate
-          ? baselineByGrip[g]?.auc
+        // Anchor the FIRST plotted point of each grip to the baseline so
+        // the chart opens at exactly 0%. The baseline's own date often
+        // isn't a plotted date (e.g. a session whose only fresh rep can't
+        // meet the ≥3 gate alone), so the previous date===base.date clamp
+        // silently never fired and the line started mid-climb. Clamping
+        // the leftmost plotted point is robust to that and to pinned
+        // baselines (which don't carry a window-close date).
+        const hasBase = baselineByGrip[g]?.auc > 0;
+        const abs = (!anchored && hasBase)
+          ? baselineByGrip[g].auc
           : computeBalancedCurveScore(amps);
+        if (hasBase) anchored = true;
         if (!(abs > 0)) continue;
         const baseAUC = baselineByGrip[g]?.auc;
         const baseBW  = baselineByGrip[g]?.bw;
