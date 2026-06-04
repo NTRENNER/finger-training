@@ -168,11 +168,28 @@ export function ForceCurvesOverlayCard({
     }
     samples.push(row);
   }
-  const allYs = samples.flatMap(row => series.flatMap(s =>
-    [row[`${s.key}_past`] || 0, row[`${s.key}_now`] || 0]
-  ));
-  const yMax = Math.max(...allYs, 1);
-  const yDomain = [0, Math.ceil(yMax * 1.1 / 10) * 10];
+  // FIXED y-axis across the entire slider range (and both hands), so
+  // scrubbing the Now date doesn't rescale the axis and make the curves
+  // visually jump — which defeats the point of comparing dates. We size
+  // the axis once from the tallest curve any slider position can draw:
+  // the three-exp curve is monotonic-decreasing in T, so each curve peaks
+  // at tMin, and we take the max over the baseline + EVERY post-baseline
+  // fit (pooled and per-hand). Switching grip recomputes (Crusher and
+  // Micro live on very different scales), but the slider never does.
+  const candidateAmps = [];
+  if (overlay.baselineAmps) candidateAmps.push(overlay.baselineAmps);
+  for (const a of overlay.ampsByDate.values()) candidateAmps.push(a);
+  for (const h of ["L", "R"]) {
+    const ph = overlay.perHand?.[h];
+    if (!ph) continue;
+    if (ph.baselineAmps) candidateAmps.push(ph.baselineAmps);
+    for (const a of ph.ampsByDate.values()) candidateAmps.push(a);
+  }
+  const yPeak = candidateAmps.reduce(
+    (m, a) => Math.max(m, toDisp(Math.max(predForceThreeExp(a, tMin), 0), unit)),
+    1
+  );
+  const yDomain = [0, Math.ceil(yPeak * 1.1 / 10) * 10];
 
   // Per-T delta strip — fixed reference durations spanning power →
   // endurance. Deltas signed (negative = lost capacity). One row per
