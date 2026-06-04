@@ -45,7 +45,7 @@ import {
   predForceThreeExp,
 } from "../../model/threeExp.js";
 import { fitAmpsForPts } from "../../model/baselines.js";
-import { effectiveLoad } from "../../model/load.js";
+import { effectiveLoad, freshFitReps } from "../../model/load.js";
 
 // Match AnalysisView's chart-min duration (5s — same lower bound as
 // the curve-sample grid in threeExpCurveData). Lives here as a local
@@ -210,7 +210,7 @@ export function ForceDurationCard({
                 // actual_time_s is a (T, F) data point. fitAmpsForPts
                 // applies the grip-aware prior + adaptive lambda
                 // shrinkage from src/model/baselines.js.
-                const failures = (history || []).filter(r =>
+                const failures = freshFitReps(history).filter(r =>
                   r.grip === grip
                   && r.actual_time_s > 0 && effectiveLoad(r) > 0
                 );
@@ -254,10 +254,11 @@ export function ForceDurationCard({
               }
               // Dots: fill by hand (L = blue, R = yellow), outline
               // by grip color. Two-dimensional encoding — fill tells
-              // you the hand, outline tells you the grip.
-              // (Replaces the legacy red/green outcome encoding now
-              // that every rep is a failure data point.)
-              const gripReps = (history || []).filter(r =>
+              // you the hand, outline tells you the grip. FRESH first
+              // reps only (matches the curve fit + every other card) —
+              // the within-set fatigue cloud lives in the click-through
+              // session detail, not the main scatter.
+              const gripReps = freshFitReps(history).filter(r =>
                 r.grip === grip
                 && r.actual_time_s > 0
                 && effectiveLoad(r) > 0

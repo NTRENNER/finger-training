@@ -64,6 +64,7 @@ import {
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
 import { prescription, prescribedLoad, effectiveLoad } from "../model/prescription.js";
+import { freshFitReps } from "../model/load.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 // EnduranceCeilingCard dropped May 2026 — the F(180s)/F(5s) ratio is
@@ -236,6 +237,13 @@ export function AnalysisView({
   // reps flow through `failures` as (T, F) data points.
   const failures = reps;
 
+  // Chart-facing reps: FRESH first reps only (rep_num === 1 + dedup), so
+  // the F-D scatter AND its fitted curve show fresh force-duration
+  // capacity — matching Curve Improvement / overlay / Capacity. The
+  // within-set fatigue cloud (later reps) is still reachable by clicking
+  // any dot, which opens the full per-session breakdown.
+  const freshFailures = useMemo(() => freshFitReps(failures), [failures]);
+
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
   // (threeExpPriors hoisted to the top of the component so the
@@ -399,12 +407,12 @@ export function AnalysisView({
   // falls back to a no-shrinkage fit (which validation showed
   // loses to Monod by ~3% on aggregate, fine as a degenerate case).
   const threeExpFit = useMemo(() => {
-    if (failures.length < 2) return null;
-    const pts = failures.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
+    if (freshFailures.length < 2) return null;
+    const pts = freshFailures.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
     const amps = fitAmpsForPts(pts, selGrip, threeExpPriors);
     if (!amps) return null;
     return { amps };
-  }, [failures, selGrip, threeExpPriors]);
+  }, [freshFailures, selGrip, threeExpPriors]);
 
   // Predicted curve for chart overlay — same T grid as curveData so the
   // two lines align visually.
@@ -475,8 +483,8 @@ export function AnalysisView({
     target_duration: r.target_duration,
     rest_s: r.rest_s,
   });
-  const leftDotsRel  = failures.filter(r => r.hand !== "R").map(buildDot);
-  const rightDotsRel = failures.filter(r => r.hand === "R").map(buildDot);
+  const leftDotsRel  = freshFailures.filter(r => r.hand !== "R").map(buildDot);
+  const rightDotsRel = freshFailures.filter(r => r.hand === "R").map(buildDot);
   const threeExpCurveDataRel = threeExpCurveData.map(d => ({
     x: d.x,
     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
