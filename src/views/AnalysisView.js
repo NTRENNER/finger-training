@@ -78,7 +78,6 @@ import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
 import { PeakForceCard } from "./analysis/PeakForceCard.jsx";
-import { ForceCurvesOverlayCard } from "./analysis/ForceCurvesOverlayCard.jsx";
 import { useAucHistoryByGrip } from "../hooks/useAucHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
 import { useHistoryOverlay } from "../hooks/useHistoryOverlay.js";
@@ -203,25 +202,10 @@ export function AnalysisView({
   };
   const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
 
-  // ── Force Curves History overlay state ──
-  // Single-slider redesign (May 2026). `historyGrip` is the grip
-  // we're comparing (one at a time — multiple curves get unreadable).
-  // `historyNowIdx` is the index into the per-grip sorted training-
-  // date list for the "Now" curve. The "Past" curve is anchored
-  // to the SHARED baseline (gripBaselines[grip].amps) — same anchor
-  // the Capacity % vs baseline chart and the Curve Improvement card
-  // already use — so all three surfaces agree on what's-vs-what.
-  // (Previous two-slider design used the cumulative-fit-at-first-
-  // date as past, which fit on degenerate single-duration windows
-  // and disagreed wildly with Curve Improvement. Fixed here.)
-  const [historyGrip, setHistoryGrip] = useState(null);
-  const [historyNowIdx, setHistoryNowIdx] = useState(null);
-  // Pooled vs per-hand toggle. Pooled fits the whole grip's data into
-  // one curve (matches Capacity %); per-hand shows L and R separately
-  // so asymmetry shows up — useful when one hand is clearly leading
-  // the other. Default to pooled because (a) it matches the most-
-  // glanced page-level cards and (b) the curve is less busy.
-  const [historyViewMode, setHistoryViewMode] = useState("pooled");
+  // (Force Curves overlay slider state removed May 2026 — the overlay
+  // merged into CurveImprovementCard, which owns its own per-grip "Now"
+  // slider state internally. Each grip block scrubs independently, so
+  // there's no longer a single page-level grip/index to track here.)
 
   // BW log loaded once on mount; the cloud-reconcile path in App.js
   // hydrates this from Supabase on sign-in, so by the time the view
@@ -730,6 +714,9 @@ export function AnalysisView({
           global3xBaseline={global3xBaseline}
           selGrip={selGrip}
           history={history}
+          historyOverlay={historyOverlay}
+          maxDur={maxDur}
+          unit={unit}
         />
 
         <CapacityTrajectoryCard
@@ -744,26 +731,11 @@ export function AnalysisView({
         <PeakForceCard history={history} unit={unit} />
 
 
-        {/* ── Force Curves History — vs baseline overlay ──
-            Baseline three-exp curve (dashed, muted) overlaid against
-            the cumulative fit at any post-baseline date (solid, grip
-            color). Per-T deltas underneath show where on the curve
-            the gains/losses landed. Card extracted to
-            ForceCurvesOverlayCard (May 2026 BACKLOG #156 sixth pass);
-            overlayActiveGrip/Dates/Last/NowI derivations live in the
-            component since they're only consumed there. */}
-        <ForceCurvesOverlayCard
-          historyOverlay={historyOverlay}
-          maxDur={maxDur}
-          unit={unit}
-          selGrip={selGrip}
-          historyGrip={historyGrip}
-          setHistoryGrip={setHistoryGrip}
-          historyNowIdx={historyNowIdx}
-          setHistoryNowIdx={setHistoryNowIdx}
-          historyViewMode={historyViewMode}
-          setHistoryViewMode={setHistoryViewMode}
-        />
+        {/* (Force Curves — vs baseline overlay merged INTO
+            CurveImprovementCard, May 2026: each grip block now carries
+            its own baseline-vs-now curve + Now slider, and the slider
+            drives the zone tiles too. The standalone card and its
+            Pooled/Per-hand + grip pills were removed.) */}
 
         {/* (CurveCoverageCard moved to the bottom of Analysis — see
             the closing block. Lives last so the freshness rundown
