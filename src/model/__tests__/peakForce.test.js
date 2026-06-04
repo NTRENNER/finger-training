@@ -1,9 +1,9 @@
 // Tests for src/model/peakForce.js — peak-force (max-strength) trend.
 
-import { buildPeakForceTrend, PEAK_NEAR_MAX_T } from "../peakForce.js";
+import { buildPeakForceTrend, PEAK_NEAR_MAX_T, PEAK_MAX_PROTOCOL_T } from "../peakForce.js";
 
-const rep = (grip, date, t, peak) => ({
-  grip, hand: "L", date, rep_num: 1,
+const rep = (grip, date, t, peak, target = 7) => ({
+  grip, hand: "L", date, rep_num: 1, target_duration: target,
   actual_time_s: t, peak_force_kg: peak, avg_force_kg: peak * 0.9,
 });
 
@@ -71,9 +71,27 @@ describe("buildPeakForceTrend", () => {
   test("respects the near-max threshold constant", () => {
     expect(PEAK_NEAR_MAX_T).toBeGreaterThan(0);
     const t = buildPeakForceTrend(
-      [rep("Crusher", "2026-05-01", 20, 60)],
+      [rep("Crusher", "2026-05-01", 20, 60, 7)],
       { nearMaxT: 25 }                         // widen → 20s rep now counts
     );
     expect(t.best.Crusher.kg).toBe(60);
+  });
+
+  test("excludes short reps from endurance protocols (fatigue, not max)", () => {
+    expect(PEAK_MAX_PROTOCOL_T).toBeGreaterThan(0);
+    const t = buildPeakForceTrend([
+      rep("Crusher", "2026-05-01", 8, 170, 7),    // max protocol → counts
+      rep("Crusher", "2026-05-08", 11, 95, 160),  // endurance fatigue tail → excluded
+    ]);
+    const may8 = t.rows.find(r => r.date === "2026-05-08");
+    expect(may8).toBeUndefined();                 // no max sample that session
+    expect(t.best.Crusher.kg).toBe(170);          // the 95 lb fatigue dip is gone
+  });
+
+  test("keeps reps with missing target_duration (legacy/manual rows)", () => {
+    const t = buildPeakForceTrend([
+      { grip: "Micro", hand: "L", date: "2026-05-01", rep_num: 1, actual_time_s: 8, peak_force_kg: 24 },
+    ]);
+    expect(t.best.Micro.kg).toBe(24);
   });
 });

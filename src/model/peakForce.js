@@ -9,17 +9,26 @@
 // as you get stronger.
 //
 // Caveat baked into the design: peak only means "near-MVC" when the rep
-// was a short, hard effort. A peak pulled from a 120s endurance hold is
-// just the (light) hold force, not a max test. So we only count peaks
-// from reps at or under PEAK_NEAR_MAX_T seconds — your short, near-max
-// pulls — and drop long-hold sessions (they're not max tests, and
-// including them would fake a dip). Per grip, best peak per session
-// date, plus a running best-to-date ("PR") line.
+// was a short, hard effort FROM a max-effort session. Two filters enforce
+// that, and BOTH are needed:
+//   1. actual_time_s ≤ PEAK_NEAR_MAX_T — the rep itself was short.
+//   2. target_duration ≤ PEAK_MAX_PROTOCOL_T — the rep came from a
+//      max/power protocol (5–10s targets), not an endurance block.
+// Filter (1) alone is not enough: on a long endurance session (e.g. a
+// 160s-target hold) the LATE reps fail in under 15s purely from fatigue,
+// not because the load was maximal — their peak force is low (you're
+// exhausted), so they plot as spurious "max strength dropped to 28 lbs"
+// dips. Those are fatigue failures, not max tests. Gating on the
+// protocol's target duration drops whole endurance sessions while
+// keeping every rep of a real max session (including ramp-up reps, which
+// can out-pull rep 1 — so we must NOT filter by rep position here).
+// Per grip, best peak per session date, plus a running best-to-date PR.
 //
 // Pure functions; no React. Tested in isolation.
 
-export const PEAK_NEAR_MAX_T = 15;   // s — at/under this, peak ≈ MVC
-const PEAK_MAX_KG = 500;             // sanity ceiling (matches load.js)
+export const PEAK_NEAR_MAX_T = 15;        // s — rep duration at/under this ≈ MVC window
+export const PEAK_MAX_PROTOCOL_T = 12;    // s — target_duration at/under this = max/power block
+const PEAK_MAX_KG = 500;                  // sanity ceiling (matches load.js)
 
 // Build the per-grip peak-force time series.
 // Returns:
@@ -30,7 +39,10 @@ const PEAK_MAX_KG = 500;             // sanity ceiling (matches load.js)
 //     latest:{ [grip]: { kg, date } },         // most recent session best
 //   }
 // or null when no grip has usable peak data.
-export function buildPeakForceTrend(history, { nearMaxT = PEAK_NEAR_MAX_T } = {}) {
+export function buildPeakForceTrend(history, {
+  nearMaxT = PEAK_NEAR_MAX_T,
+  maxProtocolT = PEAK_MAX_PROTOCOL_T,
+} = {}) {
   if (!Array.isArray(history) || history.length === 0) return null;
 
   // grip -> Map<date, bestPeakKg> over near-max reps only.
@@ -41,6 +53,11 @@ export function buildPeakForceTrend(history, { nearMaxT = PEAK_NEAR_MAX_T } = {}
     if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;
     const t = Number(r.actual_time_s);
     if (!(t > 0 && t <= nearMaxT)) continue;       // near-max efforts only
+    // Max/power protocol only — drop endurance-session reps whose short
+    // duration is fatigue, not maximal load. Missing target_duration
+    // (legacy/manual rows) is kept: we can't prove it was endurance.
+    const tgt = Number(r.target_duration);
+    if (Number.isFinite(tgt) && tgt > maxProtocolT) continue;
     if (!byGrip[r.grip]) byGrip[r.grip] = new Map();
     const cur = byGrip[r.grip].get(r.date) || 0;
     if (peak > cur) byGrip[r.grip].set(r.date, peak);
