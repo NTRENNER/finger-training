@@ -220,13 +220,19 @@ export function SessionPlanCard({
   // ── Why-text for the recommended zone ───────────────────────────────
   const whyParts = [];
   const room = rec.room ?? (1 - (rec.localRatio ?? 1));
-  if (rec.adaptBoost != null && rec.adaptBoost > 1.15) {
-    const pct = Math.round(room * 100);
-    whyParts.push(`reps near here fall ~${pct}% below the curve — biggest AUC-gain opportunity`);
-  } else if (rec.adaptBoost != null && rec.adaptBoost > 1.05) {
-    whyParts.push("reps near here sit slightly below the curve");
-  } else if (rec.adaptBoost != null && rec.adaptBoost < 0.85) {
-    whyParts.push("you're at or above the curve everywhere — picked here on staleness alone");
+  // Skip the residual ("below the curve") reasons when the target was
+  // snapped to the zone center for coverage — that signal was measured
+  // at the old argmax T, not where we're now prescribing, so quoting it
+  // would be misleading.
+  if (!rec.coverageSnap) {
+    if (rec.adaptBoost != null && rec.adaptBoost > 1.15) {
+      const pct = Math.round(room * 100);
+      whyParts.push(`reps near here fall ~${pct}% below the curve — biggest AUC-gain opportunity`);
+    } else if (rec.adaptBoost != null && rec.adaptBoost > 1.05) {
+      whyParts.push("reps near here sit slightly below the curve");
+    } else if (rec.adaptBoost != null && rec.adaptBoost < 0.85) {
+      whyParts.push("you're at or above the curve everywhere — picked here on staleness alone");
+    }
   }
   if (rec.staleStatus === "stale") {
     whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is past its detraining window`);
@@ -234,6 +240,10 @@ export function SessionPlanCard({
     whyParts.push(`never trained at this duration — exploring it anchors the curve`);
   } else if (rec.staleStatus === "warning") {
     whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is approaching stale`);
+  }
+  // Coverage snap → explain the heavier/shorter, mid-window target.
+  if (rec.coverageSnap) {
+    whyParts.push("centered in the zone (heavier · shorter) so a strong rep still lands in-window");
   }
   if (rec.recency != null && rec.recency < 0.5) {
     whyParts.push("zone partially recovered — lighter dose is fine");
