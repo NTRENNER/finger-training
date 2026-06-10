@@ -481,10 +481,23 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
 
   // Cold start: no per-grip prior or the curve fit failed. Fall back
   // to the linear-scale path if we have an anchor — it's the same Path 2
-  // the old empiricalPrescription used: F_target = F_actual × T_actual/T_target,
-  // floor at 0.7 to keep prescriptions from collapsing on a short rep.
+  // the old empiricalPrescription used: F_target = F_actual × T_actual/T_target.
+  //
+  // The ratio is CLAMPED to [0.4, 2.5]. Linear F∝T scaling is only a
+  // sane approximation for anchors near the target duration; the
+  // anchor here is "most recent rep 1 at ANY T" (the exact-T gate was
+  // deliberately removed), so without a ceiling a 160s endurance
+  // anchor feeding a 5s max-hang target prescribed 32× the endurance
+  // load — and the old 0.7 floor pinned a 5s anchor at 70% of max for
+  // a 220s hold (real endurance loads run ~25-35% of max). The true
+  // force-duration ratio between the extremes of the trained range is
+  // ~3-4×; 2.5 up / 0.4 down keeps cold-start numbers inside
+  // physically plausible territory while staying responsive. This is
+  // distinct from the unclamped anchored-CURVE path above, which has
+  // a fitted curve shape to keep it honest ("no clamp per user
+  // direction" applies there, not here).
   if (anchor) {
-    const linScale = Math.max(0.7, anchor.T / targetDuration);
+    const linScale = Math.min(2.5, Math.max(0.4, anchor.T / targetDuration));
     const v = anchor.F * linScale;
     return {
       value:       Math.round(v * 10) / 10,

@@ -490,6 +490,36 @@ describe("prescription (unified)", () => {
     expect(out).not.toBeNull();
     expect(out.source).toBe("anchored-linear");
     expect(out.value).toBeGreaterThan(0);
+    // 30s anchor → 45s target: ratio 30/45 ≈ 0.667, inside the clamp.
+    expect(out.scale).toBeCloseTo(30 / 45, 5);
+  });
+
+  // Regression: the linear ratio used to be unclamped upward (an
+  // endurance anchor at T=160s feeding a 5s max-hang target gave
+  // scale = 32 → 32× the endurance load) and floored at 0.7 downward
+  // (a 5s max anchor for a 220s hold prescribed 70% of max — real
+  // endurance loads run ~25-35%). Both directions now clamp to
+  // [0.4, 2.5].
+  test("anchored-linear clamps extreme T ratios in both directions", () => {
+    const mkHistory = (T, F) => [{
+      hand: "L", grip: "Crusher", target_duration: T, rep_num: 1,
+      actual_time_s: T, avg_force_kg: F, failed: true,
+      date: today, session_id: "s1",
+    }];
+
+    // Endurance anchor (160s @ 12kg) → 5s max-hang target.
+    // Unclamped would be 12 × 32 = 384kg; clamped: 12 × 2.5 = 30kg.
+    const up = prescription(mkHistory(160, 12), "L", "Crusher", 5);
+    expect(up.source).toBe("anchored-linear");
+    expect(up.scale).toBe(2.5);
+    expect(up.value).toBeCloseTo(30, 1);
+
+    // Max-hang anchor (5s @ 40kg) → 220s endurance target.
+    // Old floor 0.7 gave 28kg; clamped floor 0.4 gives 16kg.
+    const down = prescription(mkHistory(5, 40), "L", "Crusher", 220);
+    expect(down.source).toBe("anchored-linear");
+    expect(down.scale).toBe(0.4);
+    expect(down.value).toBeCloseTo(16, 1);
   });
 
   test("historical fallback: no prior, no anchor, but matching reps exist", () => {
