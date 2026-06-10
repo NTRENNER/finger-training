@@ -45,7 +45,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 
-import { today, uid, nowISO } from "../util.js";
+import { today, uid, uuid, nowISO } from "../util.js";
 import { calcLevel } from "../model/levels.js";
 import { zoneOf } from "../model/zones.js";
 // Runtime fatigue accumulator was retired — no view ever consumed it
@@ -115,7 +115,7 @@ export function useSessionRunner({
   // were the only consumer. Per-grip baseline data is still available
   // through model/levels.js for any future runtime feature that needs it.)
 
-  // ── Start session ───────────────────────────────────────────
+  // ── Start session ───────────────────────────────────────
   // refWeights drives the in-workout "Rep 1 suggested weight" display
   // and the weight that gets recorded against each rep. Same prescription
   // chain as the Setup card's "Train at" cell — single unified call to
@@ -175,7 +175,7 @@ export function useSessionRunner({
     setPhase("done");
   }, [config, history]);
 
-  // ── Handle rep completion ───────────────────────────────────
+  // ── Handle rep completion ─────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false }) => {
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
     // Weight is constant across the set — no within-set fatigue discount.
@@ -190,7 +190,11 @@ export function useSessionRunner({
     const derivedFailed = failed || isShortfall(roundedActual, config.targetTime);
     const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {
-      id:              uid(),
+      // Real UUID, not uid(): pushRep re-stamps non-UUID ids into the
+      // cloud payload without writing back, so a uid() here meant
+      // local id ≠ cloud id until the next reconcile — and id-based
+      // updateRep/deleteRep calls silently matched 0 cloud rows.
+      id:              uuid(),
       date:            today(),
       grip:            config.grip,
       hand:            effectiveHand,
