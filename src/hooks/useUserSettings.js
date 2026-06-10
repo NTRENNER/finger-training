@@ -35,7 +35,7 @@ import {
 import { today } from "../util.js";
 import { DEFAULT_TRIP } from "../lib/trip.js";
 import {
-  pushBW, fetchBWLog,
+  pushBW, fetchBWLog, fetchBWTombstoneDates,
   fetchUserSettings, pushUserSettings,
 } from "../lib/sync.js";
 import { defaultFatigueModel } from "../model/fatigueBeta.js";
@@ -75,14 +75,14 @@ const LS_TRIP_KEY           = "ft_trip";            // { date: "YYYY-MM-DD", nam
 const LS_CLIMBING_FOCUS_KEY = "ft_climbing_focus";  // "balanced" | "bouldering" | "power_endurance" | "endurance"
 
 export function useUserSettings({ user }) {
-  // ── Unit preference ───────────────────────────────────────
+  // ── Unit preference ─────────────────────────────────
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
   const saveUnit = useCallback((u) => {
     setUnit(u);
     saveLS("unit_pref", u);
   }, []);
 
-  // ── Body weight ───────────────────────────────────────────
+  // ── Body weight ─────────────────────────────────────
   // Two storage keys: LS_BW_KEY is the scalar current weight that
   // every consumer reads, LS_BW_LOG_KEY is the per-date history that
   // the trends + per-session-date normalization paths consume. saveBW
@@ -118,7 +118,7 @@ export function useUserSettings({ user }) {
     }
   }, []);
 
-  // ── BW cloud reconcile ───────────────────────────────────
+  // ── BW cloud reconcile ───────────────────────────────
   // Runs when `user` flips from null → signed-in. Mirrors the
   // useRepHistory reconcile pattern: fetch cloud log, union with
   // local log on date-key (later-write wins for same-day collisions —
@@ -131,14 +131,24 @@ export function useUserSettings({ user }) {
     if (!user) return;
     let cancelled = false;
     (async () => {
-      const cloud = await fetchBWLog();
+      // Fetch the log and the synced bw_tombstones together. A date
+      // deleted on another device must be filtered out of BOTH sides
+      // of the merge and out of the backfill push list — the backfill
+      // was the delete-resurrection vector ("local-only date" →
+      // re-push). null tombstone fetch = error → skip the filter
+      // rather than treating "fetch failed" as "nothing deleted".
+      const [cloud, tombDates] = await Promise.all([
+        fetchBWLog(),
+        fetchBWTombstoneDates(),
+      ]);
       if (cancelled || !cloud) return;
+      const deleted = new Set(tombDates || []);
       const local = loadLS(LS_BW_LOG_KEY) || [];
       // Merge: same-date local wins (assumption: local is the device
       // the user is actively using, so its writes are most recent).
       const byDate = new Map();
-      for (const e of cloud) byDate.set(e.date, e);
-      for (const e of local) byDate.set(e.date, e);
+      for (const e of cloud) { if (!deleted.has(e.date)) byDate.set(e.date, e); }
+      for (const e of local) { if (!deleted.has(e.date)) byDate.set(e.date, e); }
       const merged = [...byDate.values()].sort((a, b) => a.date < b.date ? -1 : 1);
       saveLS(LS_BW_LOG_KEY, merged);
       // Hydrate the scalar from the latest merged entry.
@@ -151,7 +161,7 @@ export function useUserSettings({ user }) {
       // missing date). Fire-and-forget; same as saveBW's push path.
       const cloudDates = new Set(cloud.map(e => e.date));
       for (const e of local) {
-        if (!cloudDates.has(e.date) && e.kg > 0) pushBW(e.date, e.kg);
+        if (!cloudDates.has(e.date) && e.kg > 0 && !deleted.has(e.date)) pushBW(e.date, e.kg);
       }
     })();
     return () => { cancelled = true; };
@@ -170,7 +180,7 @@ export function useUserSettings({ user }) {
     });
   }, []);
 
-  // ── Climbing focus (cloud-synced training goal bias) ──────
+  // ── Climbing focus (cloud-synced training goal bias) ──────────
   // "balanced" (default), "bouldering", "power_endurance", "endurance"
   // — feeds focusBoost() in coaching.js with gentle multipliers
   // (1.10–1.20× boost, 0.90× de-emphasis) that nudge close calls.
@@ -190,7 +200,14 @@ export function useUserSettings({ user }) {
     // future keys the user has set.
     if (user) {
       (async () => {
-        const current = (await fetchUserSettings()) || {};
+        // ABORT on fetch error (null) — pushUserSettings overwrites
+        // the whole settings JSONB, so pushing `{ climbing_focus }`
+        // on top of a failed fetch would wipe pinned baselines,
+        // pyramid pins, and the learned fatigue_model from the cloud
+        // row. fetchUserSettings returns {} (not null) for "no row
+        // yet", so a legitimate first push still goes through.
+        const current = await fetchUserSettings();
+        if (current == null) return;
         await pushUserSettings({ ...current, climbing_focus: next });
       })().catch(() => {});
     }
@@ -223,13 +240,15 @@ export function useUserSettings({ user }) {
     saveLS(LS_PYRAMID_PROJECT_KEY, next);
     if (user) {
       (async () => {
-        const current = (await fetchUserSettings()) || {};
+        // Abort on fetch error — see saveClimbingFocus for why.
+        const current = await fetchUserSettings();
+        if (current == null) return;
         await pushUserSettings({ ...current, pyramid_project: next });
       })().catch(() => {});
     }
   }, [user]);
 
-  // ── Pinned per-grip baselines ─────────────────────────────
+  // ── Pinned per-grip baselines ─────────────────────────
   // The frozen { [grip]: { date, amps } } map that anchors Curve
   // Improvement. Once a grip's baseline is seeded (≥5 failures × ≥3
   // distinct durations), it gets written here and never re-derived
@@ -249,13 +268,15 @@ export function useUserSettings({ user }) {
     saveLS(LS_PINNED_GRIP_BASELINES_KEY, stamped);
     if (user) {
       (async () => {
-        const current = (await fetchUserSettings()) || {};
+        // Abort on fetch error — see saveClimbingFocus for why.
+        const current = await fetchUserSettings();
+        if (current == null) return;
         await pushUserSettings({ ...current, pinned_grip_baselines: stamped });
       })().catch(() => {});
     }
   }, [user]);
 
-  // ── Fatigue β model (per-grip) ───────────────────────────
+  // ── Fatigue β model (per-grip) ───────────────────────
   // Stored in user_settings.settings.fatigue_model so it persists
   // across devices. Updated server-side by the
   // update_fatigue_beta_from_rep_trg trigger on every rep-1 insert;

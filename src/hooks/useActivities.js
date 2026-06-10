@@ -10,11 +10,15 @@
 // Extracted from App.js in late May 2026 (BACKLOG #154). Sister
 // hook to useUserSettings: same local-first + cloud-reconcile-on-
 // sign-in shape, narrower API (just add / delete / update + the
-// state). No tombstone tracking yet — a deleted-on-phone climb can
-// resurrect on next sign-in if the cloud delete didn't make it
-// before the device went offline. Rare in practice; if it becomes
-// a real pain point, mirror useRepHistory's LS_REP_DELETED_KEY
-// pattern with an LS_ACTIVITY_DELETED_KEY.
+// state).
+//
+// Tombstone tracking added June 2026: deletes were resurrecting
+// deterministically — any second device that still held the
+// activity in LS saw it "missing from cloud" on its next reconcile
+// and re-pushed it. Same design as useRepHistory's rep tombstones:
+// a per-device LS set for fast local filtering plus the synced
+// activity_tombstones table as the cross-device authority (written
+// inside deleteActivityCloud).
 //
 // Hook contract: pass the current `user`. Returns { activities,
 // addActivity, deleteActivity, updateActivity }. addActivity stamps
@@ -26,10 +30,12 @@ import { loadLS, saveLS } from "../lib/storage.js";
 import { uid } from "../util.js";
 import {
   pushActivity, deleteActivityCloud, fetchActivities,
+  fetchActivityTombstoneIds, pushActivityTombstones,
 } from "../lib/sync.js";
 
-// Hook-internal LS key. Used to live at the top of App.js.
-const LS_ACTIVITY_KEY = "ft_activity";  // [{ id, date, type, ... }]
+// Hook-internal LS keys. Used to live at the top of App.js.
+const LS_ACTIVITY_KEY         = "ft_activity";          // [{ id, date, type, ... }]
+const LS_ACTIVITY_DELETED_KEY = "ft_activity_deleted";  // [id, ...] per-device tombstones
 
 export function useActivities({ user }) {
   const [activities, setActivities] = useState(() => loadLS(LS_ACTIVITY_KEY) || []);
@@ -42,22 +48,44 @@ export function useActivities({ user }) {
     if (!user) return;
     let cancelled = false;
     (async () => {
-      const cloud = await fetchActivities();
+      // Tombstones first: union the per-device set with the synced
+      // activity_tombstones table, mirror the union into LS, and
+      // filter EVERYTHING below through it — the cloud rows (a delete
+      // whose row-delete failed but tombstone landed), the local rows
+      // (deleted on another device), and the backfill push list (the
+      // resurrection vector). null = tombstone fetch error → fall
+      // back to the per-device set, same convention as reps.
+      const [cloud, cloudTombs] = await Promise.all([
+        fetchActivities(),
+        fetchActivityTombstoneIds(),
+      ]);
       if (cancelled || !cloud) return;
+      const deleted = new Set([
+        ...(loadLS(LS_ACTIVITY_DELETED_KEY) || []),
+        ...(cloudTombs || []),
+      ]);
+      if (cloudTombs && cloudTombs.length > 0) {
+        saveLS(LS_ACTIVITY_DELETED_KEY, [...deleted]);
+      }
       const local = loadLS(LS_ACTIVITY_KEY) || [];
       const byId = new Map();
-      for (const a of cloud) byId.set(a.id, a);
+      for (const a of cloud) {
+        if (!deleted.has(a.id)) byId.set(a.id, a);
+      }
       // Local writes are most recent on this device — same convention
       // as the BW reconcile. If the user edited a climb on this device
       // between sign-ins, the local copy wins.
-      for (const a of local) byId.set(a.id, a);
+      for (const a of local) {
+        if (!deleted.has(a.id)) byId.set(a.id, a);
+      }
       const merged = [...byId.values()];
       saveLS(LS_ACTIVITY_KEY, merged);
       setActivities(merged);
-      // Backfill any local-only entries to the cloud.
+      // Backfill any local-only entries to the cloud — never a
+      // tombstoned one (that's the delete-resurrection path).
       const cloudIds = new Set(cloud.map(a => a.id));
       for (const a of local) {
-        if (a?.id && !cloudIds.has(a.id)) pushActivity(a);
+        if (a?.id && !cloudIds.has(a.id) && !deleted.has(a.id)) pushActivity(a);
       }
     })();
     return () => { cancelled = true; };
@@ -82,12 +110,20 @@ export function useActivities({ user }) {
       saveLS(LS_ACTIVITY_KEY, next);
       return next;
     });
-    // Cloud delete by id. If it fails, the next reconcile will resurrect
-    // the entry from the cloud — that's acceptable for now (no tombstone
-    // tracking yet for activities; rep deletes use LS_REP_DELETED_KEY,
-    // and we can add the same pattern here if delete-resurrection
-    // becomes a real problem).
-    deleteActivityCloud(id);
+    // Per-device tombstone so this device's reconcile never re-adds
+    // or re-pushes the entry, even if the cloud calls below fail.
+    const deleted = new Set(loadLS(LS_ACTIVITY_DELETED_KEY) || []);
+    if (!deleted.has(id)) {
+      deleted.add(id);
+      saveLS(LS_ACTIVITY_DELETED_KEY, [...deleted]);
+    }
+    // Cloud delete (deleteActivityCloud writes the synced tombstone
+    // before deleting the row, so other devices stop resurrecting it
+    // too). Belt-and-braces direct tombstone push in case the helper
+    // failed before reaching its tombstone write.
+    deleteActivityCloud(id).then(ok => {
+      if (!ok) pushActivityTombstones([id]).catch(() => {});
+    });
   }, []);
 
   // Edit an existing activity. Same id → same Supabase row → upsert
