@@ -207,7 +207,16 @@ export function WorkoutHistoryView({
       workoutId: editSession.workout,
       notes:     editSession.notes || "",
     };
-    const updated = log.map((s, i) => i === origIdx ? session : s);
+    // Write against the UNFILTERED log, not the display `log` memo.
+    // `log` has rotation-pin entries filtered out, so saving it back
+    // silently stripped every ROTATION_PIN_KEY marker from LS on any
+    // edit (rotation overrides then drifted until the next cloud
+    // pull). Map the display index back to the full array by id.
+    const full = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    const targetId = log[origIdx]?.id;
+    const updated = full.map(s =>
+      (targetId != null && s.id === targetId) ? session : s
+    );
     saveLS(LS_WORKOUT_LOG_KEY, updated);
     setTick(t => t + 1);
     // Best-effort cloud push. Fires through the same callback the
@@ -267,8 +276,10 @@ export function WorkoutHistoryView({
   };
 
   const deleteSession = (sessionId) => {
-    // Remove from localStorage
-    saveLS(LS_WORKOUT_LOG_KEY, log.filter(s => s.id !== sessionId));
+    // Remove from localStorage — filter the UNFILTERED log, not the
+    // display memo (which has rotation pins stripped; see saveEdit).
+    const full = loadLS(LS_WORKOUT_LOG_KEY) || [];
+    saveLS(LS_WORKOUT_LOG_KEY, full.filter(s => s.id !== sessionId));
     // Remove from synced set
     const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
     synced.delete(sessionId);
