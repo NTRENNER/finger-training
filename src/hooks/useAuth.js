@@ -24,6 +24,27 @@
 import { useEffect, useState } from "react";
 
 import { supabase } from "../lib/supabase.js";
+import { loadLS, saveLS, LS_LAST_USER_KEY, clearUserScopedLS } from "../lib/storage.js";
+
+// Account-switch guard. None of the ft_* localStorage caches are
+// namespaced by user, so if user B signs in on a device that still
+// holds user A's caches, the reconcile loops would classify A's data
+// as "local-only work" and push it into B's cloud account. Wipe the
+// caches when the signed-in user differs from the last one; keep them
+// when it's the same user (offline work must survive a re-login) or
+// when there's no recorded previous user (first sign-in adopts the
+// device's signed-out local history — that's the intended flow).
+function guardUserSwitch(u) {
+  if (!u?.id) return false;
+  const last = loadLS(LS_LAST_USER_KEY);
+  const switched = Boolean(last && last !== u.id);
+  if (switched) {
+    console.warn("useAuth: account switch detected — clearing local caches");
+    clearUserScopedLS();
+  }
+  saveLS(LS_LAST_USER_KEY, u.id);
+  return switched;
+}
 
 export function useAuth() {
   const [user,       setUser]       = useState(null);
@@ -42,8 +63,18 @@ export function useAuth() {
   // onAuthStateChange keeps it in sync if the user signs in/out
   // in another tab or the JWT expires.
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setUser(s?.user ?? null));
+    // On an account switch, wiping localStorage isn't enough on its
+    // own: hooks have already seeded React state from the previous
+    // user's caches, and their persistence effects would write that
+    // data right back (and the reconciles would push it into the new
+    // user's cloud account). A full reload restarts every hook from
+    // the now-empty caches — same hammer pullFromCloud already uses.
+    const apply = (u) => {
+      if (guardUserSwitch(u)) { window.location.reload(); return; }
+      setUser(u);
+    };
+    supabase.auth.getSession().then(({ data }) => apply(data.session?.user ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => apply(s?.user ?? null));
     return () => sub.subscription.unsubscribe();
   }, []);
 
