@@ -37,6 +37,7 @@ import {
 } from "../lib/climbing-grades.js";
 import { inferProjectGrade, computeGraduation } from "../model/gradePyramid.js";
 import { pyramidPinKey } from "../lib/storage.js";
+import { ymdLocal } from "../util.js";
 
 // Tier step size in rank units, per discipline. Boulder steps by
 // whole V-grades (V4 → V5 = +1 rank). YDS at 5.10+ steps by letter
@@ -104,8 +105,10 @@ const WINDOWS = [
 function clamberFilter(activities, days) {
   const climbs = activities.filter(a => a.type === "climbing");
   if (!days) return climbs;
-  const cutoff = new Date(Date.now() - days * 86400_000)
-    .toISOString().slice(0, 10);
+  // ymdLocal, not toISOString — logged dates are local-calendar days,
+  // so a UTC cutoff shifted the window a day early every evening for
+  // users west of UTC.
+  const cutoff = ymdLocal(new Date(Date.now() - days * 86400_000));
   return climbs.filter(a => a.date >= cutoff);
 }
 
