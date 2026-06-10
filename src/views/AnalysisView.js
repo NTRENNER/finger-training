@@ -96,6 +96,9 @@ export function AnalysisView({
   // the why this exists.
   pinnedGripBaselines = null,
   onSavePinnedGripBaselines = null,
+  // Gate for the pin-on-first-seed write — false until both cloud
+  // reconciles (user_settings + reps) have landed. See App.js.
+  baselinePinReady = true,
 }) {
   // Grip filter — null/"" means "Both grips pooled" (default view).
   // The hand-filter sibling state (selHand) was retired with the L/R/Both
@@ -311,6 +314,7 @@ export function AnalysisView({
   } = useGripFits({
     history, threeExpPriors, grips,
     pinnedGripBaselines, onSavePinnedGripBaselines,
+    allowAutoPin: baselinePinReady,
   });
 
   // (baselineProgress + FAIL_THRESHOLD/DUR_THRESHOLD moved into

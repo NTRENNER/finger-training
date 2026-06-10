@@ -56,7 +56,7 @@ export function OneRMPRCard({ activities = [], rmGrips = [], unit = "lbs" }) {
   const hasChart = chartData.length >= 2;
 
   return (
-    <Card style={{ marginBottom: 16, border: `1px solid ${"#e05560"}30` }}>
+    <Card style={{ marginBottom: 16, border: `1px solid ${C.red}30` }}>
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏋️ 1RM Progress</div>
 
       {/* PR summary per grip */}

@@ -249,12 +249,25 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
+  // True once the full reconcile below has landed (or immediately
+  // when signed out — local is the authority then). Consumed by
+  // useGripFits' auto-pin gate via App: until the cloud's reps are
+  // merged in, `history` can be a partial local cache, and a baseline
+  // auto-pinned from it freezes the wrong window permanently (pins
+  // never overwrite). Stays false while signed in if the rep fetch
+  // errors — pinning waits for a reconcile that actually saw the cloud.
+  const [historySynced, setHistorySynced] = useState(false);
+  useEffect(() => {
+    if (!user) setHistorySynced(true);
+  }, [user]);
+
   // Cloud reconcile: runs when `user` flips from null → signed-in
   // (and on every subsequent user change). The cancelled flag
   // guards the multi-step async chain so tab-switch unmounts
   // don't apply stale results.
   useEffect(() => {
     if (!user) return;
+    setHistorySynced(false);
     let cancelled = false;
     (async () => {
       const flushed = await flushQueue();
@@ -377,6 +390,9 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
 
         const finalReps = [...cloudReps, ...preserved, ...fromQueue];
         if (finalReps.length > 0) setHistory(finalReps);
+        // Reconcile landed with a real cloud snapshot — history now
+        // includes the cloud's reps. Safe for auto-pin writes.
+        setHistorySynced(true);
       }
 
       if (!cancelled) refreshPending();
@@ -634,6 +650,7 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
 
   return {
     history,
+    historySynced,
     freshMap, freshMapFp, threeExpPriors,
     pendingCount, refreshPending,
     addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,

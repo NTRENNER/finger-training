@@ -55,7 +55,7 @@ import {
 } from "./threeExp.js";
 import {
   effectiveLoad, freshLoadFor, buildFreshLoadMap,
-  prescription,
+  prescription, recentBestPeakKg,
 } from "./prescription.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 
@@ -695,17 +695,35 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // already-chosen longer T), not added load. Surfaced for the Why line.
   const oFactor = overload ? overloadFactor(best.T) : 1;
   best.overloadFactor = oFactor;
+
+  // Absolute ceiling AFTER overload: the user's recent measured
+  // instantaneous peak for this (hand, grip). prescription() already
+  // caps its value at PEAK_CAP_FRACTION × peak; the overload bump may
+  // push past that fraction (that's the point of overload — failure a
+  // hair beyond current capacity) but never past the full peak itself.
+  // No isometric hold can exceed instantaneous max, so prescribing
+  // above it is just a guaranteed unattainable target (see the
+  // 2026-06-08 94.1 kg case in prescription.js). Null for manual
+  // histories → no cap.
+  const capPeak = (hand, v) => {
+    if (v == null) return v;
+    const peak = recentBestPeakKg(history, hand, grip);
+    return peak != null && v > peak ? peak : v;
+  };
+
   const headPres = prescription(history, best.hand, grip, best.T, presOpts);
   const headBase = headPres ? headPres.value : predForceThreeExp(handFits[best.hand].amps, best.T);
-  best.loadKg = headBase != null ? headBase * oFactor : headBase;
+  best.loadKg = capPeak(best.hand, headBase != null ? headBase * oFactor : headBase);
   best.loadBeforeOverload = headBase;
   best.scale = headPres ? headPres.scale : 1.0;
   best.anchor = headPres ? headPres.anchor : null;
+  best.peakCapped = headPres?.peakCapped === true
+    || (headBase != null && best.loadKg != null && best.loadKg < headBase * oFactor);
 
   const loadByHand = {};
   for (const hand of Object.keys(handFits)) {
     const p = prescription(history, hand, grip, best.T, presOpts);
-    loadByHand[hand] = p && p.value > 0 ? p.value * oFactor : null;
+    loadByHand[hand] = p && p.value > 0 ? capPeak(hand, p.value * oFactor) : null;
   }
   best.loadByHand = loadByHand;
   return best;

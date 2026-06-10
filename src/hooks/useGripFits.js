@@ -48,6 +48,17 @@ export function useGripFits({
   // window is satisfied. No-op if the caller doesn't pass it (the
   // hook still works, just without persistence — useful for tests).
   onSavePinnedGripBaselines = null,
+  // Gate for the auto-pin effect. App threads `settingsSynced &&
+  // historySynced` here (true when signed out — local is the
+  // authority then). Until BOTH cloud reconciles have landed,
+  // `history` can be a partial local cache and `pinnedGripBaselines`
+  // a stale local copy — auto-pinning in that window (a) freezes a
+  // baseline computed from incomplete history (pins never overwrite,
+  // so the wrong date/amps stick permanently), and (b) pushes a pin
+  // map built without the cloud's pins, clobbering baselines seeded
+  // on other devices. Derivations above are unaffected — they
+  // recompute when the reconciles land; only the WRITE is gated.
+  allowAutoPin = true,
 }) {
   // Freshly-computed candidate baseline from the current rep history.
   // The earliest 5-rep / 3-distinct-duration window per grip. This is
@@ -81,6 +92,7 @@ export function useGripFits({
   // truth and changes to history (backdated reps, edits) don't
   // re-derive the baseline.
   useEffect(() => {
+    if (!allowAutoPin) return;  // cloud reconciles still in flight — see param note
     if (!onSavePinnedGripBaselines) return;
     if (!candidateGripBaselines || typeof candidateGripBaselines !== "object") return;
     let changed = false;
@@ -92,7 +104,7 @@ export function useGripFits({
       changed = true;
     }
     if (changed) onSavePinnedGripBaselines(next);
-  }, [candidateGripBaselines, pinnedGripBaselines, onSavePinnedGripBaselines]);
+  }, [candidateGripBaselines, pinnedGripBaselines, onSavePinnedGripBaselines, allowAutoPin]);
 
   // Per-grip CURRENT amps — the "now" side of the per-grip improvement
   // comparison. Both halves of the Δ% live in the same model so the

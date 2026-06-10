@@ -91,7 +91,7 @@ export function PeakForceCard({ history, unit = "lbs" }) {
             unit={` ${unit}`}
           />
           <Tooltip
-            contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
+            contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
             formatter={(v, name) => [v != null ? `${fmt1(v)} ${unit}` : "—", name]}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
