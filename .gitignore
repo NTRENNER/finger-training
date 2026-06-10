@@ -16,6 +16,13 @@
 build_old_*
 _trash_*
 build.bak.*
+# Dotted variants from later rebuild sessions (build.gone_NNN,
+# build.old.TIMESTAMP, build.stale.TIMESTAMP). 57 of these were
+# committed before the patterns were added — removed from the tree in
+# a separate commit; ignored here so they never come back.
+build.gone_*
+build.old.*
+build.stale.*
 
 # Local backup / session-scratch source files. *.deleted / *.deleted.*
 # capture an older soft-delete convention some sessions used in place
