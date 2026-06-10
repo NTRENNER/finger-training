@@ -34,7 +34,7 @@
 // and writing CMD_TARE every 25 s (which we used to do) actually
 // caused drops on Chrome/Android by racing with user actions.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // ─────────────────────────────────────────────────────────────
 // Tindeq Progressor BLE UUIDs & commands
@@ -185,6 +185,14 @@ export function useTindeq() {
 
   const ctrlRef             = useRef(null);
   const deviceRef           = useRef(null);   // kept for auto-reconnect
+  const dataCharRef         = useRef(null);   // notify characteristic — for listener/notification cleanup
+  // Handler identities kept in refs so removeEventListener actually
+  // matches what addEventListener registered. Chrome returns the SAME
+  // BluetoothDevice/characteristic objects for the same physical
+  // device, so re-adding a fresh closure on every (re)connect stacks
+  // duplicate listeners — each packet then gets processed N times.
+  const packetHandlerRef     = useRef(null);
+  const disconnectHandlerRef = useRef(null);
   const reconnectingRef     = useRef(false);  // guard against concurrent reconnects
   const peakRef             = useRef(0);
   const sumRef              = useRef(0);   // running sum for live avg display
@@ -375,7 +383,17 @@ export function useTindeq() {
     const svc    = await server.getPrimaryService(TINDEQ_SERVICE);
     const dataC  = await svc.getCharacteristic(TINDEQ_NOTIFY);
     ctrlRef.current = await svc.getCharacteristic(TINDEQ_WRITE);
+    // Chrome hands back the SAME characteristic object across
+    // reconnects, so adding without removing stacks duplicate
+    // listeners — every packet then runs through handlePacket N
+    // times, inflating the live-average counts and duplicating
+    // plateau-buffer samples. Remove-then-add keeps it to one.
+    if (packetHandlerRef.current) {
+      dataC.removeEventListener("characteristicvaluechanged", packetHandlerRef.current);
+    }
+    packetHandlerRef.current = handlePacket;
     dataC.addEventListener("characteristicvaluechanged", handlePacket);
+    dataCharRef.current = dataC;
     await dataC.startNotifications();
     // If a rep was in progress when we dropped, restart the measurement stream
     if (measuringRef.current) {
@@ -403,7 +421,7 @@ export function useTindeq() {
       // Single-shot reconnect after 1.5 s to handle brief signal blips.
       // Aggressive retry loops can poison the adapter state on Android —
       // if this one try fails, surface a clean error and let the user reconnect.
-      device.addEventListener("gattserverdisconnected", async () => {
+      const onDisconnected = async () => {
         setConnected(false);
         if (reconnectingRef.current) return;
         reconnectingRef.current = true;
@@ -418,7 +436,16 @@ export function useTindeq() {
           setReconnecting(false);
           reconnectingRef.current = false;
         }
-      });
+      };
+      // Chrome returns the SAME BluetoothDevice object for the same
+      // physical device, so a manual re-connect would stack a second
+      // disconnect listener (and a second reconnect race). Remove the
+      // previous handler (kept in a ref) before adding the new one.
+      if (disconnectHandlerRef.current) {
+        device.removeEventListener("gattserverdisconnected", disconnectHandlerRef.current);
+      }
+      disconnectHandlerRef.current = onDisconnected;
+      device.addEventListener("gattserverdisconnected", onDisconnected);
 
       await setupGatt(device);
       setConnected(true);
@@ -428,6 +455,31 @@ export function useTindeq() {
       return false;
     }
   }, [setupGatt]);
+
+  // ── Unmount cleanup ──
+  // Chrome keeps the same BluetoothDevice/characteristic objects alive
+  // across hook lifetimes, so listeners left behind here would keep
+  // firing into a dead component — and stack with the next mount's
+  // listeners, processing each packet N times. Tear everything down.
+  useEffect(() => {
+    return () => {
+      const dataC = dataCharRef.current;
+      if (dataC && packetHandlerRef.current) {
+        dataC.removeEventListener("characteristicvaluechanged", packetHandlerRef.current);
+        packetHandlerRef.current = null;
+        // stopNotifications throws (or rejects) if the device is already gone
+        try { dataC.stopNotifications().catch(() => {}); } catch { /* device gone */ }
+      }
+      const device = deviceRef.current;
+      if (device) {
+        if (disconnectHandlerRef.current) {
+          device.removeEventListener("gattserverdisconnected", disconnectHandlerRef.current);
+          disconnectHandlerRef.current = null;
+        }
+        if (device.gatt?.connected) device.gatt.disconnect();
+      }
+    };
+  }, []);
 
   const startMeasuring = useCallback(async () => {
     peakRef.current      = 0;  setPeak(0);
