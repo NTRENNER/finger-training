@@ -42,6 +42,8 @@ import {
   pushRepSlotTombstones, fetchRepSlotTombstoneKeys,
   fetchSessionTombstoneIds,
   pushWorkoutSession, fetchWorkoutSessions,
+  fetchWorkoutSessionTombstoneIds,
+  enqueueRepUpdate, applyPendingUpdates, flushUpdateQueue,
   LS_QUEUE_KEY,
 } from "../lib/sync.js";
 import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
@@ -259,6 +261,12 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
     (async () => {
       const flushed = await flushQueue();
       if (!cancelled && flushed > 0) refreshPending();
+      // Retry pending EDITS before fetching, so an edit made offline
+      // lands in cloud and the fetch below returns the edited row
+      // (instead of the stale one that applyPendingUpdates would
+      // then have to patch over).
+      await flushUpdateQueue();
+      if (cancelled) return;
 
       const remote = await fetchReps();
       if (cancelled) return;
@@ -335,9 +343,24 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
 
         // If we pushed offline reps, refetch so state includes them with
         // proper server-assigned ids. Otherwise use the first fetch.
-        const cloudReps = pushedAny ? (await fetchReps()) : remote;
+        const cloudRepsRaw = pushedAny ? (await fetchReps()) : remote;
         if (cancelled) return;
-        if (!cloudReps) return;
+        if (!cloudRepsRaw) return;
+
+        // Filter the FETCHED rows through the tombstone sets too. A
+        // rep whose cloud delete failed (offline at delete time) but
+        // whose tombstone push succeeded is still present in cloud —
+        // without this filter the reconcile re-added it to local
+        // history even though it's permanently dead (the trigger
+        // blocks re-inserts, not selects). Then overlay any pending
+        // local edits so a not-yet-synced edit isn't reverted by the
+        // wholesale setHistory below — the exact "fix a typo, lose it
+        // on next sign-in" failure the update queue exists for.
+        const cloudReps = applyPendingUpdates(cloudRepsRaw.filter(r =>
+          !(r.id && tombstoned.has(r.id)) &&
+          !slotTombSet.has(compositeKey(r)) &&
+          !(r.session_id && sessionTombSet.has(r.session_id))
+        ));
 
         // MERGE, don't replace. Verify every toSync rep actually landed
         // in cloud after the push round. Any that didn't are either:
@@ -468,11 +491,32 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
       const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
       remoteIds.forEach(id => synced.add(id));
 
-      // Merge any remote sessions not yet in local, skipping tombstoned deletions
+      // Union the per-device tombstone set with the SYNCED
+      // workout_session_tombstones table. The per-device set only
+      // protects the device the delete happened on; every other
+      // device saw the session "missing from cloud" and re-pushed it
+      // below — the deterministic delete-resurrection bug that
+      // rep_tombstones fixed for reps. Mirror the cloud set into LS
+      // so subsequent saves/flushes see the union without refetching.
+      // (null = fetch error → fall back to local-only, same
+      // convention as the rep tombstone fetches.)
+      const cloudDeleted = await fetchWorkoutSessionTombstoneIds();
+      const deletedIds = new Set([
+        ...(loadLS(LS_WORKOUT_DELETED_KEY) || []),
+        ...(cloudDeleted || []),
+      ]);
+      if (cloudDeleted && cloudDeleted.length > 0) {
+        saveLS(LS_WORKOUT_DELETED_KEY, [...deletedIds]);
+      }
+
+      // Merge any remote sessions not yet in local, skipping tombstoned
+      // deletions. Also SCRUB tombstoned sessions already sitting in
+      // local (deleted on another device) — without this they linger
+      // in this device's log forever.
       const localIds = new Set(local.map(s => s.id).filter(Boolean));
-      const deletedIds = new Set(loadLS(LS_WORKOUT_DELETED_KEY) || []);
-      const merged = [...local, ...(remote || []).filter(s => !localIds.has(s.id) && !deletedIds.has(s.id))];
-      if (merged.length > local.length) saveLS(LS_WORKOUT_LOG_KEY, merged);
+      const localScrubbed = local.filter(s => !(s.id && deletedIds.has(s.id)));
+      const merged = [...localScrubbed, ...(remote || []).filter(s => !localIds.has(s.id) && !deletedIds.has(s.id))];
+      if (merged.length !== local.length) saveLS(LS_WORKOUT_LOG_KEY, merged);
 
       // ── One-time migration: push local sessions missing from Supabase ──
       // Assign IDs to old sessions that never got one, then push all unsynced
@@ -539,7 +583,19 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
       const { error } = await supabase.from("reps")
         .update(updates)
         .eq("session_id", sessionKey);
-      if (error) console.warn("Supabase update:", error.message);
+      if (error) {
+        // Don't just warn — a dropped edit gets REVERTED by the next
+        // reconcile's setHistory (cloud copy wins by existence). Queue
+        // it: retried by flushUpdateQueue and applied over fetched
+        // rows by applyPendingUpdates until it lands.
+        console.warn("Supabase update:", error.message);
+        enqueueRepUpdate({ kind: "session", sessionKey, updates });
+      }
+    } else {
+      // Signed out: queue so the edit survives the next sign-in
+      // reconcile (it would otherwise be reverted for any rep that
+      // already exists in cloud).
+      enqueueRepUpdate({ kind: "session", sessionKey, updates });
     }
   }, [user]);
 
@@ -589,7 +645,15 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
     setHistory(h => h.map(r => repMatchKey(r) === k ? { ...r, ...updates } : r));
     if (user && rep.id) {
       const { error } = await supabase.from("reps").update(updates).eq("id", rep.id);
-      if (error) console.warn("Supabase updateRep:", error.message);
+      if (error) {
+        // Queue the failed edit — see updateSession for why a warn
+        // alone means the edit is silently reverted on next reconcile.
+        console.warn("Supabase updateRep:", error.message);
+        enqueueRepUpdate({ kind: "rep", id: rep.id, updates });
+      }
+    } else if (rep.id) {
+      // Signed out: queue for the next sign-in reconcile.
+      enqueueRepUpdate({ kind: "rep", id: rep.id, updates });
     }
   }, [user]);
 

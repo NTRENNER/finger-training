@@ -22,6 +22,7 @@ import { C } from "../ui/theme.js";
 import { Card, Sect } from "../ui/components.js";
 import { fmt1, toDisp } from "../ui/format.js";
 import { loadLS, LS_BW_LOG_KEY } from "../lib/storage.js";
+import { ymdLocal } from "../util.js";
 
 // Time-window options for the chart. Full history is the default
 // since BW data is small and the long view is the most useful for
@@ -78,8 +79,10 @@ export function BodyWeightAnalysisView({ unit = "lbs" }) {
   const filtered = useMemo(() => {
     const w = WINDOWS.find(x => x.key === windowKey);
     if (!w?.days) return bwLog;
-    const cutoff = new Date(Date.now() - w.days * 86400_000)
-      .toISOString().slice(0, 10);
+    // ymdLocal, not toISOString — BW entries are stamped with local
+    // dates, so a UTC cutoff shifted the window a day early every
+    // evening for users west of UTC.
+    const cutoff = ymdLocal(new Date(Date.now() - w.days * 86400_000));
     return bwLog.filter(e => e.date >= cutoff);
   }, [bwLog, windowKey]);
 
@@ -101,8 +104,10 @@ export function BodyWeightAnalysisView({ unit = "lbs" }) {
     const latest = bwLog[bwLog.length - 1];
     const earliest = bwLog[0];
     const todayMs = Date.now();
-    const cutoff30 = new Date(todayMs - 30 * 86400_000).toISOString().slice(0, 10);
-    const cutoff90 = new Date(todayMs - 90 * 86400_000).toISOString().slice(0, 10);
+    // ymdLocal for the same reason as the window filter above — the
+    // 30/90-day reference lookups compare against local entry dates.
+    const cutoff30 = ymdLocal(new Date(todayMs - 30 * 86400_000));
+    const cutoff90 = ymdLocal(new Date(todayMs - 90 * 86400_000));
     const ref30 = entryOnOrBefore(bwLog, cutoff30);
     const ref90 = entryOnOrBefore(bwLog, cutoff90);
     const daysTracked = Math.floor(

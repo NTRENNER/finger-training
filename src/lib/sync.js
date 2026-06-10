@@ -179,12 +179,62 @@ export async function fetchWorkoutSessions() {
 
 export async function deleteWorkoutSession(id) {
   try {
+    // Tombstone FIRST, then delete. The per-device LS_WORKOUT_DELETED_KEY
+    // only protects this device; any other device that still holds the
+    // session in its local cache sees it "missing from cloud" on its
+    // next reconcile and re-pushes it (deterministic delete-resurrection
+    // — the same bug rep_tombstones was built to stop for reps). The
+    // synced table is the cross-device authority; ordering it before
+    // the delete means a crash between the two calls leaves a tombstone
+    // and a soon-to-be-filtered row, not a resurrectable orphan.
+    await pushWorkoutSessionTombstones([id]);
     const { error } = await supabase.from("workout_sessions").delete().eq("id", id);
     if (error) { console.warn("Supabase workout delete:", error.message); return false; }
     return true;
   } catch (e) {
     console.warn("Supabase workout delete exception:", e.message);
     return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// WORKOUT-SESSION TOMBSTONES (workout_session_tombstones table)
+// ─────────────────────────────────────────────────────────────
+// Synced delete tracking for strength-workout sessions — mirrors the
+// rep_tombstones design. Table created June 2026 (migration
+// synced_tombstones_for_workouts_activities_bw): (user_id, session_id)
+// PK, RLS gated on auth.uid().
+
+export async function pushWorkoutSessionTombstones(ids) {
+  const valid = (ids || []).filter(Boolean);
+  if (valid.length === 0) return true;
+  try {
+    const userId = await currentUserId();
+    if (!userId) return false;
+    const { error } = await supabase
+      .from("workout_session_tombstones")
+      .upsert(valid.map(id => ({ user_id: userId, session_id: id })),
+        { onConflict: "user_id,session_id" });
+    if (error) { console.warn("Supabase workout tombstone push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase workout tombstone push exception:", e.message);
+    return false;
+  }
+}
+
+// Returns null on error so callers fall back to the per-device
+// LS_WORKOUT_DELETED_KEY set rather than risk re-pushing.
+export async function fetchWorkoutSessionTombstoneIds() {
+  try {
+    const { data, error } = await supabase
+      .from("workout_session_tombstones")
+      .select("session_id");
+    if (error) { console.warn("Supabase workout tombstone fetch:", error.message); return null; }
+    return (data || []).map(r => r.session_id).filter(Boolean);
+  } catch (e) {
+    console.warn("Supabase workout tombstone fetch exception:", e.message);
+    return null;
   }
 }
 
@@ -365,7 +415,26 @@ export function enqueueReps(reps) {
 // (rep queued before a tombstone got synced) can still cause the trigger
 // to throw. pushRep returns 'tombstoned' in that case and the rep is
 // dropped from the queue here, same as a pre-filtered match.
+// Mutex: flushQueue is triggered concurrently from at least three
+// places (the auth reconcile, pullFromCloud, and the Settings retry
+// button). Two interleaved flushes double-push every rep (harmless,
+// thanks to the slot upsert) but — worse — each one's final save was
+// derived from its own STALE snapshot, so a rep enqueued mid-flight
+// by enqueueReps could be silently overwritten out of the queue.
+// Single-flight + a fresh re-read at save time close both holes.
+let flushQueueInFlight = false;
+
 export async function flushQueue() {
+  if (flushQueueInFlight) return 0;
+  flushQueueInFlight = true;
+  try {
+    return await flushQueueOnce();
+  } finally {
+    flushQueueInFlight = false;
+  }
+}
+
+async function flushQueueOnce() {
   const q = loadLS(LS_QUEUE_KEY) || [];
   if (q.length === 0) return 0;
   const compositeKey = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
@@ -382,7 +451,10 @@ export async function flushQueue() {
   ]);
   const slotTombs    = new Set(cloudSlotKeys   || []);
   const sessionTombs = new Set(cloudSessionIds || []);
-  let remaining = [...q];
+  // Track which queue entries were terminally processed (pushed or
+  // dropped) by id, then subtract them from a FRESH read of the queue
+  // at save time. Anything enqueued during the awaits below survives.
+  const processed = new Set();
   let flushed = 0;
   let dropped = 0;
   for (const rep of q) {
@@ -391,25 +463,124 @@ export async function flushQueue() {
     if ((rep.id && idTombs.has(rep.id))
         || slotTombs.has(compositeKey(rep))
         || (rep.session_id && sessionTombs.has(rep.session_id))) {
-      remaining = remaining.filter(r => r.id !== rep.id);
+      if (rep.id) processed.add(rep.id);
       dropped++;
       continue;
     }
     const result = await pushRep(rep);
     if (result === "ok") {
-      remaining = remaining.filter(r => r.id !== rep.id);
+      if (rep.id) processed.add(rep.id);
       flushed++;
     } else if (result === "tombstoned") {
       // Race: rep wasn't in our pre-fetched tombstone snapshot but the
       // server trigger rejected it. Drop from queue same as pre-flight.
-      remaining = remaining.filter(r => r.id !== rep.id);
+      if (rep.id) processed.add(rep.id);
       dropped++;
     }
     // result === "error" → leave in queue for next flush
   }
+  const fresh = loadLS(LS_QUEUE_KEY) || [];
+  const remaining = fresh.filter(r => !(r.id && processed.has(r.id)));
   saveLS(LS_QUEUE_KEY, remaining);
   if (dropped > 0) console.info(`flushQueue: dropped ${dropped} tombstoned rep(s) from queue`);
   return flushed;
+}
+
+// ─────────────────────────────────────────────────────────────
+// REP UPDATE QUEUE (edit dirty-tracking)
+// ─────────────────────────────────────────────────────────────
+// Edits (updateRep / updateSession) used to fire one Supabase update
+// and only console.warn on failure. The reconcile then classified
+// local reps by EXISTENCE in cloud — an edited rep exists, so the
+// stale cloud copy won the wholesale setHistory replacement and the
+// edit was silently destroyed. This queue makes edits durable: a
+// failed (or signed-out) edit is recorded here, retried on every
+// reconcile, and applied OVER the fetched cloud rows until it lands.
+//
+// Entry shapes:
+//   { kind: "rep",     id,         updates, ts }
+//   { kind: "session", sessionKey, updates, ts }
+// Same-target entries merge (later updates win key-by-key), so
+// editing the same rep twice offline yields one entry with the
+// combined patch.
+
+export const LS_UPDATE_QUEUE_KEY = "ft_update_queue";
+
+const updateTargetKey = (e) =>
+  e.kind === "rep" ? `rep:${e.id}` : `session:${e.sessionKey}`;
+
+export function enqueueRepUpdate(entry) {
+  if (!entry || (entry.kind === "rep" && !entry.id)
+      || (entry.kind === "session" && !entry.sessionKey)) return;
+  const q = loadLS(LS_UPDATE_QUEUE_KEY) || [];
+  const key = updateTargetKey(entry);
+  const existing = q.find(e => updateTargetKey(e) === key);
+  const next = existing
+    ? q.map(e => e === existing
+        ? { ...e, updates: { ...e.updates, ...entry.updates }, ts: Date.now() }
+        : e)
+    : [...q, { ...entry, ts: Date.now() }];
+  saveLS(LS_UPDATE_QUEUE_KEY, next);
+}
+
+// Apply pending edits over an array of cloud-fetched reps so the
+// reconcile's setHistory can't revert an edit that hasn't synced yet.
+// Pure function — does no IO beyond the LS read.
+export function applyPendingUpdates(reps) {
+  const q = loadLS(LS_UPDATE_QUEUE_KEY) || [];
+  if (q.length === 0 || !Array.isArray(reps) || reps.length === 0) return reps;
+  const repPatches = new Map();
+  const sessionPatches = new Map();
+  for (const e of q) {
+    if (e.kind === "rep" && e.id) repPatches.set(e.id, e.updates);
+    if (e.kind === "session" && e.sessionKey) sessionPatches.set(e.sessionKey, e.updates);
+  }
+  return reps.map(r => {
+    let out = r;
+    const sp = sessionPatches.get(r.session_id || r.date);
+    if (sp) out = { ...out, ...sp };
+    const rp = r.id ? repPatches.get(r.id) : null;
+    if (rp) out = { ...out, ...rp };
+    return out;
+  });
+}
+
+// Retry every queued edit. Same single-flight + fresh-save discipline
+// as flushQueue. Entries are removed only when Supabase confirms the
+// write; an edit that keeps failing keeps being applied locally via
+// applyPendingUpdates, so the user's view stays correct either way.
+let updateFlushInFlight = false;
+
+export async function flushUpdateQueue() {
+  if (updateFlushInFlight) return 0;
+  updateFlushInFlight = true;
+  try {
+    const q = loadLS(LS_UPDATE_QUEUE_KEY) || [];
+    if (q.length === 0) return 0;
+    const done = new Set();
+    for (const e of q) {
+      try {
+        if (e.kind === "rep") {
+          const { error } = await supabase.from("reps")
+            .update(e.updates).eq("id", e.id);
+          if (!error) done.add(updateTargetKey(e));
+        } else if (e.kind === "session") {
+          const { error } = await supabase.from("reps")
+            .update(e.updates).eq("session_id", e.sessionKey);
+          if (!error) done.add(updateTargetKey(e));
+        }
+      } catch {
+        // Network-level failure — keep the entry for the next flush.
+      }
+    }
+    if (done.size > 0) {
+      const fresh = loadLS(LS_UPDATE_QUEUE_KEY) || [];
+      saveLS(LS_UPDATE_QUEUE_KEY, fresh.filter(e => !done.has(updateTargetKey(e))));
+    }
+    return done.size;
+  } finally {
+    updateFlushInFlight = false;
+  }
 }
 
 // Pull all reps from Supabase, normalised to the local rep shape.
@@ -748,12 +919,58 @@ export async function pushActivity(act) {
 export async function deleteActivityCloud(id) {
   if (!id) return false;
   try {
+    // Tombstone first, then delete — see deleteWorkoutSession for the
+    // ordering rationale. Without the synced tombstone, every other
+    // device that still holds this activity locally re-pushes it on
+    // its next reconcile backfill ("local-only entry" by id), making
+    // delete-resurrection deterministic, not rare.
+    await pushActivityTombstones([id]);
     const { error } = await supabase.from("activities").delete().eq("id", id);
     if (error) { console.warn("Supabase activity delete:", error.message); return false; }
     return true;
   } catch (e) {
     console.warn("Supabase activity delete exception:", e.message);
     return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// ACTIVITY TOMBSTONES (activity_tombstones table)
+// ─────────────────────────────────────────────────────────────
+// Synced delete tracking for climbing-log entries / 1RM logs —
+// mirrors rep_tombstones. Table created June 2026: (user_id,
+// activity_id) PK, RLS gated on auth.uid().
+
+export async function pushActivityTombstones(ids) {
+  const valid = (ids || []).filter(Boolean);
+  if (valid.length === 0) return true;
+  try {
+    const userId = await currentUserId();
+    if (!userId) return false;
+    const { error } = await supabase
+      .from("activity_tombstones")
+      .upsert(valid.map(id => ({ user_id: userId, activity_id: id })),
+        { onConflict: "user_id,activity_id" });
+    if (error) { console.warn("Supabase activity tombstone push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase activity tombstone push exception:", e.message);
+    return false;
+  }
+}
+
+// Returns null on error so callers skip tombstone filtering rather
+// than treating "fetch failed" as "nothing is deleted".
+export async function fetchActivityTombstoneIds() {
+  try {
+    const { data, error } = await supabase
+      .from("activity_tombstones")
+      .select("activity_id");
+    if (error) { console.warn("Supabase activity tombstone fetch:", error.message); return null; }
+    return (data || []).map(r => r.activity_id).filter(Boolean);
+  } catch (e) {
+    console.warn("Supabase activity tombstone fetch exception:", e.message);
+    return null;
   }
 }
 
@@ -827,12 +1044,56 @@ export async function pushBW(date, kg) {
 export async function deleteBW(date) {
   if (!date) return false;
   try {
+    // Tombstone first — without it, any other device whose
+    // LS_BW_LOG_KEY still holds this date re-pushes it on its next
+    // reconcile backfill ("local-only date"), resurrecting the delete.
+    await pushBWTombstones([date]);
     const { error } = await supabase.from("body_weights").delete().eq("date", date);
     if (error) { console.warn("Supabase BW delete:", error.message); return false; }
     return true;
   } catch (e) {
     console.warn("Supabase BW delete exception:", e.message);
     return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// BW TOMBSTONES (bw_tombstones table)
+// ─────────────────────────────────────────────────────────────
+// Synced delete tracking for body-weight entries, keyed by date —
+// mirrors rep_tombstones. Table created June 2026: (user_id, date)
+// PK, RLS gated on auth.uid().
+
+export async function pushBWTombstones(dates) {
+  const valid = (dates || []).filter(Boolean);
+  if (valid.length === 0) return true;
+  try {
+    const userId = await currentUserId();
+    if (!userId) return false;
+    const { error } = await supabase
+      .from("bw_tombstones")
+      .upsert(valid.map(date => ({ user_id: userId, date })),
+        { onConflict: "user_id,date" });
+    if (error) { console.warn("Supabase BW tombstone push:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase BW tombstone push exception:", e.message);
+    return false;
+  }
+}
+
+// Returns null on error so callers skip tombstone filtering rather
+// than treating "fetch failed" as "nothing is deleted".
+export async function fetchBWTombstoneDates() {
+  try {
+    const { data, error } = await supabase
+      .from("bw_tombstones")
+      .select("date");
+    if (error) { console.warn("Supabase BW tombstone fetch:", error.message); return null; }
+    return (data || []).map(r => r.date).filter(Boolean);
+  } catch (e) {
+    console.warn("Supabase BW tombstone fetch exception:", e.message);
+    return null;
   }
 }
 

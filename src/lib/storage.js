@@ -11,19 +11,45 @@
 // remain inlined there until those views are extracted too.
 
 export function loadLS(key) {
+  let raw = null;
   try {
-    const r = localStorage.getItem(key);
-    return r ? JSON.parse(r) : null;
+    raw = localStorage.getItem(key);
   } catch {
+    return null;   // storage API itself unavailable
+  }
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // QUARANTINE, don't just return null. Returning null for a
+    // corrupt blob made callers initialize to [] and their
+    // persistence effects immediately OVERWROTE the original bytes —
+    // for a signed-out user that destroyed the entire training
+    // history unrecoverably. Stash the raw string under a timestamped
+    // sibling key first so the data is recoverable by hand, then
+    // remove the corrupt original so we don't quarantine again on
+    // every read.
+    try {
+      localStorage.setItem(`${key}__corrupt_${Date.now()}`, raw);
+      localStorage.removeItem(key);
+    } catch { /* quota — the original stays in place, still readable by hand */ }
+    console.error(`loadLS: corrupt JSON under "${key}" — quarantined a copy; treating as empty`);
     return null;
   }
 }
 
+// Returns true when the write landed, false when it didn't (quota
+// exceeded, private mode). Callers persisting CRITICAL data (rep
+// history, retry queues, tombstones) should check the return value —
+// a silently-dropped queue write means a failed push is never
+// retried and the rep exists only in memory.
 export function saveLS(key, v) {
   try {
     localStorage.setItem(key, JSON.stringify(v));
-  } catch {
-    // Storage unavailable (quota, private mode) — silently drop.
+    return true;
+  } catch (e) {
+    console.error(`saveLS: write failed for "${key}" (${e?.name || "unknown"}) — data NOT persisted`);
+    return false;
   }
 }
 

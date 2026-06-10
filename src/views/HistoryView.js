@@ -73,10 +73,13 @@ export function HistoryView({
 }) {
   const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
   const switchDomain = (d) => { setDomain(d); saveLS(LS_HISTORY_DOMAIN_KEY, d); };
-  // Read wLog from LS for the year-at-a-glance heatmap. Updated on
-  // every render so newly-saved workouts surface immediately without
-  // a remount; the heatmap memoizes the expensive per-day rollup.
-  const wLogForCalendar = loadLS(LS_WORKOUT_LOG_KEY) || [];
+  // Read wLog from LS for the year-at-a-glance heatmap. Memoized with
+  // no deps so it re-reads on remount only — the previous every-render
+  // read returned a fresh array identity each time, which defeated the
+  // heatmap's useMemo on its expensive per-day rollup. Workouts are
+  // saved from the Workout tab, so this view always remounts (tab
+  // switch) before a new workout could appear here anyway.
+  const wLogForCalendar = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], []);
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
@@ -86,9 +89,9 @@ export function HistoryView({
   const [editTarget,  setEditTarget]  = useState(null); // target_duration seconds
   const [noteKey,     setNoteKey]     = useState(null); // session currently showing note editor
   // Per-rep editing
-  const [repEditMode, setRepEditMode] = useState(null);        // sessKey with reps in edit mode
-  const [editingRep,  setEditingRep]  = useState(null);        // { sessKey, repIdx, rep }
-  const [addingRep,   setAddingRep]   = useState(null);        // sessKey being added to
+  const [repEditMode, setRepEditMode] = useState(null);        // cardKey with reps in edit mode
+  const [editingRep,  setEditingRep]  = useState(null);        // { sessKey: cardKey, repIdx, rep }
+  const [addingRep,   setAddingRep]   = useState(null);        // cardKey being added to
   const [editRepLoad, setEditRepLoad] = useState("");          // display-unit load (edit or add)
   const [editRepTime, setEditRepTime] = useState("");          // seconds (edit or add)
   const [editRepHand, setEditRepHand] = useState(null);        // "L" | "R" — null in add-mode means "auto-derive at save"
@@ -125,6 +128,12 @@ export function HistoryView({
     if (!editingRep) return;
     const loadKg = fromDisp(parseFloat(editRepLoad), unit);
     const newTime = parseFloat(editRepTime);
+    // Mirror the add-path guard in saveRepAdd: blank fields parse to
+    // NaN, and an unguarded save used to write NaN straight into the
+    // rep record, poisoning every downstream computation. Time is
+    // required (it's the rep's identity); load is optional — when
+    // blank or non-positive we simply leave the existing load intact.
+    if (!Number.isFinite(newTime) || newTime <= 0) return;
     const updates = { actual_time_s: newTime };
     // Schema split (late May 2026). The "Load" field in the editor
     // means "what actually happened" — for Tindeq reps that's the
@@ -134,8 +143,10 @@ export function HistoryView({
     // just typed in either case. prescribed_load_kg is intentionally
     // left untouched — the program's suggestion at write time is a
     // historical fact, not something to retconned via the editor.
-    if (editingRep.rep.avg_force_kg > 0) updates.avg_force_kg = loadKg;
-    else updates.manual_load_kg = loadKg;
+    if (Number.isFinite(loadKg) && loadKg > 0) {
+      if (editingRep.rep.avg_force_kg > 0) updates.avg_force_kg = loadKg;
+      else updates.manual_load_kg = loadKg;
+    }
     if (editRepHand === "L" || editRepHand === "R") updates.hand = editRepHand;
     // Re-derive failed from the new time so edits keep the flag honest.
     const tgt = editingRep.rep.target_duration;
@@ -328,6 +339,60 @@ export function HistoryView({
     }
     return Object.values(map).sort((a, b) => a.date < b.date ? 1 : -1);
   }, [filtered]);
+
+  // Per-card chart inputs, hoisted out of the render path. The session
+  // cards used to call buildRepCurveBundle + buildPhysModel inline in
+  // the .map() — both walk full history, so every keystroke in any
+  // editor re-ran them for every visible card. Build them once per
+  // (grouped, history) change instead, keyed by the same
+  // `${session_id}|${date}` identity the grouping uses, and let the
+  // cards look their bundles up. Only the visible slice is computed
+  // (same SESSION_CAP slicing as the render), so collapsing back from
+  // "show all" stays cheap. Map value: an entry per rendered hand —
+  // empty array means "valid session but no per-hand reps", which the
+  // render distinguishes from "no charts at all" (missing key).
+  const chartDataByCard = useMemo(() => {
+    const map = new Map();
+    for (const sess of (showAllSessions ? grouped : grouped.slice(0, SESSION_CAP))) {
+      const cardKey = `${sess.reps[0]?.session_id || sess.date}|${sess.date}`;
+      const validReps = sess.reps.filter(r => Number(r.actual_time_s) > 0);
+      if (validReps.length < 2) continue;
+      const hands = sess.hand === "B"
+        ? ["L", "R"].filter(h => validReps.some(r => r.hand === h))
+        : [sess.hand];
+      if (hands.length === 0) continue;
+      const entries = [];
+      for (const handKey of hands) {
+        const handReps = validReps
+          .filter(r => r.hand === handKey)
+          .sort((a, b) =>
+            (a.set_num ?? 1) - (b.set_num ?? 1)
+            || (a.rep_num ?? 0) - (b.rep_num ?? 0)
+          );
+        if (handReps.length === 0) continue;
+        const rep1 = handReps[0];
+        const restS = rep1.rest_s ?? 20;
+        const bundle = buildRepCurveBundle({
+          history,
+          grip: sess.grip, hand: handKey,
+          numReps: handReps.length,
+          firstRepTime: rep1.actual_time_s,
+          restSeconds: restS,
+          actualReps: handReps,
+          targetDuration: sess.target_duration,
+          beforeDate: sess.date,
+        });
+        // physModel feeds the recovery chart, which only renders for
+        // 2+ reps — skip the fit entirely below that.
+        const physModel = handReps.length >= 2
+          ? buildPhysModel(history, handKey, sess.grip)
+          : null;
+        entries.push({ handKey, handReps, rep1, restS, bundle, physModel });
+      }
+      map.set(cardKey, entries);
+    }
+    return map;
+  }, [grouped, history, showAllSessions]);
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
@@ -589,11 +654,19 @@ export function HistoryView({
         </div>
       )}
 
-      {(showAllSessions ? grouped : grouped.slice(0, SESSION_CAP)).map((sess, i) => {
+      {(showAllSessions ? grouped : grouped.slice(0, SESSION_CAP)).map((sess) => {
         const sessKey = sess.reps[0]?.session_id || sess.date;
-        const isEditing    = editKey    === sessKey;
+        // Per-CARD identity — matches the grouping key. A session_id
+        // that spans two dates renders as two cards; keying the edit /
+        // note / rep-edit UI state on sessKey alone made those cards
+        // share state (open the editor on one, it opened on both).
+        // sessKey is still what the persisted layers key on (parent
+        // notes map, updateSession / session_cooked in useRepHistory),
+        // so it stays in use for those callbacks below.
+        const cardKey = `${sessKey}|${sess.date}`;
+        const isEditing    = editKey    === cardKey;
         return (
-          <Card key={i} style={{ marginBottom: 10 }}>
+          <Card key={cardKey} style={{ marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
               <div>
                 <b>{sess.grip}</b>
@@ -630,7 +703,7 @@ export function HistoryView({
                 {!isEditing && (
                   <>
                     <button
-                      onClick={() => setNoteKey(noteKey === sessKey ? null : sessKey)}
+                      onClick={() => setNoteKey(noteKey === cardKey ? null : cardKey)}
                       style={{
                         background: "none", border: "none",
                         color: notes[sessKey] ? C.yellow : C.muted,
@@ -639,11 +712,11 @@ export function HistoryView({
                       title={notes[sessKey] ? "View/edit note" : "Add note"}
                     >📝</button>
                     <button onClick={() => {
-                      setEditKey(sessKey);
+                      setEditKey(cardKey);
                       setEditHand(sess.hand);
                       setEditGrip(sess.grip);
                       setEditTarget(sess.target_duration);
-                      setRepEditMode(sessKey);   // also enable per-rep editing
+                      setRepEditMode(cardKey);   // also enable per-rep editing
                       setNoteKey(null);
                       closeRepEdit();
                     }} style={{
@@ -662,7 +735,18 @@ export function HistoryView({
                       const msg = `Delete this session?\n\n${n} rep${n === 1 ? "" : "s"} · ${sess.grip || ""} · ${sess.date}\n\nThis cannot be undone.`;
                       // eslint-disable-next-line no-alert
                       if (window.confirm(msg)) {
-                        onDeleteSession(sessKey);
+                        // deleteSession in useRepHistory removes EVERY rep
+                        // matching (session_id || date) — but cards are
+                        // grouped per (session_id, date), so a session_id
+                        // spanning two dates (backfill, Both-mode run past
+                        // midnight) would lose BOTH dates' reps from one
+                        // card's confirm. When the id has reps on other
+                        // dates, fall back to the per-rep delete path so
+                        // only this card's reps go.
+                        const spansOtherDates = history.some(r =>
+                          (r.session_id || r.date) === sessKey && r.date !== sess.date);
+                        if (spansOtherDates) sess.reps.forEach(r => onDeleteRep(r));
+                        else onDeleteSession(sessKey);
                       }
                     }} style={{
                       background: "none", border: "none", color: C.muted,
@@ -773,37 +857,19 @@ export function HistoryView({
                 session's date — that's what the engine would have
                 recommended at the time. */}
             {(() => {
-              const validReps = sess.reps.filter(r => Number(r.actual_time_s) > 0);
-              if (validReps.length < 2) return null;
-              const hands = sess.hand === "B"
-                ? ["L", "R"].filter(h => validReps.some(r => r.hand === h))
-                : [sess.hand];
-              if (hands.length === 0) return null;
+              // Chart inputs come from the hoisted chartDataByCard memo
+              // (see above the return) — no bundle/model fitting in the
+              // render path. Missing key = session didn't qualify for
+              // charts (fewer than 2 valid reps, or no chartable hand).
+              const handEntries = chartDataByCard.get(cardKey);
+              if (!handEntries) return null;
               // History strictly before this session — what the engine
               // knew when this session was prescribed.
               const priorHistory = history.filter(r => r.date < sess.date);
+              const handCount = handEntries.length;
               return (
                 <div style={{ marginBottom: 10 }}>
-                  {hands.map(handKey => {
-                    const handReps = validReps
-                      .filter(r => r.hand === handKey)
-                      .sort((a, b) =>
-                        (a.set_num ?? 1) - (b.set_num ?? 1)
-                        || (a.rep_num ?? 0) - (b.rep_num ?? 0)
-                      );
-                    if (handReps.length === 0) return null;
-                    const rep1 = handReps[0];
-                    const restS = rep1.rest_s ?? 20;
-                    const bundle = buildRepCurveBundle({
-                      history,
-                      grip: sess.grip, hand: handKey,
-                      numReps: handReps.length,
-                      firstRepTime: rep1.actual_time_s,
-                      restSeconds: restS,
-                      actualReps: handReps,
-                      targetDuration: sess.target_duration,
-                      beforeDate: sess.date,
-                    });
+                  {handEntries.map(({ handKey, handReps, rep1, restS, bundle, physModel }) => {
                     // The stored prescribed_load_kg on rep 1 IS the
                     // prescription the user saw at session time. Read
                     // it directly instead of recomputing — recompute
@@ -823,8 +889,8 @@ export function HistoryView({
                     }
                     const target = { value: targetKg };
                     return (
-                      <div key={handKey} style={{ marginBottom: hands.length > 1 ? 12 : 0 }}>
-                        {hands.length > 1 && (
+                      <div key={handKey} style={{ marginBottom: handCount > 1 ? 12 : 0 }}>
+                        {handCount > 1 && (
                           <div style={{
                             fontSize: 10, fontWeight: 700, letterSpacing: 1,
                             color: handKey === "L" ? C.blue : C.orange,
@@ -851,7 +917,8 @@ export function HistoryView({
                             fewer than 2 reps because the chart needs at
                             least one inter-rep recovery to be useful. */}
                         {handReps.length >= 2 && (() => {
-                          const physModel = buildPhysModel(history, handKey, sess.grip);
+                          // physModel comes pre-fit from chartDataByCard;
+                          // only the cheap bundle assembly runs per render.
                           const recBundle = buildRecoveryBundle({
                             reps: handReps,
                             restSeconds: restS,
@@ -885,7 +952,7 @@ export function HistoryView({
             {(() => {
               const sortedReps = sess.reps.slice().sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num);
               const renderChip = (r, j) => {
-                const isRepEditing = editingRep?.sessKey === sessKey && editingRep?.repIdx === j;
+                const isRepEditing = editingRep?.sessKey === cardKey && editingRep?.repIdx === j;
                 const passed = r.actual_time_s >= sess.target_duration;
                 // Per-rep hand letter — same color scheme as the F-D
                 // chart's L/R dots (L=blue, R=orange). Always shown,
@@ -897,13 +964,13 @@ export function HistoryView({
                 return (
                   <div key={j} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 0 }}>
                     <div
-                      onClick={() => repEditMode === sessKey && !isRepEditing && openRepEdit(sessKey, j, r)}
+                      onClick={() => repEditMode === cardKey && !isRepEditing && openRepEdit(cardKey, j, r)}
                       style={{
                         padding: "4px 10px", borderRadius: 8, fontSize: 12,
                         background: isRepEditing ? C.blue + "33" : passed ? "#1a2f1a" : "#2f1a1a",
                         border: `1px solid ${isRepEditing ? C.blue : passed ? C.green : C.red}`,
-                        cursor: repEditMode === sessKey ? "pointer" : "default",
-                        paddingRight: repEditMode === sessKey ? 22 : 10,
+                        cursor: repEditMode === cardKey ? "pointer" : "default",
+                        paddingRight: repEditMode === cardKey ? 22 : 10,
                       }}
                     >
                       {handLetter && (
@@ -922,7 +989,7 @@ export function HistoryView({
                         </span>
                       )}
                     </div>
-                    {repEditMode === sessKey && (
+                    {repEditMode === cardKey && (
                       <button
                         onClick={() => onDeleteRep(r)}
                         title="Delete this rep"
@@ -980,9 +1047,9 @@ export function HistoryView({
             })()}
 
             {/* + Add rep button */}
-            {repEditMode === sessKey && !editingRep && addingRep !== sessKey && (
+            {repEditMode === cardKey && !editingRep && addingRep !== cardKey && (
               <button
-                onClick={() => openRepAdd(sessKey)}
+                onClick={() => openRepAdd(cardKey)}
                 style={{
                   marginTop: 8, width: "100%", padding: "6px 0",
                   background: "none", border: `1px dashed ${C.border}`,
@@ -992,10 +1059,10 @@ export function HistoryView({
             )}
 
             {/* Inline rep editor / adder */}
-            {(editingRep?.sessKey === sessKey || addingRep === sessKey) && (
+            {(editingRep?.sessKey === cardKey || addingRep === cardKey) && (
               <div style={{ marginTop: 10, padding: 10, background: C.bg, borderRadius: 8 }}>
                 <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
-                  {addingRep === sessKey ? "Add rep" : "Edit rep"}
+                  {addingRep === cardKey ? "Add rep" : "Edit rep"}
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -1055,7 +1122,7 @@ export function HistoryView({
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
-                    onClick={() => addingRep === sessKey ? saveRepAdd(sess) : saveRepEdit()}
+                    onClick={() => addingRep === cardKey ? saveRepAdd(sess) : saveRepEdit()}
                     style={{
                       background: C.green, border: "none", borderRadius: 6, color: "#000",
                       fontSize: 11, fontWeight: 700, padding: "4px 10px", cursor: "pointer",
@@ -1069,8 +1136,12 @@ export function HistoryView({
               </div>
             )}
 
-            {/* Note preview (when note exists and editor is closed) */}
-            {notes[sessKey] && noteKey !== sessKey && (
+            {/* Note preview (when note exists and editor is closed).
+                Note CONTENT stays keyed by sessKey — that's the parent's
+                persistence key and re-keying would orphan existing notes —
+                but the open/closed editor state uses cardKey so a cross-
+                date session_id doesn't pop the editor on both cards. */}
+            {notes[sessKey] && noteKey !== cardKey && (
               <div style={{
                 marginTop: 10, padding: "7px 10px",
                 background: "#1f1a00", borderRadius: 7,
@@ -1082,7 +1153,7 @@ export function HistoryView({
             )}
 
             {/* Note editor */}
-            {noteKey === sessKey && (
+            {noteKey === cardKey && (
               <div style={{ marginTop: 10 }}>
                 <textarea
                   autoFocus
