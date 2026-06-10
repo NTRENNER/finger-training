@@ -45,7 +45,7 @@
 // consistent data (coaching.test.js), and the residual/LOO signal the
 // engine acts on is robust to the small gap; if they ever diverge
 // materially, that's the regression test's job to catch.
- 
+
 import { ymdLocal } from "../util.js";
 import { zoneOf, ZONE_REF_T } from "./zones.js";
 import { getZoneStaleness, stalenessBoost } from "./lockout.js";
@@ -58,7 +58,7 @@ import {
   prescription,
 } from "./prescription.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
- 
+
 // Population mean of COACH_RECOVERY_TAU_DAYS — the normalizer for the
 // recovery-cost denominator (see RECOVERY_COST_WEIGHT). Computed once so
 // dividing by cost is, on average, score-neutral (a mean-cost zone keeps
@@ -67,7 +67,7 @@ function _meanRecoveryTau() {
   const vs = Object.values(COACH_RECOVERY_TAU_DAYS);
   return vs.reduce((s, v) => s + v, 0) / vs.length;
 }
- 
+
 // Per-zone recovery time-constants (days). Larger tau = slower
 // recovery from a session of that zone. Short-T near-MVC work
 // recovers fastest; long-T sustained work needs the most time.
@@ -82,7 +82,7 @@ export const COACH_RECOVERY_TAU_DAYS = {
   strength_endurance: 3.0,   // crossover
   endurance:          3.5,   // long-T sustained — slowest adaptation cycle
 };
- 
+
 // Recovery curve: returns 0 immediately after training the zone, rising
 // asymptotically to 1.0 as days_ago grows. Zone-specific tau means
 // Power recovers faster than Endurance. Returns 1.0 if zone never trained.
@@ -128,7 +128,7 @@ export function recencyPenalty(zone, history, grip, tauScale = 1) {
   ));
   return 1 - Math.exp(-daysAgo / tau);
 }
- 
+
 // CONTINUOUS-IN-T RECENCY (June 2026). The zone-bucketed recencyPenalty
 // above has a discontinuity at every zone boundary: a 49s hold refreshes
 // Power, a 51s hold refreshes Power-Strength, and the penalty jumps at
@@ -174,7 +174,7 @@ export function buildContinuousRecency(history, grip, { sigmaLog = 0.35, tauScal
     return 1 - maxInfluence;   // 0 = just trained right here, 1 = fully recovered/untrained
   };
 }
- 
+
 // Personal recovery scale for a grip: ratio of the user's fitted medium
 // recovery tau to the population prior, gently compressed and clamped so
 // a noisy fit can't swing recency wildly. 1.0 when no personal fit. The
@@ -195,7 +195,7 @@ export function personalTauScale(personalTaus, grip) {
   const compressed = Math.sqrt(raw);
   return Math.max(0.6, Math.min(2.5, compressed));
 }
- 
+
 // Confidence-gate strength for the residual signal, in units of
 // "effective nearby reps" (effN = Gaussian-weighted local sample size).
 // confidence = effN/(effN+CONFIDENCE_K): at effN=K confidence is 0.5,
@@ -204,7 +204,7 @@ export function personalTauScale(personalTaus, grip) {
 // the thin zones the jackknife flagged as unstable stop producing
 // confident limiter picks. Re-sweep if the data distribution shifts.
 export const CONFIDENCE_K = 1.5;
- 
+
 // RECOVERY-COST WEIGHT (June 2026). The stated training goal is curve
 // lift per unit of CALENDAR time, but the bare score treats a session
 // costing 3.5 recovery days (endurance) the same as one costing 1.0
@@ -226,7 +226,7 @@ export const CONFIDENCE_K = 1.5;
 // τ=3.5) ~−6%, a ~1.18× max spread. Raising it materially re-introduces
 // the "cheap zone poaches every pick" failure (see coaching.test.js).
 export const RECOVERY_COST_WEIGHT = 0.15;
- 
+
 // WEAKER-HAND BOOST (June 2026). The (hand, T) argmax treated L and R
 // symmetrically, but training the weaker hand buys more POOLED-curve
 // AUC per session (you lift the lagging side) and is injury-protective
@@ -236,7 +236,7 @@ export const RECOVERY_COST_WEIGHT = 0.15;
 // applied only to the weaker hand and capped. A tie-breaker, not an
 // override: a real limiter or stale zone on the strong hand still wins.
 export const WEAKER_HAND_BOOST_MAX = 0.25;   // up to +25% at large asymmetry
- 
+
 // OVERLOAD STEP (June 2026). Prescribing exactly the curve value asks
 // you to reproduce your current capacity, not exceed it — under train-
 // to-failure that re-measures the curve but doesn't intentionally push
@@ -249,7 +249,7 @@ export const WEAKER_HAND_BOOST_MAX = 0.25;   // up to +25% at large asymmetry
 export const OVERLOAD_STEP_FRAC = 0.025;   // +2.5% load on the short end
 export const OVERLOAD_FULL_T   = 20;       // s — full overload at/below this T
 export const OVERLOAD_ZERO_T   = 120;      // s — overload fades to 0 by here
- 
+
 // ─────────────────────────────────────────────────────────────
 // CONTINUOUS COACHING ENGINE  (AUC-gain pick, May 2026)
 // ─────────────────────────────────────────────────────────────
@@ -337,7 +337,7 @@ const CONTINUOUS_T_STEP = 5;    // s — sweep granularity
 // signal) yet needlessly narrow out at 200s. Scaling the neighborhood
 // with duration is the natural geometry for an exponential-decay curve.
 const CONTINUOUS_BANDWIDTH_LOG = 0.35;
- 
+
 // Overload nudge as a function of target T — full at the short/strength
 // end, fading to 0 by OVERLOAD_ZERO_T (long near-asymptote holds overload
 // via duration, not load). Returns the multiplicative load factor.
@@ -349,7 +349,7 @@ export function overloadFactor(T) {
   else frac = (OVERLOAD_ZERO_T - T) / (OVERLOAD_ZERO_T - OVERLOAD_FULL_T);
   return 1 + OVERLOAD_STEP_FRAC * frac;
 }
- 
+
 // Climbing-focus zone biases. Multipliers in the engine's score
 // formula that nudge the recommendation toward the kind of climbing
 // the user is training for. Calibrated as a "tip-the-balance" lever:
@@ -381,7 +381,7 @@ export function focusBoost(zone, focus) {
   const m = FOCUS_MULTIPLIERS[focus];
   return m?.[zone] ?? 1.0;
 }
- 
+
 export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const {
     freshMap = null,
@@ -411,9 +411,9 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // here — see the per-T loop below for the rationale. The recommendation
   // is a pure-math curve question; how tired the user feels today is a
   // separate display/runner overlay (SessionPlanCard tiles, useSessionRunner).
- 
+
   if (!grip || !history || history.length === 0) return null;
- 
+
   // PER-GRIP staleness: a Crusher endurance session shouldn't reduce
   // Micro endurance's staleness boost — they're independent F-D curves.
   // The Setup tab's Curve Coverage card uses the all-grips view of
@@ -425,7 +425,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
   const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
   const twoSig2Log = 2 * bandwidthLog * bandwidthLog;
- 
+
   // Personal recovery scale for this grip (1.0 if no personal fit) and a
   // continuous-in-T recency function built once over this grip's efforts.
   // If the caller didn't pass a memoized personalTaus map, fit this one
@@ -436,7 +436,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const tauScale = personalTauScale(gripTaus, grip);
   const todayStr = today instanceof Date ? ymdLocal(today) : (today || ymdLocal());
   const recencyAt = buildContinuousRecency(history, grip, { sigmaLog: bandwidthLog, tauScale, today: todayStr });
- 
+
   // Per-hand: fit curve, pre-compute DE-BIASED (leave-one-out) residual
   // ratios, sweep T. Also record a mid-curve strength per hand so the
   // argmax can favor the weaker hand (more pooled-AUC gain per session).
@@ -447,7 +447,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       && r.actual_time_s > 0 && effectiveLoad(r) > 0
     );
     if (handPts.length < 1) continue;
- 
+
     const fitPts = handPts.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
     // LOO ratios are computed against the curve fit with each point left
     // out, so the residual isn't shrunk by the curve chasing its own data.
@@ -461,16 +461,16 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       continue;  // need ≥2 points without a prior
     }
     if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) continue;
- 
+
     const ratios = fitPts.map((p, i) => ({ T: p.T, ratio: looRatios[i] ?? 1.0 }));
     // Mid-curve strength (force at 30s) — the asymmetry reference, same
     // duration computeHandAsymmetry uses.
     const strength = predForceThreeExp(amps, 30);
     handFits[hand] = { amps, ratios, strength };
   }
- 
+
   if (Object.keys(handFits).length === 0) return null;
- 
+
   // Weaker-hand boost factor per hand (1.0 unless both hands fit and the
   // hand is the weaker one). asym = (strong − weak)/strong at 30s.
   const handBoost = { L: 1.0, R: 1.0 };
@@ -481,10 +481,10 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     const weaker = sL < sR ? "L" : "R";
     handBoost[weaker] = 1 + WEAKER_HAND_BOOST_MAX * Math.max(0, Math.min(1, asym));
   }
- 
+
   // Recovery-cost normalizer (mean tau) for the efficiency denominator.
   const meanTau = _meanRecoveryTau();
- 
+
   // Sweep T per hand, find argmax score across (hand, T).
   let best = null;
   for (const [hand, { ratios }] of Object.entries(handFits)) {
@@ -506,7 +506,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // No nearby data → localRatio defaults to 1.0 (neutral signal,
       // staleness drives the score in those regions).
       const localRatio = weightSum > 1e-6 ? ratioSum / weightSum : 1.0;
- 
+
       // CONFIDENCE GATE (May 2026): weightSum is the sum of Gaussian
       // kernel weights from observed reps near T — i.e. an effective
       // local sample size (a rep at T contributes ~1.0; reps within σ
@@ -524,7 +524,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // is the runtime guard against acting on that instability.)
       const effN = weightSum;
       const confidence = effN / (effN + confidenceK);
- 
+
       // SYMMETRIC adaptation room: positive when below curve (limiter,
       // adaptation headroom), negative when above curve (already strong,
       // less room to grow). The earlier residualBoost only rewarded
@@ -534,7 +534,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // is confidence-gated so this only fires on trustworthy data.
       const room = 1 - localRatio;
       let adaptBoost = Math.max(0.2, Math.min(3.0, 1 + room * 3 * confidence));
- 
+
       const zoneKey = zoneOf(T);
       const zoneStatus = stalenessMap[zoneKey]?.status ?? "ok";
       // Never-sampled zones: floor adaptBoost at 1.0 so the staleness
@@ -575,7 +575,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // that match the user's training goal. 1.0 when focus is
       // "balanced" or unset (no behavior change for default users).
       const focus = focusBoost(zoneKey, climbingFocus);
- 
+
       // RECOVERY-COST efficiency term. The goal is curve lift per CALENDAR
       // day, not per session — so a cheap-to-recover zone is worth more
       // per unit of expected lift. Crucially, the cost modulates ONLY the
@@ -595,12 +595,12 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // the lift/penalty deviation is scaled by relative recovery cost.
       const costFactor = costMult;   // surfaced on the pick for the Why line
       const adaptBoostCosted = 1 + (adaptBoost - 1) * costMult;
- 
+
       // WEAKER-HAND boost: favor the lagging hand (more pooled-AUC gain).
       const hBoost = handBoost[hand] ?? 1.0;
- 
+
       const score = adaptBoostCosted * stale * recency * focus * hBoost;
- 
+
       // Never-zone tiebreaker: snap to the zone's reference T. The
       // adaptBoost floor (above) flattens the score across every T
       // inside a never zone, so the bare argmax would pin the pick
@@ -617,7 +617,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
         const refT = ZONE_REF_T[zoneKey];
         if (refT) effectiveScore -= Math.abs(T - refT) * 1e-6;
       }
- 
+
       if (!best || effectiveScore > best._effectiveScore) {
         best = {
           T,
@@ -658,10 +658,10 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       }
     }
   }
- 
+
   if (!best) return null;
   delete best._effectiveScore;
- 
+
   // Coverage-driven picks → target the zone's REFERENCE time, not the
   // residual-argmax T. When a zone wins because it's stale/never (a
   // coverage pick, not a confident in-zone limiter), the within-zone
@@ -681,7 +681,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       best.coverageSnap = true;   // surfaced in the SessionPlan "Why" line
     }
   }
- 
+
   // Anchored loads via the unified prescription() — both the headline
   // loadKg (for best.hand) and the per-hand display ("L 38 / R 37").
   // This is the curve_shape × amplitude_anchor product, so a recent
@@ -701,7 +701,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   best.loadBeforeOverload = headBase;
   best.scale = headPres ? headPres.scale : 1.0;
   best.anchor = headPres ? headPres.anchor : null;
- 
+
   const loadByHand = {};
   for (const hand of Object.keys(handFits)) {
     const p = prescription(history, hand, grip, best.T, presOpts);

@@ -34,13 +34,13 @@
 //     - coaching.js continuous engine: per-T LOO residual ratios drive
 //       the log-T-smoothed adaptBoost in coachingRecommendationContinuous
 //       (fitThreeExpAmpsLOO, below)
- 
+
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 import { ZONE_REF_T } from "./zones.js";
 import { effectiveLoad, freshFitReps } from "./load.js";
- 
+
 export const THREE_EXP_LAMBDA_DEFAULT = 100;
- 
+
 // Solve a 3x3 linear system A x = b via Cramer's rule. Internal helper.
 function _solve3(A, b) {
   const det = (
@@ -57,14 +57,14 @@ function _solve3(A, b) {
   );
   return [det3(replaceCol(0))/det, det3(replaceCol(1))/det, det3(replaceCol(2))/det];
 }
- 
+
 function _solve2(A, b) {
   const det = A[0][0]*A[1][1] - A[0][1]*A[1][0];
   if (Math.abs(det) < 1e-12) return null;
   return [(b[0]*A[1][1] - b[1]*A[0][1]) / det,
           (A[0][0]*b[1] - A[1][0]*b[0]) / det];
 }
- 
+
 // Fit three-component amplitudes (a, b, c) to failure observations
 // with non-negativity constraints and a Gaussian shrinkage prior.
 //
@@ -142,13 +142,13 @@ export function fitThreeExpAmps(pts, opts = {}) {
   }
   return best;
 }
- 
+
 // (fitThreeExpAmpsWithSuccessFloor retired May 2026. Successes were
 // lower-bound constraints when the data model distinguished success
 // vs. failure; under train-to-failure every rep is a (T, F) point so
 // the success-floor iteration was a no-op. The plain fitThreeExpAmps
 // is the only fit path now — see prescription.js + AnalysisView.)
- 
+
 // ─────────────────────────────────────────────────────────────
 // LEAVE-ONE-OUT RESIDUAL RATIOS  (closed form, June 2026)
 // ─────────────────────────────────────────────────────────────
@@ -185,19 +185,19 @@ export function fitThreeExpAmpsLOO(pts, opts = {}) {
   const amps = fitThreeExpAmps(pts, opts);
   const n = pts ? pts.length : 0;
   if (n === 0) return { amps, ratios: [] };
- 
+
   const taus = opts.taus || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
   const lambda = opts.lambda == null ? 0 : opts.lambda;
- 
+
   // Active columns = components the NNLS fit kept above ~0.
   const active = [0, 1, 2].filter(j => amps[j] > 1e-9);
   const X = pts.map(p => taus.map(t => Math.exp(-p.T / t)));
   const y = pts.map(p => p.F);
   const w = pts.map(p => (p.w == null ? 1 : p.w));
- 
+
   // Degenerate fit → neutral ratios.
   if (active.length === 0) return { amps, ratios: pts.map(() => 1.0) };
- 
+
   // Active-column design Xa and the ridge normal matrix M = XaᵀWXa + λI.
   const k = active.length;
   const M = Array.from({ length: k }, () => new Array(k).fill(0));
@@ -209,10 +209,10 @@ export function fitThreeExpAmpsLOO(pts, opts = {}) {
     }
   }
   for (let a = 0; a < k; a++) M[a][a] += lambda;
- 
+
   const Minv = _invSym(M);
   if (!Minv) return { amps, ratios: pts.map(() => 1.0) };
- 
+
   // h_ii = w_i · xaᵢᵀ M⁻¹ xaᵢ  (diagonal of the weighted ridge smoother).
   const ratios = pts.map((p, i) => {
     const xa = active.map(j => X[i][j]);
@@ -230,7 +230,7 @@ export function fitThreeExpAmpsLOO(pts, opts = {}) {
   });
   return { amps, ratios };
 }
- 
+
 // Invert a small symmetric positive-definite matrix (k ≤ 3) via
 // Gauss-Jordan. Returns null if singular. Internal helper for the
 // LOO hat-matrix diagonal.
@@ -252,7 +252,7 @@ function _invSym(M) {
   }
   return A.map(row => row.slice(k));
 }
- 
+
 // Predict force at duration T given fitted amplitudes [a, b, c].
 // Uses PHYS_MODEL_DEFAULT.tauD by default — see header for why this is
 // the depletion basis, not the recovery basis.
@@ -260,7 +260,7 @@ export function predForceThreeExp(amps, T, taus = null) {
   const tau = taus || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
   return amps[0]*Math.exp(-T/tau[0]) + amps[1]*Math.exp(-T/tau[1]) + amps[2]*Math.exp(-T/tau[2]);
 }
- 
+
 // BALANCED CURVE SCORE — a single "whole-curve capacity" scalar.
 //
 // Replaces the old computeAUCThreeExp (force-time integral) as the
@@ -291,7 +291,7 @@ export function computeBalancedCurveScore(amps, taus = null) {
   if (n === 0) return 0;
   return Math.exp(logSum / n);
 }
- 
+
 // Build per-grip three-exp prior by pooling all that grip's data
 // across hands. Used as the shrinkage target for per-(hand, grip) fits.
 // Returns Map<grip, [a, b, c]>. Pooling within-grip avoids the cross-

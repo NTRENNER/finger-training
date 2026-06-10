@@ -1,21 +1,20 @@
-
 // Tests for src/model/threeExp.js — three-exponential F-D model.
 // Covers fitThreeExpAmps (with and without prior + weights),
 // predForceThreeExp, buildThreeExpPriors.
- 
+
 import {
   THREE_EXP_LAMBDA_DEFAULT,
   fitThreeExpAmps, fitThreeExpAmpsLOO,
   predForceThreeExp, buildThreeExpPriors,
 } from "../threeExp.js";
 import { PHYS_MODEL_DEFAULT } from "../fatigue.js";
- 
+
 const TAU_D = [
   PHYS_MODEL_DEFAULT.tauD.fast,
   PHYS_MODEL_DEFAULT.tauD.medium,
   PHYS_MODEL_DEFAULT.tauD.slow,
 ];
- 
+
 // ─────────────────────────────────────────────────────────────
 // fitThreeExpAmps — basic NNLS with optional prior + weights
 // ─────────────────────────────────────────────────────────────
@@ -28,7 +27,7 @@ describe("fitThreeExpAmps", () => {
     const out2 = fitThreeExpAmps([], { prior: [10, 5, 2] });
     expect(out2[0]).toBe(10);
   });
- 
+
   test("recovers known amplitudes from synthetic data", () => {
     // Build F(T) = 30*exp(-T/10) + 15*exp(-T/30) + 8*exp(-T/180)
     const trueAmps = [30, 15, 8];
@@ -46,7 +45,7 @@ describe("fitThreeExpAmps", () => {
     expect(amps[1]).toBeCloseTo(trueAmps[1], 0);
     expect(amps[2]).toBeCloseTo(trueAmps[2], 0);
   });
- 
+
   test("returns non-negative amplitudes even for noisy data", () => {
     // Synthetic data with adversarial noise pushing toward negative amps.
     const pts = [
@@ -59,7 +58,7 @@ describe("fitThreeExpAmps", () => {
     expect(amps[1]).toBeGreaterThanOrEqual(0);
     expect(amps[2]).toBeGreaterThanOrEqual(0);
   });
- 
+
   test("shrinkage prior pulls fit toward prior when lambda is large", () => {
     const prior = [50, 25, 10];
     const pts = [{ T: 10, F: 1 }, { T: 30, F: 1 }];  // data wants tiny amps
@@ -74,7 +73,7 @@ describe("fitThreeExpAmps", () => {
       Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2);
     expect(distTo(heavyShrink, prior)).toBeLessThan(distTo(noShrink, prior));
   });
- 
+
   test("per-point weights bias the fit toward heavy-weight points", () => {
     const pts = [
       { T: 10, F: 50, w: 1 },
@@ -88,7 +87,7 @@ describe("fitThreeExpAmps", () => {
     const predAt30 = predForceThreeExp(amps, 30);
     expect(predAt30).toBeLessThan(20);
   });
- 
+
   test("uses tauD basis by default (post-fix)", () => {
     // The fit should use depletion taus, not recovery. We verify by
     // checking that fitting clean data generated from tauD recovers
@@ -116,7 +115,7 @@ describe("fitThreeExpAmps", () => {
     }));
     const ampsD = fitThreeExpAmps(ptsD);   // should recover trueAmps
     const ampsR = fitThreeExpAmps(ptsR);   // basis mismatch → won't recover
- 
+
     const errD = Math.abs(ampsD[0] - trueAmps[0])
               + Math.abs(ampsD[1] - trueAmps[1])
               + Math.abs(ampsD[2] - trueAmps[2]);
@@ -126,7 +125,7 @@ describe("fitThreeExpAmps", () => {
     expect(errD).toBeLessThan(errR);
   });
 });
- 
+
 // ─────────────────────────────────────────────────────────────
 // predForceThreeExp — analytical evaluation
 // ─────────────────────────────────────────────────────────────
@@ -139,17 +138,17 @@ describe("predForceThreeExp", () => {
                    + 2*Math.exp(-T/TAU_D[2]);
     expect(predForceThreeExp(amps, T)).toBeCloseTo(expected, 6);
   });
- 
+
   test("F(0) = a + b + c (sum of amplitudes)", () => {
     const amps = [10, 5, 2];
     expect(predForceThreeExp(amps, 0)).toBeCloseTo(17, 6);
   });
- 
+
   test("F(T) → 0 as T → ∞ (no asymptote — all terms decay)", () => {
     const amps = [10, 5, 2];
     expect(predForceThreeExp(amps, 10000)).toBeLessThan(0.01);
   });
- 
+
   test("accepts custom taus", () => {
     const amps = [10, 0, 0];
     const out = predForceThreeExp(amps, 5, [5, 1000, 1000]);
@@ -157,7 +156,7 @@ describe("predForceThreeExp", () => {
     expect(out).toBeCloseTo(10 * Math.exp(-1), 4);
   });
 });
- 
+
 // ─────────────────────────────────────────────────────────────
 // buildThreeExpPriors — pool failures by grip across hands
 // ─────────────────────────────────────────────────────────────
@@ -176,7 +175,7 @@ describe("buildThreeExpPriors", () => {
     expect(priors.get("Crusher").length).toBe(3);
     expect(priors.get("Micro").length).toBe(3);
   });
- 
+
   test("skips grips with fewer than 2 data points", () => {
     const history = [
       { grip: "Crusher", hand: "L", actual_time_s: 10, avg_force_kg: 50 },
@@ -187,7 +186,7 @@ describe("buildThreeExpPriors", () => {
     expect(priors.has("Crusher")).toBe(true);
     expect(priors.has("OnlyOne")).toBe(false);
   });
- 
+
   test("treats every rep as a data point regardless of failed flag", () => {
     // Train-to-failure model: legacy `failed` flag no longer gates.
     // Both 'failures' (failed: true) and 'successes' (failed: false)
@@ -199,7 +198,7 @@ describe("buildThreeExpPriors", () => {
     const priors = buildThreeExpPriors(history);
     expect(priors.has("Crusher")).toBe(true);
   });
- 
+
   test("ignores missing fields and out-of-range forces", () => {
     const history = [
       { grip: null,      actual_time_s: 10, avg_force_kg: 50 }, // no grip
@@ -210,13 +209,13 @@ describe("buildThreeExpPriors", () => {
     const priors = buildThreeExpPriors(history);
     expect(priors.size).toBe(0);
   });
- 
+
   test("returns empty map for empty history", () => {
     expect(buildThreeExpPriors([]).size).toBe(0);
     expect(buildThreeExpPriors(null).size).toBe(0);
   });
 });
- 
+
 // ─────────────────────────────────────────────────────────────
 // THREE_EXP_LAMBDA_DEFAULT — sanity check that the constant exists
 // ─────────────────────────────────────────────────────────────
@@ -226,7 +225,7 @@ describe("THREE_EXP_LAMBDA_DEFAULT", () => {
     expect(THREE_EXP_LAMBDA_DEFAULT).toBeGreaterThan(0);
   });
 });
- 
+
 // ─────────────────────────────────────────────────────────────
 // fitThreeExpAmpsLOO — closed-form leave-one-out residual ratios
 // ─────────────────────────────────────────────────────────────
@@ -238,12 +237,12 @@ describe("fitThreeExpAmpsLOO", () => {
     expect(amps).toEqual(plain);
     expect(ratios).toHaveLength(pts.length);
   });
- 
+
   test("empty input → empty ratios, no throw", () => {
     const { ratios } = fitThreeExpAmpsLOO([], { lambda: 0 });
     expect(ratios).toEqual([]);
   });
- 
+
   test("LOO residuals are MORE pronounced than in-sample (de-biasing)", () => {
     // A clean curve plus one under-performing point. Leaving that point
     // out makes the fit predict higher there, so its LOO ratio sits
@@ -260,7 +259,7 @@ describe("fitThreeExpAmpsLOO", () => {
     expect(loo).toBeLessThan(1);            // still reads as below-curve
     expect(loo).toBeLessThan(inSample);     // and MORE so than in-sample
   });
- 
+
   test("leverage floor prevents blow-ups on a high-leverage lone point", () => {
     // One isolated long-duration point (high leverage) shouldn't produce
     // an absurd ratio; the (1 - h) floor keeps it finite and sane.
