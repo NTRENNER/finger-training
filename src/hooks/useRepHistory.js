@@ -540,7 +540,7 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // ── CRUD ──────────────────────────────────────────────────
+  // ── CRUD ────────────────────────────────────────────────────
   // Each mutation updates local state immediately, then mirrors
   // to Supabase if signed in. addReps queues failures for retry;
   // the others log warnings since failed deletes/updates are
