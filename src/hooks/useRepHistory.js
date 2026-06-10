@@ -93,7 +93,14 @@ function addRepTombstones(ids) {
 
 export function useRepHistory({ user, fatigueModel = null, dailyState = null }) {
   const [history, setHistory] = useState(() => loadLS(LS_HISTORY_KEY) || []);
-  useEffect(() => saveLS(LS_HISTORY_KEY, history), [history]);
+  // NOTE: block body, not a concise arrow. saveLS now returns a
+  // boolean (so callers can detect quota failures), and a concise
+  // `() => saveLS(...)` would make that boolean the effect's return
+  // value — React then treats it as the cleanup fn and calls `true()`
+  // on the next run, throwing "is not a function" and unmounting the
+  // whole tree (blank screen on the first history change after a
+  // cloud pull). The braces discard the return value.
+  useEffect(() => { saveLS(LS_HISTORY_KEY, history); }, [history]);
 
   // Content-aware fingerprint for fatigue/prior memos. Cloud-sync
   // poll churn (history array reference changes without content

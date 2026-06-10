@@ -84,4 +84,18 @@ describe("loadLS corrupt-blob quarantine", () => {
   test("saveLS reports success", () => {
     expect(saveLS("ft_x", [1, 2, 3])).toBe(true);
   });
+
+  // Guards the "blank screen" regression: saveLS returns a boolean, so
+  // a concise-arrow effect `useEffect(() => saveLS(...), deps)` would
+  // hand that boolean to React as the effect's cleanup. On the next
+  // run React calls it — `true()` throws "is not a function" and
+  // unmounts the whole app (blank screen on the first history change
+  // after a cloud pull). This asserts the return is a non-callable
+  // primitive so reviewers remember to use a block body, never a
+  // concise arrow, when an effect calls saveLS.
+  test("saveLS return value is not callable (must not be an effect cleanup)", () => {
+    const r = saveLS("ft_y", { ok: 1 });
+    expect(typeof r).toBe("boolean");
+    expect(typeof r).not.toBe("function");
+  });
 });
