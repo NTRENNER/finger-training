@@ -756,8 +756,17 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   const [elapsed,   setElapsed]   = useState(0);
   const startTimeRef = useRef(null);
   const timerRef     = useRef(null);
+  // Re-entrancy guard for handleRepEnd. BLE force-stream noise can make
+  // auto-detect fire onRepEnd twice for one physical rep; without a
+  // guard the second call logged a duplicate rep. The manual flow gets
+  // this for free (its end handler bails when startTimeRef is null);
+  // this is the auto-flow equivalent. Starts true — no rep is armed
+  // until handleRepStart runs.
+  const repEndedRef = useRef(true);
 
   const handleRepEnd = useCallback(({ actualTime, avgForce, peakForce }) => {
+    if (repEndedRef.current) return;  // already ended — ignore until next rep arms
+    repEndedRef.current = true;
     clearInterval(timerRef.current);
     setRepActive(false);
     setElapsed(0);
@@ -766,6 +775,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   }, [onRepDone]);
 
   const handleRepStart = useCallback(() => {
+    repEndedRef.current = false;  // re-arm the end guard for this rep
     startTimeRef.current = Date.now();
     setRepActive(true);
     setElapsed(0);
