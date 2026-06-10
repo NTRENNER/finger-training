@@ -174,14 +174,20 @@ export function buildRecoveryBundle({ reps, restSeconds, physModel }) {
 export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
   if (!Array.isArray(history) || history.length === 0 || !grip) return [];
 
-  // Group reps by (session_id, grip, hand).
+  // Group reps by (session_id, grip, hand, set). set_num must be in
+  // the key: rep_num restarts per set, so a multi-set session grouped
+  // only by (session, hand) paired SOME set's rep 1 with SOME other
+  // set's rep N (insertion-order dependent, not stable after cloud
+  // sync re-orders rows) — corrupting the observed/predicted gap that
+  // feeds the deload detector. Per-set gaps from the same session
+  // still average into one datapoint via the bySession pass below.
   const groups = new Map();
   for (const r of history) {
     if (r.grip !== grip) continue;
     if (!(Number(r.actual_time_s) > 0)) continue;
     const sessKey = r.session_id || r.date;
     const handKey = r.hand || "L";
-    const key = `${sessKey}|${handKey}`;
+    const key = `${sessKey}|${handKey}|${r.set_num ?? 1}`;
     if (!groups.has(key)) groups.set(key, { sessKey, date: r.date, hand: handKey, reps: [] });
     groups.get(key).reps.push(r);
   }
