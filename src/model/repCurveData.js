@@ -30,10 +30,16 @@ const ASYMPTOTE_REPS = 50;
 export function buildPhysModel(history, hand, grip, opts = {}) {
   const base = getPhysModel(history, hand, grip, opts);
   const personal = grip ? computePersonalRecoveryTausForGrip(history, grip) : null;
-  if (!personal || !personal.tauR) return base;
+  // computePersonalRecoveryTausForGrip returns flat {fast, medium,
+  // slow, nSets} — there is no nested .tauR. The original guard here
+  // checked `!personal.tauR`, which was always true, so every
+  // forecast silently fell back to the population model and the
+  // personal recovery fit never reached this surface. (deload.js
+  // consumes the same return correctly: `personalTaus.get(grip)`.)
+  if (!personal) return base;
   return {
     ...base,
-    tauR: { ...base.tauR, ...personal.tauR },
+    tauR: { fast: personal.fast, medium: personal.medium, slow: personal.slow },
   };
 }
 

@@ -2,6 +2,7 @@
 // shared RepCurveChart component.
 
 import {
+  buildPhysModel,
   buildForecastSeries,
   buildActualSeries,
   findPrevSessionReps,
@@ -9,6 +10,7 @@ import {
   buildRepCurveBundle,
 } from "../repCurveData.js";
 import { PHYS_MODEL_DEFAULT } from "../fatigue.js";
+import { computePersonalRecoveryTausForGrip } from "../recoveryFit.js";
 
 const rep = (over = {}) => ({
   date: "2026-05-15",
@@ -176,5 +178,51 @@ describe("buildRepCurveBundle", () => {
     expect(out.prevSession.map(p => p.t)).toEqual([28, 22]);
     expect(out.asymptoticHold).toBeGreaterThan(0);
     expect(out.targetS).toBe(45);
+  });
+});
+
+describe("buildPhysModel personalization", () => {
+  // Regression: computePersonalRecoveryTausForGrip returns flat
+  // {fast, medium, slow, nSets}, not a nested .tauR — the original
+  // wrapper checked personal.tauR and therefore ALWAYS fell back to
+  // the population model, silently disabling personalization for
+  // every RepCurveChart forecast.
+  const decaySession = (sid, times) =>
+    times.map((t, i) => rep({
+      session_id: sid, rep_num: i + 1, actual_time_s: t, rest_s: 20,
+    }));
+
+  // Steep within-set decay → fitted taus differ from population.
+  const history = [
+    ...decaySession("p1", [30, 18, 12, 9]),
+    ...decaySession("p2", [32, 20, 13, 10]),
+    ...decaySession("p3", [31, 19, 12, 9]),
+  ];
+
+  test("personal fit exists for this fixture (guards the fixture itself)", () => {
+    const personal = computePersonalRecoveryTausForGrip(history, "Crusher");
+    expect(personal).not.toBeNull();
+    expect(personal.fast).toEqual(expect.any(Number));
+    expect(personal.nSets).toBeGreaterThanOrEqual(3);
+  });
+
+  test("personal taus reach the returned tauR (not the population default)", () => {
+    const personal = computePersonalRecoveryTausForGrip(history, "Crusher");
+    const model = buildPhysModel(history, "L", "Crusher");
+    expect(model.tauR.fast).toBeCloseTo(personal.fast, 6);
+    expect(model.tauR.medium).toBeCloseTo(personal.medium, 6);
+    // Slow is always population — recoveryFit holds it fixed.
+    expect(model.tauR.slow).toBe(PHYS_MODEL_DEFAULT.tauR.slow);
+    // And the fit must actually move at least one tau off population,
+    // otherwise this test can't distinguish fixed from broken.
+    const moved =
+      model.tauR.fast !== PHYS_MODEL_DEFAULT.tauR.fast ||
+      model.tauR.medium !== PHYS_MODEL_DEFAULT.tauR.medium;
+    expect(moved).toBe(true);
+  });
+
+  test("falls back to population model when grip has no data", () => {
+    const model = buildPhysModel(history, "L", "NoSuchGrip");
+    expect(model.tauR).toEqual(PHYS_MODEL_DEFAULT.tauR);
   });
 });
