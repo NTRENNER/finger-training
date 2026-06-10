@@ -778,6 +778,12 @@ export async function fetchActivities() {
       if (a.area       != null) out.area       = a.area;
       if (a.rpe         != null) out.rpe         = a.rpe;
       if (a.session_rpe != null) out.session_rpe = a.session_rpe;
+      // stars/notes were pushed by pushActivity but never mapped back
+      // here — so on another device they vanished, and a subsequent
+      // updateActivity push (which normalizes missing → null) cleared
+      // the cloud columns permanently.
+      if (a.stars != null) out.stars = a.stars;
+      if (a.notes != null) out.notes = a.notes;
       return out;
     });
   } catch (e) {

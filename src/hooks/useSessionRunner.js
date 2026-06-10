@@ -45,7 +45,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 
-import { today, uid, nowISO } from "../util.js";
+import { today, uid, uuid, nowISO } from "../util.js";
 import { calcLevel } from "../model/levels.js";
 import { zoneOf } from "../model/zones.js";
 // Runtime fatigue accumulator was retired — no view ever consumed it
@@ -190,7 +190,11 @@ export function useSessionRunner({
     const derivedFailed = failed || isShortfall(roundedActual, config.targetTime);
     const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {
-      id:              uid(),
+      // Real UUID, not uid(): pushRep re-stamps non-UUID ids into the
+      // cloud payload without writing back, so a uid() here meant
+      // local id ≠ cloud id until the next reconcile — and id-based
+      // updateRep/deleteRep calls silently matched 0 cloud rows.
+      id:              uuid(),
       date:            today(),
       grip:            config.grip,
       hand:            effectiveHand,

@@ -145,6 +145,43 @@ describe("computePersonalRecoveryTausForGrip", () => {
     const taus = computePersonalRecoveryTausForGrip(history, "Crusher");
     expect(taus.nSets).toBe(7);
   });
+
+  // Regression: setsForGrip used to group only by (session_id, hand).
+  // rep_num restarts per set, so a multi-set session interleaved as
+  // ONE pseudo-set [s1r1, s2r1, s1r2, s2r2, ...] and was scored as a
+  // single continuous decay — corrupting the fit.
+  describe("multi-set sessions (set_num grouping)", () => {
+    const trueTau = { fast: 8, medium: POP.medium, slow: POP.slow };
+
+    test("two sets in one session count as two sets, not one merged blob", () => {
+      const set1 = simulateSet({ firstT: 8, nReps: 4, restS: 20, tauR: trueTau, sessionId: "s1" })
+        .map(r => ({ ...r, set_num: 1 }));
+      const set2 = simulateSet({ firstT: 8, nReps: 4, restS: 20, tauR: trueTau, sessionId: "s1" })
+        .map(r => ({ ...r, set_num: 2 }));
+      const taus = computePersonalRecoveryTausForGrip([...set1, ...set2], "Crusher");
+      expect(taus).not.toBeNull();
+      expect(taus.nSets).toBe(2);
+    });
+
+    test("one session with two sets fits identically to two single-set sessions", () => {
+      const mk = (sid, setNum) => simulateSet({
+        firstT: 8, nReps: 5, restS: 20, tauR: trueTau, sessionId: sid,
+      }).map(r => (setNum != null ? { ...r, set_num: setNum } : r));
+
+      // 15 two-set sessions vs 30 single-set sessions with identical decay data.
+      const oneSessionPer2Sets = [];
+      const twoSessions = [];
+      for (let s = 0; s < 15; s++) {
+        oneSessionPer2Sets.push(...mk(`m${s}`, 1), ...mk(`m${s}`, 2));
+        twoSessions.push(...mk(`a${s}`), ...mk(`b${s}`));
+      }
+      const tausMulti  = computePersonalRecoveryTausForGrip(oneSessionPer2Sets, "Crusher");
+      const tausSingle = computePersonalRecoveryTausForGrip(twoSessions, "Crusher");
+      expect(tausMulti.nSets).toBe(tausSingle.nSets);
+      expect(tausMulti.fast).toBeCloseTo(tausSingle.fast, 6);
+      expect(tausMulti.medium).toBeCloseTo(tausSingle.medium, 6);
+    });
+  });
 });
 
 describe("computePersonalRecoveryTaus (per-grip map)", () => {

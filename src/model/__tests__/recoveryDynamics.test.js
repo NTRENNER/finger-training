@@ -260,6 +260,23 @@ describe("buildRecoveryTrend", () => {
     expect(out[0].observedAtTarget).toBeCloseTo(0.75, 5); // mean(0.8, 0.7)
   });
 
+  // Regression: grouping used to ignore set_num, so a multi-set
+  // session paired SOME set's rep 1 with SOME other set's rep 2
+  // (insertion-order dependent). Per-set ratios must be computed
+  // within each set, then averaged into the session point.
+  test("multi-set session computes the gap within each set, then averages", () => {
+    const set = (set_num, t1, t2) => [
+      { ...repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: t1 }), set_num },
+      { ...repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: t2 }), set_num },
+    ];
+    // set 1: 15/30 = 0.5 — set 2: 50/60 ≈ 0.8333 — mean ≈ 0.6667.
+    // The broken merged grouping yielded 15/30 = 0.5 instead.
+    const history = [...set(1, 30, 15), ...set(2, 60, 50)];
+    const out = buildRecoveryTrend(history, "Crusher");
+    expect(out).toHaveLength(1);
+    expect(out[0].observedAtTarget).toBeCloseTo((15 / 30 + 50 / 60) / 2, 5);
+  });
+
   test("filters by grip — Micro sessions ignored when querying Crusher", () => {
     const history = [
       repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),

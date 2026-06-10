@@ -172,6 +172,31 @@ export const LS_PINNED_GRIP_BASELINES_KEY = "ft_pinned_grip_baselines";
 // orphaned `ft_pyramid_warmup` entries in localStorage are now
 // ignored and can be cleared by a future migration if desired.)
 
+// Last signed-in Supabase user id. Used by useAuth to detect an
+// account switch on a shared device: every ft_* cache below is
+// user-scoped data but none of the keys are namespaced by user, so
+// without this guard, user B signing in after user A would reconcile
+// A's cached reps/workouts/BW/activities as "local-only work" and
+// push A's entire training history into B's account.
+export const LS_LAST_USER_KEY = "ft_last_user";
+
+// Wipe all user-scoped local caches. Called by useAuth when the
+// signed-in user id differs from LS_LAST_USER_KEY. Removes every
+// ft_* key plus the legacy unprefixed "unit_pref". Deliberately
+// leaves Supabase's own sb-* auth/session keys alone.
+export function clearUserScopedLS() {
+  try {
+    const doomed = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith("ft_") || k === "unit_pref")) doomed.push(k);
+    }
+    doomed.forEach(k => localStorage.removeItem(k));
+  } catch {
+    // Storage unavailable — nothing cached, nothing to clear.
+  }
+}
+
 // Build a stable composite key for the pyramid pin maps from the
 // active filter set. Wall only matters for indoor boulder; for any
 // other combination we force "all" so the key reflects only the

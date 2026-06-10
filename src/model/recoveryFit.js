@@ -125,17 +125,24 @@ function fitCore(sets) {
   return best;
 }
 
-// Group history into per-(session, hand) within-set sequences for one
-// grip. Skips reps with non-L/R hand (the legacy "B" corruption from
-// the May 2026 Both-button bug — those reps don't carry a coherent
-// per-hand decay sequence).
+// Group history into per-(session, hand, set) within-set sequences
+// for one grip. Skips reps with non-L/R hand (the legacy "B"
+// corruption from the May 2026 Both-button bug — those reps don't
+// carry a coherent per-hand decay sequence).
+//
+// set_num MUST be part of the key: rep_num restarts per set, so a
+// 2×4 session grouped only by (session, hand) interleaved as ONE
+// pseudo-set [s1r1, s2r1, s1r2, s2r2, ...] (stable sort, ties by
+// insertion order) and predictDecay scored it as a single 8-rep
+// continuous decay — badly biasing the fitted tauR for every
+// consumer (freshMap, deload, coaching, warmup rest scaling).
 function setsForGrip(history, grip) {
   const groups = new Map();
   for (const r of history || []) {
     if (!r || r.grip !== grip) continue;
     if (r.hand !== "L" && r.hand !== "R") continue;
     if (!(r.actual_time_s > 0) || !r.session_id) continue;
-    const key = `${r.session_id}|${r.hand}`;
+    const key = `${r.session_id}|${r.hand}|${r.set_num ?? 1}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   }
