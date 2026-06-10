@@ -473,9 +473,13 @@ export function AnalysisView({
   // Hand Asymmetry card below the chart. Reps with no hand or
   // hand="Both" (legacy data) drop into the L bucket as a quiet
   // default — rare and not worth a third bar.
+  // effectiveLoad, not raw avg_force_kg — the rep filter and the fitted
+  // curve both run on effectiveLoad's fallback chain, so reading the
+  // raw column here made manual-load reps (avg_force_kg null) vanish
+  // from the pooled scatter while still shaping the curve.
   const buildDot = (r) => ({
     x: r.actual_time_s,
-    y: useRel ? r.avg_force_kg / bodyWeight : toDisp(r.avg_force_kg, unit),
+    y: useRel ? effectiveLoad(r) / bodyWeight : toDisp(effectiveLoad(r), unit),
     date: r.date, grip: r.grip, hand: r.hand,
     // session_id lets click handlers gather the full session's reps to
     // pop up the RepCurveChart for that workout.
@@ -491,10 +495,12 @@ export function AnalysisView({
     x: d.x,
     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
   }));
+  // effectiveLoad here too — see buildDot. Otherwise the axis ceiling
+  // ignores manual-load reps and can clip their dots.
   const maxForceRel = Math.max(
     ...(useRel
-      ? reps.map(r => r.avg_force_kg / bodyWeight)
-      : reps.map(r => toDisp(r.avg_force_kg, unit))),
+      ? reps.map(r => effectiveLoad(r) / bodyWeight)
+      : reps.map(r => toDisp(effectiveLoad(r), unit))),
     useRel ? 0.5 : 40
   );
 
