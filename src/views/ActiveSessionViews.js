@@ -162,7 +162,12 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   const [repPhase,     setRepPhase]    = useState(autoStart ? "active" : "ready");
   const [countdown,    setCountdown]   = useState(3);
   const [elapsed,      setElapsed]     = useState(0);
-  const [manualWeight, setManualWeight] = useState(null);
+  // Raw display-unit string, NOT kg. The input used to round-trip
+  // through fmtW(toFixed(1)) on every keystroke, which made multi-
+  // digit weights untypable ("12" → "1.0" after the first key) and
+  // drifted values through double kg↔lbs conversion. Keep what the
+  // user typed; convert to kg only where consumed (targetKg).
+  const [manualWeightStr, setManualWeightStr] = useState("");
   const startTimeRef = useRef(null);
   const timerRef     = useRef(null);
 
@@ -256,7 +261,11 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   const sug = suggestions[activeSugHand] ?? null;
 
   // Effective target weight in kg for color-coding and auto-failure threshold
-  const targetKg = manualWeight ?? sug?.suggested ?? null;
+  const manualKg = (() => {
+    const n = parseFloat(manualWeightStr);
+    return Number.isFinite(n) && n > 0 ? fromDisp(n, unit) : null;
+  })();
+  const targetKg = manualKg ?? sug?.suggested ?? null;
 
   // Keep the Tindeq hook's target ref in sync so auto-failure uses the right threshold
   useEffect(() => {
@@ -352,8 +361,8 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
           <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
             <input
               type="number" min={0} step={0.5}
-              value={manualWeight != null ? fmtW(manualWeight, unit) : ""}
-              onChange={e => setManualWeight(e.target.value === "" ? null : fromDisp(Number(e.target.value), unit))}
+              value={manualWeightStr}
+              onChange={e => setManualWeightStr(e.target.value)}
               placeholder={`Override ${unit}…`}
               style={{ width: 120, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 15 }}
             />
@@ -410,22 +419,47 @@ function playBeep(freq = 880, duration = 0.12, volume = 0.4) {
 }
 
 export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs" }) {
+  // Wall-clock countdown, NOT tick-counted. The old version decremented
+  // once per setInterval fire; background tabs / locked phones throttle
+  // intervals to ≥1/min, so a 20s rest silently stretched to minutes —
+  // exactly when the user pockets the phone between hangs. Deadline math
+  // (same pattern as WarmupView) survives throttling: a late tick just
+  // jumps the display to the correct remaining time. Side effects
+  // (beeps, onRestDone) live in effects keyed off `remaining`, not
+  // inside the setState updater — StrictMode double-invokes updaters,
+  // which double-fired the beep and the phase transition in dev.
   const [remaining, setRemaining] = useState(restSeconds);
+  const deadlineRef = useRef(null);
   const intervalRef = useRef(null);
+  const lastBeepRef = useRef(null);
+  const doneRef     = useRef(false);
 
   useEffect(() => {
+    deadlineRef.current = Date.now() + restSeconds * 1000;
+    doneRef.current = false;
     setRemaining(restSeconds);
-    intervalRef.current = setInterval(() => {
-      setRemaining(r => {
-        if (r <= 1) { clearInterval(intervalRef.current); onRestDone(); return 0; }
-        const next = r - 1;
-        if (next <= 3 && next >= 1) playBeep(next === 1 ? 1100 : 880);
-        return next;
-      });
-    }, 1000);
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+      setRemaining(left);
+    };
+    // 250ms cadence keeps the displayed second accurate without
+    // relying on 1000ms fires landing on second boundaries.
+    intervalRef.current = setInterval(tick, 250);
     return () => clearInterval(intervalRef.current);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restSeconds]);
+
+  useEffect(() => {
+    if (remaining <= 3 && remaining >= 1 && lastBeepRef.current !== remaining) {
+      lastBeepRef.current = remaining;
+      playBeep(remaining === 1 ? 1100 : 880);
+    }
+    if (remaining === 0 && !doneRef.current) {
+      doneRef.current = true;
+      clearInterval(intervalRef.current);
+      onRestDone();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remaining]);
 
   const pct = remaining / restSeconds;
   // Single-set model (curve-trust commit C): no more "set complete"
@@ -488,7 +522,12 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
       )}
 
       <Btn
-        onClick={() => { clearInterval(intervalRef.current); onRestDone(); }}
+        onClick={() => {
+          if (doneRef.current) return;   // already transitioned
+          doneRef.current = true;
+          clearInterval(intervalRef.current);
+          onRestDone();
+        }}
         style={{ width: "100%", padding: "14px 0", fontSize: 16, borderRadius: 12 }}
         color={C.muted}
       >
@@ -499,19 +538,31 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
 }
 
 export function SwitchHandsView({ onReady }) {
-  const [remaining, setRemaining] = useState(10);
+  // Wall-clock countdown — see RestView for the rationale.
+  const SWITCH_SECONDS = 10;
+  const [remaining, setRemaining] = useState(SWITCH_SECONDS);
+  const deadlineRef = useRef(null);
   const intervalRef = useRef(null);
+  const doneRef     = useRef(false);
 
   useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setRemaining(r => {
-        if (r <= 1) { clearInterval(intervalRef.current); onReady(); return 0; }
-        return r - 1;
-      });
-    }, 1000);
+    deadlineRef.current = Date.now() + SWITCH_SECONDS * 1000;
+    doneRef.current = false;
+    const tick = () => {
+      setRemaining(Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000)));
+    };
+    intervalRef.current = setInterval(tick, 250);
     return () => clearInterval(intervalRef.current);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (remaining === 0 && !doneRef.current) {
+      doneRef.current = true;
+      clearInterval(intervalRef.current);
+      onReady();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remaining]);
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "40px 16px", textAlign: "center" }}>
@@ -521,7 +572,12 @@ export function SwitchHandsView({ onReady }) {
       <div style={{ fontSize: 80, fontWeight: 900, color: remaining > 3 ? C.green : C.orange, lineHeight: 1, marginBottom: 24 }}>
         {remaining}
       </div>
-      <Btn onClick={() => { clearInterval(intervalRef.current); onReady(); }}
+      <Btn onClick={() => {
+        if (doneRef.current) return;
+        doneRef.current = true;
+        clearInterval(intervalRef.current);
+        onReady();
+      }}
         style={{ padding: "14px 40px", fontSize: 16, borderRadius: 12 }}>
         Ready →
       </Btn>
