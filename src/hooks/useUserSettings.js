@@ -75,14 +75,14 @@ const LS_TRIP_KEY           = "ft_trip";            // { date: "YYYY-MM-DD", nam
 const LS_CLIMBING_FOCUS_KEY = "ft_climbing_focus";  // "balanced" | "bouldering" | "power_endurance" | "endurance"
 
 export function useUserSettings({ user }) {
-  // ── Unit preference ─────────────────────────────────
+  // ── Unit preference ───────────────────────────────────────
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
   const saveUnit = useCallback((u) => {
     setUnit(u);
     saveLS("unit_pref", u);
   }, []);
 
-  // ── Body weight ─────────────────────────────────────
+  // ── Body weight ───────────────────────────────────────────
   // Two storage keys: LS_BW_KEY is the scalar current weight that
   // every consumer reads, LS_BW_LOG_KEY is the per-date history that
   // the trends + per-session-date normalization paths consume. saveBW
@@ -118,7 +118,7 @@ export function useUserSettings({ user }) {
     }
   }, []);
 
-  // ── BW cloud reconcile ───────────────────────────────
+  // ── BW cloud reconcile ───────────────────────────────────
   // Runs when `user` flips from null → signed-in. Mirrors the
   // useRepHistory reconcile pattern: fetch cloud log, union with
   // local log on date-key (later-write wins for same-day collisions —
@@ -180,7 +180,7 @@ export function useUserSettings({ user }) {
     });
   }, []);
 
-  // ── Climbing focus (cloud-synced training goal bias) ──────────
+  // ── Climbing focus (cloud-synced training goal bias) ──────
   // "balanced" (default), "bouldering", "power_endurance", "endurance"
   // — feeds focusBoost() in coaching.js with gentle multipliers
   // (1.10–1.20× boost, 0.90× de-emphasis) that nudge close calls.
@@ -248,7 +248,7 @@ export function useUserSettings({ user }) {
     }
   }, [user]);
 
-  // ── Pinned per-grip baselines ─────────────────────────
+  // ── Pinned per-grip baselines ─────────────────────────────
   // The frozen { [grip]: { date, amps } } map that anchors Curve
   // Improvement. Once a grip's baseline is seeded (≥5 failures × ≥3
   // distinct durations), it gets written here and never re-derived
@@ -276,7 +276,7 @@ export function useUserSettings({ user }) {
     }
   }, [user]);
 
-  // ── Fatigue β model (per-grip) ───────────────────────
+  // ── Fatigue β model (per-grip) ───────────────────────────
   // Stored in user_settings.settings.fatigue_model so it persists
   // across devices. Updated server-side by the
   // update_fatigue_beta_from_rep_trg trigger on every rep-1 insert;
