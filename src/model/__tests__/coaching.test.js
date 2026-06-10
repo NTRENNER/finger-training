@@ -1,3 +1,4 @@
+
 // Tests for src/model/coaching.js — continuous coaching engine.
 // Covers recencyPenalty and the coachingRecommendationContinuous
 // AUC-gain picker (including the confidence gate on adaptBoost).
@@ -9,14 +10,19 @@
 // and its tests were removed May 2026 — finger training always follows
 // climbing, so climbing fatigue is a baseline carried by the cooked
 // slider, not a per-recommendation modifier.
-
+ 
 import {
   COACH_RECOVERY_TAU_DAYS,
   recencyPenalty,
   coachingRecommendationContinuous,
+  buildContinuousRecency,
+  personalTauScale,
+  overloadFactor,
 } from "../coaching.js";
-import { buildThreeExpPriors } from "../threeExp.js";
-
+import { buildThreeExpPriors, predForceThreeExp } from "../threeExp.js";
+import { buildGripEstimates } from "../baselines.js";
+import { ZONE_REF_T } from "../zones.js";
+ 
 // ─────────────────────────────────────────────────────────────
 // COACH_RECOVERY_TAU_DAYS — sanity
 // ─────────────────────────────────────────────────────────────
@@ -26,7 +32,7 @@ describe("coaching constants", () => {
     expect(COACH_RECOVERY_TAU_DAYS.strength).toBeLessThan(COACH_RECOVERY_TAU_DAYS.endurance);
   });
 });
-
+ 
 // ─────────────────────────────────────────────────────────────
 // recencyPenalty — exponential recovery curve since last session
 // ─────────────────────────────────────────────────────────────
@@ -35,11 +41,11 @@ describe("recencyPenalty", () => {
     expect(recencyPenalty("power", [], "Crusher")).toBe(1.0);
     expect(recencyPenalty("power", null, "Crusher")).toBe(1.0);
   });
-
+ 
   test("returns 1.0 with no grip", () => {
     expect(recencyPenalty("power", [], null)).toBe(1.0);
   });
-
+ 
   test("returns near-zero immediately after training (today)", () => {
     const today = new Date().toISOString().slice(0, 10);
     // Power refTime is 30s after the 6-zone migration.
@@ -47,13 +53,13 @@ describe("recencyPenalty", () => {
     const out = recencyPenalty("power", history, "Crusher");
     expect(out).toBeLessThan(0.1);
   });
-
+ 
   test("approaches 1.0 as days_ago grows", () => {
     const longAgo = "2020-01-01";
     const history = [{ grip: "Crusher", target_duration: 30, date: longAgo }];
     expect(recencyPenalty("power", history, "Crusher")).toBeGreaterThan(0.9);
   });
-
+ 
   test("matches by grip + target_duration (not other zones)", () => {
     const today = new Date().toISOString().slice(0, 10);
     // Strength refTime is 115s after the 6-zone migration.
@@ -63,7 +69,7 @@ describe("recencyPenalty", () => {
     // But Power (refTime 30s) was not trained
     expect(recencyPenalty("power", history, "Crusher")).toBe(1.0);
   });
-
+ 
   test("prefers actual_time_s over target_duration when present", () => {
     const today = new Date().toISOString().slice(0, 10);
     // User targeted strength_endurance (140s) but only held 60s. The
@@ -78,7 +84,7 @@ describe("recencyPenalty", () => {
     expect(recencyPenalty("power_strength",     history, "Crusher")).toBeLessThan(0.1);
     expect(recencyPenalty("strength_endurance", history, "Crusher")).toBe(1.0);
   });
-
+ 
   test("falls back to target_duration when actual_time_s is missing", () => {
     const today = new Date().toISOString().slice(0, 10);
     // Legacy / manual rep with no actual_time_s — bucket by target.
@@ -86,7 +92,7 @@ describe("recencyPenalty", () => {
     expect(recencyPenalty("power", history, "Crusher")).toBeLessThan(0.1);
   });
 });
-
+ 
 // ─────────────────────────────────────────────────────────────
 // coachingRecommendationContinuous — curve-trust continuous engine
 // ─────────────────────────────────────────────────────────────
@@ -95,7 +101,7 @@ describe("recencyPenalty", () => {
 // at that point on the curve.
 describe("coachingRecommendationContinuous", () => {
   const today = new Date();
-
+ 
   // Build a synthetic history that follows a known three-exp curve.
   // F(T) = 30·exp(-T/10) + 12·exp(-T/30) + 6·exp(-T/180)
   const trueAmps = [30, 12, 6];
@@ -103,7 +109,7 @@ describe("coachingRecommendationContinuous", () => {
   const F_curve = (T) => trueAmps[0]*Math.exp(-T/tau[0])
                        + trueAmps[1]*Math.exp(-T/tau[1])
                        + trueAmps[2]*Math.exp(-T/tau[2]);
-
+ 
   const buildRep = (hand, T, F, daysAgo = 0) => ({
     id: `r-${hand}-${T}-${daysAgo}`,
     hand, grip: "Crusher",
@@ -113,16 +119,16 @@ describe("coachingRecommendationContinuous", () => {
     date: new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10),
     session_id: `s-${daysAgo}-${T}`,
   });
-
+ 
   test("returns null with no history", () => {
     expect(coachingRecommendationContinuous([], "Crusher", { today })).toBeNull();
     expect(coachingRecommendationContinuous(null, "Crusher", { today })).toBeNull();
   });
-
+ 
   test("returns null with no grip", () => {
     expect(coachingRecommendationContinuous([buildRep("L", 30, 22)], null, { today })).toBeNull();
   });
-
+ 
   test("returns a (T, hand, loadKg) pick with on-curve data", () => {
     // Two L data points exactly on the curve → no residual signal,
     // staleness drives the pick.
@@ -136,7 +142,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.loadKg).toBeGreaterThan(0);
     expect(rec.loadByHand).toBeDefined();
   });
-
+ 
   test("surfaces confidence and effN on the pick, in range", () => {
     const history = [buildRep("L", 30, F_curve(30)), buildRep("L", 60, F_curve(60))];
     const priors = buildThreeExpPriors(history);
@@ -146,7 +152,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.confidence).toBeLessThanOrEqual(1);
     expect(rec.effN).toBeGreaterThan(0);
   });
-
+ 
   test("confidence gate: denser sampling at the limiter yields higher confidence", () => {
     // Full on-curve coverage 8 days ago (no never-zone 3.0× boost), with
     // a deep under-perform at 90s. The THIN history has a single rep at
@@ -183,7 +189,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(recDense).not.toBeNull();
     expect(recDense.confidence).toBeGreaterThan(recThin.confidence);
   });
-
+ 
   test("recommends near a duration where actuals fall below the curve", () => {
     // Coverage across every zone (so no never-zone wins by 3.0× boost),
     // all 8 days ago (every zone is "ok" with recency near 1.0 — neutral
@@ -216,7 +222,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.T).toBeGreaterThanOrEqual(50);
     expect(rec.T).toBeLessThanOrEqual(140);
   });
-
+ 
   test("prefers hand with stronger limiter signal", () => {
     // L is on-curve everywhere. R has a big under-perform at 60s.
     const history = [
@@ -232,7 +238,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec).not.toBeNull();
     expect(rec.hand).toBe("R");
   });
-
+ 
   test("respects T range limits", () => {
     // Even with strong signal at T=300, sweep stops at tMax=240.
     const history = [
@@ -245,7 +251,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.T).toBeGreaterThanOrEqual(5);
     expect(rec.T).toBeLessThanOrEqual(240);
   });
-
+ 
   test("loadByHand contains predicted load for both hands at T_star", () => {
     const history = [
       buildRep("L", 30, F_curve(30)),
@@ -261,7 +267,7 @@ describe("coachingRecommendationContinuous", () => {
     // The picked hand's load should match loadKg
     expect(rec.loadByHand[rec.hand]).toBeCloseTo(rec.loadKg, 4);
   });
-
+ 
   test("returns zone-of-T_star for context", () => {
     const history = [
       buildRep("L", 5, F_curve(5)),
@@ -272,7 +278,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec).not.toBeNull();
     expect(["max_strength", "power", "power_strength", "strength", "strength_endurance", "endurance"]).toContain(rec.zone);
   });
-
+ 
   // ── AUC-gain pick (Reading B) — symmetric adaptBoost ───────────
   test("adaptBoost penalizes zones where actuals sit ABOVE the curve", () => {
     // Many on-curve points anchor the fit, plus a strong above-curve
@@ -292,11 +298,16 @@ describe("coachingRecommendationContinuous", () => {
     const priors = buildThreeExpPriors(history);
     const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
     expect(rec).not.toBeNull();
-    // Strength signal zone (around 30s) shouldn't be the pick. Allow
-    // some kernel bleed — assert pick is NOT inside the obvious peak.
-    expect(rec.T < 15 || rec.T > 60).toBe(true);
+    // The above-curve peak is at 30s. The pick must not land in its
+    // immediate neighborhood. With the log-T kernel (σ≈0.35) that peak's
+    // influence spans roughly 30·e^±0.35 ≈ [21, 43]s, so anything at or
+    // below ~20s or at/above ~45s is safely outside it. (The old fixed
+    // 30s linear kernel spread the penalty far wider, pushing the pick
+    // past 60s; the tighter, duration-scaled kernel legitimately lets a
+    // pick sit just below the peak.)
+    expect(rec.T <= 20 || rec.T >= 45).toBe(true);
   });
-
+ 
   test("recency penalty steers away from a just-trained zone", () => {
     // Two zones with identical limiter strength: strength_endurance
     // (T=160, in zone bounds [140, 180)) trained TODAY, vs power
@@ -322,7 +333,7 @@ describe("coachingRecommendationContinuous", () => {
     // The pick should not land inside [140, 180).
     expect(rec.T < 140 || rec.T >= 180).toBe(true);
   });
-
+ 
   test("never-sampled zone wins over above-curve sampled zone (adaptBoost floor)", () => {
     // Reproduce the May 2026 issue: Crusher Strength reps showing above-
     // curve performance at 90-120s suppressed the adaptBoost at T=160s
@@ -359,14 +370,16 @@ describe("coachingRecommendationContinuous", () => {
     // Floor pinned adaptBoost ≥ 1.0 in the never zone
     expect(rec.adaptBoost).toBeGreaterThanOrEqual(1.0);
   });
-
+ 
   test("never-zone tiebreaker: T snaps to the zone's reference time", () => {
-    // With the adaptBoost floor flattening every T inside a never zone
-    // to the same score, the engine should pick the zone's canonical
-    // refT (S·E → 160) rather than the zone's lower boundary by first-T
-    // accident. History covers max_strength through strength so S·E and
-    // Endurance are both "never"; S·E wins by zone-order, and within
-    // S·E the pick should land at T=160 not T=140 (boundary).
+    // With the adaptBoost floor flattening every T inside a never zone to
+    // the same score, the engine should pick the zone's canonical refT
+    // (S·E → 160) rather than the zone's lower boundary by first-T
+    // accident. History covers every zone EXCEPT S·E (including an
+    // Endurance rep at 220) so S·E is the uniquely-never pick — this
+    // isolates the refT-SNAP property under test from cross-never-zone
+    // ordering, which continuous recency now resolves by log-T proximity
+    // to recent work rather than by zone order (see the Endurance test).
     const history = [
       buildRep("L", 10,  F_curve(10),  6),   // max_strength
       buildRep("L", 30,  F_curve(30),  6),   // power
@@ -374,6 +387,7 @@ describe("coachingRecommendationContinuous", () => {
       buildRep("L", 70,  F_curve(70),  8),   // power_strength
       buildRep("L", 95,  F_curve(95)  * 1.4, 8),   // strength (above curve)
       buildRep("L", 120, F_curve(120) * 1.4, 8),
+      buildRep("L", 220, F_curve(220), 10),  // endurance (so only S·E is never)
     ];
     const priors = buildThreeExpPriors(history);
     const rec = coachingRecommendationContinuous(history, "Crusher",
@@ -383,7 +397,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.staleStatus).toBe("never");
     expect(rec.T).toBe(160);  // ZONE_REF_T.strength_endurance
   });
-
+ 
   test("never-zone snap: Endurance pick lands at T=220, not T=180 boundary", () => {
     // Same property for the Endurance zone. History covers every zone
     // except Endurance so Endurance is the uniquely-never pick. Pick
@@ -404,7 +418,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.staleStatus).toBe("never");
     expect(rec.T).toBe(220);  // ZONE_REF_T.endurance
   });
-
+ 
   test("never-zone floor does not lift adaptBoost above 1.0 for limiter signal", () => {
     // The floor is a MINIMUM, not a ceiling — a genuine below-curve
     // signal in a never zone should still produce adaptBoost > 1.0.
@@ -428,7 +442,7 @@ describe("coachingRecommendationContinuous", () => {
     // adaptBoost can be > 1.0 (limiter signal won't be clamped down)
     expect(rec.adaptBoost).toBeGreaterThan(0);
   });
-
+ 
   test("residualBoost field is preserved as alias for adaptBoost (back-compat)", () => {
     const history = [buildRep("L", 30, F_curve(30)), buildRep("L", 60, F_curve(60))];
     const priors = buildThreeExpPriors(history);
@@ -436,7 +450,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec).not.toBeNull();
     expect(rec.residualBoost).toBe(rec.adaptBoost);
   });
-
+ 
   test("perceivedFatigue does NOT bias the recommendation (pure-math pick)", () => {
     // The RPE slider is a display/runner overlay, not an engine input.
     // What the curve wants next is a pure-math question over staleness,
@@ -459,7 +473,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(cooked.T).toBe(fresh.T);
     expect(cooked.score).toBe(fresh.score);
   });
-
+ 
   test("recent climbing activities do NOT change the recommendation", () => {
     // externalLoadModifier was removed May 2026 — finger training always
     // follows climbing, so climbing fatigue is a baseline carried by the
@@ -484,7 +498,7 @@ describe("coachingRecommendationContinuous", () => {
     expect(withClimbs.T).toBe(noClimbs.T);
     expect(withClimbs.score).toBe(noClimbs.score);
   });
-
+ 
   test("staleness is per-grip — Crusher endurance training doesn't refresh Micro endurance", () => {
     // Helper: same as buildRep but lets us pick the grip
     const rep = (hand, grip, T, F, daysAgo = 0) => ({
@@ -527,5 +541,162 @@ describe("coachingRecommendationContinuous", () => {
     // over the stale-but-sampled zones. Pick lands in endurance (T ≥ 180s).
     expect(rec.zone).toBe("endurance");
     expect(rec.staleStatus).toBe("never");
+  });
+});
+ 
+// ─────────────────────────────────────────────────────────────
+// June 2026 quality pass — new engine behaviors
+// ─────────────────────────────────────────────────────────────
+describe("overloadFactor", () => {
+  test("full overload at/below the short-end threshold, none at long T", () => {
+    expect(overloadFactor(5)).toBeGreaterThan(1);
+    expect(overloadFactor(5)).toBeCloseTo(overloadFactor(20), 5);   // both full
+    expect(overloadFactor(150)).toBe(1);                            // long T: no load overload
+    expect(overloadFactor(220)).toBe(1);
+  });
+  test("monotonically fades from short to long", () => {
+    expect(overloadFactor(20)).toBeGreaterThan(overloadFactor(60));
+    expect(overloadFactor(60)).toBeGreaterThan(overloadFactor(110));
+  });
+  test("a short pick's load is nudged above the bare curve; a long pick is not", () => {
+    const today = new Date();
+    const F = (T) => 30*Math.exp(-T/10) + 12*Math.exp(-T/30) + 6*Math.exp(-T/180);
+    const mk = (T, d) => ({ id:`o-${T}-${d}`, hand:"L", grip:"Crusher",
+      target_duration:T, actual_time_s:T, avg_force_kg:F(T), rep_num:1,
+      date:new Date(Date.now()-d*86400000).toISOString().slice(0,10), session_id:`o-${d}-${T}` });
+    // Force a short max-strength pick: only max_strength is never.
+    const hist = [mk(30,6), mk(70,6), mk(110,6), mk(160,6), mk(220,6)];
+    const priors = buildThreeExpPriors(hist);
+    const on  = coachingRecommendationContinuous(hist, "Crusher", { threeExpPriors: priors, today, overload: true });
+    const off = coachingRecommendationContinuous(hist, "Crusher", { threeExpPriors: priors, today, overload: false });
+    expect(on.overloadFactor).toBeGreaterThan(1);
+    expect(on.loadKg).toBeGreaterThan(off.loadKg);          // overload raised the load
+    expect(on.loadBeforeOverload).toBeCloseTo(off.loadKg, 6);
+  });
+});
+ 
+describe("personalTauScale", () => {
+  test("returns 1.0 with no personal fit", () => {
+    expect(personalTauScale(null, "Crusher")).toBe(1);
+    expect(personalTauScale(new Map(), "Crusher")).toBe(1);
+  });
+  test("slow-recovering grip scales recency tau up, fast-recovering down", () => {
+    const slow = personalTauScale({ medium: 400 }, "Micro");
+    const fast = personalTauScale({ medium: 45 }, "Crusher");
+    expect(slow).toBeGreaterThan(1);
+    expect(fast).toBeLessThan(1);
+    expect(slow).toBeGreaterThan(fast);
+  });
+  test("accepts a Map keyed by grip", () => {
+    const m = new Map([["Micro", { medium: 400 }]]);
+    expect(personalTauScale(m, "Micro")).toBeGreaterThan(1);
+    expect(personalTauScale(m, "Crusher")).toBe(1);   // grip absent → neutral
+  });
+});
+ 
+describe("buildContinuousRecency", () => {
+  const today = "2026-06-09";
+  const mk = (T, dateStr) => ({ grip:"Crusher", hand:"L", target_duration:T,
+    actual_time_s:T, rep_num:1, date:dateStr });
+  test("no penalty far from any trained duration; near-zero right where just trained", () => {
+    const rec = buildContinuousRecency([mk(30, today)], "Crusher", { today });
+    expect(rec(30)).toBeLessThan(0.1);     // just trained at 30s
+    expect(rec(220)).toBeGreaterThan(0.9); // far away in log-T → fresh
+  });
+  test("is continuous across a zone boundary (no cliff at T=50)", () => {
+    const rec = buildContinuousRecency([mk(48, today)], "Crusher", { today });
+    // 48s and 52s straddle the power / power_strength boundary but the
+    // penalty should be nearly identical — the whole point of going
+    // continuous. (Zone-bucketed recency jumps discontinuously here.)
+    expect(Math.abs(rec(48) - rec(52))).toBeLessThan(0.1);
+  });
+  test("penalty recovers as days pass", () => {
+    const recent = buildContinuousRecency([mk(30, "2026-06-08")], "Crusher", { today });
+    const old    = buildContinuousRecency([mk(30, "2026-04-01")], "Crusher", { today });
+    expect(old(30)).toBeGreaterThan(recent(30));
+  });
+});
+ 
+describe("LOO de-biasing + weaker-hand boost (engine)", () => {
+  const today = new Date();
+  const F = (T) => 30*Math.exp(-T/10) + 12*Math.exp(-T/30) + 6*Math.exp(-T/180);
+  const mk = (hand, T, Fv, d=8) => ({ id:`x-${hand}-${T}-${d}`, hand, grip:"Crusher",
+    target_duration:T, actual_time_s:T, avg_force_kg:Fv, rep_num:1,
+    date:new Date(Date.now()-d*86400000).toISOString().slice(0,10), session_id:`x-${d}-${T}-${hand}` });
+ 
+  test("weaker hand is favored when both hands have the same staleness", () => {
+    // Both hands sampled across EVERY zone (no never-zone, so the 3×
+    // exploration boost — which can be perturbed per-hand by LOO residual
+    // leakage near an unsampled zone — isn't what decides the pick) and
+    // same dates → identical per-zone staleness/recency. L is markedly
+    // weaker (35%). With the tie otherwise even, the weaker-hand boost is
+    // the deciding factor and must favor L.
+    const hist = [];
+    for (const d of [6, 9, 12]) {
+      for (const T of [5, 30, 70, 120, 160, 220]) {   // full coverage incl S·E + endurance
+        hist.push(mk("L", T, F(T) * 0.65, d));
+        hist.push(mk("R", T, F(T), d));
+      }
+    }
+    const priors = buildThreeExpPriors(hist);
+    const rec = coachingRecommendationContinuous(hist, "Crusher", { threeExpPriors: priors, today });
+    expect(rec.hand).toBe("L");
+    expect(rec.handBoost).toBeGreaterThan(1);
+  });
+ 
+  test("costFactor is surfaced and neutral-or-above for the cheapest zone", () => {
+    const hist = [mk("L", 30, F(30)), mk("L", 70, F(70)), mk("L", 120, F(120))];
+    const priors = buildThreeExpPriors(hist);
+    const rec = coachingRecommendationContinuous(hist, "Crusher", { threeExpPriors: priors, today });
+    expect(typeof rec.costFactor).toBe("number");
+    expect(rec.costFactor).toBeGreaterThan(0);
+  });
+});
+ 
+// ─────────────────────────────────────────────────────────────
+// Curve-consistency regression (June 2026)
+// ─────────────────────────────────────────────────────────────
+// The coaching engine fits on ALL reps with freshMap fatigue-corrected
+// loads; the F-D chart fits on rep-1-only RAW loads (buildGripEstimates
+// → freshFitReps). The header docstring used to claim they "match the
+// literal purple curve" — corrected to "close but not identical". This
+// guards the "close" half: on CONSISTENT data (every rep is a fresh
+// rep_num===1 with no within-set fatigue to correct), the two fit paths
+// must agree at every zone reference time within a tolerance. If they
+// ever diverge materially, that's the regression this catches.
+describe("coaching fit vs chart (buildGripEstimates) fit consistency", () => {
+  const F = (T) => 30*Math.exp(-T/10) + 12*Math.exp(-T/30) + 6*Math.exp(-T/180);
+  const mk = (T, d, i) => ({ id:`c-${T}-${d}-${i}`, hand:"L", grip:"Crusher",
+    target_duration:T, actual_time_s:T, avg_force_kg:F(T), rep_num:1,
+    date:new Date(Date.now()-d*86400000).toISOString().slice(0,10), session_id:`c-${d}-${T}` });
+ 
+  test("both fit paths agree within 5% at every zone reference time", () => {
+    // All fresh rep_num===1 reps, spread over dates and durations.
+    const hist = [];
+    let i = 0;
+    for (const d of [20, 16, 12, 8, 4]) {
+      for (const T of [5, 15, 30, 60, 120, 200]) hist.push(mk(T, d, i++));
+    }
+    const priors = buildThreeExpPriors(hist);
+ 
+    // Chart path: per-grip estimate amps (rep-1-only raw via freshFitReps).
+    const chartAmps = buildGripEstimates(hist, priors)["Crusher"];
+    expect(chartAmps).toBeTruthy();
+ 
+    // Engine path: the load it prescribes at each zone refT (best.loadByHand
+    // uses the same anchored prescription the engine's fit drives). Compare
+    // the chart curve's force at refT against the engine's curve. We read
+    // the engine fit indirectly through a no-overload prescription so the
+    // overload nudge doesn't count as "divergence".
+    for (const zk of Object.keys(ZONE_REF_T)) {
+      const T = ZONE_REF_T[zk];
+      const chartF = predForceThreeExp(chartAmps, T);
+      const rec = coachingRecommendationContinuous(hist, "Crusher",
+        { threeExpPriors: priors, today: new Date(), tMin: T, tMax: T, tStep: 1, overload: false });
+      const engineF = rec?.loadByHand?.L;
+      expect(engineF).toBeTruthy();
+      const relGap = Math.abs(engineF - chartF) / chartF;
+      expect(relGap).toBeLessThan(0.05);
+    }
   });
 });
