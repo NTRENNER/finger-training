@@ -27,10 +27,16 @@ export const CLIMB_DISCIPLINES = [
 // The persisted key stays "redpoint" so historical data and existing
 // downstream consumers (gradePyramid, ClimbingAnalysisView) don't
 // need a migration; labels are looked up via ascentMeta(key).label.
+// "repeat" (June 2026): a clean re-send of a route you've already
+// sent. Counts as a send everywhere (isSend checks key !== "attempt")
+// including the pyramid's repeat-volume philosophy — re-sending IS
+// the consolidation signal — but it's listed below Send because it
+// carries no new-tick achievement.
 export const ASCENT_STYLES = [
   { key: "onsight",  label: "Onsight",          desc: "1st try, no beta"          },
   { key: "flash",    label: "Flash",            desc: "1st try, with beta"        },
   { key: "redpoint", label: "Send",             desc: "Sent clean after working"  },
+  { key: "repeat",   label: "Repeat",           desc: "Re-sent a previous send"   },
   { key: "rest",     label: "Completed w/ rest",desc: "Sent with mid-route rest"  },
   { key: "attempt",  label: "Attempt",          desc: "Worked but didn't send"    },
 ];

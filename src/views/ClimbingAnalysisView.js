@@ -68,14 +68,19 @@ const ASCENT_COLORS = {
   onsight:  C.green,
   flash:    C.green,
   redpoint: C.orange,
+  repeat:   C.orange,
   rest:     C.yellow,
   attempt:  C.red,
 };
 
-// "Clean send" = onsight, flash, or redpoint. Excludes rest (took weight)
-// and attempt (didn't send). Used by the pyramid + hardest-send line so
-// the progression metrics aren't inflated by working attempts.
-const CLEAN_SEND_STYLES = new Set(["onsight", "flash", "redpoint"]);
+// "Clean send" = onsight, flash, redpoint, or repeat. Excludes rest
+// (took weight) and attempt (didn't send). Used by the pyramid +
+// hardest-send line so the progression metrics aren't inflated by
+// working attempts. "repeat" (June 2026) is a clean re-send of a
+// previous send — same physical evidence as the original, and for
+// the pyramid's consolidation model (send it more than once) it's
+// exactly the signal being asked for.
+const CLEAN_SEND_STYLES = new Set(["onsight", "flash", "redpoint", "repeat"]);
 const isCleanSend = (a) => CLEAN_SEND_STYLES.has(a.ascent);
 
 // Ordered list of clean-send styles for the Max-sends card. Order is

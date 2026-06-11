@@ -213,27 +213,19 @@ export function SessionPlanCard({
   // ── Reps / Rest defaults from the active T ─────────────────────────
   // Ladder reps win for repeat (grip, zone) sessions; the T-derived
   // formula is the cold-start default for combos with no history.
-  const defaultReps = ladder
+  // Protocol-driven, no manual override (June 2026): the Hangs/Rest
+  // sliders were removed — the ladder (or the T-derived default for
+  // new combos) owns the rep count, and rest is a protocol constant.
+  // The sliders were never deliberately used and were an accidental-
+  // bump hazard; commitment to the protocol is the point of the
+  // ladder. The Hangs/Rest/Time summary strip below still shows the
+  // plan read-only.
+  const reps = ladder
     ? ladder.reps
     : activeT
       ? Math.max(4, Math.min(6, Math.round(6 - (activeT - 5) / 117.5)))
       : 5;
-  const defaultRest = 20;
-  const [reps, setReps] = useState(defaultReps);
-  const [rest, setRest] = useState(defaultRest);
-  const [userOverride, setUserOverride] = useState(false);
-  // Reset to defaults when the active zone / T changes, unless the user
-  // has manually touched the sliders this session.
-  useEffect(() => {
-    if (!userOverride) {
-      setReps(defaultReps);
-      setRest(defaultRest);
-    }
-    // defaultReps included so a ladder change (history updated after a
-    // session) re-syncs the rep count without a zone/T change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeZone, activeT, defaultReps]);
-  useEffect(() => { setUserOverride(false); }, [grip]);
+  const rest = 20;
 
   // ── Push to session config ─────────────────────────────────────────
   // ladderLoadByHand: fresh-equivalent pinned loads when the density
@@ -629,26 +621,8 @@ export function SessionPlanCard({
         ))}
       </div>
 
-      {/* Hangs + Rest sliders — always visible; defaults track the
-          active zone, sliders override locally. */}
-      <div style={{ display: "flex", gap: 16 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Hangs</span><span style={{ fontWeight: 700, color: C.text }}>{reps}</span>
-          </div>
-          <input type="range" min={2} max={12} value={reps}
-            onChange={e => { setReps(Number(e.target.value)); setUserOverride(true); }}
-            style={{ width: "100%", accentColor: activeColor }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
-          </div>
-          <input type="range" min={5} max={300} step={5} value={rest}
-            onChange={e => { setRest(Number(e.target.value)); setUserOverride(true); }}
-            style={{ width: "100%", accentColor: activeColor }} />
-        </div>
-      </div>
+      {/* (Hangs + Rest sliders removed June 2026 — protocol-driven;
+          see the comment at the reps/rest derivation above.) */}
 
       {/* Six zone tiles — alternatives. Tap any tile to override the
           recommended pick for this session; the active session block
