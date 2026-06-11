@@ -756,13 +756,13 @@ describe("peak-force ceiling", () => {
   });
 
   test("anchored-linear cold-start path is capped too", () => {
-    // No prior (no curve-supporting data) — just one recent long rep
-    // with a measured peak, prescribing for a 5s target. Linear T-ratio
-    // scaling (clamped at 2.5×) would prescribe 21 × 2.5 = 52.5 kg;
-    // the measured peak of 30 kg says that's impossible.
+    // No prior (no curve-supporting data) — just one recent max-
+    // protocol rep with a measured peak, prescribing for a 5s target.
+    // Linear T-ratio scaling would prescribe 21 × 1.9 = 39.9 kg; the
+    // measured peak of 30 kg says that's impossible.
     const history = [
-      { id: "rA", hand: "L", grip: "Crusher", target_duration: 30,
-        rep_num: 1, actual_time_s: 28, failed: true,
+      { id: "rA", hand: "L", grip: "Crusher", target_duration: 10,
+        rep_num: 1, actual_time_s: 9.5, failed: true,
         avg_force_kg: 21, peak_force_kg: 30,
         date: today, session_id: "sA" },
     ];
@@ -771,5 +771,23 @@ describe("peak-force ceiling", () => {
     expect(out.source).toBe("anchored-linear");
     expect(out.peakCapped).toBe(true);
     expect(out.value).toBeCloseTo(Math.round(30 * PEAK_CAP_FRACTION * 10) / 10, 1);
+  });
+
+  test("sub-max-protocol peaks do NOT create a cap (new-grip case)", () => {
+    // Prime regression (June 2026): the grip's only session is 35s
+    // holds — its peaks track the prescribed load, not the user's
+    // max. An unfiltered cap would freeze future max-day
+    // prescriptions at ~the endurance load.
+    const history = [
+      { id: "rA", hand: "L", grip: "Prime", target_duration: 35,
+        rep_num: 1, actual_time_s: 12, failed: true,
+        avg_force_kg: 5.8, peak_force_kg: 7.6,
+        date: today, session_id: "sA" },
+    ];
+    expect(recentBestPeakKg(history, "L", "Prime")).toBeNull();
+    const out = prescription(history, "L", "Prime", 5);
+    expect(out).not.toBeNull();
+    expect(out.peakCapKg).toBeNull();
+    expect(out.peakCapped).toBe(false);
   });
 });

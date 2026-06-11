@@ -31,23 +31,45 @@ const PEAK_MAX_KG = 500;                  // sanity ceiling (matches load.js)
 // Build the per-grip peak-force time series.
 // Returns:
 //   {
-//     grips: string[],                         // grips with ≥1 near-max peak
+//     grips: string[],                         // grips with peak data (incl. provisional)
+//     provisional: { [grip]: true },           // grips with NO max/power session yet —
+//                                              //   series built from sub-max-session peaks,
+//                                              //   which UNDERSTATE true max (see below)
 //     rows:  [{ date, [grip]: kg, [grip]_pr: kg }],  // per-session best + running PR
-//     best:  { [grip]: { kg, date } },         // all-time best near-max peak
+//     best:  { [grip]: { kg, date } },         // all-time best peak (per its series)
 //     latest:{ [grip]: { kg, date } },         // most recent session best
 //   }
 // or null when no grip has usable peak data.
+//
+// PROVISIONAL GRIPS (June 2026): a new grip's first sessions are
+// mid-duration (cold-start seeding), so it can train for weeks before
+// its first max/power day — and was invisible here the whole time.
+// Rather than hide it or silently mix sub-max peaks into the real
+// series, grips without any qualifying max-protocol peak get included
+// under a `provisional` flag: the card renders them visually distinct
+// and withholds the % badge (a % over sub-max pulls is noise). The
+// moment a real max/power session lands, the grip flips to the
+// qualified series automatically and the provisional history is
+// dropped (it would understate the baseline).
 export function buildPeakForceTrend(history, {
   maxProtocolT = PEAK_MAX_PROTOCOL_T,
 } = {}) {
   if (!Array.isArray(history) || history.length === 0) return null;
 
-  // grip -> Map<date, bestPeakKg> over max/power-protocol reps only.
+  // grip -> Map<date, bestPeakKg>, split into qualified (max/power-
+  // protocol reps) and unqualified (any protocol — provisional source).
   const byGrip = {};
+  const anyByGrip = {};
   for (const r of history) {
     if (!r || !r.grip || !r.date) continue;
     const peak = Number(r.peak_force_kg);
     if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;
+    const put = (map) => {
+      if (!map[r.grip]) map[r.grip] = new Map();
+      const cur = map[r.grip].get(r.date) || 0;
+      if (peak > cur) map[r.grip].set(r.date, peak);
+    };
+    put(anyByGrip);
     // Max/power protocol only — exclude endurance sessions (sub-max load,
     // peak not a max attempt). Rep duration is intentionally NOT filtered:
     // peak force is instantaneous, so a hard short pull is a valid max
@@ -55,9 +77,16 @@ export function buildPeakForceTrend(history, {
     // can't prove it was endurance.
     const tgt = Number(r.target_duration);
     if (Number.isFinite(tgt) && tgt > maxProtocolT) continue;
-    if (!byGrip[r.grip]) byGrip[r.grip] = new Map();
-    const cur = byGrip[r.grip].get(r.date) || 0;
-    if (peak > cur) byGrip[r.grip].set(r.date, peak);
+    put(byGrip);
+  }
+
+  // Provisional: peaks exist, but none from a max/power session.
+  const provisional = {};
+  for (const g of Object.keys(anyByGrip)) {
+    if (!byGrip[g] || byGrip[g].size === 0) {
+      byGrip[g] = anyByGrip[g];
+      provisional[g] = true;
+    }
   }
 
   const grips = Object.keys(byGrip).filter(g => byGrip[g].size > 0).sort();
@@ -99,12 +128,14 @@ export function buildPeakForceTrend(history, {
   });
 
   // % climb in your max (best-ever vs first session) per grip.
+  // Provisional grips get null — a % computed over sub-max pulls
+  // measures protocol variation, not strength change.
   const changePct = {};
   for (const g of grips) {
-    changePct[g] = firstBest[g] > 0
+    changePct[g] = (!provisional[g] && firstBest[g] > 0)
       ? Math.round((best[g].kg / firstBest[g] - 1) * 100)
       : null;
   }
 
-  return { grips, rows, best, latest, firstBest, changePct, domain };
+  return { grips, provisional, rows, best, latest, firstBest, changePct, domain };
 }

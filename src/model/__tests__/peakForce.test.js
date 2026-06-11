@@ -86,4 +86,35 @@ describe("buildPeakForceTrend", () => {
     ]);
     expect(t.best.Micro.kg).toBe(24);
   });
+
+  // ── Provisional grips (June 2026) ────────────────────────────
+  // A new grip's cold-start sessions are mid-duration, so it can
+  // train for weeks with no max/power day. It now appears as a
+  // provisional series (sub-max peaks, no % badge) instead of being
+  // invisible — and flips to the qualified series the moment a real
+  // max day lands.
+  test("grip with only sub-max-protocol peaks shows as provisional, no %", () => {
+    const t = buildPeakForceTrend([
+      rep("Crusher", "2026-05-01", 8, 170, 7),     // qualified grip
+      rep("Prime",   "2026-06-10", 12, 7.6, 35),   // 35s session only → provisional
+    ]);
+    expect(t.grips).toEqual(["Crusher", "Prime"]);
+    expect(t.provisional.Prime).toBe(true);
+    expect(t.provisional.Crusher).toBeUndefined();
+    expect(t.best.Prime.kg).toBe(7.6);
+    expect(t.changePct.Prime).toBeNull();          // % over sub-max pulls is noise
+    expect(t.changePct.Crusher).not.toBeNull();
+  });
+
+  test("first max/power session flips a grip from provisional to qualified", () => {
+    const t = buildPeakForceTrend([
+      rep("Prime", "2026-06-10", 12, 7.6, 35),     // sub-max era
+      rep("Prime", "2026-06-20", 5, 9.1, 5),       // first real max day
+    ]);
+    expect(t.provisional.Prime).toBeUndefined();
+    // The provisional history is dropped — it would understate the
+    // baseline the % climbs from.
+    expect(t.rows.find(r => r.date === "2026-06-10")).toBeUndefined();
+    expect(t.best.Prime.kg).toBe(9.1);
+  });
 });

@@ -48,6 +48,9 @@ import {
   fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
 import { capacityMultiplier } from "./fatigueBeta.js";
+// Max/power-protocol gate shared with the Peak Force card — both
+// surfaces must agree on what counts as a "max attempt" peak.
+import { PEAK_MAX_PROTOCOL_T } from "./peakForce.js";
 // Load-extraction helpers (sane / prescribedLoad / effectiveLoad /
 // loadedWeight) moved to ./load.js (May 2026) so lower-level modules
 // like threeExp.js can use effectiveLoad without a circular import
@@ -407,10 +410,18 @@ export const PEAK_CAP_LOOKBACK_DAYS = 90;
 export const PEAK_CAP_FRACTION = 0.95;
 
 // Best measured instantaneous peak (kg) for (hand, grip) within the
-// lookback window, from any rep (peaks are valid signals regardless
-// of rep_num — fatigue lowers them, never raises). referenceDate
-// mirrors prescription()'s retrospective semantics: null = today.
-// Returns null when no Tindeq peak exists in the window.
+// lookback window — MAX/POWER-PROTOCOL reps only (target ≤
+// PEAK_MAX_PROTOCOL_T, same intent filter as the Peak Force card).
+// A sub-max session's peak tracks the prescribed load, not the
+// user's max: capping on it would bound a new grip's first max-day
+// prescription at ~its endurance load (June 2026 — Prime's only
+// session was 35s holds at ~6 kg; an unfiltered cap would have
+// frozen its 5s prescriptions at ~6.9 kg indefinitely). Within a
+// qualifying session, any rep's peak counts (fatigue lowers peaks,
+// never raises) and missing targets (legacy/manual rows) are kept.
+// referenceDate mirrors prescription()'s retrospective semantics:
+// null = today. Returns null when no qualifying peak exists in the
+// window — callers then run uncapped, the pre-cap behavior.
 export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
   if (!history) return null;
   const refMs = referenceDate
@@ -422,6 +433,8 @@ export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
+    const tgt = Number(r.target_duration);
+    if (Number.isFinite(tgt) && tgt > PEAK_MAX_PROTOCOL_T) continue; // sub-max protocol
     const p = sane(r.peak_force_kg);
     if (p != null && (best == null || p > best)) best = p;
   }

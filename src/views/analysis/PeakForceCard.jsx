@@ -52,7 +52,11 @@ export function PeakForceCard({ history, unit = "lbs" }) {
     // so every grip sits at its true height and the magnitude gap shows.
     const hi = Math.max(...trend.grips.map(g => toDisp(trend.best[g].kg, unit)));
     const axisMax = Math.ceil((hi * 1.12) / 5) * 5;
-    return { rows, grips: trend.grips, best: trend.best, changePct: trend.changePct, axisMax };
+    return {
+      rows, grips: trend.grips, best: trend.best,
+      changePct: trend.changePct, axisMax,
+      provisional: trend.provisional || {},
+    };
   }, [trend, unit]);
 
   if (!view || view.rows.length < 1) return null;
@@ -74,6 +78,9 @@ export function PeakForceCard({ history, unit = "lbs" }) {
                     {pct > 0 ? "+" : ""}{pct}%
                   </b>
                 )}
+                {view.provisional[g] && (
+                  <i style={{ color: C.muted, marginLeft: 4, fontSize: 11 }}>prov.</i>
+                )}
               </span>
             );
           })}
@@ -86,6 +93,14 @@ export function PeakForceCard({ history, unit = "lbs" }) {
         dots mark the sessions that raised it, and the % is how much
         your max has climbed. One shared scale, so each grip sits at
         its true magnitude. Endurance sessions are excluded.
+        {Object.keys(view.provisional).length > 0 && (
+          <span style={{ fontStyle: "italic" }}>
+            {" "}Dashed = provisional: no max/power session logged yet
+            for that grip, so its line shows best pulls from sub-max
+            sessions and understates true max — the first real max day
+            replaces it.
+          </span>
+        )}
       </div>
       <ResponsiveContainer width="100%" height={220}>
         <ComposedChart data={view.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
@@ -105,9 +120,13 @@ export function PeakForceCard({ history, unit = "lbs" }) {
           <Legend wrapperStyle={{ fontSize: 11 }} />
           {view.grips.map(g => {
             const color = GRIP_COLORS[g] || C.blue;
+            const prov = view.provisional[g];
             return (
               <Line key={`${g}-pr`} type="monotone" dataKey={`${g}_pr`}
-                name={`${g} PR`} stroke={color} strokeWidth={2} dot={false}
+                name={prov ? `${g} (prov.)` : `${g} PR`}
+                stroke={color} strokeWidth={2} dot={false}
+                strokeDasharray={prov ? "6 4" : undefined}
+                opacity={prov ? 0.7 : 1}
                 connectNulls isAnimationActive={false} />
             );
           })}
