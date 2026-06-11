@@ -3,6 +3,7 @@
 
 import {
   computeSessionFatigue,
+  suggestCookedFromClimbs,
   mostRecentClimbDate,
   fatigueToModifier,
 } from "../climbingFatigue.js";
@@ -137,5 +138,61 @@ describe("fatigueToModifier", () => {
 
   test("at 48h, modifier returns to 1.0", () => {
     expect(fatigueToModifier("power", 10, 48)).toBe(1.0);
+  });
+});
+
+describe("suggestCookedFromClimbs", () => {
+  const climb = (date, rpe) => ({ type: "climbing", date, rpe });
+
+  test("null with no signal (no climbs today or yesterday)", () => {
+    expect(suggestCookedFromClimbs([], "2026-06-08")).toBeNull();
+    expect(suggestCookedFromClimbs(null, "2026-06-08")).toBeNull();
+    // Climbs two days ago don't count.
+    expect(suggestCookedFromClimbs([climb("2026-06-06", 8)], "2026-06-08")).toBeNull();
+  });
+
+  test("same-day climbs drive the suggestion (today's session fatigue)", () => {
+    // 4 × RPE 8 → sessionFatigue 7 (sum 32×0.12 + 8×0.4 ≈ 7).
+    const acts = Array.from({ length: 4 }, () => climb("2026-06-08", 8));
+    const out = suggestCookedFromClimbs(acts, "2026-06-08");
+    expect(out).not.toBeNull();
+    expect(out.cooked).toBe(computeSessionFatigue(acts, "2026-06-08"));
+    expect(out.todayFatigue).toBe(7);
+    expect(out.yesterdayFatigue).toBeNull();
+    expect(out.nClimbsToday).toBe(4);
+  });
+
+  test("yesterday-only carries over at a decayed weight", () => {
+    const acts = Array.from({ length: 4 }, () => climb("2026-06-07", 8));
+    const out = suggestCookedFromClimbs(acts, "2026-06-08");
+    expect(out).not.toBeNull();
+    expect(out.todayFatigue).toBeNull();
+    expect(out.yesterdayFatigue).toBe(7);
+    // 0.4 × 7 = 2.8 → 3. Carryover is real but much smaller than same-day.
+    expect(out.cooked).toBe(3);
+    expect(out.nClimbsToday).toBe(0);
+  });
+
+  test("today + yesterday stack and clamp at 10", () => {
+    const acts = [
+      ...Array.from({ length: 8 }, () => climb("2026-06-08", 7)),  // today: fatigue 10
+      ...Array.from({ length: 4 }, () => climb("2026-06-07", 8)),  // yesterday: fatigue 7
+    ];
+    const out = suggestCookedFromClimbs(acts, "2026-06-08");
+    expect(out.cooked).toBe(10);  // 10 + 2.8 clamped
+  });
+
+  test("regression: the 2026-06-05 inversion — hard same-day bouldering must not suggest 0", () => {
+    // Shaped like the real June 5 log: a dozen problems, RPEs 2–8,
+    // V8 attempts at RPE 8. The user logged cooked = 0 that day.
+    const rpes = [7, 3, 7, 2, 8, 5, 8, 5, 8, 6, 7, 7];
+    const acts = rpes.map(r => climb("2026-06-05", r));
+    const out = suggestCookedFromClimbs(acts, "2026-06-05");
+    expect(out.cooked).toBeGreaterThanOrEqual(5);
+  });
+
+  test("non-climbing activities are ignored", () => {
+    const acts = [{ type: "oneRM", date: "2026-06-08", rpe: 9 }];
+    expect(suggestCookedFromClimbs(acts, "2026-06-08")).toBeNull();
   });
 });

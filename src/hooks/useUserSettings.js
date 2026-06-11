@@ -28,6 +28,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   loadLS, saveLS,
   LS_BW_LOG_KEY,
+  LS_BW_DIRTY_KEY, loadDirtySet, markDirty, clearDirty,
   LS_PYRAMID_PROJECT_KEY,
   LS_PINNED_GRIP_BASELINES_KEY,
   migrateLegacyPyramidPins,
@@ -35,7 +36,11 @@ import {
 import { today } from "../util.js";
 import { DEFAULT_TRIP } from "../lib/trip.js";
 import {
+<<<<<<< HEAD
   pushBW, fetchBWLog, fetchBWTombstoneDates,
+=======
+  pushBW, deleteBW, fetchBWLog,
+>>>>>>> climb-aware-coaching
   fetchUserSettings, pushUserSettings,
 } from "../lib/sync.js";
 import { defaultFatigueModel } from "../model/fatigueBeta.js";
@@ -74,6 +79,20 @@ const LS_BW_KEY             = "ft_bw";              // body weight in kg (number
 const LS_TRIP_KEY           = "ft_trip";            // { date: "YYYY-MM-DD", name }
 const LS_CLIMBING_FOCUS_KEY = "ft_climbing_focus";  // "balanced" | "bouldering" | "power_endurance" | "endurance"
 
+// Confirm-or-keep-dirty helper for the BW dirty set (see storage.js
+// for the sync model). Clears the dirty mark only if the LS log entry
+// for the date still matches what we pushed — if the user re-logged
+// while the push was in flight, the newer write's own push owns the
+// eventual clear. Pass kg = null after a confirmed cloud DELETE: the
+// mark clears only if the entry is still absent locally.
+function confirmBWPushed(date, kg) {
+  const entry = (loadLS(LS_BW_LOG_KEY) || []).find(e => e?.date === date) || null;
+  const same = kg == null
+    ? entry == null
+    : entry != null && Number(entry.kg) === Number(kg);
+  if (same) clearDirty(LS_BW_DIRTY_KEY, date);
+}
+
 export function useUserSettings({ user }) {
   // ── Unit preference ───────────────────────────────────────
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
@@ -110,23 +129,29 @@ export function useUserSettings({ user }) {
       // Replace existing entry for today if present, otherwise append
       const updated = log.filter(e => e.date !== d);
       saveLS(LS_BW_LOG_KEY, [...updated, { date: d, kg }].sort((a, b) => a.date < b.date ? -1 : 1));
-      // Best-effort cloud push (fire-and-forget). Failures are
-      // logged but otherwise silent — the local write is already
-      // durable, and the next sign-in reconcile will catch any
-      // entries that didn't make it to the server.
-      pushBW(d, kg);
+      // Best-effort cloud push. Failures are logged but otherwise
+      // silent — the local write is already durable, the date stays
+      // dirty, and the next sign-in reconcile retries the backfill.
+      markDirty(LS_BW_DIRTY_KEY, d);
+      pushBW(d, kg).then(ok => { if (ok) confirmBWPushed(d, kg); });
     }
   }, []);
 
   // ── BW cloud reconcile ───────────────────────────────────
   // Runs when `user` flips from null → signed-in. Mirrors the
   // useRepHistory reconcile pattern: fetch cloud log, union with
-  // local log on date-key (later-write wins for same-day collisions —
-  // we trust local since the user just opened the app there), save
-  // the merged set back to LS, and re-derive the scalar from the
-  // latest entry. Also fires a push for any local-only entries the
-  // cloud doesn't yet know about, so a previously-offline device's
-  // BW history gets backfilled on first sign-in.
+  // local log on date-key, save the merged set back to LS, and
+  // re-derive the scalar from the latest entry.
+  //
+  // Collision rule (dirty-key sync model — see storage.js): local
+  // wins ONLY for dirty dates (a same-day re-log this device hasn't
+  // confirmed pushing) and local-only dates (offline writes / pre-
+  // dirty-era entries, kept + backfilled). Cloud wins everywhere
+  // else, so a re-log made on another device actually lands here —
+  // the old blanket "local wins" rule shadowed it forever. A dirty
+  // date with no local entry is a pending delete (HistoryView's BW
+  // log card removed it but the cloud delete didn't confirm) — drop
+  // the cloud copy and retry the delete instead of resurrecting.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -144,11 +169,30 @@ export function useUserSettings({ user }) {
       if (cancelled || !cloud) return;
       const deleted = new Set(tombDates || []);
       const local = loadLS(LS_BW_LOG_KEY) || [];
-      // Merge: same-date local wins (assumption: local is the device
-      // the user is actively using, so its writes are most recent).
+      const dirty = loadDirtySet(LS_BW_DIRTY_KEY);
+      const cloudDates = new Set(cloud.map(e => e.date));
+      const localDates = new Set(local.map(e => e?.date).filter(Boolean));
       const byDate = new Map();
+<<<<<<< HEAD
       for (const e of cloud) { if (!deleted.has(e.date)) byDate.set(e.date, e); }
       for (const e of local) { if (!deleted.has(e.date)) byDate.set(e.date, e); }
+=======
+      for (const e of cloud) byDate.set(e.date, e);
+      for (const e of local) {
+        if (!e?.date) continue;
+        if (dirty.has(e.date) || !cloudDates.has(e.date)) byDate.set(e.date, e);
+      }
+      // Pending deletes: dirty dates with no local entry.
+      for (const date of dirty) {
+        if (localDates.has(date)) continue;
+        byDate.delete(date);
+        if (cloudDates.has(date)) {
+          deleteBW(date).then(ok => { if (ok) confirmBWPushed(date, null); });
+        } else {
+          clearDirty(LS_BW_DIRTY_KEY, date);  // already gone server-side
+        }
+      }
+>>>>>>> climb-aware-coaching
       const merged = [...byDate.values()].sort((a, b) => a.date < b.date ? -1 : 1);
       saveLS(LS_BW_LOG_KEY, merged);
       // Hydrate the scalar from the latest merged entry.
@@ -157,11 +201,18 @@ export function useUserSettings({ user }) {
         setBodyWeight(latest.kg);
         saveLS(LS_BW_KEY, latest.kg);
       }
-      // Backfill any local-only entries to the cloud (one push per
-      // missing date). Fire-and-forget; same as saveBW's push path.
-      const cloudDates = new Set(cloud.map(e => e.date));
+      // Backfill unsynced local entries (dirty re-logs + local-only
+      // dates). Fire-and-forget; failures stay dirty and retry on
+      // the next sign-in reconcile.
       for (const e of local) {
+<<<<<<< HEAD
         if (!cloudDates.has(e.date) && e.kg > 0 && !deleted.has(e.date)) pushBW(e.date, e.kg);
+=======
+        if (!e?.date || !byDate.has(e.date) || !(e.kg > 0)) continue;
+        if (dirty.has(e.date) || !cloudDates.has(e.date)) {
+          pushBW(e.date, e.kg).then(ok => { if (ok) confirmBWPushed(e.date, e.kg); });
+        }
+>>>>>>> climb-aware-coaching
       }
     })();
     return () => { cancelled = true; };
@@ -288,12 +339,24 @@ export function useUserSettings({ user }) {
   // going through a cloud round-trip from this hook's perspective.
   const [fatigueModel, setFatigueModel] = useState(() => defaultFatigueModel());
 
+  // True once the user_settings cloud reconcile below has landed (or
+  // immediately when signed out — local is the authority then).
+  // Consumed by useGripFits' auto-pin gate via App: until this is
+  // true, pinnedGripBaselines may be a stale local copy, and letting
+  // the auto-pin effect write through savePinnedGripBaselines would
+  // push a pin map that's missing the cloud's pins — permanently
+  // clobbering baselines seeded on other devices. Stays false while
+  // signed in if the fetch errors (offline) — pinning waits for a
+  // reconcile that actually saw the cloud.
+  const [settingsSynced, setSettingsSynced] = useState(false);
+
   // Pull climbing focus + pyramid pins + fatigue model from cloud on
   // sign-in. Cloud-wins for scalars/maps that already exist on the
   // cloud row — keeps cross-device state coherent without a more
   // elaborate merge protocol.
   useEffect(() => {
-    if (!user) return;
+    if (!user) { setSettingsSynced(true); return; }
+    setSettingsSynced(false);
     let cancelled = false;
     (async () => {
       const cloud = await fetchUserSettings();
@@ -332,6 +395,9 @@ export function useUserSettings({ user }) {
       if (cloud.fatigue_model && typeof cloud.fatigue_model === "object") {
         setFatigueModel(cloud.fatigue_model);
       }
+      // Reconcile landed — pinned baselines (and everything else) now
+      // reflect the cloud. Safe to let the auto-pin effect write.
+      setSettingsSynced(true);
     })();
     return () => { cancelled = true; };
   }, [user]);
@@ -344,5 +410,6 @@ export function useUserSettings({ user }) {
     pyramidProjectMap, savePyramidProjectMap,
     pinnedGripBaselines, savePinnedGripBaselines,
     fatigueModel, setFatigueModel,
+    settingsSynced,
   };
 }

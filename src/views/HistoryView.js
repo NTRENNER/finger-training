@@ -30,6 +30,7 @@ import { TARGET_OPTIONS } from "../model/zones.js";
 import {
   loadLS, saveLS,
   LS_BW_LOG_KEY, LS_HISTORY_DOMAIN_KEY, LS_WORKOUT_LOG_KEY,
+  LS_BW_DIRTY_KEY, markDirty, clearDirty,
 } from "../lib/storage.js";
 import { WorkoutHistoryView } from "./WorkoutHistoryView.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
@@ -298,11 +299,22 @@ export function HistoryView({
     const next = bwLog.filter(e => e.date !== date);
     setBwLog(next);
     saveLS(LS_BW_LOG_KEY, next);
-    // Fire-and-forget cloud delete. If it fails, the local removal
-    // still stands; next reconcile would resurrect it from cloud, so
-    // log a warning so the user can retry if needed.
+    // Record the deletion intent BEFORE the cloud call (dirty-key
+    // sync model — see storage.js). If the delete fails, the date
+    // stays dirty with no local entry; useUserSettings' BW reconcile
+    // recognizes that as a pending delete, drops the cloud copy from
+    // the merge, and retries — instead of resurrecting the entry.
+    markDirty(LS_BW_DIRTY_KEY, date);
     deleteBW(date).then(ok => {
-      if (!ok) console.warn(`BW cloud delete failed for ${date} — local removed but cloud may resurrect on next sync`);
+      if (!ok) {
+        console.warn(`BW cloud delete failed for ${date} — will retry on next sync`);
+        return;
+      }
+      // Confirm only if the entry is still absent locally (the user
+      // could have re-logged the same date while the delete was in
+      // flight — that newer write's push owns the mark).
+      const stillGone = !(loadLS(LS_BW_LOG_KEY) || []).some(e => e?.date === date);
+      if (stillGone) clearDirty(LS_BW_DIRTY_KEY, date);
     });
   };
 

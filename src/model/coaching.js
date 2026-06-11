@@ -55,7 +55,7 @@ import {
 } from "./threeExp.js";
 import {
   effectiveLoad, freshLoadFor, buildFreshLoadMap,
-  prescription,
+  prescription, recentBestPeakKg,
 } from "./prescription.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 
@@ -382,6 +382,40 @@ export function focusBoost(zone, focus) {
   return m?.[zone] ?? 1.0;
 }
 
+// ── Fresh short-duration test constants + helper ──────────────
+// "Short end" = durations at/under this — the max-strength/power
+// territory where the three-exp fit extrapolates unless it has real
+// failure anchors.
+export const FRESH_TEST_SHORT_T_MAX = 10;   // seconds
+// Days without a short-T failure before the engine starts advising a
+// fresh max test. Half the peak-cap lookback (90d) so the advisory
+// fires while the cap still has a valid peak to protect with.
+export const FRESH_TEST_STALE_DAYS = 45;
+
+// Days since this grip's last FAILED rep at target ≤ FRESH_TEST_SHORT_T_MAX,
+// from already-grip-filtered history. Failures are the only reps the
+// curve fit learns an upper bound from at short T (successes are just
+// lower-bound constraints), so "trained 5s recently" without a failure
+// still leaves the short end unanchored.
+// Returns { staleDays, lastDate, recommended }:
+//   staleDays   — days since last short-T failure (null = never)
+//   recommended — true when never failed short, or staleDays exceeds
+//                 FRESH_TEST_STALE_DAYS
+export function shortEndFailureStaleness(gripHistory, todayStr) {
+  let lastDate = null;
+  for (const r of gripHistory || []) {
+    if (!r || r.failed !== true) continue;
+    if (!(Number(r.target_duration) <= FRESH_TEST_SHORT_T_MAX)) continue;
+    if (!r.date) continue;
+    if (lastDate == null || r.date > lastDate) lastDate = r.date;
+  }
+  if (lastDate == null) return { staleDays: null, lastDate: null, recommended: true };
+  const days = Math.round(
+    (new Date(`${todayStr}T00:00:00`).getTime() - new Date(`${lastDate}T00:00:00`).getTime()) / 86400000
+  );
+  return { staleDays: days, lastDate, recommended: days > FRESH_TEST_STALE_DAYS };
+}
+
 export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const {
     freshMap = null,
@@ -413,6 +447,20 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // separate display/runner overlay (SessionPlanCard tiles, useSessionRunner).
 
   if (!grip || !history || history.length === 0) return null;
+
+  // ── Fresh short-duration test advice ─────────────────────────
+  // The curve fit only LEARNS from failures, and the short end
+  // (≤ FRESH_TEST_SHORT_T_MAX s) is where failures are rarest — the
+  // June 2026 review found months of history with no failure under
+  // 7s, leaving F(5s) pure extrapolation (bounded only by the peak
+  // cap). Zone staleness can't catch this: a submax 5s session
+  // counts as "trained" without anchoring anything. Track days since
+  // the last short-T FAILURE for this grip and surface a "do a fresh
+  // max test" advisory when it's stale — Setup's Why line tells the
+  // user to schedule it BEFORE climbing, since every anchor logged
+  // after bouldering reads systematically low.
+  // (Computed against gripHistory below; attached to the returned
+  // rec as `freshTest`.)
 
   // PER-GRIP staleness: a Crusher endurance session shouldn't reduce
   // Micro endurance's staleness boost — they're independent F-D curves.
@@ -695,18 +743,43 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // already-chosen longer T), not added load. Surfaced for the Why line.
   const oFactor = overload ? overloadFactor(best.T) : 1;
   best.overloadFactor = oFactor;
+
+  // Absolute ceiling AFTER overload: the user's recent measured
+  // instantaneous peak for this (hand, grip). prescription() already
+  // caps its value at PEAK_CAP_FRACTION × peak; the overload bump may
+  // push past that fraction (that's the point of overload — failure a
+  // hair beyond current capacity) but never past the full peak itself.
+  // No isometric hold can exceed instantaneous max, so prescribing
+  // above it is just a guaranteed unattainable target (see the
+  // 2026-06-08 94.1 kg case in prescription.js). Null for manual
+  // histories → no cap.
+  const capPeak = (hand, v) => {
+    if (v == null) return v;
+    const peak = recentBestPeakKg(history, hand, grip);
+    return peak != null && v > peak ? peak : v;
+  };
+
   const headPres = prescription(history, best.hand, grip, best.T, presOpts);
   const headBase = headPres ? headPres.value : predForceThreeExp(handFits[best.hand].amps, best.T);
-  best.loadKg = headBase != null ? headBase * oFactor : headBase;
+  best.loadKg = capPeak(best.hand, headBase != null ? headBase * oFactor : headBase);
   best.loadBeforeOverload = headBase;
   best.scale = headPres ? headPres.scale : 1.0;
   best.anchor = headPres ? headPres.anchor : null;
+  best.peakCapped = headPres?.peakCapped === true
+    || (headBase != null && best.loadKg != null && best.loadKg < headBase * oFactor);
 
   const loadByHand = {};
   for (const hand of Object.keys(handFits)) {
     const p = prescription(history, hand, grip, best.T, presOpts);
-    loadByHand[hand] = p && p.value > 0 ? p.value * oFactor : null;
+    loadByHand[hand] = p && p.value > 0 ? capPeak(hand, p.value * oFactor) : null;
   }
   best.loadByHand = loadByHand;
+
+  // Fresh short-T test advisory — see shortEndFailureStaleness above.
+  // Attached unconditionally so the Why line can (a) prompt a fresh
+  // max test when the short end is unanchored, and (b) remind the
+  // user to do short-T picks BEFORE climbing.
+  best.freshTest = shortEndFailureStaleness(gripHistory, todayStr);
+
   return best;
 }

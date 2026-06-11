@@ -223,6 +223,59 @@ export function clearUserScopedLS() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// DIRTY-KEY TRACKING (per-domain unsynced-edit sets)
+// ─────────────────────────────────────────────────────────────
+// The activities / daily_state / BW cloud reconciles used to merge
+// with a blanket "local wins on collision" rule. That rule is only
+// right when the local copy actually carries a newer edit; for
+// untouched entries it permanently shadowed edits made on OTHER
+// devices, so two devices could diverge forever (each one's stale
+// copy beating the other's newer cloud write on every sign-in).
+//
+// Instead of per-row timestamps (schema migration + clock-skew
+// trust), each domain keeps a small LS set of keys with local edits
+// that haven't been confirmed by a successful cloud push:
+//
+//   * save/update → markDirty(key)        (before the push)
+//   * push resolves ok → clearDirty(key)  (only if the local value
+//                                          still matches what was
+//                                          pushed — see hooks)
+//   * reconcile → local wins ONLY for dirty keys; cloud wins for
+//     everything else. A dirty key with no local entry records a
+//     local DELETE that hasn't reached the cloud yet — reconcile
+//     honors it (drops the cloud copy and retries the delete)
+//     instead of resurrecting.
+//
+// Sets are arrays in LS (JSON has no Set). Helpers below normalize.
+
+// Per-date daily_state edits (Set<"YYYY-MM-DD">).
+export const LS_DAILY_STATE_DIRTY_KEY = "ft_daily_state_dirty";
+// Per-id activity edits (Set<id>).
+export const LS_ACTIVITY_DIRTY_KEY = "ft_activity_dirty";
+// Per-date body-weight edits (Set<"YYYY-MM-DD">).
+export const LS_BW_DIRTY_KEY = "ft_bw_dirty";
+
+export function loadDirtySet(key) {
+  const raw = loadLS(key);
+  return new Set(Array.isArray(raw) ? raw.filter(Boolean) : []);
+}
+
+export function markDirty(key, id) {
+  if (!id) return;
+  const set = loadDirtySet(key);
+  if (set.has(id)) return;
+  set.add(id);
+  saveLS(key, [...set]);
+}
+
+export function clearDirty(key, id) {
+  if (!id) return;
+  const set = loadDirtySet(key);
+  if (!set.delete(id)) return;
+  saveLS(key, [...set]);
+}
+
 // Build a stable composite key for the pyramid pin maps from the
 // active filter set. Wall only matters for indoor boulder; for any
 // other combination we force "all" so the key reflects only the

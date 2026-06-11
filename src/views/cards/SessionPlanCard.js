@@ -44,14 +44,23 @@
 // is purely local (no workout to drive). Both components share the same
 // per-grip cookedness math through fatigueBeta.capacityMultiplier.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { fmtW } from "../../ui/format.js";
 import { ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
-import { coachingRecommendationContinuous } from "../../model/coaching.js";
+import {
+  coachingRecommendationContinuous,
+  FRESH_TEST_SHORT_T_MAX,
+} from "../../model/coaching.js";
 import { capacityMultiplier } from "../../model/fatigueBeta.js";
+import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
+import {
+  computeDensityLadder,
+  LADDER_MAX_REPS, LADDER_MIN_REPS, LADDER_LOAD_STEP_FRAC,
+} from "../../model/densityLadder.js";
+import { today } from "../../util.js";
 
 // Display labels for the climbing-focus pill in the header. Kept here
 // (vs imported from coaching.js) because coaching.js exports the
@@ -107,6 +116,26 @@ export function SessionPlanCard({
   );
   const recommendedZone = rec?.zone;
 
+  // ── Climb-derived cookedness suggestion ──────────────────────
+  // Derived from today's (+ decayed yesterday's) logged climbs — see
+  // suggestCookedFromClimbs. Pre-fills the slider ONCE per mount when
+  // the user hasn't touched it (cooked still at the 0 default / null);
+  // any manual slider interaction pins their value for the rest of
+  // the session setup. The provenance note below the slider keeps the
+  // suggestion visible even after an override, with a one-tap apply.
+  const cookedSuggestion = useMemo(
+    () => suggestCookedFromClimbs(activities, today()),
+    [activities]
+  );
+  const cookedTouchedRef = useRef(false);
+  useEffect(() => {
+    if (cookedTouchedRef.current) return;
+    if (!cookedSuggestion || !(cookedSuggestion.cooked > 0)) return;
+    if (cooked != null && cooked !== 0) return;  // user/day value already set
+    onCookedChange?.(cookedSuggestion.cooked);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cookedSuggestion]);
+
   // ── Active zone — defaults to recommended, user can override via tiles ──
   // Stored as the zone key (e.g. "power") or null = "follow recommendation"
   const [overrideZone, setOverrideZone] = useState(null);
@@ -116,6 +145,21 @@ export function SessionPlanCard({
   // Reset the override when the grip changes — a Crusher pick shouldn't
   // carry into Micro silently.
   useEffect(() => { setOverrideZone(null); }, [grip]);
+
+  // ── Density ladder for the active (grip, zone) ───────────────
+  // Rep-count progression at constant load, gated by the previous
+  // session's LAST-rep duration (see model/densityLadder.js). Non-null
+  // whenever this (grip, zone) has been trained before — in that case
+  // the ladder pins the previous session's T + load and prescribes the
+  // rep count, while the engine still owns WHICH zone gets recommended
+  // (its coverage/staleness/focus logic is unchanged). Brand-new
+  // (grip, zone) combos fall through to the curve-fit defaults.
+  const ladder = useMemo(
+    () => (grip && activeZone)
+      ? computeDensityLadder(history, grip, activeZone, { fatigueModel })
+      : null,
+    [history, grip, activeZone, fatigueModel]
+  );
 
   // ── Per-zone tiles (with per-grip cookedness scale-down) ─────────
   // Every tile gets the same multiplier because β is per-grip. If
@@ -149,10 +193,13 @@ export function SessionPlanCard({
   const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
   // T comes from rec (the engine's argmax in the continuous sweep) when
   // we're on the recommended zone; from the zone's refTime when the user
-  // has overridden. Either way the load comes from prescription() at that T.
-  const activeT = isOverridden
+  // has overridden. The density ladder pins the PREVIOUS session's T
+  // for repeat (grip, zone) combos — protocol comparability requires
+  // holding T constant while reps climb, so the pin wins over both.
+  const curveT = isOverridden
     ? activeRow?.T
     : (rec?.T ?? activeRow?.T);
+  const activeT = ladder?.T ?? curveT;
   // Per-hand load values used to feed a separate "active TARGET/LOAD"
   // big-numbers panel — that panel was retired May 2026 since the
   // Recommended button (above) and the highlighted alternative tile
@@ -164,25 +211,28 @@ export function SessionPlanCard({
   const activeLabel = activeRow?.label ?? activeZone;
 
   // ── Reps / Rest defaults from the active T ─────────────────────────
-  const defaultReps = activeT
-    ? Math.max(4, Math.min(6, Math.round(6 - (activeT - 5) / 117.5)))
-    : 5;
-  const defaultRest = 20;
-  const [reps, setReps] = useState(defaultReps);
-  const [rest, setRest] = useState(defaultRest);
-  const [userOverride, setUserOverride] = useState(false);
-  // Reset to defaults when the active zone / T changes, unless the user
-  // has manually touched the sliders this session.
-  useEffect(() => {
-    if (!userOverride) {
-      setReps(defaultReps);
-      setRest(defaultRest);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeZone, activeT]);
-  useEffect(() => { setUserOverride(false); }, [grip]);
+  // Ladder reps win for repeat (grip, zone) sessions; the T-derived
+  // formula is the cold-start default for combos with no history.
+  // Protocol-driven, no manual override (June 2026): the Hangs/Rest
+  // sliders were removed — the ladder (or the T-derived default for
+  // new combos) owns the rep count, and rest is a protocol constant.
+  // The sliders were never deliberately used and were an accidental-
+  // bump hazard; commitment to the protocol is the point of the
+  // ladder. The Hangs/Rest/Time summary strip below still shows the
+  // plan read-only.
+  const reps = ladder
+    ? ladder.reps
+    : activeT
+      ? Math.max(4, Math.min(6, Math.round(6 - (activeT - 5) / 117.5)))
+      : 5;
+  const rest = 20;
 
   // ── Push to session config ─────────────────────────────────────────
+  // ladderLoadByHand: fresh-equivalent pinned loads when the density
+  // ladder is active (null otherwise). useSessionRunner.startSession
+  // prefers these over a fresh prescription() call so the "same
+  // weight, more reps" contract actually holds — re-prescribing from
+  // the curve would drift the load between ladder rungs.
   useEffect(() => {
     if (!activeZone || !activeT) return;
     onApplyPlan?.({
@@ -190,9 +240,10 @@ export function SessionPlanCard({
       targetTime: activeT,
       repsPerSet: reps,
       restTime: rest,
+      ladderLoadByHand: ladder?.loadByHand ?? null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeZone, activeT, reps, rest]);
+  }, [activeZone, activeT, reps, rest, ladder]);
 
   // ── Empty / loading states ──────────────────────────────────────────
   if (!grip) {
@@ -262,6 +313,48 @@ export function SessionPlanCard({
     } else {
       whyParts.push(`${focusLabel} focus despite −${Math.abs(pct)}% de-emphasis`);
     }
+  }
+  // Density ladder receipts — when active, the plan's reps + load are
+  // protocol-driven (constant load, earn reps via the last-rep gate),
+  // so the Why line must say so and show the gate math. Loads shown
+  // with today's cookedness multiplier applied, matching what the
+  // runner will stamp.
+  if (ladder) {
+    const lb = ladder.basis;
+    const lMult = capacityMultiplier(fatigueModel, grip, cooked);
+    const loadStr = ["L", "R"]
+      .filter(h => ladder.loadByHand[h] != null)
+      .map(h => `${h} ${fmtW(ladder.loadByHand[h] * lMult, unit)}`)
+      .join(" / ");
+    if (ladder.decision === "advance") {
+      whyParts.push(`ladder: last rep ${lb.lastRepSec}s ≥ ${lb.gateSec}s gate → ${ladder.reps} reps, same load (${loadStr} ${unit})`);
+    } else if (ladder.decision === "repeat") {
+      whyParts.push(`ladder: last rep ${lb.lastRepSec}s < ${lb.gateSec}s gate → repeat ${ladder.reps} reps, same load (${loadStr} ${unit})`);
+    } else {
+      whyParts.push(`ladder: topped out at ${LADDER_MAX_REPS} reps → +${Math.round(LADDER_LOAD_STEP_FRAC * 100)}% load (${loadStr} ${unit}), back to ${LADDER_MIN_REPS} reps`);
+    }
+  }
+  // Fresh short-T test advisory (rec.freshTest, see coaching.js).
+  // Two flavors:
+  //   • the active pick IS short-T → remind to do it fresh, before
+  //     climbing — and warn when today's climb log says that ship
+  //     has already sailed;
+  //   • the pick isn't short-T but the short end is unanchored →
+  //     prompt scheduling a fresh max-test day so the curve's top
+  //     end gets a real failure anchor instead of extrapolation.
+  const pickIsShort = activeT != null && activeT <= FRESH_TEST_SHORT_T_MAX;
+  if (pickIsShort) {
+    if (cookedSuggestion && cookedSuggestion.todayFatigue != null && cookedSuggestion.cooked >= 4) {
+      whyParts.push("⚠️ you've climbed today — a max test now will read low; consider repeating it on a fresh day");
+    } else {
+      whyParts.push("do this fresh — before climbing — so it anchors the curve's top end honestly");
+    }
+  } else if (rec.freshTest?.recommended) {
+    whyParts.push(
+      rec.freshTest.staleDays == null
+        ? "no short-duration failure on record — schedule a fresh ≤10s max test (before climbing) to anchor the curve's top end"
+        : `last short-duration failure was ${rec.freshTest.staleDays}d ago — schedule a fresh ≤10s max test (before climbing) to re-anchor the curve's top end`
+    );
   }
   if (whyParts.length === 0) {
     whyParts.push("curve is well-calibrated locally; this T scores best on staleness × recency");
@@ -438,7 +531,10 @@ export function SessionPlanCard({
         <input
           type="range" min={0} max={10} step={1}
           value={cooked ?? 0}
-          onChange={e => onCookedChange?.(Number(e.target.value))}
+          onChange={e => {
+            cookedTouchedRef.current = true;  // manual edit pins the value
+            onCookedChange?.(Number(e.target.value));
+          }}
           style={{
             flex: 1,
             accentColor: C.orange,
@@ -447,7 +543,10 @@ export function SessionPlanCard({
         />
         {cooked > 0 && (
           <button
-            onClick={() => onCookedChange?.(0)}
+            onClick={() => {
+              cookedTouchedRef.current = true;
+              onCookedChange?.(0);
+            }}
             style={{
               flex: "0 0 auto", fontSize: 10, padding: "2px 8px",
               borderRadius: 4, border: `1px solid ${C.border}`,
@@ -456,6 +555,37 @@ export function SessionPlanCard({
           >fresh</button>
         )}
       </div>
+
+      {/* Provenance note for the climb-derived suggestion. Shown
+          whenever there's climb-log signal for today/yesterday so the
+          user can see WHY the slider pre-filled — and re-apply with
+          one tap after overriding. */}
+      {cookedSuggestion && cookedSuggestion.cooked > 0 && (
+        <div style={{
+          fontSize: 10, color: C.muted, margin: "-6px 2px 12px",
+          lineHeight: 1.4, fontStyle: "italic",
+        }}>
+          Climb log suggests <b style={{ color: C.orange }}>{cookedSuggestion.cooked}/10</b>
+          {" — "}
+          {cookedSuggestion.todayFatigue != null
+            ? `${cookedSuggestion.nClimbsToday} climb${cookedSuggestion.nClimbsToday === 1 ? "" : "s"} logged today`
+            : "no climbs today"}
+          {cookedSuggestion.yesterdayFatigue != null && " + yesterday's session"}
+          {cooked !== cookedSuggestion.cooked && (
+            <button
+              onClick={() => {
+                cookedTouchedRef.current = true;
+                onCookedChange?.(cookedSuggestion.cooked);
+              }}
+              style={{
+                background: "none", border: "none", color: C.orange,
+                fontSize: 10, cursor: "pointer", padding: 0, marginLeft: 6,
+                textDecoration: "underline", fontStyle: "normal",
+              }}
+            >apply</button>
+          )}
+        </div>
+      )}
 
       {/* Override indicator — shows up when the user has selected a tile
           other than the recommended one. Click to revert. */}
@@ -491,26 +621,8 @@ export function SessionPlanCard({
         ))}
       </div>
 
-      {/* Hangs + Rest sliders — always visible; defaults track the
-          active zone, sliders override locally. */}
-      <div style={{ display: "flex", gap: 16 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Hangs</span><span style={{ fontWeight: 700, color: C.text }}>{reps}</span>
-          </div>
-          <input type="range" min={2} max={12} value={reps}
-            onChange={e => { setReps(Number(e.target.value)); setUserOverride(true); }}
-            style={{ width: "100%", accentColor: activeColor }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 4 }}>
-            <span>Rest</span><span style={{ fontWeight: 700, color: C.text }}>{rest}s</span>
-          </div>
-          <input type="range" min={5} max={300} step={5} value={rest}
-            onChange={e => { setRest(Number(e.target.value)); setUserOverride(true); }}
-            style={{ width: "100%", accentColor: activeColor }} />
-        </div>
-      </div>
+      {/* (Hangs + Rest sliders removed June 2026 — protocol-driven;
+          see the comment at the reps/rest derivation above.) */}
 
       {/* Six zone tiles — alternatives. Tap any tile to override the
           recommended pick for this session; the active session block

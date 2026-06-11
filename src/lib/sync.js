@@ -656,6 +656,32 @@ export async function pushDailyState(date, cooked) {
   }
 }
 
+// Delete a date's daily_state row. The clear path's cloud half:
+// saveCooked(date, null) means "no opinion logged" — before this
+// helper existed, a clear only removed the LS entry, so the cloud
+// row survived and the next sign-in reconcile (or the server-side
+// β trigger joining on date) kept seeing the stale cooked value.
+// RLS scopes the delete to the signed-in user; .eq("date") picks
+// the row. Missing row deletes are no-ops (still `ok`), so retrying
+// is harmless.
+export async function deleteDailyState(date) {
+  if (!date) return false;
+  try {
+    const userId = await currentUserId();
+    if (!userId) return false;
+    const { error } = await supabase
+      .from("daily_state")
+      .delete()
+      .eq("user_id", userId)
+      .eq("date", date);
+    if (error) { console.warn("Supabase daily_state delete:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase daily_state delete exception:", e.message);
+    return false;
+  }
+}
+
 export async function fetchDailyStateForDate(date) {
   if (!date) return null;
   try {

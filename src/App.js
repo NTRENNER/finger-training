@@ -229,6 +229,7 @@ export default function App() {
     pyramidProjectMap, savePyramidProjectMap,
     pinnedGripBaselines, savePinnedGripBaselines,
     fatigueModel, setFatigueModel,
+    settingsSynced,
   } = useUserSettings({ user });
 
   // ── Activities (climbing log + 1RM) ──────────────────────
@@ -271,12 +272,23 @@ export default function App() {
   // fatigue-only version.
   const {
     history,
+    historySynced,
     freshMap, threeExpPriors,
     pendingCount, refreshPending,
     addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
     replaceHistory,
     handleWorkoutSessionSaved,
   } = useRepHistory({ user, fatigueModel, dailyState });
+
+  // Gate for useGripFits' pin-on-first-seed write (threaded through
+  // AnalysisContainer → AnalysisView). Both cloud reconciles must land
+  // before a baseline may be frozen: settings, so the local pin map
+  // includes pins seeded on other devices (a premature save clobbers
+  // them on the cloud); history, so the seed window isn't computed
+  // from a partial local cache (pins never overwrite, so a wrong
+  // first pin sticks). Both flags are true when signed out — local-
+  // only users pin immediately, as before.
+  const baselinePinReady = settingsSynced && historySynced;
 
   // Per-grip fatigue β model (replaces perceivedFatigueLearning's
   // (fatigueModel + setFatigueModel come from useUserSettings above —
@@ -744,6 +756,7 @@ export default function App() {
           onPyramidProjectChange={savePyramidProjectMap}
           pinnedGripBaselines={pinnedGripBaselines}
           onSavePinnedGripBaselines={savePinnedGripBaselines}
+          baselinePinReady={baselinePinReady}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder

@@ -9,6 +9,7 @@ import {
   buildSMaxIndex, buildFreshLoadMap, freshLoadFor, fitDoseK,
   estimateRefWeight,
   EMPIRICAL_LOOKBACK_DAYS, prescription,
+  PEAK_CAP_FRACTION, PEAK_CAP_LOOKBACK_DAYS, recentBestPeakKg,
   suggestWeight,
 } from "../prescription.js";
 import { buildThreeExpPriors } from "../threeExp.js";
@@ -638,5 +639,137 @@ describe("prescription (unified)", () => {
     expect(out).not.toBeNull();
     expect(out.potential).toBeGreaterThan(20 * 0.9);
     expect(fmap.get("id:r3").fresh).toBeGreaterThan(20);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Peak-force ceiling (recentBestPeakKg + the cap in prescription)
+// ─────────────────────────────────────────────────────────────
+// Regression for the 2026-06-08 Crusher/L session: the three-exp
+// curve, with no data below 7s, extrapolated F(5s) ABOVE the user's
+// best-ever measured instantaneous peak (94.1 kg prescribed vs
+// 76.9 kg peak). The cap bounds short-T prescriptions at
+// PEAK_CAP_FRACTION × recent best peak_force_kg.
+describe("peak-force ceiling", () => {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // June-8-like history: failures at 7–120s with Tindeq peaks a few
+  // percent above each rep's average — so the short end of the curve
+  // is unconstrained, but the measured peaks bound what the hand can
+  // actually produce.
+  const buildPeakHistory = () => {
+    const Ts = [7, 10, 30, 45, 60, 90, 120];
+    const trueAmps = [30, 12, 6];
+    const tau = [10, 30, 180];
+    return Ts.map((T, i) => {
+      const F = trueAmps[0] * Math.exp(-T / tau[0])
+              + trueAmps[1] * Math.exp(-T / tau[1])
+              + trueAmps[2] * Math.exp(-T / tau[2]);
+      return {
+        id: `r${i}`, hand: "L", grip: "Crusher", target_duration: T,
+        rep_num: 1, actual_time_s: T, failed: true,
+        avg_force_kg: F, peak_force_kg: F * 1.05,
+        date: "2026-04-20", session_id: `s${i}`,
+      };
+    });
+  };
+
+  test("recentBestPeakKg: max sane peak within window, per (hand, grip)", () => {
+    const history = [
+      { hand: "L", grip: "Crusher", peak_force_kg: 70, date: today },
+      { hand: "L", grip: "Crusher", peak_force_kg: 76.9, date: today },
+      { hand: "R", grip: "Crusher", peak_force_kg: 90, date: today },   // other hand
+      { hand: "L", grip: "Micro",   peak_force_kg: 95, date: today },   // other grip
+      { hand: "L", grip: "Crusher", peak_force_kg: 0,  date: today },   // insane → ignored
+    ];
+    expect(recentBestPeakKg(history, "L", "Crusher")).toBe(76.9);
+    expect(recentBestPeakKg(history, "R", "Crusher")).toBe(90);
+    expect(recentBestPeakKg(history, "L", "Prime")).toBeNull();
+    expect(recentBestPeakKg([], "L", "Crusher")).toBeNull();
+  });
+
+  test("recentBestPeakKg: respects lookback window and referenceDate", () => {
+    const oldDate = new Date(Date.now() - (PEAK_CAP_LOOKBACK_DAYS + 10) * 86400 * 1000)
+      .toISOString().slice(0, 10);
+    const history = [
+      { hand: "L", grip: "Crusher", peak_force_kg: 100, date: oldDate },
+      { hand: "L", grip: "Crusher", peak_force_kg: 70,  date: today },
+    ];
+    // Stale 100 kg peak is outside the window — only the recent 70 counts.
+    expect(recentBestPeakKg(history, "L", "Crusher")).toBe(70);
+    // Retrospective: reps on/after referenceDate are excluded (no
+    // leaking the session's own measurement into its reconstruction).
+    expect(recentBestPeakKg(history, "L", "Crusher", today)).toBeNull();
+  });
+
+  test("caps short-duration curve extrapolation at PEAK_CAP_FRACTION × best peak", () => {
+    const seed = buildPeakHistory();
+    const priors = buildThreeExpPriors(seed);
+    // Recent anchor so the curve path is anchored (like June 8).
+    const history = [
+      ...seed,
+      { id: "rA", hand: "L", grip: "Crusher", target_duration: 30,
+        rep_num: 1, actual_time_s: 28, failed: true,
+        avg_force_kg: 21, peak_force_kg: 23,
+        date: today, session_id: "sA" },
+    ];
+    const bestPeak = Math.max(...history.map(r => r.peak_force_kg));
+    const out = prescription(history, "L", "Crusher", 5, { threeExpPriors: priors });
+    expect(out).not.toBeNull();
+    expect(out.peakCapKg).toBeCloseTo(Math.round(bestPeak * PEAK_CAP_FRACTION * 10) / 10, 1);
+    // The cap is a hard bound regardless of what the curve extrapolated.
+    expect(out.value).toBeLessThanOrEqual(out.peakCapKg);
+    // potential stays the raw (uncapped) curve diagnostic.
+    if (out.peakCapped) {
+      expect(out.potential * out.scale).toBeGreaterThan(out.value);
+    }
+  });
+
+  test("cap does not bind at long durations (curve sits far below peak)", () => {
+    const seed = buildPeakHistory();
+    const priors = buildThreeExpPriors(seed);
+    const history = [
+      ...seed,
+      { id: "rA", hand: "L", grip: "Crusher", target_duration: 60,
+        rep_num: 1, actual_time_s: 60, failed: true,
+        avg_force_kg: 13, peak_force_kg: 15,
+        date: today, session_id: "sA" },
+    ];
+    const out = prescription(history, "L", "Crusher", 60, { threeExpPriors: priors });
+    expect(out).not.toBeNull();
+    expect(out.peakCapped).toBe(false);
+  });
+
+  test("no Tindeq peaks → no cap (manual-load histories unchanged)", () => {
+    const seed = buildPeakHistory().map(({ peak_force_kg, ...r }) => r);
+    const priors = buildThreeExpPriors(seed);
+    const history = [
+      ...seed,
+      { id: "rA", hand: "L", grip: "Crusher", target_duration: 30,
+        rep_num: 1, actual_time_s: 28, failed: true,
+        avg_force_kg: 21, date: today, session_id: "sA" },
+    ];
+    const out = prescription(history, "L", "Crusher", 5, { threeExpPriors: priors });
+    expect(out).not.toBeNull();
+    expect(out.peakCapKg).toBeNull();
+    expect(out.peakCapped).toBe(false);
+  });
+
+  test("anchored-linear cold-start path is capped too", () => {
+    // No prior (no curve-supporting data) — just one recent long rep
+    // with a measured peak, prescribing for a 5s target. Linear T-ratio
+    // scaling (clamped at 2.5×) would prescribe 21 × 2.5 = 52.5 kg;
+    // the measured peak of 30 kg says that's impossible.
+    const history = [
+      { id: "rA", hand: "L", grip: "Crusher", target_duration: 30,
+        rep_num: 1, actual_time_s: 28, failed: true,
+        avg_force_kg: 21, peak_force_kg: 30,
+        date: today, session_id: "sA" },
+    ];
+    const out = prescription(history, "L", "Crusher", 5);
+    expect(out).not.toBeNull();
+    expect(out.source).toBe("anchored-linear");
+    expect(out.peakCapped).toBe(true);
+    expect(out.value).toBeCloseTo(Math.round(30 * PEAK_CAP_FRACTION * 10) / 10, 1);
   });
 });

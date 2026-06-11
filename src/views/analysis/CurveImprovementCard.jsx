@@ -128,7 +128,7 @@ function OverlayChart({ baselineAmps, nowAmps, candidateAmps, unit, maxDur, colo
         />
         <YAxis domain={yDomain} tick={{ fill: C.muted, fontSize: 11 }} width={44} unit={` ${unit}`} />
         <Tooltip
-          contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+          contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
           formatter={(val, name) => [val == null ? "—" : `${fmtW(val, unit)} ${unit}`, name]}
           labelFormatter={(t) => `${fmt1(t)}s`}
         />
@@ -163,7 +163,7 @@ function GripBlock({ grip, overlay, unit, maxDur, nowIdx, onScrub, divider }) {
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color }}>{grip}</div>
-        <div style={{ fontSize: 10, color: C.muted }}>since {overlay.baselineDate}</div>
+        <div style={{ fontSize: 11, color: C.muted }}>since {overlay.baselineDate}</div>
       </div>
 
       {imp && <ImprovementRow label={null} imp={imp} />}
@@ -243,13 +243,13 @@ export function CurveImprovementCard({
               // No overlay yet for this grip — static tiles at latest.
               return (
                 <div key={grip} style={{
-                  paddingBottom: divider ? 12 : 0,
+                  paddingBottom: divider ? 14 : 0,
                   borderBottom: divider ? `1px solid ${C.border}` : "none",
-                  marginBottom: divider ? 12 : 0,
+                  marginBottom: divider ? 14 : 0,
                 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: GRIP_COLORS[grip] || C.text }}>{grip}</div>
-                    <div style={{ fontSize: 10, color: C.muted }}>since {imp.baselineDate}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: GRIP_COLORS[grip] || C.blue }}>{grip}</div>
+                    <div style={{ fontSize: 11, color: C.muted }}>since {imp.baselineDate}</div>
                   </div>
                   <ImprovementRow label={null} imp={imp} />
                 </div>

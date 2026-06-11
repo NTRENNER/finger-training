@@ -43,9 +43,12 @@ export function AnalysisContainer(props) {
     freshMap,
     GOAL_CONFIG, RM_GRIPS,
     // Frozen per-grip baselines threaded from App.useUserSettings — see
-    // LS_PINNED_GRIP_BASELINES_KEY for the rationale.
+    // LS_PINNED_GRIP_BASELINES_KEY for the rationale. baselinePinReady
+    // gates the pin-on-first-seed WRITE until both cloud reconciles
+    // (user_settings + reps) have landed — see App.js.
     pinnedGripBaselines = null,
     onSavePinnedGripBaselines = () => {},
+    baselinePinReady = true,
     // WorkoutAnalysisView (lifts) props
     defaultWorkouts,
     // ClimbingAnalysisView (climbs) props — pyramid pins synced via App
@@ -107,6 +110,7 @@ export function AnalysisContainer(props) {
           RM_GRIPS={RM_GRIPS}
           pinnedGripBaselines={pinnedGripBaselines}
           onSavePinnedGripBaselines={onSavePinnedGripBaselines}
+          baselinePinReady={baselinePinReady}
         />
       )}
       {sub === "lifts" && (

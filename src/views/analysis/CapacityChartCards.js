@@ -58,7 +58,7 @@ export function CapacityTrajectoryCard({ aucHistoryByGrip, normalizeOn }) {
           <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={48} unit="%"
             label={{ value: "vs baseline", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
           <Tooltip
-            contentStyle={{ background: C.card, border: `1px solid ${C.border}`, fontSize: 12 }}
+            contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
             formatter={(val, name) => [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}
           />
           {aucHistoryByGrip.grips.flatMap(g => {

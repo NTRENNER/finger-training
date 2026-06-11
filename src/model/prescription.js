@@ -54,7 +54,7 @@ import { capacityMultiplier } from "./fatigueBeta.js";
 // (prescription.js imports threeExp.js). effectiveLoad + loadedWeight
 // are used internally below; all four are re-exported just after so
 // existing call sites that import them from prescription.js keep working.
-import { effectiveLoad, loadedWeight } from "./load.js";
+import { sane, effectiveLoad, loadedWeight } from "./load.js";
 
 // ─────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
@@ -359,6 +359,11 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
 //     reliability: "well-supported" | "marginal" | "extrapolation"
 //     source:      "anchored-curve"  | "unanchored-curve"
 //                | "anchored-linear" | "historical" | "none"
+//     peakCapKg:   <number> | null  ceiling (PEAK_CAP_FRACTION × recent
+//                                   best peak_force_kg), null when no
+//                                   Tindeq peak exists in the window
+//     peakCapped:  <bool>           true when value was reduced to the
+//                                   ceiling (curve/linear paths only)
 //   }
 //   or null if there's not even a historical fallback.
 //
@@ -375,6 +380,53 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
 //   none              — nothing usable; returns null.
 
 export const EMPIRICAL_LOOKBACK_DAYS = 30;
+
+// ── Peak-force ceiling (June 2026) ───────────────────────────
+// The three-exp curve has essentially no data support below ~10s for
+// most training histories (short-end reps are rare, and the recent
+// ones usually aren't failures), so curve_shape(T) extrapolates
+// steeply at short T. Unclamped, that produced prescriptions ABOVE
+// the user's measured instantaneous max — the 2026-06-08 Crusher/L
+// max-strength session prescribed 94.1 kg when the best peak_force_kg
+// ever recorded on that (hand, grip) was 76.9 kg. No isometric hold
+// of ANY duration can exceed instantaneous peak force, so a recent
+// measured peak is a hard physical ceiling the curve must respect.
+//
+// PEAK_CAP_FRACTION sits slightly below 1.0 because a prescription is
+// a load to SUSTAIN for targetDuration, and sustained force is always
+// under instantaneous peak. The cap only binds at short durations —
+// at 30s+ the curve sits far below peak and nothing changes. Manual
+// (non-Tindeq) histories have no peak_force_kg, so the cap is simply
+// absent there.
+//
+// This is deliberately NOT a re-clamp of the anchor scale (removed
+// May 2026 per user direction — the engine should react to genuine
+// recent performance). The scale stays unclamped; the cap bounds only
+// the final value, and only against demonstrated physical capacity.
+export const PEAK_CAP_LOOKBACK_DAYS = 90;
+export const PEAK_CAP_FRACTION = 0.95;
+
+// Best measured instantaneous peak (kg) for (hand, grip) within the
+// lookback window, from any rep (peaks are valid signals regardless
+// of rep_num — fatigue lowers them, never raises). referenceDate
+// mirrors prescription()'s retrospective semantics: null = today.
+// Returns null when no Tindeq peak exists in the window.
+export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
+  if (!history) return null;
+  const refMs = referenceDate
+    ? new Date(`${referenceDate}T00:00:00`).getTime()
+    : Date.now();
+  const cutoff = ymdLocal(new Date(refMs - PEAK_CAP_LOOKBACK_DAYS * 86400 * 1000));
+  let best = null;
+  for (const r of history) {
+    if (!r || r.hand !== hand || r.grip !== grip) continue;
+    if ((r.date || "") < cutoff) continue;
+    if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
+    const p = sane(r.peak_force_kg);
+    if (p != null && (best == null || p > best)) best = p;
+  }
+  return best;
+}
 
 export function prescription(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
@@ -420,6 +472,15 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
     F: loadedWeight(anchorRep),
     date: anchorRep.date,
   } : null;
+
+  // Peak-force ceiling — see PEAK_CAP_FRACTION above. Null when the
+  // history has no Tindeq peaks in the window (manual users), in
+  // which case capValue() is a pass-through.
+  const bestPeakKg = recentBestPeakKg(history, hand, grip, referenceDate);
+  const peakCapKg = bestPeakKg != null
+    ? Math.round(bestPeakKg * PEAK_CAP_FRACTION * 10) / 10
+    : null;
+  const capValue = (v) => (peakCapKg != null && v > peakCapKg) ? peakCapKg : v;
 
   // Try the three-exp curve fit. Requires a per-grip prior to anchor
   // the shrinkage; without one, small-N fits collapse onto degenerate
@@ -467,13 +528,21 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
                           : within50 >= 1 ? "marginal"
                           :                 "extrapolation";
 
+        // Apply the peak-force ceiling to the trainable value only.
+        // `potential` stays the raw curve — it's a diagnostic of what
+        // the model believes, and the gap consumers should keep seeing
+        // the uncapped shape. peakCapped tells the UI the value was
+        // physically bounded rather than curve-derived.
+        const value = capValue(Math.round(valueRaw * 10) / 10);
         return {
-          value:       Math.round(valueRaw * 10) / 10,
+          value,
           potential:   Math.round(potentialRaw * 10) / 10,
           scale,
           anchor,
           reliability,
           source,
+          peakCapKg,
+          peakCapped:  value !== Math.round(valueRaw * 10) / 10,
         };
       }
     }
@@ -498,14 +567,19 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // direction" applies there, not here).
   if (anchor) {
     const linScale = Math.min(2.5, Math.max(0.4, anchor.T / targetDuration));
-    const v = anchor.F * linScale;
+    const v = Math.round(anchor.F * linScale * 10) / 10;
+    // Same peak-force ceiling as the curve path — linear scaling from
+    // a long-T anchor to a short target overshoots the same way.
+    const value = capValue(v);
     return {
-      value:       Math.round(v * 10) / 10,
-      potential:   Math.round(v * 10) / 10,  // no curve to give a separate ceiling
+      value,
+      potential:   v,  // no curve to give a separate ceiling
       scale:       linScale,
       anchor,
       reliability: "extrapolation",
       source:      "anchored-linear",
+      peakCapKg,
+      peakCapped:  value !== v,
     };
   }
 
