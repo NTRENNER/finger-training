@@ -73,7 +73,8 @@ import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 // benchmark bands aren't validated against personal performance, and
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
-import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
+import { CapacityTrajectoryCard, ZoneShareCard } from "./analysis/CapacityChartCards.js";
+import { EnduranceCeilingCard } from "./analysis/EnduranceCeilingCard.jsx";
 import { DeloadGauge } from "./cards/DeloadGauge.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
@@ -741,13 +742,28 @@ export function AnalysisView({
         <CapacityTrajectoryCard
           aucHistoryByGrip={aucHistoryByGrip}
           normalizeOn={normalizeOn}
+          activities={activities}
         />
+
+        {/* Capacity shape — zone share of the balanced score over time.
+            The trajectory above says how much the curve grew; this says
+            where the growth came from (June 2026). */}
+        <ZoneShareCard aucHistoryByGrip={aucHistoryByGrip} />
 
         {/* Peak force — direct max-strength measurement over time, from
             short near-max reps. Complements the curve (sustained force)
             and the AUC trajectory (whole-curve capacity) with the one
             thing they underrepresent: instantaneous max recruitment. */}
         <PeakForceCard history={history} unit={unit} />
+
+        {/* Endurance ceiling — sustained (240s curve force) ÷ measured
+            peak, per grip. One-number limiter diagnostic bridging the
+            curve fits and the peak measurements (June 2026). */}
+        <EnduranceCeilingCard
+          history={history}
+          grip3xEstimates={grip3xEstimates}
+          unit={unit}
+        />
 
 
         {/* (Force Curves — vs baseline overlay merged INTO

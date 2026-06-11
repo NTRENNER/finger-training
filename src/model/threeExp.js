@@ -292,6 +292,52 @@ export function computeBalancedCurveScore(amps, taus = null) {
   return Math.exp(logSum / n);
 }
 
+// ── Zone shares — where the curve's capacity lives (June 2026) ──
+// The balanced score answers "how big is the whole curve"; these
+// answer "what SHAPE is it" — the share of that capacity sitting in
+// the power / strength / endurance regions. Tracked over time it
+// shows where a block's gains actually came from ("this month was
+// mostly endurance"). Buckets pair adjacent ZONE_REF_T evaluation
+// points (the same six refTs the balanced score uses, same
+// geometric-mean aggregation), so the three shares are a clean
+// decomposition of the score's inputs and always sum to ~100.
+export const ZONE_SHARE_BUCKETS = {
+  power:     ["max_strength", "power"],            // 5s, 30s
+  strength:  ["power_strength", "strength"],       // 70s, 115s
+  endurance: ["strength_endurance", "endurance"],  // 160s, 220s
+};
+
+// Returns { power, strength, endurance } as percentages (1 d.p.)
+// summing to ~100, or null when the amps are unusable.
+export function computeZoneShares(amps, taus = null) {
+  if (!Array.isArray(amps) || amps.length !== 3) return null;
+  const bucketVals = {};
+  for (const [bucket, zoneKeys] of Object.entries(ZONE_SHARE_BUCKETS)) {
+    let logSum = 0;
+    let n = 0;
+    for (const zk of zoneKeys) {
+      const f = predForceThreeExp(amps, ZONE_REF_T[zk], taus);
+      if (isFinite(f) && f > 0) { logSum += Math.log(f); n++; }
+    }
+    if (n === 0) return null;
+    bucketVals[bucket] = Math.exp(logSum / n);
+  }
+  const total = bucketVals.power + bucketVals.strength + bucketVals.endurance;
+  if (!(total > 0)) return null;
+  const pct = (v) => Math.round((v / total) * 1000) / 10;
+  return {
+    power:     pct(bucketVals.power),
+    strength:  pct(bucketVals.strength),
+    endurance: pct(bucketVals.endurance),
+  };
+}
+
+// Long-duration evaluation point for the Endurance Ceiling diagnostic
+// (curve force here ÷ measured peak force). 240s sits past the last
+// zone refT — deep in slow-component territory — without extrapolating
+// beyond what training data plausibly supports.
+export const ENDURANCE_CEILING_T = 240;
+
 // Build per-grip three-exp prior by pooling all that grip's data
 // across hands. Used as the shrinkage target for per-(hand, grip) fits.
 // Returns Map<grip, [a, b, c]>. Pooling within-grip avoids the cross-

@@ -24,7 +24,7 @@
 
 import { useMemo } from "react";
 import { bwOnDate } from "../ui/format.js";
-import { computeBalancedCurveScore, buildThreeExpPriors } from "../model/threeExp.js";
+import { computeBalancedCurveScore, computeZoneShares, buildThreeExpPriors } from "../model/threeExp.js";
 import { fitAmpsForPts } from "../model/baselines.js";
 import { effectiveLoad, freshFitReps } from "../model/load.js";
 
@@ -113,7 +113,10 @@ export function useAucHistoryByGrip({
         const pctBW = (baseAUC && baseAUC > 0 && baseBW > 0 && sessionBW > 0)
           ? Math.round((abs / baseAUC * baseBW / sessionBW - 1) * 100)
           : pct;  // fall back to raw pct if any BW is missing
-        seriesMap.set(date, { abs: Math.round(abs), pct, pctBW });
+        // Zone shares from the fitted amps (shape, not level — so the
+        // baseline-anchored first point still uses its own fit's shape).
+        const shares = computeZoneShares(amps);
+        seriesMap.set(date, { abs: Math.round(abs), pct, pctBW, shares });
         datesUnion.add(date);
       }
       // Baseline required: this hook feeds the "% vs baseline" card,
@@ -159,10 +162,12 @@ export function useAucHistoryByGrip({
     const absRows = [];
     const pctRows = [];
     const pctRowsBW = [];
+    const shareRows = [];
     for (const date of dates) {
       const aRow = { date };
       const pRow = { date };
       const pBwRow = { date };
+      const sRow = { date };
       for (const g of Object.keys(perGrip)) {
         const v = perGrip[g].get(date);
         const sv = smoothedByGrip[g]?.get(date);
@@ -171,16 +176,21 @@ export function useAucHistoryByGrip({
         pRow[`${g}_pct_sm`]   = sv ? sv.pctSm   : null;
         pBwRow[`${g}_pct`]    = v ? v.pctBW : null;
         pBwRow[`${g}_pct_sm`] = sv ? sv.pctBWSm : null;
+        sRow[`${g}_power`]     = v?.shares ? v.shares.power     : null;
+        sRow[`${g}_strength`]  = v?.shares ? v.shares.strength  : null;
+        sRow[`${g}_endurance`] = v?.shares ? v.shares.endurance : null;
       }
       absRows.push(aRow);
       pctRows.push(pRow);
       pctRowsBW.push(pBwRow);
+      shareRows.push(sRow);
     }
     return {
       grips: Object.keys(perGrip),
       absRows,
       pctRows,
       pctRowsBW,
+      shareRows,
       hasPct: Object.values(baselineByGrip).some(v => v.auc > 0),
     };
   }, [history, grips, gripBaselines, threeExpPriors, bwLog]);
