@@ -34,6 +34,13 @@ export function useAucHistoryByGrip({
   gripBaselines,
   threeExpPriors,
   bwLog,
+  // Hand scoping (June 2026, analysis hand selector): when `hand` is
+  // "L"/"R", the trajectory runs on that hand's fresh reps and the
+  // baseline comes from perHandBaselines (`${grip}|${hand}` keys —
+  // the FROZEN per-hand pins from useGripFits). Null = pooled, the
+  // original behavior, byte for byte.
+  hand = null,
+  perHandBaselines = null,
 }) {
   return useMemo(() => {
     // Per-grip date-keyed map of AUC values (and % vs baseline).
@@ -54,6 +61,7 @@ export function useAucHistoryByGrip({
       // Curve-Improvement cards so the Capacity % agrees with them.
       const gripFails = freshFitReps(history).filter(r =>
         r.grip === g &&
+        (!hand || r.hand === hand) &&
         effectiveLoad(r) > 0 && r.actual_time_s > 0
       );
       if (gripFails.length < 3) continue;
@@ -65,7 +73,9 @@ export function useAucHistoryByGrip({
       // bwOnDate returns the most-recent-on-or-before entry, so a
       // baseline dated before the first BW log just yields null and
       // pctBW falls back to the raw pct in the render.
-      const base = gripBaselines[g];
+      const base = hand
+        ? perHandBaselines?.[`${g}|${hand}`]
+        : gripBaselines[g];
       if (base?.amps) {
         const baseAUC = computeBalancedCurveScore(base.amps);
         const baseBwEntry = base.date ? bwOnDate(bwLog, base.date) : null;
@@ -193,5 +203,5 @@ export function useAucHistoryByGrip({
       shareRows,
       hasPct: Object.values(baselineByGrip).some(v => v.auc > 0),
     };
-  }, [history, grips, gripBaselines, threeExpPriors, bwLog]);
+  }, [history, grips, gripBaselines, threeExpPriors, bwLog, hand, perHandBaselines]);
 }

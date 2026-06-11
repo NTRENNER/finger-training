@@ -48,6 +48,8 @@ export function AnalysisContainer(props) {
     // (user_settings + reps) have landed — see App.js.
     pinnedGripBaselines = null,
     onSavePinnedGripBaselines = () => {},
+    pinnedPerHandBaselines = null,
+    onSavePinnedPerHandBaselines = () => {},
     baselinePinReady = true,
     // WorkoutAnalysisView (lifts) props
     defaultWorkouts,
@@ -110,6 +112,8 @@ export function AnalysisContainer(props) {
           RM_GRIPS={RM_GRIPS}
           pinnedGripBaselines={pinnedGripBaselines}
           onSavePinnedGripBaselines={onSavePinnedGripBaselines}
+          pinnedPerHandBaselines={pinnedPerHandBaselines}
+          onSavePinnedPerHandBaselines={onSavePinnedPerHandBaselines}
           baselinePinReady={baselinePinReady}
         />
       )}

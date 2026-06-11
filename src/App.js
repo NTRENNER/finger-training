@@ -228,6 +228,7 @@ export default function App() {
     climbingFocus, saveClimbingFocus,
     pyramidProjectMap, savePyramidProjectMap,
     pinnedGripBaselines, savePinnedGripBaselines,
+    pinnedPerHandBaselines, savePinnedPerHandBaselines,
     fatigueModel, setFatigueModel,
     settingsSynced,
   } = useUserSettings({ user });
@@ -756,6 +757,8 @@ export default function App() {
           onPyramidProjectChange={savePyramidProjectMap}
           pinnedGripBaselines={pinnedGripBaselines}
           onSavePinnedGripBaselines={savePinnedGripBaselines}
+          pinnedPerHandBaselines={pinnedPerHandBaselines}
+          onSavePinnedPerHandBaselines={savePinnedPerHandBaselines}
           baselinePinReady={baselinePinReady}
         />
       )}

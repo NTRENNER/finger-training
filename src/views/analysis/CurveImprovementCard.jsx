@@ -207,6 +207,13 @@ export function CurveImprovementCard({
   historyOverlay = {},
   maxDur = 180,
   unit = "lbs",
+  // Hand selector (June 2026): "pooled" | "L" | "R". In L/R mode the
+  // card renders STATIC per-grip tiles from perHandGripImprovement
+  // (keys `${grip}|${hand}`, vs the FROZEN per-hand baselines) — the
+  // interactive overlay + slider stay pooled-only, where the fits
+  // have the data density to be worth scrubbing.
+  handView = "pooled",
+  perHandGripImprovement = {},
 }) {
   // Per-grip "Now" slider index. null → latest date for that grip.
   const [nowIdxByGrip, setNowIdxByGrip] = useState({});
@@ -223,6 +230,51 @@ export function CurveImprovementCard({
   const overlayGrips = new Set(
     Object.keys(historyOverlay).filter(g => historyOverlay[g]?.dates?.length > 0)
   );
+
+  // ── Per-hand mode: static tiles vs frozen per-hand baselines ──
+  if (handView === "L" || handView === "R") {
+    const entries = Object.entries(perHandGripImprovement)
+      .filter(([key]) => key.endsWith(`|${handView}`))
+      .map(([key, imp]) => [key.split("|")[0], imp])
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    return (
+      <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
+          Curve Improvement
+          <span style={{ color: handView === "R" ? C.orange : C.blue, marginLeft: 8, fontSize: 12 }}>
+            {handView === "R" ? "Right hand" : "Left hand"}
+          </span>
+        </div>
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.4 }}>
+          Per-hand fits vs that hand's frozen baseline — half the data
+          of the pooled view, so expect noisier numbers. The overlay +
+          slider live in the Pooled view.
+        </div>
+        {entries.length > 0 ? entries.map(([grip, imp], i, arr) => {
+          const divider = i < arr.length - 1;
+          return (
+            <div key={grip} style={{
+              paddingBottom: divider ? 14 : 0,
+              borderBottom: divider ? `1px solid ${C.border}` : "none",
+              marginBottom: divider ? 14 : 0,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: GRIP_COLORS[grip] || C.blue }}>{grip}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>since {imp.baselineDate}</div>
+              </div>
+              <ImprovementRow label={null} imp={imp} />
+            </div>
+          );
+        }) : (
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+            No {handView === "R" ? "right" : "left"}-hand baseline seeded
+            yet — a hand needs ≥{FAIL_THRESHOLD} failures across
+            ≥{DUR_THRESHOLD} durations of its own before its frame freezes.
+          </div>
+        )}
+      </Card>
+    );
+  }
 
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>

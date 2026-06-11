@@ -32,7 +32,8 @@
 import { useEffect, useMemo } from "react";
 import {
   buildGripBaselines, buildPerHandGripBaselines,
-  buildGripEstimates, buildGripImprovement, computeHandAsymmetry,
+  buildGripEstimates, buildPerHandGripEstimates,
+  buildGripImprovement, computeHandAsymmetry,
 } from "../model/baselines.js";
 
 export function useGripFits({
@@ -43,11 +44,18 @@ export function useGripFits({
   // in history later (stale-device sync, accidental import, etc.).
   // See LS_PINNED_GRIP_BASELINES_KEY for the why.
   pinnedGripBaselines = null,
+  // Optional: per-(grip, hand) pinned baselines, keyed `${grip}|${hand}`.
+  // Same freeze contract as the pooled pins (June 2026, added with the
+  // analysis hand selector). Pinned wins over freshly computed.
+  pinnedPerHandBaselines = null,
   // Optional: callback to persist a newly-seeded baseline. Called
   // from the auto-pin effect below the first time each grip's seed
   // window is satisfied. No-op if the caller doesn't pass it (the
   // hook still works, just without persistence — useful for tests).
   onSavePinnedGripBaselines = null,
+  // Optional: persists newly-seeded per-hand baselines (same shape of
+  // callback as the pooled one, map keyed `${grip}|${hand}`).
+  onSavePinnedPerHandBaselines = null,
   // Gate for the auto-pin effect. App threads `settingsSynced &&
   // historySynced` here (true when signed out — local is the
   // authority then). Until BOTH cloud reconciles have landed,
@@ -118,12 +126,53 @@ export function useGripFits({
   // 2026 with its only consumer, the Strength Balance card.)
 
   // Per-(grip, hand) baselines — same seed gate as gripBaselines but
-  // scoped to a single hand on a single grip. Used by the per-hand
-  // baseline scoping logic in the Curve Improvement card and the
-  // per-hand mode of the Force Curves overlay.
-  const perHandGripBaselines = useMemo(
+  // scoped to a single hand on a single grip. Candidates from raw
+  // history; pinned wins (same freeze rationale as the pooled map).
+  const candidatePerHandBaselines = useMemo(
     () => buildPerHandGripBaselines(history, threeExpPriors),
     [history, threeExpPriors]
+  );
+  const perHandGripBaselines = useMemo(() => {
+    const out = { ...candidatePerHandBaselines };
+    if (pinnedPerHandBaselines && typeof pinnedPerHandBaselines === "object") {
+      for (const [key, pinned] of Object.entries(pinnedPerHandBaselines)) {
+        if (pinned && Array.isArray(pinned.amps) && pinned.amps.length === 3 && pinned.date) {
+          out[key] = pinned;
+        }
+      }
+    }
+    return out;
+  }, [candidatePerHandBaselines, pinnedPerHandBaselines]);
+
+  // Auto-pin per-hand baselines on first seed — mirrors the pooled
+  // effect above, including the allowAutoPin gate (partial history /
+  // stale pins would freeze the wrong frame or clobber cloud pins).
+  useEffect(() => {
+    if (!allowAutoPin) return;
+    if (!onSavePinnedPerHandBaselines) return;
+    if (!candidatePerHandBaselines || typeof candidatePerHandBaselines !== "object") return;
+    let changed = false;
+    const next = { ...(pinnedPerHandBaselines || {}) };
+    for (const [key, baseline] of Object.entries(candidatePerHandBaselines)) {
+      if (next[key]) continue;        // already pinned, never overwrite
+      if (!baseline || !Array.isArray(baseline.amps) || !baseline.date) continue;
+      next[key] = { date: baseline.date, amps: baseline.amps };
+      changed = true;
+    }
+    if (changed) onSavePinnedPerHandBaselines(next);
+  }, [candidatePerHandBaselines, pinnedPerHandBaselines, onSavePinnedPerHandBaselines, allowAutoPin]);
+
+  // Per-(grip, hand) CURRENT fits + improvement vs the per-hand
+  // baselines — the data behind the analysis hand selector's L/R
+  // views. Keys are `${grip}|${hand}` throughout, so the pooled
+  // buildGripImprovement consumes the maps unchanged.
+  const perHandGripEstimates = useMemo(
+    () => buildPerHandGripEstimates(history, threeExpPriors),
+    [history, threeExpPriors]
+  );
+  const perHandGripImprovement = useMemo(
+    () => buildGripImprovement(perHandGripBaselines, perHandGripEstimates),
+    [perHandGripBaselines, perHandGripEstimates]
   );
 
   // Per-grip improvement — pooled current vs pooled baseline, same
@@ -148,6 +197,8 @@ export function useGripFits({
     gripBaselines,
     grip3xEstimates,
     perHandGripBaselines,
+    perHandGripEstimates,
+    perHandGripImprovement,
     gripImprovement,
     handAsymmetry,
   };

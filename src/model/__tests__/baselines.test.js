@@ -3,7 +3,10 @@
 // fits now run through (fixes the per-hand asymmetry + pooled-vs-per-hand
 // divergence that came from fatigue/duplicate-contaminated baselines).
 
-import { buildGripBaselines, buildGripEstimates, buildGripImprovement } from "../baselines.js";
+import {
+  buildGripBaselines, buildGripEstimates, buildGripImprovement,
+  buildPerHandGripEstimates,
+} from "../baselines.js";
 import { buildThreeExpPriors, predForceThreeExp } from "../threeExp.js";
 import { freshFitReps } from "../load.js";
 
@@ -11,6 +14,31 @@ const r = (over) => ({
   grip: "Crusher", hand: "L", date: "2026-04-20",
   rep_num: 1, target_duration: 45, actual_time_s: 40, avg_force_kg: 30,
   ...over,
+});
+
+describe("buildPerHandGripEstimates", () => {
+  test("splits fits by hand under grip|hand keys; ignores Both/missing hand", () => {
+    const history = [
+      r({ hand: "L", target_duration: 10, actual_time_s: 10, avg_force_kg: 50 }),
+      r({ hand: "L", target_duration: 60, actual_time_s: 60, avg_force_kg: 22 }),
+      r({ hand: "R", target_duration: 10, actual_time_s: 10, avg_force_kg: 44 }),
+      r({ hand: "R", target_duration: 60, actual_time_s: 60, avg_force_kg: 19 }),
+      r({ hand: "Both", target_duration: 30, actual_time_s: 30, avg_force_kg: 70 }),  // ignored
+    ];
+    const priors = buildThreeExpPriors(history);
+    const out = buildPerHandGripEstimates(history, priors);
+    expect(out["Crusher|L"]).toBeDefined();
+    expect(out["Crusher|R"]).toBeDefined();
+    expect(Object.keys(out).every(k => k.endsWith("|L") || k.endsWith("|R"))).toBe(true);
+    // The stronger hand's fit predicts more force at a shared duration.
+    const fL = predForceThreeExp(out["Crusher|L"], 30);
+    const fR = predForceThreeExp(out["Crusher|R"], 30);
+    expect(fL).toBeGreaterThan(fR);
+  });
+
+  test("empty / handless history yields an empty map", () => {
+    expect(buildPerHandGripEstimates([], buildThreeExpPriors([]))).toEqual({});
+  });
 });
 
 describe("freshFitReps", () => {

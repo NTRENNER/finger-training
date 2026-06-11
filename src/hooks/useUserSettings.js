@@ -31,6 +31,7 @@ import {
   LS_BW_DIRTY_KEY, loadDirtySet, markDirty, clearDirty,
   LS_PYRAMID_PROJECT_KEY,
   LS_PINNED_GRIP_BASELINES_KEY,
+  LS_PINNED_PERHAND_BASELINES_KEY,
   migrateLegacyPyramidPins,
 } from "../lib/storage.js";
 import { today } from "../util.js";
@@ -325,6 +326,28 @@ export function useUserSettings({ user }) {
     }
   }, [user]);
 
+  // ── Pinned per-(grip, hand) baselines ─────────────────────
+  // Same freeze contract as the pooled map, keyed `${grip}|${hand}`
+  // (June 2026, added with the analysis hand selector). Same schema
+  // versioning, same cloud-wins reconcile, synced under
+  // user_settings.pinned_perhand_baselines.
+  const [pinnedPerHandBaselines, setPinnedPerHandBaselinesState] = useState(
+    () => migratePins(loadLS(LS_PINNED_PERHAND_BASELINES_KEY))
+  );
+  const savePinnedPerHandBaselines = useCallback((next) => {
+    const stamped = { ...next, _v: PIN_SCHEMA_VERSION };
+    setPinnedPerHandBaselinesState(stamped);
+    saveLS(LS_PINNED_PERHAND_BASELINES_KEY, stamped);
+    if (user) {
+      (async () => {
+        // Abort on fetch error — see saveClimbingFocus for why.
+        const current = await fetchUserSettings();
+        if (current == null) return;
+        await pushUserSettings({ ...current, pinned_perhand_baselines: stamped });
+      })().catch(() => {});
+    }
+  }, [user]);
+
   // ── Fatigue β model (per-grip) ───────────────────────────
   // Stored in user_settings.settings.fatigue_model so it persists
   // across devices. Updated server-side by the
@@ -387,6 +410,12 @@ export function useUserSettings({ user }) {
         setPinnedGripBaselinesState(migrated);
         saveLS(LS_PINNED_GRIP_BASELINES_KEY, migrated);
       }
+      // Per-hand pins — same cloud-wins rationale as the pooled map.
+      if (cloud.pinned_perhand_baselines && typeof cloud.pinned_perhand_baselines === "object") {
+        const migrated = migratePins(cloud.pinned_perhand_baselines);
+        setPinnedPerHandBaselinesState(migrated);
+        saveLS(LS_PINNED_PERHAND_BASELINES_KEY, migrated);
+      }
       // Pull fatigue_model so the client uses the same β the server
       // trigger is updating. Falls back to local defaults if cloud
       // has no value yet (first-run before any rep-1 insert).
@@ -407,6 +436,7 @@ export function useUserSettings({ user }) {
     climbingFocus, saveClimbingFocus,
     pyramidProjectMap, savePyramidProjectMap,
     pinnedGripBaselines, savePinnedGripBaselines,
+    pinnedPerHandBaselines, savePinnedPerHandBaselines,
     fatigueModel, setFatigueModel,
     settingsSynced,
   };

@@ -192,6 +192,15 @@ export const LS_WARMUP_MODE_KEY = "ft_warmup_mode";
 // localStorage / user_settings and the next render reseeds.
 export const LS_PINNED_GRIP_BASELINES_KEY = "ft_pinned_grip_baselines";
 
+// Per-(grip, hand) pinned baselines — same freeze-on-first-seed
+// contract as LS_PINNED_GRIP_BASELINES_KEY but keyed `${grip}|${hand}`
+// (June 2026, added with the analysis hand selector so the per-hand
+// Curve Improvement / Capacity views compare against a FROZEN frame,
+// not a recomputed one that backdated syncs could slide). Synced to
+// user_settings.pinned_perhand_baselines; useGripFits owns the
+// pin-on-first-seed effect, same gating as the pooled pins.
+export const LS_PINNED_PERHAND_BASELINES_KEY = "ft_pinned_perhand_baselines";
+
 // (LS_PYRAMID_WARMUP_KEY existed when the pyramid card had a
 // "Warmups ≤ Vx" floor selector — May 2026. The redesigned 5-tier
 // silhouette doesn't filter by warmup, so the key was removed. Any

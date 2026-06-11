@@ -97,6 +97,9 @@ export function AnalysisView({
   // the why this exists.
   pinnedGripBaselines = null,
   onSavePinnedGripBaselines = null,
+  // Per-(grip, hand) pins — same contract, keyed `${grip}|${hand}`.
+  pinnedPerHandBaselines = null,
+  onSavePinnedPerHandBaselines = null,
   // Gate for the pin-on-first-seed write — false until both cloud
   // reconciles (user_settings + reps) have landed. See App.js.
   baselinePinReady = true,
@@ -207,6 +210,16 @@ export function AnalysisView({
   };
   const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
 
+  // ── Hand selector (June 2026) ─────────────────────────────
+  // "pooled" (default) | "L" | "R". One global control, like the
+  // Absolute/×BW toggle: scopes the F-D chart's data + fit, the
+  // Capacity trajectory (against FROZEN per-hand baselines — see
+  // LS_PINNED_PERHAND_BASELINES_KEY), Curve Improvement's tiles, and
+  // the Endurance Ceiling ratios. Not persisted: it's a diagnostic
+  // lens, and per-hand fits run on half the data (noisier), so each
+  // visit starts at the clean pooled view.
+  const [handView, setHandView] = useState("pooled");
+
   // (Force Curves overlay slider state removed May 2026 — the overlay
   // merged into CurveImprovementCard, which owns its own per-grip "Now"
   // slider state internally. Each grip block scrubs independently, so
@@ -247,6 +260,17 @@ export function AnalysisView({
   // within-set fatigue cloud (later reps) is still reachable by clicking
   // any dot, which opens the full per-session breakdown.
   const freshFailures = useMemo(() => freshFitReps(failures), [failures]);
+
+  // Hand-scoped variant for the F-D chart (fit + dots). Pooled mode is
+  // untouched; in L/R mode the chart shows that hand's reps and a
+  // curve fitted to them alone (handView state is declared above with
+  // the BW-normalize toggle).
+  const fdFailures = useMemo(
+    () => (handView === "pooled"
+      ? freshFailures
+      : freshFailures.filter(r => r.hand === handView)),
+    [freshFailures, handView]
+  );
 
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
@@ -311,10 +335,12 @@ export function AnalysisView({
   // the per-memo notes — extraction was pure relocation, no math changes.
   const {
     gripBaselines, grip3xEstimates,
-    perHandGripBaselines, gripImprovement, handAsymmetry,
+    perHandGripBaselines, perHandGripEstimates, perHandGripImprovement,
+    gripImprovement, handAsymmetry,
   } = useGripFits({
     history, threeExpPriors, grips,
     pinnedGripBaselines, onSavePinnedGripBaselines,
+    pinnedPerHandBaselines, onSavePinnedPerHandBaselines,
     allowAutoPin: baselinePinReady,
   });
 
@@ -400,6 +426,10 @@ export function AnalysisView({
   // AnalysisView render. Same memo deps as before.
   const aucHistoryByGrip = useAucHistoryByGrip({
     history, grips, gripBaselines, threeExpPriors, bwLog,
+    // Hand scoping (June 2026): in L/R mode the trajectory runs on
+    // that hand's reps against the FROZEN per-hand baselines.
+    hand: handView === "pooled" ? null : handView,
+    perHandBaselines: perHandGripBaselines,
   });
 
   // ── Three-exp F-D fit (governing model — see src/model/threeExp.js) ──
@@ -412,12 +442,12 @@ export function AnalysisView({
   // falls back to a no-shrinkage fit (which validation showed
   // loses to Monod by ~3% on aggregate, fine as a degenerate case).
   const threeExpFit = useMemo(() => {
-    if (freshFailures.length < 2) return null;
-    const pts = freshFailures.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
+    if (fdFailures.length < 2) return null;
+    const pts = fdFailures.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
     const amps = fitAmpsForPts(pts, selGrip, threeExpPriors);
     if (!amps) return null;
     return { amps };
-  }, [freshFailures, selGrip, threeExpPriors]);
+  }, [fdFailures, selGrip, threeExpPriors]);
 
   // Predicted curve for chart overlay — same T grid as curveData so the
   // two lines align visually.
@@ -495,7 +525,7 @@ export function AnalysisView({
   // Pooled across hands — the F-D chart shows the grip's whole fresh
   // cloud as one series (the curve is already a pooled L+R fit). Click a
   // dot for the per-session L/R breakdown.
-  const dotsRel = freshFailures.map(buildDot);
+  const dotsRel = fdFailures.map(buildDot);
   const threeExpCurveDataRel = threeExpCurveData.map(d => ({
     x: d.x,
     y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
@@ -666,6 +696,21 @@ export function AnalysisView({
                 ))}
               </div>
             )}
+            {/* Hand selector — scopes the F-D chart, Capacity
+                trajectory, Curve Improvement tiles, and Endurance
+                Ceiling to one hand. Pooled is the default clean view;
+                per-hand fits run on half the data, so expect noise. */}
+            <div style={{ display: "flex", gap: 4 }}>
+              {[{ key: "pooled", label: "Pooled" }, { key: "L", label: "L" }, { key: "R", label: "R" }].map(opt => (
+                <button key={opt.key} onClick={() => setHandView(opt.key)} style={{
+                  padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
+                  background: handView === opt.key
+                    ? (opt.key === "R" ? C.orange : opt.key === "L" ? C.blue : C.purple)
+                    : C.border,
+                  color:      handView === opt.key ? "#fff" : C.muted,
+                }}>{opt.label}</button>
+              ))}
+            </div>
           </div>
         )}
       </Card>
@@ -737,6 +782,8 @@ export function AnalysisView({
           historyOverlay={historyOverlay}
           maxDur={maxDur}
           unit={unit}
+          handView={handView}
+          perHandGripImprovement={perHandGripImprovement}
         />
 
         <CapacityTrajectoryCard
@@ -762,6 +809,8 @@ export function AnalysisView({
         <EnduranceCeilingCard
           history={history}
           grip3xEstimates={grip3xEstimates}
+          perHandGripEstimates={perHandGripEstimates}
+          handView={handView}
           unit={unit}
         />
 

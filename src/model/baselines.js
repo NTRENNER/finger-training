@@ -235,9 +235,40 @@ export function buildGripEstimates(history, threeExpPriors) {
   return out;
 }
 
+// Per-(grip, hand) CURRENT fits — the "now" side of the per-hand
+// improvement comparison (June 2026, added with the analysis hand
+// selector). Mirrors buildGripEstimates but splits by hand; keys are
+// `${grip}|${hand}` to align with buildPerHandGripBaselines, so
+// buildGripImprovement can consume the two maps unchanged. Per-hand
+// fits run on roughly half the data — expect noisier numbers than
+// the pooled fits; that's inherent, not a bug.
+export function buildPerHandGripEstimates(history, threeExpPriors) {
+  const out = {};
+  const byKey = {};
+  for (const r of freshFitReps(history)) {
+    if (!r.grip || !r.hand || r.hand === "Both") continue;
+    if (!(effectiveLoad(r) > 0)) continue;
+    if (!(r.actual_time_s > 0)) continue;
+    const key = `${r.grip}|${r.hand}`;
+    if (!byKey[key]) byKey[key] = [];
+    byKey[key].push(r);
+  }
+  for (const [key, reps] of Object.entries(byKey)) {
+    const grip = key.split("|")[0];
+    const amps = fitAmpsForPts(
+      reps.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
+      grip,
+      threeExpPriors,
+    );
+    if (amps) out[key] = amps;
+  }
+  return out;
+}
+
 // Per-grip improvement. For each grip with both a baseline AND a
 // current fit, compute Δ% (per-zone + AUC total) via improvementForAmps.
 // Returns { [grip]: { ...zoneDeltas, total, baselineDate } }.
+// (Also consumed with per-hand maps — keys just become `grip|hand`.)
 export function buildGripImprovement(gripBaselines, gripEstimates) {
   const out = {};
   for (const grip of Object.keys(gripEstimates || {})) {

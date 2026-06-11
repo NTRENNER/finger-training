@@ -30,12 +30,32 @@ import { fmt1, toDisp } from "../../ui/format.js";
 import { predForceThreeExp, ENDURANCE_CEILING_T } from "../../model/threeExp.js";
 import { buildPeakForceTrend } from "../../model/peakForce.js";
 
-export function EnduranceCeilingCard({ history, grip3xEstimates = {}, unit = "lbs" }) {
+export function EnduranceCeilingCard({
+  history,
+  grip3xEstimates = {},
+  // Hand selector (June 2026): in L/R mode the ratio uses that hand's
+  // fits (perHandGripEstimates, keys `${grip}|${hand}`) over that
+  // hand's measured peaks.
+  perHandGripEstimates = {},
+  handView = "pooled",
+  unit = "lbs",
+}) {
   const rows = useMemo(() => {
-    const trend = buildPeakForceTrend(history);
+    const split = handView === "L" || handView === "R";
+    const scopedHistory = split
+      ? (history || []).filter(r => r?.hand === handView)
+      : history;
+    const ampsByGrip = split
+      ? Object.fromEntries(
+          Object.entries(perHandGripEstimates)
+            .filter(([key]) => key.endsWith(`|${handView}`))
+            .map(([key, amps]) => [key.split("|")[0], amps])
+        )
+      : grip3xEstimates;
+    const trend = buildPeakForceTrend(scopedHistory);
     if (!trend) return [];
     const out = [];
-    for (const [grip, amps] of Object.entries(grip3xEstimates)) {
+    for (const [grip, amps] of Object.entries(ampsByGrip)) {
       if (!Array.isArray(amps) || amps.length !== 3) continue;
       const ceilingKg = predForceThreeExp(amps, ENDURANCE_CEILING_T);
       if (!(ceilingKg > 0)) continue;
@@ -51,7 +71,7 @@ export function EnduranceCeilingCard({ history, grip3xEstimates = {}, unit = "lb
       });
     }
     return out.sort((a, b) => a.grip.localeCompare(b.grip));
-  }, [history, grip3xEstimates]);
+  }, [history, grip3xEstimates, perHandGripEstimates, handView]);
 
   if (rows.length === 0) return null;
 
@@ -68,6 +88,11 @@ export function EnduranceCeilingCard({ history, grip3xEstimates = {}, unit = "lb
     <Card style={{ marginBottom: 16 }}>
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
         Endurance ceiling — sustained vs max
+        {(handView === "L" || handView === "R") && (
+          <span style={{ color: handView === "R" ? C.orange : C.blue, marginLeft: 8, fontSize: 12 }}>
+            {handView === "R" ? "Right hand" : "Left hand"}
+          </span>
+        )}
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
         The curve's force at {ENDURANCE_CEILING_T}s as a share of your
