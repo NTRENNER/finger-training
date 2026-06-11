@@ -17,6 +17,9 @@ import {
   buildContinuousRecency,
   personalTauScale,
   overloadFactor,
+  shortEndFailureStaleness,
+  FRESH_TEST_SHORT_T_MAX,
+  FRESH_TEST_STALE_DAYS,
 } from "../coaching.js";
 import { buildThreeExpPriors, predForceThreeExp } from "../threeExp.js";
 import { buildGripEstimates } from "../baselines.js";
@@ -697,5 +700,73 @@ describe("coaching fit vs chart (buildGripEstimates) fit consistency", () => {
       const relGap = Math.abs(engineF - chartF) / chartF;
       expect(relGap).toBeLessThan(0.05);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Fresh short-duration test advisory
+// ─────────────────────────────────────────────────────────────
+// The curve fit only learns an upper bound at short T from FAILURES,
+// and zone staleness can't see the difference between "trained 5s"
+// and "failed at 5s" — the June 2026 review found months of history
+// with no failure under 7s. shortEndFailureStaleness tracks the gap;
+// the engine attaches it to the rec as `freshTest`.
+describe("shortEndFailureStaleness / freshTest advisory", () => {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const daysAgoStr = (n) =>
+    new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+  const rep = (T, daysAgo, failed) => ({
+    grip: "Crusher", hand: "L", rep_num: 1,
+    target_duration: T, actual_time_s: T,
+    avg_force_kg: 30, failed,
+    date: daysAgoStr(daysAgo), session_id: `s${T}-${daysAgo}`,
+  });
+
+  test("never failed short → recommended, null staleDays", () => {
+    // Plenty of short-T SUCCESSES and long-T failures — neither anchors
+    // the short end, so the advisory must still fire.
+    const hist = [
+      rep(5, 3, false), rep(7, 10, false),       // short successes
+      rep(60, 2, true), rep(120, 5, true),       // long failures
+    ];
+    const out = shortEndFailureStaleness(hist, todayStr);
+    expect(out.staleDays).toBeNull();
+    expect(out.recommended).toBe(true);
+  });
+
+  test("recent short-T failure → not recommended, correct staleDays", () => {
+    const hist = [rep(5, 10, true), rep(60, 1, true)];
+    const out = shortEndFailureStaleness(hist, todayStr);
+    expect(out.staleDays).toBe(10);
+    expect(out.lastDate).toBe(daysAgoStr(10));
+    expect(out.recommended).toBe(false);
+  });
+
+  test("short-T failure beyond the window → recommended again", () => {
+    const hist = [rep(5, FRESH_TEST_STALE_DAYS + 15, true)];
+    const out = shortEndFailureStaleness(hist, todayStr);
+    expect(out.staleDays).toBe(FRESH_TEST_STALE_DAYS + 15);
+    expect(out.recommended).toBe(true);
+  });
+
+  test("boundary: only target_duration ≤ FRESH_TEST_SHORT_T_MAX counts", () => {
+    const justOver = [rep(FRESH_TEST_SHORT_T_MAX + 1, 5, true)];
+    expect(shortEndFailureStaleness(justOver, todayStr).staleDays).toBeNull();
+    const atMax = [rep(FRESH_TEST_SHORT_T_MAX, 5, true)];
+    expect(shortEndFailureStaleness(atMax, todayStr).staleDays).toBe(5);
+  });
+
+  test("engine attaches freshTest to the rec", () => {
+    const hist = [
+      { ...rep(30, 3, true), avg_force_kg: 22 },
+      { ...rep(60, 5, true), avg_force_kg: 18 },
+    ];
+    const priors = buildThreeExpPriors(hist);
+    const rec = coachingRecommendationContinuous(hist, "Crusher",
+      { threeExpPriors: priors, today: new Date() });
+    expect(rec).not.toBeNull();
+    expect(rec.freshTest).toBeDefined();
+    expect(rec.freshTest.recommended).toBe(true);   // no short-T failure in hist
+    expect(rec.freshTest.staleDays).toBeNull();
   });
 });

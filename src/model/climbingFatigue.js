@@ -67,6 +67,50 @@ export function computeSessionFatigue(activities, dateStr) {
   return Math.max(1, Math.min(10, Math.round(raw)));
 }
 
+// ── Climb-derived cookedness suggestion ──────────────────────
+// The cookedness slider is only as good as the user's self-rating,
+// and the June 2026 review showed those ratings can invert reality:
+// cooked = 0 logged on a triple-climbing-day with same-day V8
+// attempts, cooked = 5 on a lighter day. Since the climb log already
+// carries the ground truth (per-climb RPE + volume), derive a
+// suggested cooked value from it and PRE-FILL the slider — the user
+// confirms or overrides, so the β-learner's input semantics don't
+// change, but the default is now evidence-based instead of 0.
+//
+// Formula: today's session fatigue (computeSessionFatigue, 1–10)
+// plus a 40%-decayed carryover of yesterday's. Day-level resolution
+// because activities carry no timestamps; the 0.4 carryover matches
+// the spirit of fatigueToModifier's 48h linear decay (~half left a
+// day later) without claiming hour precision.
+//
+// Returns { cooked, todayFatigue, yesterdayFatigue, nClimbsToday }
+// or null when neither day has any logged climbs (no signal — leave
+// the slider alone rather than suggesting a fabricated 0).
+const YESTERDAY_CARRYOVER = 0.4;
+
+function prevDateStr(dateStr) {
+  // Noon anchor avoids DST-boundary off-by-one when subtracting a day.
+  const d = new Date(`${dateStr}T12:00:00`);
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() - 1);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function suggestCookedFromClimbs(activities, dateStr) {
+  if (!activities || !dateStr) return null;
+  const todayFatigue = computeSessionFatigue(activities, dateStr);
+  const yDate = prevDateStr(dateStr);
+  const yesterdayFatigue = yDate ? computeSessionFatigue(activities, yDate) : null;
+  if (todayFatigue == null && yesterdayFatigue == null) return null;
+  const raw = (todayFatigue ?? 0) + YESTERDAY_CARRYOVER * (yesterdayFatigue ?? 0);
+  const cooked = Math.max(0, Math.min(10, Math.round(raw)));
+  const nClimbsToday = activities.filter(
+    a => a?.type === "climbing" && a.date === dateStr
+  ).length;
+  return { cooked, todayFatigue, yesterdayFatigue, nClimbsToday };
+}
+
 // Most recent climbing date in the past `withinDays` days, or null.
 // Used by the ClimbingLogCard display to surface recent session
 // fatigue. (No longer consumed by the coaching engine — the

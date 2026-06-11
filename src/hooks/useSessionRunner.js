@@ -91,6 +91,11 @@ export function useSessionRunner({
     // daily_state by today's date so the server-side β trigger can read
     // it when reps land.
     cooked: 0,
+    // Density-ladder pinned loads ({ L?, R? } fresh-equivalent kg, or
+    // null when the ladder isn't active). Set by SessionPlanCard's
+    // onApplyPlan; startSession prefers these over re-prescribing so
+    // "same weight, more reps" holds between ladder rungs.
+    ladderLoadByHand: null,
   }));
 
   // No derived fields anymore — config is rawConfig.
@@ -130,9 +135,19 @@ export function useSessionRunner({
     // and lives in user_settings.settings.fatigue_model.
     const fatigueMod = capacityMultiplier(fatigueModel, config.grip, config.cooked);
     ["L", "R"].forEach(h => {
-      const p = prescription(history, h, config.grip, config.targetTime,
-        { freshMap, threeExpPriors });
-      const base = p ? p.value : estimateRefWeight(history, h, config.grip, config.targetTime);
+      // Density-ladder pin (see model/densityLadder.js + SessionPlanCard):
+      // for repeat (grip, zone) sessions the plan carries the previous
+      // session's fresh-equivalent load — "same weight, more reps" only
+      // holds if we DON'T re-prescribe from the (still-learning) curve.
+      // Today's cooked multiplier still applies, same as the curve path.
+      const pinned = config.ladderLoadByHand?.[h];
+      const base = pinned > 0
+        ? pinned
+        : (() => {
+            const p = prescription(history, h, config.grip, config.targetTime,
+              { freshMap, threeExpPriors });
+            return p ? p.value : estimateRefWeight(history, h, config.grip, config.targetTime);
+          })();
       rw[h] = base != null ? base * fatigueMod : base;
     });
     // Persist today's cookedness so the server-side β trigger can
