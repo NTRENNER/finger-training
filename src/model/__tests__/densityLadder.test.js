@@ -11,6 +11,7 @@ import {
   LADDER_MIN_REPS, LADDER_MAX_REPS,
   LADDER_GATE_FRAC, LADDER_LOAD_STEP_FRAC,
 } from "../densityLadder.js";
+import { capacityMultiplier } from "../fatigueBeta.js";
 
 // Build one session's reps: `times[hand]` is the per-rep hold times in
 // rep order; every rep carries the same T, load, session id, and date.
@@ -142,9 +143,14 @@ describe("computeDensityLadder", () => {
     });
     const out = computeDensityLadder(hist, "Crusher", "power", { fatigueModel });
     expect(out.loadByHand.L).toBeCloseTo(fresh, 0);
-    // Without the model, no adjustment is possible — raw pin.
+    // Without a model, capacityMultiplier falls back to DEFAULT_BETA —
+    // the ladder de-cooks with the same default the scale-down side
+    // uses, keeping the round-trip symmetric. Assert against the
+    // function itself so the test tracks the fallback.
     const raw = computeDensityLadder(hist, "Crusher", "power");
-    expect(raw.loadByHand.L).toBeCloseTo(recorded, 0);
+    expect(raw.loadByHand.L).toBeCloseTo(
+      recorded / capacityMultiplier(null, "Crusher", 5), 0
+    );
   });
 
   test("gate fraction reproduces both source anchors", () => {
