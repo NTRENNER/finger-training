@@ -45,6 +45,32 @@ export function Btn({ children, onClick, color = C.blue, disabled, style, small 
   );
 }
 
+// Hand-view selector pills (June 2026) — Pooled | L | R. One GLOBAL
+// state (owned by AnalysisView), many controls: the selector is
+// repeated on each hand-scoped card so the user never has to scroll
+// back to the top to flip hands, but every instance drives the same
+// state so the cards can't disagree about which hand is displayed.
+// Compact by design — it lives inside card title rows.
+export function HandViewPills({ value, onChange }) {
+  const opts = [
+    { key: "pooled", label: "Pooled", color: C.purple },
+    { key: "L",      label: "L",      color: C.blue   },
+    { key: "R",      label: "R",      color: C.orange },
+  ];
+  return (
+    <span style={{ display: "inline-flex", gap: 3, verticalAlign: "middle" }}>
+      {opts.map(o => (
+        <button key={o.key} onClick={() => onChange?.(o.key)} style={{
+          padding: "2px 8px", borderRadius: 20, fontSize: 10, cursor: "pointer",
+          border: "none", fontWeight: 600,
+          background: value === o.key ? o.color : C.border,
+          color:      value === o.key ? "#fff"  : C.muted,
+        }}>{o.label}</button>
+      ))}
+    </span>
+  );
+}
+
 // Form-field label — small caps muted text above an input.
 export function Label({ children }) {
   return (

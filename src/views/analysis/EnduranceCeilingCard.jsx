@@ -24,7 +24,7 @@
 
 import React, { useMemo } from "react";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card, HandViewPills } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, toDisp } from "../../ui/format.js";
 import { predForceThreeExp, ENDURANCE_CEILING_T } from "../../model/threeExp.js";
@@ -38,6 +38,8 @@ export function EnduranceCeilingCard({
   // hand's measured peaks.
   perHandGripEstimates = {},
   handView = "pooled",
+  // Repeated local control for the global hand-view state (June 2026).
+  onHandViewChange = null,
   unit = "lbs",
 }) {
   const rows = useMemo(() => {
@@ -86,13 +88,16 @@ export function EnduranceCeilingCard({
 
   return (
     <Card style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
-        Endurance ceiling — sustained vs max
-        {(handView === "L" || handView === "R") && (
-          <span style={{ color: handView === "R" ? C.orange : C.blue, marginLeft: 8, fontSize: 12 }}>
-            {handView === "R" ? "Right hand" : "Left hand"}
-          </span>
-        )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>
+          Endurance ceiling — sustained vs max
+          {(handView === "L" || handView === "R") && (
+            <span style={{ color: handView === "R" ? C.orange : C.blue, marginLeft: 8, fontSize: 12 }}>
+              {handView === "R" ? "Right hand" : "Left hand"}
+            </span>
+          )}
+        </div>
+        {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
         The curve's force at {ENDURANCE_CEILING_T}s as a share of your

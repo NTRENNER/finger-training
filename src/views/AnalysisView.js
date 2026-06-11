@@ -731,6 +731,8 @@ export function AnalysisView({
           bodyWeight={bodyWeight}
           useRel={useRel}
           normalizeOn={normalizeOn}
+          handView={handView}
+          onHandViewChange={setHandView}
           fdSplitData={fdSplitData}
           threeExpCurveDataRel={threeExpCurveDataRel}
           threeExpRef180={threeExpRef180}
@@ -784,18 +786,25 @@ export function AnalysisView({
           unit={unit}
           handView={handView}
           perHandGripImprovement={perHandGripImprovement}
+          onHandViewChange={setHandView}
         />
 
         <CapacityTrajectoryCard
           aucHistoryByGrip={aucHistoryByGrip}
           normalizeOn={normalizeOn}
           activities={activities}
+          handView={handView}
+          onHandViewChange={setHandView}
         />
 
         {/* Capacity shape — zone share of the balanced score over time.
             The trajectory above says how much the curve grew; this says
             where the growth came from (June 2026). */}
-        <ZoneShareCard aucHistoryByGrip={aucHistoryByGrip} />
+        <ZoneShareCard
+          aucHistoryByGrip={aucHistoryByGrip}
+          handView={handView}
+          onHandViewChange={setHandView}
+        />
 
         {/* Peak force — direct max-strength measurement over time, from
             short near-max reps. Complements the curve (sustained force)
@@ -811,6 +820,7 @@ export function AnalysisView({
           grip3xEstimates={grip3xEstimates}
           perHandGripEstimates={perHandGripEstimates}
           handView={handView}
+          onHandViewChange={setHandView}
           unit={unit}
         />
 

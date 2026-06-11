@@ -37,7 +37,7 @@ import {
   ReferenceLine, ReferenceArea,
 } from "recharts";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card, HandViewPills } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../../ui/format.js";
 import { ZONE6 } from "../../model/zones.js";
@@ -76,6 +76,12 @@ export function ForceDurationCard({
   bodyWeight,
   useRel,
   normalizeOn,
+  // Global hand-view state, repeated here as a local control so the
+  // user can flip hands without scrolling to the top (June 2026).
+  // Single-grip mode's dots/curve arrive pre-scoped via props; the
+  // split-mode block below scopes its own per-grip fits by handView.
+  handView = "pooled",
+  onHandViewChange = null,
   // Chart-data props (memoized in AnalysisView)
   fdSplitData,
   threeExpCurveDataRel,
@@ -109,9 +115,12 @@ export function ForceDurationCard({
 
   return (
     <Card style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Force vs. Duration</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Force vs. Duration</div>
+        {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
+      </div>
       <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
-        {!splitMode && <span><span style={{ color: POOLED_DOT }}>●</span> reps (pooled)</span>}
+        {!splitMode && <span><span style={{ color: POOLED_DOT }}>●</span> reps ({handView === "pooled" ? "pooled" : handView === "L" ? "left hand" : "right hand"})</span>}
         {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model: a regression fit summing three exponentials with progressively longer decay constants (≈10s / 30s / 180s). The components are labeled fast / medium / slow by timescale; treating them as specific tissue compartments would be an overclaim the fit doesn't support."><span style={{ color: curveColor }}>―</span> F-D curve (3-exp)</span>}
         {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — well past the medium component's decay, where the slow component carries essentially the whole load. The closest model analog to a 'long-duration sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
         {splitMode && Object.keys(fdSplitData).map(g => (
@@ -211,6 +220,7 @@ export function ForceDurationCard({
                 // shrinkage from src/model/baselines.js.
                 const failures = freshFitReps(history).filter(r =>
                   r.grip === grip
+                  && (handView === "pooled" || r.hand === handView)
                   && r.actual_time_s > 0 && effectiveLoad(r) > 0
                 );
                 if (failures.length >= 2) {
@@ -258,6 +268,7 @@ export function ForceDurationCard({
               // session detail, not the main scatter.
               const gripReps = freshFitReps(history).filter(r =>
                 r.grip === grip
+                && (handView === "pooled" || r.hand === handView)
                 && r.actual_time_s > 0
                 && effectiveLoad(r) > 0
               );

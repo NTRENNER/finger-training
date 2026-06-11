@@ -42,11 +42,15 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine,
 } from "recharts";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card, HandViewPills } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 
-export function CapacityTrajectoryCard({ aucHistoryByGrip, normalizeOn, activities = [] }) {
+export function CapacityTrajectoryCard({
+  aucHistoryByGrip, normalizeOn, activities = [],
+  // Global hand-view state, repeated as a local control (June 2026).
+  handView = "pooled", onHandViewChange = null,
+}) {
   // Climbing-load strip: the same same-day + decayed-yesterday
   // estimate that pre-fills the cookedness slider, evaluated at each
   // plotted session date. Computed before any early return so the
@@ -65,9 +69,17 @@ export function CapacityTrajectoryCard({ aucHistoryByGrip, normalizeOn, activiti
 
   return (
     <Card style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
-        Total Capacity (Area Under the Curve) — % vs baseline
-        {normalizeOn && <span style={{ color: C.purple, fontSize: 12, marginLeft: 6 }}>· × BW</span>}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>
+          Total Capacity (Area Under the Curve) — % vs baseline
+          {normalizeOn && <span style={{ color: C.purple, fontSize: 12, marginLeft: 6 }}>· × BW</span>}
+          {handView !== "pooled" && (
+            <span style={{ color: handView === "R" ? C.orange : C.blue, fontSize: 12, marginLeft: 6 }}>
+              · {handView === "R" ? "Right hand" : "Left hand"}
+            </span>
+          )}
+        </div>
+        {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
         {normalizeOn
@@ -133,7 +145,11 @@ const SHARE_SERIES = [
   { key: "endurance", label: "Endurance (140s+)",  color: "#3b82f6" },
 ];
 
-export function ZoneShareCard({ aucHistoryByGrip }) {
+export function ZoneShareCard({
+  aucHistoryByGrip,
+  // Global hand-view state, repeated as a local control (June 2026).
+  handView = "pooled", onHandViewChange = null,
+}) {
   // Per-grip pill — shares are a per-grip shape property; overlaying
   // multiple grips' three lines each is unreadable.
   const grips = aucHistoryByGrip?.grips || [];
@@ -147,7 +163,15 @@ export function ZoneShareCard({ aucHistoryByGrip }) {
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Capacity shape — zone share over time</div>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>
+          Capacity shape — zone share over time
+          {handView !== "pooled" && (
+            <span style={{ color: handView === "R" ? C.orange : C.blue, fontSize: 12, marginLeft: 6 }}>
+              · {handView === "R" ? "Right hand" : "Left hand"}
+            </span>
+          )}
+        </div>
+        {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
         {grips.length > 1 && (
           <div style={{ display: "flex", gap: 4 }}>
             {grips.map(g => (

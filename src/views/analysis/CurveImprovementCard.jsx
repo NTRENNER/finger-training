@@ -30,7 +30,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card, HandViewPills } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, fmtW, toDisp } from "../../ui/format.js";
 import { ZONE6 } from "../../model/zones.js";
@@ -214,6 +214,8 @@ export function CurveImprovementCard({
   // have the data density to be worth scrubbing.
   handView = "pooled",
   perHandGripImprovement = {},
+  // Repeated local control for the global hand-view state (June 2026).
+  onHandViewChange = null,
 }) {
   // Per-grip "Now" slider index. null → latest date for that grip.
   const [nowIdxByGrip, setNowIdxByGrip] = useState({});
@@ -239,11 +241,14 @@ export function CurveImprovementCard({
       .sort((a, b) => a[0].localeCompare(b[0]));
     return (
       <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
-          Curve Improvement
-          <span style={{ color: handView === "R" ? C.orange : C.blue, marginLeft: 8, fontSize: 12 }}>
-            {handView === "R" ? "Right hand" : "Left hand"}
-          </span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>
+            Curve Improvement
+            <span style={{ color: handView === "R" ? C.orange : C.blue, marginLeft: 8, fontSize: 12 }}>
+              {handView === "R" ? "Right hand" : "Left hand"}
+            </span>
+          </div>
+          {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
         </div>
         <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.4 }}>
           Per-hand fits vs that hand's frozen baseline — half the data
@@ -278,7 +283,10 @@ export function CurveImprovementCard({
 
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
-      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Curve Improvement</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Improvement</div>
+        {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
+      </div>
 
       {perGripMode ? (
         gripImpEntries.length > 0 ? (
