@@ -116,7 +116,12 @@ export function useAucHistoryByGrip({
         seriesMap.set(date, { abs: Math.round(abs), pct, pctBW });
         datesUnion.add(date);
       }
-      if (seriesMap.size >= 2) perGrip[g] = seriesMap;
+      // Baseline required: this hook feeds the "% vs baseline" card,
+      // and a grip with no baseline yet has only null pct values — it
+      // would render as a ghost legend entry with no line during the
+      // window between its 3rd fresh rep and its baseline seeding
+      // (June 2026, observed while waiting for Prime to qualify).
+      if (seriesMap.size >= 2 && baselineByGrip[g]?.auc > 0) perGrip[g] = seriesMap;
     }
     if (Object.keys(perGrip).length === 0) return null;
     // Per-grip 3-point centered rolling mean over each grip's own
