@@ -35,8 +35,16 @@ export function PeakForceCard({ history, unit = "lbs" }) {
     const rows = trend.rows.map(r => {
       const o = { date: r.date.slice(5) };
       for (const g of trend.grips) {
-        o[g] = r[g] != null ? toDisp(r[g], unit) : null;
         o[`${g}_pr`] = r[`${g}_pr`] != null ? toDisp(r[`${g}_pr`], unit) : null;
+        // Dots only on sessions that SET (or matched) the running PR.
+        // Sub-PR session bests are expected — most days aren't max
+        // days, and a submax dot below the line reads as regression
+        // when it's just a normal session (June 2026). The card's job
+        // is "watch the PR climb"; the line carries that, dots mark
+        // the sessions that moved it.
+        o[g] = (r[g] != null && r[`${g}_pr`] != null && r[g] >= r[`${g}_pr`])
+          ? toDisp(r[g], unit)
+          : null;
       }
       return o;
     });
@@ -72,12 +80,12 @@ export function PeakForceCard({ history, unit = "lbs" }) {
         </div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        Best instantaneous pull per session from your max/power sessions —
-        a direct max-strength measurement (peak force is instantaneous, so
-        rep length doesn't matter). Dots are per-session bests; the line is
-        your running best-to-date, and the % is how much your max has
-        climbed. One shared scale, so each grip sits at its true magnitude.
-        Endurance sessions are excluded.
+        Best instantaneous pull from your max/power sessions — a direct
+        max-strength measurement (peak force is instantaneous, so rep
+        length doesn't matter). The line is your running best-to-date;
+        dots mark the sessions that raised it, and the % is how much
+        your max has climbed. One shared scale, so each grip sits at
+        its true magnitude. Endurance sessions are excluded.
       </div>
       <ResponsiveContainer width="100%" height={220}>
         <ComposedChart data={view.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
@@ -106,7 +114,7 @@ export function PeakForceCard({ history, unit = "lbs" }) {
           {view.grips.map(g => {
             const color = GRIP_COLORS[g] || C.blue;
             return (
-              <Scatter key={`${g}-dots`} dataKey={g} name={g}
+              <Scatter key={`${g}-dots`} dataKey={g} name={`${g} new PR`}
                 fill={color} isAnimationActive={false} />
             );
           })}
