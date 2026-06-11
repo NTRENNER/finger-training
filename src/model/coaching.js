@@ -392,6 +392,34 @@ export const FRESH_TEST_SHORT_T_MAX = 10;   // seconds
 // fires while the cap still has a valid peak to protect with.
 export const FRESH_TEST_STALE_DAYS = 45;
 
+// ── Cold-start seeding (June 2026) ────────────────────────────
+// A brand-new grip has every zone "never trained", so the staleness
+// tiebreak fell to the first zone in the list — Max Strength — and
+// the first Prime session got prescribed a 5s max day. Backwards for
+// cold start: a mid-duration session to failure sweeps a RANGE of
+// durations as fatigue accumulates (a 40s-class session produces
+// failures from ~40s down to ~6s across its reps), unlocks the
+// per-grip baseline faster (≥5 failures across ≥3 distinct
+// durations), and sits where the population prior is most
+// trustworthy. Short-T testing earns its keep RE-anchoring an
+// established curve's top end — with no curve yet, there's nothing
+// to anchor.
+//
+// A grip is cold-start until it has logged this many distinct target
+// durations (matches the baseline gate's duration requirement).
+export const COLD_START_MIN_DURATIONS = 3;
+
+// Multiplicative score bias applied during cold start: a smooth bump
+// in log-T space peaking at 45s (+30%), ~+20% at 30s/70s, fading to
+// ~1.0 at the extremes (5s, 220s). Big enough to win the flat
+// never-trained tiebreak, small enough that a strong genuine signal
+// (real residuals, recency) still dominates.
+export function coldStartSeedWeight(T) {
+  if (!(T > 0)) return 1;
+  const x = Math.log(T / 45);
+  return 1 + 0.3 * Math.exp(-(x * x) / (2 * 0.5 * 0.5));
+}
+
 // Days since this grip's last FAILED rep at target ≤ FRESH_TEST_SHORT_T_MAX,
 // from already-grip-filtered history. Failures are the only reps the
 // curve fit learns an upper bound from at short T (successes are just
@@ -469,6 +497,17 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // grip-scoped view so the engine recommends what THIS grip needs.
   const gripHistory = history.filter(r => r?.grip === grip);
   const stalenessMap = getZoneStaleness(gripHistory, today);
+
+  // Cold start: fewer than COLD_START_MIN_DURATIONS distinct target
+  // durations logged on this grip. Biases the pick toward the middle
+  // of the duration range (coldStartSeedWeight) and suppresses the
+  // fresh-test advisory — see the constants above for the rationale.
+  const distinctDurations = new Set(
+    gripHistory
+      .filter(r => r.actual_time_s > 0 && r.target_duration > 0)
+      .map(r => r.target_duration)
+  );
+  const coldStart = distinctDurations.size < COLD_START_MIN_DURATIONS;
   const fmap = freshMap || buildFreshLoadMap(history);
   const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
   const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
@@ -647,7 +686,11 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // WEAKER-HAND boost: favor the lagging hand (more pooled-AUC gain).
       const hBoost = handBoost[hand] ?? 1.0;
 
-      const score = adaptBoostCosted * stale * recency * focus * hBoost;
+      // Cold-start seeding bias — neutral (1.0) once the grip has
+      // enough distinct durations logged. See coldStartSeedWeight.
+      const seedW = coldStart ? coldStartSeedWeight(T) : 1;
+
+      const score = adaptBoostCosted * stale * recency * focus * hBoost * seedW;
 
       // Never-zone tiebreaker: snap to the zone's reference T. The
       // adaptBoost floor (above) flattens the score across every T
@@ -776,10 +819,15 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   best.loadByHand = loadByHand;
 
   // Fresh short-T test advisory — see shortEndFailureStaleness above.
-  // Attached unconditionally so the Why line can (a) prompt a fresh
-  // max test when the short end is unanchored, and (b) remind the
-  // user to do short-T picks BEFORE climbing.
-  best.freshTest = shortEndFailureStaleness(gripHistory, todayStr);
+  // Suppressed during cold start: the advisory exists to RE-anchor an
+  // established curve's top end, and on a brand-new grip it was
+  // reinforcing exactly the premature 5s pick the seeding bias
+  // corrects. The Why line can still remind the user to do short-T
+  // picks fresh when one is genuinely chosen.
+  const freshTest = shortEndFailureStaleness(gripHistory, todayStr);
+  if (coldStart) freshTest.recommended = false;
+  best.freshTest = freshTest;
+  best.coldStart = coldStart;
 
   return best;
 }

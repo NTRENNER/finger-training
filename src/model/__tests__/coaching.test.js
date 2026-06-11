@@ -20,6 +20,8 @@ import {
   shortEndFailureStaleness,
   FRESH_TEST_SHORT_T_MAX,
   FRESH_TEST_STALE_DAYS,
+  COLD_START_MIN_DURATIONS,
+  coldStartSeedWeight,
 } from "../coaching.js";
 import { buildThreeExpPriors, predForceThreeExp } from "../threeExp.js";
 import { buildGripEstimates } from "../baselines.js";
@@ -760,13 +762,67 @@ describe("shortEndFailureStaleness / freshTest advisory", () => {
     const hist = [
       { ...rep(30, 3, true), avg_force_kg: 22 },
       { ...rep(60, 5, true), avg_force_kg: 18 },
+      { ...rep(120, 8, true), avg_force_kg: 12 },   // 3 distinct durations → not cold start
     ];
     const priors = buildThreeExpPriors(hist);
     const rec = coachingRecommendationContinuous(hist, "Crusher",
       { threeExpPriors: priors, today: new Date() });
     expect(rec).not.toBeNull();
+    expect(rec.coldStart).toBe(false);
     expect(rec.freshTest).toBeDefined();
     expect(rec.freshTest.recommended).toBe(true);   // no short-T failure in hist
     expect(rec.freshTest.staleDays).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Cold-start seeding — new grips get mid-duration sessions first
+// ─────────────────────────────────────────────────────────────
+// Regression for the first Prime session (June 2026): with every
+// zone never-trained, the flat staleness tiebreak fell to Max
+// Strength and prescribed a 5s max day on a grip with no curve —
+// and the fresh-test advisory reinforced it. Cold-start grips
+// (< COLD_START_MIN_DURATIONS distinct durations) now get a smooth
+// mid-T score bump and a suppressed fresh-test advisory.
+describe("cold-start seeding", () => {
+  const daysAgoStr = (n) =>
+    new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+  const rep = (T, repNum, F, daysAgo) => ({
+    id: `p-${T}-${repNum}`, grip: "Prime", hand: "L",
+    rep_num: repNum, target_duration: T, actual_time_s: T * (1 - 0.05 * repNum),
+    avg_force_kg: F, failed: true,
+    date: daysAgoStr(daysAgo), session_id: `ps-${daysAgo}`,
+  });
+
+  test("coldStartSeedWeight: peaks mid-range, neutral at the extremes", () => {
+    expect(coldStartSeedWeight(45)).toBeCloseTo(1.3, 2);
+    expect(coldStartSeedWeight(30)).toBeGreaterThan(1.15);
+    expect(coldStartSeedWeight(70)).toBeGreaterThan(1.15);
+    expect(coldStartSeedWeight(5)).toBeLessThan(1.05);
+    expect(coldStartSeedWeight(220)).toBeLessThan(1.05);
+    expect(coldStartSeedWeight(0)).toBe(1);
+  });
+
+  test("COLD_START_MIN_DURATIONS matches the baseline gate's duration requirement", () => {
+    expect(COLD_START_MIN_DURATIONS).toBe(3);
+  });
+
+  test("one-session grip: cold start flagged, mid-duration pick, advisory suppressed", () => {
+    // Shaped like the first Prime session: six 5s max reps, 10 days
+    // ago (so recency has recovered and the pure tiebreak is what's
+    // being tested).
+    const hist = [1, 2, 3, 4, 5, 6].map(i => rep(5, i, 6 - i * 0.3, 10));
+    const priors = buildThreeExpPriors(hist);
+    const rec = coachingRecommendationContinuous(hist, "Prime",
+      { threeExpPriors: priors, today: new Date() });
+    expect(rec).not.toBeNull();
+    expect(rec.coldStart).toBe(true);
+    // The seeding bump pulls the pick into the curve's body — not
+    // another 5s max day, not a 220s endurance flyer.
+    expect(rec.T).toBeGreaterThanOrEqual(15);
+    expect(rec.T).toBeLessThanOrEqual(110);
+    // Advisory exists but must not push short-T testing on a curve
+    // that doesn't exist yet.
+    expect(rec.freshTest.recommended).toBe(false);
   });
 });

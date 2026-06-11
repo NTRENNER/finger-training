@@ -334,6 +334,13 @@ export function SessionPlanCard({
       whyParts.push(`ladder: topped out at ${LADDER_MAX_REPS} reps → +${Math.round(LADDER_LOAD_STEP_FRAC * 100)}% load (${loadStr} ${unit}), back to ${LADDER_MIN_REPS} reps`);
     }
   }
+  // Cold-start seeding (rec.coldStart, see coaching.js) — a new grip
+  // gets mid-duration sessions first: each one sweeps a range of
+  // failure durations as fatigue accumulates, building the curve's
+  // body before the extremes get tested.
+  if (rec.coldStart) {
+    whyParts.push("new grip — seeding the curve from mid durations first (each failure session covers a range)");
+  }
   // Fresh short-T test advisory (rec.freshTest, see coaching.js).
   // Two flavors:
   //   • the active pick IS short-T → remind to do it fresh, before
