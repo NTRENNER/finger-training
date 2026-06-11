@@ -289,23 +289,10 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
 
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
 
-      {/* Live rep-curve preview — forecasted vs. actual so far, with
-          last-session overlay and asymptotic floor. Re-seeds from rep
-          1's actual time once it lands so the forecast tracks the
-          user's actual capacity for this session. */}
-      <LiveRepCurveCard
-        history={history}
-        config={config}
-        activeHand={activeHand}
-        sessionReps={sessionReps}
-      />
-
-      <LiveRecoveryCard
-        history={history}
-        config={config}
-        activeHand={activeHand}
-        sessionReps={sessionReps}
-      />
+      {/* Phase cards (countdown / timer / ready) render FIRST so the
+          timer never scrolls below the fold mid-rep — the live charts
+          moved below the controls (June 2026). During a hang you need
+          the clock, not the forecast. */}
 
       {/* Countdown overlay */}
       {repPhase === "countdown" && (
@@ -391,6 +378,28 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
             ✕ Done
           </Btn>
         )}
+      </div>
+
+      {/* Live rep-curve preview — forecasted vs. actual so far, with
+          last-session overlay and asymptotic floor. Re-seeds from rep
+          1's actual time once it lands so the forecast tracks the
+          user's actual capacity for this session. Rendered below the
+          timer + controls so the clock stays on-screen during a hang;
+          these are between-rep reading material. */}
+      <div style={{ marginTop: 12 }}>
+        <LiveRepCurveCard
+          history={history}
+          config={config}
+          activeHand={activeHand}
+          sessionReps={sessionReps}
+        />
+
+        <LiveRecoveryCard
+          history={history}
+          config={config}
+          activeHand={activeHand}
+          sessionReps={sessionReps}
+        />
       </div>
     </div>
   );
@@ -798,22 +807,9 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
 
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
 
-      {/* Live rep-curve preview (same component as the manual flow). */}
-      <LiveRepCurveCard
-        history={history}
-        config={config}
-        activeHand={activeHand}
-        sessionReps={sessionReps}
-      />
-
-      <LiveRecoveryCard
-        history={history}
-        config={config}
-        activeHand={activeHand}
-        sessionReps={sessionReps}
-      />
-
-      {/* Status card */}
+      {/* Status card first — the big hold timer must never scroll
+          below the fold mid-rep. Live charts moved below the force
+          gauge (June 2026); they're between-rep reading material. */}
       <Card style={{ textAlign: "center", padding: "32px 16px", marginTop: 12 }}>
         {repActive ? (
           <>
@@ -880,6 +876,24 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
           />
         </Card>
       )}
+
+      {/* Live rep-curve preview (same component as the manual flow) —
+          below the timer + gauge so the clock stays on-screen. */}
+      <div style={{ marginTop: 12 }}>
+        <LiveRepCurveCard
+          history={history}
+          config={config}
+          activeHand={activeHand}
+          sessionReps={sessionReps}
+        />
+
+        <LiveRecoveryCard
+          history={history}
+          config={config}
+          activeHand={activeHand}
+          sessionReps={sessionReps}
+        />
+      </div>
     </div>
   );
 }
