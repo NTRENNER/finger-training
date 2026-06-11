@@ -153,6 +153,27 @@ describe("computeDensityLadder", () => {
     );
   });
 
+  test("a one-hand manual override pins THAT hand's actual load, not the suggestion", () => {
+    // June 2026 regression: user overrode the suggested Micro weight
+    // upward on the RIGHT hand only and sustained it. "Same weight,
+    // more reps" must mean the weight actually held — re-pinning the
+    // old suggestion would silently undo the override. Left hand
+    // (no override, Tindeq avg ≈ suggestion) pins as before.
+    const hist = [
+      ...session({ id: "s1", date: "2026-06-10", T: 40, loadKg: 20,
+        times: { L: [40.2, 24, 16.5, 12.1] } }),
+      ...session({ id: "s1", date: "2026-06-10", T: 40, loadKg: 20,
+        times: { R: [40.5, 25, 17, 13] } }).map(r => ({
+          ...r, manual_load_kg: 24,        // user-chosen higher weight
+          prescribed_load_kg: 20,          // what the card suggested
+        })),
+    ];
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out.decision).toBe("advance");
+    expect(out.loadByHand.L).toBeCloseTo(20, 1);   // suggestion held
+    expect(out.loadByHand.R).toBeCloseTo(24, 1);   // override honored
+  });
+
   test("gate fraction reproduces both source anchors", () => {
     expect(40 * LADDER_GATE_FRAC).toBeCloseTo(10, 5);
     expect(Math.round(90 * LADDER_GATE_FRAC)).toBeGreaterThanOrEqual(20);

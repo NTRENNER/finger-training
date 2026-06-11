@@ -6,6 +6,7 @@ import {
   suggestCookedFromClimbs,
   mostRecentClimbDate,
   fatigueToModifier,
+  BOARD_WALL_FACTOR, BOARD_WALL_KEYS,
 } from "../climbingFatigue.js";
 
 describe("computeSessionFatigue", () => {
@@ -138,6 +139,46 @@ describe("fatigueToModifier", () => {
 
   test("at 48h, modifier returns to 1.0", () => {
     expect(fatigueToModifier("power", 10, 48)).toBe(1.0);
+  });
+});
+
+describe("board-wall tax", () => {
+  const climb = (wall, rpe) => ({ type: "climbing", date: "2026-06-10", wall, rpe });
+
+  test("constants: both board walls taxed, factor > 1", () => {
+    expect(BOARD_WALL_KEYS.has("moonboard")).toBe(true);
+    expect(BOARD_WALL_KEYS.has("kilter")).toBe(true);
+    expect(BOARD_WALL_KEYS.has("commercial")).toBe(false);
+    expect(BOARD_WALL_FACTOR).toBeGreaterThan(1);
+  });
+
+  test("a board session scores higher than the same session on a commercial set", () => {
+    const board = [climb("moonboard", 8), climb("moonboard", 8), climb("moonboard", 9)];
+    const gym   = [climb("commercial", 8), climb("commercial", 8), climb("commercial", 9)];
+    expect(computeSessionFatigue(board, "2026-06-10"))
+      .toBeGreaterThan(computeSessionFatigue(gym, "2026-06-10"));
+  });
+
+  test("regression: short-but-fierce board session no longer reads as mild", () => {
+    // Three hard MoonBoard problems — the kind of brief savaging that
+    // was scoring like a casual gym hour (June 2026).
+    const fierce = [climb("moonboard", 8), climb("moonboard", 9), climb("moonboard", 8)];
+    expect(computeSessionFatigue(fierce, "2026-06-10")).toBeGreaterThanOrEqual(8);
+  });
+
+  test("climbs without a wall (outdoor, rope, legacy) are untaxed", () => {
+    const noWall = [
+      { type: "climbing", date: "2026-06-10", rpe: 7 },
+      { type: "climbing", date: "2026-06-10", rpe: 7 },
+    ];
+    const commercial = [climb("commercial", 7), climb("commercial", 7)];
+    expect(computeSessionFatigue(noWall, "2026-06-10"))
+      .toBe(computeSessionFatigue(commercial, "2026-06-10"));
+  });
+
+  test("explicit session_rpe override is NOT board-taxed", () => {
+    const acts = [{ ...climb("moonboard", 9), session_rpe: 6 }];
+    expect(computeSessionFatigue(acts, "2026-06-10")).toBe(6);
   });
 });
 

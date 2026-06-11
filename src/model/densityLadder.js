@@ -123,13 +123,20 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   const lastRepSec = Math.min(...Object.values(lastRepSecByHand));
   const gatePassed = lastRepSec >= gateSec;
 
-  // Fresh-equivalent pinned load per hand (see header): recorded
-  // prescribed load ÷ the capacity multiplier that was active when it
-  // was stamped (session_cooked; 1.0 when absent or no β model).
+  // Fresh-equivalent pinned load per hand (see header). ACTUAL load
+  // first (effectiveLoad: Tindeq-measured ?? manual override ??
+  // prescribed) — "same weight" means the weight the user actually
+  // held, not the one the card proposed. June 2026: a user who
+  // overrides the suggestion upward and sustains it would otherwise
+  // get the OLD lower weight re-pinned next session, silently
+  // undoing the override. Prescribed remains the fallback for rows
+  // with no recorded actual. De-cooked by the capacity multiplier
+  // that was active when the rep was stamped (session_cooked; 1.0
+  // when absent or no β model).
   const loadByHand = {};
   for (const [h, reps] of Object.entries(byHand)) {
     const rep1 = reps[0];
-    const recorded = prescribedLoad(rep1) || effectiveLoad(rep1);
+    const recorded = effectiveLoad(rep1) || prescribedLoad(rep1);
     if (!(recorded > 0)) continue;
     const thenMult = capacityMultiplier(fatigueModel, grip, rep1.session_cooked ?? 0);
     loadByHand[h] = round1(thenMult > 0 ? recorded / thenMult : recorded);

@@ -14,7 +14,9 @@
 // session fatigue measures cumulative load.
 //
 // Formula:
-//   fatigue = clamp(1, 10, round( Σ(RPE_i) × 0.12 + max(RPE_i) × 0.4 ))
+//   fatigue = clamp(1, 10, round( Σ(RPE_i·w_i) × 0.12 + max(RPE_i·w_i) × 0.4 ))
+//   where w_i = BOARD_WALL_FACTOR for MoonBoard/Kilter climbs, 1.0
+//   otherwise (June 2026 — see the board-tax comment below).
 //
 // The Σ term captures volume (more climbs = more fatigue); the max
 // term gives some weight to peak intensity (one all-out attempt does
@@ -32,15 +34,28 @@
 // the derived value at session-end. Until then the formula is the
 // single source of truth.
 
-// Numeric RPE on each activity row. Skips rows with no usable rpe.
-function rpesForDate(activities, dateStr) {
+// Board-wall tax (June 2026): MoonBoard / Kilter climbing is more
+// finger-taxing per climb than a commercial set at the same RPE —
+// RPE measures whole-effort, but board style loads the fingers
+// disproportionately (small holds, full crimp, no rests). A "short
+// but fierce" board session was scoring like a casual gym hour and
+// under-suggesting cookedness. Each board climb's RPE is multiplied
+// by this factor in both the volume and peak terms before the
+// session-fatigue aggregation.
+export const BOARD_WALL_KEYS = new Set(["moonboard", "kilter"]);
+export const BOARD_WALL_FACTOR = 1.3;
+
+// Weighted RPE per climb on the date: rpe × (board tax when the wall
+// is a board). Skips rows with no usable rpe.
+function weightedRpesForDate(activities, dateStr) {
   if (!activities || !dateStr) return [];
   const out = [];
   for (const a of activities) {
     if (!a || a.type !== "climbing") continue;
     if (a.date !== dateStr) continue;
     const r = Number(a.rpe);
-    if (Number.isFinite(r) && r >= 1 && r <= 10) out.push(r);
+    if (!(Number.isFinite(r) && r >= 1 && r <= 10)) continue;
+    out.push(BOARD_WALL_KEYS.has(a.wall) ? r * BOARD_WALL_FACTOR : r);
   }
   return out;
 }
@@ -48,7 +63,8 @@ function rpesForDate(activities, dateStr) {
 // Compute session fatigue 1-10 (or null) for a specific date.
 // If a row has an explicit `session_rpe` field (Phase B), use that
 // directly instead of deriving — same field will be carried on every
-// climb row in a session.
+// climb row in a session. (The explicit override is NOT board-taxed:
+// the user already rated the whole session.)
 export function computeSessionFatigue(activities, dateStr) {
   if (!activities || !dateStr) return null;
   // Phase B override: prefer explicit session_rpe if present on any
@@ -59,7 +75,7 @@ export function computeSessionFatigue(activities, dateStr) {
     const sr = Number(a.session_rpe);
     if (Number.isFinite(sr) && sr >= 1 && sr <= 10) return Math.round(sr);
   }
-  const rpes = rpesForDate(activities, dateStr);
+  const rpes = weightedRpesForDate(activities, dateStr);
   if (rpes.length === 0) return null;
   const sum = rpes.reduce((acc, x) => acc + x, 0);
   const peak = Math.max(...rpes);
