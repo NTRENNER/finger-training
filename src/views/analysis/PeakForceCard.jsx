@@ -16,7 +16,7 @@
 // shared axis is both honest about magnitude and not hiding a big climb.
 // The per-grip % climb still appears in the header.
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ResponsiveContainer, ComposedChart, Line, Scatter,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -30,8 +30,60 @@ import { buildPeakForceTrend } from "../../model/peakForce.js";
 export function PeakForceCard({ history, unit = "lbs" }) {
   const trend = useMemo(() => buildPeakForceTrend(history), [history]);
 
+  // Pooled (default) vs per-hand detail. Pooled is the clean daily
+  // read; the L/R split is on-demand for asymmetry questions —
+  // June 2026, after the pooled redesign proved cleaner but hid the
+  // per-hand picture entirely.
+  const [split, setSplit] = useState(false);
+
   const view = useMemo(() => {
     if (!trend) return null;
+    if (split) {
+      // ── L/R detail: one trend per hand, merged onto shared dates.
+      // L renders solid, R dashed, both in the grip's color. The
+      // faint pooled trend line is omitted here — six overlapping
+      // series is exactly the clutter pooled mode exists to avoid.
+      const byHand = {};
+      for (const h of ["L", "R"]) {
+        const t = buildPeakForceTrend((history || []).filter(r => r?.hand === h));
+        if (t) byHand[h] = t;
+      }
+      const hands = Object.keys(byHand);
+      if (hands.length === 0) return null;
+      const dateSet = new Set();
+      for (const h of hands) for (const r of byHand[h].rows) dateSet.add(r.date);
+      const dates = [...dateSet].sort();
+      const rows = dates.map(date => {
+        const o = { date: date.slice(5) };
+        for (const h of hands) {
+          const src = byHand[h].rows.find(x => x.date === date);
+          for (const g of byHand[h].grips) {
+            const pr = src?.[`${g}_pr`];
+            o[`${g}_${h}_pr`] = pr != null ? toDisp(pr, unit) : null;
+            // Same PR-set-only dot rule as pooled mode.
+            o[`${g}_${h}`] = (src?.[g] != null && pr != null && src[g] >= pr)
+              ? toDisp(src[g], unit) : null;
+          }
+        }
+        return o;
+      });
+      const series = [];
+      for (const h of hands) {
+        for (const g of byHand[h].grips) {
+          series.push({ g, h, provisional: !!byHand[h].provisional?.[g] });
+        }
+      }
+      const hi = Math.max(...series.map(({ g, h }) => toDisp(byHand[h].best[g].kg, unit)));
+      const axisMax = Math.ceil((hi * 1.12) / 5) * 5;
+      return {
+        mode: "split", rows, series, axisMax,
+        // Header stats stay pooled in both modes — the summary
+        // numbers shouldn't jump when the user pokes at detail.
+        grips: trend.grips, best: trend.best,
+        changePct: trend.changePct,
+        provisional: trend.provisional || {},
+      };
+    }
     const rows = trend.rows.map(r => {
       const o = { date: r.date.slice(5) };
       for (const g of trend.grips) {
@@ -56,18 +108,30 @@ export function PeakForceCard({ history, unit = "lbs" }) {
     const hi = Math.max(...trend.grips.map(g => toDisp(trend.best[g].kg, unit)));
     const axisMax = Math.ceil((hi * 1.12) / 5) * 5;
     return {
+      mode: "pooled",
       rows, grips: trend.grips, best: trend.best,
       changePct: trend.changePct, axisMax,
       provisional: trend.provisional || {},
     };
-  }, [trend, unit]);
+  }, [trend, unit, split, history]);
 
   if (!view || view.rows.length < 1) return null;
 
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Peak force — max strength over time</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Peak force — max strength over time</div>
+          <div style={{ display: "flex", gap: 4 }}>
+            {[{ k: false, label: "Pooled" }, { k: true, label: "L / R" }].map(opt => (
+              <button key={String(opt.k)} onClick={() => setSplit(opt.k)} style={{
+                padding: "2px 10px", borderRadius: 20, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                background: split === opt.k ? C.purple : C.border,
+                color:      split === opt.k ? "#fff"   : C.muted,
+              }}>{opt.label}</button>
+            ))}
+          </div>
+        </div>
         <div style={{ fontSize: 12, color: C.muted }}>
           {view.grips.map(g => {
             const pct = view.changePct[g];
@@ -95,10 +159,10 @@ export function PeakForceCard({ history, unit = "lbs" }) {
         length doesn't matter). The line is your running best-to-date;
         dots mark the sessions that raised it, and the % is how much
         your max has climbed. One shared scale, so each grip sits at
-        its true magnitude. Endurance sessions are excluded. The thin
-        dotted line is the smoothed trend of max-day session bests —
-        unlike the PR line it can fall, so it's the early warning for
-        both breakouts and decline.
+        its true magnitude. Endurance sessions are excluded.
+        {view.mode === "split"
+          ? " L solid · R dashed, per-hand PR lines. (The smoothed trend is pooled-mode only.)"
+          : " The thin dotted line is the smoothed trend of max-day session bests — unlike the PR line it can fall, so it's the early warning for both breakouts and decline."}
         {Object.keys(view.provisional).length > 0 && (
           <span style={{ fontStyle: "italic" }}>
             {" "}Dashed = provisional: no max/power session logged yet
@@ -124,35 +188,58 @@ export function PeakForceCard({ history, unit = "lbs" }) {
             formatter={(v, name) => [v != null ? `${fmt1(v)} ${unit}` : "—", name]}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          {view.grips.map(g => {
-            const color = GRIP_COLORS[g] || C.blue;
-            const prov = view.provisional[g];
-            return (
-              <Line key={`${g}-pr`} type="monotone" dataKey={`${g}_pr`}
-                name={prov ? `${g} (prov.)` : `${g} PR`}
-                stroke={color} strokeWidth={2} dot={false}
-                strokeDasharray={prov ? "6 4" : undefined}
-                opacity={prov ? 0.7 : 1}
-                connectNulls isAnimationActive={false} />
-            );
-          })}
-          {/* Faint smoothed max-day trend — kept out of the legend
-              (legendType none) so the legend stays PR-focused; the
-              description text explains the dotted line. */}
-          {view.grips.filter(g => !view.provisional[g]).map(g => (
-            <Line key={`${g}-trend`} type="monotone" dataKey={`${g}_trend`}
-              name={`${g} trend`} legendType="none"
-              stroke={GRIP_COLORS[g] || C.blue} strokeWidth={1.5}
-              strokeDasharray="2 3" opacity={0.45} dot={false}
-              connectNulls isAnimationActive={false} />
-          ))}
-          {view.grips.map(g => {
-            const color = GRIP_COLORS[g] || C.blue;
-            return (
-              <Scatter key={`${g}-dots`} dataKey={g} name={`${g} new PR`}
-                fill={color} isAnimationActive={false} />
-            );
-          })}
+          {view.mode === "split" ? (
+            <>
+              {view.series.map(({ g, h, provisional }) => (
+                <Line key={`${g}-${h}-pr`} type="monotone" dataKey={`${g}_${h}_pr`}
+                  name={`${g} ${h}${provisional ? " (prov.)" : ""}`}
+                  stroke={GRIP_COLORS[g] || C.blue}
+                  strokeWidth={h === "L" ? 2 : 1.5}
+                  strokeDasharray={h === "R" ? "6 4" : undefined}
+                  opacity={provisional ? 0.6 : 1}
+                  dot={false} connectNulls isAnimationActive={false} />
+              ))}
+              {/* PR-set dots per hand — out of the legend to keep it
+                  to one entry per (grip, hand) line. */}
+              {view.series.map(({ g, h }) => (
+                <Scatter key={`${g}-${h}-dots`} dataKey={`${g}_${h}`}
+                  name={`${g} ${h} new PR`} legendType="none"
+                  fill={GRIP_COLORS[g] || C.blue} isAnimationActive={false} />
+              ))}
+            </>
+          ) : (
+            <>
+              {view.grips.map(g => {
+                const color = GRIP_COLORS[g] || C.blue;
+                const prov = view.provisional[g];
+                return (
+                  <Line key={`${g}-pr`} type="monotone" dataKey={`${g}_pr`}
+                    name={prov ? `${g} (prov.)` : `${g} PR`}
+                    stroke={color} strokeWidth={2} dot={false}
+                    strokeDasharray={prov ? "6 4" : undefined}
+                    opacity={prov ? 0.7 : 1}
+                    connectNulls isAnimationActive={false} />
+                );
+              })}
+              {/* Faint smoothed max-day trend — kept out of the legend
+                  (legendType none) so the legend stays PR-focused; the
+                  description text explains the dotted line. */}
+              {view.grips.filter(g => !view.provisional[g]).map(g => (
+                <Line key={`${g}-trend`} type="monotone" dataKey={`${g}_trend`}
+                  name={`${g} trend`} legendType="none"
+                  stroke={GRIP_COLORS[g] || C.blue} strokeWidth={1.5}
+                  strokeDasharray="2 3" opacity={0.45} dot={false}
+                  connectNulls isAnimationActive={false} />
+              ))}
+              {view.grips.map(g => {
+                const color = GRIP_COLORS[g] || C.blue;
+                return (
+                  <Scatter key={`${g}-dots`} dataKey={g} name={`${g} new PR`}
+                    fill={color} isAnimationActive={false} />
+                );
+              })}
+            </>
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </Card>
