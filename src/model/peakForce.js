@@ -127,6 +127,32 @@ export function buildPeakForceTrend(history, {
     return row;
   });
 
+  // Smoothed session-best trend (June 2026): a 3-point centered
+  // rolling mean over each grip's max-day session bests. The PR line
+  // can only rise or hold — by construction it CANNOT show max
+  // strength decaying, and it shows a breakout only after the PR
+  // falls. This trend line can fall, and it bends upward while a
+  // breakout is still forming. Restricted to qualified grips (every
+  // point is a real max attempt, so the trend is meaningful — unlike
+  // a sub-max session cloud) with ≥3 max days. Keyed as `${g}_trend`
+  // on the same rows.
+  for (const g of grips) {
+    if (provisional[g]) continue;   // dashed provisional line is enough there
+    const gDates = allDates.filter(d => byGrip[g].has(d));
+    if (gDates.length < 3) continue;
+    const vals = gDates.map(d => byGrip[g].get(d));
+    const smByDate = new Map(gDates.map((d, i) => {
+      const lo = Math.max(0, i - 1);
+      const hi = Math.min(vals.length - 1, i + 1);
+      let s = 0, n = 0;
+      for (let j = lo; j <= hi; j++) { s += vals[j]; n++; }
+      return [d, Math.round((s / n) * 10) / 10];
+    }));
+    for (const row of rows) {
+      row[`${g}_trend`] = smByDate.get(row.date) ?? null;
+    }
+  }
+
   // % climb in your max (best-ever vs first session) per grip.
   // Provisional grips get null — a % computed over sub-max pulls
   // measures protocol variation, not strength change.

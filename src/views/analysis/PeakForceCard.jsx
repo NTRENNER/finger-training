@@ -45,6 +45,9 @@ export function PeakForceCard({ history, unit = "lbs" }) {
         o[g] = (r[g] != null && r[`${g}_pr`] != null && r[g] >= r[`${g}_pr`])
           ? toDisp(r[g], unit)
           : null;
+        // Smoothed max-day trend — the line that CAN fall (see
+        // peakForce.js). Null for provisional grips and <3 max days.
+        o[`${g}_trend`] = r[`${g}_trend`] != null ? toDisp(r[`${g}_trend`], unit) : null;
       }
       return o;
     });
@@ -92,7 +95,10 @@ export function PeakForceCard({ history, unit = "lbs" }) {
         length doesn't matter). The line is your running best-to-date;
         dots mark the sessions that raised it, and the % is how much
         your max has climbed. One shared scale, so each grip sits at
-        its true magnitude. Endurance sessions are excluded.
+        its true magnitude. Endurance sessions are excluded. The thin
+        dotted line is the smoothed trend of max-day session bests —
+        unlike the PR line it can fall, so it's the early warning for
+        both breakouts and decline.
         {Object.keys(view.provisional).length > 0 && (
           <span style={{ fontStyle: "italic" }}>
             {" "}Dashed = provisional: no max/power session logged yet
@@ -130,6 +136,16 @@ export function PeakForceCard({ history, unit = "lbs" }) {
                 connectNulls isAnimationActive={false} />
             );
           })}
+          {/* Faint smoothed max-day trend — kept out of the legend
+              (legendType none) so the legend stays PR-focused; the
+              description text explains the dotted line. */}
+          {view.grips.filter(g => !view.provisional[g]).map(g => (
+            <Line key={`${g}-trend`} type="monotone" dataKey={`${g}_trend`}
+              name={`${g} trend`} legendType="none"
+              stroke={GRIP_COLORS[g] || C.blue} strokeWidth={1.5}
+              strokeDasharray="2 3" opacity={0.45} dot={false}
+              connectNulls isAnimationActive={false} />
+          ))}
           {view.grips.map(g => {
             const color = GRIP_COLORS[g] || C.blue;
             return (

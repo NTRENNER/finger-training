@@ -106,6 +106,54 @@ describe("buildPeakForceTrend", () => {
     expect(t.changePct.Crusher).not.toBeNull();
   });
 
+  // ── Smoothed max-day trend (June 2026) ───────────────────────
+  // The PR line can only rise or hold; the trend line is the one
+  // that can fall — early warning for decline the staircase hides.
+  test("trend is a 3-point centered mean over max-day session bests", () => {
+    const t = buildPeakForceTrend([
+      rep("Crusher", "2026-05-01", 8, 70, 7),
+      rep("Crusher", "2026-05-08", 8, 76, 7),
+      rep("Crusher", "2026-05-15", 8, 64, 7),
+    ]);
+    const r1 = t.rows.find(r => r.date === "2026-05-01");
+    const r2 = t.rows.find(r => r.date === "2026-05-08");
+    const r3 = t.rows.find(r => r.date === "2026-05-15");
+    expect(r1.Crusher_trend).toBeCloseTo((70 + 76) / 2, 1);       // 2-pt endpoint
+    expect(r2.Crusher_trend).toBeCloseTo((70 + 76 + 64) / 3, 1);  // centered
+    expect(r3.Crusher_trend).toBeCloseTo((76 + 64) / 2, 1);
+  });
+
+  test("trend can fall while the PR line stays flat (decline visibility)", () => {
+    const t = buildPeakForceTrend([
+      rep("Crusher", "2026-05-01", 8, 80, 7),   // PR set here
+      rep("Crusher", "2026-05-08", 8, 72, 7),
+      rep("Crusher", "2026-05-15", 8, 66, 7),
+      rep("Crusher", "2026-05-22", 8, 61, 7),
+    ]);
+    const rows = t.rows;
+    // PR line: flat at 80 after the first session.
+    expect(rows.at(-1).Crusher_pr).toBe(80);
+    // Trend: strictly falling across the decline.
+    const trends = rows.map(r => r.Crusher_trend);
+    expect(trends.at(-1)).toBeLessThan(trends[0]);
+    expect(trends.at(-1)).toBeLessThan(rows.at(-1).Crusher_pr);
+  });
+
+  test("no trend for provisional grips or fewer than 3 max days", () => {
+    const sparse = buildPeakForceTrend([
+      rep("Crusher", "2026-05-01", 8, 70, 7),
+      rep("Crusher", "2026-05-08", 8, 76, 7),
+    ]);
+    expect(sparse.rows.every(r => r.Crusher_trend == null)).toBe(true);
+    const prov = buildPeakForceTrend([
+      rep("Prime", "2026-06-01", 12, 7, 35),
+      rep("Prime", "2026-06-05", 12, 7.2, 35),
+      rep("Prime", "2026-06-10", 12, 7.6, 35),
+    ]);
+    expect(prov.provisional.Prime).toBe(true);
+    expect(prov.rows.every(r => r.Prime_trend == null)).toBe(true);
+  });
+
   test("first max/power session flips a grip from provisional to qualified", () => {
     const t = buildPeakForceTrend([
       rep("Prime", "2026-06-10", 12, 7.6, 35),     // sub-max era
