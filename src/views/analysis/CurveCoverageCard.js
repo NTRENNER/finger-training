@@ -176,8 +176,17 @@ export function CurveCoverageCard({ history }) {
               <span style={{ color: C.orange, fontWeight: 700 }}>● {warningCount} aging</span>
             </div>
           )}
+          {/* Explainer matches the worst state present. "Past the
+              window" is only true for STALE zones; aging zones are
+              approaching it and get a small score nudge until they
+              cross (June 2026 — the old single line claimed "past
+              the window" even when only aging zones existed, which
+              contradicted the SOON badge on the row below and made
+              it look like the recommender was ignoring the card). */}
           <div style={{ marginTop: 4, fontStyle: "italic" }}>
-            Past the detraining window — the engine will prioritize a fresh sample.
+            {staleCount > 0
+              ? "Past the detraining window — the engine will prioritize a fresh sample."
+              : "Approaching the detraining window — a small nudge for now; the engine takes over once the window closes."}
           </div>
         </div>
       )}
