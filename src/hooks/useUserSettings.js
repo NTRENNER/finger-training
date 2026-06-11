@@ -36,11 +36,7 @@ import {
 import { today } from "../util.js";
 import { DEFAULT_TRIP } from "../lib/trip.js";
 import {
-<<<<<<< HEAD
-  pushBW, fetchBWLog, fetchBWTombstoneDates,
-=======
-  pushBW, deleteBW, fetchBWLog,
->>>>>>> climb-aware-coaching
+  pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates,
   fetchUserSettings, pushUserSettings,
 } from "../lib/sync.js";
 import { defaultFatigueModel } from "../model/fatigueBeta.js";
@@ -173,26 +169,30 @@ export function useUserSettings({ user }) {
       const cloudDates = new Set(cloud.map(e => e.date));
       const localDates = new Set(local.map(e => e?.date).filter(Boolean));
       const byDate = new Map();
-<<<<<<< HEAD
+      // Tombstoned dates never enter the merge, from either side
+      // (deleted on another device = synced tombstone; this device's
+      // own pending deletes are handled by the dirty pass below).
       for (const e of cloud) { if (!deleted.has(e.date)) byDate.set(e.date, e); }
-      for (const e of local) { if (!deleted.has(e.date)) byDate.set(e.date, e); }
-=======
-      for (const e of cloud) byDate.set(e.date, e);
       for (const e of local) {
         if (!e?.date) continue;
+        if (deleted.has(e.date)) {
+          // Deleted elsewhere — drop, and retire any stale dirty mark.
+          clearDirty(LS_BW_DIRTY_KEY, e.date);
+          continue;
+        }
         if (dirty.has(e.date) || !cloudDates.has(e.date)) byDate.set(e.date, e);
       }
-      // Pending deletes: dirty dates with no local entry.
+      // Pending deletes: dirty dates with no local entry (this device
+      // deleted but the cloud delete didn't confirm).
       for (const date of dirty) {
         if (localDates.has(date)) continue;
         byDate.delete(date);
-        if (cloudDates.has(date)) {
+        if (cloudDates.has(date) && !deleted.has(date)) {
           deleteBW(date).then(ok => { if (ok) confirmBWPushed(date, null); });
         } else {
-          clearDirty(LS_BW_DIRTY_KEY, date);  // already gone server-side
+          clearDirty(LS_BW_DIRTY_KEY, date);  // already gone / tombstoned
         }
       }
->>>>>>> climb-aware-coaching
       const merged = [...byDate.values()].sort((a, b) => a.date < b.date ? -1 : 1);
       saveLS(LS_BW_LOG_KEY, merged);
       // Hydrate the scalar from the latest merged entry.
@@ -205,14 +205,12 @@ export function useUserSettings({ user }) {
       // dates). Fire-and-forget; failures stay dirty and retry on
       // the next sign-in reconcile.
       for (const e of local) {
-<<<<<<< HEAD
-        if (!cloudDates.has(e.date) && e.kg > 0 && !deleted.has(e.date)) pushBW(e.date, e.kg);
-=======
+        // byDate.has gate doubles as the tombstone filter — deleted
+        // dates never entered the merge, so they never get re-pushed.
         if (!e?.date || !byDate.has(e.date) || !(e.kg > 0)) continue;
         if (dirty.has(e.date) || !cloudDates.has(e.date)) {
           pushBW(e.date, e.kg).then(ok => { if (ok) confirmBWPushed(e.date, e.kg); });
         }
->>>>>>> climb-aware-coaching
       }
     })();
     return () => { cancelled = true; };
