@@ -43,7 +43,7 @@
 //   onSessionStart  — fires after startSession() so App can switch
 //                     tabs back to Train
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { today, uid, uuid, nowISO } from "../util.js";
 import { calcLevel } from "../model/levels.js";
@@ -198,10 +198,26 @@ export function useSessionRunner({
   // charts, the session summary, and double-advancing the rep counter
   // — until the cloud's workout-slot unique constraint collapsed it
   // on the next sync. A ref (not state) because the second call can
-  // arrive in the same tick, before any re-render. Re-armed wherever
-  // the next rep legitimately becomes startable: startSession and
-  // handleRestDone (which also covers the switch-hands resume).
+  // arrive in the same tick, before any re-render.
+  //
+  // RE-ARMING (fixed 2026-06-12): v1 cleared the lock only in
+  // startSession and handleRestDone, on the WRONG assumption that the
+  // switch-hands resume routed through handleRestDone. It doesn't —
+  // App.js calls setPhase("rep_ready") directly from SwitchHandsView's
+  // onReady — so the lock set by the LEFT hand's final rep was never
+  // cleared and every RIGHT-hand rep completion was silently dropped
+  // (rep timer ran in the view; no record, no rest phase — the
+  // 2026-06-12 Crusher session lost its entire R set this way). The
+  // phase effect below now clears the lock on ANY transition into a
+  // rep-startable phase, so no arming path — present or future — can
+  // be missed. The explicit clears in startSession/handleRestDone are
+  // kept as belt-and-braces.
   const repDoneLockRef = useRef(false);
+  useEffect(() => {
+    if (phase === "rep_ready" || phase === "rep_active") {
+      repDoneLockRef.current = false;
+    }
+  }, [phase]);
 
   // ── Handle rep completion ───────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false }) => {
