@@ -30,7 +30,7 @@
 // small (~50 lines). Splitting them would require either two
 // adjacent Cards or a wrapper component — neither earns its weight.
 
-import React from "react";
+import React, { useMemo } from "react";
 import {
   ResponsiveContainer, ComposedChart, Line, Scatter,
   XAxis, YAxis, Tooltip, CartesianGrid,
@@ -39,13 +39,14 @@ import {
 import { C } from "../../ui/theme.js";
 import { Card, HandViewPills } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
-import { KG_TO_LBS, fmt1, fmtW, toDisp } from "../../ui/format.js";
+import { fmt1, fmtW, toDisp, forceOverBW } from "../../ui/format.js";
 import { ZONE6 } from "../../model/zones.js";
 import {
   predForceThreeExp,
 } from "../../model/threeExp.js";
 import { fitAmpsForPts } from "../../model/baselines.js";
 import { effectiveLoad, freshFitReps } from "../../model/load.js";
+import { freshLoadFor } from "../../model/prescription.js";
 
 // Match AnalysisView's chart-min duration (5s — same lower bound as
 // the curve-sample grid in threeExpCurveData). Lives here as a local
@@ -93,10 +94,14 @@ export function ForceDurationCard({
   // Per-grip Hand Asymmetry rows
   handAsymmetry,
   // Raw history + priors (only used for the per-grip split-mode
-  // render block; the single-fit path uses the pre-computed dot/curve
+  // series below; the single-fit path uses the pre-computed dot/curve
   // props above).
   history,
   threeExpPriors,
+  // freshMap — the engine's fresh-equivalent load corrections. Split-
+  // mode curves fit on the same basis prescription() uses (June 2026
+  // audit; matches the single-grip curve's engine-basis change).
+  freshMap = null,
   // Callback when a dot is clicked (opens session-detail modal)
   handleDotClick,
 }) {
@@ -106,12 +111,77 @@ export function ForceDurationCard({
   // surface that reads them.
   const fmtForce = (kg) => {
     if (kg == null) return "—";
-    if (useRel) return fmt1(kg / bodyWeight);     // unitless ratio
+    if (useRel) return fmt1(forceOverBW(kg, bodyWeight));   // unitless ratio
     return fmtW(kg, unit);
   };
   const forceUnit = useRel ? "× BW" : unit;
 
   const splitMode = !!fdSplitData;
+
+  // ── Split-mode series, precomputed (June 2026 audit) ─────────
+  // This work — freshFitReps scans, per-grip three-exp fits, curve
+  // sampling — used to run inline inside the chart's render JSX on
+  // every render. Memoized here so it only recomputes when its
+  // actual inputs change. Curve fits use the ENGINE BASIS (all reps
+  // at fresh-equivalent loads, same as prescription()); dots stay
+  // observed fresh rep-1s.
+  const splitSeries = useMemo(() => {
+    if (!fdSplitData || !threeExpPriors?.get) return null;
+    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
+    const out = [];
+    for (const grip of Object.keys(fdSplitData)) {
+      const color = GRIP_COLORS[grip] || C.blue;
+      // Engine-basis curve fit: all reps, fresh-equivalent loads.
+      const fitReps = (history || []).filter(r =>
+        r.grip === grip
+        && (handView === "pooled" || r.hand === handView)
+        && r.actual_time_s > 0 && effectiveLoad(r) > 0
+      );
+      let teeCurve = null;
+      let ref180 = null;
+      if (fitReps.length >= 2) {
+        const pts = fitReps.map(r => ({
+          T: r.actual_time_s,
+          F: freshMap ? freshLoadFor(r, freshMap) : effectiveLoad(r),
+        }));
+        const amps = fitAmpsForPts(pts, grip, threeExpPriors);
+        if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
+          teeCurve = Array.from({ length: 80 }, (_, i) => {
+            const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
+            const f = Math.max(predForceThreeExp(amps, t), 0);
+            return {
+              x: t,
+              y: useRel && bodyWeight > 0
+                ? forceOverBW(f, bodyWeight)
+                : toDisp(f, unit),
+            };
+          });
+          const r180 = predForceThreeExp(amps, 180);
+          if (r180 > 0) ref180 = r180;
+        }
+      }
+      // Dots: observed FRESH first reps only (matches the single-grip
+      // scatter) — the within-set fatigue cloud lives in the
+      // click-through session detail, not the main scatter.
+      const dots = freshFitReps(history).filter(r =>
+        r.grip === grip
+        && (handView === "pooled" || r.hand === handView)
+        && r.actual_time_s > 0
+        && effectiveLoad(r) > 0
+      ).map(r => ({
+        x: r.actual_time_s,
+        y: useRel && bodyWeight > 0
+          ? forceOverBW(effectiveLoad(r), bodyWeight)
+          : toDisp(effectiveLoad(r), unit),
+        grip, date: r.date, hand: r.hand,
+        session_id: r.session_id,
+        target_duration: r.target_duration,
+        rest_s: r.rest_s,
+      }));
+      out.push({ grip, color, teeCurve, ref180, dots });
+    }
+    return out;
+  }, [fdSplitData, history, threeExpPriors, freshMap, handView, useRel, bodyWeight, unit, maxDur]);
 
   return (
     <Card style={{ marginBottom: 16 }}>
@@ -121,7 +191,7 @@ export function ForceDurationCard({
       </div>
       <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
         {!splitMode && <span><span style={{ color: POOLED_DOT }}>●</span> reps ({handView === "pooled" ? "pooled" : handView === "L" ? "left hand" : "right hand"})</span>}
-        {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model: a regression fit summing three exponentials with progressively longer decay constants (≈10s / 30s / 180s). The components are labeled fast / medium / slow by timescale; treating them as specific tissue compartments would be an overclaim the fit doesn't support."><span style={{ color: curveColor }}>―</span> F-D curve (3-exp)</span>}
+        {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model fit on the SAME basis the prescription engine uses: every rep, at its fresh-equivalent load (corrected for within-set fatigue and cookedness). The curve is modeled fresh capacity — the line your recommendations come from — while the dots are observed fresh first reps."><span style={{ color: curveColor }}>―</span> modeled fresh capacity (3-exp)</span>}
         {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — well past the medium component's decay, where the slow component carries essentially the whole load. The closest model analog to a 'long-duration sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
         {splitMode && Object.keys(fdSplitData).map(g => (
           <span key={g}>
@@ -177,7 +247,7 @@ export function ForceDurationCard({
               fit can produce. */}
           {!fdSplitData && threeExpRef180 != null && (
             <ReferenceLine
-              y={useRel ? threeExpRef180 / bodyWeight : toDisp(threeExpRef180, unit)}
+              y={useRel ? forceOverBW(threeExpRef180, bodyWeight) : toDisp(threeExpRef180, unit)}
               stroke={curveColor} strokeDasharray="6 3" strokeWidth={1.5}
               label={{ value: `3-min ${fmtForce(threeExpRef180)} ${forceUnit}`, position: "insideTopRight", fill: curveColor, fontSize: 10 }}
             />
@@ -199,97 +269,35 @@ export function ForceDurationCard({
               Crusher FDS crush ~15-30kg on a single curve). Failure dots
               retain their red/green meaning, but get a colored OUTLINE
               matching the grip so you can tell which is which. */}
-          {fdSplitData && (() => {
-            const grips = Object.keys(fdSplitData);
+          {splitSeries && splitSeries.flatMap(({ grip, color, teeCurve, ref180, dots }) => {
             const elements = [];
-            const tMax = Math.max(maxDur, F_D_T_MIN + 10);
-            for (const grip of grips) {
-              const color = GRIP_COLORS[grip] || C.blue;
-              // (Per-grip dot data is now built from `history` directly
-              // below — fdSplitData[grip] is only consumed for the
-              // per-grip curve fits, not the dots.)
-              // Three-exp PRIMARY curve — bold solid grip color. This
-              // is the curve the engine optimizes against; Monod
-              // (above) is just for visual comparison. Also emits a
-              // per-grip "3-min sustainable" reference line so split
-              // mode shows the same overlays as single-grip mode.
-              if (threeExpPriors && threeExpPriors.get) {
-                // Train-to-failure model: every rep with valid
-                // actual_time_s is a (T, F) data point. fitAmpsForPts
-                // applies the grip-aware prior + adaptive lambda
-                // shrinkage from src/model/baselines.js.
-                const failures = freshFitReps(history).filter(r =>
-                  r.grip === grip
-                  && (handView === "pooled" || r.hand === handView)
-                  && r.actual_time_s > 0 && effectiveLoad(r) > 0
-                );
-                if (failures.length >= 2) {
-                  const pts = failures.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
-                  const amps = fitAmpsForPts(pts, grip, threeExpPriors);
-                  if (amps && (amps[0] + amps[1] + amps[2]) > 0) {
-                    const teeCurve = Array.from({ length: 80 }, (_, i) => {
-                      const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
-                      const f = predForceThreeExp(amps, t);
-                      return {
-                        x: t,
-                        y: useRel && bodyWeight > 0
-                          ? toDisp(Math.max(f, 0), unit) / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1))
-                          : toDisp(Math.max(f, 0), unit),
-                      };
-                    });
-                    elements.push(
-                      <Line key={`${grip}-tee`} data={teeCurve} dataKey="y"
-                        stroke={color} strokeWidth={2} dot={false}
-                        legendType="none" isAnimationActive={false} />
-                    );
-                    // 3-min sustainable reference for this grip — analog
-                    // of the dashed horizontal line in single-grip mode.
-                    const teeRef180 = predForceThreeExp(amps, 180);
-                    if (teeRef180 > 0) {
-                      const refY = useRel && bodyWeight > 0
-                        ? teeRef180 / bodyWeight
-                        : toDisp(teeRef180, unit);
-                      elements.push(
-                        <ReferenceLine key={`${grip}-ref180`} y={refY}
-                          stroke={color} strokeDasharray="6 3" strokeWidth={1}
-                          strokeOpacity={0.7}
-                          label={{ value: `${grip} 3-min ${fmtForce(teeRef180)} ${forceUnit}`,
-                            position: "insideRight", fill: color, fontSize: 9 }}
-                        />
-                      );
-                    }
-                  }
-                }
-              }
-              // Dots: pooled across hands, filled in the grip's color
-              // (the same color as that grip's curve). FRESH first reps
-              // only (matches the curve fit + every other card) — the
-              // within-set fatigue cloud lives in the click-through
-              // session detail, not the main scatter.
-              const gripReps = freshFitReps(history).filter(r =>
-                r.grip === grip
-                && (handView === "pooled" || r.hand === handView)
-                && r.actual_time_s > 0
-                && effectiveLoad(r) > 0
-              );
-              const gripDots = gripReps.map(r => ({
-                x: r.actual_time_s,
-                y: useRel && bodyWeight > 0
-                  ? effectiveLoad(r) / bodyWeight
-                  : toDisp(effectiveLoad(r), unit),
-                grip, date: r.date, hand: r.hand,
-                session_id: r.session_id,
-                target_duration: r.target_duration,
-                rest_s: r.rest_s,
-              }));
+            if (teeCurve) {
               elements.push(
-                <Scatter key={`${grip}-dots`} data={gripDots} dataKey="y"
-                  fill={color} opacity={0.85}
-                  onClick={handleDotClick} style={{ cursor: "pointer" }} />
+                <Line key={`${grip}-tee`} data={teeCurve} dataKey="y"
+                  stroke={color} strokeWidth={2} dot={false}
+                  legendType="none" isAnimationActive={false} />
               );
             }
+            if (ref180 != null) {
+              const refY = useRel && bodyWeight > 0
+                ? forceOverBW(ref180, bodyWeight)
+                : toDisp(ref180, unit);
+              elements.push(
+                <ReferenceLine key={`${grip}-ref180`} y={refY}
+                  stroke={color} strokeDasharray="6 3" strokeWidth={1}
+                  strokeOpacity={0.7}
+                  label={{ value: `${grip} 3-min ${fmtForce(ref180)} ${forceUnit}`,
+                    position: "insideRight", fill: color, fontSize: 9 }}
+                />
+              );
+            }
+            elements.push(
+              <Scatter key={`${grip}-dots`} data={dots} dataKey="y"
+                fill={color} opacity={0.85}
+                onClick={handleDotClick} style={{ cursor: "pointer" }} />
+            );
             return elements;
-          })()}
+          })}
         </ComposedChart>
       </ResponsiveContainer>
       {/* Zone labels — 6-zone scheme. Wraps to two rows on narrow

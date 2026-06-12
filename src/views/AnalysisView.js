@@ -48,7 +48,7 @@ import React, { useMemo, useState } from "react";
 // directly — child cards own their own chart machinery.
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
-import { KG_TO_LBS, toDisp } from "../ui/format.js";
+import { toDisp, forceOverBW } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 import { today } from "../util.js";
 import { STRENGTH_MAX } from "../model/zones.js";
@@ -63,7 +63,7 @@ import {
 } from "../model/baselines.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
-import { prescription, prescribedLoad, effectiveLoad } from "../model/prescription.js";
+import { prescription, prescribedLoad, effectiveLoad, freshLoadFor } from "../model/prescription.js";
 import { freshFitReps } from "../model/load.js";
 import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
@@ -442,12 +442,28 @@ export function AnalysisView({
   // falls back to a no-shrinkage fit (which validation showed
   // loses to Monod by ~3% on aggregate, fine as a degenerate case).
   const threeExpFit = useMemo(() => {
-    if (fdFailures.length < 2) return null;
-    const pts = fdFailures.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
+    // ENGINE-BASIS fit (June 2026 audit): this curve previously fit
+    // raw loads on fresh rep-1s only, while prescription() fits ALL
+    // reps at fresh-equivalent loads (freshMap-corrected for within-
+    // set fatigue + cookedness). Two strategies for the same confound
+    // — exclusion vs correction — that produced two subtly different
+    // curves, and the one on screen wasn't the one coaching you. The
+    // chart's curve now uses prescription()'s exact basis, so the
+    // line you see IS the line the engine prescribes from. Dots stay
+    // observed fresh rep-1s — observed data vs modeled capacity.
+    const pool = failures.filter(r =>
+      r.actual_time_s > 0 && effectiveLoad(r) > 0
+      && (handView === "pooled" || r.hand === handView)
+    );
+    if (pool.length < 2) return null;
+    const pts = pool.map(r => ({
+      T: r.actual_time_s,
+      F: freshMap ? freshLoadFor(r, freshMap) : effectiveLoad(r),
+    }));
     const amps = fitAmpsForPts(pts, selGrip, threeExpPriors);
     if (!amps) return null;
     return { amps };
-  }, [fdFailures, selGrip, threeExpPriors]);
+  }, [failures, handView, freshMap, selGrip, threeExpPriors]);
 
   // Predicted curve for chart overlay — same T grid as curveData so the
   // two lines align visually.
@@ -457,7 +473,9 @@ export function AnalysisView({
     return Array.from({ length: 80 }, (_, i) => {
       const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
       const f = predForceThreeExp(threeExpFit.amps, t);
-      return { x: t, y: toDisp(Math.max(f, 0), unit) };
+      // yKg carried so the BW-relative variant divides kg by kg via
+      // the canonical helper instead of display-unit by display-unit.
+      return { x: t, y: toDisp(Math.max(f, 0), unit), yKg: Math.max(f, 0) };
     });
   }, [threeExpFit, maxDur, unit]);
 
@@ -514,7 +532,7 @@ export function AnalysisView({
   // from the pooled scatter while still shaping the curve.
   const buildDot = (r) => ({
     x: r.actual_time_s,
-    y: useRel ? effectiveLoad(r) / bodyWeight : toDisp(effectiveLoad(r), unit),
+    y: useRel ? forceOverBW(effectiveLoad(r), bodyWeight) : toDisp(effectiveLoad(r), unit),
     date: r.date, grip: r.grip, hand: r.hand,
     // session_id lets click handlers gather the full session's reps to
     // pop up the RepCurveChart for that workout.
@@ -528,13 +546,13 @@ export function AnalysisView({
   const dotsRel = fdFailures.map(buildDot);
   const threeExpCurveDataRel = threeExpCurveData.map(d => ({
     x: d.x,
-    y: useRel && bodyWeight > 0 ? d.y / (bodyWeight * (unit === "lbs" ? KG_TO_LBS : 1)) : d.y,
+    y: useRel && bodyWeight > 0 ? forceOverBW(d.yKg, bodyWeight) : d.y,
   }));
   // effectiveLoad here too — see buildDot. Otherwise the axis ceiling
   // ignores manual-load reps and can clip their dots.
   const maxForceRel = Math.max(
     ...(useRel
-      ? reps.map(r => effectiveLoad(r) / bodyWeight)
+      ? reps.map(r => forceOverBW(effectiveLoad(r), bodyWeight) ?? 0)
       : reps.map(r => toDisp(effectiveLoad(r), unit))),
     useRel ? 0.5 : 40
   );
@@ -742,6 +760,7 @@ export function AnalysisView({
           maxForceRel={maxForceRel}
           handAsymmetry={handAsymmetry}
           history={history}
+          freshMap={freshMap}
           threeExpPriors={threeExpPriors}
           handleDotClick={handleDotClick}
         />

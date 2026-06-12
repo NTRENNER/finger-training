@@ -29,6 +29,17 @@ export const fromDisp = (val, unit) =>
 // rounded to one decimal.
 export const fmtW = (kg, unit) => fmt1(toDisp(kg, unit));
 
+// Bodyweight-relative force ratio — THE canonical helper (June 2026
+// audit). BW-relative math was hand-rolled at several call sites in
+// two correct-but-different styles (kg ÷ kg in some, display-unit ÷
+// display-unit in others). Both reduce to the same unitless ratio,
+// but mixing styles is exactly how a units bug slips in. Always pass
+// KG for both arguments; the result is unitless (force as a fraction
+// of bodyweight) so it never needs unit conversion. Returns null for
+// unusable inputs so callers can render "—".
+export const forceOverBW = (forceKg, bodyWeightKg) =>
+  (forceKg > 0 && bodyWeightKg > 0) ? forceKg / bodyWeightKg : null;
+
 // Format seconds as M:SS for ≥60s, or "<n>s" for <60s. "—" for invalid.
 export const fmtTime = (s) => {
   if (!isFinite(s) || s < 0) return "—";

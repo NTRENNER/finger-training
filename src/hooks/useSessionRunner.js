@@ -43,7 +43,7 @@
 //   onSessionStart  — fires after startSession() so App can switch
 //                     tabs back to Train
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { today, uid, uuid, nowISO } from "../util.js";
 import { calcLevel } from "../model/levels.js";
@@ -157,6 +157,7 @@ export function useSessionRunner({
       pushDailyState(today(), config.cooked);
     }
     const startedAt = nowISO();
+    repDoneLockRef.current = false;   // arm rep-done for the first rep
     setSessionId(sid);
     setSessionStartedAt(startedAt);
     setRefWeights(rw);
@@ -190,8 +191,22 @@ export function useSessionRunner({
     setPhase("done");
   }, [config, history]);
 
+  // Duplicate-event lock (June 2026 audit): a double-tapped Done
+  // button or a doubled Tindeq release event called handleRepDone
+  // twice for one physical rep. Each call minted a fresh UUID, so the
+  // duplicate looked like a real rep locally — feeding the live
+  // charts, the session summary, and double-advancing the rep counter
+  // — until the cloud's workout-slot unique constraint collapsed it
+  // on the next sync. A ref (not state) because the second call can
+  // arrive in the same tick, before any re-render. Re-armed wherever
+  // the next rep legitimately becomes startable: startSession and
+  // handleRestDone (which also covers the switch-hands resume).
+  const repDoneLockRef = useRef(false);
+
   // ── Handle rep completion ───────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false }) => {
+    if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
+    repDoneLockRef.current = true;
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
     // Weight is constant across the set — no within-set fatigue discount.
     // The rep-time curve (actual_time_s) is what reflects fatigue and feeds
@@ -308,6 +323,7 @@ export function useSessionRunner({
   }, [config, currentRep, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, activeHand]);
 
   const handleRestDone = useCallback(() => {
+    repDoneLockRef.current = false;   // next rep armed — accept its completion
     // When Tindeq is connected, go to rep_ready so AutoRepSessionView can arm
     // auto-detection and wait for the next pull. When not connected, auto-start
     // the countdown so the user doesn't need to tap Start Rep.
