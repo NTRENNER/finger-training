@@ -63,7 +63,7 @@ import {
 } from "../lib/trip.js";
 
 import { today, nowISO } from "../util.js";
-import { recommendSet } from "../model/workout-progression.js";
+import { recommendSet, recommendSetCount } from "../model/workout-progression.js";
 import { shortBuildLabel } from "../lib/buildInfo.js";
 
 import {
@@ -215,7 +215,18 @@ export function WorkoutTab({
   // without duplicating the three-logging-mode branching.
   const seedExercise = (ex) => {
     if (!ex.loggable) return { done: false, notes: "" };
-    const sets = Array.from({ length: ex.sets || 1 }, (_, i) => {
+    // Set ladder (June 2026): weight-logged exercises earn sets at
+    // constant load — see recommendSetCount. circles/band exercises
+    // keep their template counts (no load to ladder against), and
+    // variant-ladder exercises (logVariant, June 2026) are excluded
+    // too — their progression variable is leverage, not load, and
+    // they're maintenance-dosed by design (no set accumulation).
+    const isWeightLogged = !ex.circlesOnly && !ex.logBand && !ex.logVariant;
+    const ladder = isWeightLogged
+      ? recommendSetCount(wLog, ex, ex.sets || 1)
+      : null;
+    const setCount = ladder ? ladder.sets : (ex.sets || 1);
+    const sets = Array.from({ length: setCount }, (_, i) => {
       if (ex.circlesOnly) {
         // Seed reps from the prior session when the exercise tracks
         // reps too; otherwise just a bare done flag.
@@ -248,8 +259,28 @@ export function WorkoutTab({
           done: false,
         };
       }
-      // Default weight-logged exercise — seed via recommendSet.
-      const rec = recommendSet(wLog, ex, activeId, i);
+      if (ex.logVariant) {
+        // Variant-ladder exercises (June 2026, e.g. TRX Row): each set
+        // logs which leverage variant was used alongside reps and an
+        // OPTIONAL weight (vest). Same seeding precedent as logBand —
+        // inherit variant/reps/weight from the most recent session
+        // containing this exercise, no progression math (stepping to
+        // the next rung is a user judgment call, like band color).
+        // Default variant = the easiest rung (first in `variants`);
+        // weight stays blank until the user actually adds a vest.
+        const lastSession = findLastSessionFor(wLog, activeId, ex.id);
+        const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
+        return {
+          variant: lastSet?.variant ?? (ex.variants?.[0] ?? ""),
+          reps:    lastSet?.reps    ?? ex.reps ?? "",
+          weight:  lastSet?.weight  ?? "",
+          done: false,
+        };
+      }
+      // Default weight-logged exercise — seed via recommendSet, with
+      // the ladder plan steering the load policy (hold during set
+      // accumulation; step/jump/bridge only at top-out).
+      const rec = recommendSet(wLog, ex, activeId, i, null, ladder);
       if (ex.unilateral) {
         return {
           leftReps:    rec?.leftReps    ?? ex.reps ?? "",
@@ -530,10 +561,21 @@ export function WorkoutTab({
               if (ex.loggable) {
                 // Build per-set recommendations for this exercise.
                 // recommendSet is called per set index, same protocol
-                // the legacy tab used.
-                const recommendations = Array.from(
+                // the legacy tab used. Pass the same ladder plan that
+                // seeded the session (June 2026) so the reasoning
+                // hints agree with the seeded values — without it, a
+                // maintain/double-policy exercise would seed a held
+                // load but still display the legacy "+5% clean
+                // session" hint underneath. Variant-ladder exercises
+                // get no hints at all: they're maintenance-dosed and
+                // their progression variable (leverage) isn't
+                // something recommendSet can reason about.
+                const plan = (!ex.circlesOnly && !ex.logBand && !ex.logVariant)
+                  ? recommendSetCount(wLog, ex, ex.sets || 1)
+                  : null;
+                const recommendations = ex.logVariant ? [] : Array.from(
                   { length: (exData.sets?.length || ex.sets || 1) },
-                  (_, idx) => recommendSet(wLog, ex, activeId, idx)
+                  (_, idx) => recommendSet(wLog, ex, activeId, idx, null, plan)
                 );
                 return (
                   <div key={ex.id}>

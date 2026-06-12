@@ -91,7 +91,7 @@ function nextAvailableLoad(currentWeight, availableLoads) {
 // "= hold (missed reps)" / "→ next KB · 35 → 50, reset reps") that
 // the UI surfaces under the input so the user understands the
 // suggestion.
-function recommendSide(prev, exDef, repRange) {
+function recommendSide(prev, exDef, repRange, ladder = null) {
   const { targetReps, topReps } = repRange;
   const usesAvailableLoads = Array.isArray(exDef?.availableLoads) && exDef.availableLoads.length > 0;
 
@@ -114,6 +114,82 @@ function recommendSide(prev, exDef, repRange) {
   const hitTarget  = hasReps && targetReps > 0 && prevReps >= targetReps;
   const cleanLast  = prevDone && hitTarget;
   const badMiss    = prevDone && hasReps && targetReps > 0 && prevReps <= targetReps * 0.5;
+
+  // Set-ladder directives (June 2026): when the caller passes a
+  // ladder plan, it owns the LOAD policy — weight holds while sets
+  // accumulate, steps/jumps only at top-out, and KB rep-up runs only
+  // in bridge mode. Without a ladder (legacy callers, tests), the
+  // original per-set strategies below apply unchanged.
+  if (ladder && hasWeight && !badMiss) {   // catastrophic miss → legacy back-off below
+    if (ladder.mode === "accumulate" || ladder.mode === "repeat") {
+      return {
+        weight: String(prevWeight),
+        reps:   String(targetReps || prevReps),
+        reasoning: ladder.mode === "accumulate"
+          ? "= hold (ladder: building sets)"
+          : "= hold (ladder: repeat)",
+      };
+    }
+    if (ladder.mode === "step_load" && cleanLast) {
+      const raw = prevWeight * 1.05;
+      const bumped = roundToPlateIncrement(Math.max(raw, prevWeight + 2.5));
+      return {
+        weight: String(bumped),
+        reps:   String(targetReps || prevReps),
+        reasoning: `↑ +${(bumped - prevWeight).toFixed(1).replace(/\.0$/, "")} lbs (ladder top-out)`,
+      };
+    }
+    if (ladder.mode === "jump" && ladder.nextLoad != null) {
+      return {
+        weight: String(ladder.nextLoad),
+        reps:   String(targetReps),
+        reasoning: `→ next KB · ${prevWeight} → ${ladder.nextLoad} (gate cleared), reset reps`,
+      };
+    }
+    if (ladder.mode === "maintain" || ladder.mode === "quality") {
+      return {
+        weight: String(prevWeight),
+        reps:   String(targetReps || prevReps),
+        reasoning: ladder.mode === "maintain" ? "= hold (maintenance)" : "= hold (quality work)",
+      };
+    }
+    if (ladder.mode === "double") {
+      // Rep-up at constant load; at top of range, advise the next
+      // implement (med balls are discrete — user enters the new ball).
+      if (cleanLast && prevReps < topReps) {
+        return {
+          weight: String(prevWeight),
+          reps:   String(prevReps + 1),
+          reasoning: "↑ +1 fast rep (same ball)",
+        };
+      }
+      if (cleanLast) {
+        return {
+          weight: String(prevWeight),
+          reps:   String(targetReps),
+          reasoning: "top reps at full speed — grab the next ball, reset reps",
+        };
+      }
+      return {
+        weight: String(prevWeight),
+        reps:   String(targetReps || prevReps),
+        reasoning: "= hold (keep every rep fast)",
+      };
+    }
+    if (ladder.mode === "bridge") {
+      const nextReps = cleanLast
+        ? Math.min(topReps || prevReps + 1, prevReps + 1)
+        : (targetReps || prevReps);
+      return {
+        weight: String(prevWeight),
+        reps:   String(nextReps),
+        reasoning: cleanLast
+          ? `↑ +1 rep (bridging toward ${ladder.nextLoad ?? "next bell"})`
+          : "= hold (bridge: retry reps)",
+      };
+    }
+    // "seed" / "hold_top" fall through to the legacy strategies.
+  }
 
   // Strategy 1: KB-style double progression — rep up at the
   // current weight, jump to the next load when at top of range.
@@ -192,6 +268,166 @@ function recommendSide(prev, exDef, repRange) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────
+// SET LADDER (June 2026) — volume-first progression
+// ─────────────────────────────────────────────────────────────
+// Sibling of the finger density ladder: hold the LOAD constant and
+// earn SETS. Clean session (every done set hit target reps) → +1 set
+// next time, same weight. Topped out (template + 2 sets, clean) →
+// step the load and reset to the template's set count — which makes
+// the first week at the new load LESS total work, a built-in
+// mini-deload exactly when intensity rises (accumulate → intensify).
+// Miss → repeat the same prescription (no auto-retreat; the existing
+// catastrophic-miss backoff in recommendSide still applies).
+//
+// KB / discrete-load exercises share the ladder, with a FEASIBILITY
+// GATE at the top: jumps between bells are big and unequal (35→50 is
+// +43%), and adding sets doesn't build the per-set strength a jump
+// needs. So at top-out we estimate 1RM (Epley, best recent set) and
+// jump only when the next bell × target reps is within KB_JUMP_MARGIN
+// of it; otherwise BRIDGE — back to template sets, repping up (the
+// old double progression) until the estimate clears, then jump.
+export const SET_LADDER_CAP_OVER_TEMPLATE = 2;
+// Jump when est. 1RM ≥ margin × the 1RM the next bell's target set
+// requires. 0.95 ≈ last rep around RPE 9.5 on the first new-bell
+// session, cushioned by the set-count reset.
+export const KB_JUMP_MARGIN = 0.95;
+
+// Epley estimated 1RM: w × (1 + r/30). Unit-agnostic.
+export function epley1RM(weight, reps) {
+  const w = Number(weight);
+  const r = Number(reps);
+  if (!(w > 0) || !(r > 0)) return null;
+  return w * (1 + r / 30);
+}
+
+// Per-set rep check for clean-session evaluation, handling both
+// bilateral and unilateral set shapes. Unilateral: BOTH sides must
+// hit target (the weaker side gates, same as the finger ladder).
+function setHitTarget(set, unilateral, targetReps) {
+  if (!set || !set.done || !(targetReps > 0)) return false;
+  if (unilateral) {
+    return parseRepsCount(set.leftReps) >= targetReps
+        && parseRepsCount(set.rightReps) >= targetReps;
+  }
+  return parseRepsCount(set.reps) >= targetReps;
+}
+
+// Decide next session's SET COUNT (and load directive) for one
+// exercise. Pure derivation from the workout log — no stored ladder
+// state, same philosophy as the finger ladder. Returns:
+//   {
+//     sets,        // set count to prescribe
+//     mode,        // "seed" | "accumulate" | "repeat" | "step_load"
+//                  //   | "bridge" | "jump" | "hold_top"
+//     nextLoad,    // KB jump target (jump mode only)
+//     est1RM, requiredRM,   // KB gate receipts (bridge/jump modes)
+//     reasoning,   // human-readable receipt for the UI
+//   }
+export function recommendSetCount(history, exDef, templateSets) {
+  const base = Math.max(1, Number(templateSets) || 1);
+
+  // Per-exercise progression policy (June 2026): the set ladder's
+  // "clean session = advance" gate assumes near-failure rep targets.
+  // Power and maintenance work pass that gate by DESIGN, so laddering
+  // them escalates volume forever — degrading the power stimulus and
+  // turning the light-touch day into a second strength day.
+  //   "double"   — fixed sets; rep-up at constant load (fast reps
+  //                only, user-judged), advance load at top of range.
+  //   "maintain" — fixed sets, held load: a capped dose by design.
+  //   "quality"  — fixed sets/reps; progression is execution quality.
+  // Default (unset) = "ladder", the volume-first scheme below.
+  const policy = exDef?.progressionPolicy;
+  if (policy === "double" || policy === "maintain" || policy === "quality") {
+    return {
+      sets: base,
+      mode: policy,
+      reasoning: policy === "maintain"
+        ? "maintenance dose — sets and load held by design"
+        : policy === "double"
+          ? "fixed sets — build fast reps, then step the load"
+          : "fixed sets — progress execution quality, not volume",
+    };
+  }
+
+  const cap = base + SET_LADDER_CAP_OVER_TEMPLATE;
+  const { targetReps, topReps } = parseRepRange(exDef?.reps);
+  const lastSession = findLastSession(history, null, exDef?.id);
+  const doneSets = (lastSession?.exercises?.[exDef?.id]?.sets || [])
+    .filter(s => !!(s && s.done));
+  if (doneSets.length === 0 || !(targetReps > 0)) {
+    return { sets: base, mode: "seed", reasoning: "" };
+  }
+  const prevCount = doneSets.length;
+  const clean = doneSets.every(s => setHitTarget(s, exDef?.unilateral, targetReps));
+  const usesKB = Array.isArray(exDef?.availableLoads) && exDef.availableLoads.length > 0;
+
+  if (!clean) {
+    return {
+      sets: Math.min(cap, Math.max(base, prevCount)),
+      mode: "repeat",
+      reasoning: `ladder: missed reps — repeat ${Math.max(base, prevCount)} sets at the same load`,
+    };
+  }
+  if (prevCount < cap) {
+    const next = Math.max(base, prevCount) + 1;
+    return {
+      sets: Math.min(cap, next),
+      mode: "accumulate",
+      reasoning: `ladder: clean ${prevCount}×${targetReps} → ${Math.min(cap, next)} sets, same load`,
+    };
+  }
+
+  // Topped out, clean. Plates: step the load, reset sets.
+  if (!usesKB) {
+    return {
+      sets: base,
+      mode: "step_load",
+      reasoning: `ladder: topped out ${cap} sets → step load, back to ${base} sets`,
+    };
+  }
+
+  // KB top-out: feasibility gate.
+  const sideEst = (weightKey, repsKey) => {
+    let best = null;
+    for (const s of doneSets) {
+      const e = epley1RM(parseFloat(s[weightKey]), parseRepsCount(s[repsKey]));
+      if (e != null && (best == null || e > best)) best = e;
+    }
+    return best;
+  };
+  const est1RM = exDef?.unilateral
+    ? (() => {
+        const l = sideEst("leftWeight", "leftReps");
+        const r = sideEst("rightWeight", "rightReps");
+        if (l == null || r == null) return l ?? r;
+        return Math.min(l, r);   // weaker side gates the jump
+      })()
+    : sideEst("weight", "reps");
+  const curWeight = Math.max(...doneSets.map(s =>
+    parseFloat(exDef?.unilateral ? s.leftWeight : s.weight) || 0));
+  const nextLoad = nextAvailableLoad(curWeight, exDef.availableLoads);
+  if (nextLoad == null) {
+    return {
+      sets: cap, mode: "hold_top",
+      reasoning: "ladder: top bell, top sets — nowhere higher without heavier equipment",
+    };
+  }
+  const requiredRM = epley1RM(nextLoad, targetReps);
+  const feasible = est1RM != null && requiredRM != null
+    && est1RM >= requiredRM * KB_JUMP_MARGIN;
+  if (feasible) {
+    return {
+      sets: base, mode: "jump", nextLoad, est1RM, requiredRM,
+      reasoning: `ladder: topped out — ${nextLoad} reachable (est 1RM ${Math.round(est1RM)} vs ${Math.round(requiredRM)} needed), jumping · back to ${base} sets`,
+    };
+  }
+  return {
+    sets: base, mode: "bridge", nextLoad, est1RM, requiredRM,
+    reasoning: `ladder: ${nextLoad} not reachable yet (est 1RM ${Math.round(est1RM ?? 0)}, need ~${Math.round((requiredRM ?? 0) * KB_JUMP_MARGIN)}) — building reps at the current bell, ${base} sets`,
+  };
+}
+
 // Find the most recent USABLE session matching the given predicate.
 // Sorts candidates by date DESC (then completedAt DESC as tiebreaker)
 // rather than walking the array backward, because the array's
@@ -258,10 +494,14 @@ function findLastSession(history, workoutKey, exId) {
 // detector for conditional reasoning text; the recommender does
 // NOT add bodyweight to the recorded weight (the user types added
 // weight, the volume math folds bodyweight in separately).
-export function recommendSet(history, exDef, workoutKey, setIdx, bw = null) {
+export function recommendSet(history, exDef, workoutKey, setIdx, bw = null, ladder = null) {
   const repRange = parseRepRange(exDef?.reps);
   const lastSession = findLastSession(history, workoutKey, exDef.id);
-  const lastSet = lastSession?.exercises?.[exDef.id]?.sets?.[setIdx];
+  const prevSets = lastSession?.exercises?.[exDef.id]?.sets;
+  // Ladder-added sets have no positional precedent in the previous
+  // session (setIdx beyond its count) — inherit the last set's values
+  // so the new set seeds at the same weight instead of blank.
+  const lastSet = prevSets?.[setIdx] ?? (ladder ? prevSets?.[prevSets.length - 1] : undefined);
 
   // If we fell back across workouts, prepend a small hint to the
   // reasoning so the user understands why the suggestion exists when
@@ -290,8 +530,8 @@ export function recommendSet(history, exDef, workoutKey, setIdx, bw = null) {
       reps:   lastSet.rightReps   ?? lastSet.reps   ?? "",
       done:   !!lastSet.done,
     } : null;
-    const left  = decorate(recommendSide(leftPrev,  exDef, repRange));
-    const right = decorate(recommendSide(rightPrev, exDef, repRange));
+    const left  = decorate(recommendSide(leftPrev,  exDef, repRange, ladder));
+    const right = decorate(recommendSide(rightPrev, exDef, repRange, ladder));
     return {
       leftWeight:    left.weight,
       leftReps:      left.reps,
@@ -312,5 +552,5 @@ export function recommendSet(history, exDef, workoutKey, setIdx, bw = null) {
   // current logic doesn't branch on it).
   void isBodyweightAdditive(exDef);
   void bw;
-  return decorate(recommendSide(prev, exDef, repRange));
+  return decorate(recommendSide(prev, exDef, repRange, ladder));
 }

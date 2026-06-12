@@ -54,6 +54,14 @@ function seedExerciseEmpty(ex) {
     if (ex.unilateral) {
       return { leftReps: "", leftWeight: "", rightReps: "", rightWeight: "", done: false };
     }
+    // Variant exercises (June 2026, e.g. TRX Row) start with a blank
+    // variant too — same blank-start philosophy as reps/weight, so the
+    // user records which leverage rung they actually used rather than
+    // accepting a defaulted one. SessionExRow's select shows a
+    // placeholder option while variant is empty.
+    if (ex.logVariant) {
+      return { variant: "", reps: "", weight: "", done: false };
+    }
     return { reps: "", weight: "", done: false };
   });
   return { sets };
@@ -701,7 +709,18 @@ export function WorkoutHistoryView({
                             ) : isBand ? (
                               <span>{formatBandSide(s.reps, s.band)}</span>
                             ) : (
-                              formatSide(s.reps, s.weight)
+                              // Variant sets (June 2026, e.g. TRX Row)
+                              // prepend the leverage rung — "Archer ·
+                              // 10 reps" — but only when the set has
+                              // real reps/weight data, so a variant
+                              // with nothing logged still reads as the
+                              // bare "—" dash like every other set.
+                              (() => {
+                                const body = formatSide(s.reps, s.weight);
+                                return s.variant && body !== "—"
+                                  ? `${s.variant} · ${body}`
+                                  : body;
+                              })()
                             )}
                           </span>
                         );

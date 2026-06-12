@@ -116,6 +116,47 @@ export const exercises = {
     bodyweightAdditive: true,
   },
 
+  trxRow: {
+    // Added June 2026 as Workout C's pulling slot, replacing the
+    // weighted pull-up there (the pull-up def stays in this map for
+    // Workout A and for historical sessions). Rationale: between
+    // climbing, A's pull-ups, and C's old pull-ups, every pull in the
+    // program was vertical. A horizontal row trains the scapular
+    // retraction / mid-back strength that balances all that vertical
+    // pulling — the classic climber's-shoulder prehab gap.
+    id: "trxRow",
+    name: "TRX Row",
+    tags: ["strength", "shoulder"],
+    prescription: "3 × 8–12",
+    intent:
+      "Horizontal pull for scapular and mid-back balance. Climbing and pull-ups are all vertical pulling; rows train the retraction strength that keeps shoulders healthy underneath it.",
+    progression: [
+      "Climb the leverage rungs: two-arm → feet-elevated → archer → one-arm.",
+      "Only then add vest weight.",
+      "Maintenance dose — quality reps, no auto-escalation.",
+    ],
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "8–12",
+    // Variant ladder (June 2026): the progression variable here is
+    // LEVERAGE, not load — each set logs which rung was used.
+    // logVariant is an axis alongside logWeight (like `unilateral`),
+    // NOT a fourth logging mode: the row still renders reps + weight
+    // inputs, plus a per-set variant selector fed by `variants`.
+    logVariant: true,
+    variants: ["Two-arm", "Feet-elevated", "Archer", "One-arm"],
+    // Optional vest weight — the input exists but may stay blank.
+    // Blank weights are safe downstream: the volume/1RM helpers skip
+    // zero/missing loads, and seeding for variant exercises copies the
+    // prior session rather than running plate-progression math.
+    logWeight: true,
+    // Definition-level policy is fine HERE (unlike the shared lifts in
+    // Workout C below) because only C uses this definition: fixed 3
+    // sets, held load — no set ladder, no +5% bumps.
+    progressionPolicy: "maintain",
+  },
+
   benchPress: {
     id: "benchPress",
     name: "Bench Press",
@@ -303,6 +344,12 @@ export const exercises = {
     sets: 4,
     reps: "3–5",
     logWeight: true,
+    // Set ladder opt-out (June 2026): power work must not accumulate
+    // sets. "double" = fixed sets, rep-up at the current ball counting
+    // only FAST reps, then step to the next ball and reset reps —
+    // alactic repeat-power capacity, the thing the user reports
+    // feeling great.
+    progressionPolicy: "double",
   },
 
   kbSnatch: {
@@ -318,6 +365,47 @@ export const exercises = {
     reps: "4–6",
     logWeight: true,
     unilateral: true,
+  },
+
+  // Broad/box jumps split into two first-class exercises (June 2026),
+  // replacing KB snatch in Workout B: the user's bell ladder makes the
+  // snatch jump infeasible-and-unenjoyable (35→50), and jumps train
+  // the same hip projection. Logged as COUNT OF FAST REPS only —
+  // recording distance/height was judged a compliance cost. circlesOnly
+  // + reps gives the reps-only logging path; no weight, no set ladder.
+  broadJump: {
+    id: "broadJump",
+    name: "Broad Jump",
+    tags: ["power", "explosive", "hamstring", "hip"],
+    prescription: "3 × 3–5 fast reps",
+    intent: "Horizontal hip projection — count only jumps that feel maximal.",
+    progression: [
+      "All reps maximal intent, full recovery between sets.",
+      "Stop the set when a jump feels flat.",
+    ],
+    loggable: true,
+    circlesOnly: true,
+    type: "P",
+    sets: 3,
+    reps: "3–5",
+    logWeight: false,
+  },
+  boxJump: {
+    id: "boxJump",
+    name: "Box Jump",
+    tags: ["power", "explosive", "hip"],
+    prescription: "3 × 3–5 fast reps",
+    intent: "Vertical hip drive with near-zero landing cost — step down, never jump down.",
+    progression: [
+      "Crisp takeoffs only; step down between reps.",
+      "Raise the box only when every rep is easy-fast.",
+    ],
+    loggable: true,
+    circlesOnly: true,
+    type: "P",
+    sets: 3,
+    reps: "3–5",
+    logWeight: false,
   },
 
   jumps: {
@@ -500,10 +588,13 @@ export const workouts = {
     // but at the workout level B is a power session — not a hip-
     // mobility session. See note on A above.
     tags: ["power", "explosive"],
+    // KB snatch removed June 2026 (bell-jump infeasibility killed
+    // adherence; def retained for history). The combined "jumps"
+    // chooser became two first-class exercises so each gets logged.
     exercises: [
       exercises.medBallThrows,
-      exercises.kbSnatch,
-      exercises.jumps,
+      exercises.broadJump,
+      exercises.boxJump,
       exercises.skaterBounds,
       exercises.bandedRotationalWork,
     ],
@@ -532,11 +623,27 @@ export const workouts = {
     fatigueClass: "frequent",
     fatigueCost: 1,
     tags: ["strength", "neural"],
+    // Per-workout policy overrides (June 2026): C shares these
+    // definition OBJECTS with A, so a definition-level
+    // progressionPolicy would wrongly freeze A's progression too.
+    // The spread copies scope `maintain` to C's membership only —
+    // exercise identity is by `id` everywhere downstream (history,
+    // exDef indexes, the swap picker), so nothing relies on
+    // referential identity between A's and C's copies. C is the
+    // light-touch day: every weight-logged lift here holds sets and
+    // load by design; progression lives on A.
+    //
+    // Pulling slot swapped June 2026: weighted pull-ups → TRX Row
+    // (def carries its own maintain policy — only C uses it). All
+    // the program's other pulling is vertical; the row adds the
+    // horizontal scapular/mid-back balance.
     exercises: [
-      { ...exercises.weightedPullup, prescription: "2 × 2" },
-      { ...exercises.dips,           prescription: "2 × 3–5" },
-      { ...exercises.bicepCurls,     prescription: "1–2 × 5–8 optional" },
-      { ...exercises.abWheel,        prescription: "1–2 light sets optional" },
+      exercises.trxRow,
+      { ...exercises.dips,       prescription: "2 × 3–5",            progressionPolicy: "maintain" },
+      { ...exercises.bicepCurls, prescription: "1–2 × 5–8 optional", progressionPolicy: "maintain" },
+      // abWheel is circlesOnly (no load to ladder against), so it
+      // needs no policy override.
+      { ...exercises.abWheel,    prescription: "1–2 light sets optional" },
     ],
     coachingNotes: [
       "This should feel like activation, not training.",

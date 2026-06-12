@@ -12,6 +12,14 @@
 //     set. Used for habit-style exercises like Ab Wheel where the
 //     done/not-done flag is the only useful signal.
 //
+// Orthogonal axis (June 2026): `logVariant` adds a compact per-set
+// variant <select> (fed by ex.variants) alongside the reps + weight
+// inputs — for exercises like TRX Row where the progression variable
+// is LEVERAGE (two-arm → feet-elevated → archer → one-arm) and the
+// weight input is an optional vest that may stay blank. It's a
+// modifier on the default mode (like `unilateral`), not a fourth
+// mode; the chosen variant persists into the set object as `variant`.
+//
 // Unilateral (default + logBand) exercises render TWO short rows
 // per set (L on top, R below) so each side gets its own reps +
 // weight/band inputs. The pair shares one done button — a "set" of
@@ -207,6 +215,11 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
             <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
               <span style={{ fontSize: 11, color: C.muted, width: 36, flexShrink: 0 }}></span>
               <span style={{ fontSize: 11, color: C.muted, width: 48, textAlign: "center" }}>reps</span>
+              {/* Variant column header (June 2026) — sits between reps
+                  and weight to match the input order below. */}
+              {ex.logVariant && (
+                <span style={{ fontSize: 11, color: C.muted, width: 104, textAlign: "center" }}>variant</span>
+              )}
               <span style={{ fontSize: 11, color: C.muted, width: ex.logBand ? 192 : 72, textAlign: "center" }}>
                 {ex.logBand ? "bands" : "weight"}
               </span>
@@ -274,6 +287,38 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       style={{ ...inputStyle, width: 48, fontSize: 13 }}
                       placeholder={recReps != null ? String(recReps) : (ex.reps || "")}
                     />
+                    {/* Per-set variant selector (June 2026). A <select>
+                        rather than pill buttons — four leverage rungs
+                        with multi-word labels would blow out the row
+                        width that the reps/weight inputs share. Stored
+                        under the plain `variant` key: the only variant
+                        exercise (TRX Row) is bilateral, so no per-side
+                        keys yet; a future unilateral variant exercise
+                        would need leftVariant/rightVariant the way
+                        band mode grew leftBand/rightBand. Empty-value
+                        option renders only while the set has no
+                        variant (retroactive history edits seed blank)
+                        so picking a rung is one tap and un-picking
+                        isn't a thing. */}
+                    {ex.logVariant && (
+                      <select
+                        value={s.variant ?? ""}
+                        onChange={e => {
+                          const next = [...setsData.sets];
+                          next[i] = { ...next[i], variant: e.target.value };
+                          onSetsChange({ sets: next });
+                        }}
+                        style={{
+                          width: 104, background: C.bg, border: `1px solid ${C.border}`,
+                          color: C.text, borderRadius: 6, padding: "4px 4px", fontSize: 12,
+                        }}
+                      >
+                        {!(s.variant) && <option value="">— variant —</option>}
+                        {(ex.variants || []).map(v => (
+                          <option key={v} value={v}>{v}</option>
+                        ))}
+                      </select>
+                    )}
                     {ex.logBand ? (
                       <span style={{
                         display: "inline-flex", alignItems: "center", flexWrap: "wrap",
@@ -374,6 +419,16 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                   }
                   if (ex.logBand) {
                     return { reps: ex.reps || "", band: "", done: false };
+                  }
+                  if (ex.logVariant) {
+                    // Inherit the previous set's variant — within one
+                    // session you almost always keep working the same
+                    // leverage rung; fall back to the easiest rung.
+                    const prevVariant = setsData.sets[setsData.sets.length - 1]?.variant;
+                    return {
+                      variant: prevVariant || (ex.variants?.[0] ?? ""),
+                      reps: ex.reps || "", weight: "", done: false,
+                    };
                   }
                   return { reps: ex.reps || "", weight: "", done: false };
                 };
