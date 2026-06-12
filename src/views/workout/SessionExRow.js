@@ -127,7 +127,14 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                   </span>
                   {showReps && (
                     <input
-                      type="text" inputMode="text"
+                      type="text" inputMode="numeric"
+                      // Select-all on focus (June 2026): inputs arrive
+                      // pre-filled with the recommendation, and on
+                      // phones overriding meant tap → double-tap →
+                      // delete → type. One tap now highlights the
+                      // value so typing replaces it. inputMode numeric
+                      // brings up the number pad on mobile.
+                      onFocus={e => e.target.select()}
                       value={s.reps ?? ""}
                       onChange={e => {
                         const next = [...setsData.sets];
@@ -277,7 +284,10 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       {sLabel}
                     </span>
                     <input
-                      type="text" inputMode="text"
+                      type="text" inputMode="numeric"
+                      // Select-all on focus — see the bilateral reps
+                      // input above for the mobile-override rationale.
+                      onFocus={e => e.target.select()}
                       value={repsVal}
                       onChange={e => {
                         const next = [...setsData.sets];
@@ -355,6 +365,9 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       <>
                         <input
                           type="number" inputMode="decimal"
+                          // Select-all on focus — see the reps inputs
+                          // above for the mobile-override rationale.
+                          onFocus={e => e.target.select()}
                           value={loadVal}
                           onChange={e => {
                             const next = [...setsData.sets];
