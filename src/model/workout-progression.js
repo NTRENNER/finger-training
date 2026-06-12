@@ -351,7 +351,9 @@ export function recommendSetCount(history, exDef, templateSets) {
   }
 
   const cap = base + SET_LADDER_CAP_OVER_TEMPLATE;
-  const { targetReps, topReps } = parseRepRange(exDef?.reps);
+  // (Only targetReps is needed here — topReps belongs to the per-set
+  // rep-up logic in recommendSide, not the set-count decision.)
+  const { targetReps } = parseRepRange(exDef?.reps);
   const lastSession = findLastSession(history, null, exDef?.id);
   const doneSets = (lastSession?.exercises?.[exDef?.id]?.sets || [])
     .filter(s => !!(s && s.done));
