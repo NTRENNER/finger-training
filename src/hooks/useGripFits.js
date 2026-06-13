@@ -26,6 +26,10 @@
 //     grip3xEstimates:      { [grip]: amps },
 //     perHandGripBaselines: { [`${grip}|${hand}`]: { date, amps } },
 //     gripImprovement:      { [grip]: { ...zoneDeltas, total, baselineDate } },
+//     gripImprovementFresh / perHandGripImprovementFresh:
+//                           same shapes, current fits de-cooked to
+//                           fresh-equivalent loads (Curve Improvement
+//                           basis toggle) vs the SAME frozen baselines,
 //     handAsymmetry:        [{ grip, L, R, stronger, weaker, asymPct }],
 //   }
 
@@ -38,6 +42,11 @@ import {
 
 export function useGripFits({
   history, threeExpPriors, grips,
+  // Optional: per-grip fatigue β model (user_settings.fatigue_model).
+  // Only used by the fresh-equivalent improvement maps below — the
+  // raw fits never touch it. Null → DEFAULT_BETA fallbacks inside
+  // capacityMultiplier, so the fresh-eq path still works cold-start.
+  fatigueModel = null,
   // Optional: { [grip]: { date, amps } } from useUserSettings. When
   // present, takes precedence over the freshly-computed baseline so
   // the comparison frame doesn't slide backward if older reps land
@@ -185,6 +194,29 @@ export function useGripFits({
     [gripBaselines, grip3xEstimates]
   );
 
+  // FRESH-EQUIVALENT current fits + improvement (June 2026, Curve
+  // Improvement basis toggle). Same builders, but each rep's load is
+  // de-cooked via the per-grip β model before fitting, so cooked-day
+  // sessions don't read as phantom regressions. Baselines stay the
+  // SAME frozen/pinned maps as the raw comparison — only the "now"
+  // side changes basis.
+  const grip3xEstimatesFresh = useMemo(
+    () => buildGripEstimates(history, threeExpPriors, { freshEq: true, fatigueModel }),
+    [history, threeExpPriors, fatigueModel]
+  );
+  const perHandGripEstimatesFresh = useMemo(
+    () => buildPerHandGripEstimates(history, threeExpPriors, { freshEq: true, fatigueModel }),
+    [history, threeExpPriors, fatigueModel]
+  );
+  const gripImprovementFresh = useMemo(
+    () => buildGripImprovement(gripBaselines, grip3xEstimatesFresh),
+    [gripBaselines, grip3xEstimatesFresh]
+  );
+  const perHandGripImprovementFresh = useMemo(
+    () => buildGripImprovement(perHandGripBaselines, perHandGripEstimatesFresh),
+    [perHandGripBaselines, perHandGripEstimatesFresh]
+  );
+
   // Per-grip hand asymmetry diagnostic — for each grip with fittable
   // L and R reps, the % gap between hands at 30s (middle of the
   // curve). Surfaces the limiter the user doesn't normally see.
@@ -200,6 +232,8 @@ export function useGripFits({
     perHandGripEstimates,
     perHandGripImprovement,
     gripImprovement,
+    gripImprovementFresh,
+    perHandGripImprovementFresh,
     handAsymmetry,
   };
 }

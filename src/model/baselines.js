@@ -28,6 +28,7 @@ import {
 } from "./threeExp.js";
 import { ZONE_KEYS, ZONE_REF_T } from "./zones.js";
 import { effectiveLoad, freshFitReps } from "./load.js";
+import { capacityMultiplier } from "./fatigueBeta.js";
 
 // Per-zone reference times pulled into a single lookup, indexed by
 // zone key. Keeps the improvement loop tight.
@@ -211,10 +212,29 @@ export function buildPerHandGripBaselines(history, threeExpPriors) {
   return out;
 }
 
+// Fresh-equivalent load for a rep: divide out the cooked-day capacity
+// scale-down so the point reflects what the user could have held FRESH.
+// session_cooked is the 0–10 fatigue the session was prescribed under;
+// capacityMultiplier returns exp(-β·cooked) ≤ 1 (and exactly 1 for
+// cooked null/0), so this only ever scales loads UP, and is a no-op
+// for fresh sessions. Used by the freshEq option below.
+function freshEqLoad(r, fatigueModel) {
+  return effectiveLoad(r) / capacityMultiplier(fatigueModel, r.grip, r.session_cooked ?? 0);
+}
+
 // Per-grip CURRENT fits — the "now" side of the per-grip improvement
 // comparison. Pulls every usable failure on that grip and fits a
 // three-exp basis with the grip's prior. Returns { [grip]: amps }.
-export function buildGripEstimates(history, threeExpPriors) {
+//
+// opts.freshEq (default false): when true, each rep's load is
+// de-cooked to its fresh-equivalent (see freshEqLoad) before fitting.
+// Why: sessions trained deep in fatigue use lighter prescribed loads,
+// so those raw points drag the current fit down and the improvement
+// card reads a phantom regression after hard training weeks. The
+// fresh-eq fit answers "did fresh capacity change?" instead of "what
+// did the reps literally show?". Default (raw) behavior is unchanged.
+export function buildGripEstimates(history, threeExpPriors, opts = {}) {
+  const { freshEq = false, fatigueModel = null } = opts;
   const out = {};
   const byGrip = {};
   for (const r of freshFitReps(history)) {
@@ -226,7 +246,10 @@ export function buildGripEstimates(history, threeExpPriors) {
   }
   for (const [grip, reps] of Object.entries(byGrip)) {
     const amps = fitAmpsForPts(
-      reps.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
+      reps.map(r => ({
+        T: r.actual_time_s,
+        F: freshEq ? freshEqLoad(r, fatigueModel) : effectiveLoad(r),
+      })),
       grip,
       threeExpPriors,
     );
@@ -242,7 +265,11 @@ export function buildGripEstimates(history, threeExpPriors) {
 // buildGripImprovement can consume the two maps unchanged. Per-hand
 // fits run on roughly half the data — expect noisier numbers than
 // the pooled fits; that's inherent, not a bug.
-export function buildPerHandGripEstimates(history, threeExpPriors) {
+//
+// opts.freshEq / opts.fatigueModel: same fresh-equivalent de-cooking
+// as buildGripEstimates — see the comment there. Raw is the default.
+export function buildPerHandGripEstimates(history, threeExpPriors, opts = {}) {
+  const { freshEq = false, fatigueModel = null } = opts;
   const out = {};
   const byKey = {};
   for (const r of freshFitReps(history)) {
@@ -256,7 +283,10 @@ export function buildPerHandGripEstimates(history, threeExpPriors) {
   for (const [key, reps] of Object.entries(byKey)) {
     const grip = key.split("|")[0];
     const amps = fitAmpsForPts(
-      reps.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
+      reps.map(r => ({
+        T: r.actual_time_s,
+        F: freshEq ? freshEqLoad(r, fatigueModel) : effectiveLoad(r),
+      })),
       grip,
       threeExpPriors,
     );

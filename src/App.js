@@ -760,6 +760,7 @@ export default function App() {
           pinnedPerHandBaselines={pinnedPerHandBaselines}
           onSavePinnedPerHandBaselines={savePinnedPerHandBaselines}
           baselinePinReady={baselinePinReady}
+          fatigueModel={fatigueModel}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
