@@ -221,18 +221,6 @@ function GripBlock({ grip, overlay, unit, maxDur, nowIdx, onScrub, divider }) {
 
       {imp && <ImprovementRow label={null} imp={imp} />}
 
-      {/* Now slider — scrub the comparison date; tiles + curve follow. */}
-      <div style={{ margin: "4px 0 8px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color, marginBottom: 4 }}>
-          <span>Now: <b>{nowDate}</b></span>
-          <span style={{ color: C.muted }}>{dates.length} session{dates.length === 1 ? "" : "s"} since baseline</span>
-        </div>
-        <input type="range" min={0} max={last} step={1} value={idx}
-          onChange={(e) => onScrub(grip, parseInt(e.target.value, 10))}
-          style={{ width: "100%", accentColor: color, cursor: "pointer" }}
-        />
-      </div>
-
       <OverlayChart
         baselineAmps={overlay.baselineAmps}
         nowAmps={nowAmps}
@@ -243,6 +231,21 @@ function GripBlock({ grip, overlay, unit, maxDur, nowIdx, onScrub, divider }) {
         baselineDate={overlay.baselineDate}
         nowDate={nowDate}
       />
+
+      {/* Now slider — scrub the comparison date; tiles + curve follow.
+          BELOW the chart (June 2026): the scrubbing thumb sits under
+          the user's finger, and with the slider above, that hand
+          covered exactly the curve they were trying to watch move. */}
+      <div style={{ margin: "8px 0 0" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color, marginBottom: 4 }}>
+          <span>Now: <b>{nowDate}</b></span>
+          <span style={{ color: C.muted }}>{dates.length} session{dates.length === 1 ? "" : "s"} since baseline</span>
+        </div>
+        <input type="range" min={0} max={last} step={1} value={idx}
+          onChange={(e) => onScrub(grip, parseInt(e.target.value, 10))}
+          style={{ width: "100%", accentColor: color, cursor: "pointer" }}
+        />
+      </div>
     </div>
   );
 }
