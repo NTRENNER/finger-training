@@ -162,12 +162,25 @@ export function HistoryView({
     closeRepEdit();
   };
 
-  const openRepAdd = (sessKey) => {
+  const openRepAdd = (sessKey, sess) => {
     setEditingRep(null);
     setAddingRep(sessKey);
     setEditRepLoad("");
     setEditRepTime("");
-    setEditRepHand(null); // null = auto-derive from session in saveRepAdd
+    // Pre-select the derived hand instead of leaving the picker blank
+    // (June 2026). With null, saveRepAdd silently auto-derived at save
+    // time — on a single-hand card that meant a new rep quietly joined
+    // the existing hand even when the user intended the other one, and
+    // a missed tap on the L/R button was invisible. Now the picker
+    // always shows exactly what will be saved; tap the other button to
+    // change it. Derivation mirrors saveRepAdd's old fallback: single-
+    // hand session → that hand; mixed → alternate from the last rep.
+    let derived = sess?.hand === "L" || sess?.hand === "R" ? sess.hand : null;
+    if (sess?.hand === "B") {
+      const lastHand = sess.reps?.length ? sess.reps[sess.reps.length - 1].hand : null;
+      derived = lastHand === "L" ? "R" : "L";
+    }
+    setEditRepHand(derived ?? "L");
     setEditRepRest("");   // empty = saveRepAdd will default to 20s (matches sync.js fallback)
   };
 
@@ -1061,7 +1074,7 @@ export function HistoryView({
             {/* + Add rep button */}
             {repEditMode === cardKey && !editingRep && addingRep !== cardKey && (
               <button
-                onClick={() => openRepAdd(cardKey)}
+                onClick={() => openRepAdd(cardKey, sess)}
                 style={{
                   marginTop: 8, width: "100%", padding: "6px 0",
                   background: "none", border: `1px dashed ${C.border}`,

@@ -602,24 +602,12 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
     setHistory(h => h.map(r =>
       (r.session_id || r.date) === sessionKey ? { ...r, ...updates } : r
     ));
-    if (user) {
-      const { error } = await supabase.from("reps")
-        .update(updates)
-        .eq("session_id", sessionKey);
-      if (error) {
-        // Don't just warn — a dropped edit gets REVERTED by the next
-        // reconcile's setHistory (cloud copy wins by existence). Queue
-        // it: retried by flushUpdateQueue and applied over fetched
-        // rows by applyPendingUpdates until it lands.
-        console.warn("Supabase update:", error.message);
-        enqueueRepUpdate({ kind: "session", sessionKey, updates });
-      }
-    } else {
-      // Signed out: queue so the edit survives the next sign-in
-      // reconcile (it would otherwise be reverted for any rep that
-      // already exists in cloud).
-      enqueueRepUpdate({ kind: "session", sessionKey, updates });
-    }
+    // WRITE-AHEAD queue — see updateRep for the full rationale. The
+    // entry lands in LS before any network IO, so an app close mid-
+    // flight can't lose the edit; flushUpdateQueue removes it only on
+    // confirmed success.
+    enqueueRepUpdate({ kind: "session", sessionKey, updates });
+    if (user) await flushUpdateQueue();
   }, [user]);
 
   // Per-session cookedness override (null clears). Updates every rep
@@ -666,17 +654,20 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
   const updateRep = useCallback(async (rep, updates) => {
     const k = repMatchKey(rep);
     setHistory(h => h.map(r => repMatchKey(r) === k ? { ...r, ...updates } : r));
-    if (user && rep.id) {
-      const { error } = await supabase.from("reps").update(updates).eq("id", rep.id);
-      if (error) {
-        // Queue the failed edit — see updateSession for why a warn
-        // alone means the edit is silently reverted on next reconcile.
-        console.warn("Supabase updateRep:", error.message);
-        enqueueRepUpdate({ kind: "rep", id: rep.id, updates });
-      }
-    } else if (rep.id) {
-      // Signed out: queue for the next sign-in reconcile.
+    // WRITE-AHEAD queue (June 2026): enqueue BEFORE the network
+    // attempt, not only after a failure. The old shape (await update →
+    // enqueue on error) had a silent loss mode on phones: close the
+    // app while the write is in flight and neither the success nor
+    // the error path ever runs — the edit isn't queued, and the next
+    // reconcile reverts it to the cloud copy (this is how manually
+    // R-labeled reps "changed back" to L on 2026-06-12).
+    // flushUpdateQueue pushes the entry and removes it only when
+    // Supabase confirms; until then applyPendingUpdates keeps the
+    // local view correct across reconciles, and signed-out edits just
+    // sit in the queue for the next sign-in.
+    if (rep.id) {
       enqueueRepUpdate({ kind: "rep", id: rep.id, updates });
+      if (user) await flushUpdateQueue();
     }
   }, [user]);
 
