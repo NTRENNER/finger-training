@@ -436,6 +436,74 @@ export const exercises = {
     type: "P",
   },
 
+  frontLever: {
+    // Added June 2026 as Workout B's core slot, replacing the banded
+    // core chop. Rationale: the chop's band/cable tension never matched
+    // the demand of actually holding body position on the wall, so it
+    // felt like it wasn't doing much. Front lever trains the straight-
+    // arm, scapula-loaded body tension that transfers directly to
+    // keeping feet on overhanging terrain — the single most climbing-
+    // specific core quality, and one the program had no dedicated work
+    // for (hard-style situp = flexion on A; ab wheel = anti-extension
+    // on C; both bent-arm / floor-based).
+    id: "frontLever",
+    name: "Front Lever",
+    tags: ["core", "strength", "shoulder", "connective"],
+    prescription: "4 × 5–10 sec",
+    intent:
+      "Straight-arm body tension for steep terrain — the king of climbing core. Hang with straight arms, shoulders depressed and pushed down away from the ears, ribs down so the lower back doesn't arch. Hold the hardest leverage at which the LINE stays rigid hip-to-heel; the instant the hips sag or the elbows bend, you've dropped a rung.",
+    progression: [
+      "Climb the leverage ladder by HOLD QUALITY, not reps: tuck → advanced tuck → single-leg → straddle → full.",
+      "Only add vest weight once a full lever is solid.",
+      "Arms dead straight, shoulders depressed, ribs down — end the set the moment the line breaks.",
+    ],
+    cautions: [
+      "Can light up elbows and shoulders if rushed — stay one rung easier than your ego wants for the first few weeks.",
+      "Stop a set when form breaks rather than grinding to failure; this is a tension-quality exercise, not a burn.",
+    ],
+    // Loggable on the leverage-variant path (like trxRow): the
+    // progression variable is LEVERAGE, logged per set via the variant
+    // selector, with an optional vest-weight input for the post-full-
+    // lever phase. Held position — maintain policy, no set ladder.
+    loggable: true,
+    type: "S",
+    sets: 4,
+    reps: "5–10 sec",
+    logVariant: true,
+    variants: ["Tuck", "Advanced tuck", "Single-leg", "Straddle", "Full"],
+    logWeight: true,
+    progressionPolicy: "maintain",
+  },
+
+  hangingLegRaise: {
+    // Added June 2026 alongside the front lever as Workout B's second
+    // core slot. Covers the compression / active-hip-flexion quality
+    // the program had nothing for — bringing high feet up under roofs,
+    // locking into steep kneebars and scums. The windshield-wiper rung
+    // at the top of the ladder also restores the rotation-under-load
+    // the banded chop was nominally there for, but with real bodyweight
+    // tension instead of band slack.
+    id: "hangingLegRaise",
+    name: "Hanging Leg Raise",
+    tags: ["core", "strength", "shoulder"],
+    prescription: "3 × 6–10",
+    intent:
+      "Compression and active hip flexion from a dead hang. Straight legs if hamstring length allows, knees if not; keep it strict — no kipping or swing. Finish hard sessions with a few windshield wipers (legs up, rotate side to side under control) for rotation under real load.",
+    progression: [
+      "Climb the leverage ladder: knee raise → straight-leg raise → toes-to-bar → windshield wiper.",
+      "Strict and controlled — kill the swing before adding range or reps.",
+      "Optional ankle weight / dumbbell between the feet once toes-to-bar is easy.",
+    ],
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "6–10",
+    logVariant: true,
+    variants: ["Knee raise", "Straight-leg raise", "Toes-to-bar", "Windshield wiper"],
+    logWeight: true,
+    progressionPolicy: "maintain",
+  },
+
   bandedRotationalWork: {
     id: "bandedRotationalWork",
     name: "Banded Core Chop",
@@ -591,12 +659,22 @@ export const workouts = {
     // KB snatch removed June 2026 (bell-jump infeasibility killed
     // adherence; def retained for history). The combined "jumps"
     // chooser became two first-class exercises so each gets logged.
+    //
+    // Banded core chop swapped out June 2026 (def retained for history).
+    // Replaced by front lever + hanging leg raise: the chop's band
+    // tension never matched on-wall demand, and the program lacked any
+    // straight-arm body-tension or compression core work. Workout-level
+    // tags stay ["power","explosive"] — per the convention above, "core"
+    // is an EXERCISE-level tag, not a workout stimulus tag (cf. A, which
+    // holds the hard-style situp without listing core at the workout
+    // level).
     exercises: [
       exercises.medBallThrows,
       exercises.broadJump,
       exercises.boxJump,
       exercises.skaterBounds,
-      exercises.bandedRotationalWork,
+      exercises.frontLever,
+      exercises.hangingLegRaise,
     ],
     coachingNotes: [
       "Stop while fast and springy.",
