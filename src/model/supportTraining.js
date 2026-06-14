@@ -390,6 +390,15 @@ export const exercises = {
     reps: "3–5",
     logWeight: false,
   },
+  // boxJump replaced by verticalJump in Workout B (June 2026); def
+  // retained so historical sessions still resolve. Rationale: the
+  // trainable quality in a jump is the takeoff (triple extension), which
+  // is identical with or without a box. Box HEIGHT is confounded by knee
+  // tuck (hip flexion), so it measures compression as much as power. A
+  // standing vertical jump trains/measures the hip drive that transfers
+  // to dynos and driving off footholds more honestly. The box's one real
+  // benefit — a de-loaded landing — is a low-volume non-issue here, and
+  // recoverable via reach-a-target + step-down if knees object.
   boxJump: {
     id: "boxJump",
     name: "Box Jump",
@@ -400,6 +409,28 @@ export const exercises = {
       "Crisp takeoffs only; step down between reps.",
       "Raise the box only when every rep is easy-fast.",
     ],
+    loggable: true,
+    circlesOnly: true,
+    type: "P",
+    sets: 3,
+    reps: "3–5",
+    logWeight: false,
+  },
+
+  verticalJump: {
+    id: "verticalJump",
+    name: "Vertical Jump",
+    tags: ["power", "explosive", "hip"],
+    prescription: "3 × 3–5 fast reps",
+    intent:
+      "Vertical hip drive / triple extension — the takeoff that powers dynos and driving off footholds. Countermovement, then explode and reach for a fixed high target. The trainable quality is the explosive extension, not how high you tuck the knees, so chase reach, not air-time.",
+    progression: [
+      "Every rep maximal intent; full recovery between sets.",
+      "Reach for a fixed target so you're chasing output, not knee tuck.",
+      "Land soft; stop the set the moment a jump feels flat.",
+    ],
+    // Same logging shape as broad/box jump: reps-only fast-rep count
+    // (circlesOnly + reps), no weight, no set ladder.
     loggable: true,
     circlesOnly: true,
     type: "P",
@@ -668,10 +699,16 @@ export const workouts = {
     // is an EXERCISE-level tag, not a workout stimulus tag (cf. A, which
     // holds the hard-style situp without listing core at the workout
     // level).
+    //
+    // Box jump → vertical jump June 2026 (boxJump def retained for
+    // history). The takeoff (triple extension) is the trainable quality
+    // either way; box height is confounded by knee tuck, so a standing
+    // vertical jump measures hip drive more honestly. broadJump keeps
+    // the horizontal axis; verticalJump keeps the vertical axis.
     exercises: [
       exercises.medBallThrows,
       exercises.broadJump,
-      exercises.boxJump,
+      exercises.verticalJump,
       exercises.skaterBounds,
       exercises.frontLever,
       exercises.hangingLegRaise,
