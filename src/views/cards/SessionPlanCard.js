@@ -433,9 +433,26 @@ export function SessionPlanCard({
         // per-hand values so the Recommended card stays in sync with
         // the rest of the screen as the slider moves.
         const recMult = capacityMultiplier(fatigueModel, grip, cooked);
-        const recLoadKg = rec.loadKg != null ? rec.loadKg * recMult : rec.loadKg;
-        const recL = rec.loadByHand?.L != null ? rec.loadByHand.L * recMult : null;
-        const recR = rec.loadByHand?.R != null ? rec.loadByHand.R * recMult : null;
+        // When the density ladder is active for the recommended zone
+        // (i.e. NOT overridden), the session runs the ladder's pinned
+        // T + load (see activeT / ladderLoadByHand). The headline must
+        // show THOSE, not the raw curve argmax, so the big numbers match
+        // the Why line, the Hangs/Rest/Time strip, and the live session.
+        // Under a tile override the ladder belongs to the override zone,
+        // so the Recommended card falls back to the engine's curve pick.
+        const recLadder = isOverridden ? null : ladder;
+        const recT = recLadder ? recLadder.T : rec.T;
+        let recLoadKg, recL, recR;
+        if (recLadder) {
+          recL = recLadder.loadByHand?.L != null ? recLadder.loadByHand.L * recMult : null;
+          recR = recLadder.loadByHand?.R != null ? recLadder.loadByHand.R * recMult : null;
+          const vals = [recL, recR].filter(v => v != null);
+          recLoadKg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+        } else {
+          recLoadKg = rec.loadKg != null ? rec.loadKg * recMult : rec.loadKg;
+          recL = rec.loadByHand?.L != null ? rec.loadByHand.L * recMult : null;
+          recR = rec.loadByHand?.R != null ? rec.loadByHand.R * recMult : null;
+        }
         const recScalePct = recMult < 0.999 ? Math.round((1 - recMult) * 100) : 0;
         // Recommended is the primary "tile" — clickable like the small
         // alternatives below. Tapping it clears any override (back to
@@ -470,7 +487,7 @@ export function SessionPlanCard({
               <div style={{ flex: 1, textAlign: "center" }}>
                 <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>
                 <div style={{ fontSize: 28, fontWeight: 800, color: recCfg.color, lineHeight: 1 }}>
-                  {rec.T}<span style={{ fontSize: 13, color: C.muted, marginLeft: 2 }}>s</span>
+                  {recT}<span style={{ fontSize: 13, color: C.muted, marginLeft: 2 }}>s</span>
                 </div>
               </div>
               <div style={{ flex: 1, textAlign: "center" }}>
