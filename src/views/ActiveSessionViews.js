@@ -509,6 +509,14 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
               </span>
               <div style={{ fontSize: 11, color: C.muted }}>target {lastRep.targetTime}s</div>
             </div>
+            {lastRep.avgForce > 0 && (
+              <div>
+                <Label>Avg Force</Label>
+                <span style={{ fontSize: 28, fontWeight: 700, color: C.blue }}>
+                  {fmtW(lastRep.avgForce, unit)} {unit}
+                </span>
+              </div>
+            )}
             {lastRep.peakForce > 0 && (
               <div>
                 <Label>Peak Force</Label>
@@ -907,4 +915,3 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
     </div>
   );
 }
-
