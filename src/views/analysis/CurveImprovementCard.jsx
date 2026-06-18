@@ -239,7 +239,7 @@ function GripBlock({ grip, overlay, unit, maxDur, nowIdx, onScrub, divider }) {
       <div style={{ margin: "8px 0 0" }}>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color, marginBottom: 4 }}>
           <span>Now: <b>{nowDate}</b></span>
-          <span style={{ color: C.muted }}>{dates.length} session{dates.length === 1 ? "" : "s"} since baseline</span>
+          <span style={{ color: C.muted }}>{idx + 1} of {dates.length} session{dates.length === 1 ? "" : "s"} since baseline</span>
         </div>
         <input type="range" min={0} max={last} step={1} value={idx}
           onChange={(e) => onScrub(grip, parseInt(e.target.value, 10))}
