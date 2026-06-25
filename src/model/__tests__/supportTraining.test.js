@@ -347,8 +347,8 @@ describe("workouts (templates)", () => {
     expect(workouts.REST.exercises).toEqual([]);
   });
 
-  test("A has 7 exercises (post-decomp)", () => {
-    expect(workouts.A.exercises).toHaveLength(7);
+  test("A has 6 exercises (prone ER moved to C, June 2026)", () => {
+    expect(workouts.A.exercises).toHaveLength(6);
   });
 
   test("STRETCH inherits the 3 mobility exercises from old C", () => {
