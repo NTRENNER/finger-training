@@ -763,6 +763,10 @@ export const workouts = {
     // Leg slot is the heel-hook iso pull (replaced the split squat):
     // the user hikes fine with a pack, so the need is heel-hook
     // hamstring power, not general squatting.
+    //
+    // Prone external rotation moved to C June 2026: rotator-cuff health
+    // rewards frequency, and C is the frequent low-fatigue day — a
+    // better home than A's once-a-week slot.
     exercises: [
       exercises.weightedPullup,
       exercises.dips,
@@ -770,7 +774,6 @@ export const workouts = {
       exercises.bandedLatPull,
       exercises.bicepCurls,
       exercises.hardStyleSitup,
-      exercises.proneExternalRotation,
     ],
     coachingNotes: [
       "Crisp, controlled, low-volume strength.",
@@ -876,6 +879,12 @@ export const workouts = {
     // Bicep curls dropped June 2026: the one-arm TRX row already loads
     // lats and biceps enough on the light day, so a dedicated curl was
     // redundant. Curls live on A.
+    //
+    // Prone external rotation moved here from A June 2026: low-load
+    // rotator-cuff prehab belongs on the frequent day, not the weekly
+    // one — cuff health is frequency-driven. C-only now, so a membership
+    // maintain policy keeps it from set-laddering (load doesn't chase
+    // on the light day).
     exercises: [
       exercises.trxRow,
       { ...exercises.benchPress, prescription: "2 × 5 · light",       progressionPolicy: "maintain" },
@@ -883,6 +892,7 @@ export const workouts = {
       // needs no policy override.
       { ...exercises.abWheel,    prescription: "1–2 light sets optional" },
       exercises.copenhagenPlank,
+      { ...exercises.proneExternalRotation, progressionPolicy: "maintain" },
     ],
     coachingNotes: [
       "This should feel like activation, not training.",
