@@ -177,7 +177,7 @@ export const exercises = {
     tags: ["strength", "shoulder", "connective"],
     prescription: "2 × 3–5",
     intent:
-      "Light, frequent pressing on C, complementing the heavier bench in A. Two press days per week without doubling the heavy stimulus.",
+      "Pressing strength. June 2026 dip⇄bench swap made dips Workout A's main press (weighted) — bench's barbell had been blocking the pull-up bar on the same day. Two press days a week without doubling the heavy stimulus.",
     progression: ["Add load slowly.", "Keep ROM pain-free."],
     cautions: ["Avoid deep ROM if anterior shoulder feels irritated."],
     loggable: true,
@@ -514,6 +514,13 @@ export const exercises = {
     // at the top of the ladder also restores the rotation-under-load
     // the banded chop was nominally there for, but with real bodyweight
     // tension instead of band slack.
+    //
+    // DROPPED from Workout B June 2026 (def retained for history):
+    // grip-limited (taxed already-cooked forearms) and pure flexion,
+    // the least climbing-valuable core quality. Its anti-lateral-flexion
+    // replacement (Copenhagen plank) lives on the light C day; B kept
+    // the front lever as its tension piece and added the TRX hamstring
+    // curl.
     id: "hangingLegRaise",
     name: "Hanging Leg Raise",
     tags: ["core", "strength", "shoulder"],
@@ -531,6 +538,98 @@ export const exercises = {
     reps: "6–10",
     logVariant: true,
     variants: ["Knee raise", "Straight-leg raise", "Toes-to-bar", "Windshield wiper"],
+    logWeight: true,
+    progressionPolicy: "maintain",
+  },
+
+  heelHookPull: {
+    // Added June 2026 as Workout A's leg slot, replacing the split
+    // squat. The user hikes fine with a heavy pack, so general leg
+    // strength wasn't the need — heel-hook pulling power is. Heel hooks
+    // load the hamstring as a PRIME MOVER reeling the body into the wall
+    // through the heel; squatting never trains that. Lie on your back,
+    // hip and knee ~90°, heel/calf on a box, drive the heel down-and-in
+    // and lift the hips — an isometric pull in the exact heel-hook joint
+    // position.
+    id: "heelHookPull",
+    name: "Heel-Hook Iso Pull (90/90)",
+    tags: ["hamstring", "hip", "strength"],
+    prescription: "3 × 8–10 sec / side",
+    intent:
+      "Heel-hook–specific hamstring/glute strength in the 90/90 position — the hamstring as the prime mover that pulls your body into the wall through the heel.",
+    progression: [
+      "Single-leg before adding load.",
+      "Pull hard — treat each rep as a max isometric, not a stretch.",
+      "Add a dumbbell/vest on the hips, then lengthen the hold.",
+    ],
+    // logWeight + unilateral (optional hip load, logged per side since
+    // heel hooks are single-leg and L/R often differ). Held position —
+    // maintain policy, no set ladder.
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "8–10 sec",
+    logWeight: true,
+    unilateral: true,
+    progressionPolicy: "maintain",
+  },
+
+  trxHamstringCurl: {
+    // Added June 2026 to Workout B as the dynamic partner to A's
+    // heel-hook iso pull — heel-hook/hamstring work twice a week. Heels
+    // in the straps, hips bridged the whole set; curl the heels in
+    // without letting the hips drop. Knee-flexion + hip-extension
+    // through range, the moving complement to the 90/90 isometric.
+    id: "trxHamstringCurl",
+    name: "TRX Hamstring Curl",
+    tags: ["hamstring", "hip"],
+    prescription: "3 × 6–10",
+    intent:
+      "Dynamic knee-flexion + hip-extension for heel-hook pulling power. Hips stay lifted in a bridge throughout the set.",
+    progression: [
+      "Keep hips up the whole set — no sagging.",
+      "Two-leg → single-leg for more load and anti-rotation.",
+      "Slow the eccentric before adding reps.",
+    ],
+    // circlesOnly: progression is leverage / single-leg, not numeric
+    // load — reps-only logging (same shape as Ab Wheel).
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "6–10",
+    circlesOnly: true,
+  },
+
+  copenhagenPlank: {
+    // Added June 2026 as Workout C's core slot. Fills the core axis the
+    // whole program lacked: across A/B/C the core work was all anterior
+    // (hard-style situp = flexion, front lever = tension, ab wheel =
+    // anti-extension) with ZERO anti-lateral-flexion or adductor work —
+    // exactly the high-value, under-trained quality coaches (Bechtel/
+    // Climb Strong) flag. Also grip-free, which is why it landed on the
+    // light C day rather than piling more onto B (B's hanging leg raise
+    // was dropped outright for the same grip reason). Side plank, top
+    // leg on a box, bottom leg hovering; the adductors hold the line.
+    id: "copenhagenPlank",
+    name: "Copenhagen Plank",
+    tags: ["core", "hip", "strength"],
+    prescription: "3 × 8–12 sec / side",
+    intent:
+      "Anti-lateral-flexion + adductor strength — grip-free, and the core axis the program was missing. Serves drop-knees, heel-hook tension, and keeping the hips pinned on steep walls.",
+    progression: [
+      "Box under the knee (short lever) → mid-shin → ankle.",
+      "Bottom leg hovering, body in one line, no hip dip.",
+      "Keep it low-rep / short-hold — never to failure.",
+    ],
+    // Variant ladder (lever position) like trxRow/frontLever, plus an
+    // optional ankle/hip load. logVariant is an axis alongside the
+    // single logging mode (logWeight). Held position — maintain.
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "8–12 sec",
+    logVariant: true,
+    variants: ["Knee-supported", "Mid-shin", "Ankle-supported"],
     logWeight: true,
     progressionPolicy: "maintain",
   },
@@ -659,10 +758,15 @@ export const workouts = {
     // recommender reads them to detect stimulus staleness). Same logic
     // applies to B, C, D below.
     tags: ["strength", "neural", "connective"],
+    // Press slot is dips (weighted) after the June 2026 dip⇄bench swap —
+    // bench's barbell was blocking the pull-up bar on this same day.
+    // Leg slot is the heel-hook iso pull (replaced the split squat):
+    // the user hikes fine with a pack, so the need is heel-hook
+    // hamstring power, not general squatting.
     exercises: [
       exercises.weightedPullup,
-      exercises.benchPress,
-      exercises.splitSquat,
+      exercises.dips,
+      exercises.heelHookPull,
       exercises.bandedLatPull,
       exercises.bicepCurls,
       exercises.hardStyleSitup,
@@ -705,13 +809,21 @@ export const workouts = {
     // either way; box height is confounded by knee tuck, so a standing
     // vertical jump measures hip drive more honestly. broadJump keeps
     // the horizontal axis; verticalJump keeps the vertical axis.
+    //
+    // Hanging leg raise dropped June 2026 (def retained for history):
+    // grip-limited (taxed already-cooked forearms) and pure flexion —
+    // the least climbing-valuable core quality. Its anti-lateral-flexion
+    // replacement (Copenhagen plank) went to the light C day instead.
+    // B gains the TRX hamstring curl — the dynamic partner to A's
+    // heel-hook iso pull, so heel-hook/hamstring work happens twice a
+    // week. Front lever stays as B's tension piece.
     exercises: [
       exercises.medBallThrows,
       exercises.broadJump,
       exercises.verticalJump,
       exercises.skaterBounds,
       exercises.frontLever,
-      exercises.hangingLegRaise,
+      exercises.trxHamstringCurl,
     ],
     coachingNotes: [
       "Stop while fast and springy.",
@@ -728,8 +840,10 @@ export const workouts = {
     // The "I can do this when tired" workout — pull + press + arm
     // + core in ~15 min. Catches the post-outdoor-Monday case and
     // the broader "I'd skip A but this still happens" pattern.
-    // Dips on C is locked (no bench/dips alternation any more);
-    // bench lives on A.
+    // Bench on C (light) and dips on A (heavy) — swapped June 2026:
+    // bench's barbell blocked the pull-up bar when both lived on A,
+    // slowing the session. C pulls horizontally (TRX row), so bench
+    // here has no bar conflict.
     //
     // Was workouts.D before the May 2026 rename. Same content,
     // same fatigueClass, same tags — only the slot key changed
@@ -752,13 +866,20 @@ export const workouts = {
     // (def carries its own maintain policy — only C uses it). All
     // the program's other pulling is vertical; the row adds the
     // horizontal scapular/mid-back balance.
+    //
+    // Copenhagen plank added June 2026 — the program's anti-lateral-
+    // flexion + adductor gap, parked on the light day because it's
+    // grip-free. C now covers two core axes (ab wheel = anti-extension,
+    // Copenhagen = anti-lateral-flexion); it carries its own maintain
+    // policy via the def. Drop the ab wheel if C runs long.
     exercises: [
       exercises.trxRow,
-      { ...exercises.dips,       prescription: "2 × 3–5",            progressionPolicy: "maintain" },
+      { ...exercises.benchPress, prescription: "2 × 5 · light",       progressionPolicy: "maintain" },
       { ...exercises.bicepCurls, prescription: "1–2 × 5–8 optional", progressionPolicy: "maintain" },
       // abWheel is circlesOnly (no load to ladder against), so it
       // needs no policy override.
       { ...exercises.abWheel,    prescription: "1–2 light sets optional" },
+      exercises.copenhagenPlank,
     ],
     coachingNotes: [
       "This should feel like activation, not training.",
