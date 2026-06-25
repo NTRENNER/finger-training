@@ -837,9 +837,9 @@ export const workouts = {
     shortName: "C",
     name: "Workout C — Neural Strength Touch",
     purpose: "Brief low-fatigue strength exposure to maintain frequency.",
-    // The "I can do this when tired" workout — pull + press + arm
-    // + core in ~15 min. Catches the post-outdoor-Monday case and
-    // the broader "I'd skip A but this still happens" pattern.
+    // The "I can do this when tired" workout — pull + press + core
+    // in ~15 min. Catches the post-outdoor-Monday case and the
+    // broader "I'd skip A but this still happens" pattern.
     // Bench on C (light) and dips on A (heavy) — swapped June 2026:
     // bench's barbell blocked the pull-up bar when both lived on A,
     // slowing the session. C pulls horizontally (TRX row), so bench
@@ -872,10 +872,13 @@ export const workouts = {
     // grip-free. C now covers two core axes (ab wheel = anti-extension,
     // Copenhagen = anti-lateral-flexion); it carries its own maintain
     // policy via the def. Drop the ab wheel if C runs long.
+    //
+    // Bicep curls dropped June 2026: the one-arm TRX row already loads
+    // lats and biceps enough on the light day, so a dedicated curl was
+    // redundant. Curls live on A.
     exercises: [
       exercises.trxRow,
       { ...exercises.benchPress, prescription: "2 × 5 · light",       progressionPolicy: "maintain" },
-      { ...exercises.bicepCurls, prescription: "1–2 × 5–8 optional", progressionPolicy: "maintain" },
       // abWheel is circlesOnly (no load to ladder against), so it
       // needs no policy override.
       { ...exercises.abWheel,    prescription: "1–2 light sets optional" },
