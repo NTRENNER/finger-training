@@ -359,12 +359,16 @@ describe("workouts (templates)", () => {
     expect(ids).toEqual(["supineWeightedFrog", "weightedPancake", "pancakeLegLifts"]);
   });
 
-  test("C presses with dips, not bench (inherited from old D)", () => {
-    // C absorbed old D's content: pull/press/arm/core in ~15 min.
-    // Dips on C is locked — bench lives on A.
-    const ids = workouts.C.exercises.map(e => e.id);
-    expect(ids).toContain("dips");
-    expect(ids).not.toContain("benchPress");
+  test("C presses with bench, A presses with dips (June 2026 swap)", () => {
+    // Dip⇄bench swap: bench's barbell blocked the pull-up bar when both
+    // were on A, so dips (weighted) became A's press and bench (light)
+    // moved to C, which pulls horizontally and has no bar conflict.
+    const cIds = workouts.C.exercises.map(e => e.id);
+    expect(cIds).toContain("benchPress");
+    expect(cIds).not.toContain("dips");
+    const aIds = workouts.A.exercises.map(e => e.id);
+    expect(aIds).toContain("dips");
+    expect(aIds).not.toContain("benchPress");
   });
 
   test("every exercise carries an id, tags, prescription, intent", () => {
@@ -436,13 +440,13 @@ describe("workouts (templates)", () => {
     expect(aLoggable.length).toBeGreaterThanOrEqual(3);
   });
 
-  test("C presses with dips and dips is loggable", () => {
-    // C's pressing slot is dips (inherited from old D); weight
-    // tracking enabled so per-set progression carries forward.
-    const cDips = workouts.C.exercises.find(ex => ex.id === "dips");
-    expect(cDips).toBeTruthy();
-    expect(cDips.loggable).toBe(true);
-    expect(cDips.logWeight).toBe(true);
+  test("C presses with bench and bench is loggable", () => {
+    // C's pressing slot is bench (light/maintain after the June 2026
+    // swap); weight tracking enabled so per-set logging carries forward.
+    const cBench = workouts.C.exercises.find(ex => ex.id === "benchPress");
+    expect(cBench).toBeTruthy();
+    expect(cBench.loggable).toBe(true);
+    expect(cBench.logWeight).toBe(true);
   });
 
   test("novel exercises carry a videoUrl pointing at a real video host", () => {
