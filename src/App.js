@@ -19,7 +19,7 @@ import { ClimbView } from "./views/ClimbView.js";
 import {
   ActiveSessionView, AutoRepSessionView,
   RestView, SwitchHandsView,
-  SessionSummaryView,
+  SessionSummaryView, ManualOffsetPrompt,
 } from "./views/ActiveSessionViews.js";
 import { WorkoutTab } from "./views/WorkoutTab.js";
 import { ALL_WORKOUTS_LOOKUP } from "./data/legacyWorkouts.js";
@@ -324,7 +324,7 @@ export default function App() {
     leveledUp, newLevel,
     activeHand,
     nextWeight,
-    startSession, handleRepDone,
+    startSession, chooseOffset, handleRepDone,
     handleRestDone, handleAbort,
   } = useSessionRunner({
     history, freshMap, threeExpPriors, addReps,
@@ -664,6 +664,10 @@ export default function App() {
               onNavigateToSettings={() => setTab(SETTINGS_TAB)}
             />
           );
+        }
+
+        if (phase === "offset_prompt") {
+          return <ManualOffsetPrompt onChoose={chooseOffset} />;
         }
 
         if (phase === "rep_ready" || phase === "rep_active") {
