@@ -10,6 +10,8 @@
 //
 // State machine phases:
 //   idle          — pre-session, SetupView is rendered
+//   offset_prompt — no-Tindeq only: ask once whether to apply the
+//                   manual-timing 2s offset before the first rep
 //   rep_ready     — show "Start Rep" button (manual mode) or arm
 //                   auto-detect (BLE mode)
 //   rep_active    — rep in progress
@@ -61,6 +63,15 @@ import {
 } from "../model/prescription.js";
 import { capacityMultiplier } from "../model/fatigueBeta.js";
 import { pushDailyState } from "../lib/sync.js";
+
+// Manual-timing offset (June 2026): non-Tindeq users tap Done a beat
+// after they actually fail. When they opt in at session start, they
+// count "1-2" after failure and we subtract this fixed offset so the
+// recorded hold matches the real failure time. Tindeq sessions never
+// use it (auto-detect captures the release precisely). The floor keeps
+// a very short hold from recording as zero/negative.
+const MANUAL_OFFSET_S = 2;
+const MIN_HOLD_S = 0.5;
 
 export function useSessionRunner({
   history,
@@ -115,6 +126,10 @@ export function useSessionRunner({
   const [leveledUp,   setLeveledUp]   = useState(false);
   const [newLevel,    setNewLevel]    = useState(1);
   const [activeHand,  setActiveHand]  = useState("L"); // tracks current hand in Both mode
+  // Per-session manual-timing offset opt-in (see MANUAL_OFFSET_S).
+  // Chosen at session start via the offset_prompt phase; false until
+  // chosen, and irrelevant when a Tindeq is driving the timing.
+  const [manualOffset, setManualOffset] = useState(false);
 
   // (sMax memos retired with the runtime fatigue accumulator — they
   // were the only consumer. Per-grip baseline data is still available
@@ -166,9 +181,20 @@ export function useSessionRunner({
     setLeveledUp(false);
     setLastRepResult(null);
     setActiveHand(config.hand === "Both" ? "L" : config.hand);
-    setPhase("rep_ready");
+    setManualOffset(false);
+    // No Tindeq → ask once whether to apply the 2s manual-timing offset
+    // before the first rep. Tindeq sessions skip straight into the rep
+    // flow (auto-detect handles timing precisely).
+    setPhase(tindeqConnected ? "rep_ready" : "offset_prompt");
     onSessionStart?.();
-  }, [history, config, freshMap, threeExpPriors, fatigueModel, onSessionStart]);
+  }, [history, config, freshMap, threeExpPriors, fatigueModel, onSessionStart, tindeqConnected]);
+
+  // Resolve the offset_prompt phase: store the per-session choice and
+  // enter the rep flow.
+  const chooseOffset = useCallback((enabled) => {
+    setManualOffset(!!enabled);
+    setPhase("rep_ready");
+  }, []);
 
   // Forward-declared so handleRepDone can call it before its
   // own useCallback identity is materialised.
@@ -232,7 +258,14 @@ export function useSessionRunner({
       return ws.length > 0 ? ws[0] : 0;
     })();
 
-    const roundedActual = Math.round(actualTime * 10) / 10;
+    // Apply the per-session manual-timing offset (non-Tindeq only): the
+    // user counted "1-2" after failure before tapping Done, so the raw
+    // elapsed overshoots real failure by ~2s. Floored so a very short
+    // hold can't record as zero/negative.
+    const adjTime = (manualOffset && !tindeqConnected)
+      ? Math.max(MIN_HOLD_S, actualTime - MANUAL_OFFSET_S)
+      : actualTime;
+    const roundedActual = Math.round(adjTime * 10) / 10;
     const derivedFailed = failed || isShortfall(roundedActual, config.targetTime);
     const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {
@@ -303,7 +336,7 @@ export function useSessionRunner({
                             : null,
     };
 
-    setLastRepResult({ actualTime, avgForce, peakForce, targetTime: config.targetTime });
+    setLastRepResult({ actualTime: adjTime, avgForce, peakForce, targetTime: config.targetTime });
     setSessionReps(reps => [...reps, repRecord]);
     addReps([repRecord]);
 
@@ -336,7 +369,7 @@ export function useSessionRunner({
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentRep, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, activeHand]);
+  }, [config, currentRep, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, activeHand, manualOffset, tindeqConnected]);
 
   const handleRestDone = useCallback(() => {
     repDoneLockRef.current = false;   // next rep armed — accept its completion
@@ -370,7 +403,7 @@ export function useSessionRunner({
     leveledUp, newLevel,
     activeHand,
     nextWeight,
-    startSession, handleRepDone,
+    startSession, chooseOffset, handleRepDone,
     handleRestDone, handleAbort,
   };
 }
