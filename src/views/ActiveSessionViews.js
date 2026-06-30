@@ -147,6 +147,45 @@ function RepDots({ total, done, current }) {
   );
 }
 
+// Manual-timing offset prompt — shown once at the start of a no-Tindeq
+// session (the offset_prompt phase in useSessionRunner). Opting in means
+// the user counts "1-2" after failure before tapping Done, and the runner
+// subtracts a fixed 2s from every recorded hold this session so the data
+// matches real failure time. Tindeq sessions never reach this phase.
+export function ManualOffsetPrompt({ onChoose }) {
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+      <Card style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Manual timing</div>
+        <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.6, marginBottom: 20 }}>
+          No Tindeq connected, so you'll tap <b>Done</b> by hand — which always lags
+          a beat behind the moment you actually fail.
+          <br /><br />
+          Use the <b>2-second offset</b>? When you fail, count <b>"one, two"</b> and
+          then tap Done. The app subtracts 2s so the recorded hold matches your real
+          failure time.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <Btn
+            onClick={() => onChoose(true)}
+            color={C.green}
+            style={{ padding: "14px 0", fontSize: 16, borderRadius: 12 }}
+          >
+            Yes — count 1-2, then tap Done
+          </Btn>
+          <Btn
+            onClick={() => onChoose(false)}
+            color={C.muted}
+            style={{ padding: "14px 0", fontSize: 16, borderRadius: 12 }}
+          >
+            No — I'll tap right at failure
+          </Btn>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 
 // ACTIVE-REP SCREEN (manual flow — no BLE)
