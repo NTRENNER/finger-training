@@ -19,10 +19,17 @@
 // The fallback chain encodes "what actually happened" in priority order:
 //   Tindeq measurement > user manual override > prescribed value > legacy
 
-// Pull a positive, sane kg load value out of a field (0–499 kg range).
+// Physical ceiling for a finger force/load (kg). No isometric finger
+// hold or prescribed load approaches this — anything at/above is
+// corrupt data (a Tindeq/units glitch), so sane() rejects it. This
+// guards every downstream consumer (fits, ladder, peak, prescription)
+// from garbage. Was 500 until June 2026, which let a 284 kg glitch
+// slip through; the strongest real pull on record is ~77 kg.
+export const SANE_MAX_KG = 200;
+
 export function sane(v) {
   const n = Number(v);
-  return n > 0 && n < 500 ? n : null;
+  return n > 0 && n < SANE_MAX_KG ? n : null;
 }
 
 // Pull the prescribed value with legacy fallback. Helper so callers

@@ -57,7 +57,7 @@ import { PEAK_MAX_PROTOCOL_T } from "./peakForce.js";
 // (prescription.js imports threeExp.js). effectiveLoad + loadedWeight
 // are used internally below; all four are re-exported just after so
 // existing call sites that import them from prescription.js keep working.
-import { sane, effectiveLoad, loadedWeight } from "./load.js";
+import { sane, effectiveLoad, loadedWeight, SANE_MAX_KG } from "./load.js";
 
 // ─────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
@@ -409,6 +409,17 @@ export const EMPIRICAL_LOOKBACK_DAYS = 30;
 export const PEAK_CAP_LOOKBACK_DAYS = 90;
 export const PEAK_CAP_FRACTION = 0.95;
 
+// Clamp a prescribed load to a physical ceiling. With a recent measured
+// peak, that peak IS the ceiling (peakCapKg). WITHOUT one — a new grip, a
+// sub-max-only history, or a first max day — fall back to SANE_MAX_KG so a
+// degenerate short-T curve extrapolation can't emit an impossible load.
+// (The 2026-06-10 Micro session wrote 974 kg exactly this way, before the
+// peak cap existed and on a path where no recent Micro max peak bound it.)
+export function capLoad(v, peakCapKg, absMax = SANE_MAX_KG) {
+  const ceil = peakCapKg != null ? peakCapKg : absMax;
+  return v > ceil ? ceil : v;
+}
+
 // Best measured instantaneous peak (kg) for (hand, grip) within the
 // lookback window — MAX/POWER-PROTOCOL reps only (target ≤
 // PEAK_MAX_PROTOCOL_T, same intent filter as the Peak Force card).
@@ -488,12 +499,12 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
 
   // Peak-force ceiling — see PEAK_CAP_FRACTION above. Null when the
   // history has no Tindeq peaks in the window (manual users), in
-  // which case capValue() is a pass-through.
+  // which case capValue() falls back to the SANE_MAX_KG backstop.
   const bestPeakKg = recentBestPeakKg(history, hand, grip, referenceDate);
   const peakCapKg = bestPeakKg != null
     ? Math.round(bestPeakKg * PEAK_CAP_FRACTION * 10) / 10
     : null;
-  const capValue = (v) => (peakCapKg != null && v > peakCapKg) ? peakCapKg : v;
+  const capValue = (v) => capLoad(v, peakCapKg);
 
   // Try the three-exp curve fit. Requires a per-grip prior to anchor
   // the shrinkage; without one, small-N fits collapse onto degenerate
