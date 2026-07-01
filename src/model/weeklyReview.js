@@ -36,7 +36,7 @@ import { gradeRank, weekKey } from "../lib/climbing-grades.js";
 const BASELINE_WEEKS = 4;
 const STALE_DAYS = 12;          // a grip "goes quiet" past this
 const SUPPORT_STALE_DAYS = 14;  // an A/B/C workout counts as skipped past this
-const CURVE_TICK_PP = 2;        // curve Δ% (percentage points) this week to call a win
+const CURVE_TICK_PP = 3;        // curve Δ% (percentage points) this week to call a win (≥3 = earned, filters fit noise)
 const LOW_WEEK_FRAC = 0.7;      // finger days below this × baseline = a "lighter week"
 
 // "Sent" = clean send OR a completion that took a mid-route rest — the

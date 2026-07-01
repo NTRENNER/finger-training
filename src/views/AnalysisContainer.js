@@ -33,6 +33,7 @@ import { AnalysisView } from "./AnalysisView.js";
 import { WorkoutAnalysisView } from "./WorkoutAnalysisView.js";
 import { ClimbingAnalysisView } from "./ClimbingAnalysisView.js";
 import { BodyWeightAnalysisView } from "./BodyWeightAnalysisView.js";
+import { WeeklyReviewCard } from "./cards/WeeklyReviewCard.jsx";
 
 const VALID_SUBS = new Set(["fingers", "lifts", "climbing", "weight"]);
 
@@ -97,6 +98,7 @@ export function AnalysisContainer(props) {
 
   return (
     <div>
+      <WeeklyReviewCard history={history} activities={activities} />
       <div style={{ display: "flex", gap: 6, padding: "12px 16px 0" }}>
         {pill("Fingers", "fingers")}
         {pill("Lifts", "lifts")}
