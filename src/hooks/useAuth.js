@@ -24,26 +24,52 @@
 import { useEffect, useState } from "react";
 
 import { supabase } from "../lib/supabase.js";
-import { loadLS, saveLS, LS_LAST_USER_KEY, clearUserScopedLS } from "../lib/storage.js";
+import { readRawLastUser, setLastUserRaw, adoptAnonDataForUser } from "../lib/storage.js";
 
-// Account-switch guard. None of the ft_* localStorage caches are
-// namespaced by user, so if user B signs in on a device that still
-// holds user A's caches, the reconcile loops would classify A's data
-// as "local-only work" and push it into B's cloud account. Wipe the
-// caches when the signed-in user differs from the last one; keep them
-// when it's the same user (offline work must survive a re-login) or
-// when there's no recorded previous user (first sign-in adopts the
-// device's signed-out local history — that's the intended flow).
+// Account-switch guard. Every ft_* localStorage cache is stored under
+// a per-user namespace pinned at module load (see the USER NAMESPACING
+// postmortem in lib/storage.js). This guard's only job is to notice
+// when the signed-in user doesn't match the namespace this page was
+// loaded with, record the new user, and request a reload so every
+// hook re-seeds from the right namespace. Nothing is wiped anymore:
+// the previous user's caches stay safe under their own prefix, and
+// because setLastUserRaw never retargets the CURRENT page's writes,
+// in-flight persistence effects keep landing in the old user's
+// namespace until the reload — no window for cross-user bleed.
+//
+// Returns true when the caller must reload before letting the app run
+// as this user; false when the page's namespace already matches.
 function guardUserSwitch(u) {
   if (!u?.id) return false;
-  const last = loadLS(LS_LAST_USER_KEY);
-  const switched = Boolean(last && last !== u.id);
-  if (switched) {
-    console.warn("useAuth: account switch detected — clearing local caches");
-    clearUserScopedLS();
+
+  const last = readRawLastUser();
+
+  // Same user re-authenticating (token refresh, re-login after an
+  // offline stretch): the namespace already matches. Deliberately
+  // does NOT re-save ft_last_user — the branch is fully idempotent,
+  // which is also what terminates the post-reload cycle below.
+  if (last === u.id) return false;
+
+  // First sign-in this device has ever recorded (also the upgrade
+  // path already handled by storage.js's module-load migration when
+  // an OLD ft_last_user existed — here there was truly none). Adopt
+  // the anonymous namespace's training data as this user's, then
+  // reload: adoption MOVED the bare keys out from under hooks that
+  // already mounted against the anonymous namespace, so they must
+  // re-seed from the namespaced copies. No reload loop — post-reload,
+  // last === u.id and the branch above returns false.
+  if (last == null) {
+    adoptAnonDataForUser(u.id);
+    setLastUserRaw(u.id);
+    return true;
   }
-  saveLS(LS_LAST_USER_KEY, u.id);
-  return switched;
+
+  // Different user than the namespace this page loaded with. Record
+  // the new uid for the NEXT load and reload. NO WIPE: the old user's
+  // caches live under their own `u:<uid>:` prefix, and the new user's
+  // namespace is either empty or already contains their own data.
+  setLastUserRaw(u.id);
+  return true;
 }
 
 export function useAuth() {
@@ -63,12 +89,13 @@ export function useAuth() {
   // onAuthStateChange keeps it in sync if the user signs in/out
   // in another tab or the JWT expires.
   useEffect(() => {
-    // On an account switch, wiping localStorage isn't enough on its
-    // own: hooks have already seeded React state from the previous
-    // user's caches, and their persistence effects would write that
-    // data right back (and the reconciles would push it into the new
-    // user's cloud account). A full reload restarts every hook from
-    // the now-empty caches — same hammer pullFromCloud already uses.
+    // When the signed-in user doesn't match this page's storage
+    // namespace, a reload is mandatory: hooks have already seeded
+    // React state from the old namespace, and only a restart makes
+    // them re-seed from the new one — same hammer pullFromCloud
+    // already uses. Until the reload lands, their persistence effects
+    // keep writing to the OLD namespace (storage.js pins nsUid at
+    // module load), so nothing bleeds between accounts in the interim.
     const apply = (u) => {
       if (guardUserSwitch(u)) { window.location.reload(); return; }
       setUser(u);
