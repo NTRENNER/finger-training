@@ -58,7 +58,7 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
-export function RepCurveChart({
+function RepCurveChart({
   forecasted = [],
   actual = [],
   prevSession = [],
@@ -239,3 +239,11 @@ export function RepCurveChart({
     </div>
   );
 }
+
+// React.memo (2026-07-01): this component sits under the live BLE
+// force stream — App-level state updates every animation frame while
+// the Tindeq is connected. Memo skips reconciliation entirely when
+// this component's own props haven't changed; without it every force
+// sample re-rendered the full recharts tree.
+const RepCurveChartMemo = React.memo(RepCurveChart);
+export { RepCurveChartMemo as RepCurveChart };

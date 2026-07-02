@@ -183,6 +183,44 @@ export function useTindeq() {
   const [avgForce,      setAvgForce]      = useState(0);
   const [bleError,      setBleError]      = useState(null);
 
+  // ── UI flush coalescing (added 2026-07-01) ──────────────
+  // The Tindeq streams ~15 samples/packet at ~5-10 packets/s, and
+  // this hook lives at the App level — so per-sample setForce()
+  // re-rendered the ENTIRE app tree hundreds of times a minute while
+  // connected, stacking on the active view's own 100ms elapsed-timer
+  // and two live recharts. All measurement math stays SAMPLE-ACCURATE
+  // in refs (peak, avg accumulators, auto-fail, auto-detect below);
+  // only the React state mirror is coalesced to one update per
+  // animation frame — the fastest rate a human can perceive anyway.
+  const rafRef      = useRef(0);   // pending rAF id; 0 = none scheduled
+  const latestKgRef = useRef(0);   // last sample, for the next flush
+  const flushUi = useCallback(() => {
+    rafRef.current = 0;
+    setForce(latestKgRef.current);
+    setPeak(peakRef.current);
+    const c = countRef.current, adC = adCountRef.current;
+    if (adC > 0)     setAvgForce(adSumRef.current / adC);
+    else if (c > 0)  setAvgForce(sumRef.current / c);
+  }, []);
+  const scheduleUiFlush = useCallback(() => {
+    if (rafRef.current) return;  // one flush per frame
+    if (typeof requestAnimationFrame === "function") {
+      rafRef.current = requestAnimationFrame(flushUi);
+    } else {
+      rafRef.current = setTimeout(flushUi, 66);  // test envs / very old browsers
+    }
+  }, [flushUi]);
+  const cancelUiFlush = useCallback(() => {
+    if (rafRef.current) {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafRef.current);
+      else clearTimeout(rafRef.current);
+      rafRef.current = 0;
+    }
+  }, []);
+  // Cancel any pending flush on unmount so it can't fire into an
+  // unmounted component.
+  useEffect(() => () => { cancelUiFlush(); }, [cancelUiFlush]);
+
   const ctrlRef             = useRef(null);
   const deviceRef           = useRef(null);   // kept for auto-reconnect
   const dataCharRef         = useRef(null);   // notify characteristic — for listener/notification cleanup
@@ -260,8 +298,9 @@ export function useTindeq() {
   // feedback, not what gets saved.
   const handlePacket = useCallback((evt) => {
     parseTindeqPacket(evt.target.value, ({ kg }) => {
-      setForce(kg);
-      if (kg > peakRef.current) { peakRef.current = kg; setPeak(kg); }
+      latestKgRef.current = kg;
+      if (kg > peakRef.current) peakRef.current = kg;
+      scheduleUiFlush();  // state mirror updates at most once per frame
 
       // Stable-hold threshold for the LIVE display only. When a target
       // is set, count samples ≥ 85% of target. Otherwise include any
@@ -276,8 +315,7 @@ export function useTindeq() {
         samplesRef.current.push({ kg, ts: Date.now() });
         if (isStableSample) {
           sumRef.current   += kg;
-          countRef.current += 1;
-          setAvgForce(sumRef.current / countRef.current);
+          countRef.current += 1;   // avg state mirror updated by flushUi
         }
       }
 
@@ -324,8 +362,8 @@ export function useTindeq() {
             adCountRef.current     = 0;
             adSamplesRef.current   = [{ kg, ts: now }];
             adBelowRef.current     = null;
-            peakRef.current = kg; setPeak(kg);
-            setAvgForce(0);
+            peakRef.current = kg;
+            scheduleUiFlush();
             adOnStartRef.current?.();
           }
         } else {
@@ -336,8 +374,7 @@ export function useTindeq() {
           adSamplesRef.current.push({ kg, ts: now });
           if (isStableSample) {
             adSumRef.current  += kg;
-            adCountRef.current += 1;
-            setAvgForce(adSumRef.current / adCountRef.current);
+            adCountRef.current += 1;  // avg state mirror updated by flushUi
           }
           if (kg < AD_END_KG) {
             if (adBelowRef.current === null) adBelowRef.current = now;
@@ -486,6 +523,7 @@ export function useTindeq() {
     sumRef.current       = 0;
     countRef.current     = 0;  setAvgForce(0);
     samplesRef.current   = [];
+    latestKgRef.current = 0;
     setForce(0);
     belowSinceRef.current = null;
     measuringRef.current  = true;
@@ -502,9 +540,16 @@ export function useTindeq() {
     const avg = computePlateauAvg(samplesRef.current);
     const peakF = peakRef.current;
     samplesRef.current = [];
+    // Final avg is authoritative: kill any queued frame flush and
+    // retire the live accumulators so no later flush recomputes a
+    // running avg over this rep's samples and overwrites the
+    // plateau-trimmed value.
+    cancelUiFlush();
+    sumRef.current = 0;
+    countRef.current = 0;
     setAvgForce(avg);
     return { avgForce: avg, peakForce: peakF };
-  }, []);
+  }, [cancelUiFlush]);
 
   const resetPeak = useCallback(() => {
     peakRef.current = 0; setPeak(0);
@@ -512,7 +557,7 @@ export function useTindeq() {
 
   const tare = useCallback(async () => {
     if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_TARE);
-    peakRef.current = 0; setPeak(0); setForce(0);
+    peakRef.current = 0; latestKgRef.current = 0; setPeak(0); setForce(0);
   }, []);
 
   // Start auto-detect mode: Tindeq streams continuously, reps are detected by
