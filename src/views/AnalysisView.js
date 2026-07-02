@@ -48,6 +48,7 @@ import React, { useMemo, useState } from "react";
 // directly — child cards own their own chart machinery.
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
+import { CardBoundary } from "../ui/ErrorBoundary.jsx";
 import { toDisp, forceOverBW } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 import { today } from "../util.js";
@@ -213,7 +214,7 @@ export function AnalysisView({
   };
   const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
 
-  // ── Hand selector (June 2026) ─────────────────────────────
+  // ── Hand selector (June 2026) ─────────────────────────
   // "pooled" (default) | "L" | "R". One global control, like the
   // Absolute/×BW toggle: scopes the F-D chart's data + fit, the
   // Capacity trajectory (against FROZEN per-hand baselines — see
@@ -749,6 +750,7 @@ export function AnalysisView({
             switch in lockstep. Card body extracted to ForceDurationCard
             (May 2026 BACKLOG #156 fourth pass); AnalysisView wires the
             data props in. */}
+        <CardBoundary name="Force-Duration chart">
         <ForceDurationCard
           unit={unit}
           bodyWeight={bodyWeight}
@@ -769,6 +771,7 @@ export function AnalysisView({
           threeExpPriors={threeExpPriors}
           handleDotClick={handleDotClick}
         />
+        </CardBoundary>
         {/* (Inline F-D card render block was here — ~280 lines covering
             the title + legend + ComposedChart + per-grip split-mode
             curves/dots + zone labels + Hand Asymmetry rows. Now in
@@ -797,6 +800,7 @@ export function AnalysisView({
             #156 fifth pass). The three branch modes (perGripMode,
             selGrip-with-baseline, pooled fallback) and their early-days
             placeholders all live in the component now. */}
+        <CardBoundary name="Curve Improvement">
         <CurveImprovementCard
           improvement={improvement}
           gripImprovement={gripImprovement}
@@ -814,7 +818,9 @@ export function AnalysisView({
           perHandGripImprovementFresh={perHandGripImprovementFresh}
           onHandViewChange={setHandView}
         />
+        </CardBoundary>
 
+        <CardBoundary name="Total Capacity trajectory">
         <CapacityTrajectoryCard
           aucHistoryByGrip={aucHistoryByGrip}
           normalizeOn={normalizeOn}
@@ -822,25 +828,31 @@ export function AnalysisView({
           handView={handView}
           onHandViewChange={setHandView}
         />
+        </CardBoundary>
 
         {/* Capacity shape — zone share of the balanced score over time.
             The trajectory above says how much the curve grew; this says
             where the growth came from (June 2026). */}
+        <CardBoundary name="Capacity zone share">
         <ZoneShareCard
           aucHistoryByGrip={aucHistoryByGrip}
           handView={handView}
           onHandViewChange={setHandView}
         />
+        </CardBoundary>
 
         {/* Peak force — direct max-strength measurement over time, from
             short near-max reps. Complements the curve (sustained force)
             and the AUC trajectory (whole-curve capacity) with the one
             thing they underrepresent: instantaneous max recruitment. */}
+        <CardBoundary name="Peak Force trend">
         <PeakForceCard history={history} unit={unit} />
+        </CardBoundary>
 
         {/* Endurance ceiling — sustained (240s curve force) ÷ measured
             peak, per grip. One-number limiter diagnostic bridging the
             curve fits and the peak measurements (June 2026). */}
+        <CardBoundary name="Endurance Ceiling">
         <EnduranceCeilingCard
           history={history}
           grip3xEstimates={grip3xEstimates}
@@ -849,6 +861,7 @@ export function AnalysisView({
           onHandViewChange={setHandView}
           unit={unit}
         />
+        </CardBoundary>
 
 
         {/* (Force Curves — vs baseline overlay merged INTO
@@ -864,7 +877,9 @@ export function AnalysisView({
       </>)}
 
       {/* ── 1RM PR tracker ── */}
-      <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
+      <CardBoundary name="1RM PR tracker">
+        <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
+        </CardBoundary>
 
       {reps.length === 0 ? (
         <Card>
@@ -891,7 +906,9 @@ export function AnalysisView({
             as a glanceable green/yellow/red light with a runway toward a
             deload. Conservatively gated (red only at the strong-deload
             condition) so it won't react to one rough session. */}
+        <CardBoundary name="Recovery gauge">
         <DeloadGauge status={deloadStatusResult} />
+        </CardBoundary>
 
         {/* (StrengthBalanceCard — the Crusher:Micro "open-hand vs crimp
             dominance" ratio — removed May 2026. The ratio is dominated by
@@ -904,7 +921,9 @@ export function AnalysisView({
             Anchors the bottom of Analysis: it's a "how good is your
             data" rundown rather than a training-signal card, so it
             reads naturally as the final summary of the page. */}
+        <CardBoundary name="Curve Coverage">
         <CurveCoverageCard history={history} />
+        </CardBoundary>
 
         {/* (Per-Compartment Dose AUC chart + Energy System Breakdown
             card removed under curve-trust — both were zone-keyed
