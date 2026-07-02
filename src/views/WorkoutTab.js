@@ -44,7 +44,7 @@
 // exist. Both can come back if needed; for now the simpler tab is
 // the point.
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
@@ -63,6 +63,7 @@ import {
 } from "../lib/trip.js";
 
 import { today, nowISO } from "../util.js";
+import { useLSValue } from "../hooks/useLSValue.js";
 import { recommendSet, recommendSetCount } from "../model/workout-progression.js";
 import { shortBuildLabel } from "../lib/buildInfo.js";
 
@@ -99,33 +100,43 @@ export function WorkoutTab({
   trip = DEFAULT_TRIP,
 }) {
   // ── State ─────────────────────────────────────────────
-  // wLog initial: load, then run the May 2026 D → C migration if
-  // any historical sessions still carry workoutId "D". The migration
-  // is intentionally schemaless (no version flag) and idempotent —
-  // a session can be rewritten 0 or 1 times and that's it. We
-  // re-push each rewritten session through pushWorkoutSession; the
-  // upsert is keyed on session id, so the cloud row's `workout`
-  // column gets updated in-place. If another device has already
-  // migrated the same session, the upsert is a harmless no-op.
-  const [wLog, setWLog] = useState(() => {
+  // wLog — live LS read. This view used to hold the log in useState
+  // (seeded at mount) and mirror every save into that shadow copy;
+  // now saveLS's subscriber notification IS the state update, and
+  // sessions merged by the cloud reconcile / manual pull show up in
+  // the recommender + stretch pill without a remount.
+  const wLogRaw = useLSValue(LS_WORKOUT_LOG_KEY);
+  const wLog = useMemo(() => wLogRaw || [], [wLogRaw]);
+
+  // May 2026 D → C migration for historical sessions still carrying
+  // workoutId "D". Moved out of the old useState initializer into a
+  // mount effect: the initializer ran during RENDER, so its saveLS +
+  // cloud pushes double-fired under StrictMode's double-invoke (and
+  // writing storage from render is illegal now that saveLS notifies
+  // subscribers). Idempotency is layered: the ref stops a re-run
+  // within this component instance, and the fresh loadLS means a
+  // second run (remount) finds no "D" sessions left and no-ops before
+  // touching the cloud. The re-push goes through pushWorkoutSession's
+  // id-keyed upsert, so a device that already migrated makes it a
+  // harmless no-op. Failures are logged by the sync helper and don't
+  // block the UI — the local rewrite already landed, so history reads
+  // correctly immediately; cloud reconciles whenever sync next succeeds.
+  const dToCMigrationRan = useRef(false);
+  useEffect(() => {
+    if (dToCMigrationRan.current) return;
+    dToCMigrationRan.current = true;
     const raw = loadLS(LS_WORKOUT_LOG_KEY) || [];
-    const needsRewrite = raw.some(s => s?.workoutId === "D");
-    if (!needsRewrite) return raw;
+    if (!raw.some(s => s?.workoutId === "D")) return;
     const migrated = raw.map(s =>
       s?.workoutId === "D" ? { ...s, workout: "C", workoutId: "C" } : s
     );
     saveLS(LS_WORKOUT_LOG_KEY, migrated);
-    // Fire-and-forget the cloud catch-up. Failures are logged by the
-    // sync helper and don't block the UI — the local migration
-    // already succeeded, so the user's history reads correctly
-    // immediately; cloud reconciles whenever sync succeeds next.
     for (let i = 0; i < raw.length; i++) {
       if (raw[i]?.workoutId === "D") {
         pushWorkoutSession(migrated[i]).catch(() => {});
       }
     }
-    return migrated;
-  });
+  }, []);
   // pickedId: null means "follow recommendation"; otherwise an
   // explicit workout selection.
   const [pickedId, setPickedId] = useState(null);
@@ -173,7 +184,10 @@ export function WorkoutTab({
   // deload. During the week, suggest skipping the heavy day (A) and
   // keeping any session light. Read-only here; ending the week happens
   // on the banner that started it.
-  const deloadWeek = loadLS(LS_DELOAD_WEEK_KEY) || null;
+  // Live read (was a per-render loadLS parse) — SetupView's banner
+  // writes this key, so accepting/ending a deload updates the nudge
+  // here through the same subscription path as everything else.
+  const deloadWeek = useLSValue(LS_DELOAD_WEEK_KEY);
   const deloadDay = deloadWeek?.start
     ? Math.round((new Date(today()) - new Date(deloadWeek.start)) / 86400000) + 1
     : 0;
@@ -372,7 +386,6 @@ export function WorkoutTab({
     };
     const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
     const nextLog = [...freshLog, session];
-    setWLog(nextLog);
     saveLS(LS_WORKOUT_LOG_KEY, nextLog);
     onSessionSaved?.(session);
     setSessionActive(false);
@@ -398,7 +411,6 @@ export function WorkoutTab({
     };
     const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
     const nextLog = [...freshLog, session];
-    setWLog(nextLog);
     saveLS(LS_WORKOUT_LOG_KEY, nextLog);
     onSessionSaved?.(session);
     setPickedId(null);
@@ -421,7 +433,6 @@ export function WorkoutTab({
     );
     if (existing) {
       const nextLog = freshLog.filter(s => s.id !== existing.id);
-      setWLog(nextLog);
       saveLS(LS_WORKOUT_LOG_KEY, nextLog);
       const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
       synced.delete(existing.id);
@@ -444,7 +455,6 @@ export function WorkoutTab({
       notes: "",
     };
     const nextLog = [...freshLog, session];
-    setWLog(nextLog);
     saveLS(LS_WORKOUT_LOG_KEY, nextLog);
     onSessionSaved?.(session);
   };
