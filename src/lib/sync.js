@@ -1185,7 +1185,7 @@ export async function fetchBWLog() {
       .filter(r => r?.date && Number(r.kg) > 0)
       .map(r => ({ date: r.date, kg: Number(r.kg) }));
   } catch (e) {
-    console.warn("Supabase BW push exception:", e.message);
+    console.warn("Supabase BW fetch exception:", e.message);
     return null;
   }
 }
