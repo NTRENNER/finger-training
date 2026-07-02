@@ -241,7 +241,7 @@ export function WorkoutHistoryView({
     cancelEdit();
   };
 
-  // ── Edit-mode mutation helpers ───────────────────────────
+  // ── Edit-mode mutation helpers ─────────────────────────────
   // Each one takes a state-shape transform and applies it to
   // editSession.exercises so the render binds to fresh refs.
   const editUpdateExerciseSets = (exId, next) => {
