@@ -69,7 +69,7 @@ import {
   buildThreeExpPriors,
   THREE_EXP_LAMBDA_DEFAULT,
 } from "./threeExp.js";
-import { effectiveLoad } from "./load.js";
+import { effectiveLoad, SANE_MAX_KG } from "./load.js";
 import { computePersonalRecoveryTaus } from "./recoveryFit.js";
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 
@@ -242,7 +242,7 @@ function getRecentPeakMVC(history, grip, daysOld = 90) {
   for (const r of history) {
     if (r?.grip !== grip) continue;
     const peak = Number(r?.peak_force_kg);
-    if (!Number.isFinite(peak) || peak <= 0 || peak >= 500) continue;
+    if (!Number.isFinite(peak) || peak <= 0 || peak >= SANE_MAX_KG) continue;
     if (r.date) {
       const ts = Date.parse(r.date);
       if (isFinite(ts) && ts < cutoffMs) continue;

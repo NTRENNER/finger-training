@@ -214,7 +214,7 @@ export async function pushWorkoutSessionTombstones(ids) {
     const { error } = await supabase
       .from("workout_session_tombstones")
       .upsert(valid.map(id => ({ user_id: userId, session_id: id })),
-        { onConflict: "user_id,session_id" });
+        { onConflict: "user_id,session_id", ignoreDuplicates: true });
     if (error) { console.warn("Supabase workout tombstone push:", error.message); return false; }
     return true;
   } catch (e) {
@@ -742,11 +742,11 @@ export async function fetchUserSettings() {
 
 // Upsert the user's settings. The row's user_id defaults from
 // auth.uid() via RLS, so we just send the settings object. Patch
-// semantics: pass only the keys you want to change; server-side
-// uses JSONB || operator? No — Supabase upsert overwrites the
-// whole row. Caller should fetch first, merge, then push, or this
-// helper can do it. For now we accept the full settings object;
-// the App.js layer merges with local cached settings before push.
+// PREFER pushUserSettingsPatch below. This whole-object upsert is a
+// lost-update hazard: it overwrites the entire settings JSONB, erasing
+// anything written between the caller's fetch and this push — including
+// the update_fatigue_beta_from_rep trigger's β updates and pins seeded
+// on other devices. Kept only for full-object migrations/repairs.
 export async function pushUserSettings(settings) {
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -766,6 +766,24 @@ export async function pushUserSettings(settings) {
   }
 }
 
+// Atomic server-side merge of ONLY the passed top-level keys
+// (settings = settings || patch via the update_user_settings_patch
+// RPC). No fetch-first, no read-modify-write window: concurrent
+// writers touching different keys can no longer erase each other.
+export async function pushUserSettingsPatch(patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return false;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.id) return false;
+    const { error } = await supabase.rpc("update_user_settings_patch", { patch });
+    if (error) { console.warn("Supabase settings patch:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase settings patch exception:", e.message);
+    return false;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // REP TOMBSTONE HELPERS (rep_tombstones table)
 // ─────────────────────────────────────────────────────────────
@@ -778,8 +796,11 @@ export async function pushUserSettings(settings) {
 // rationale. Just id + created_at, RLS gated on auth.uid().
 
 // Push N tombstones to cloud in a single batch. Returns true on
-// success. ON CONFLICT (id) DO NOTHING server-side, so re-pushing the
-// same id is harmless.
+// success. ignoreDuplicates makes this a true ON CONFLICT DO NOTHING —
+// required, not just harmless: the rep-family tombstone tables have no
+// UPDATE RLS policy, so the default DO UPDATE upsert would reject the
+// ENTIRE batch (42501) whenever any id already exists (e.g. a second
+// device re-deleting an already-tombstoned session).
 export async function pushRepTombstones(ids) {
   const valid = (ids || []).filter(Boolean);
   if (valid.length === 0) return true;
@@ -788,7 +809,7 @@ export async function pushRepTombstones(ids) {
     if (!userId) return false;
     const { error } = await supabase
       .from("rep_tombstones")
-      .upsert(valid.map(id => ({ id, user_id: userId })), { onConflict: "id" });
+      .upsert(valid.map(id => ({ id, user_id: userId })), { onConflict: "id", ignoreDuplicates: true });
     if (error) { console.warn("Supabase tombstone push:", error.message); return false; }
     return true;
   } catch (e) {
@@ -846,7 +867,7 @@ export async function pushRepSlotTombstones(slots) {
         set_num:    s.set_num,
         rep_num:    s.rep_num,
         hand:       s.hand,
-      })), { onConflict: "user_id,session_id,set_num,rep_num,hand" });
+      })), { onConflict: "user_id,session_id,set_num,rep_num,hand", ignoreDuplicates: true });
     if (error) { console.warn("Supabase slot tombstone push:", error.message); return false; }
     return true;
   } catch (e) {
@@ -976,7 +997,7 @@ export async function pushActivityTombstones(ids) {
     const { error } = await supabase
       .from("activity_tombstones")
       .upsert(valid.map(id => ({ user_id: userId, activity_id: id })),
-        { onConflict: "user_id,activity_id" });
+        { onConflict: "user_id,activity_id", ignoreDuplicates: true });
     if (error) { console.warn("Supabase activity tombstone push:", error.message); return false; }
     return true;
   } catch (e) {
@@ -1099,11 +1120,38 @@ export async function pushBWTombstones(dates) {
     const { error } = await supabase
       .from("bw_tombstones")
       .upsert(valid.map(date => ({ user_id: userId, date })),
-        { onConflict: "user_id,date" });
+        { onConflict: "user_id,date", ignoreDuplicates: true });
     if (error) { console.warn("Supabase BW tombstone push:", error.message); return false; }
     return true;
   } catch (e) {
     console.warn("Supabase BW tombstone push exception:", e.message);
+    return false;
+  }
+}
+
+// Remove BW tombstones for dates the user has RE-LOGGED. BW tombstones
+// are keyed by date, and dates get legitimately reused (delete a typo'd
+// weigh-in, log the correct one) — unlike the UUID-keyed rep tombstones,
+// which are never reused. Without this, a tombstone permanently shadows
+// the date: the reconcile drops the re-log from both sides of the merge,
+// and the reject_tombstoned_bw_inserts trigger blocks the push outright.
+// Callers MUST await this before pushBW on a re-logged date (trigger
+// ordering). Returns true on success or nothing-to-do.
+export async function removeBWTombstones(dates) {
+  const valid = (dates || []).filter(Boolean);
+  if (valid.length === 0) return true;
+  try {
+    const userId = await currentUserId();
+    if (!userId) return false;
+    const { error } = await supabase
+      .from("bw_tombstones")
+      .delete()
+      .eq("user_id", userId)
+      .in("date", valid);
+    if (error) { console.warn("Supabase BW un-tombstone:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase BW un-tombstone exception:", e.message);
     return false;
   }
 }

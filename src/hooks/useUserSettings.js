@@ -37,8 +37,8 @@ import {
 import { today } from "../util.js";
 import { DEFAULT_TRIP } from "../lib/trip.js";
 import {
-  pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates,
-  fetchUserSettings, pushUserSettings,
+  pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates, removeBWTombstones,
+  fetchUserSettings, pushUserSettingsPatch,
 } from "../lib/sync.js";
 import { defaultFatigueModel } from "../model/fatigueBeta.js";
 
@@ -130,7 +130,17 @@ export function useUserSettings({ user }) {
       // silent — the local write is already durable, the date stays
       // dirty, and the next sign-in reconcile retries the backfill.
       markDirty(LS_BW_DIRTY_KEY, d);
-      pushBW(d, kg).then(ok => { if (ok) confirmBWPushed(d, kg); });
+      // Un-tombstone FIRST: if this date was previously deleted, its
+      // bw_tombstone both shadows the re-log at every future reconcile
+      // and makes the server's reject trigger refuse the insert. A
+      // re-log is strictly newer intent than the old delete, so the
+      // tombstone must die before the push. On failure (offline) the
+      // date stays dirty and the reconcile's re-log path retries both.
+      (async () => {
+        await removeBWTombstones([d]);
+        const ok = await pushBW(d, kg);
+        if (ok) confirmBWPushed(d, kg);
+      })();
     }
   }, []);
 
@@ -174,9 +184,19 @@ export function useUserSettings({ user }) {
       // (deleted on another device = synced tombstone; this device's
       // own pending deletes are handled by the dirty pass below).
       for (const e of cloud) { if (!deleted.has(e.date)) byDate.set(e.date, e); }
+      // Dirty date WITH a local entry on a tombstoned date = an
+      // unconfirmed re-log (saveBW writes entry + dirty mark; deletes
+      // remove the entry) — the re-log is strictly newer than the
+      // tombstone, so it wins: keep it, kill the tombstone, backfill.
+      const relogged = [];
       for (const e of local) {
         if (!e?.date) continue;
         if (deleted.has(e.date)) {
+          if (dirty.has(e.date) && e.kg > 0) {
+            byDate.set(e.date, e);
+            relogged.push(e.date);
+            continue;
+          }
           // Deleted elsewhere — drop, and retire any stale dirty mark.
           clearDirty(LS_BW_DIRTY_KEY, e.date);
           continue;
@@ -205,13 +225,31 @@ export function useUserSettings({ user }) {
       // Backfill unsynced local entries (dirty re-logs + local-only
       // dates). Fire-and-forget; failures stay dirty and retry on
       // the next sign-in reconcile.
+      const reloggedSet = new Set(relogged);
       for (const e of local) {
         // byDate.has gate doubles as the tombstone filter — deleted
         // dates never entered the merge, so they never get re-pushed.
-        if (!e?.date || !byDate.has(e.date) || !(e.kg > 0)) continue;
+        // (Re-logged dates DID enter the merge but go through the
+        // ordered un-tombstone-then-push chain below instead — pushing
+        // before the tombstone is gone trips the reject trigger.)
+        if (!e?.date || !byDate.has(e.date) || !(e.kg > 0) || reloggedSet.has(e.date)) continue;
         if (dirty.has(e.date) || !cloudDates.has(e.date)) {
           pushBW(e.date, e.kg).then(ok => { if (ok) confirmBWPushed(e.date, e.kg); });
         }
+      }
+      // Re-logged tombstoned dates: strictly ordered un-tombstone →
+      // push → confirm. Failures leave the date dirty for next time.
+      if (relogged.length > 0) {
+        (async () => {
+          const cleared = await removeBWTombstones(relogged);
+          if (!cleared) return;  // stay dirty, retry next reconcile
+          for (const date of relogged) {
+            const e = byDate.get(date);
+            if (!(e?.kg > 0)) continue;
+            const ok = await pushBW(date, e.kg);
+            if (ok) confirmBWPushed(date, e.kg);
+          }
+        })();
       }
     })();
     return () => { cancelled = true; };
@@ -246,20 +284,11 @@ export function useUserSettings({ user }) {
     setClimbingFocusState(next);
     saveLS(LS_CLIMBING_FOCUS_KEY, next);
     // Fire-and-forget cloud push so cross-device sync is automatic.
-    // Merge with existing cloud settings so we don't clobber any
-    // future keys the user has set.
+    // Patch RPC merges server-side (settings || patch) — no fetch-
+    // first read-modify-write window, so this can no longer erase
+    // keys written concurrently (β trigger, other devices' pins).
     if (user) {
-      (async () => {
-        // ABORT on fetch error (null) — pushUserSettings overwrites
-        // the whole settings JSONB, so pushing `{ climbing_focus }`
-        // on top of a failed fetch would wipe pinned baselines,
-        // pyramid pins, and the learned fatigue_model from the cloud
-        // row. fetchUserSettings returns {} (not null) for "no row
-        // yet", so a legitimate first push still goes through.
-        const current = await fetchUserSettings();
-        if (current == null) return;
-        await pushUserSettings({ ...current, climbing_focus: next });
-      })().catch(() => {});
+      pushUserSettingsPatch({ climbing_focus: next }).catch(() => {});
     }
   }, [user]);
 
@@ -289,12 +318,8 @@ export function useUserSettings({ user }) {
     setPyramidProjectMapState(next);
     saveLS(LS_PYRAMID_PROJECT_KEY, next);
     if (user) {
-      (async () => {
-        // Abort on fetch error — see saveClimbingFocus for why.
-        const current = await fetchUserSettings();
-        if (current == null) return;
-        await pushUserSettings({ ...current, pyramid_project: next });
-      })().catch(() => {});
+      // Server-side merge — see saveClimbingFocus for why.
+      pushUserSettingsPatch({ pyramid_project: next }).catch(() => {});
     }
   }, [user]);
 
@@ -317,12 +342,8 @@ export function useUserSettings({ user }) {
     setPinnedGripBaselinesState(stamped);
     saveLS(LS_PINNED_GRIP_BASELINES_KEY, stamped);
     if (user) {
-      (async () => {
-        // Abort on fetch error — see saveClimbingFocus for why.
-        const current = await fetchUserSettings();
-        if (current == null) return;
-        await pushUserSettings({ ...current, pinned_grip_baselines: stamped });
-      })().catch(() => {});
+      // Server-side merge — see saveClimbingFocus for why.
+      pushUserSettingsPatch({ pinned_grip_baselines: stamped }).catch(() => {});
     }
   }, [user]);
 
@@ -339,12 +360,8 @@ export function useUserSettings({ user }) {
     setPinnedPerHandBaselinesState(stamped);
     saveLS(LS_PINNED_PERHAND_BASELINES_KEY, stamped);
     if (user) {
-      (async () => {
-        // Abort on fetch error — see saveClimbingFocus for why.
-        const current = await fetchUserSettings();
-        if (current == null) return;
-        await pushUserSettings({ ...current, pinned_perhand_baselines: stamped });
-      })().catch(() => {});
+      // Server-side merge — see saveClimbingFocus for why.
+      pushUserSettingsPatch({ pinned_perhand_baselines: stamped }).catch(() => {});
     }
   }, [user]);
 
