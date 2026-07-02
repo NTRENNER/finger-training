@@ -31,7 +31,7 @@ import { clamp } from "../../util.js";
 //   seconds        — elapsed seconds (number)
 //   targetSeconds  — target hold duration (number)
 //   running        — when false the display reads as muted (paused)
-export function BigTimer({ seconds, targetSeconds, running }) {
+function BigTimer({ seconds, targetSeconds, running }) {
   const pct = targetSeconds ? Math.min(seconds / targetSeconds, 1) : 0;
   const over = seconds >= targetSeconds;
   const color = running ? (over ? C.green : C.blue) : C.muted;
@@ -66,7 +66,7 @@ export function BigTimer({ seconds, targetSeconds, running }) {
 //                Tindeq output forces; bigger isolates the avg
 //                marker visually for typical training loads)
 //   unit       — "lbs" or "kg" — display only, kg is the wire format
-export function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs" }) {
+function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs" }) {
   const fPct    = clamp(force / maxDisplay, 0, 1);
   const avgPct  = clamp(avg   / maxDisplay, 0, 1);
   const tgtPct  = targetKg != null ? clamp(targetKg / maxDisplay, 0, 1) : null;
@@ -107,3 +107,12 @@ export function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50,
     </div>
   );
 }
+
+// React.memo (2026-07-01): this component sits under the live BLE
+// force stream — App-level state updates every animation frame while
+// the Tindeq is connected. Memo skips reconciliation entirely when
+// this component's own props haven't changed; without it every force
+// sample re-rendered the full recharts tree.
+const BigTimerMemo = React.memo(BigTimer);
+const ForceGaugeMemo = React.memo(ForceGauge);
+export { BigTimerMemo as BigTimer, ForceGaugeMemo as ForceGauge };

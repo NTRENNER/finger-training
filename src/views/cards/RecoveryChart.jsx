@@ -61,7 +61,7 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
-export function RecoveryChart({
+function RecoveryChart({
   observed = [],
   predicted = [],
   // Coaching headline displayed above the chart when a gap is
@@ -204,3 +204,11 @@ export function RecoveryChart({
     </div>
   );
 }
+
+// React.memo (2026-07-01): this component sits under the live BLE
+// force stream — App-level state updates every animation frame while
+// the Tindeq is connected. Memo skips reconciliation entirely when
+// this component's own props haven't changed; without it every force
+// sample re-rendered the full recharts tree.
+const RecoveryChartMemo = React.memo(RecoveryChart);
+export { RecoveryChartMemo as RecoveryChart };
