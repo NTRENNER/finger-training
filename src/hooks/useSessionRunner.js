@@ -120,6 +120,16 @@ export function useSessionRunner({
   const [currentRep,  setCurrentRep]  = useState(0);
   const [sessionReps, setSessionReps] = useState([]);
   const [sessionId,        setSessionId]        = useState("");
+  // Pre-session history snapshot for level-up detection (fixed
+  // 2026-07-01): handleRepDone pushes each rep into `history` via
+  // addReps as it lands, so by finishSession the "old" history
+  // already contains this session's reps 1..N-1 — at the same
+  // (possibly PR) load, since load is constant within a set.
+  // calcLevel is max-load based, so oldLevel === newLevel for any
+  // session with ≥2 reps and the Level Up celebration could
+  // essentially never fire. Snapshot at startSession instead. A ref,
+  // not state: it must not retrigger effects and is only read once.
+  const preSessionHistoryRef = useRef(null);
   const [sessionStartedAt, setSessionStartedAt] = useState("");
   const [refWeights,       setRefWeights]        = useState({});
   const [lastRepResult, setLastRepResult] = useState(null);
@@ -172,6 +182,7 @@ export function useSessionRunner({
       pushDailyState(today(), config.cooked);
     }
     const startedAt = nowISO();
+    preSessionHistoryRef.current = history;  // freeze pre-session view for level-up detection
     repDoneLockRef.current = false;   // arm rep-done for the first rep
     setSessionId(sid);
     setSessionStartedAt(startedAt);
@@ -206,9 +217,13 @@ export function useSessionRunner({
     // Zone bucket of the prescribed T — the level cell this session
     // contributes to. See model/levels.js for the curve-trust grouping.
     const zone = zoneOf(config.targetTime);
+    // Level-up compares against the PRE-session snapshot (see
+    // preSessionHistoryRef) — `history` here already contains this
+    // session's earlier reps, which used to mask the level change.
+    const before = preSessionHistoryRef.current ?? history;
     for (const h of hands) {
-      const combined = [...history, ...allReps.filter(r => r.hand === h || r.hand === "B")];
-      const oldLevel = calcLevel(history, h, config.grip, zone);
+      const combined = [...before, ...allReps.filter(r => r.hand === h || r.hand === "B")];
+      const oldLevel = calcLevel(before, h, config.grip, zone);
       const newLvl   = calcLevel(combined, h, config.grip, zone);
       if (newLvl > oldLevel) { leveled = true; maxNewLevel = Math.max(maxNewLevel, newLvl); }
     }
