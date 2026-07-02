@@ -214,7 +214,7 @@ export function AnalysisView({
   };
   const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
 
-  // ── Hand selector (June 2026) ─────────────────────────
+  // ── Hand selector (June 2026) ─────────────────────────────
   // "pooled" (default) | "L" | "R". One global control, like the
   // Absolute/×BW toggle: scopes the F-D chart's data + fit, the
   // Capacity trajectory (against FROZEN per-hand baselines — see
