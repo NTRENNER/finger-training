@@ -459,11 +459,14 @@ export default function App() {
         }
       }
 
-      // Workout sessions — merge into localStorage (skipping tombstoned ids).
-      // WorkoutView re-reads LS on mount, so new workouts appear once the
-      // user next navigates there; we trigger a reload below to make them
-      // visible immediately across all tabs that use those memos.
-      let workoutChanged = false;
+      // Workout sessions — merge into localStorage (skipping tombstoned
+      // ids). These saveLS calls notify the reactive layer (see
+      // storage.js), so every mounted useLSValue subscriber — the
+      // Workout tab, workout history, heatmap, analysis views —
+      // re-renders with the merged log immediately. This used to end
+      // in a delayed window.location.reload() because views only read
+      // LS on mount; the reload is gone (it also nuked any in-progress
+      // session state).
       const remote = await fetchWorkoutSessions();
       if (remote) {
         const local      = loadLS(LS_WORKOUT_LOG_KEY) || [];
@@ -472,7 +475,6 @@ export default function App() {
         const additions  = remote.filter(s => !localIds.has(s.id) && !deletedIds.has(s.id));
         if (additions.length > 0) {
           saveLS(LS_WORKOUT_LOG_KEY, [...local, ...additions]);
-          workoutChanged = true;
         }
         const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
         remote.forEach(s => s.id && synced.add(s.id));
@@ -482,13 +484,6 @@ export default function App() {
       refreshPending();
       setLastPulledAt(Date.now());
       setPullStatus("ok");
-
-      // If we merged in new workout_sessions from the cloud, reload so the
-      // WorkoutView (which reads LS on mount) picks them up immediately.
-      // Reps/history live in App state so they appear without reload.
-      if (workoutChanged) {
-        setTimeout(() => window.location.reload(), 400);
-      }
     } catch (e) {
       console.warn("pullFromCloud failed:", e?.message);
       setPullStatus("err");
