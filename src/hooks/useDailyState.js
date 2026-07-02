@@ -57,8 +57,8 @@ function loadFromLS() {
 // every local write is dirty-marked at save time, so a CLEAN local
 // date the cloud doesn't have can only mean "cleared on another
 // device" — reconcile drops it instead of resurrecting it via
-// backfill. (Cleared by clearUserScopedLS on account switch, same
-// as every other ft_* key.)
+// backfill. (User-namespaced like every other ft_* key — an account
+// switch reads a different namespace, so no cross-user carryover.)
 const LS_DAILY_STATE_SYNCED_ONCE_KEY = "ft_daily_state_synced_once";
 
 // Confirm-or-keep-dirty helper: clear the dirty mark only if the

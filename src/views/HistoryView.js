@@ -35,6 +35,7 @@ import {
 import { WorkoutHistoryView } from "./WorkoutHistoryView.js";
 import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
 import { CalendarHeatmap } from "./CalendarHeatmap.jsx";
+import { useLSValue } from "../hooks/useLSValue.js";
 import { CookednessSlider } from "./cards/CookednessSlider.jsx";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
@@ -74,13 +75,14 @@ export function HistoryView({
 }) {
   const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
   const switchDomain = (d) => { setDomain(d); saveLS(LS_HISTORY_DOMAIN_KEY, d); };
-  // Read wLog from LS for the year-at-a-glance heatmap. Memoized with
-  // no deps so it re-reads on remount only — the previous every-render
-  // read returned a fresh array identity each time, which defeated the
-  // heatmap's useMemo on its expensive per-day rollup. Workouts are
-  // saved from the Workout tab, so this view always remounts (tab
-  // switch) before a new workout could appear here anyway.
-  const wLogForCalendar = useMemo(() => loadLS(LS_WORKOUT_LOG_KEY) || [], []);
+  // wLog for the year-at-a-glance heatmap — live via useLSValue, so a
+  // cloud pull that merges in another device's sessions repaints the
+  // heatmap without a remount (the old mount-only read went stale).
+  // The raw snapshot is referentially stable between writes; deriving
+  // the [] fallback inside a memo keyed on it preserves the identity
+  // the heatmap's expensive per-day rollup memo depends on.
+  const wLogRaw = useLSValue(LS_WORKOUT_LOG_KEY);
+  const wLogForCalendar = useMemo(() => wLogRaw || [], [wLogRaw]);
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
@@ -285,11 +287,13 @@ export function HistoryView({
     setNewRepLoad(""); setNewRepTime("");
   };
 
-  // Body weight log — backing state so deletions re-render. Loaded
-  // once from localStorage; the Body Weight Log card mutates it via
-  // setBwLog, which also writes back to LS and (for cloud-synced
-  // entries) calls deleteBW to drop the row from Supabase.
-  const [bwLog, setBwLog] = useState(() => loadLS(LS_BW_LOG_KEY) || []);
+  // Body weight log — live via useLSValue. Deletions below write the
+  // filtered copy through saveLS, whose notification re-renders this
+  // (and every other subscriber: BwPrompt, the analysis views) — no
+  // shadow React state to keep in sync, and BW entries logged from
+  // other tabs or merged by the cloud reconcile appear immediately.
+  const bwRaw = useLSValue(LS_BW_LOG_KEY);
+  const bwLog = useMemo(() => bwRaw || [], [bwRaw]);
 
   // Sorted descending for display + the BW Log card. Anomaly detection
   // flags entries that differ from the rolling median by > 15%, so
@@ -309,8 +313,9 @@ export function HistoryView({
     // Native confirm — same pattern the session-delete buttons use.
     // eslint-disable-next-line no-alert
     if (!window.confirm(`Delete body weight entry for ${date}?\n\nThis removes it locally and from the cloud.`)) return;
+    // NEW array through saveLS — never mutate bwLog in place, it's
+    // the shared snapshot every subscriber renders from.
     const next = bwLog.filter(e => e.date !== date);
-    setBwLog(next);
     saveLS(LS_BW_LOG_KEY, next);
     // Record the deletion intent BEFORE the cloud call (dirty-key
     // sync model — see storage.js). If the delete fails, the date

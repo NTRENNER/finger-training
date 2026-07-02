@@ -6,14 +6,332 @@
 // safely use `loadLS(key) || defaultValue`. Writes silently no-op when
 // localStorage is unavailable (private browsing modes, quota full).
 //
+// Every key handed to loadLS/saveLS is a LOGICAL key: it's mapped to
+// a physical localStorage key through the per-user namespace resolver
+// in the USER NAMESPACING section below before it touches the storage
+// API. Callers never see the prefix.
+//
 // The LS_*_KEY constants exported here are the storage keys the
 // extracted view modules consume. Other LS keys consumed only by App.js
 // remain inlined there until those views are extracted too.
 
+// ─────────────────────────────────────────────────────────────
+// USER NAMESPACING — postmortem, July 2026
+// ─────────────────────────────────────────────────────────────
+// Incident: every ft_* cache in this file is user-scoped data, but
+// the keys themselves were global. The original mitigation
+// (ft_last_user + clearUserScopedLS() on account switch, then a
+// reload) had two holes, both of which ended with user A's training
+// history pushed into user B's cloud account by the reconcile loops:
+//
+//   HOLE (a) — devices that predate the guard had caches but no
+//   ft_last_user. The first sign-in after upgrading saw last == null,
+//   treated it as "first sign-in adopts the device's local data", and
+//   adopted WHOEVER's data happened to be cached — not necessarily
+//   the person signing in.
+//
+//   HOLE (b) — the wipe raced the app. Between clearUserScopedLS()
+//   and window.location.reload(), already-mounted hooks still held
+//   user A's data in React state, and their persistence effects
+//   rewrote it into the freshly-wiped localStorage. Post-reload, the
+//   reconciles classified that data as B's "local-only work" and
+//   pushed it into B's account.
+//
+// Fix: namespace the storage instead of wiping it.
+//
+//   * Every user-scoped key is physically stored as `u:<uid>:<key>`.
+//     Bare (unprefixed) keys are the anonymous / signed-out namespace.
+//   * `nsUid` — the namespace this page instance reads and writes —
+//     is captured ONCE at module load from ft_last_user and never
+//     changes for the life of the page. On an account switch,
+//     setLastUserRaw() records the new uid for the NEXT page load but
+//     deliberately leaves nsUid alone, so in-flight persistence
+//     effects keep writing to the OLD user's namespace until the
+//     reload lands. That closes hole (b) structurally: there is no
+//     window in which A's in-memory data can land in a namespace B
+//     will ever read.
+//   * A one-time migration at module load moves legacy bare keys into
+//     the namespace of whichever user the OLD system itself recorded
+//     in ft_last_user — attributing pre-namespacing data to the
+//     person who was actually signed in. That closes hole (a).
+//   * Nothing is wiped on switch anymore: each user's caches sit
+//     safely under their own prefix, and offline work survives.
+//
+// Device-scoped keys (never namespaced): ft_last_user only. Everything
+// else — every other ft_* key plus the legacy unprefixed "unit_pref" —
+// is user-scoped. Supabase's own sb-* auth/session keys are not ours
+// and are never touched by any code in this file.
+
+// Last signed-in Supabase user id. Written RAW (setLastUserRaw) and
+// read RAW (readRawLastUser) — never routed through loadLS/saveLS's
+// key resolution, because it's the key that DEFINES the resolution.
+export const LS_LAST_USER_KEY = "ft_last_user";
+
+// Keys that describe the device, not the user. resolveKey passes
+// these through bare no matter who is signed in.
+const DEVICE_SCOPED_KEYS = new Set([LS_LAST_USER_KEY]);
+
+// Is `k` a BARE physical key holding user-scoped data? Used by the
+// legacy migration, anon-data adoption, and the signed-out branch of
+// clearUserScopedLS. Quarantine siblings ("ft_v3__corrupt_<ts>",
+// "unit_pref__corrupt_<ts>") match too — they're user data and must
+// travel with their user.
+function isUserScopedBareKey(k) {
+  if (k.startsWith("ft_")) return !DEVICE_SCOPED_KEYS.has(k);
+  return k === "unit_pref" || k.startsWith("unit_pref__corrupt_");
+}
+
+// Read ft_last_user directly — no namespacing, no quarantine-on-
+// corrupt (there'd be nothing useful to recover). The value is JSON
+// (historically written via saveLS, now via setLastUserRaw); any
+// failure — missing key, storage unavailable, corrupt JSON, non-
+// string value — reads as "no recorded user".
+export function readRawLastUser() {
+  try {
+    const raw = localStorage.getItem(LS_LAST_USER_KEY);
+    if (raw == null) return null;
+    const v = JSON.parse(raw);
+    return (typeof v === "string" && v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// The namespace this page instance lives in. Captured once at module
+// load and frozen; see the postmortem above for why it must NOT track
+// later ft_last_user writes (hole (b)).
+let nsUid = readRawLastUser();
+
+// Map a logical key to its physical localStorage key. Device-scoped
+// keys pass through bare. User-scoped keys get the page's namespace
+// prefix; with no namespace (signed out / never signed in) the bare
+// key IS the namespace — the anonymous one.
+function resolveKey(key) {
+  if (DEVICE_SCOPED_KEYS.has(key)) return key;
+  return nsUid ? `u:${nsUid}:${key}` : key;
+}
+
+// Move every bare user-scoped key into `uid`'s namespace. Shared by
+// the legacy migration (hole (a)) and first-sign-in adoption.
+//
+// Conflict rule: if the namespaced copy already exists it was written
+// AFTER namespacing shipped — newer by construction — so keep it and
+// drop the stale bare duplicate. Quota rule: if the namespaced write
+// throws mid-move, the catch skips the removeItem, leaving that bare
+// key in place so the next module load retries the move instead of
+// silently losing data.
+function moveBareKeysToNamespace(uid) {
+  if (!uid) return;
+  try {
+    const bare = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && isUserScopedBareKey(k)) bare.push(k);
+    }
+    for (const k of bare) {
+      try {
+        const target = `u:${uid}:${k}`;
+        if (localStorage.getItem(target) == null) {
+          localStorage.setItem(target, localStorage.getItem(k));
+        }
+        localStorage.removeItem(k);
+      } catch {
+        // Quota / availability failure mid-move — leave this bare key
+        // untouched; the next load retries it.
+      }
+    }
+  } catch {
+    // Storage API unavailable — nothing to move.
+  }
+}
+
+// Record `uid` as the last signed-in user for the NEXT page load.
+// CRITICAL: does not touch nsUid. After an account switch the caller
+// (useAuth's guard) forces a reload; until that reload lands, every
+// persistence effect on the current page keeps writing to the OLD
+// user's namespace. Retargeting writes here would reopen hole (b) —
+// A's in-memory state would start landing in B's namespace.
+export function setLastUserRaw(uid) {
+  try {
+    localStorage.setItem(LS_LAST_USER_KEY, JSON.stringify(uid));
+  } catch {
+    // Storage unavailable — nothing recorded; the guard simply runs
+    // again on the next load.
+  }
+}
+
+// First-sign-in adoption: fold the anonymous namespace's training
+// data (bare user-scoped keys) into `uid`'s namespace — signed-out
+// local work belongs to the first account that signs in on the
+// device. Same move/conflict/quota semantics as the legacy migration.
+export function adoptAnonDataForUser(uid) {
+  moveBareKeysToNamespace(uid);
+}
+
+// One-time legacy migration (closes hole (a)): if this device
+// recorded a last user under the OLD un-namespaced system, any bare
+// user-scoped keys still lying around are THAT user's data — move
+// them into their namespace before any hook can read them. Runs at
+// module load, so by the time loadLS is callable the physical layout
+// is already namespaced. No-op when there are no bare keys left.
+function runLegacyMigration() {
+  if (nsUid) moveBareKeysToNamespace(nsUid);
+}
+runLegacyMigration();
+
+// ─────────────────────────────────────────────────────────────
+// SUBSCRIPTIONS + SNAPSHOT CACHE — reactive layer, July 2026
+// ─────────────────────────────────────────────────────────────
+// localStorage used to be an unowned shadow store: half a dozen views
+// read it independently at mount (or on every render) with no way to
+// hear about later writes, so they went stale the moment the cloud
+// reconcile or a manual pull rewrote LS behind them. Every workaround
+// for that grew somewhere else — App.js's pullFromCloud ended in a
+// full window.location.reload() because "WorkoutView reads LS on
+// mount", WorkoutHistoryView bumped a `tick` counter to force
+// re-reads after its own edits, and SetupView's BwPrompt re-parsed
+// the BW log JSON on every render. This layer makes storage.js the
+// owner: saveLS notifies per-key subscribers after each successful
+// write, and src/hooks/useLSValue.js turns that into a
+// useSyncExternalStore hook so a view's read of a key stays live for
+// as long as it's mounted.
+//
+// Keys here are LOGICAL keys — the strings callers already pass to
+// loadLS/saveLS — not resolved physical keys. That's safe because the
+// logical→physical mapping is constant for the life of the page:
+// nsUid is frozen at module load and account switches always reload
+// (see the namespacing postmortem up top).
+//
+// Contract: values flowing through this layer are IMMUTABLE.
+// getLSSnapshot returns the same reference on every call until the
+// key is next written (useSyncExternalStore requires referentially
+// stable snapshots to avoid render loops), so callers must never
+// mutate a value they read — build a NEW array/object and hand it to
+// saveLS instead. Plain loadLS stays uncached for one-off readers;
+// only getLSSnapshot consults the cache. saveLS keeps the cache
+// coherent even for keys nobody currently subscribes to, so a later
+// subscriber's first snapshot is never stale.
+
+const lsListeners = new Map();     // logical key → Set<callback>
+const lsSnapshotCache = new Map(); // logical key → last parsed value
+
+function notifyLS(key) {
+  const subs = lsListeners.get(key);
+  if (!subs) return;
+  // Copy before iterating — a callback may (un)subscribe
+  // synchronously, and mutating a Set mid-iteration skips entries.
+  for (const cb of [...subs]) {
+    try {
+      cb();
+    } catch (e) {
+      console.error(`subscribeLS: listener for "${key}" threw`, e);
+    }
+  }
+}
+
+// Drop every cached snapshot and wake every subscriber. Used when the
+// physical layout changes out from under the whole logical mapping:
+// a cross-tab localStorage.clear(), clearUserScopedLS, or the test
+// seams re-pointing nsUid.
+function invalidateAllLS() {
+  const keys = new Set([...lsSnapshotCache.keys(), ...lsListeners.keys()]);
+  lsSnapshotCache.clear();
+  keys.forEach(k => notifyLS(k));
+}
+
+// Subscribe to writes on a logical key. Returns the unsubscribe fn.
+export function subscribeLS(key, cb) {
+  let set = lsListeners.get(key);
+  if (!set) {
+    set = new Set();
+    lsListeners.set(key, set);
+  }
+  set.add(cb);
+  return () => {
+    set.delete(cb);
+    if (set.size === 0) lsListeners.delete(key);
+  };
+}
+
+// Cached parsed read. On a miss, loads through loadLS (so the corrupt-
+// JSON quarantine still runs) and caches the result — including null,
+// which is a perfectly stable snapshot for "key absent".
+export function getLSSnapshot(key) {
+  if (lsSnapshotCache.has(key)) return lsSnapshotCache.get(key);
+  const v = loadLS(key);
+  lsSnapshotCache.set(key, v);
+  return v;
+}
+
+// Inverse of resolveKey for THIS page's namespace: map a physical
+// localStorage key back to the logical key it resolves from, or null
+// when the physical key belongs to another user's namespace (or isn't
+// ours at all). Used by the cross-tab storage listener below.
+function logicalKeyFor(physicalKey) {
+  if (DEVICE_SCOPED_KEYS.has(physicalKey)) return physicalKey;
+  if (nsUid) {
+    const prefix = `u:${nsUid}:`;
+    return physicalKey.startsWith(prefix) ? physicalKey.slice(prefix.length) : null;
+  }
+  // Signed out: bare keys ARE the (anonymous) namespace; any u:* key
+  // is some signed-in user's data, not this page's.
+  return physicalKey.startsWith("u:") ? null : physicalKey;
+}
+
+// Cross-tab coherence. "storage" fires in OTHER tabs of this origin
+// when localStorage changes; the writing tab already went through
+// saveLS. Invalidate (don't eagerly re-parse — the next getLSSnapshot
+// does that lazily) and notify so mounted useLSValue hooks re-read.
+// Guarded for SSR / non-window test environments.
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("storage", (e) => {
+    try {
+      // Ignore sessionStorage events; e.storageArea can be absent on
+      // synthetic events, and touching window.localStorage can throw
+      // in locked-down modes — treat both as "assume it's ours".
+      if (e.storageArea && e.storageArea !== window.localStorage) return;
+    } catch { /* assume localStorage */ }
+    if (e.key == null) {
+      // localStorage.clear() in another tab — everything is suspect.
+      invalidateAllLS();
+      return;
+    }
+    const logical = logicalKeyFor(e.key);
+    if (logical == null) return;
+    lsSnapshotCache.delete(logical);
+    notifyLS(logical);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// TEST SEAMS — not for production use
+// ─────────────────────────────────────────────────────────────
+// nsUid is deliberately frozen at module load in production; tests
+// need to simulate different sign-in states (and re-run the module-
+// load migration) within a single module instance, so these poke the
+// module state directly.
+
+// Force the active namespace (null = signed-out / anonymous).
+// Re-pointing nsUid changes the logical→physical mapping, so every
+// cached snapshot is stale — flush the reactive layer too.
+export function __setNsUidForTests(uid) {
+  nsUid = uid || null;
+  invalidateAllLS();
+}
+
+// Re-read ft_last_user and re-run the legacy migration, exactly as a
+// fresh page load would.
+export function __runLegacyMigrationForTests() {
+  nsUid = readRawLastUser();
+  runLegacyMigration();
+  invalidateAllLS();
+}
+
 export function loadLS(key) {
+  const k = resolveKey(key);
   let raw = null;
   try {
-    raw = localStorage.getItem(key);
+    raw = localStorage.getItem(k);
   } catch {
     return null;   // storage API itself unavailable
   }
@@ -29,11 +347,18 @@ export function loadLS(key) {
     // sibling key first so the data is recoverable by hand, then
     // remove the corrupt original so we don't quarantine again on
     // every read.
+    // Quarantine keys are siblings of the RESOLVED key, so a corrupt
+    // blob stays inside the namespace (with the user) it came from.
     try {
-      localStorage.setItem(`${key}__corrupt_${Date.now()}`, raw);
-      localStorage.removeItem(key);
+      localStorage.setItem(`${k}__corrupt_${Date.now()}`, raw);
+      localStorage.removeItem(k);
     } catch { /* quota — the original stays in place, still readable by hand */ }
-    console.error(`loadLS: corrupt JSON under "${key}" — quarantined a copy; treating as empty`);
+    console.error(`loadLS: corrupt JSON under "${k}" — quarantined a copy; treating as empty`);
+    // Whatever the reactive layer cached for this key no longer
+    // matches the (now quarantined-away) bytes — snapshot readers
+    // should see the same null this call returns.
+    lsSnapshotCache.set(key, null);
+    notifyLS(key);
     return null;
   }
 }
@@ -45,12 +370,20 @@ export function loadLS(key) {
 // retried and the rep exists only in memory.
 export function saveLS(key, v) {
   try {
-    localStorage.setItem(key, JSON.stringify(v));
-    return true;
+    localStorage.setItem(resolveKey(key), JSON.stringify(v));
   } catch (e) {
     console.error(`saveLS: write failed for "${key}" (${e?.name || "unknown"}) — data NOT persisted`);
     return false;
   }
+  // Write landed — the value just written IS the current snapshot.
+  // Cache it (even with zero subscribers, so a later subscriber's
+  // first read stays coherent) and notify. Failed writes return above
+  // WITHOUT notifying: localStorage still holds the old value, and
+  // telling subscribers about a value that never persisted would
+  // desync them from what a reload will read.
+  lsSnapshotCache.set(key, v);
+  notifyLS(key);
+  return true;
 }
 
 // Canonical client-side rep array. Owned by useRepHistory; the
@@ -207,26 +540,31 @@ export const LS_PINNED_PERHAND_BASELINES_KEY = "ft_pinned_perhand_baselines";
 // orphaned `ft_pyramid_warmup` entries in localStorage are now
 // ignored and can be cleared by a future migration if desired.)
 
-// Last signed-in Supabase user id. Used by useAuth to detect an
-// account switch on a shared device: every ft_* cache below is
-// user-scoped data but none of the keys are namespaced by user, so
-// without this guard, user B signing in after user A would reconcile
-// A's cached reps/workouts/BW/activities as "local-only work" and
-// push A's entire training history into B's account.
-export const LS_LAST_USER_KEY = "ft_last_user";
+// (LS_LAST_USER_KEY now lives in the USER NAMESPACING section at the
+// top of this file — it defines the namespace, so it's declared with
+// the resolver that consumes it.)
 
-// Wipe all user-scoped local caches. Called by useAuth when the
-// signed-in user id differs from LS_LAST_USER_KEY. Removes every
-// ft_* key plus the legacy unprefixed "unit_pref". Deliberately
-// leaves Supabase's own sb-* auth/session keys alone.
+// Clear the CURRENT namespace's user-scoped caches: the signed-in
+// user's `u:<uid>:*` keys, or the bare anonymous keys when signed
+// out. NO LONGER called by the auth guard — account switches are
+// handled by namespacing, not wiping (see the postmortem up top) —
+// but retained as a utility for explicit "clear local data" flows.
+// Never touches ft_last_user, other users' namespaces, or Supabase's
+// own sb-* auth/session keys.
 export function clearUserScopedLS() {
   try {
+    const prefix = nsUid ? `u:${nsUid}:` : null;
     const doomed = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && (k.startsWith("ft_") || k === "unit_pref")) doomed.push(k);
+      if (!k) continue;
+      if (prefix ? k.startsWith(prefix) : isUserScopedBareKey(k)) doomed.push(k);
     }
     doomed.forEach(k => localStorage.removeItem(k));
+    // The whole namespace just vanished — flush the reactive layer so
+    // mounted useLSValue hooks re-read (to null) instead of serving
+    // snapshots of deleted data.
+    invalidateAllLS();
   } catch {
     // Storage unavailable — nothing cached, nothing to clear.
   }

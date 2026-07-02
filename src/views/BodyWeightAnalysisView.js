@@ -21,7 +21,8 @@ import {
 import { C } from "../ui/theme.js";
 import { Card, Sect } from "../ui/components.js";
 import { fmt1, toDisp } from "../ui/format.js";
-import { loadLS, LS_BW_LOG_KEY } from "../lib/storage.js";
+import { LS_BW_LOG_KEY } from "../lib/storage.js";
+import { useLSValue } from "../hooks/useLSValue.js";
 import { ymdLocal } from "../util.js";
 
 // Time-window options for the chart. Full history is the default
@@ -62,14 +63,17 @@ function entryOnOrBefore(entries, targetDate) {
 }
 
 export function BodyWeightAnalysisView({ unit = "lbs" }) {
-  // Load once on mount; tab switches unmount this view and the cloud
-  // reconcile in App.js keeps localStorage current.
-  const [bwLog] = useState(() => {
-    const raw = loadLS(LS_BW_LOG_KEY) || [];
-    return [...raw]
+  // Live LS read — a BW entry logged elsewhere (BwPrompt, History
+  // edits, a cloud pull) while this view is mounted re-renders the
+  // chart; the old mount-only read went stale. Filter/sort into a
+  // fresh array inside the memo — never sort the snapshot in place,
+  // it's shared with every other subscriber.
+  const bwRaw = useLSValue(LS_BW_LOG_KEY);
+  const bwLog = useMemo(() => {
+    return [...(bwRaw || [])]
       .filter(e => e?.date && e.kg > 0)
       .sort((a, b) => a.date < b.date ? -1 : 1);
-  });
+  }, [bwRaw]);
 
   const [windowKey, setWindowKey] = useState("all");
 
