@@ -91,14 +91,14 @@ function confirmBWPushed(date, kg) {
 }
 
 export function useUserSettings({ user }) {
-  // ── Unit preference ─────────────────────────────────
+  // ── Unit preference ───────────────────────────────────────
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
   const saveUnit = useCallback((u) => {
     setUnit(u);
     saveLS("unit_pref", u);
   }, []);
 
-  // ── Body weight ─────────────────────────────────────
+  // ── Body weight ───────────────────────────────────────────
   // Two storage keys: LS_BW_KEY is the scalar current weight that
   // every consumer reads, LS_BW_LOG_KEY is the per-date history that
   // the trends + per-session-date normalization paths consume. saveBW
@@ -144,7 +144,7 @@ export function useUserSettings({ user }) {
     }
   }, []);
 
-  // ── BW cloud reconcile ───────────────────────────────
+  // ── BW cloud reconcile ───────────────────────────────────
   // Runs when `user` flips from null → signed-in. Mirrors the
   // useRepHistory reconcile pattern: fetch cloud log, union with
   // local log on date-key, save the merged set back to LS, and
@@ -323,7 +323,7 @@ export function useUserSettings({ user }) {
     }
   }, [user]);
 
-  // ── Pinned per-grip baselines ─────────────────────────
+  // ── Pinned per-grip baselines ─────────────────────────────
   // The frozen { [grip]: { date, amps } } map that anchors Curve
   // Improvement. Once a grip's baseline is seeded (≥5 failures × ≥3
   // distinct durations), it gets written here and never re-derived
@@ -365,7 +365,7 @@ export function useUserSettings({ user }) {
     }
   }, [user]);
 
-  // ── Fatigue β model (per-grip) ───────────────────────
+  // ── Fatigue β model (per-grip) ───────────────────────────
   // Stored in user_settings.settings.fatigue_model so it persists
   // across devices. Updated server-side by the
   // update_fatigue_beta_from_rep_trg trigger on every rep-1 insert;
