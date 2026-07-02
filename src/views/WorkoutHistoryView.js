@@ -7,11 +7,13 @@
 // workout type, deleting sessions, and toggling between absolute
 // and %-bodyweight load display.
 //
-// Reads the workout log, body-weight log, and synced-id set directly
-// from localStorage on mount (and on every `tick` bump triggered by
-// edits/deletes). Takes configuration and side-effect callbacks as
-// props so App.js retains control over the Supabase sync path and
-// the CSV export.
+// Reads the workout log, body-weight log, and synced-id set live via
+// useLSValue, so cloud pulls / reconciles and this view's own
+// edits/deletes all re-render it through the same saveLS
+// notification (the old `tick` counter that forced re-reads is
+// gone). Takes configuration and side-effect callbacks as props so
+// App.js retains control over the Supabase sync path and the CSV
+// export.
 
 import React, { useMemo, useState } from "react";
 import { C } from "../ui/theme.js";
@@ -24,6 +26,7 @@ import {
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
   ROTATION_PIN_KEY,
 } from "../lib/storage.js";
+import { useLSValue } from "../hooks/useLSValue.js";
 import {
   sessionExerciseVolume, sessionExerciseEst1RM,
   isBodyweightAdditive, parseRepsCount,
@@ -74,9 +77,6 @@ export function WorkoutHistoryView({
   onUpdateWorkoutSession = () => {},
   onDownloadWorkoutCSV = () => {},
 }) {
-  // Always read fresh from localStorage — no useState wrapper so newly
-  // completed sessions appear immediately without needing a remount.
-  const [tick,           setTick]           = useState(0); // increment to force re-read
   // Edit mode holds a deep-copy of the session being edited. Save
   // writes it back into the log; cancel discards. editIdx tracks the
   // original index in the log so saveEdit knows where to splice.
@@ -96,11 +96,19 @@ export function WorkoutHistoryView({
   const [filterDays, setFilterDays] = useState(0);   // 0 = all time, else last N days
   const [relMode,    setRelMode]    = useState(false);
 
+  // Live LS reads — any saveLS on these keys (this view's own
+  // edits/deletes, a finished workout, the cloud reconcile, manual
+  // pull) re-renders with fresh data. Raw values are null until first
+  // write; derive the [] fallback inside the memos so identities stay
+  // stable.
+  const logRaw    = useLSValue(LS_WORKOUT_LOG_KEY);
+  const bwRaw     = useLSValue(LS_BW_LOG_KEY);
+  const syncedRaw = useLSValue(LS_WORKOUT_SYNCED_KEY);
   // Filter out rotation-pin entries — they're synced markers used by
   // WorkoutTab to override the next-up rotation, not real workouts.
-  const log      = useMemo(() => (loadLS(LS_WORKOUT_LOG_KEY) || []).filter(s => s.workout !== ROTATION_PIN_KEY), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
-  const bwLog    = useMemo(() => loadLS(LS_BW_LOG_KEY)       || [], [tick]); // eslint-disable-line react-hooks/exhaustive-deps
-  const syncedIds = useMemo(() => new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const log      = useMemo(() => (logRaw || []).filter(s => s.workout !== ROTATION_PIN_KEY), [logRaw]);
+  const bwLog    = useMemo(() => bwRaw || [], [bwRaw]);
+  const syncedIds = useMemo(() => new Set(syncedRaw || []), [syncedRaw]);
 
   // Flat exercise-definition lookup, keyed by CURRENT (post-migration)
   // id. Walking the merged ALL_WORKOUTS_LOOKUP yields both legacy and
@@ -226,7 +234,6 @@ export function WorkoutHistoryView({
       (targetId != null && s.id === targetId) ? session : s
     );
     saveLS(LS_WORKOUT_LOG_KEY, updated);
-    setTick(t => t + 1);
     // Best-effort cloud push. Fires through the same callback the
     // initial save uses (App.js's handleWorkoutSessionSaved), so an
     // upsert by id replaces the existing row and marks it synced.
@@ -234,7 +241,7 @@ export function WorkoutHistoryView({
     cancelEdit();
   };
 
-  // ── Edit-mode mutation helpers ─────────────────────────────
+  // ── Edit-mode mutation helpers ───────────────────────────
   // Each one takes a state-shape transform and applies it to
   // editSession.exercises so the render binds to fresh refs.
   const editUpdateExerciseSets = (exId, next) => {
@@ -299,7 +306,6 @@ export function WorkoutHistoryView({
     // Best-effort delete from Supabase (provided by parent)
     onDeleteWorkoutSession(sessionId);
     setConfirmDeleteId(null);
-    setTick(t => t + 1);
   };
 
   if (!log.length) return (
