@@ -50,6 +50,7 @@ import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import { toDisp, forceOverBW } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
+import { useLSValue } from "../hooks/useLSValue.js";
 import { today } from "../util.js";
 import { STRENGTH_MAX } from "../model/zones.js";
 import { deloadStatus } from "../model/deload.js";
@@ -213,7 +214,7 @@ export function AnalysisView({
   };
   const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
 
-  // ── Hand selector (June 2026) ─────────────────────────────
+  // ── Hand selector (June 2026) ─────────────────────────
   // "pooled" (default) | "L" | "R". One global control, like the
   // Absolute/×BW toggle: scopes the F-D chart's data + fit, the
   // Capacity trajectory (against FROZEN per-hand baselines — see
@@ -228,10 +229,13 @@ export function AnalysisView({
   // slider state internally. Each grip block scrubs independently, so
   // there's no longer a single page-level grip/index to track here.)
 
-  // BW log loaded once on mount; the cloud-reconcile path in App.js
-  // hydrates this from Supabase on sign-in, so by the time the view
-  // mounts the log reflects every device's history.
-  const bwLog = useMemo(() => loadLS(LS_BW_LOG_KEY) || [], []);
+  // BW log — live via useLSValue, so BW entries written after mount
+  // (BwPrompt, History-tab edits, the cloud reconcile / manual pull)
+  // flow into the ×BW normalization without a remount. The [] fallback
+  // is derived in a memo keyed on the stable raw snapshot so
+  // downstream memo deps keep a stable identity.
+  const bwLogRaw = useLSValue(LS_BW_LOG_KEY);
+  const bwLog = useMemo(() => bwLogRaw || [], [bwLogRaw]);
 
   const grips = useMemo(() =>
     [...new Set(history.map(r => r.grip).filter(Boolean))].sort(),

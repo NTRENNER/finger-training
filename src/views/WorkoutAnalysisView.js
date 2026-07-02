@@ -31,6 +31,7 @@ import {
 } from "../lib/storage.js";
 import { bwOnDate, toDisp } from "../ui/format.js";
 import { migrateExerciseId, buildExerciseDefIndex } from "../model/exerciseIds.js";
+import { useLSValue } from "../hooks/useLSValue.js";
 
 // Locally re-declared to match WorkoutTab's storage key (which is
 // defined inline there, not exported). Keeping the string literal
@@ -242,16 +243,21 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
     });
   };
 
-  // BW log — read once on mount; cloud-reconcile in App.js hydrates
-  // localStorage on sign-in, so by the time the view mounts the log
-  // reflects every device's history.
-  const [bwLog] = useState(() => loadLS(LS_BW_LOG_KEY) || []);
+  // BW log — live via useLSValue so entries logged after mount (or
+  // merged in by a cloud pull while this tab is open) reach the ×BW
+  // charts. Raw snapshots are referentially stable between writes.
+  const bwLogRaw = useLSValue(LS_BW_LOG_KEY);
+  const bwLog = useMemo(() => bwLogRaw || [], [bwLogRaw]);
 
-  // Load wLog + plan once on mount. Each tab navigation away unmounts
-  // this view, so on next mount we re-read fresh from localStorage —
-  // no need for a sync effect or shared App-level state.
-  const [wLog] = useState(() => {
-    const raw = loadLS(LS_WORKOUT_LOG_KEY) || [];
+  // wLog + plan — live LS reads with the exercise-id migration applied
+  // in memos keyed on the raw snapshots. These used to be mount-time
+  // useState reads justified by "tab navigation remounts this view",
+  // which broke as soon as anything rewrote LS while the tab WAS
+  // mounted (manual cloud pull). The migration here is a pure rename
+  // pass — no LS writes — so recomputing per write is safe.
+  const wLogStored = useLSValue(LS_WORKOUT_LOG_KEY);
+  const wLog = useMemo(() => {
+    const raw = wLogStored || [];
     return raw.map(s => {
       if (!s?.exercises) return s;
       const migrated = {};
@@ -264,16 +270,16 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
       }
       return changed ? { ...s, exercises: migrated } : s;
     });
-  });
+  }, [wLogStored]);
 
-  const [plan] = useState(() => {
-    // Load stored plan with same id-migration; fall back to defaults
+  const planStored = useLSValue(LS_WORKOUT_PLAN_KEY);
+  const plan = useMemo(() => {
+    // Stored plan with the same id-migration; fall back to defaults
     // if no stored plan exists yet (fresh install). We don't apply
     // the full metadata-merge here — the analysis only reads
     // unilateral/bodyweightAdditive flags, and DEFAULT_WORKOUTS as a
     // fallback already has the canonical values.
-    const stored = loadLS(LS_WORKOUT_PLAN_KEY);
-    const source = stored || defaultWorkouts;
+    const source = planStored || defaultWorkouts;
     if (!source) return {};
     const out = {};
     for (const [key, wk] of Object.entries(source)) {
@@ -286,7 +292,7 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
       };
     }
     return out;
-  });
+  }, [planStored, defaultWorkouts]);
 
   const exIndex = useMemo(() => buildExerciseDefIndex(plan), [plan]);
 

@@ -56,6 +56,7 @@ import { Card, Btn } from "../ui/components.js";
 import { fmt0, toDisp, fromDisp } from "../ui/format.js";
 
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY, LS_DELOAD_WEEK_KEY } from "../lib/storage.js";
+import { useLSValue } from "../hooks/useLSValue.js";
 import { today } from "../util.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
@@ -70,7 +71,12 @@ import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 // (>3 days). Exported because WorkoutTab also renders it before its
 // session log so users get the same nudge regardless of entry tab.
 export function BwPrompt({ unit = "lbs", onSave }) {
-  const bwLog  = loadLS(LS_BW_LOG_KEY) || [];
+  // Live subscription — replaces a loadLS call that re-parsed the
+  // whole BW log JSON on EVERY render and still went stale between
+  // renders (a cloud pull rewriting the log didn't re-render this).
+  // Now onSave's write path lands back here immediately, so the
+  // "Still X lbs?" line and the loggedToday gate update on the spot.
+  const bwLog  = useLSValue(LS_BW_LOG_KEY) || [];
   const latest = bwLog.length ? bwLog[bwLog.length - 1] : null;
 
   const [editing,  setEditing]  = useState(false);
