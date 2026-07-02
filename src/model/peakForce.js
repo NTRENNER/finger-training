@@ -25,8 +25,10 @@
 //
 // Pure functions; no React. Tested in isolation.
 
+import { SANE_MAX_KG } from "./load.js";
+
 export const PEAK_MAX_PROTOCOL_T = 12;    // s — target_duration at/under this = max/power block
-const PEAK_MAX_KG = 500;                  // sanity ceiling (matches load.js)
+const PEAK_MAX_KG = SANE_MAX_KG;          // single sanity ceiling — see load.js (was a stale local 500)
 
 // Build the per-grip peak-force time series.
 // Returns:
