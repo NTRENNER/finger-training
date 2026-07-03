@@ -24,6 +24,7 @@ import { C } from "../ui/theme.js";
 import { Card, Sect } from "../ui/components.js";
 import {
   sessionExerciseTopWeight, sessionExerciseVolume, isBodyweightAdditive,
+  buildRepsVariantSeries,
 } from "../model/workout-volume.js";
 import {
   loadLS, saveLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY,
@@ -83,6 +84,90 @@ function buildExerciseSeries(wLog, exId, exDef, currentBw, bwLog, unit) {
     out.push({ date: s.date, top, volume: vol, workout: s.workout, sessionBw });
   }
   return out;
+}
+
+// Reps/variant progression card — for exercises whose progression is
+// leverage + reps rather than load (TRX Row's rung ladder, circlesOnly
+// exercises like the ab wheel / TRX hamstring curl). Renders total
+// done reps per session as a single-axis line; the header carries the
+// current variant rung and the ladder move since the first session.
+// The weight-based ExerciseCard takes over automatically once a
+// session logs real weight (see the cards memo).
+function RepsExerciseCard({ ex, series }) {
+  if (!series || series.length === 0) return null;
+  const first = series[0];
+  const last  = series[series.length - 1];
+  const dReps = last.reps - first.reps;
+  const ladderMoved = first.variant && last.variant && first.variant !== last.variant;
+  const data = series.map(p => ({ ...p }));
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{ex.name}</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+            {series.length} session{series.length === 1 ? "" : "s"} · leverage / reps progression
+            {ex.unilateral ? " · unilateral" : ""}
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 11, color: C.muted }}>current rung</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.purple }}>
+            {last.variant || "—"}
+          </div>
+          <div style={{ fontSize: 11, color: C.muted }}>
+            {last.reps} reps last session
+          </div>
+          {series.length > 1 && (
+            <div style={{ fontSize: 11, color: ladderMoved || dReps > 0 ? C.green : dReps < 0 ? C.red : C.muted }}>
+              {ladderMoved
+                ? `${first.variant} → ${last.variant} since ${first.date}`
+                : `${dReps > 0 ? "+" : ""}${dReps} reps since ${first.date}`}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ width: "100%", height: 160 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 5, right: 12, left: -8, bottom: 0 }}>
+            <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+            <XAxis
+              dataKey="date"
+              stroke={C.muted}
+              tick={{ fontSize: 10, fill: C.muted }}
+              tickFormatter={(d) => d?.slice(5) || ""}
+            />
+            <YAxis
+              stroke={C.purple}
+              tick={{ fontSize: 10, fill: C.purple }}
+              width={30}
+              allowDecimals={false}
+            />
+            <Tooltip
+              contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
+              labelStyle={{ color: C.muted }}
+              formatter={(value, name, entry) => [
+                `${value} reps${entry?.payload?.variant ? ` · ${entry.payload.variant}` : ""}`,
+                "total reps",
+              ]}
+            />
+            <Line
+              type="monotone"
+              dataKey="reps"
+              stroke={C.purple}
+              strokeWidth={2}
+              dot={{ r: 3, fill: C.purple }}
+              isAnimationActive={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
+        Total done reps per session. Chart switches to weight once you log added load.
+      </div>
+    </Card>
+  );
 }
 
 // One Card for one exercise. Header shows current top weight + Δ
@@ -303,11 +388,29 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
   // ordering would.
   const cards = useMemo(() => {
     const items = [];
+    // Rotation-pin markers are skipped inside buildExerciseSeries;
+    // the reps builder is model-pure, so pre-filter here.
+    const realSessions = Array.isArray(wLog)
+      ? wLog.filter(s => s?.workout !== ROTATION_PIN_KEY)
+      : [];
     for (const [exId, exDef] of Object.entries(exIndex)) {
-      if (!exDef?.logWeight) continue;
-      const series = buildExerciseSeries(wLog, exId, exDef, bodyWeight, bwLog, unit);
-      if (series.length === 0) continue;
-      items.push({ exDef, series, lastDate: series[series.length - 1].date });
+      // Weight chart owns any exercise with actual weighted history.
+      // Exercises that progress by leverage/reps (variant ladders,
+      // circlesOnly) get a reps card until real weight appears —
+      // before this, TRX Row (logWeight but every set weightless on
+      // the leverage rungs) never rendered at all (July 2026).
+      const chartable = exDef?.logWeight || exDef?.circlesOnly || Array.isArray(exDef?.variants);
+      if (!chartable) continue;
+      if (exDef?.logWeight) {
+        const series = buildExerciseSeries(wLog, exId, exDef, bodyWeight, bwLog, unit);
+        if (series.length > 0) {
+          items.push({ kind: "weight", exDef, series, lastDate: series[series.length - 1].date });
+          continue;
+        }
+      }
+      const repsSeries = buildRepsVariantSeries(realSessions, exId, exDef);
+      if (repsSeries.length === 0) continue;
+      items.push({ kind: "reps", exDef, series: repsSeries, lastDate: repsSeries[repsSeries.length - 1].date });
     }
     items.sort((a, b) => (b.lastDate || "").localeCompare(a.lastDate || ""));
     return items;
@@ -340,8 +443,10 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
             </div>
           </Card>
         ) : (
-          cards.map(({ exDef, series }) => (
-            <ExerciseCard key={exDef.id} ex={exDef} series={series} unit={unit} normalizeOn={normalizeOn} />
+          cards.map(({ kind, exDef, series }) => (
+            kind === "reps"
+              ? <RepsExerciseCard key={exDef.id} ex={exDef} series={series} />
+              : <ExerciseCard key={exDef.id} ex={exDef} series={series} unit={unit} normalizeOn={normalizeOn} />
           ))
         )}
       </Sect>
