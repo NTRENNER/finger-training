@@ -6,6 +6,7 @@
 import {
   buildGripBaselines, buildGripEstimates, buildGripImprovement,
   buildPerHandGripEstimates,
+  improvementForAmps, SUPPORT_MIN_HOLD_FRAC,
 } from "../baselines.js";
 import { buildThreeExpPriors, predForceThreeExp } from "../threeExp.js";
 import { freshFitReps } from "../load.js";
@@ -170,5 +171,94 @@ describe("fresh-equivalent basis (freshEq opt on the estimate builders)", () => 
     const raw   = buildPerHandGripEstimates(history, null);
     const fresh = buildPerHandGripEstimates(history, null, { freshEq: true, fatigueModel: null });
     expect(fresh).toEqual(raw); // July 2026: freshEq == raw for the per-hand builder too
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// improvementForAmps — unbaselined-zone gating (July 2026)
+// ─────────────────────────────────────────────────────────────
+// A zone whose reference duration is past what the baseline actually
+// measured is pure extrapolation — comparing a real current curve to a
+// GUESSED baseline. Those zones report null ("new") and drop from total.
+describe("improvementForAmps unbaselined-zone gating", () => {
+  // Non-uniform gains so excluding a zone actually moves the total: the
+  // slow amp is DOUBLED (8 vs 4 → big endurance gain) while the fast amp
+  // is up 1.5x (30 vs 20). So the long zones improve more than the short.
+  const cur = [30, 12, 8];
+  const ref = [20, 8, 4];
+
+  test("no baselineMaxHoldS → every zone reported (prior behavior)", () => {
+    const imp = improvementForAmps(cur, ref);        // null gate
+    for (const k of ["max_strength","power","power_strength","strength","strength_endurance","endurance"]) {
+      expect(typeof imp[k]).toBe("number");
+    }
+    expect(typeof imp.total).toBe("number");
+  });
+
+  test("a short baseline nulls the zones past its reach and drops them from total", () => {
+    // Longest baseline hold 85s. Zone is baselined iff maxHold >= refT*0.6:
+    //   strength refT=115 -> 69 <= 85 kept; strength_endurance 160 -> 96 > 85 null;
+    //   endurance 220 -> 132 > 85 null.
+    const imp = improvementForAmps(cur, ref, 85);
+    expect(imp.strength).not.toBeNull();             // 115*0.6 = 69 <= 85
+    expect(imp.strength_endurance).toBeNull();       // 160*0.6 = 96 > 85
+    expect(imp.endurance).toBeNull();                // 220*0.6 = 132 > 85
+    expect(imp.max_strength).not.toBeNull();
+    const allSix = improvementForAmps(cur, ref);
+    // The excluded endurance zones had the biggest gains, so dropping them
+    // lowers the gated total below the all-six total.
+    expect(imp.total).toBeLessThan(allSix.total);
+    expect(typeof imp.total).toBe("number");
+  });
+
+  test("SUPPORT_MIN_HOLD_FRAC boundary: refT*frac is the cutoff", () => {
+    expect(improvementForAmps(cur, ref, 132).endurance).not.toBeNull(); // 220*0.6 exactly
+    expect(improvementForAmps(cur, ref, 131).endurance).toBeNull();     // just under
+    expect(SUPPORT_MIN_HOLD_FRAC).toBe(0.6);
+  });
+});
+
+// buildGripBaselines now records the baseline window's longest real hold,
+// so improvement can tell measured zones from extrapolated ones.
+describe("buildGripBaselines maxHoldS + gated improvement integration", () => {
+  const rep = (T, F, date, sid) => ({
+    grip: "Crusher", hand: "L", rep_num: 1, set_num: 1,
+    target_duration: T, actual_time_s: T, avg_force_kg: F, date, session_id: sid,
+  });
+  const baseHist = [
+    rep(7,  55, "2026-01-01", "b1"),
+    rep(30, 34, "2026-01-01", "b1"),
+    rep(45, 30, "2026-01-02", "b2"),
+    rep(60, 27, "2026-01-02", "b2"),
+    rep(90, 22, "2026-01-03", "b3"),
+  ];
+
+  test("baseline records maxHoldS = longest actual hold in the window", () => {
+    const priors = buildThreeExpPriors(baseHist);
+    const base = buildGripBaselines(baseHist, priors);
+    expect(base.Crusher).toBeDefined();
+    expect(base.Crusher.maxHoldS).toBeCloseTo(90, 5);
+  });
+
+  test("improvement hides zones past the baseline's longest hold", () => {
+    const now = [
+      rep(7,  62, "2026-03-01", "n1"),
+      rep(30, 40, "2026-03-01", "n1"),
+      rep(90, 26, "2026-03-02", "n2"),
+      rep(160, 20, "2026-03-03", "n3"),
+      rep(220, 16, "2026-03-04", "n4"),
+    ];
+    const history = [...baseHist, ...now];
+    const priors = buildThreeExpPriors(history);
+    const base = buildGripBaselines(history, priors);
+    const est = buildGripEstimates(history, priors);
+    const imp = buildGripImprovement(base, est);
+    expect(imp.Crusher).toBeDefined();
+    // 90s baseline: endurance (220*0.6=132 > 90) and strength_endurance
+    // (160*0.6=96 > 90) are unbaselined -> null ("new").
+    expect(imp.Crusher.endurance).toBeNull();
+    expect(imp.Crusher.strength_endurance).toBeNull();
+    expect(typeof imp.Crusher.power).toBe("number");
+    expect(typeof imp.Crusher.total).toBe("number");
   });
 });

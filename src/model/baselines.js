@@ -24,7 +24,7 @@
 
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmps, predForceThreeExp,
-  computeBalancedCurveScore, buildThreeExpPriors,
+  buildThreeExpPriors,
 } from "./threeExp.js";
 import { ZONE_KEYS, ZONE_REF_T } from "./zones.js";
 import { effectiveLoad, freshFitReps } from "./load.js";
@@ -55,40 +55,51 @@ export function fitAmpsForPts(pts, grip, threeExpPriors) {
   return amps;
 }
 
-// Per-zone Δ% from a current amp triple vs a reference triple, plus a
-// `total` keyed off the BALANCED CURVE SCORE ratio (geometric mean of
-// force across the six zone refTs — see computeBalancedCurveScore).
-// The balanced total is what the Capacity / Curve-Improvement chart
-// uses, so headline numbers tie out across surfaces. By construction
-// the balanced total ≈ the average of the per-zone Δ%s, so a gain in
-// any zone moves it — unlike the old τ-weighted AUC total, which only
-// tracked the slow tail. Falls back to the explicit zone-average if
-// either score is degenerate.
+// Per-zone Δ% from a current amp triple vs a reference (baseline) triple,
+// plus a `total` = the geometric-mean force ratio across the zone refTs
+// (identical to the balanced curve score ratio when every zone counts).
+// By construction the total ≈ the average of the per-zone Δ%s, so a gain
+// in any zone moves it.
 //
-// Returns { ...zoneKey: pct, total: pct } or null if either input
-// can't produce a positive reference force at any zone.
-export function improvementForAmps(curAmps, refAmps) {
+// UNBASELINED ZONES (July 2026): a baseline only MEASURED durations up to
+// its longest real hold. A zone whose refT is well beyond that is pure
+// extrapolation — reporting a Δ% there compares your real current curve
+// against a GUESSED baseline (e.g. an endurance zone you hadn't trained
+// when the baseline froze; the curve simply extended the short-hold shape
+// out to 220s). Those zones are marked null ("new" in the UI) and dropped
+// from the total, so an extrapolated baseline can't skew the headline. A
+// zone counts as baselined when the baseline's longest hold reaches at
+// least SUPPORT_MIN_HOLD_FRAC of the zone's refT. Pass baselineMaxHoldS =
+// null (default) to disable the gate (every zone reported, prior behavior).
+//
+// Returns { ...zoneKey: pct|null, total: pct|null } or null if a SUPPORTED
+// zone can't produce a positive reference force.
+export const SUPPORT_MIN_HOLD_FRAC = 0.6;
+
+export function improvementForAmps(curAmps, refAmps, baselineMaxHoldS = null) {
   if (!curAmps || !refAmps) return null;
-  const pct = (t) => {
+  const supported = (t) =>
+    baselineMaxHoldS == null || baselineMaxHoldS >= t * SUPPORT_MIN_HOLD_FRAC;
+  const result = {};
+  const supRefTs = [];
+  for (const k of ZONE_KEYS) {
+    const t = REF_T_BY_ZONE[k];
+    if (!supported(t)) { result[k] = null; continue; }   // unbaselined → "new"
     const cur = predForceThreeExp(curAmps, t);
     const ref = predForceThreeExp(refAmps, t);
     if (ref <= 0) return null;
-    return Math.round((cur / ref - 1) * 100);
+    result[k] = Math.round((cur / ref - 1) * 100);
+    supRefTs.push(t);
+  }
+  // Balanced total over the SUPPORTED zones only.
+  if (supRefTs.length === 0) { result.total = null; return result; }
+  const gmForce = (amps) => {
+    let logSum = 0;
+    for (const t of supRefTs) logSum += Math.log(Math.max(predForceThreeExp(amps, t), 1e-9));
+    return Math.exp(logSum / supRefTs.length);
   };
-  const result = {};
-  for (const k of ZONE_KEYS) {
-    const v = pct(REF_T_BY_ZONE[k]);
-    if (v == null) return null;
-    result[k] = v;
-  }
-  const curScore = computeBalancedCurveScore(curAmps);
-  const refScore = computeBalancedCurveScore(refAmps);
-  if (curScore > 0 && refScore > 0) {
-    result.total = Math.round((curScore / refScore - 1) * 100);
-  } else {
-    const sum = ZONE_KEYS.reduce((s, k) => s + result[k], 0);
-    result.total = Math.round(sum / ZONE_KEYS.length);
-  }
+  const curGM = gmForce(curAmps), refGM = gmForce(refAmps);
+  result.total = refGM > 0 ? Math.round((curGM / refGM - 1) * 100) : null;
   return result;
 }
 
@@ -114,7 +125,10 @@ export function buildGlobalBaseline(history) {
         null,           // pooled across grips → no per-grip prior
         null,           // no priors map needed when grip is null
       );
-      if (amps) return { date: acc[0].date, amps };
+      if (amps) {
+        const maxHoldS = acc.reduce((m, x) => Math.max(m, x.actual_time_s || 0), 0);
+        return { date: acc[0].date, amps, maxHoldS };
+      }
       return null;
     }
   }
@@ -127,7 +141,7 @@ export function buildGlobalBaseline(history) {
 // preserve the "small per-grip fits are noisy" damping — the global
 // baseline has more cross-grip support to lean on.
 //
-// Returns { [grip]: { date, amps } }.
+// Returns { [grip]: { date, amps, maxHoldS } }.
 export function buildGripBaselines(history, threeExpPriors) {
   const out = {};
   const byGrip = {};
@@ -160,7 +174,8 @@ export function buildGripBaselines(history, threeExpPriors) {
           grip,
           priorsForFit,
         );
-        if (amps) out[grip] = { date: acc[0].date, amps };
+        const maxHoldS = acc.reduce((m, x) => Math.max(m, x.actual_time_s || 0), 0);
+        if (amps) out[grip] = { date: acc[0].date, amps, maxHoldS };
         break;
       }
     }
@@ -173,7 +188,7 @@ export function buildGripBaselines(history, threeExpPriors) {
 // hand on a single grip. Skips entries with hand === "Both" because
 // pooled reps belong to buildGripBaselines, not per-hand bookkeeping.
 //
-// Returns { [`${grip}|${hand}`]: { date, amps } }.
+// Returns { [`${grip}|${hand}`]: { date, amps, maxHoldS } }.
 export function buildPerHandGripBaselines(history, threeExpPriors) {
   const out = {};
   const byKey = {};
@@ -204,7 +219,8 @@ export function buildPerHandGripBaselines(history, threeExpPriors) {
           grip,
           priorsForFit,
         );
-        if (amps) out[key] = { date: acc[0].date, amps };
+        const maxHoldS = acc.reduce((m, x) => Math.max(m, x.actual_time_s || 0), 0);
+        if (amps) out[key] = { date: acc[0].date, amps, maxHoldS };
         break;
       }
     }
@@ -296,7 +312,8 @@ export function buildPerHandGripEstimates(history, threeExpPriors, opts = {}) {
 }
 
 // Per-grip improvement. For each grip with both a baseline AND a
-// current fit, compute Δ% (per-zone + AUC total) via improvementForAmps.
+// current fit, compute Δ% (per-zone + total) via improvementForAmps,
+// gating zones the baseline never measured (baseline.maxHoldS).
 // Returns { [grip]: { ...zoneDeltas, total, baselineDate } }.
 // (Also consumed with per-hand maps — keys just become `grip|hand`.)
 export function buildGripImprovement(gripBaselines, gripEstimates) {
@@ -304,7 +321,7 @@ export function buildGripImprovement(gripBaselines, gripEstimates) {
   for (const grip of Object.keys(gripEstimates || {})) {
     const baseline = gripBaselines?.[grip];
     if (!baseline) continue;
-    const imp = improvementForAmps(gripEstimates[grip], baseline.amps);
+    const imp = improvementForAmps(gripEstimates[grip], baseline.amps, baseline.maxHoldS ?? null);
     if (imp) out[grip] = { ...imp, baselineDate: baseline.date };
   }
   return out;

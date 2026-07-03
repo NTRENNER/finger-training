@@ -15,10 +15,11 @@
 //       [grip]: {
 //         baselineAmps,         // pooled grip baseline (from gripBaselines)
 //         baselineDate,
+//         baselineMaxHoldS,     // longest real hold in the baseline window
 //         dates: string[],      // post-baseline session dates with a fit
 //         ampsByDate: Map<date, amps>,  // pooled cumulative fits
 //         perHand: {
-//           [hand]: { baselineAmps, baselineDate, ampsByDate: Map<date, amps> },
+//           [hand]: { baselineAmps, baselineDate, baselineMaxHoldS, ampsByDate: Map<date, amps> },
 //         },
 //       },
 //     },
@@ -151,6 +152,7 @@ export function useHistoryOverlay({
         perHand[hand] = {
           baselineAmps: handBaseline.amps,
           baselineDate: handBaseline.date,
+          baselineMaxHoldS: handBaseline.maxHoldS ?? null,
           ampsByDate: handByDate,
         };
       }
@@ -158,6 +160,7 @@ export function useHistoryOverlay({
       byGrip[g] = {
         baselineAmps: baseline.amps,
         baselineDate: baseline.date,
+        baselineMaxHoldS: baseline.maxHoldS ?? null,
         dates: validDates,
         ampsByDate,
         perHand,    // { L?: {...}, R?: {...} } — empty when no per-hand baselines

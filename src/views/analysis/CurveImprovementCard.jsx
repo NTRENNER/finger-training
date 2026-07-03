@@ -97,8 +97,8 @@ function ImprovementRow({ label, imp }) {
           <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{label}</div>
         )}
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginLeft: "auto" }}>
-          <div style={{ fontSize: 26, fontWeight: 900, color: imp.total >= 0 ? C.green : C.red, lineHeight: 1 }}>
-            {imp.total >= 0 ? "+" : ""}{imp.total}%
+          <div style={{ fontSize: 26, fontWeight: 900, color: (imp.total ?? 0) >= 0 ? C.green : C.red, lineHeight: 1 }}>
+            {imp.total == null ? "—" : `${imp.total >= 0 ? "+" : ""}${imp.total}%`}
           </div>
           <div style={{ fontSize: 11, color: C.muted }}>total</div>
         </div>
@@ -106,16 +106,24 @@ function ImprovementRow({ label, imp }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
         {ZONE6.map(z => {
           const val = imp[z.key];
-          if (val == null) return null;
+          // val === null → this zone's reference duration is past what the
+          // baseline actually measured (extrapolated), so there's no honest
+          // starting point to compare against. Show it as "new", muted, and
+          // it's already excluded from the total.
+          const unbaselined = val == null;
           return (
-            <div key={z.key} style={{
+            <div key={z.key} title={unbaselined ? "No baseline data — this zone wasn't trained when your baseline was set" : undefined} style={{
               background: C.bg, borderRadius: 10, padding: "8px 6px", textAlign: "center",
-              border: `1px solid ${z.color}30`,
+              border: `1px solid ${z.color}30`, opacity: unbaselined ? 0.5 : 1,
             }}>
               <div style={{ fontSize: 9, color: C.muted, marginBottom: 3 }}>{z.short}</div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: val >= 0 ? z.color : C.red }}>
-                {val >= 0 ? "+" : ""}{val}%
-              </div>
+              {unbaselined ? (
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>new</div>
+              ) : (
+                <div style={{ fontSize: 16, fontWeight: 800, color: val >= 0 ? z.color : C.red }}>
+                  {val >= 0 ? "+" : ""}{val}%
+                </div>
+              )}
             </div>
           );
         })}
@@ -177,7 +185,7 @@ function GripBlock({ grip, overlay, unit, maxDur, nowIdx, onScrub, divider }) {
   const nowAmps = overlay.ampsByDate.get(nowDate);
   const color = GRIP_COLORS[grip] || C.blue;
 
-  const imp = nowAmps ? improvementForAmps(nowAmps, overlay.baselineAmps) : null;
+  const imp = nowAmps ? improvementForAmps(nowAmps, overlay.baselineAmps, overlay.baselineMaxHoldS ?? null) : null;
 
   // Every drawable curve for this grip — for the fixed y-axis.
   const candidateAmps = [overlay.baselineAmps, ...overlay.ampsByDate.values()].filter(Boolean);
