@@ -33,8 +33,8 @@ import { C } from "../../ui/theme.js";
 import { Card, HandViewPills } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, fmtW, toDisp } from "../../ui/format.js";
-import { ZONE6 } from "../../model/zones.js";
-import { improvementForAmps } from "../../model/baselines.js";
+import { ZONE6, ZONE_REF_T } from "../../model/zones.js";
+import { improvementForAmps, SUPPORT_MIN_HOLD_FRAC } from "../../model/baselines.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
 import { effectiveLoad } from "../../model/load.js";
 
@@ -130,6 +130,36 @@ function ImprovementRow({ label, imp }) {
       </div>
     </div>
   );
+}
+
+// Gate the pooled global-fallback improvement to the baseline's real reach.
+// The per-grip paths pass baselineMaxHoldS into improvementForAmps, but the
+// pooled `improvement` prop (AnalysisView) is computed WITHOUT it, so its
+// long zones would show extrapolated deltas instead of "new". Post-gate here
+// with the pooled baseline's maxHoldS: null out any zone whose refT is past
+// the baseline's real reach, then recompute the total over the supported
+// zones only. A zone's % IS the cur/ref force ratio at its refT, and
+// geomean(aᵢ/bᵢ) = geomean(aᵢ)/geomean(bᵢ), so the balanced total is the
+// geomean of (1 + zonePct) over the supported zones — identical to what
+// improvementForAmps would return with the maxHoldS gate applied.
+function gateGlobalImprovement(imp, maxHoldS) {
+  if (!imp || maxHoldS == null) return imp;
+  const out = { ...imp };
+  const supportedPcts = [];
+  for (const z of ZONE6) {
+    const refT = ZONE_REF_T[z.key];
+    if (maxHoldS < refT * SUPPORT_MIN_HOLD_FRAC) {
+      out[z.key] = null;
+    } else if (typeof imp[z.key] === "number") {
+      supportedPcts.push(imp[z.key]);
+    }
+  }
+  if (supportedPcts.length === 0) { out.total = null; return out; }
+  const gm = Math.exp(
+    supportedPcts.reduce((sum, p) => sum + Math.log(1 + p / 100), 0) / supportedPcts.length
+  );
+  out.total = Math.round((gm - 1) * 100);
+  return out;
 }
 
 // Baseline vs Now force-curve chart with a FIXED y-axis (sized once from
@@ -394,7 +424,7 @@ export function CurveImprovementCard({
               since {global3xBaseline.date}
             </div>
           )}
-          <ImprovementRow label={null} imp={improvement} />
+          <ImprovementRow label={null} imp={gateGlobalImprovement(improvement, global3xBaseline?.maxHoldS ?? null)} />
         </>
       ) : null}
     </Card>
