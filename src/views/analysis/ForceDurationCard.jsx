@@ -72,9 +72,9 @@ function ScatterTooltip({ active, payload, unit }) {
 }
 
 // Raw / Fresh-eq basis toggle for the modeled-capacity curve. Raw =
-// loads as actually held (no within-set-fatigue / cookedness correction);
-// Fresh-eq = the engine's fresh-equivalent basis the prescription fits on.
-// Same distinction as the Curve Improvement card's Raw / Fresh-eq toggle.
+// loads as actually held; Fresh-eq = the engine's fresh-equivalent
+// basis the prescription fits on (loads corrected for within-set
+// fatigue). Cookedness no longer factors into either basis (July 2026).
 function BasisPills({ value, onChange }) {
   return (
     <div style={{ display: "flex", gap: 4 }}>
@@ -216,7 +216,7 @@ export function ForceDurationCard({
       </div>
       <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
         {!splitMode && <span><span style={{ color: POOLED_DOT }}>●</span> reps ({handView === "pooled" ? "pooled" : handView === "L" ? "left hand" : "right hand"})</span>}
-        {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model fit on the SAME basis the prescription engine uses: every rep, at its fresh-equivalent load (corrected for within-set fatigue and cookedness). The curve is modeled fresh capacity — the line your recommendations come from — while the dots are observed fresh first reps."><span style={{ color: curveColor }}>―</span>{fdBasis === "raw" ? " modeled capacity (raw, 3-exp)" : " modeled fresh capacity (3-exp)"}</span>}
+        {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model fit on the SAME basis the prescription engine uses: every rep, at its fresh-equivalent load (corrected for within-set fatigue). The curve is modeled fresh capacity — the line your recommendations come from — while the dots are observed fresh first reps."><span style={{ color: curveColor }}>―</span>{fdBasis === "raw" ? " modeled capacity (raw, 3-exp)" : " modeled fresh capacity (3-exp)"}</span>}
         {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — well past the medium component's decay, where the slow component carries essentially the whole load. The closest model analog to a 'long-duration sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
         {splitMode && Object.keys(fdSplitData).map(g => (
           <span key={g}>

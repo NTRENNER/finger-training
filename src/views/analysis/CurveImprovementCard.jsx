@@ -61,43 +61,17 @@ function baselineProgress(history, grip, hand = null) {
   };
 }
 
-// Raw / Fresh-eq basis toggle (June 2026). Raw = loads as actually
-// held; Fresh-eq = current fits with each rep's load de-cooked via the
-// per-grip β model, so cooked-day sessions don't read as phantom
-// regressions. Same pill look as HandViewPills in components.js.
-function BasisPills({ value, onChange }) {
-  const opts = [
-    { key: "raw",   label: "Raw",      color: C.blue  },
-    { key: "fresh", label: "Fresh-eq", color: C.green },
-  ];
-  return (
-    <span style={{ display: "inline-flex", gap: 3, verticalAlign: "middle" }}>
-      {opts.map(o => (
-        <button key={o.key} onClick={() => onChange(o.key)} style={{
-          padding: "2px 8px", borderRadius: 20, fontSize: 10, cursor: "pointer",
-          border: "none", fontWeight: 600,
-          background: value === o.key ? o.color : C.border,
-          color:      value === o.key ? "#fff"  : C.muted,
-        }}>{o.label}</button>
-      ))}
-    </span>
-  );
-}
-
-// One-line basis explainer under the header — copy follows the toggle.
-function BasisNote({ basis }) {
+// One-line explainer under the header.
+function BasisNote() {
   return (
     <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.4 }}>
-      {basis === "fresh"
-        ? "Loads corrected for how cooked you logged each session (same β model the prescription engine uses) — answers \"did my fresh capacity change?\". Overlay + slider live in Raw."
-        : "What your reps actually showed — sessions trained deep in fatigue count at the loads you actually held, so hard training weeks can dip."}
+      What your reps actually showed — sessions trained deep in fatigue count at the loads you actually held, so hard training weeks can dip.
     </div>
   );
 }
 
 // Static per-grip block: header (grip + since date) + tiles. The
-// fallback shape for grips without an overlay, and the only shape in
-// Fresh-eq mode (the interactive overlay + slider are raw-only).
+// fallback shape for grips without an interactive overlay.
 function StaticGripTiles({ grip, imp, divider }) {
   return (
     <div style={{
@@ -270,12 +244,6 @@ export function CurveImprovementCard({
   // have the data density to be worth scrubbing.
   handView = "pooled",
   perHandGripImprovement = {},
-  // Fresh-equivalent improvement maps (June 2026 basis toggle) — same
-  // shapes as gripImprovement / perHandGripImprovement but with the
-  // CURRENT fits de-cooked via the per-grip β model. Baselines are the
-  // same frozen pins in both bases.
-  gripImprovementFresh = {},
-  perHandGripImprovementFresh = {},
   // Repeated local control for the global hand-view state (June 2026).
   onHandViewChange = null,
 }) {
@@ -283,16 +251,11 @@ export function CurveImprovementCard({
   const [nowIdxByGrip, setNowIdxByGrip] = useState({});
   const scrub = (grip, idx) => setNowIdxByGrip(prev => ({ ...prev, [grip]: idx }));
 
-  // Basis toggle: "raw" (loads as held — default, resets every mount)
-  // | "fresh" (de-cooked fresh-equivalent loads, static tiles only).
-  const [basis, setBasis] = useState("raw");
 
   if (!improvement && Object.keys(gripImprovement).length === 0) return null;
 
   const perGripMode = !selGrip && Object.keys(grip3xEstimates).length >= 2;
-  // Improvement map for the active basis. Same frozen baselines in
-  // both — only the "now" fit changes (raw loads vs de-cooked).
-  const impMap = basis === "fresh" ? gripImprovementFresh : gripImprovement;
+  const impMap = gripImprovement;
   const gripImpEntries = Object.entries(impMap);
 
   // Grips that have an interactive overlay (baseline + ≥1 post-baseline
@@ -304,7 +267,7 @@ export function CurveImprovementCard({
 
   // ── Per-hand mode: static tiles vs frozen per-hand baselines ──
   if (handView === "L" || handView === "R") {
-    const handImpMap = basis === "fresh" ? perHandGripImprovementFresh : perHandGripImprovement;
+    const handImpMap = perHandGripImprovement;
     const entries = Object.entries(handImpMap)
       .filter(([key]) => key.endsWith(`|${handView}`))
       .map(([key, imp]) => [key.split("|")[0], imp])
@@ -318,16 +281,13 @@ export function CurveImprovementCard({
               {handView === "R" ? "Right hand" : "Left hand"}
             </span>
           </div>
-          <span style={{ display: "inline-flex", gap: 8, alignItems: "baseline" }}>
-            <BasisPills value={basis} onChange={setBasis} />
-            {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
-          </span>
+          {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
         </div>
         <div style={{ fontSize: 11, color: C.muted, marginBottom: 4, lineHeight: 1.4 }}>
           Per-hand fits vs that hand's frozen baseline — half the data
           of the pooled view, so expect noisier numbers.
         </div>
-        <BasisNote basis={basis} />
+        <BasisNote />
         {entries.length > 0 ? entries.map(([grip, imp], i, arr) => (
           <StaticGripTiles key={grip} grip={grip} imp={imp}
             divider={i < arr.length - 1} />
@@ -346,29 +306,23 @@ export function CurveImprovementCard({
     <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Improvement</div>
-        <span style={{ display: "inline-flex", gap: 8, alignItems: "baseline" }}>
-          <BasisPills value={basis} onChange={setBasis} />
-          {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
-        </span>
+        {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
       </div>
-      <BasisNote basis={basis} />
+      <BasisNote />
 
       {perGripMode ? (
         gripImpEntries.length > 0 ? (
           <>
             {gripImpEntries.map(([grip, imp], i, arr) => {
               const divider = i < arr.length - 1;
-              // Overlay + slider are raw-only — the cumulative
-              // ampsByDate fits behind them are raw. In Fresh-eq mode
-              // every grip renders as static tiles.
-              if (basis !== "fresh" && overlayGrips.has(grip)) {
+              if (overlayGrips.has(grip)) {
                 return (
                   <GripBlock key={grip} grip={grip} overlay={historyOverlay[grip]}
                     unit={unit} maxDur={maxDur}
                     nowIdx={nowIdxByGrip[grip]} onScrub={scrub} divider={divider} />
                 );
               }
-              // No overlay (or fresh basis) — static tiles at latest.
+              // No overlay — static tiles at latest.
               return (
                 <StaticGripTiles key={grip} grip={grip} imp={imp} divider={divider} />
               );
@@ -399,12 +353,10 @@ export function CurveImprovementCard({
           </div>
         )
       ) : selGrip ? (
-        basis !== "fresh" && overlayGrips.has(selGrip) ? (
+        overlayGrips.has(selGrip) ? (
           <GripBlock grip={selGrip} overlay={historyOverlay[selGrip]}
             unit={unit} maxDur={maxDur}
             nowIdx={nowIdxByGrip[selGrip]} onScrub={scrub} divider={false} />
-        ) : basis === "fresh" && impMap[selGrip] ? (
-          <StaticGripTiles grip={selGrip} imp={impMap[selGrip]} divider={false} />
         ) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
             Need ≥{FAIL_THRESHOLD} failures across ≥{DUR_THRESHOLD} target durations on <b>{selGrip}</b> for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
@@ -427,24 +379,15 @@ export function CurveImprovementCard({
           </div>
         )
       ) : improvement ? (
-        // Global fallback (single-grip histories). The pooled global
-        // fit is raw-only; in Fresh-eq mode prefer the per-grip
-        // fresh-eq tiles when any exist, else fall back to raw.
-        basis === "fresh" && gripImpEntries.length > 0 ? (
-          gripImpEntries.map(([grip, imp], i, arr) => (
-            <StaticGripTiles key={grip} grip={grip} imp={imp}
-              divider={i < arr.length - 1} />
-          ))
-        ) : (
-          <>
-            {global3xBaseline && (
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, textAlign: "right" }}>
-                since {global3xBaseline.date}
-              </div>
-            )}
-            <ImprovementRow label={null} imp={improvement} />
-          </>
-        )
+        // Global fallback (single-grip histories) — the pooled global fit.
+        <>
+          {global3xBaseline && (
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, textAlign: "right" }}>
+              since {global3xBaseline.date}
+            </div>
+          )}
+          <ImprovementRow label={null} imp={improvement} />
+        </>
       ) : null}
     </Card>
   );
