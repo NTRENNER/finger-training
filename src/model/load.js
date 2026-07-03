@@ -81,7 +81,14 @@ export function loadedWeight(r) {
 //    improvement %. Matches the coverage rep-1-only fix and the limiter.
 //  - content de-dup: some early sessions were double-logged (identical
 //    rows). Collapse exact-duplicate content (NOT by id — duplicates are
-//    distinct rows with the same content).
+//    distinct rows with the same content). The key includes set_num and
+//    manual_load_kg (July 2026): without them, two REAL rep-1s from
+//    different sets/sessions on the same day with equal target/actual
+//    and null avg_force_kg — typical manual-timer entries — collapsed
+//    to one point even when their manual loads differed, thinning
+//    exactly the small baseline windows this function protects. The
+//    double-logging bug produced fully identical rows, so the stricter
+//    key still catches those.
 //
 // Lives in this leaf module so EVERY fit path can share it — the prior
 // (threeExp.buildThreeExpPriors), the baselines/estimates (baselines.js),
@@ -94,7 +101,7 @@ export function freshFitReps(history) {
   for (const r of history || []) {
     if (!r) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;
-    const key = `${r.date}|${r.hand}|${r.grip}|${r.target_duration}|${r.actual_time_s}|${r.avg_force_kg}|${r.rep_num}`;
+    const key = `${r.date}|${r.hand}|${r.grip}|${r.set_num}|${r.target_duration}|${r.actual_time_s}|${r.avg_force_kg}|${r.manual_load_kg}|${r.rep_num}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(r);
