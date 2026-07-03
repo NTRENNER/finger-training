@@ -1,14 +1,15 @@
-// Regression: a legacy PINNED baseline (frozen before maxHoldS existed,
-// or by the old auto-pin that only stored {date, amps}) must have its
-// maxHoldS BACKFILLED from the freshly-computed candidate. Without the
-// backfill, gripBaselines[grip].maxHoldS is undefined, the Curve-
-// Improvement gate (improvementForAmps) never fires for any pinned grip,
-// and unbaselined long zones (Str-End/End past the baseline's reach)
-// render real — often negative — deltas instead of "new". This is the
-// bug Nathan hit: his Micro pin predated the field, so endurance read
-// as a regression on a curve he'd never actually baselined.
+// Durable baseline: a PINNED baseline locks WHICH window is the baseline
+// (its start date), but the amps must always be RE-FIT under the current
+// model — never trusted from storage. A stored fit is only valid under the
+// model version that produced it; once the model changes (e.g. the F-D
+// slow-tau 180->480s change, or the cookedness-rescale removal) a frozen
+// fit is compared against a "now" curve built under DIFFERENT assumptions,
+// manufacturing phantom per-zone regressions. This is the bug Nathan hit:
+// his Micro pin, fit at tau=180, read ~50% too strong at 115s once
+// evaluated at tau=480, so real gains showed as -19%.
 import { renderHook } from "@testing-library/react";
 import { useGripFits } from "../useGripFits.js";
+import { buildGripBaselines } from "../../model/baselines.js";
 import { buildThreeExpPriors } from "../../model/threeExp.js";
 
 const rep = (date, T, t, F) => ({
@@ -29,14 +30,16 @@ const history = [
 ];
 const grips = ["Micro"];
 const priors = buildThreeExpPriors(history);
+const candidateAmps = buildGripBaselines(history, priors).Micro.amps;
 
-// Legacy pin: no maxHoldS (what the old auto-pin persisted).
-const legacyPin = { Micro: { date: D0, amps: [12, 5, 3] } };
+// Legacy pin: DELIBERATELY wrong amps (as if fit under an old model), no
+// maxHoldS. The date is valid so the window is rebuildable from history.
+const legacyPin = { Micro: { date: D0, amps: [999, 999, 999] } };
 
-const run = (pinned) =>
+const run = (pinned, hist = history) =>
   renderHook(() =>
     useGripFits({
-      history, threeExpPriors: priors, grips,
+      history: hist, threeExpPriors: priors, grips,
       fatigueModel: null,
       pinnedGripBaselines: pinned, onSavePinnedGripBaselines: () => {},
       pinnedPerHandBaselines: null, onSavePinnedPerHandBaselines: () => {},
@@ -44,29 +47,28 @@ const run = (pinned) =>
     })
   ).result.current;
 
-describe("useGripFits — legacy pin maxHoldS backfill", () => {
-  it("backfills maxHoldS onto a pinned baseline that lacks it", () => {
+describe("useGripFits — durable baseline re-fit", () => {
+  it("ignores stored amps and re-fits the frozen window under the current model", () => {
     const { gripBaselines } = run(legacyPin);
-    // The pin's amps/date are preserved (pinned still wins the frame)...
-    expect(gripBaselines.Micro.date).toBe(D0);
-    expect(gripBaselines.Micro.amps).toEqual([12, 5, 3]);
-    // ...but maxHoldS is now populated from the candidate window (85s).
-    expect(gripBaselines.Micro.maxHoldS).toBe(85);
+    expect(gripBaselines.Micro.date).toBe(D0);          // window still locked to the pin
+    expect(gripBaselines.Micro.amps).toEqual(candidateAmps); // re-fit, NOT [999,999,999]
+    expect(gripBaselines.Micro.maxHoldS).toBe(85);      // derived from the re-fit window
   });
 
-  it("gates unbaselined long zones to null once maxHoldS is present", () => {
-    const { gripImprovement } = run(legacyPin);
-    const imp = gripImprovement.Micro;
+  it("gates unbaselined long zones to null (maxHoldS now reaches the gate)", () => {
+    const imp = run(legacyPin).gripImprovement.Micro;
     expect(imp).toBeTruthy();
-    // Past the baseline's 85s reach -> "new" (null), not a real delta.
-    expect(imp.strength_endurance).toBeNull();
+    expect(imp.strength_endurance).toBeNull();  // past the 85s reach -> "new"
     expect(imp.endurance).toBeNull();
-    // Within reach -> a real number.
-    expect(typeof imp.strength).toBe("number");
+    expect(typeof imp.strength).toBe("number"); // within reach -> a real number
   });
 
-  it("respects a pin that already carries maxHoldS (no clobber)", () => {
-    const { gripBaselines } = run({ Micro: { date: D0, amps: [12, 5, 3], maxHoldS: 300 } });
-    expect(gripBaselines.Micro.maxHoldS).toBe(300);
+  it("falls back to the stored pin when the window can't be rebuilt", () => {
+    // History lacking the seed window (only the pin's start date, <5 reps):
+    // refit returns null, so the stored pin is preserved (best effort).
+    const thin = [rep(D0, 10, 9, 18)];
+    const { gripBaselines } = run({ Micro: { date: D0, amps: [12, 5, 3], maxHoldS: 77 } }, thin);
+    expect(gripBaselines.Micro.amps).toEqual([12, 5, 3]);
+    expect(gripBaselines.Micro.maxHoldS).toBe(77);
   });
 });

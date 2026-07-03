@@ -39,6 +39,7 @@ import {
   buildGripEstimates, buildPerHandGripEstimates,
   buildGripImprovement, computeHandAsymmetry,
 } from "../model/baselines.js";
+import { refitPinnedBaseline } from "../model/refitBaseline.js";
 
 export function useGripFits({
   history, threeExpPriors, grips,
@@ -96,20 +97,22 @@ export function useGripFits({
     if (pinnedGripBaselines && typeof pinnedGripBaselines === "object") {
       for (const [grip, pinned] of Object.entries(pinnedGripBaselines)) {
         if (pinned && Array.isArray(pinned.amps) && pinned.amps.length === 3 && pinned.date) {
-          // Backfill maxHoldS for legacy pins frozen before the field
-          // existed. The candidate's seed window is the same earliest-reps
-          // window the pin froze, so its longest hold matches. Without this
-          // the Curve-Improvement gate never fires for a pinned grip and
-          // unbaselined long zones read as real (often negative) deltas
-          // instead of "new".
-          out[grip] = pinned.maxHoldS != null
-            ? pinned
-            : { ...pinned, maxHoldS: candidateGripBaselines[grip]?.maxHoldS ?? null };
+          // Durable baseline: the pin locks WHICH window is the baseline
+          // (its start date), but the amps are always RE-FIT under the
+          // current model so a later model change can't orphan the frozen
+          // fit and manufacture phantom regressions. Fall back to the
+          // stored pin (with maxHoldS backfilled) only when the window
+          // can't be rebuilt from the current history (partial cache).
+          const refit = refitPinnedBaseline(history, grip, pinned.date, threeExpPriors);
+          out[grip] = refit
+            ?? (pinned.maxHoldS != null
+              ? pinned
+              : { ...pinned, maxHoldS: candidateGripBaselines[grip]?.maxHoldS ?? null });
         }
       }
     }
     return out;
-  }, [candidateGripBaselines, pinnedGripBaselines]);
+  }, [candidateGripBaselines, pinnedGripBaselines, history, threeExpPriors]);
 
   // Auto-pin on first seed. Each render after a grip's seed window
   // gets satisfied, the candidate appears for that grip; if there's
@@ -154,14 +157,17 @@ export function useGripFits({
     if (pinnedPerHandBaselines && typeof pinnedPerHandBaselines === "object") {
       for (const [key, pinned] of Object.entries(pinnedPerHandBaselines)) {
         if (pinned && Array.isArray(pinned.amps) && pinned.amps.length === 3 && pinned.date) {
-          out[key] = pinned.maxHoldS != null
-            ? pinned
-            : { ...pinned, maxHoldS: candidatePerHandBaselines[key]?.maxHoldS ?? null };
+          const [g, hand] = key.split("|");
+          const refit = refitPinnedBaseline(history, g, pinned.date, threeExpPriors, { hand });
+          out[key] = refit
+            ?? (pinned.maxHoldS != null
+              ? pinned
+              : { ...pinned, maxHoldS: candidatePerHandBaselines[key]?.maxHoldS ?? null });
         }
       }
     }
     return out;
-  }, [candidatePerHandBaselines, pinnedPerHandBaselines]);
+  }, [candidatePerHandBaselines, pinnedPerHandBaselines, history, threeExpPriors]);
 
   // Auto-pin per-hand baselines on first seed — mirrors the pooled
   // effect above, including the allowAutoPin gate (partial history /
