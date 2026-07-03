@@ -56,6 +56,18 @@ export function useAucHistoryByGrip({
     const perGrip = {};            // grip -> Map<date, { abs, pct, pctBW }>
     const baselineByGrip = {};     // grip -> { auc, bw }
     const datesUnion = new Set();
+    // Leak-free per-date prior cache — same priorsAt pattern as
+    // useHistoryOverlay. buildThreeExpPriors returns EVERY grip's
+    // prior in one Map, so one date-keyed cache is shared across the
+    // whole grip loop. Before July 2026 the prior was rebuilt inside
+    // the per-date loop inside the per-grip loop — O(grips × dates ×
+    // history) NNLS work on every memo invalidation, all of it
+    // recomputing identical results.
+    const priorCache = new Map();
+    const priorsAt = (date) => {
+      if (!priorCache.has(date)) priorCache.set(date, buildThreeExpPriors(history, { upTo: date }));
+      return priorCache.get(date);
+    };
     for (const g of grips) {
       // Fresh + de-duped — same fit basis as the baseline / overlay /
       // Curve-Improvement cards so the Capacity % agrees with them.
@@ -93,7 +105,7 @@ export function useAucHistoryByGrip({
         // restricted to data on/before this date keeps each point an
         // honest "where I was then", so the line starts ~0% and climbs to
         // the same endpoint (the last date's prior == whole history).
-        const leakPrior = buildThreeExpPriors(history, { upTo: date });
+        const leakPrior = priorsAt(date);
         const priorsForFit = leakPrior.has(g) ? leakPrior : threeExpPriors;
         const amps = fitAmpsForPts(
           upToFails.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
