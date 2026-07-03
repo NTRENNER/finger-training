@@ -2,6 +2,7 @@
 
 import {
   stalenessBoost,
+  STALE_BOOST_MAX,
   getLastZoneTrainedDates,
   getZoneStaleness,
 } from "../lockout.js";
@@ -20,8 +21,32 @@ describe("stalenessBoost", () => {
     expect(stalenessBoost("power", { power: { status: "warning" } })).toBe(1.4);
   });
 
-  test("returns 2.0 for stale", () => {
+  test("returns 2.0 for a bare stale probe (no days/window available)", () => {
+    // Fallback when the entry lacks a days field — preserves the
+    // historical flat 2.0x for callers passing a status-only stub.
     expect(stalenessBoost("power", { power: { status: "stale" } })).toBe(2.0);
+  });
+
+  test("escalates the stale boost with how far past the window it is", () => {
+    // strength window = 30d. Anchor at 2.0x when days == window, then
+    // grow linearly with the overdue ratio (2.0 * days/window).
+    const at = (days) => stalenessBoost("strength", { strength: { status: "stale", days } });
+    expect(at(30)).toBeCloseTo(2.0, 5);            // exactly at the window
+    expect(at(33)).toBeCloseTo(2.0 * 33 / 30, 5);  // ~2.2, below the cap
+    expect(at(37.5)).toBeCloseTo(2.5, 5);          // 2.0 * 37.5/30 == cap
+    // Strictly increasing until the cap.
+    expect(at(35)).toBeGreaterThan(at(31));
+  });
+
+  test("stale boost is capped at STALE_BOOST_MAX, strictly below the never boost", () => {
+    const huge = stalenessBoost("strength", { strength: { status: "stale", days: 999 } });
+    expect(huge).toBe(STALE_BOOST_MAX);
+    expect(STALE_BOOST_MAX).toBe(2.5);
+    // Never-sampled zones stay the top coverage priority: even a wildly-
+    // overdue stale zone cannot reach the 3.0 never boost.
+    expect(huge).toBeLessThan(
+      stalenessBoost("strength", { strength: { status: "never" } })
+    );
   });
 
   test("returns 3.0 for never — stronger than stale", () => {

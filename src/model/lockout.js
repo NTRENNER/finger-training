@@ -121,9 +121,10 @@ export function getZoneStaleness(history, today = new Date()) {
 
 // Score multiplier the coaching engine applies to bias toward stale
 // zones. Stable for "ok" so most recommendations aren't perturbed;
-// modest bump for "warning" to nudge the user before lockout; firm
-// 2× for "stale" so the engine genuinely prefers it over balanced
-// alternatives.
+// modest bump for "warning" to nudge the user before lockout; and an
+// ESCALATING boost for "stale" (2× at the window, climbing with how far
+// overdue the zone is) so the engine genuinely prefers a neglected zone
+// over balanced alternatives.
 //
 // "never" is bumped to 3.0× (higher than "stale") to prioritize
 // baseline coverage before adaptation-gain optimization takes over.
@@ -137,12 +138,34 @@ export function getZoneStaleness(history, today = new Date()) {
 // flips to "ok"/"fresh" and the regular adaptation-gain math runs
 // unchanged. So this acts like a one-month coverage pass for new
 // users without any time-based logic.
+// Baseline stale boost (at exactly the detraining window) and the cap
+// the escalation climbs toward. STALE_BOOST_MAX sits BELOW the never-zone
+// boost (3.0) so a never-sampled zone — which has no anchor at all and
+// whose curve is pure extrapolation — stays the top coverage priority;
+// an overdue-but-sampled zone escalates toward, but never reaches, it.
+export const STALE_BOOST_BASE = 2.0;
+export const STALE_BOOST_MAX  = 2.5;
+
 export function stalenessBoost(zoneKey, stalenessMap) {
   const s = stalenessMap?.[zoneKey];
   if (!s) return 1.0;
   switch (s.status) {
     case "never":   return 3.0;
-    case "stale":   return 2.0;
+    case "stale": {
+      // ESCALATE with how far past the window the zone is (July 2026):
+      // a flat 2x doesn't preserve freshness — a zone can drift
+      // arbitrarily overdue and never climb, so a chronically neglected
+      // zone with a crushed adaptBoost stays buried. Anchor at the
+      // historical 2.0x when days == window and grow linearly with the
+      // overdue ratio, capped at STALE_BOOST_MAX. Falls back to the base
+      // when days/window aren't available (bare {status:"stale"} probes).
+      const window = LOCKOUT_WINDOW_DAYS[zoneKey];
+      const days = s.days;
+      if (days > 0 && window > 0) {
+        return Math.min(STALE_BOOST_MAX, STALE_BOOST_BASE * (days / window));
+      }
+      return STALE_BOOST_BASE;
+    }
     case "warning": return 1.4;
     case "ok":
     default:        return 1.0;
