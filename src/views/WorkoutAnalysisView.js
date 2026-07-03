@@ -358,28 +358,39 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
   }, [wLogStored]);
 
   const planStored = useLSValue(LS_WORKOUT_PLAN_KEY);
-  const plan = useMemo(() => {
-    // Stored plan with the same id-migration; fall back to defaults
-    // if no stored plan exists yet (fresh install). We don't apply
-    // the full metadata-merge here — the analysis only reads
-    // unilateral/bodyweightAdditive flags, and DEFAULT_WORKOUTS as a
-    // fallback already has the canonical values.
-    const source = planStored || defaultWorkouts;
-    if (!source) return {};
-    const out = {};
-    for (const [key, wk] of Object.entries(source)) {
-      out[key] = {
-        ...wk,
-        exercises: (wk?.exercises || []).map(ex => {
-          const newId = migrateExerciseId(ex.id);
-          return newId !== ex.id ? { ...ex, id: newId } : ex;
-        }),
-      };
-    }
-    return out;
+  // Exercise index = stored plan UNIONED with current defaults —
+  // defaults win for shared ids. The old `planStored || defaults`
+  // fallback let a stale stored plan completely SHADOW the defaults:
+  // nothing has written ft_workout_plan since the plan editor was
+  // removed, so a plan cached before the June 2026 exercise swaps
+  // (weighted pull-up → TRX Row in Workout C, TRX hamstring curl
+  // added to B) simply didn't contain the new ids, and their logged
+  // sessions were invisible here — even though WorkoutTab logs from
+  // the current supportTraining defs regardless (July 2026: "still
+  // not seeing the TRX card"). Defaults-win also keeps metadata
+  // (variants ladders, unilateral/circlesOnly flags) current for
+  // shared ids; stored-only ids (legacy/custom exercises) survive
+  // for their historical sessions.
+  const exIndex = useMemo(() => {
+    const migrate = (source) => {
+      if (!source) return {};
+      const out = {};
+      for (const [key, wk] of Object.entries(source)) {
+        out[key] = {
+          ...wk,
+          exercises: (wk?.exercises || []).map(ex => {
+            const newId = migrateExerciseId(ex.id);
+            return newId !== ex.id ? { ...ex, id: newId } : ex;
+          }),
+        };
+      }
+      return out;
+    };
+    return {
+      ...buildExerciseDefIndex(migrate(planStored)),
+      ...buildExerciseDefIndex(migrate(defaultWorkouts)),
+    };
   }, [planStored, defaultWorkouts]);
-
-  const exIndex = useMemo(() => buildExerciseDefIndex(plan), [plan]);
 
   // For each exercise in the plan with logWeight=true, build its
   // series. Sort the result by latest-session date DESC so the most
