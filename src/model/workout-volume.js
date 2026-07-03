@@ -149,3 +149,61 @@ export function sessionExerciseEst1RM(sets, bw, exDef) {
   }
   return Math.round(best * 10) / 10;
 }
+
+// ─────────────────────────────────────────────────────────────
+// REPS/VARIANT SERIES — progression for weightless exercises
+// ─────────────────────────────────────────────────────────────
+// Lift Progression is weight-based, but several exercises progress by
+// LEVERAGE (variant ladder) + reps, not load: TRX Row's rungs are
+// two-arm → feet-elevated → archer → one-arm, and vest weight only
+// enters after the last rung. Every set of such an exercise logs
+// weight: "" — so sessionExerciseTopWeight/Volume both return 0 and
+// the weight card's `top <= 0 && vol <= 0` gate skipped every
+// session, making the exercise invisible in Analysis (July 2026
+// report: "I'm not seeing the TRX in the analysis tab").
+//
+// This builder walks the log and produces one point per session with
+// ≥1 done set: total done reps + the hardest variant attempted (max
+// index in exDef.variants; an off-ladder label still surfaces as
+// text). The Analysis view renders these with a reps chart when the
+// weight series is empty; once real weight is logged, the weight
+// chart takes over.
+//
+// Callers pass sessions already filtered of rotation-pin markers
+// (this module stays dependency-free; ROTATION_PIN_KEY lives in
+// lib/storage.js).
+export function buildRepsVariantSeries(sessions, exId, exDef) {
+  if (!Array.isArray(sessions) || !exId) return [];
+  const ladder = Array.isArray(exDef?.variants) ? exDef.variants : [];
+  const sorted = [...sessions].sort((a, b) => {
+    const ad = a?.date || "";
+    const bd = b?.date || "";
+    if (ad !== bd) return ad.localeCompare(bd);
+    return (a?.completedAt || "").localeCompare(b?.completedAt || "");
+  });
+  const out = [];
+  for (const s of sorted) {
+    const sets = s?.exercises?.[exId]?.sets;
+    if (!Array.isArray(sets)) continue;
+    let reps = 0, vIdx = -1, variant = null;
+    for (const t of sets) {
+      if (!t || !t.done) continue;
+      // Both set schemas: bilateral {reps} and unilateral
+      // {leftReps, rightReps} — same shape-handling as the volume
+      // helpers above (sidePayloads).
+      for (const side of sidePayloads(t)) reps += parseRepsCount(side.reps);
+      const i = ladder.indexOf(t.variant);
+      if (i > vIdx) { vIdx = i; variant = t.variant; }
+      else if (vIdx < 0 && variant == null && t.variant) variant = t.variant; // off-ladder label
+    }
+    if (reps <= 0 && variant == null) continue;  // nothing usable logged
+    out.push({
+      date: s.date,
+      reps,
+      variant,
+      variantIdx: vIdx >= 0 ? vIdx : null,
+      workout: s.workout,
+    });
+  }
+  return out;
+}
