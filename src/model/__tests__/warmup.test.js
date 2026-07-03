@@ -2,7 +2,7 @@
 // two-handed load scaling, the progressive strength ladder, and the
 // margin-based (in-range) perfusion loads.
 
-import { generateWarmupProtocol, BILATERAL_FACTOR } from "../warmup.js";
+import { generateWarmupProtocol, BILATERAL_FACTOR, getRecentMaxPullups } from "../warmup.js";
 import { predForceThreeExp } from "../threeExp.js";
 
 // Synthetic Crusher + Micro history spanning several durations so the
@@ -82,5 +82,53 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
     const p = generateWarmupProtocol({ history, wLog: [], bodyWeightKg: BW, mode: "boulder" });
     const bork = p.steps.find(s => s.id === "bork-micro");
     expect(bork.referenceMvcKg).toBeCloseTo(p.mvcSource.microKg * BILATERAL_FACTOR, 1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// getRecentMaxPullups — exercise-id migration
+// ─────────────────────────────────────────────────────────────
+// Regression (July 2026): the lookup hard-coded the LEGACY id
+// "pull_ups", but current sessions log pullups under "weightedPullup"
+// (supportTraining.js; exerciseIds.js maps pull_ups → weightedPullup).
+// Once legacy sessions aged past the 30-day window this returned null
+// forever and the finisher silently pinned to its default 5 reps.
+describe("getRecentMaxPullups — id migration", () => {
+  const BW_LBS = 165;
+  const isoDaysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const wSession = (exId, daysAgo, sets) => ({
+    date: isoDaysAgo(daysAgo),
+    exercises: { [exId]: { sets } },
+  });
+
+  test("finds pullups logged under the CURRENT id weightedPullup", () => {
+    const wLog = [wSession("weightedPullup", 3, [{ reps: 8, weight: 25, done: true }])];
+    const out = getRecentMaxPullups(wLog, { bodyWeightLbs: BW_LBS });
+    expect(out).not.toBeNull();
+    expect(out.sourceReps).toBe(8);
+    expect(out.sourceWeightLbs).toBe(25);
+    expect(out.unweightedReps).toBeGreaterThan(8);   // Epley: +25 lb ⇒ more BW reps
+  });
+
+  test("still finds pullups under the legacy pull_ups id", () => {
+    const wLog = [wSession("pull_ups", 5, [{ reps: 10, weight: 0, done: true }])];
+    const out = getRecentMaxPullups(wLog, { bodyWeightLbs: BW_LBS });
+    expect(out).not.toBeNull();
+    expect(out.unweightedReps).toBe(10);
+    expect(out.ageDays).toBe(5);
+  });
+
+  test("takes the best across a legacy and a current session", () => {
+    const wLog = [
+      wSession("pull_ups", 20, [{ reps: 6, weight: 0, done: true }]),
+      wSession("weightedPullup", 2, [{ reps: 12, weight: 0, done: true }]),
+    ];
+    const out = getRecentMaxPullups(wLog, { bodyWeightLbs: BW_LBS });
+    expect(out.unweightedReps).toBe(12);
+  });
+
+  test("unrelated exercises never match", () => {
+    const wLog = [wSession("benchPress", 2, [{ reps: 10, weight: 135, done: true }])];
+    expect(getRecentMaxPullups(wLog, { bodyWeightLbs: BW_LBS })).toBeNull();
   });
 });
