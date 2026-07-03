@@ -647,7 +647,19 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // loses to a routine Power pick at 0.98. The floor preserves the
       // "anchor unexplored zones" intent of the 3.0× boost while still
       // letting genuine in-zone limiters (adaptBoost > 1) push higher.
-      if (zoneStatus === "never") {
+      //
+      // STALE zones share the SAME floor (July 2026). Their residual is
+      // real but built on data past the detraining window (30-50+ days
+      // old); an above-curve reading that stale is weak evidence the zone
+      // still needs no work, and without a floor it crushes adaptBoost to
+      // ~0.4 (or the 0.2 clamp), zeroing the freshness signal — the Curve
+      // Coverage review found three stale Crusher zones all out-scored by
+      // a fresh Power pick because 0.4 x 2.0 < 1.15. Flooring at neutral
+      // lets the (now escalating) staleness boost actually surface the
+      // zone, without inventing a limiter the stale data can't support.
+      // Only the FLOOR is shared — the refT snap below stays never-only,
+      // since stale zones have real in-zone data (their argmax T is real).
+      if (zoneStatus === "never" || zoneStatus === "stale") {
         adaptBoost = Math.max(adaptBoost, 1.0);
       }
       const stale = stalenessBoost(zoneKey, stalenessMap);

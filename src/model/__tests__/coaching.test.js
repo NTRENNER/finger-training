@@ -375,6 +375,42 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.adaptBoost).toBeGreaterThanOrEqual(1.0);
   });
 
+  test("STALE zone with above-curve data still wins (stale adaptBoost floor + escalation)", () => {
+    // July 2026 freshness fix. A zone trained past its detraining window,
+    // whose (now old) data sat ABOVE the curve, used to have its
+    // adaptBoost crushed to ~0.2-0.5 by its own above-curve residual; the
+    // flat 2.0x stale boost couldn't recover it (0.4 x 2.0 < a fresh
+    // zone), so a chronically neglected zone stayed buried. The fix
+    // floors a stale zone's adaptBoost at 1.0 (like a never zone) and
+    // escalates the boost with how overdue it is.
+    //
+    // Every zone is covered recently (fresh) EXCEPT Strength, which was
+    // trained 40 days ago (window 30 -> stale) with above-curve data.
+    // The stale Strength zone must win despite the above-curve residual.
+    const history = [
+      buildRep("L", 7,   F_curve(7),   3),   // max_strength (fresh)
+      buildRep("L", 30,  F_curve(30),  3),   // power (fresh)
+      buildRep("L", 30,  F_curve(30),  3),
+      buildRep("L", 70,  F_curve(70),  3),   // power_strength (fresh)
+      buildRep("L", 160, F_curve(160), 3),   // strength_endurance (fresh)
+      buildRep("L", 220, F_curve(220), 3),   // endurance (fresh)
+      // Strength zone, ABOVE curve, trained 40 days ago -> STALE.
+      buildRep("L", 110, F_curve(110) * 1.4, 40),
+      buildRep("L", 110, F_curve(110) * 1.4, 40),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const rec = coachingRecommendationContinuous(history, "Crusher",
+      { threeExpPriors: priors, today });
+    expect(rec).not.toBeNull();
+    expect(rec.zone).toBe("strength");
+    expect(rec.staleStatus).toBe("stale");
+    // Floor lifted the crushed above-curve adaptBoost back to >= 1.0...
+    expect(rec.adaptBoost).toBeGreaterThanOrEqual(1.0);
+    // ...and the boost escalated past the old flat 2.0x (40/30 = 1.33x).
+    expect(rec.stalenessBoost).toBeGreaterThan(2.0);
+    expect(rec.stalenessBoost).toBeLessThanOrEqual(3.0);
+  });
+
   test("never-zone tiebreaker: T snaps to the zone's reference time", () => {
     // With the adaptBoost floor flattening every T inside a never zone to
     // the same score, the engine should pick the zone's canonical refT
