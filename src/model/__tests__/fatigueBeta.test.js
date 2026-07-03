@@ -44,36 +44,30 @@ describe("currentBeta", () => {
   });
 });
 
-describe("capacityMultiplier", () => {
+describe("capacityMultiplier (cookedness disabled as a load rescaler, July 2026)", () => {
   test("returns 1.0 at cooked = 0 (fresh)", () => {
     const m = defaultFatigueModel();
     expect(capacityMultiplier(m, "Crusher", 0)).toBeCloseTo(1.0);
     expect(capacityMultiplier(m, "Micro",   0)).toBeCloseTo(1.0);
   });
 
-  test("returns 1.0 when cooked is null/undefined (no scale-down)", () => {
+  test("returns 1.0 when cooked is null/undefined", () => {
     const m = defaultFatigueModel();
     expect(capacityMultiplier(m, "Crusher", null)).toBeCloseTo(1.0);
     expect(capacityMultiplier(m, "Crusher", undefined)).toBeCloseTo(1.0);
   });
 
-  test("monotone decreasing in cooked", () => {
-    const m = defaultFatigueModel();
-    const values = [0, 2, 4, 6, 8, 10].map(c => capacityMultiplier(m, "Crusher", c));
-    for (let i = 1; i < values.length; i++) {
-      expect(values[i]).toBeLessThan(values[i - 1]);
+  test("returns 1.0 for ANY cookedness -- loads are no longer rescaled", () => {
+    const m = { Crusher: { beta: 0.10 }, Micro: { beta: 0.5 } };
+    for (const c of [0, 2, 4, 6, 8, 10]) {
+      expect(capacityMultiplier(m, "Crusher", c)).toBe(1.0);
+      expect(capacityMultiplier(m, "Micro",   c)).toBe(1.0);
     }
   });
 
-  test("matches exp(-β·c) for given β", () => {
-    const m = { Crusher: { beta: 0.10 } };
-    expect(capacityMultiplier(m, "Crusher", 5)).toBeCloseTo(Math.exp(-0.5), 6);
-    expect(capacityMultiplier(m, "Crusher", 10)).toBeCloseTo(Math.exp(-1.0), 6);
-  });
-
-  test("uses DEFAULT_BETA for unknown grip", () => {
-    const m = defaultFatigueModel();
-    expect(capacityMultiplier(m, "MysteryGrip", 5)).toBeCloseTo(Math.exp(-DEFAULT_BETA * 5), 6);
+  test("ignores beta entirely -- even a large beta doesn't move the load", () => {
+    expect(capacityMultiplier({ Crusher: { beta: 0.5 } }, "Crusher", 10)).toBe(1.0);
+    expect(capacityMultiplier(defaultFatigueModel(), "MysteryGrip", 5)).toBe(1.0);
   });
 });
 

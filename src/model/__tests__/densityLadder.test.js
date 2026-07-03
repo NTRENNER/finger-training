@@ -142,7 +142,7 @@ describe("computeDensityLadder", () => {
       times: { L: [40, 24, 16, 12] }, cooked: 5,
     });
     const out = computeDensityLadder(hist, "Crusher", "power", { fatigueModel });
-    expect(out.loadByHand.L).toBeCloseTo(fresh, 0);
+    expect(out.loadByHand.L).toBeCloseTo(recorded, 0); // July 2026: cookedness no longer de-cooks the pin
     // Without a model, capacityMultiplier falls back to DEFAULT_BETA —
     // the ladder de-cooks with the same default the scale-down side
     // uses, keeping the round-trip symmetric. Assert against the

@@ -14,13 +14,12 @@ const rep = (over = {}) => ({
 describe("buildFreshLoadMap fresh-equivalent cap", () => {
   const model = { Micro: { beta: 0.5 } }; // strong cookedness sensitivity
 
-  test("a maximally-cooked rep can't produce a runaway fresh-equivalent", () => {
-    // Uncapped: 20 / exp(-0.5*10) = 20 / 0.0067 ≈ 2985 kg.
-    const h = [rep({ session_cooked: 10 })];
-    const fresh = buildFreshLoadMap(h, { fatigueModel: model }).get(repKey(h[0])).fresh;
-    expect(fresh).toBeLessThanOrEqual(20 * 3 + 1e-9); // ≤ 3× measured load
-    expect(fresh).toBeLessThanOrEqual(SANE_MAX_KG);
-    expect(fresh).toBeGreaterThan(20);                // still de-cooked upward, just bounded
+  test("cookedness no longer rescales the fresh-equivalent load (July 2026)", () => {
+    // Cookedness disabled as a load rescaler: a maximally-cooked rep is
+    // treated identically to a fresh one (its logged load, no de-cook).
+    const cooked = buildFreshLoadMap([rep({ session_cooked: 10 })], { fatigueModel: model }).get(repKey(rep())).fresh;
+    expect(cooked).toBeCloseTo(20, 1);
+    expect(cooked).toBeLessThanOrEqual(SANE_MAX_KG);
   });
 
   test("a normal fresh rep is unchanged (cap doesn't bind)", () => {

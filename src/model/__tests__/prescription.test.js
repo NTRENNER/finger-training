@@ -191,11 +191,10 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     expect(freshLoadFor({ avg_force_kg: 30 }, null)).toBe(30);
   });
 
-  test("cookedByDate + fatigueModel scales fresh load up on cooked days", () => {
+  test("cookedness no longer scales the fresh load (disabled July 2026)", () => {
     // Same rep on two different dates — one tagged cooked, one fresh.
-    // The cooked-day rep should report a higher fresh-equivalent
-    // load: capacityMultiplier scales down what you could lift, so
-    // dividing by it recovers the load you'd have lifted fresh.
+    // Cookedness is disabled as a load rescaler, so both report their
+    // logged load unchanged (no de-cook).
     const history = [
       { id: "fresh", hand: "L", grip: "Crusher",
         session_id: "s_fresh", set_num: 1, rep_num: 1,
@@ -206,51 +205,29 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
         avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
         date: "2026-05-02" },
     ];
-    // Minimal fatigue model: a single per-grip beta that gives a
-    // meaningful scale-down at cooked=7. The exact value doesn't
-    // matter; we just need the cooked-day fresh > fresh-day fresh.
-    const fatigueModel = { Crusher: { beta: 0.03 } };
-    const cookedByDate = { "2026-05-02": 7 };
+    const fatigueModel = { Crusher: { beta: 0.5 } }; // even a big beta must not move loads
+    const cookedByDate = { "2026-05-02": 10 };
     const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
-    const fresh = map.get("id:fresh").fresh;
-    const cooked = map.get("id:cooked").fresh;
-    expect(fresh).toBeCloseTo(25, 4);
-    expect(cooked).toBeGreaterThan(fresh);
-    // Sanity bound — the multiplier exp(-0.03 * 7) ≈ 0.81, so
-    // 25 / 0.81 ≈ 30.85.
-    expect(cooked).toBeCloseTo(25 / Math.exp(-0.03 * 7), 2);
+    expect(map.get("id:fresh").fresh).toBeCloseTo(25, 4);
+    expect(map.get("id:cooked").fresh).toBeCloseTo(25, 4); // no de-cook
   });
 
-  test("r.session_cooked wins over cookedByDate for that day", () => {
-    // Two reps on the same date — one carries an explicit
-    // session_cooked override, one uses the day default. The
-    // override-bearing rep should scale fresh using its own value,
-    // not the day default; the other rep falls back to the day.
+  test("neither session_cooked nor cookedByDate moves the fresh load anymore (July 2026)", () => {
     const history = [
       { id: "morning", hand: "L", grip: "Crusher",
         session_id: "s_morning", set_num: 1, rep_num: 1,
         avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
-        date: "2026-05-02",
-        session_cooked: 2 },  // morning was actually fresh
+        date: "2026-05-02", session_cooked: 2 },
       { id: "evening", hand: "L", grip: "Crusher",
         session_id: "s_evening", set_num: 1, rep_num: 1,
         avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
-        date: "2026-05-02",
-        session_cooked: null },  // evening falls back to day default
+        date: "2026-05-02", session_cooked: null },
     ];
-    const fatigueModel = { Crusher: { beta: 0.03 } };
-    const cookedByDate = { "2026-05-02": 8 };  // day-level says cooked
+    const fatigueModel = { Crusher: { beta: 0.5 } };
+    const cookedByDate = { "2026-05-02": 8 };
     const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
-    const morning = map.get("id:morning").fresh;
-    const evening = map.get("id:evening").fresh;
-    // Morning uses override (cooked=2 → mult≈0.94, fresh≈26.6)
-    expect(morning).toBeCloseTo(25 / Math.exp(-0.03 * 2), 2);
-    // Evening uses day default (cooked=8 → mult≈0.79, fresh≈31.8)
-    expect(evening).toBeCloseTo(25 / Math.exp(-0.03 * 8), 2);
-    // Sanity: override should yield a LOWER fresh-equivalent than
-    // the day default in this case (morning was less cooked than
-    // the day baseline).
-    expect(morning).toBeLessThan(evening);
+    expect(map.get("id:morning").fresh).toBeCloseTo(25, 4);
+    expect(map.get("id:evening").fresh).toBeCloseTo(25, 4);
   });
 
   test("session_cooked: 0 explicitly suppresses day-level compensation", () => {
@@ -708,10 +685,6 @@ describe("prescription (unified)", () => {
 describe("peak-force ceiling", () => {
   const today = new Date().toISOString().slice(0, 10);
 
-  // June-8-like history: failures at 7–120s with Tindeq peaks a few
-  // percent above each rep's average — so the short end of the curve
-  // is unconstrained, but the measured peaks bound what the hand can
-  // actually produce.
   const buildPeakHistory = () => {
     const Ts = [7, 10, 30, 45, 60, 90, 120];
     const trueAmps = [30, 12, 6];
@@ -760,7 +733,6 @@ describe("peak-force ceiling", () => {
   test("caps short-duration curve extrapolation at PEAK_CAP_FRACTION × best peak", () => {
     const seed = buildPeakHistory();
     const priors = buildThreeExpPriors(seed);
-    // Recent anchor so the curve path is anchored (like June 8).
     const history = [
       ...seed,
       { id: "rA", hand: "L", grip: "Crusher", target_duration: 30,
@@ -772,9 +744,7 @@ describe("peak-force ceiling", () => {
     const out = prescription(history, "L", "Crusher", 5, { threeExpPriors: priors });
     expect(out).not.toBeNull();
     expect(out.peakCapKg).toBeCloseTo(Math.round(bestPeak * PEAK_CAP_FRACTION * 10) / 10, 1);
-    // The cap is a hard bound regardless of what the curve extrapolated.
     expect(out.value).toBeLessThanOrEqual(out.peakCapKg);
-    // potential stays the raw (uncapped) curve diagnostic.
     if (out.peakCapped) {
       expect(out.potential * out.scale).toBeGreaterThan(out.value);
     }
@@ -811,10 +781,6 @@ describe("peak-force ceiling", () => {
   });
 
   test("anchored-linear cold-start path is capped too", () => {
-    // No prior (no curve-supporting data) — just one recent max-
-    // protocol rep with a measured peak, prescribing for a 5s target.
-    // Linear T-ratio scaling would prescribe 21 × 1.9 = 39.9 kg; the
-    // measured peak of 30 kg says that's impossible.
     const history = [
       { id: "rA", hand: "L", grip: "Crusher", target_duration: 10,
         rep_num: 1, actual_time_s: 9.5, failed: true,
@@ -829,10 +795,6 @@ describe("peak-force ceiling", () => {
   });
 
   test("sub-max-protocol peaks do NOT create a cap (new-grip case)", () => {
-    // Prime regression (June 2026): the grip's only session is 35s
-    // holds — its peaks track the prescribed load, not the user's
-    // max. An unfiltered cap would freeze future max-day
-    // prescriptions at ~the endurance load.
     const history = [
       { id: "rA", hand: "L", grip: "Prime", target_duration: 35,
         rep_num: 1, actual_time_s: 12, failed: true,

@@ -129,8 +129,11 @@ describe("baseline prior is LEAK-FREE (does not pull baseline toward future stre
 });
 
 describe("fresh-equivalent basis (freshEq opt on the estimate builders)", () => {
-  // Loads on cooked-day sessions are de-cooked (÷ exp(-β·cooked) ≤ 1,
-  // i.e. scaled UP) before fitting; cooked null/0 is a strict no-op.
+  // July 2026: cookedness is disabled as a load rescaler
+  // (capacityMultiplier returns 1.0), so the freshEq path is now a
+  // no-op -- it produces the same fit as raw. These tests pin that
+  // equivalence; flip COOKEDNESS_LOAD_SCALING back on to restore the
+  // old de-cook behavior.
   const cookedHistory = (cooked) => [
     r({ target_duration: 10,  actual_time_s: 10,  avg_force_kg: 50, session_cooked: cooked }),
     r({ target_duration: 45,  actual_time_s: 45,  avg_force_kg: 30, session_cooked: cooked }),
@@ -144,16 +147,13 @@ describe("fresh-equivalent basis (freshEq opt on the estimate builders)", () => 
     expect(buildGripEstimates(history, null, { freshEq: false, fatigueModel: null })).toEqual(raw);
   });
 
-  test("all-cooked history: fresh-eq curve sits strictly above the raw curve", () => {
+  test("all-cooked history: fresh-eq curve equals the raw curve (cookedness disabled)", () => {
     const history = cookedHistory(5);
     const raw   = buildGripEstimates(history, null);
     const fresh = buildGripEstimates(history, null, { freshEq: true, fatigueModel: null });
     expect(raw.Crusher).toBeDefined();
     expect(fresh.Crusher).toBeDefined();
-    // null model → DEFAULT_BETA fallback; cooked=5 → loads ÷ exp(-β·5),
-    // so every point (and the fitted curve) scales up.
-    expect(predForceThreeExp(fresh.Crusher, 30))
-      .toBeGreaterThan(predForceThreeExp(raw.Crusher, 30));
+    expect(fresh).toEqual(raw); // July 2026: cookedness disabled as a load rescaler -> freshEq == raw
   });
 
   test("session_cooked null/0 → freshEq fit identical to raw", () => {
@@ -165,11 +165,10 @@ describe("fresh-equivalent basis (freshEq opt on the estimate builders)", () => 
     }
   });
 
-  test("per-hand variant honors freshEq the same way", () => {
+  test("per-hand variant: freshEq equals raw too (cookedness disabled)", () => {
     const history = cookedHistory(5);
     const raw   = buildPerHandGripEstimates(history, null);
     const fresh = buildPerHandGripEstimates(history, null, { freshEq: true, fatigueModel: null });
-    expect(predForceThreeExp(fresh["Crusher|L"], 30))
-      .toBeGreaterThan(predForceThreeExp(raw["Crusher|L"], 30));
+    expect(fresh).toEqual(raw); // July 2026: freshEq == raw for the per-hand builder too
   });
 });

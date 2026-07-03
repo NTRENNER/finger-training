@@ -90,7 +90,23 @@ export function currentBeta(model, grip) {
 // safe to apply unconditionally:
 //
 //   prescribedLoad = freshLoad * capacityMultiplier(model, grip, cooked);
+// Master switch (July 2026): cookedness as a LOAD RESCALER is OFF. See
+// capacityMultiplier below for the why. Flip to true to bring back the
+// exp(-beta*cooked) de-cook/re-cook (add a hard floor of ~0.85 if you do).
+const COOKEDNESS_LOAD_SCALING = false;
+
 export function capacityMultiplier(model, grip, cooked) {
+  // COOKEDNESS NO LONGER RESCALES LOADS (July 2026). Dividing loads by
+  // exp(-beta*cooked) to "de-cook" them (and multiplying today's target
+  // by it to "re-cook") turned a subjective 0-10 slider into up-to-3x
+  // load corrections -- producing implausible curves and improvement
+  // numbers (Micro read +258% on the fresh-eq basis vs +25% raw) and
+  // feeding the prescription off a distorted basis. Cookedness stays a
+  // LOGGED readiness signal (session_cooked is still recorded and shown);
+  // it just no longer moves any load. Returning 1.0 here neutralizes
+  // every de-cook (buildFreshLoadMap, freshEqLoad, density-ladder pin)
+  // and re-cook (SessionPlanCard, useSessionRunner) in one place.
+  if (!COOKEDNESS_LOAD_SCALING) return 1.0;
   if (cooked == null) return 1.0;
   const c = clamp(Number(cooked), COOKED_MIN, COOKED_MAX);
   if (!(c > 0)) return 1.0;
