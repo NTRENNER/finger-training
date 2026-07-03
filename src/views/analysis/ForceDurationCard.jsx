@@ -71,6 +71,25 @@ function ScatterTooltip({ active, payload, unit }) {
   );
 }
 
+// Raw / Fresh-eq basis toggle for the modeled-capacity curve. Raw =
+// loads as actually held (no within-set-fatigue / cookedness correction);
+// Fresh-eq = the engine's fresh-equivalent basis the prescription fits on.
+// Same distinction as the Curve Improvement card's Raw / Fresh-eq toggle.
+function BasisPills({ value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {[{ k: "raw", label: "Raw" }, { k: "fresh", label: "Fresh-eq" }].map(o => (
+        <button key={o.k} onClick={() => onChange(o.k)} style={{
+          padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+          cursor: "pointer", border: "none",
+          background: value === o.k ? C.purple : C.border,
+          color:      value === o.k ? "#fff"    : C.muted,
+        }}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
 export function ForceDurationCard({
   // Display context
   unit,
@@ -83,6 +102,9 @@ export function ForceDurationCard({
   // split-mode block below scopes its own per-grip fits by handView.
   handView = "pooled",
   onHandViewChange = null,
+  // Raw / Fresh-eq basis for the modeled-capacity curve (July 2026).
+  fdBasis = "fresh",
+  onFdBasisChange = null,
   // Chart-data props (memoized in AnalysisView)
   fdSplitData,
   threeExpCurveDataRel,
@@ -187,11 +209,14 @@ export function ForceDurationCard({
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>Force vs. Duration</div>
-        {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {onFdBasisChange && <BasisPills value={fdBasis} onChange={onFdBasisChange} />}
+          {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
+        </div>
       </div>
       <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
         {!splitMode && <span><span style={{ color: POOLED_DOT }}>●</span> reps ({handView === "pooled" ? "pooled" : handView === "L" ? "left hand" : "right hand"})</span>}
-        {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model fit on the SAME basis the prescription engine uses: every rep, at its fresh-equivalent load (corrected for within-set fatigue and cookedness). The curve is modeled fresh capacity — the line your recommendations come from — while the dots are observed fresh first reps."><span style={{ color: curveColor }}>―</span> modeled fresh capacity (3-exp)</span>}
+        {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model fit on the SAME basis the prescription engine uses: every rep, at its fresh-equivalent load (corrected for within-set fatigue and cookedness). The curve is modeled fresh capacity — the line your recommendations come from — while the dots are observed fresh first reps."><span style={{ color: curveColor }}>―</span>{fdBasis === "raw" ? " modeled capacity (raw, 3-exp)" : " modeled fresh capacity (3-exp)"}</span>}
         {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — well past the medium component's decay, where the slow component carries essentially the whole load. The closest model analog to a 'long-duration sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
         {splitMode && Object.keys(fdSplitData).map(g => (
           <span key={g}>

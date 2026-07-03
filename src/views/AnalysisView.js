@@ -224,6 +224,14 @@ export function AnalysisView({
   // lens, and per-hand fits run on half the data (noisier), so each
   // visit starts at the clean pooled view.
   const [handView, setHandView] = useState("pooled");
+  // F-D curve basis (July 2026): Raw = loads as actually held (no
+  // within-set-fatigue or cookedness correction); Fresh-eq = the
+  // engine's fresh-equivalent basis (default — what prescription() fits
+  // on). Nulling freshMap in Raw mode flips BOTH the single-grip curve
+  // (threeExpFit below) and the card's split-mode fits, which key off
+  // the freshMap prop we pass down.
+  const [fdBasis, setFdBasis] = useState("fresh");
+  const fdFreshMap = fdBasis === "fresh" ? freshMap : null;
 
   // (Force Curves overlay slider state removed May 2026 — the overlay
   // merged into CurveImprovementCard, which owns its own per-grip "Now"
@@ -468,12 +476,12 @@ export function AnalysisView({
     if (pool.length < 2) return null;
     const pts = pool.map(r => ({
       T: r.actual_time_s,
-      F: freshMap ? freshLoadFor(r, freshMap) : effectiveLoad(r),
+      F: fdFreshMap ? freshLoadFor(r, fdFreshMap) : effectiveLoad(r),
     }));
     const amps = fitAmpsForPts(pts, selGrip, threeExpPriors);
     if (!amps) return null;
     return { amps };
-  }, [failures, handView, freshMap, selGrip, threeExpPriors]);
+  }, [failures, handView, fdFreshMap, selGrip, threeExpPriors]);
 
   // Predicted curve for chart overlay — same T grid as curveData so the
   // two lines align visually.
@@ -762,6 +770,8 @@ export function AnalysisView({
           normalizeOn={normalizeOn}
           handView={handView}
           onHandViewChange={setHandView}
+          fdBasis={fdBasis}
+          onFdBasisChange={setFdBasis}
           fdSplitData={fdSplitData}
           threeExpCurveDataRel={threeExpCurveDataRel}
           threeExpRef180={threeExpRef180}
@@ -771,7 +781,7 @@ export function AnalysisView({
           maxForceRel={maxForceRel}
           handAsymmetry={handAsymmetry}
           history={history}
-          freshMap={freshMap}
+          freshMap={fdFreshMap}
           threeExpPriors={threeExpPriors}
           handleDotClick={handleDotClick}
         />
