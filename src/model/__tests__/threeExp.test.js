@@ -7,14 +7,14 @@ import {
   fitThreeExpAmps, fitThreeExpAmpsLOO,
   predForceThreeExp, buildThreeExpPriors,
   computeZoneShares, ZONE_SHARE_BUCKETS,
+  THREE_EXP_TAUS,
 } from "../threeExp.js";
 import { PHYS_MODEL_DEFAULT } from "../fatigue.js";
-
-const TAU_D = [
-  PHYS_MODEL_DEFAULT.tauD.fast,
-  PHYS_MODEL_DEFAULT.tauD.medium,
-  PHYS_MODEL_DEFAULT.tauD.slow,
-];
+// These tests exercise the F-D curve functions (fit / predForce), which
+// default to THREE_EXP_TAUS — decoupled from the fatigue depletion tauD
+// at the slow constant (July 2026). Generate + verify against the curve
+// taus so synthetic round-trips stay self-consistent.
+const TAU_D = THREE_EXP_TAUS;
 
 // ─────────────────────────────────────────────────────────────
 // fitThreeExpAmps — basic NNLS with optional prior + weights
@@ -30,7 +30,8 @@ describe("fitThreeExpAmps", () => {
   });
 
   test("recovers known amplitudes from synthetic data", () => {
-    // Build F(T) = 30*exp(-T/10) + 15*exp(-T/30) + 8*exp(-T/180)
+    // Build F(T) from the curve taus (THREE_EXP_TAUS) so a clean
+    // synthetic signal round-trips back to the amplitudes.
     const trueAmps = [30, 15, 8];
     const Ts = [3, 7, 15, 30, 60, 120, 240];
     const pts = Ts.map(T => ({
@@ -89,10 +90,10 @@ describe("fitThreeExpAmps", () => {
     expect(predAt30).toBeLessThan(20);
   });
 
-  test("uses tauD basis by default (post-fix)", () => {
-    // The fit should use depletion taus, not recovery. We verify by
-    // checking that fitting clean data generated from tauD recovers
-    // amps better than data generated from tauR would.
+  test("uses the THREE_EXP_TAUS curve basis by default (not recovery taus)", () => {
+    // The fit should use the curve envelope taus (THREE_EXP_TAUS), not the
+    // recovery taus. We verify by checking that clean data generated from
+    // the curve taus recovers amps better than data generated from tauR.
     const tauR = [
       PHYS_MODEL_DEFAULT.tauR.fast,
       PHYS_MODEL_DEFAULT.tauR.medium,

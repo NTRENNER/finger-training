@@ -14,11 +14,14 @@
 // (timescale ordering); calling them by tissue names would be an
 // overclaim the fit doesn't support.
 //
-// τ₁, τ₂, τ₃ are the DEPLETION time constants (PHYS_MODEL_DEFAULT.tauD)
-// of the three model components — fast (≈10s), medium (≈30s), slow
-// (≈180s). The model describes how max sustainable force decays during
-// a sustained hold, which is depletion physics, so the basis is the
-// depletion taus, not the recovery taus.
+// τ₁, τ₂, τ₃ are the F-D CURVE time constants — fast (≈10s), medium
+// (≈30s), slow (480s). fast/medium track the fatigue model's depletion
+// taus (PHYS_MODEL_DEFAULT.tauD), but the SLOW constant is DECOUPLED
+// (July 2026): the fatigue tauD.slow (180s) models force decay WITHIN a
+// single hang, whereas this curve is the ENVELOPE of max sustainable
+// avg force vs hold duration, which decays far more slowly. 180s made
+// the modeled endurance tail drop ~25% faster than real held forces —
+// see THREE_EXP_SLOW_TAU_S below.
 //
 // Amplitude parameterization (a, b, c ≥ 0 in kg) — Smax = a+b+c falls
 // out as the model's prediction at T=0 (i.e. MVC / fresh max).
@@ -40,6 +43,25 @@ import { ZONE_REF_T } from "./zones.js";
 import { effectiveLoad, freshFitReps } from "./load.js";
 
 export const THREE_EXP_LAMBDA_DEFAULT = 100;
+
+// F-D CURVE TIME-CONSTANTS (decoupled from the fatigue depletion model,
+// July 2026). fast/medium reuse the fatigue model's depletion taus, but
+// the SLOW constant is the curve's OWN endurance timescale. The fatigue
+// model's tauD.slow (180s) describes force fade during one hang; the F-D
+// envelope (max sustainable avg force vs hold duration) decays much more
+// slowly. At 180s the modeled tail dropped ~25% faster than real held
+// forces — a genuine 189s @ 5.5 kg Micro hold read only ~3.4 kg on the
+// curve, so the prescription undershot demonstrated capacity. Fit against
+// real per-grip endurance holds the envelope slow constant lands near
+// 540s; 480 is chosen slightly conservative to avoid OVER-predicting
+// endurance for lower-endurance climbers (long-zone fit ~0.98 of held
+// force at 480 vs 0.75 at 180, with short/mid unchanged). Tune here.
+export const THREE_EXP_SLOW_TAU_S = 480;
+export const THREE_EXP_TAUS = [
+  PHYS_MODEL_DEFAULT.tauD.fast,    // 10s
+  PHYS_MODEL_DEFAULT.tauD.medium,  // 30s
+  THREE_EXP_SLOW_TAU_S,            // 480s (curve envelope; NOT the 180s fatigue tau)
+];
 
 // Solve a 3x3 linear system A x = b via Cramer's rule. Internal helper.
 function _solve3(A, b) {
@@ -73,15 +95,15 @@ function _solve2(A, b) {
 //     + λ · ((a − a₀)² + (b − b₀)² + (c − c₀)²)
 //
 // pts:    [{T: duration_s, F: avg_force_kg, w?: weight}]   w defaults to 1
-// taus:   [τ₁, τ₂, τ₃] in seconds (defaults to PHYS_MODEL_DEFAULT.tauD —
-//         the DEPLETION time constants, since this is a hold-duration
-//         decay model, not a rest-period recovery model).
+// taus:   [τ₁, τ₂, τ₃] in seconds (defaults to THREE_EXP_TAUS — the F-D
+//         curve envelope taus; the slow constant is decoupled from the
+//         fatigue depletion basis, see header).
 // prior:  [a₀, b₀, c₀] target amplitudes for shrinkage
 // lambda: shrinkage strength (0 = no shrinkage; large = ignore data)
 //
 // Returns [a, b, c] all ≥ 0. Falls back to prior if no points.
 export function fitThreeExpAmps(pts, opts = {}) {
-  const taus  = opts.taus  || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
+  const taus  = opts.taus  || THREE_EXP_TAUS;
   const prior = opts.prior || [0, 0, 0];
   const lambda = opts.lambda == null ? 0 : opts.lambda;
   if (!pts || pts.length === 0) return prior.slice();
@@ -180,13 +202,13 @@ export function fitThreeExpAmps(pts, opts = {}) {
 //
 // Returns { amps, ratios } where ratios[i] aligns with pts[i]:
 //   ratios[i] = F_actual,i / F_curve_loo,i   ( <1 → below curve, room )
-// taus default to PHYS_MODEL_DEFAULT.tauD (see header).
+// taus default to THREE_EXP_TAUS (see header).
 export function fitThreeExpAmpsLOO(pts, opts = {}) {
   const amps = fitThreeExpAmps(pts, opts);
   const n = pts ? pts.length : 0;
   if (n === 0) return { amps, ratios: [] };
 
-  const taus = opts.taus || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
+  const taus = opts.taus || THREE_EXP_TAUS;
   const lambda = opts.lambda == null ? 0 : opts.lambda;
 
   // Active columns = components the NNLS fit kept above ~0.
@@ -254,10 +276,10 @@ function _invSym(M) {
 }
 
 // Predict force at duration T given fitted amplitudes [a, b, c].
-// Uses PHYS_MODEL_DEFAULT.tauD by default — see header for why this is
-// the depletion basis, not the recovery basis.
+// Uses THREE_EXP_TAUS by default — see header (curve envelope taus,
+// decoupled from the fatigue depletion basis at the slow constant).
 export function predForceThreeExp(amps, T, taus = null) {
-  const tau = taus || [PHYS_MODEL_DEFAULT.tauD.fast, PHYS_MODEL_DEFAULT.tauD.medium, PHYS_MODEL_DEFAULT.tauD.slow];
+  const tau = taus || THREE_EXP_TAUS;
   return amps[0]*Math.exp(-T/tau[0]) + amps[1]*Math.exp(-T/tau[1]) + amps[2]*Math.exp(-T/tau[2]);
 }
 
