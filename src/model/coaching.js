@@ -420,20 +420,32 @@ export function coldStartSeedWeight(T) {
   return 1 + 0.3 * Math.exp(-(x * x) / (2 * 0.5 * 0.5));
 }
 
-// Days since this grip's last FAILED rep at target ≤ FRESH_TEST_SHORT_T_MAX,
-// from already-grip-filtered history. Failures are the only reps the
-// curve fit learns an upper bound from at short T (successes are just
-// lower-bound constraints), so "trained 5s recently" without a failure
-// still leaves the short end unanchored.
+// Days since this grip's last fresh (rep-1) rep at target ≤
+// FRESH_TEST_SHORT_T_MAX, from already-grip-filtered history. Under
+// the train-to-failure model every completed rep IS a failure point —
+// actual_time_s is where the hold ended — so a fresh short-T rep
+// anchors the curve's top end regardless of the `failed` flag.
+//
+// July 2026: this used to gate on `failed === true`, but that flag
+// was retired for fit gating in the May 2026 migration — the runner
+// stamps derivedFailed = failed || isShortfall(...) and the live path
+// always passes failed: false, so a genuine 5s max effort where the
+// user OUTLASTS the target records failed: false. Keying on the flag
+// made "do a fresh max test" nag indefinitely right after the user
+// did exactly that. Rep-1 only (rep_num null = legacy/manual, treated
+// as fresh — same convention as freshFitReps): fatigued within-set
+// reps don't re-anchor the fresh top end.
 // Returns { staleDays, lastDate, recommended }:
-//   staleDays   — days since last short-T failure (null = never)
-//   recommended — true when never failed short, or staleDays exceeds
+//   staleDays   — days since last fresh short-T rep (null = never)
+//   recommended — true when never tested short, or staleDays exceeds
 //                 FRESH_TEST_STALE_DAYS
 export function shortEndFailureStaleness(gripHistory, todayStr) {
   let lastDate = null;
   for (const r of gripHistory || []) {
-    if (!r || r.failed !== true) continue;
+    if (!r) continue;
+    if (!(r.rep_num == null || r.rep_num === 1)) continue;
     if (!(Number(r.target_duration) <= FRESH_TEST_SHORT_T_MAX)) continue;
+    if (!(Number(r.actual_time_s) > 0)) continue;
     if (!r.date) continue;
     if (lastDate == null || r.date > lastDate) lastDate = r.date;
   }
@@ -477,14 +489,13 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   if (!grip || !history || history.length === 0) return null;
 
   // ── Fresh short-duration test advice ─────────────────────────
-  // The curve fit only LEARNS from failures, and the short end
-  // (≤ FRESH_TEST_SHORT_T_MAX s) is where failures are rarest — the
-  // June 2026 review found months of history with no failure under
-  // 7s, leaving F(5s) pure extrapolation (bounded only by the peak
-  // cap). Zone staleness can't catch this: a submax 5s session
-  // counts as "trained" without anchoring anything. Track days since
-  // the last short-T FAILURE for this grip and surface a "do a fresh
-  // max test" advisory when it's stale — Setup's Why line tells the
+  // The short end (≤ FRESH_TEST_SHORT_T_MAX s) is where the fit's
+  // anchors are rarest — the June 2026 review found months of history
+  // with no short-T anchor under 7s, leaving F(5s) pure extrapolation
+  // (bounded only by the peak cap). Track days since the last FRESH
+  // short-T rep for this grip (every train-to-failure rep is a
+  // failure point; see shortEndFailureStaleness) and surface a "do a
+  // fresh max test" advisory when it's stale — Setup's Why line tells the
   // user to schedule it BEFORE climbing, since every anchor logged
   // after bouldering reads systematically low.
   // (Computed against gripHistory below; attached to the returned

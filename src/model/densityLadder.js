@@ -95,14 +95,33 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   const sess = latestSessionInZone(history, grip, zoneKey);
   if (!sess) return null;
 
-  // Per-hand rep sequences, sorted by rep number.
-  const byHand = {};
+  // Per-hand rep sequences from the session's LAST set, sorted by rep
+  // number. set_num MUST be part of the grouping (July 2026 — same bug
+  // class the recovery fit fixed): rep_num restarts per set, so pooling
+  // all of a hand's reps made a 2×4 session read as prevReps = 8
+  // (> LADDER_MAX_REPS) with an interleaved [r1,r1,r2,r2,…] order whose
+  // “last rep” was an arbitrary tie-break — the gate could read the
+  // wrong rep and the ladder could emit a spurious +5% step_load. We
+  // ladder on the LAST set (max set_num; null → 1 for legacy rows):
+  // it sits under the most cumulative fatigue, so its final rep is the
+  // honest dose-absorbed readout the protocol gates on, and its rep
+  // count is the rung the user most recently performed. (Max per-set
+  // count was considered and rejected: gating on the last set's final
+  // rep while counting a different set's reps would let the gate and
+  // the rung disagree about which set they describe.)
+  const byHandSet = {};
   for (const r of sess.reps) {
     const h = r.hand === "R" ? "R" : "L";
-    (byHand[h] = byHand[h] || []).push(r);
+    const setNum = r.set_num ?? 1;
+    const sets = (byHandSet[h] = byHandSet[h] || new Map());
+    if (!sets.has(setNum)) sets.set(setNum, []);
+    sets.get(setNum).push(r);
   }
-  for (const h of Object.keys(byHand)) {
-    byHand[h].sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1));
+  const byHand = {};
+  for (const [h, sets] of Object.entries(byHandSet)) {
+    const lastSetNum = Math.max(...sets.keys());
+    byHand[h] = sets.get(lastSetNum)
+      .sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1));
   }
 
   // The session's protocol T — every rep shares it; read off rep 1.

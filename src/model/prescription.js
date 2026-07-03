@@ -478,6 +478,15 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
     : Date.now();
   const cutoffMs = refMs - EMPIRICAL_LOOKBACK_DAYS * 86400 * 1000;
   const cutoff = ymdLocal(new Date(cutoffMs));
+  //
+  // July 2026: when referenceDate is set, reps ON or AFTER it are
+  // excluded here AND from the curve-fit points below. Both callers
+  // of the retrospective path happened to pre-truncate their history,
+  // which is why this never misfired — but "retrospective" was an
+  // invariant enforced nowhere inside the function that claims it.
+  // recentBestPeakKg already guarded this; the anchor and fit did not,
+  // so an untruncated caller would have anchored an old session's
+  // reconstruction on reps from its own future.
   const sessionRep1 = new Map();
   for (const r of history) {
     if (r.hand !== hand || r.grip !== grip) continue;
@@ -485,6 +494,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
     if (!(r.actual_time_s > 0)) continue;
     if (!(loadedWeight(r) > 0)) continue;
     if ((r.date || "") < cutoff) continue;
+    if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
     const sid = r.session_id || r.date || "unknown";
     sessionRep1.set(sid, r);
   }
@@ -512,6 +522,9 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   const points = history.filter(r =>
     r.hand === hand && r.grip === grip
     && r.actual_time_s > 0 && effectiveLoad(r) > 0
+    // Retrospective semantics (see anchor loop): the fit must not
+    // learn from reps the engine couldn't have seen on referenceDate.
+    && !(referenceDate && (r.date || "") >= referenceDate)
   );
   const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
   const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;

@@ -174,6 +174,59 @@ describe("computeDensityLadder", () => {
     expect(out.loadByHand.R).toBeCloseTo(24, 1);   // override honored
   });
 
+  test("multi-set session ladders on the LAST set, not a pooled rep count", () => {
+    // Regression (July 2026): reps were pooled per hand with set_num
+    // ignored, so a 2×4 session read as prevReps = 8 (> LADDER_MAX_REPS
+    // = 6) and — with the gate passed — emitted a spurious +5%
+    // step_load. Correct reading: the last set is 4 reps on the ladder,
+    // gate passed → advance to 5 at the SAME load.
+    const set = (setNum, times) => session({
+      id: "s1", date: "2026-06-20", T: 40, loadKg: 50,
+      times: { L: times },
+    }).map(r => ({ ...r, id: `${r.id}-set${setNum}`, set_num: setNum }));
+    const hist = [
+      ...set(1, [40, 26, 18, 13]),
+      ...set(2, [38, 24, 16, 12]),   // last set: rep 4 = 12s ≥ 10s gate
+    ];
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out.basis.prevReps).toBe(4);          // not 8
+    expect(out.decision).toBe("advance");        // not step_load
+    expect(out.reps).toBe(5);
+    expect(out.loadByHand.L).toBeCloseTo(50, 1); // no +5% bump
+  });
+
+  test("the gate reads the LAST set's final rep, not a rep_num tie-break", () => {
+    // With set_num ignored, both sets' rep-4s tied in the sort and
+    // "the last rep" fell to insertion order — here set 1's 12s
+    // (passes) instead of set 2's 8s (fails). The second set is the
+    // most fatigued readout: it failed the gate, so the ladder must
+    // repeat, not advance (and certainly not step the load off a
+    // pooled prevReps of 8).
+    const set = (setNum, times) => session({
+      id: "s1", date: "2026-06-21", T: 40, loadKg: 50,
+      times: { L: times },
+    }).map(r => ({ ...r, id: `${r.id}-set${setNum}`, set_num: setNum }));
+    const hist = [
+      ...set(2, [36, 20, 12, 8]),    // last set FAILS the 10s gate…
+      ...set(1, [40, 26, 18, 12]),   // …listed after set 1 passed it
+    ];
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out.basis.lastRepSec).toBeCloseTo(8, 1);
+    expect(out.decision).toBe("repeat");
+    expect(out.reps).toBe(4);
+    expect(out.loadByHand.L).toBeCloseTo(50, 1);
+  });
+
+  test("legacy rows without set_num still ladder as one set", () => {
+    const hist = session({
+      id: "s1", date: "2026-06-22", T: 40, loadKg: 50,
+      times: { L: [40, 24, 16, 12] },
+    }).map(({ set_num, ...r }) => r);   // strip set_num entirely
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out.basis.prevReps).toBe(4);
+    expect(out.decision).toBe("advance");
+  });
+
   test("gate fraction reproduces both source anchors", () => {
     expect(40 * LADDER_GATE_FRAC).toBeCloseTo(10, 5);
     expect(Math.round(90 * LADDER_GATE_FRAC)).toBeGreaterThanOrEqual(20);

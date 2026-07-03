@@ -708,11 +708,15 @@ describe("coaching fit vs chart (buildGripEstimates) fit consistency", () => {
 // ─────────────────────────────────────────────────────────────
 // Fresh short-duration test advisory
 // ─────────────────────────────────────────────────────────────
-// The curve fit only learns an upper bound at short T from FAILURES,
-// and zone staleness can't see the difference between "trained 5s"
-// and "failed at 5s" — the June 2026 review found months of history
-// with no failure under 7s. shortEndFailureStaleness tracks the gap;
-// the engine attaches it to the rec as `freshTest`.
+// The short end is where the fit's anchors are rarest — the June 2026
+// review found months of history with no short-T anchor under 7s.
+// shortEndFailureStaleness tracks the gap; the engine attaches it to
+// the rec as `freshTest`. July 2026: the tracker counts any FRESH
+// (rep-1) short-T rep with a positive actual_time_s — under the
+// train-to-failure model every completed rep is a failure point, and
+// the retired `failed` flag it used to key on records false on the
+// live path (ActiveSessionViews always passes failed: false), which
+// made the advisory nag right after a genuine fresh test.
 describe("shortEndFailureStaleness / freshTest advisory", () => {
   const todayStr = new Date().toISOString().slice(0, 10);
   const daysAgoStr = (n) =>
@@ -724,16 +728,40 @@ describe("shortEndFailureStaleness / freshTest advisory", () => {
     date: daysAgoStr(daysAgo), session_id: `s${T}-${daysAgo}`,
   });
 
-  test("never failed short → recommended, null staleDays", () => {
-    // Plenty of short-T SUCCESSES and long-T failures — neither anchors
-    // the short end, so the advisory must still fire.
-    const hist = [
-      rep(5, 3, false), rep(7, 10, false),       // short successes
-      rep(60, 2, true), rep(120, 5, true),       // long failures
-    ];
+  test("never tested short → recommended, null staleDays", () => {
+    // Long-T reps only — none anchor the short end, so the advisory
+    // must fire regardless of their failed flags.
+    const hist = [rep(60, 2, true), rep(120, 5, false)];
     const out = shortEndFailureStaleness(hist, todayStr);
     expect(out.staleDays).toBeNull();
     expect(out.recommended).toBe(true);
+  });
+
+  test("a fresh short-T max effort counts even with failed: false (retired flag)", () => {
+    // Regression (July 2026): the live runner path always stamps
+    // failed: false — a genuine 5s max effort where the user outlasts
+    // the target still records failed: false. Keying on the retired
+    // flag made "do a fresh max test" nag indefinitely right after
+    // the user did exactly that.
+    const hist = [rep(5, 3, false), rep(60, 2, true)];
+    const out = shortEndFailureStaleness(hist, todayStr);
+    expect(out.staleDays).toBe(3);
+    expect(out.lastDate).toBe(daysAgoStr(3));
+    expect(out.recommended).toBe(false);
+  });
+
+  test("fatigued within-set reps and zero-time rows do not re-anchor", () => {
+    // A rep-3 at 5s is a fatigued within-set hold, not a fresh test;
+    // a rep with no positive actual_time_s anchors nothing. Neither
+    // clears the advisory. rep_num: null (legacy/manual) is treated
+    // as fresh, same convention as freshFitReps.
+    const hist = [
+      { ...rep(5, 2, true), rep_num: 3 },
+      { ...rep(5, 4, true), actual_time_s: 0 },
+    ];
+    expect(shortEndFailureStaleness(hist, todayStr).recommended).toBe(true);
+    const legacy = [{ ...rep(5, 6, false), rep_num: null }];
+    expect(shortEndFailureStaleness(legacy, todayStr).staleDays).toBe(6);
   });
 
   test("recent short-T failure → not recommended, correct staleDays", () => {

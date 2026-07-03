@@ -72,6 +72,7 @@ import {
 import { effectiveLoad, SANE_MAX_KG } from "./load.js";
 import { computePersonalRecoveryTaus } from "./recoveryFit.js";
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
+import { migrateExerciseId } from "./exerciseIds.js";
 
 // ─────────────────────────────────────────────────────────────
 // TWO-HANDED LOAD FACTOR
@@ -180,8 +181,20 @@ export function getRecentMaxPullups(wLog, { daysOld = 30, bodyWeightLbs } = {}) 
       if (!session?.date) continue;
       const sessTs = Date.parse(session.date);
       if (!isFinite(sessTs) || sessTs < cutoffMs) continue;
-      const sets = session.exercises?.["pull_ups"]?.sets;
-      if (!Array.isArray(sets)) continue;
+      // Pullups live under the CURRENT id "weightedPullup"
+      // (supportTraining.js) in new sessions and the legacy "pull_ups"
+      // in old ones — resolve every logged id through the exerciseIds
+      // migration map instead of hard-coding either. Before July 2026
+      // this read only "pull_ups": current sessions were invisible, so
+      // once legacy sessions aged past the 30-day window this returned
+      // null forever and the finisher silently pinned to its default
+      // 5 reps.
+      const sets = [];
+      for (const [exId, ex] of Object.entries(session.exercises || {})) {
+        if (migrateExerciseId(exId) !== "weightedPullup") continue;
+        if (Array.isArray(ex?.sets)) sets.push(...ex.sets);
+      }
+      if (sets.length === 0) continue;
       for (const set of sets) {
         if (strict && !set?.done) continue;
         const reps = Number(set?.reps);
