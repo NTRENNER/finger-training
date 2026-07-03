@@ -96,6 +96,15 @@ export function isShortfall(actualTime, targetDuration) {
 
 // sMax per (hand, grip) = max observed effective load × 1.2 (matches
 // the sMaxL / sMaxR computation used at runtime).
+// Cap on how much within-set fatigue + cookedness de-cook can inflate a
+// single rep's fresh-equivalent load. Without it, a maximally-cooked
+// session (cooked=10 -> capacityMultiplier ~= exp(-5)) compounded with a
+// fatigued late-set rep (availFrac floors at 0.05) produced ~20,000 kg
+// fresh-equivalents that blew the F-D curve fit / chart axis up to
+// ~44,000 lb (July 2026). A rep is never worth more than
+// MAX_FRESH_INFLATION x its measured load, nor above SANE_MAX_KG.
+const MAX_FRESH_INFLATION = 3;
+
 export function buildSMaxIndex(history) {
   const out = new Map();
   for (const r of history || []) {
@@ -217,7 +226,11 @@ export function buildFreshLoadMap(history, opts = {}) {
           if (mult > 0) fresh = fresh / mult;
         }
       }
-      out.set(repKey(r), { fresh, availFrac: af, load });
+      // Bound the fresh-equivalent load (see MAX_FRESH_INFLATION).
+      const cappedFresh = load > 0
+        ? Math.min(fresh, load * MAX_FRESH_INFLATION, SANE_MAX_KG)
+        : fresh;
+      out.set(repKey(r), { fresh: cappedFresh, availFrac: af, load });
 
       const sMax = sMaxByKey.get(`${r.hand}|${r.grip}`) || 20;
       const dose = fatigueDose(load, r.actual_time_s || 0, sMax, doseK);
