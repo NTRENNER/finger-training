@@ -96,7 +96,15 @@ export function useGripFits({
     if (pinnedGripBaselines && typeof pinnedGripBaselines === "object") {
       for (const [grip, pinned] of Object.entries(pinnedGripBaselines)) {
         if (pinned && Array.isArray(pinned.amps) && pinned.amps.length === 3 && pinned.date) {
-          out[grip] = pinned;
+          // Backfill maxHoldS for legacy pins frozen before the field
+          // existed. The candidate's seed window is the same earliest-reps
+          // window the pin froze, so its longest hold matches. Without this
+          // the Curve-Improvement gate never fires for a pinned grip and
+          // unbaselined long zones read as real (often negative) deltas
+          // instead of "new".
+          out[grip] = pinned.maxHoldS != null
+            ? pinned
+            : { ...pinned, maxHoldS: candidateGripBaselines[grip]?.maxHoldS ?? null };
         }
       }
     }
@@ -117,7 +125,7 @@ export function useGripFits({
     for (const [grip, baseline] of Object.entries(candidateGripBaselines)) {
       if (next[grip]) continue;       // already pinned, never overwrite
       if (!baseline || !Array.isArray(baseline.amps) || !baseline.date) continue;
-      next[grip] = { date: baseline.date, amps: baseline.amps };
+      next[grip] = { date: baseline.date, amps: baseline.amps, maxHoldS: baseline.maxHoldS ?? null };
       changed = true;
     }
     if (changed) onSavePinnedGripBaselines(next);
@@ -146,7 +154,9 @@ export function useGripFits({
     if (pinnedPerHandBaselines && typeof pinnedPerHandBaselines === "object") {
       for (const [key, pinned] of Object.entries(pinnedPerHandBaselines)) {
         if (pinned && Array.isArray(pinned.amps) && pinned.amps.length === 3 && pinned.date) {
-          out[key] = pinned;
+          out[key] = pinned.maxHoldS != null
+            ? pinned
+            : { ...pinned, maxHoldS: candidatePerHandBaselines[key]?.maxHoldS ?? null };
         }
       }
     }
@@ -165,7 +175,7 @@ export function useGripFits({
     for (const [key, baseline] of Object.entries(candidatePerHandBaselines)) {
       if (next[key]) continue;        // already pinned, never overwrite
       if (!baseline || !Array.isArray(baseline.amps) || !baseline.date) continue;
-      next[key] = { date: baseline.date, amps: baseline.amps };
+      next[key] = { date: baseline.date, amps: baseline.amps, maxHoldS: baseline.maxHoldS ?? null };
       changed = true;
     }
     if (changed) onSavePinnedPerHandBaselines(next);
