@@ -380,6 +380,10 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
 //                                   Tindeq peak exists in the window
 //     peakCapped:  <bool>           true when value was reduced to the
 //                                   ceiling (curve/linear paths only)
+//     capacityFloorKg: <number>|null best load sustained for a hold of
+//                                   this length-or-longer (the floor)
+//     capacityFloored: <bool>       true when the floor lifted value
+//                                   above the curve x anchor product
 //   }
 //   or null if there's not even a historical fallback.
 //
@@ -465,6 +469,46 @@ export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
   return best;
 }
 
+// Best load the user has DEMONSTRABLY sustained for a hold of
+// targetDuration-or-longer, within the lookback window — a hard FLOOR
+// for the prescription. Holding F kg for actual_time_s d seconds proves
+// the user can sustain at least F for any target <= d (a shorter hold at
+// the same load is strictly easier). So for a target T no prescription
+// should fall below max{ effectiveLoad(r) : fresh rep, actual_time_s >= T }.
+//
+// Why this is needed: the F-D fit is unweighted least-squares in ABSOLUTE
+// kg, so sparse low-force endurance points sit well below the curve (a real
+// 189s @ 5.5 kg Micro hold reads ~37% above the fit). The prescription is
+// curve x anchor with a peak-force CEILING but no floor, so it could
+// recommend LESS load than the user just sustained for a longer hold. This
+// floor makes that impossible; it's a minimum, so genuine progression (the
+// curve/anchor going higher) is unaffected.
+//
+// Fresh efforts only (rep_num === 1 / null) so a fatigued within-set rep
+// can't set the floor; sane loads only; referenceDate mirrors the
+// retrospective semantics used throughout this file. Returns null when
+// nothing qualifies — the prescription then runs unfloored, as before.
+export const CAPACITY_FLOOR_LOOKBACK_DAYS = 90;
+
+export function demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate = null) {
+  if (!history || !(targetDuration > 0)) return null;
+  const refMs = referenceDate
+    ? new Date(`${referenceDate}T00:00:00`).getTime()
+    : Date.now();
+  const cutoff = ymdLocal(new Date(refMs - CAPACITY_FLOOR_LOOKBACK_DAYS * 86400 * 1000));
+  let best = null;
+  for (const r of history) {
+    if (!r || r.hand !== hand || r.grip !== grip) continue;
+    if (!(r.rep_num == null || r.rep_num === 1)) continue;        // fresh efforts only
+    if (!(Number(r.actual_time_s) >= targetDuration)) continue;   // proves capacity at this T-or-shorter
+    if ((r.date || "") < cutoff) continue;
+    if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
+    const load = sane(effectiveLoad(r));
+    if (load != null && (best == null || load > best)) best = load;
+  }
+  return best;
+}
+
 export function prescription(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
   const { freshMap = null, threeExpPriors = null, referenceDate = null } = opts;
@@ -527,7 +571,13 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   const peakCapKg = bestPeakKg != null
     ? Math.round(bestPeakKg * PEAK_CAP_FRACTION * 10) / 10
     : null;
-  const capValue = (v) => capLoad(v, peakCapKg);
+  // Demonstrated-capacity FLOOR (July 2026) — see demonstratedCapacityKg.
+  // Applied inside capValue as floor-then-cap so every return path is
+  // bounded to [floor, ceiling]. A sustained avg is under instantaneous
+  // peak, so the floor can't legitimately exceed the peak ceiling; if a
+  // stale/odd data point ever makes it, the ceiling still wins.
+  const floorKg = demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate);
+  const capValue = (v) => capLoad(floorKg != null ? Math.max(v, floorKg) : v, peakCapKg);
 
   // Try the three-exp curve fit. Requires a per-grip prior to anchor
   // the shrinkage; without one, small-N fits collapse onto degenerate
@@ -583,7 +633,8 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
         // the model believes, and the gap consumers should keep seeing
         // the uncapped shape. peakCapped tells the UI the value was
         // physically bounded rather than curve-derived.
-        const value = capValue(Math.round(valueRaw * 10) / 10);
+        const rawRounded = Math.round(valueRaw * 10) / 10;
+        const value = capValue(rawRounded);
         return {
           value,
           potential:   Math.round(potentialRaw * 10) / 10,
@@ -592,7 +643,9 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
           reliability,
           source,
           peakCapKg,
-          peakCapped:  value !== Math.round(valueRaw * 10) / 10,
+          peakCapped:      value < rawRounded,   // ceiling bit
+          capacityFloorKg: floorKg,
+          capacityFloored: value > rawRounded,   // floor lifted it above the curve
         };
       }
     }
@@ -629,7 +682,9 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
       reliability: "extrapolation",
       source:      "anchored-linear",
       peakCapKg,
-      peakCapped:  value !== v,
+      peakCapped:      value < v,
+      capacityFloorKg: floorKg,
+      capacityFloored: value > v,
     };
   }
 
@@ -638,13 +693,19 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // based on what they've done historically near this T.
   const hist = estimateRefWeight(history, hand, grip, targetDuration);
   if (hist != null && hist > 0) {
+    const hv = Math.round(hist * 10) / 10;
+    const value = capValue(hv);
     return {
-      value:       Math.round(hist * 10) / 10,
-      potential:   Math.round(hist * 10) / 10,
+      value,
+      potential:   hv,
       scale:       1.0,
       anchor:      null,
       reliability: "extrapolation",
       source:      "historical",
+      peakCapKg,
+      peakCapped:      value < hv,
+      capacityFloorKg: floorKg,
+      capacityFloored: value > hv,
     };
   }
 

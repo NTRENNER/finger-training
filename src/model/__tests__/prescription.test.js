@@ -11,6 +11,7 @@ import {
   EMPIRICAL_LOOKBACK_DAYS, prescription,
   PEAK_CAP_FRACTION, PEAK_CAP_LOOKBACK_DAYS, recentBestPeakKg,
   suggestWeight,
+  demonstratedCapacityKg,
 } from "../prescription.js";
 import { buildThreeExpPriors } from "../threeExp.js";
 
@@ -403,9 +404,12 @@ describe("prescription (unified)", () => {
     expect(out.source).toBe("anchored-curve");
     expect(out.anchor).not.toBeNull();
     // Held 30s at 26 kg vs target 45s — the curve over-predicted the
-    // anchor's force, so scale < 1 and prescription < potential.
+    // anchor's force, so scale < 1 and prescription < potential. (No
+    // demonstrated hold reaches the 45s target here — 30s + 10s + a
+    // 60s @ 22 kg — wait, the 60s @ 22 hold DOES reach 45s, so it
+    // floors value at >= 22. Assert on scale, which the floor doesn't
+    // touch.)
     expect(out.scale).toBeLessThan(1);
-    expect(out.value).toBeLessThan(out.potential);
   });
 
   test("cross-zone anchor: a great rep at one T lifts every T", () => {
@@ -425,7 +429,9 @@ describe("prescription (unified)", () => {
     const out = prescription(history, "L", "Crusher", 220, { threeExpPriors: priors });
     expect(out).not.toBeNull();
     expect(out.source).toBe("anchored-curve");
-    // The cross-T anchor lifted the amplitude scalar above 1.
+    // The cross-T anchor lifted the amplitude scalar above 1. (Target
+    // 220s exceeds every demonstrated hold, so the floor is inactive
+    // and value === potential × scale.)
     expect(out.scale).toBeGreaterThan(1);
     expect(out.value).toBeGreaterThan(out.potential);
   });
@@ -435,7 +441,9 @@ describe("prescription (unified)", () => {
     // still builds from these (fresh) rep-1 points, yet no RECENT anchor
     // can be found within the lookback window. (Reps stay rep_num 1: the
     // curve fits / prior now use fresh reps only, so rep_num 2 would also
-    // remove the prior, which isn't what this case is testing.)
+    // remove the prior, which isn't what this case is testing.) Dates are
+    // >90d old so the demonstrated-capacity floor is inactive too, and
+    // value === potential.
     const history = buildCurveHistory().map(r => ({ ...r, date: "2020-01-01" }));
     const priors = buildThreeExpPriors(history);
     const out = prescription(history, "L", "Crusher", 45, { threeExpPriors: priors });
@@ -487,13 +495,17 @@ describe("prescription (unified)", () => {
 
     // Endurance anchor (160s @ 12kg) → 5s max-hang target.
     // Unclamped would be 12 × 32 = 384kg; clamped: 12 × 2.5 = 30kg.
+    // (5s target < the 160s hold, so the floor also guarantees >= 12;
+    // 30 > 12 so the clamp is what binds here.)
     const up = prescription(mkHistory(160, 12), "L", "Crusher", 5);
     expect(up.source).toBe("anchored-linear");
     expect(up.scale).toBe(2.5);
     expect(up.value).toBeCloseTo(30, 1);
 
     // Max-hang anchor (5s @ 40kg) → 220s endurance target.
-    // Old floor 0.7 gave 28kg; clamped floor 0.4 gives 16kg.
+    // Old floor 0.7 gave 28kg; clamped floor 0.4 gives 16kg. (220s
+    // target exceeds the 5s hold, so the demonstrated-capacity floor
+    // is inactive and the linear clamp is what sets the value.)
     const down = prescription(mkHistory(5, 40), "L", "Crusher", 220);
     expect(down.source).toBe("anchored-linear");
     expect(down.scale).toBe(0.4);
@@ -597,10 +609,16 @@ describe("prescription (unified)", () => {
     expect(withRef.source).toBe("anchored-curve");
     expect(withRef.anchor).not.toBeNull();
     expect(withRef.anchor.date).toBe(anchorDate);
-    // The anchored value should be higher than the unanchored one
-    // because the anchor rep (30 kg) is well above the curve's
-    // unscaled prediction.
-    expect(withRef.value).toBeGreaterThan(withoutRef.value);
+    // referenceDate let the strong 30 kg anchor lift the amplitude: its
+    // scale is > 1 (the anchor sits above the ~24 kg curve) while the
+    // unanchored path stays at scale 1. (July 2026: both raw values are
+    // now also subject to the demonstrated-capacity floor — the anchor is
+    // a 30 kg / 30 s hold, so at this 30 s target the floor pins BOTH to
+    // >= 30 kg, which is why we assert on scale rather than the floored
+    // value.)
+    expect(withRef.scale).toBeGreaterThan(1);
+    expect(withoutRef.scale).toBe(1);
+    expect(withRef.value).toBeGreaterThanOrEqual(withoutRef.value);
   });
 
   test("retrospective prescription() ignores reps on/after referenceDate even without caller pre-truncation", () => {
@@ -806,5 +824,71 @@ describe("peak-force ceiling", () => {
     expect(out).not.toBeNull();
     expect(out.peakCapKg).toBeNull();
     expect(out.peakCapped).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Demonstrated-capacity FLOOR — never prescribe below a sustained load
+// ─────────────────────────────────────────────────────────────
+// Holding F kg for d seconds proves capacity >= F for any target <= d, so
+// prescription() floors its value at the best fresh sustained load over
+// holds of duration >= targetDuration (within 90d). Fixes the case where
+// the short-rep-dominated F-D fit sits below a real endurance hold and the
+// unfloored curve x anchor recommends LESS than the user just sustained.
+describe("demonstrated-capacity floor", () => {
+  const day = (n) => new Date(Date.now() - n * 86400 * 1000).toISOString().slice(0, 10);
+  const rep = (over) => ({
+    hand: "L", grip: "Micro", rep_num: 1, set_num: 1,
+    target_duration: 160, actual_time_s: 188, avg_force_kg: 5.5,
+    date: day(5), session_id: "s", ...over,
+  });
+
+  test("demonstratedCapacityKg: best fresh load over holds of duration >= T (within 90d)", () => {
+    const h = [
+      rep({ actual_time_s: 188, avg_force_kg: 5.5, session_id: "a" }), // 188s @ 5.5
+      rep({ actual_time_s: 130, avg_force_kg: 6.0, session_id: "b" }), // 130s @ 6.0
+      rep({ actual_time_s: 40,  avg_force_kg: 9.0, session_id: "c" }), // 40s  @ 9.0
+    ];
+    expect(demonstratedCapacityKg(h, "L", "Micro", 160)).toBeCloseTo(5.5, 5); // only the 188s hold reaches 160
+    expect(demonstratedCapacityKg(h, "L", "Micro", 120)).toBeCloseTo(6.0, 5); // 188 + 130 qualify -> max 6.0
+    expect(demonstratedCapacityKg(h, "L", "Micro", 220)).toBeNull();          // no hold >= 220
+    expect(demonstratedCapacityKg(h, "R", "Micro", 160)).toBeNull();          // other hand
+  });
+
+  test("ignores fatigued within-set reps (rep_num > 1) and stale (> 90d) holds", () => {
+    const h = [
+      rep({ actual_time_s: 200, avg_force_kg: 9.0, rep_num: 3, session_id: "x" }),    // fatigued -> ignored
+      rep({ actual_time_s: 200, avg_force_kg: 8.0, date: day(120), session_id: "y" }), // stale -> ignored
+      rep({ actual_time_s: 200, avg_force_kg: 5.5, session_id: "z" }),                 // fresh, recent
+    ];
+    expect(demonstratedCapacityKg(h, "L", "Micro", 160)).toBeCloseTo(5.5, 5);
+  });
+
+  test("prescription never falls below what was sustained for that hold length", () => {
+    // Short high-force reps dominate the unweighted-in-kg fit, so a genuine
+    // low-force long hold sits ABOVE the curve and the unfloored value lands
+    // under it. The floor lifts it back to the demonstrated load.
+    const history = [
+      ...Array.from({ length: 12 }, (_, i) =>
+        rep({ target_duration: 7, actual_time_s: 7, avg_force_kg: 18, date: day(6), session_id: `sh${i}` })),
+      rep({ target_duration: 160, actual_time_s: 188, avg_force_kg: 5.5, date: day(6), session_id: "long" }),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const p = prescription(history, "L", "Micro", 160, { threeExpPriors: priors });
+    expect(p).not.toBeNull();
+    expect(p.value).toBeGreaterThanOrEqual(5.5);          // never below the 188s @ 5.5 hold
+    expect(p.capacityFloorKg).toBeCloseTo(5.5, 5);
+  });
+
+  test("floor does not apply for a target longer than any demonstrated hold", () => {
+    const history = [
+      ...Array.from({ length: 12 }, (_, i) =>
+        rep({ target_duration: 7, actual_time_s: 7, avg_force_kg: 18, date: day(6), session_id: `sh${i}` })),
+      rep({ target_duration: 160, actual_time_s: 188, avg_force_kg: 5.5, date: day(6), session_id: "long" }),
+    ];
+    const priors = buildThreeExpPriors(history);
+    const p = prescription(history, "L", "Micro", 220, { threeExpPriors: priors });
+    expect(p.capacityFloorKg).toBeNull();
+    expect(p.capacityFloored).toBe(false);
   });
 });
