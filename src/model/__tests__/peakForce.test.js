@@ -1,6 +1,6 @@
 // Tests for src/model/peakForce.js — peak-force (max-strength) trend.
 
-import { buildPeakForceTrend, PEAK_MAX_PROTOCOL_T } from "../peakForce.js";
+import { buildPeakForceTrend, PEAK_MAX_PROTOCOL_T, maxTestStaleness, MAX_TEST_STALE_DAYS } from "../peakForce.js";
 
 const rep = (grip, date, t, peak, target = 7) => ({
   grip, hand: "L", date, rep_num: 1, target_duration: target,
@@ -87,7 +87,7 @@ describe("buildPeakForceTrend", () => {
     expect(t.best.Micro.kg).toBe(24);
   });
 
-  // ── Provisional grips (June 2026) ────────────────────────────
+  // ── Provisional grips (June 2026) ───────────────────────────
   // A new grip's cold-start sessions are mid-duration, so it can
   // train for weeks with no max/power day. It now appears as a
   // provisional series (sub-max peaks, no % badge) instead of being
@@ -106,7 +106,7 @@ describe("buildPeakForceTrend", () => {
     expect(t.changePct.Crusher).not.toBeNull();
   });
 
-  // ── Smoothed max-day trend (June 2026) ───────────────────────
+  // ── Smoothed max-day trend (June 2026) ──────────────────────
   // The PR line can only rise or hold; the trend line is the one
   // that can fall — early warning for decline the staircase hides.
   test("trend is a 3-point centered mean over max-day session bests", () => {
@@ -164,5 +164,57 @@ describe("buildPeakForceTrend", () => {
     // baseline the % climbs from.
     expect(t.rows.find(r => r.date === "2026-06-10")).toBeUndefined();
     expect(t.best.Prime.kg).toBe(9.1);
+  });
+});
+
+describe("maxTestStaleness", () => {
+  const R = (date, { peak = 20, target = 3 } = {}) => ({
+    grip: "Micro", hand: "L", date, rep_num: 1, set_num: 1,
+    target_duration: target, actual_time_s: 3, peak_force_kg: peak, avg_force_kg: 18,
+  });
+
+  test("never measured → recommended, staleDays null", () => {
+    const r = maxTestStaleness([], "2026-07-04");
+    expect(r).toEqual({ staleDays: null, lastDate: null, recommended: true });
+  });
+
+  test("fresh reading (< 28d) → not recommended", () => {
+    const r = maxTestStaleness([R("2026-06-20")], "2026-07-04");  // 14d
+    expect(r.staleDays).toBe(14);
+    expect(r.recommended).toBe(false);
+  });
+
+  test("stale reading (> 28d) → recommended", () => {
+    const r = maxTestStaleness([R("2026-05-20")], "2026-07-04");  // 45d
+    expect(r.staleDays).toBe(45);
+    expect(r.recommended).toBe(true);
+  });
+
+  test("uses the MOST RECENT peak reading", () => {
+    const r = maxTestStaleness([R("2026-04-01"), R("2026-06-25")], "2026-07-04");
+    expect(r.lastDate).toBe("2026-06-25");
+    expect(r.recommended).toBe(false);
+  });
+
+  test("peak-only: a short rep WITHOUT a measured peak does not clear it", () => {
+    // manual short entry (peak null) — clears shortEndFailureStaleness but
+    // NOT the peak-test cadence, which needs a real peak_force_kg reading.
+    const manualShort = { grip: "Micro", hand: "L", date: "2026-07-03", rep_num: 1,
+      target_duration: 3, actual_time_s: 3, peak_force_kg: null, avg_force_kg: 18 };
+    const r = maxTestStaleness([manualShort], "2026-07-04");
+    expect(r).toEqual({ staleDays: null, lastDate: null, recommended: true });
+  });
+
+  test("endurance rep with a peak is excluded (target beyond max/power)", () => {
+    const enduro = R("2026-07-03", { target: 160 });  // has a peak but sub-max intent
+    const r = maxTestStaleness([enduro], "2026-07-04");
+    expect(r).toEqual({ staleDays: null, lastDate: null, recommended: true });
+  });
+
+  test("boundary: exactly 28d is still fresh (> is the gate)", () => {
+    const r = maxTestStaleness([R("2026-06-06")], "2026-07-04");  // 28d
+    expect(r.staleDays).toBe(28);
+    expect(r.recommended).toBe(false);
+    expect(MAX_TEST_STALE_DAYS).toBe(28);
   });
 });
