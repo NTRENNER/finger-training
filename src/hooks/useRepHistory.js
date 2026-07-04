@@ -652,6 +652,36 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
   }, [user]);
 
   const updateRep = useCallback(async (rep, updates) => {
+    // HAND CHANGE = IDENTITY MOVE (2026-07 fix). `hand` is part of a
+    // rep's cloud identity — the reps table's slot/conflict key is
+    // (session_id, set_num, rep_num, hand), and the tombstone system
+    // keys on it. An in-place id-based update (below) changes the row
+    // but leaves the OLD-hand slot un-tombstoned, so a reconcile / stale
+    // offline cache / other device can re-insert the pre-edit-hand row
+    // — the "R reps changed back to L" bug (documented 2026-06-12; the
+    // write-ahead queue reduced but didn't close it). Model a hand
+    // change as delete-old + insert-new instead: deleteRep tombstones
+    // the vacated id AND slot, addReps re-inserts at the new slot with a
+    // fresh id, reusing the machinery that already handles identity
+    // moves and is immune to resurrection. The moved rep takes the next
+    // free rep_num on the TARGET hand so it can't collide with an
+    // existing rep there (hand+rep_num is unique). Non-hand edits
+    // (load / time / rest) keep the cheap in-place path.
+    const movingHand =
+      (updates.hand === "L" || updates.hand === "R") && updates.hand !== rep.hand;
+    if (movingHand) {
+      const sessKey = rep.session_id || rep.date;
+      const setNum = rep.set_num ?? 1;
+      const nextRepNum = 1 + (history || []).reduce((m, r) =>
+        ((r.session_id || r.date) === sessKey && (r.set_num ?? 1) === setNum
+          && r.hand === updates.hand)
+          ? Math.max(m, r.rep_num || 0) : m, 0);
+      const moved = { ...rep, ...updates, id: genRepId(), set_num: setNum, rep_num: nextRepNum };
+      await deleteRep(rep);   // id + slot tombstone the vacated (…, old hand)
+      addReps([moved]);       // fresh id + slot at (…, new hand)
+      return;
+    }
+
     const k = repMatchKey(rep);
     setHistory(h => h.map(r => repMatchKey(r) === k ? { ...r, ...updates } : r));
     // WRITE-AHEAD queue (June 2026): enqueue BEFORE the network
@@ -669,7 +699,7 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
       enqueueRepUpdate({ kind: "rep", id: rep.id, updates });
       if (user) await flushUpdateQueue();
     }
-  }, [user]);
+  }, [user, history, deleteRep, addReps]);
 
   const deleteSession = useCallback(async (sessionKey) => {
     // Capture removed reps outside setHistory so we can push their
