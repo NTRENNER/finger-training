@@ -54,6 +54,8 @@ import {
   coachingRecommendationContinuous,
   FRESH_TEST_SHORT_T_MAX,
 } from "../../model/coaching.js";
+import { MAX_TEST_TARGET_S, MAX_TEST_ATTEMPTS, maxTestStaleness } from "../../model/peakForce.js";
+import { ymdLocal } from "../../util.js";
 import { capacityMultiplier } from "../../model/fatigueBeta.js";
 import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import {
@@ -116,6 +118,18 @@ export function SessionPlanCard({
   );
   const recommendedZone = rec?.zone;
 
+  // Peak-test cadence (MVP): is a fresh MEASURED max reading overdue for
+  // this grip? Computed here from grip-filtered history (the coaching
+  // engine stays untouched); drives the actionable "peak test due" nudge
+  // in the Why line. Suppressed while the engine is cold-starting a new
+  // grip (a max test comes after the curve is seeded).
+  const maxTest = useMemo(
+    () => grip && !rec?.coldStart
+      ? maxTestStaleness(history.filter(r => r?.grip === grip), ymdLocal())
+      : null,
+    [history, grip, rec]
+  );
+
   // ── Climb-derived cookedness suggestion ──────────────────────
   // Derived from today's (+ decayed yesterday's) logged climbs — see
   // suggestCookedFromClimbs. Pre-fills the slider ONCE per mount when
@@ -146,7 +160,7 @@ export function SessionPlanCard({
   // carry into Micro silently.
   useEffect(() => { setOverrideZone(null); }, [grip]);
 
-  // ── Density ladder for the active (grip, zone) ───────────────
+  // ── Density ladder for the active (grip, zone) ─────────────
   // Rep-count progression at constant load, gated by the previous
   // session's LAST-rep duration (see model/densityLadder.js). Non-null
   // whenever this (grip, zone) has been trained before — in that case
@@ -189,7 +203,7 @@ export function SessionPlanCard({
     }).filter(Boolean);
   }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, fatigueModel, cooked]);
 
-  // ── Active row — drives the bottom session-details panel ─────────────
+  // ── Active row — drives the bottom session-details panel ──────────────
   const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
   // T comes from rec (the engine's argmax in the continuous sweep) when
   // we're on the recommended zone; from the zone's refTime when the user
@@ -227,7 +241,7 @@ export function SessionPlanCard({
       : 5;
   const rest = 20;
 
-  // ── Push to session config ─────────────────────────────────────────
+  // ── Push to session config ────────────────────────────────────────────
   // ladderLoadByHand: fresh-equivalent pinned loads when the density
   // ladder is active (null otherwise). useSessionRunner.startSession
   // prefers these over a fresh prescription() call so the "same
@@ -245,7 +259,7 @@ export function SessionPlanCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeZone, activeT, reps, rest, ladder]);
 
-  // ── Empty / loading states ──────────────────────────────────────────
+  // ── Empty / loading states ─────────────────────────────────────────────
   if (!grip) {
     return (
       <Card style={{ marginBottom: 16 }}>
@@ -268,7 +282,7 @@ export function SessionPlanCard({
     );
   }
 
-  // ── Why-text for the recommended zone ───────────────────────────────
+  // ── Why-text for the recommended zone ─────────────────────────────────
   const whyParts = [];
   const room = rec.room ?? (1 - (rec.localRatio ?? 1));
   // Skip the residual ("below the curve") reasons when the target was
@@ -356,6 +370,17 @@ export function SessionPlanCard({
     } else {
       whyParts.push("do this fresh — before climbing — so it anchors the curve's top end honestly");
     }
+  } else if (maxTest?.recommended) {
+    // Peak test due — the actionable, cadenced max-strength read. A
+    // MAX_TEST_ATTEMPTS × MAX_TEST_TARGET_S max effort refreshes the Peak
+    // Force card AND anchors the curve's top end, so it supersedes the
+    // freshTest curve-anchor line below.
+    const proto = `${MAX_TEST_ATTEMPTS}×${MAX_TEST_TARGET_S}s max pulls per hand (before climbing)`;
+    whyParts.push(
+      maxTest.staleDays == null
+        ? `no max reading on record — peak test due: ${proto} to set your top line and anchor the curve`
+        : `last max reading was ${maxTest.staleDays}d ago — peak test due: ${proto} to refresh your top line`
+    );
   } else if (rec.freshTest?.recommended) {
     whyParts.push(
       rec.freshTest.staleDays == null
@@ -376,7 +401,7 @@ export function SessionPlanCard({
   const s = totalSec % 60;
   const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
 
-  // ── Render ──────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${activeColor}66` }}>
 
