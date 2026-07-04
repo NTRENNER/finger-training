@@ -86,7 +86,7 @@ export function useSessionRunner({
   tindeqConnected,
   onSessionStart,
 }) {
-  // ── Session config (see comment at top) ─────────────────────
+  // ── Session config (see comment at top) ──────────────────────
   // Multi-set fields (numSets, setRestTime) removed — every session
   // is single-set under the curve-trust model.
   const [rawConfig, setConfig] = useState(() => ({
@@ -112,7 +112,7 @@ export function useSessionRunner({
   // No derived fields anymore — config is rawConfig.
   const config = rawConfig;
 
-  // ── Phase machine + per-rep counters ────────────────────────
+  // ── Phase machine + per-rep counters ─────────────────────────
   // (currentSet removed — single-set model. Rep records still write
   // set_num: 1 as a constant for backward compat with the existing
   // Supabase schema; the column is otherwise unused going forward.)
@@ -145,41 +145,51 @@ export function useSessionRunner({
   // were the only consumer. Per-grip baseline data is still available
   // through model/levels.js for any future runtime feature that needs it.)
 
-  // ── Start session ───────────────────────────────────────────
+  // ── Start session ────────────────────────────────────────────────
   // refWeights drives the in-workout "Rep 1 suggested weight" display
   // and the weight that gets recorded against each rep. Same prescription
   // chain as the Setup card's "Train at" cell — single unified call to
   // prescription() which internally walks anchored-curve → unanchored-curve
   // → anchored-linear → historical, returning whichever path has data.
-  const startSession = useCallback(() => {
+  // Optional `override` config lets a caller launch a session with a
+  // config distinct from the live setup state — used by the Peak Test
+  // launcher (SetupView), which starts a target-less 3s max preset that
+  // must NOT be clobbered by the SessionPlanCard's onApplyPlan. When an
+  // override is passed we also setConfig(override) so every downstream
+  // reader (handleRepDone stamps target_duration from config) sees it.
+  // Anything without a .grip (e.g. a click event from onClick={onStart})
+  // is ignored, so the plain Start button keeps working unchanged.
+  const startSession = useCallback((override) => {
+    const cfg = (override && override.grip) ? override : config;
+    if (override && override.grip) setConfig(override);
     const sid = uid();
     const rw = {};
     // Per-grip capacity multiplier: exp(-β·cooked). 1.0 when cooked
     // is null/0. Replaces the old per-zone applyPersonalGain path —
     // same multiplicative role on load, but the learner is per-grip
     // and lives in user_settings.settings.fatigue_model.
-    const fatigueMod = capacityMultiplier(fatigueModel, config.grip, config.cooked);
+    const fatigueMod = capacityMultiplier(fatigueModel, cfg.grip, cfg.cooked);
     ["L", "R"].forEach(h => {
       // Density-ladder pin (see model/densityLadder.js + SessionPlanCard):
       // for repeat (grip, zone) sessions the plan carries the previous
       // session's fresh-equivalent load — "same weight, more reps" only
       // holds if we DON'T re-prescribe from the (still-learning) curve.
       // Today's cooked multiplier still applies, same as the curve path.
-      const pinned = config.ladderLoadByHand?.[h];
+      const pinned = cfg.ladderLoadByHand?.[h];
       const base = pinned > 0
         ? pinned
         : (() => {
-            const p = prescription(history, h, config.grip, config.targetTime,
+            const p = prescription(history, h, cfg.grip, cfg.targetTime,
               { freshMap, threeExpPriors });
-            return p ? p.value : estimateRefWeight(history, h, config.grip, config.targetTime);
+            return p ? p.value : estimateRefWeight(history, h, cfg.grip, cfg.targetTime);
           })();
       rw[h] = base != null ? base * fatigueMod : base;
     });
     // Persist today's cookedness so the server-side β trigger can
     // join it onto rep-1 inserts. Fire-and-forget; failure here
     // doesn't block the session, just costs a learning update.
-    if (config.cooked != null) {
-      pushDailyState(today(), config.cooked);
+    if (cfg.cooked != null) {
+      pushDailyState(today(), cfg.cooked);
     }
     const startedAt = nowISO();
     preSessionHistoryRef.current = history;  // freeze pre-session view for level-up detection
@@ -191,7 +201,7 @@ export function useSessionRunner({
     setCurrentRep(0);
     setLeveledUp(false);
     setLastRepResult(null);
-    setActiveHand(config.hand === "Both" ? "L" : config.hand);
+    setActiveHand(cfg.hand === "Both" ? "L" : cfg.hand);
     setManualOffset(false);
     // No Tindeq → ask once whether to apply the 2s manual-timing offset
     // before the first rep. Tindeq sessions skip straight into the rep
@@ -260,7 +270,7 @@ export function useSessionRunner({
     }
   }, [phase]);
 
-  // ── Handle rep completion ───────────────────────────────────
+  // ── Handle rep completion ────────────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false }) => {
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
