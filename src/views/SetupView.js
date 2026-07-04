@@ -313,28 +313,6 @@ export function SetupView({
         </div>
       </Card>
 
-      {/* Peak test due — target-less 3s max preset (see startMaxTest).
-          Only shows for the selected grip when its measured max reading
-          is overdue. One-line warm-up gate in the copy. */}
-      {config.grip && maxTest?.recommended && (
-        <Card style={{ marginBottom: 16, border: `1px solid ${C.blue}66`, background: C.blue + "11" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>
-                🎯 Peak test due · {config.grip}
-              </div>
-              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.45 }}>
-                {maxTest.staleDays == null
-                  ? "No max reading on record yet."
-                  : `Last max reading was ${maxTest.staleDays}d ago.`}{" "}
-                {MAX_TEST_ATTEMPTS}×{MAX_TEST_TARGET_S}s max pulls per hand, full rest — warm up first, and connect your Tindeq so it captures peak.
-              </div>
-            </div>
-            <Btn color={C.blue} onClick={startMaxTest}>Start peak test</Btn>
-          </div>
-        </Card>
-      )}
-
       {/* Single unified session-pick surface — RPE slider on top, six
           clickable zone tiles, session details below. Replaces the
           previously-separate ContinuousPickCard + PrescribedLoadCard
@@ -359,6 +337,35 @@ export function SetupView({
         onNavigateToSettings={onNavigateToSettings}
       />
 
+
+      {/* Peak test launcher — always available once a grip is picked, so
+          you can run a max test on demand, not only when the cadence is
+          due. Copy + emphasis adapt to whether this grip's measured max
+          reading is overdue (maxTest.recommended). Target-less 3s max
+          preset via startMaxTest → the Peak Force card + cadence update
+          from the logged reps. */}
+      {config.grip && maxTest && (
+        <Card style={{
+          marginBottom: 16,
+          border: `1px solid ${maxTest.recommended ? C.blue : C.border}`,
+          background: maxTest.recommended ? C.blue + "11" : C.card,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>
+                🎯 Peak test{maxTest.recommended ? " due" : ""} · {config.grip}
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.45 }}>
+                {maxTest.staleDays == null
+                  ? "No measured max on record yet."
+                  : `Last max reading ${maxTest.staleDays}d ago${maxTest.recommended ? " — overdue" : ""}.`}{" "}
+                {MAX_TEST_ATTEMPTS}×{MAX_TEST_TARGET_S}s max pulls per hand, full rest — warm up first, Tindeq connected so it captures peak.
+              </div>
+            </div>
+            <Btn color={C.blue} onClick={startMaxTest}>Start peak test</Btn>
+          </div>
+        </Card>
+      )}
 
       {/* Curve Coverage moved to Analysis tab — it's a per-zone
           reference view, not a session-prep input, so it lives with
