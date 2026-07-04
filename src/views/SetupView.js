@@ -62,11 +62,12 @@ import { today } from "../util.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { computeDeload, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.js";
+import { maxTestStaleness, MAX_TEST_TARGET_S, MAX_TEST_ATTEMPTS } from "../model/peakForce.js";
 import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // Inline body-weight prompt — shown in session setup when BW is stale
 // (>3 days). Exported because WorkoutTab also renders it before its
 // session log so users get the same nudge regardless of entry tab.
@@ -172,9 +173,9 @@ export function BwPrompt({ unit = "lbs", onSave }) {
 }
 
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // SETUP VIEW
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 
 export function SetupView({
   config, setConfig, onStart, history,
@@ -240,6 +241,33 @@ export function SetupView({
     setDeloadWeek(null);
   };
 
+  // Peak-test cadence for the selected grip — drives the "peak test due"
+  // launcher below. maxTestStaleness keys on a MEASURED peak (Tindeq), so a
+  // grip whose last max reading is overdue (or never) surfaces the button.
+  const maxTest = useMemo(
+    () => config.grip
+      ? maxTestStaleness(history.filter(r => r?.grip === config.grip), todayStr)
+      : null,
+    [history, config.grip, todayStr]
+  );
+
+  // Launch a target-less max test: a 3s, best-of-MAX_TEST_ATTEMPTS
+  // max-strength preset started through startSession's override path so
+  // the SessionPlanCard's onApplyPlan can't clobber it. Reps log with
+  // target_duration = 3 + the Tindeq peak, so the Peak Force card and the
+  // cadence pick them up with no special tagging.
+  const startMaxTest = () => {
+    onStart({
+      ...config,
+      goal: "max_strength",
+      targetTime: MAX_TEST_TARGET_S,
+      repsPerSet: MAX_TEST_ATTEMPTS,
+      restTime: 150,
+      hand: "Both",
+      ladderLoadByHand: null,
+    });
+  };
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
@@ -284,6 +312,28 @@ export function SetupView({
           </div>
         </div>
       </Card>
+
+      {/* Peak test due — target-less 3s max preset (see startMaxTest).
+          Only shows for the selected grip when its measured max reading
+          is overdue. One-line warm-up gate in the copy. */}
+      {config.grip && maxTest?.recommended && (
+        <Card style={{ marginBottom: 16, border: `1px solid ${C.blue}66`, background: C.blue + "11" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>
+                🎯 Peak test due · {config.grip}
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.45 }}>
+                {maxTest.staleDays == null
+                  ? "No max reading on record yet."
+                  : `Last max reading was ${maxTest.staleDays}d ago.`}{" "}
+                {MAX_TEST_ATTEMPTS}×{MAX_TEST_TARGET_S}s max pulls per hand, full rest — warm up first, and connect your Tindeq so it captures peak.
+              </div>
+            </div>
+            <Btn color={C.blue} onClick={startMaxTest}>Start peak test</Btn>
+          </div>
+        </Card>
+      )}
 
       {/* Single unified session-pick surface — RPE slider on top, six
           clickable zone tiles, session details below. Replaces the
