@@ -167,3 +167,55 @@ export function buildPeakForceTrend(history, {
 
   return { grips, provisional, rows, best, latest, firstBest, changePct, domain };
 }
+
+// ─────────────────────────────────────────────────────────────
+// PEAK TEST CADENCE — periodic max-strength test
+// ─────────────────────────────────────────────────────────────
+// A dedicated short maximal-pull test so the Peak Force card stays
+// populated on a cadence instead of only when a max/power block
+// happens to land. The top line is neuromuscular / instantaneous, so
+// the test is short and repeatable:
+//   MAX_TEST_TARGET_S — 3s target: long enough to ramp to true peak
+//     recruitment, short enough to avoid metabolic confound / fatigue.
+//   MAX_TEST_ATTEMPTS — best of 3 per hand (one pull is noisy; a
+//     ramp-up attempt can out-pull a cold first pull).
+// A 3s rep clears both PEAK_MAX_PROTOCOL_T (peak card) and the curve's
+// short-end fresh-test gate, so it needs no special protocol tagging.
+export const MAX_TEST_TARGET_S = 3;
+export const MAX_TEST_ATTEMPTS = 3;
+// Cadence. Peak is fairly flat month-to-month, so ~4 weeks between
+// tests keeps the reading fresh without over-testing. This is a
+// MEASUREMENT-freshness window (when did we last read your max),
+// distinct from LOCKOUT_WINDOW_DAYS (detraining).
+export const MAX_TEST_STALE_DAYS = 28;
+
+// Days since this grip last produced a real PEAK reading — a Tindeq-
+// measured max-effort rep (peak_force_kg present, at a max/power
+// target ≤ PEAK_MAX_PROTOCOL_T). Distinct from shortEndFailureStaleness
+// (which anchors the CURVE's short end and accepts any short rep,
+// including manual entries with no peak): the peak card needs a
+// measured peak, so a manual short hold can't clear this. `gripHistory`
+// is already grip-filtered (called per grip from the coaching engine).
+// Returns { staleDays, lastDate, recommended }:
+//   staleDays   — days since last peak reading (null = never)
+//   recommended — true when never measured, or staleDays exceeds
+//                 MAX_TEST_STALE_DAYS
+export function maxTestStaleness(gripHistory, todayStr, {
+  maxProtocolT = PEAK_MAX_PROTOCOL_T,
+  staleDaysMax = MAX_TEST_STALE_DAYS,
+} = {}) {
+  let lastDate = null;
+  for (const r of gripHistory || []) {
+    if (!r || !r.date) continue;
+    const peak = Number(r.peak_force_kg);
+    if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;
+    const tgt = Number(r.target_duration);
+    if (Number.isFinite(tgt) && tgt > maxProtocolT) continue;   // max/power intent only
+    if (lastDate == null || r.date > lastDate) lastDate = r.date;
+  }
+  if (lastDate == null) return { staleDays: null, lastDate: null, recommended: true };
+  const days = Math.round(
+    (new Date(`${todayStr}T00:00:00`).getTime() - new Date(`${lastDate}T00:00:00`).getTime()) / 86400000
+  );
+  return { staleDays: days, lastDate, recommended: days > staleDaysMax };
+}
