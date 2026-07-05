@@ -88,6 +88,12 @@ export function useHistoryOverlay({
       }
       const allDates = [...datesSet].sort();
       const ampsByDate = new Map();
+      // Cumulative longest hold in the data up to each date. Used by
+      // the per-zone baseline: a zone the pooled baseline never reached
+      // gets anchored to the earliest date whose data first reached that
+      // duration (see perZoneBaselineAmps), so long-hold zones show a
+      // real Δ% instead of "new" once you've trained them.
+      const maxHoldByDate = new Map();
       const validDates = [];
       for (const date of allDates) {
         const upTo = gripReps.filter(r => (r.date || "") <= date);
@@ -100,6 +106,7 @@ export function useHistoryOverlay({
         );
         if (!amps) continue;
         ampsByDate.set(date, amps);
+        maxHoldByDate.set(date, upTo.reduce((m, r) => Math.max(m, r.actual_time_s || 0), 0));
         validDates.push(date);
       }
       if (validDates.length === 0) continue;
@@ -163,6 +170,7 @@ export function useHistoryOverlay({
         baselineMaxHoldS: baseline.maxHoldS ?? null,
         dates: validDates,
         ampsByDate,
+        maxHoldByDate,
         perHand,    // { L?: {...}, R?: {...} } — empty when no per-hand baselines
       };
     }
