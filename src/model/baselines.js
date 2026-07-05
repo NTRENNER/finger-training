@@ -76,7 +76,16 @@ export function fitAmpsForPts(pts, grip, threeExpPriors) {
 // zone can't produce a positive reference force.
 export const SUPPORT_MIN_HOLD_FRAC = 0.6;
 
-export function improvementForAmps(curAmps, refAmps, baselineMaxHoldS = null) {
+// zoneRefAmps (July 2026, per-zone baseline): a zone whose refT is beyond
+// the pooled baseline's reach used to show "new" forever, even after you'd
+// trained it — because there's no pooled-baseline force to divide by. When
+// a per-zone baseline is supplied (from perZoneBaselineAmps: the earliest
+// cumulative fit whose data first reached that zone), the zone reports Δ%
+// vs ITS OWN baseline instead of null. Those zones are NOT folded into the
+// pooled `total` (that stays "since <baselineDate>" over the pooled-
+// supported zones) — a per-zone gain is measured from a different, later
+// start, so mixing it into the headline would misdate the number.
+export function improvementForAmps(curAmps, refAmps, baselineMaxHoldS = null, zoneRefAmps = null) {
   if (!curAmps || !refAmps) return null;
   const supported = (t) =>
     baselineMaxHoldS == null || baselineMaxHoldS >= t * SUPPORT_MIN_HOLD_FRAC;
@@ -84,7 +93,19 @@ export function improvementForAmps(curAmps, refAmps, baselineMaxHoldS = null) {
   const supRefTs = [];
   for (const k of ZONE_KEYS) {
     const t = REF_T_BY_ZONE[k];
-    if (!supported(t)) { result[k] = null; continue; }   // unbaselined → "new"
+    if (!supported(t)) {
+      // Beyond the pooled baseline. Use a per-zone baseline if we have
+      // one; otherwise it's genuinely unmeasured → "new".
+      const zref = zoneRefAmps && zoneRefAmps[k];
+      if (zref) {
+        const cur = predForceThreeExp(curAmps, t);
+        const ref = predForceThreeExp(zref, t);
+        result[k] = ref > 0 ? Math.round((cur / ref - 1) * 100) : null;
+      } else {
+        result[k] = null;
+      }
+      continue;
+    }
     const cur = predForceThreeExp(curAmps, t);
     const ref = predForceThreeExp(refAmps, t);
     if (ref <= 0) return null;
@@ -101,6 +122,33 @@ export function improvementForAmps(curAmps, refAmps, baselineMaxHoldS = null) {
   const curGM = gmForce(curAmps), refGM = gmForce(refAmps);
   result.total = refGM > 0 ? Math.round((curGM / refGM - 1) * 100) : null;
   return result;
+}
+
+// Per-zone baseline amps (July 2026). For each zone the pooled baseline
+// never reached (its longest hold < SUPPORT_MIN_HOLD_FRAC × refT), find the
+// EARLIEST cumulative fit whose data had by then first reached that zone's
+// duration, and use that fit as the zone's own baseline. Lets long-hold
+// zones (str-endurance, endurance) show a real, moving Δ% once trained
+// instead of a permanent "new". `dates` ascending; `ampsByDate` and
+// `maxHoldByDate` keyed by date (from useHistoryOverlay). Returns
+// { [zoneKey]: amps } only for zones the pooled baseline missed AND some
+// later date reached; other zones are omitted (caller renders them "new").
+export function perZoneBaselineAmps(dates, ampsByDate, maxHoldByDate, baselineMaxHoldS) {
+  if (!dates || !ampsByDate || !maxHoldByDate) return {};
+  const out = {};
+  for (const k of ZONE_KEYS) {
+    const t = REF_T_BY_ZONE[k];
+    const need = t * SUPPORT_MIN_HOLD_FRAC;
+    if (baselineMaxHoldS != null && baselineMaxHoldS >= need) continue; // pooled baseline already covers it
+    for (const d of dates) {
+      if ((maxHoldByDate.get(d) || 0) >= need) {
+        const amps = ampsByDate.get(d);
+        if (amps) out[k] = amps;
+        break;   // earliest qualifying date
+      }
+    }
+  }
+  return out;
 }
 
 // Pooled global baseline. Walks history chronologically, accumulating
