@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Single source of truth for pulling a usable kg load value off a rep
 // record. Lives in its own dependency-free leaf module (no imports)
 // so EVERY layer can use it without circular-import problems — in
@@ -107,4 +107,24 @@ export function freshFitReps(history) {
     out.push(r);
   }
   return out;
+}
+
+// Data-integrity guard (July 2026). A hand-seeded / backfilled rep can
+// carry a single intended load value mirrored into BOTH avg_force_kg and
+// peak_force_kg (that's the signature of the corrupt "andr0520" Micro
+// session — a manual twin of a real Tindeq session, logged at ~2x the
+// true load). A genuinely MEASURED hold always has peak strictly above
+// average — the force ramps and decays, so the mean is below the peak.
+// So avg==peak (both finite, positive) means "not a real measurement" —
+// exclude it from anything that reads capacity off a single rep (the
+// demonstrated-capacity floor, the amplitude anchor, the curve-fit
+// points), where one inflated point can dominate. Manual reps
+// (avg_force_kg null, load in manual_load_kg) are NOT flagged — null is
+// not a finite peak — so genuine manual endurance entries still count.
+export function isSeedArtifactRep(r) {
+  if (!r) return false;
+  const a = Number(r.avg_force_kg);
+  const p = Number(r.peak_force_kg);
+  return Number.isFinite(a) && Number.isFinite(p) && a > 0 && p > 0
+    && Math.abs(a - p) < 1e-6;
 }
