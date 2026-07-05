@@ -57,7 +57,7 @@ import { PEAK_MAX_PROTOCOL_T } from "./peakForce.js";
 // (prescription.js imports threeExp.js). effectiveLoad + loadedWeight
 // are used internally below; all four are re-exported just after so
 // existing call sites that import them from prescription.js keep working.
-import { sane, effectiveLoad, loadedWeight, SANE_MAX_KG } from "./load.js";
+import { sane, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep } from "./load.js";
 
 // ─────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
@@ -500,6 +500,7 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
   for (const r of history) {
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;        // fresh efforts only
+    if (isSeedArtifactRep(r)) continue;                           // skip seeded/backfilled twins (avg==peak)
     if (!(Number(r.actual_time_s) >= targetDuration)) continue;   // proves capacity at this T-or-shorter
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
@@ -550,6 +551,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
     if ((r.rep_num || 1) !== 1) continue;
     if (!(r.actual_time_s > 0)) continue;
     if (!(loadedWeight(r) > 0)) continue;
+    if (isSeedArtifactRep(r)) continue;                             // seeded/backfilled twin can't anchor
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
     const sid = r.session_id || r.date || "unknown";
@@ -585,6 +587,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   const points = history.filter(r =>
     r.hand === hand && r.grip === grip
     && r.actual_time_s > 0 && effectiveLoad(r) > 0
+    && !isSeedArtifactRep(r)      // seeded twins would distort the fit
     // Retrospective semantics (see anchor loop): the fit must not
     // learn from reps the engine couldn't have seen on referenceDate.
     && !(referenceDate && (r.date || "") >= referenceDate)
