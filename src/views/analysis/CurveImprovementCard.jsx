@@ -34,7 +34,7 @@ import { Card, HandViewPills } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, fmtW, toDisp } from "../../ui/format.js";
 import { ZONE6, ZONE_REF_T } from "../../model/zones.js";
-import { improvementForAmps, SUPPORT_MIN_HOLD_FRAC } from "../../model/baselines.js";
+import { improvementForAmps, SUPPORT_MIN_HOLD_FRAC, perZoneBaselineAmps } from "../../model/baselines.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
 import { effectiveLoad } from "../../model/load.js";
 
@@ -215,7 +215,15 @@ function GripBlock({ grip, overlay, unit, maxDur, nowIdx, onScrub, divider }) {
   const nowAmps = overlay.ampsByDate.get(nowDate);
   const color = GRIP_COLORS[grip] || C.blue;
 
-  const imp = nowAmps ? improvementForAmps(nowAmps, overlay.baselineAmps, overlay.baselineMaxHoldS ?? null) : null;
+  // Per-zone baselines fill the long-hold "new" tiles once trained:
+  // each such zone is measured from the first date its data reached that
+  // duration, not the pooled baseline (which never got there).
+  const zoneRef = perZoneBaselineAmps(
+    overlay.dates, overlay.ampsByDate, overlay.maxHoldByDate, overlay.baselineMaxHoldS ?? null,
+  );
+  const imp = nowAmps
+    ? improvementForAmps(nowAmps, overlay.baselineAmps, overlay.baselineMaxHoldS ?? null, zoneRef)
+    : null;
 
   // Every drawable curve for this grip — for the fixed y-axis.
   const candidateAmps = [overlay.baselineAmps, ...overlay.ampsByDate.values()].filter(Boolean);
