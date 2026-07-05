@@ -18,7 +18,7 @@
 // onDeleteRep / onDeleteSession / onUpdateSession / onDeleteActivity)
 // so this view doesn't reach into the parent's state directly.
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { C } from "../ui/theme.js";
 import { Card, Btn } from "../ui/components.js";
 import {
@@ -42,6 +42,28 @@ import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
 import { deleteBW } from "../lib/sync.js";
+
+// Default hand for the "+ Add rep" picker. Resolution order:
+//   1. STICKY — the last hand you added to THIS session (sessKey match),
+//      so a run of same-hand adds (e.g. logging the right side you did
+//      after a Tindeq dropout) stays on that hand instead of resetting.
+//   2. the session's own hand (single-hand session).
+//   3. for a Both session, alternate away from the last rep's hand.
+//   4. fall back to "L".
+// Pure + exported so the resolution is unit-testable without driving the
+// whole History render tree.
+export function addRepDefaultHand({ sticky, sessKey, sessHand, reps }) {
+  if (sticky && sticky.sessKey === sessKey &&
+      (sticky.hand === "L" || sticky.hand === "R")) {
+    return sticky.hand;
+  }
+  if (sessHand === "L" || sessHand === "R") return sessHand;
+  if (sessHand === "B") {
+    const lastHand = reps && reps.length ? reps[reps.length - 1].hand : null;
+    return lastHand === "L" ? "R" : "L";
+  }
+  return "L";
+}
 
 export function HistoryView({
   history,
@@ -99,6 +121,12 @@ export function HistoryView({
   const [editRepTime, setEditRepTime] = useState("");          // seconds (edit or add)
   const [editRepHand, setEditRepHand] = useState(null);        // "L" | "R" — null in add-mode means "auto-derive at save"
   const [editRepRest, setEditRepRest] = useState("");          // seconds of rest_s (edit or add) — empty string means "leave existing value"
+  // Sticky add-rep hand (2026-07): remembers the last hand you added
+  // within a session so logging a run of the OTHER hand's reps (e.g. the
+  // right side you did after a Tindeq dropout) doesn't snap the picker
+  // back to the session's existing hand on every single rep — the bug
+  // that kept saving manually-added R reps as L. Shape: { sessKey, hand }.
+  const lastAddHandRef = useRef(null);
   // Manual session entry
   const [addingSession,    setAddingSession]    = useState(false);
   const [newSessDate,      setNewSessDate]      = useState(() => ymdLocal());
@@ -169,20 +197,15 @@ export function HistoryView({
     setAddingRep(sessKey);
     setEditRepLoad("");
     setEditRepTime("");
-    // Pre-select the derived hand instead of leaving the picker blank
-    // (June 2026). With null, saveRepAdd silently auto-derived at save
-    // time — on a single-hand card that meant a new rep quietly joined
-    // the existing hand even when the user intended the other one, and
-    // a missed tap on the L/R button was invisible. Now the picker
-    // always shows exactly what will be saved; tap the other button to
-    // change it. Derivation mirrors saveRepAdd's old fallback: single-
-    // hand session → that hand; mixed → alternate from the last rep.
-    let derived = sess?.hand === "L" || sess?.hand === "R" ? sess.hand : null;
-    if (sess?.hand === "B") {
-      const lastHand = sess.reps?.length ? sess.reps[sess.reps.length - 1].hand : null;
-      derived = lastHand === "L" ? "R" : "L";
-    }
-    setEditRepHand(derived ?? "L");
+    // Pre-select the hand the rep will save to so it's never a blank,
+    // silent auto-derive (June 2026 fix) — and prefer the STICKY hand
+    // (last one you added to this session) so logging a run of the OTHER
+    // hand's reps doesn't snap back to the session's hand every rep
+    // (2026-07 fix). See addRepDefaultHand for the resolution order.
+    setEditRepHand(addRepDefaultHand({
+      sticky: lastAddHandRef.current, sessKey,
+      sessHand: sess?.hand, reps: sess?.reps,
+    }));
     setEditRepRest("");   // empty = saveRepAdd will default to 20s (matches sync.js fallback)
   };
 
@@ -212,6 +235,8 @@ export function HistoryView({
         newHand = lastHand === "L" ? "R" : "L";
       }
     }
+    // Remember this choice so the next add to this session defaults to it.
+    lastAddHandRef.current = { sessKey: addingRep, hand: newHand };
     const newRep = {
       date:            sess.date,
       grip:            sess.grip,
@@ -1115,8 +1140,8 @@ export function HistoryView({
                     />
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                    <label style={{ fontSize: 10, color: C.muted }}>Hand</label>
-                    <div style={{ display: "flex", gap: 4 }}>
+                    <label style={{ fontSize: 10, color: C.muted }}>Hand — saving to</label>
+                    <div style={{ display: "flex", gap: 6 }}>
                       {["L", "R"].map(h => {
                         const selected = editRepHand === h;
                         return (
@@ -1125,11 +1150,12 @@ export function HistoryView({
                             type="button"
                             onClick={() => setEditRepHand(h)}
                             style={{
-                              width: 32, padding: "4px 0",
-                              background: selected ? C.blue : C.border,
+                              width: 44, padding: "7px 0",
+                              background: selected ? (h === "R" ? C.orange : C.blue) : "transparent",
                               color: selected ? "#000" : C.muted,
-                              border: "none", borderRadius: 6,
-                              fontSize: 12, fontWeight: 700, cursor: "pointer",
+                              border: selected ? "none" : `1px solid ${C.border}`,
+                              borderRadius: 6,
+                              fontSize: 14, fontWeight: 800, cursor: "pointer",
                             }}
                           >{h}</button>
                         );
