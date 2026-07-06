@@ -316,7 +316,32 @@ export function CurveImprovementCard({
     const handImpMap = perHandGripImprovement;
     const entries = Object.entries(handImpMap)
       .filter(([key]) => key.endsWith(`|${handView}`))
-      .map(([key, imp]) => [key.split("|")[0], imp])
+      .map(([key, imp]) => {
+        // Fill this hand's long-hold "new" tiles the same way the pooled
+        // block does: anchor each zone the hand baseline never reached to
+        // the earliest per-hand cumulative fit that reached it. Merge ONLY
+        // the previously-null zones so the existing supported-zone numbers
+        // and the `total` are untouched.
+        const grip = key.split("|")[0];
+        const ph = historyOverlay[grip]?.perHand?.[handView];
+        let merged = imp;
+        if (ph?.ampsByDate && ph.dates?.length) {
+          const nowAmps = ph.ampsByDate.get(ph.dates[ph.dates.length - 1]);
+          const zoneRef = perZoneBaselineAmps(
+            ph.dates, ph.ampsByDate, ph.maxHoldByDate, ph.baselineMaxHoldS ?? null,
+          );
+          if (nowAmps && Object.keys(zoneRef).length) {
+            const filled = improvementForAmps(nowAmps, ph.baselineAmps, ph.baselineMaxHoldS ?? null, zoneRef);
+            if (filled) {
+              merged = { ...imp };
+              for (const zk of Object.keys(zoneRef)) {
+                if (imp[zk] == null && typeof filled[zk] === "number") merged[zk] = filled[zk];
+              }
+            }
+          }
+        }
+        return [grip, merged];
+      })
       .sort((a, b) => a[0].localeCompare(b[0]));
     return (
       <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
