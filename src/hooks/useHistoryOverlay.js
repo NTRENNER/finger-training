@@ -133,6 +133,11 @@ export function useHistoryOverlay({
         if (!handBaseline?.amps) continue;
         const handReps = gripReps.filter(r => r.hand === hand);
         const handByDate = new Map();
+        // Same per-date cumulative maxHold + valid-date list as the pooled
+        // path, so the per-hand tiles can run perZoneBaselineAmps and fill
+        // trained long-hold zones instead of showing "new".
+        const handMaxHoldByDate = new Map();
+        const handValidDates = [];
         let firstHandDate = null;
         for (const date of validDates) {
           const upToHand = handReps.filter(r => (r.date || "") <= date);
@@ -147,6 +152,8 @@ export function useHistoryOverlay({
           );
           if (amps) {
             handByDate.set(date, amps);
+            handMaxHoldByDate.set(date, upToHand.reduce((m, r) => Math.max(m, r.actual_time_s || 0), 0));
+            handValidDates.push(date);
             if (!firstHandDate) firstHandDate = date;
           }
         }
@@ -160,7 +167,9 @@ export function useHistoryOverlay({
           baselineAmps: handBaseline.amps,
           baselineDate: handBaseline.date,
           baselineMaxHoldS: handBaseline.maxHoldS ?? null,
+          dates: handValidDates,
           ampsByDate: handByDate,
+          maxHoldByDate: handMaxHoldByDate,
         };
       }
 
