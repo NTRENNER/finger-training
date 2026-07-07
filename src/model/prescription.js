@@ -591,7 +591,12 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
     && !isSeedArtifactRep(r)      // seeded twins would distort the fit
     // Retrospective semantics (see anchor loop): the fit must not
     // learn from reps the engine couldn't have seen on referenceDate.
-    && !(referenceDate && (r.date || "") >= referenceDate)
+    // An UNDATED rep can't be placed in time, so retrospective mode
+    // excludes it too — ("" >= referenceDate) is false, which used to
+    // let dateless rows leak into every reconstruction. (The anchor /
+    // peak / floor loops were already safe: their lookback cutoff
+    // rejects "" on its own.)
+    && !(referenceDate && (!r.date || r.date >= referenceDate))
   );
   const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
   const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
