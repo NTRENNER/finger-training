@@ -271,7 +271,7 @@ export function useSessionRunner({
   }, [phase]);
 
   // ── Handle rep completion ────────────────────────────────────────
-  const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false }) => {
+  const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null }) => {
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
@@ -311,11 +311,16 @@ export function useSessionRunner({
       // every read site is confirmed using effectiveLoad's fallback chain.
       prescribed_load_kg: roundedPrescribed,
       weight_kg:          roundedPrescribed,
-      // manual_load_kg stays null on session writes — the only entry
-      // point for a manual actual is the History rep editor's "Manual
-      // load" field, populated after the fact when the user lifted
-      // something other than prescribed in a non-Tindeq session.
-      manual_load_kg:     null,
+      // manual_load_kg = the live weight-override the user typed this
+      // rep (kg). For a non-Tindeq session this is the ONLY record of what
+      // they lifted — effectiveLoad reads avg_force_kg first (Tindeq), then
+      // this. Was hardcoded null (July 2026 fix): the override box fed the
+      // live color/auto-fail threshold but never reached the saved rep, so
+      // manual users' reps persisted load=0 and every fit read zero. The
+      // History rep editor's "Manual load" field still back-fills it later.
+      manual_load_kg:     (Number.isFinite(manualLoadKg) && manualLoadKg > 0)
+                            ? Math.round(manualLoadKg * 10) / 10
+                            : null,
       actual_time_s:   roundedActual,
       avg_force_kg:    (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
                          ? Math.round(avgForce * 10) / 10
