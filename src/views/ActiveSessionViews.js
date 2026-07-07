@@ -209,6 +209,10 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   const [manualWeightStr, setManualWeightStr] = useState("");
   const startTimeRef = useRef(null);
   const timerRef     = useRef(null);
+  // Latest manual weight override in kg. endRep (a stable useCallback) reads
+  // this at rep-completion time; without the ref it would close over a stale
+  // manualKg (or need manualKg in its deps). Kept in sync every render below.
+  const manualKgRef  = useRef(null);
 
   // Suggested weight per hand — held CONSTANT within a set. We don't
   // fatigue-discount the displayed weight; the user holds the same load
@@ -274,7 +278,12 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       avgForce = stats.avgForce;
       peakForce = stats.peakForce;
     }
-    onRepDone({ actualTime, avgForce, peakForce, failed });
+    // manualLoadKg (non-Tindeq / override): the load the user actually
+    // lifted this rep. For manual sessions it's the ONLY load signal —
+    // without it the rep persists load=0 and every downstream fit reads
+    // zero (the elcerritotom bug, July 2026). Tindeq reps still prefer the
+    // measured avg_force_kg via effectiveLoad, so this is a no-op there.
+    onRepDone({ actualTime, avgForce, peakForce, failed, manualLoadKg: manualKgRef.current });
   }, [tindeq, onRepDone]);
 
   // Wire auto-failure → endRep for the duration of an active rep only.
@@ -304,6 +313,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     const n = parseFloat(manualWeightStr);
     return Number.isFinite(n) && n > 0 ? fromDisp(n, unit) : null;
   })();
+  manualKgRef.current = manualKg;
   const targetKg = manualKg ?? sug?.suggested ?? null;
 
   // Keep the Tindeq hook's target ref in sync so auto-failure uses the right threshold
