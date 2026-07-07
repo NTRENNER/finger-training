@@ -25,7 +25,7 @@
 //
 // Pure functions; no React. Tested in isolation.
 
-import { SANE_MAX_KG } from "./load.js";
+import { SANE_MAX_KG, isSeedArtifactRep } from "./load.js";
 
 export const PEAK_MAX_PROTOCOL_T = 12;    // s — target_duration at/under this = max/power block
 const PEAK_MAX_KG = SANE_MAX_KG;          // single sanity ceiling — see load.js (was a stale local 500)
@@ -64,6 +64,10 @@ export function buildPeakForceTrend(history, {
   const anyByGrip = {};
   for (const r of history) {
     if (!r || !r.grip || !r.date) continue;
+    // Seed-artifact guard: a seeded/backfilled twin mirrors its (often
+    // inflated) load into peak_force_kg too — avg==peak is not a real
+    // measurement, so it can't set a PR or a session best.
+    if (isSeedArtifactRep(r)) continue;
     const peak = Number(r.peak_force_kg);
     if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;
     const put = (map) => {
@@ -207,6 +211,7 @@ export function maxTestStaleness(gripHistory, todayStr, {
   let lastDate = null;
   for (const r of gripHistory || []) {
     if (!r || !r.date) continue;
+    if (isSeedArtifactRep(r)) continue;  // a fake peak must not silence the cadence
     const peak = Number(r.peak_force_kg);
     if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;
     const tgt = Number(r.target_duration);
