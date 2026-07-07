@@ -215,7 +215,7 @@ export function AnalysisView({
   };
   const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
 
-  // ── Hand selector (June 2026) ─────────────────────────────
+  // ── Hand selector (June 2026) ─────────────────────────
   // "pooled" (default) | "L" | "R". One global control, like the
   // Absolute/×BW toggle: scopes the F-D chart's data + fit, the
   // Capacity trajectory (against FROZEN per-hand baselines — see
@@ -528,6 +528,7 @@ export function AnalysisView({
   // confidence-gated per-T residual is the live "what to train next"
   // signal; the chart no longer asserts a single limiter zone.)
 
+
   // ── Relative strength helpers ──
   // useRel gates the absolute-vs-relative rendering path that
   // builds leftDotsRel / rightDotsRel / threeExpCurveDataRel /
@@ -828,6 +829,7 @@ export function AnalysisView({
           unit={unit}
           handView={handView}
           perHandGripImprovement={perHandGripImprovement}
+          perHandGripEstimates={perHandGripEstimates}
           gripImprovementFresh={gripImprovementFresh}
           perHandGripImprovementFresh={perHandGripImprovementFresh}
           onHandViewChange={setHandView}
