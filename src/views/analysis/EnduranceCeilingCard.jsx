@@ -105,10 +105,14 @@ export function EnduranceCeilingCard({
       }
 
       const allDates = [...new Set([...susByDate.keys(), ...maxByDate.keys()])].sort();
+      // Series stay in KG here — display conversion happens at render.
+      // Putting toDisp inside this memo forced `unit` into the deps, so
+      // toggling lbs/kg re-ran every per-date NNLS fit for a pure unit
+      // change (July 2026).
       const data = allDates.map(d => ({
         date: d,
-        sus: susByDate.has(d) ? toDisp(susByDate.get(d), unit) : null,
-        max: maxByDate.has(d) ? toDisp(maxByDate.get(d), unit) : null,
+        sus: susByDate.has(d) ? susByDate.get(d) : null,
+        max: maxByDate.has(d) ? maxByDate.get(d) : null,
       }));
 
       // Snapshot ratio = current ceiling ÷ current SMOOTHED max (the
@@ -126,7 +130,7 @@ export function EnduranceCeilingCard({
       });
     }
     return out.sort((a, b) => a.grip.localeCompare(b.grip));
-  }, [history, handView, unit]);
+  }, [history, handView]);
 
   if (rows.length === 0) return null;
 
@@ -164,6 +168,12 @@ export function EnduranceCeilingCard({
 
       {rows.map((r, i) => {
         const color = GRIP_COLORS[r.grip] || C.blue;
+        // kg → display units (the memo above is unit-agnostic).
+        const data = r.data.map(p => ({
+          ...p,
+          sus: p.sus != null ? toDisp(p.sus, unit) : null,
+          max: p.max != null ? toDisp(p.max, unit) : null,
+        }));
         return (
           <div key={r.grip} style={{
             paddingBottom: i < rows.length - 1 ? 14 : 0,
@@ -187,7 +197,7 @@ export function EnduranceCeilingCard({
             </div>
 
             <ResponsiveContainer width="100%" height={150}>
-              <LineChart data={r.data} margin={{ top: 6, right: 12, bottom: 4, left: 0 }}>
+              <LineChart data={data} margin={{ top: 6, right: 12, bottom: 4, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
                 <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: C.muted, fontSize: 10 }} minTickGap={24} />
                 <YAxis tick={{ fill: C.muted, fontSize: 10 }} width={34} domain={[0, "auto"]} />
