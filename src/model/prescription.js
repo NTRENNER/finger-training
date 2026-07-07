@@ -461,6 +461,7 @@ export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
+    if (isSeedArtifactRep(r)) continue; // seeded twin's mirrored peak can't set the ceiling
     const tgt = Number(r.target_duration);
     if (Number.isFinite(tgt) && tgt > PEAK_MAX_PROTOCOL_T) continue; // sub-max protocol
     const p = sane(r.peak_force_kg);

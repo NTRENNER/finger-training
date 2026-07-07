@@ -101,6 +101,13 @@ export function freshFitReps(history) {
   for (const r of history || []) {
     if (!r) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;
+    // Seed-artifact guard (July 2026, see isSeedArtifactRep below): an
+    // avg==peak seeded/backfilled twin is not a real measurement, and
+    // this function is the shared fit basis (priors, baselines, refit,
+    // overlay, AUC history, endurance ceiling) — one inflated fake
+    // point here poisons every fit at once. prescription.js guards its
+    // own paths the same way.
+    if (isSeedArtifactRep(r)) continue;
     const key = `${r.date}|${r.hand}|${r.grip}|${r.set_num}|${r.target_duration}|${r.actual_time_s}|${r.avg_force_kg}|${r.manual_load_kg}|${r.rep_num}`;
     if (seen.has(key)) continue;
     seen.add(key);
