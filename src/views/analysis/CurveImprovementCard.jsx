@@ -290,6 +290,10 @@ export function CurveImprovementCard({
   // have the data density to be worth scrubbing.
   handView = "pooled",
   perHandGripImprovement = {},
+  // Current per-hand fits (keys `grip|hand`) — the "now" amps the L/R
+  // tiles' supported zones are built from; used so the per-zone fill
+  // shares the same basis (July 2026).
+  perHandGripEstimates = {},
   // Repeated local control for the global hand-view state (June 2026).
   onHandViewChange = null,
 }) {
@@ -326,7 +330,14 @@ export function CurveImprovementCard({
         const ph = historyOverlay[grip]?.perHand?.[handView];
         let merged = imp;
         if (ph?.ampsByDate && ph.dates?.length) {
-          const nowAmps = ph.ampsByDate.get(ph.dates[ph.dates.length - 1]);
+          // "Now" basis for the filled zones = the CURRENT per-hand
+          // estimate — the SAME amps the supported-zone tiles were
+          // computed from (perHandGripImprovement is built on
+          // perHandGripEstimates), so filled and supported tiles can't
+          // disagree about what "now" means. The overlay's last-date
+          // cumulative fit is only the fallback (partial estimates map).
+          const nowAmps = perHandGripEstimates[key]
+            ?? ph.ampsByDate.get(ph.dates[ph.dates.length - 1]);
           const zoneRef = perZoneBaselineAmps(
             ph.dates, ph.ampsByDate, ph.maxHoldByDate, ph.baselineMaxHoldS ?? null,
           );
