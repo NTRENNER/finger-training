@@ -98,12 +98,20 @@ export function AnalysisContainer(props) {
 
   return (
     <div>
-      <WeeklyReviewCard history={history} activities={activities} />
-      <div style={{ display: "flex", gap: 6, padding: "12px 16px 0" }}>
-        {pill("Fingers", "fingers")}
-        {pill("Lifts", "lifts")}
-        {pill("Climbs", "climbing")}
-        {pill("Weight", "weight")}
+      {/* Width-constrained header (July 2026): every sub-view centers
+          itself at maxWidth 480, but this container's own children — the
+          check-in card and the sub-tab pills — rendered unconstrained,
+          so on desktop the card stretched the full window width above a
+          narrow column. Same 480px centered column here so the whole
+          tab reads as one column on any screen. */}
+      <div style={{ maxWidth: 480, margin: "0 auto" }}>
+        <WeeklyReviewCard history={history} activities={activities} />
+        <div style={{ display: "flex", gap: 6, padding: "12px 16px 0" }}>
+          {pill("Fingers", "fingers")}
+          {pill("Lifts", "lifts")}
+          {pill("Climbs", "climbing")}
+          {pill("Weight", "weight")}
+        </div>
       </div>
 
       {sub === "fingers" && (
