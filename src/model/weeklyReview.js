@@ -37,6 +37,12 @@ import { maxTestStaleness } from "./peakForce.js";
 // ramp) migrated INTO the check-in from the Session Plan card
 // (2026-07-08 — coaching lives in Analysis; the plan card plans).
 import { buildCoachNotes } from "./coachNotes.js";
+// Exercise-level support tracking (2026-07-08, BACKLOG #6's
+// observational half): workout defs give exercise→workout membership
+// so piecemeal A/B/C elements get seen and credited; the prescriptive
+// keystone nudge stays parked.
+import { workouts as SUPPORT_WORKOUTS, exercises as SUPPORT_EXERCISES } from "./supportTraining.js";
+import { migrateExerciseId } from "./exerciseIds.js";
 
 // Tunables
 const BASELINE_WEEKS = 4;
@@ -456,6 +462,38 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
     }
   }
 
+  // ── Support work at the EXERCISE level, last 7d ──
+  // Busy weeks produce ELEMENTS of A/B/C rather than full sessions.
+  // Workout-level staleness can't see that, so: which exercises got
+  // ≥1 done set this week (any session label), and — for each stale
+  // workout — how many of ITS exercises were touched (partial credit).
+  const touchedByEx = new Map();          // migrated exId → Set(dates)
+  const supportDates7 = new Set();
+  for (const w of workoutSessions || []) {
+    if (!w || !w.date || w.date < d7 || w.date > refDate) continue;
+    for (const [exId, ex] of Object.entries(w.exercises || {})) {
+      const touched = (Array.isArray(ex?.sets) && ex.sets.some(t => t && t.done)) || ex?.done === true;
+      if (!touched) continue;
+      const id = migrateExerciseId(exId);
+      if (!touchedByEx.has(id)) touchedByEx.set(id, new Set());
+      touchedByEx.get(id).add(w.date);
+      supportDates7.add(w.date);
+    }
+  }
+  const exName = (id) => SUPPORT_EXERCISES[id]?.name || id;
+  const supportDetail = {
+    days: supportDates7.size,
+    exercises: [...touchedByEx.keys()].sort().map(exName),
+  };
+  const partialCredit = {};
+  for (const sw of base.support.staleWorkouts) {
+    const def = SUPPORT_WORKOUTS[sw.workout];
+    if (!def) continue;
+    const ids = new Set((def.exercises || []).map(e => e.id));
+    const touched = [...touchedByEx.keys()].filter(id => ids.has(id));
+    if (touched.length) partialCredit[sw.workout] = { count: touched.length, names: touched.map(exName) };
+  }
+
   // ── Behavioral notes (adherence + volume ramp), as of week end ──
   // buildCoachNotes owns the thresholds and the adherence-suppresses-
   // ramp-drop priority; no trajectory injection here — the check-in's
@@ -463,7 +501,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   let behaviorNotes = [];
   try { behaviorNotes = buildCoachNotes(history, { todayStr: refDate }); } catch (e) { behaviorNotes = []; }
 
-  return { ...base, volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, focusCandidates: focus.slice(0, 3) };
+  return { ...base, volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, focusCandidates: focus.slice(0, 3) };
 }
 
 export function assembleCheckIn(signals) {
@@ -471,7 +509,7 @@ export function assembleCheckIn(signals) {
     return { range: null, headline: "No training logged yet — log a session to start your weekly check-in.", sections: null };
   }
   const digest = assembleReview(signals);
-  const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, focusCandidates, finger } = signals;
+  const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, focusCandidates, finger } = signals;
 
   // WHAT YOU DID — volume/coverage lines.
   const did = [];
@@ -487,6 +525,11 @@ export function assembleCheckIn(signals) {
       (climbCtx.hardestSend ? `, hardest send ${climbCtx.hardestSend}` : "") +
       (climbCtx.avgRpe != null ? `, avg RPE ${climbCtx.avgRpe}` : "") + ".");
   }
+  if (supportDetail && supportDetail.exercises.length > 0) {
+    const names = supportDetail.exercises;
+    const shown = names.slice(0, 3).join(", ") + (names.length > 3 ? `, +${names.length - 3} more` : "");
+    did.push(`Support work: ${names.length} exercise${names.length === 1 ? "" : "s"} across ${supportDetail.days} day${supportDetail.days === 1 ? "" : "s"} (${shown}).`);
+  }
   if (!did.length) did.push("No finger or climbing sessions logged this week.");
 
   // WHAT'S MOVING — digest wins + the ratio trend when it's rising.
@@ -499,7 +542,21 @@ export function assembleCheckIn(signals) {
 
   // WHAT'S STUCK OR MISSING — digest concerns + behavior (workload
   // ramp / adherence) + stale zones + falling ratio.
-  const stuck = digest.points.filter(p => p.kind === "concern").map(p => p.text);
+  // Partial credit rewrite: the digest's workout-level staleness line
+  // ("Support workout B hasn't come up in 17 days...") is rephrased
+  // when this week touched some of that workout's exercises inside
+  // other sessions. The match keys on the digest's own copy, which is
+  // owned by assembleReview in THIS file — keep the two in sync.
+  const stuck = digest.points.filter(p => p.kind === "concern").map(p => p.text)
+    .map(t => {
+      const m = t.match(/^Support workout (\S+) hasn't come up in (\d+) days/);
+      if (m && partialCredit && partialCredit[m[1]]) {
+        const pc = partialCredit[m[1]];
+        const names = pc.names.slice(0, 3).join(", ") + (pc.names.length > 3 ? `, +${pc.names.length - 3} more` : "");
+        return `No full Workout ${m[1]} in ${m[2]} days — but you touched ${pc.count} of its exercise${pc.count === 1 ? "" : "s"} this week (${names}), so the stimulus isn't fully cold.`;
+      }
+      return t;
+    });
   for (const n of behaviorNotes || []) stuck.push(n.text);
   for (const sz of (staleZones || []).slice(0, 3)) {
     stuck.push(`${sz.grip} ${sz.zone.replace(/_/g, " ")} hasn't been trained in ${sz.days} days.`);

@@ -139,6 +139,30 @@ describe("assembleCheckIn", () => {
     expect(out.sections.stuck.join(" ")).toMatch(/monthly average|tendons/);
   });
 
+  test("support work shows at the exercise level; stale workout gets partial credit", () => {
+    const hist = [rep("2026-07-01", "Micro", 45, 46)];
+    const wlog = [
+      // Old full Workout B — makes B stale (>14d before REF).
+      { date: "2026-06-18", workout: "B",
+        exercises: { medBallThrows: { sets: [{ done: true, reps: 8 }] } } },
+      // This week: A-labeled session that ALSO touches B's med ball slams.
+      { date: "2026-07-02", workout: "A",
+        exercises: {
+          weightedPullup: { sets: [{ done: true, reps: 5 }] },
+          medBallThrows:  { sets: [{ done: true, reps: 10 }] },
+          dips:           { sets: [{ done: false }] },          // not done → not counted
+        } },
+    ];
+    const out = buildCheckIn(hist, [], wlog, { refDate: REF });
+    const didFlat = out.sections.did.join(" ");
+    expect(didFlat).toMatch(/Support work: 2 exercises across 1 day/);
+    expect(didFlat).toMatch(/Med Ball Slams/);
+    expect(didFlat).not.toMatch(/Dips/);
+    const stuckFlat = out.sections.stuck.join(" ");
+    expect(stuckFlat).toMatch(/No full Workout B in 1[0-9] days — but you touched 1 of its exercise/);
+    expect(stuckFlat).not.toMatch(/Support workout B hasn't come up/);
+  });
+
   test("no week activity → plain acknowledgment in did", () => {
     const hist = [rep("2026-05-01", "Micro", 45, 46)];
     const out = buildCheckIn(hist, [], [], { refDate: REF });
