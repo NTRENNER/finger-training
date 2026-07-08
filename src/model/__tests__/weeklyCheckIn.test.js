@@ -112,6 +112,18 @@ describe("assembleCheckIn", () => {
     expect(Array.isArray(out.points)).toBe(true);
   });
 
+  test("behavior notes (volume ramp / adherence) land in stuck", () => {
+    // Chronic base: one 45s×10kg rep (~450 kg·s) twice a week for four
+    // weeks, then two 3×-load days inside the last week → acute spike.
+    const dates = ["2026-06-10", "2026-06-13", "2026-06-17", "2026-06-20",
+                   "2026-06-24", "2026-06-27", "2026-07-01", "2026-07-03"];
+    const hist = dates.map(d => rep(d, "Micro", 45, 45, 10));
+    hist.push(rep("2026-07-04", "Micro", 45, 45, 30));
+    hist.push(rep("2026-07-05", "Micro", 45, 45, 30));
+    const out = buildCheckIn(hist, [], [], { refDate: REF });
+    expect(out.sections.stuck.join(" ")).toMatch(/monthly average|tendons/);
+  });
+
   test("no week activity → plain acknowledgment in did", () => {
     const hist = [rep("2026-05-01", "Micro", 45, 46)];
     const out = buildCheckIn(hist, [], [], { refDate: REF });

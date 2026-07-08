@@ -33,6 +33,10 @@ import { ZONE_KEYS, ZONE_REF_T, zoneOf } from "./zones.js";
 import { gradeRank, weekKey } from "../lib/climbing-grades.js";
 import { effectiveLoad } from "./load.js";
 import { maxTestStaleness } from "./peakForce.js";
+// Behavioral notes (adherence vs own cadence, acute:chronic volume
+// ramp) migrated INTO the check-in from the Session Plan card
+// (2026-07-08 — coaching lives in Analysis; the plan card plans).
+import { buildCoachNotes } from "./coachNotes.js";
 
 // Tunables
 const BASELINE_WEEKS = 4;
@@ -427,7 +431,14 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
     }
   }
 
-  return { ...base, volume, staleZones, perf, climbCtx, bw, dataQuality, focusCandidates: focus.slice(0, 3) };
+  // ── Behavioral notes (adherence + volume ramp), as of week end ──
+  // buildCoachNotes owns the thresholds and the adherence-suppresses-
+  // ramp-drop priority; no trajectory injection here — the check-in's
+  // hold-ratio trend + curve-Δ wins already cover trajectory.
+  let behaviorNotes = [];
+  try { behaviorNotes = buildCoachNotes(history, { todayStr: refDate }); } catch (e) { behaviorNotes = []; }
+
+  return { ...base, volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, focusCandidates: focus.slice(0, 3) };
 }
 
 export function assembleCheckIn(signals) {
@@ -435,7 +446,7 @@ export function assembleCheckIn(signals) {
     return { range: null, headline: "No training logged yet — log a session to start your weekly check-in.", sections: null };
   }
   const digest = assembleReview(signals);
-  const { volume, staleZones, perf, climbCtx, bw, dataQuality, focusCandidates, finger } = signals;
+  const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, focusCandidates, finger } = signals;
 
   // WHAT YOU DID — volume/coverage lines.
   const did = [];
@@ -461,8 +472,10 @@ export function assembleCheckIn(signals) {
   }
   if (perf && perf.overshoots >= 3) moving.push(`${perf.overshoots} reps beat their target by 40%+ this month — the engine will chase those with heavier prescriptions.`);
 
-  // WHAT'S STUCK OR MISSING — digest concerns + stale zones + falling ratio.
+  // WHAT'S STUCK OR MISSING — digest concerns + behavior (workload
+  // ramp / adherence) + stale zones + falling ratio.
   const stuck = digest.points.filter(p => p.kind === "concern").map(p => p.text);
+  for (const n of behaviorNotes || []) stuck.push(n.text);
   for (const sz of (staleZones || []).slice(0, 3)) {
     stuck.push(`${sz.grip} ${sz.zone.replace(/_/g, " ")} hasn't been trained in ${sz.days} days.`);
   }
