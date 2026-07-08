@@ -204,14 +204,33 @@ item are already covered:
 No code change needed. Closing the item out so it stops anchoring the
 post-lockout backlog.
 
-## 6. Keystone exercises — busy-week support coaching (design note, 2026-07-08)
+## 6. Keystone exercises — busy-week support coaching ✓ SHIPPED (commits b7b707f, 9db5b12, 51f0450 — same day it was parked)
+
+Delivered, in two passes on 2026-07-08 after the first live check-in
+made the gap concrete:
+
+- **Observational half** (b7b707f): exercise-level support tracking in
+  the check-in — "Support work: N exercises across D days (names)" in
+  What-you-did from done-sets in ANY session label, and partial credit
+  rephrasing of the workout-level staleness line ("No full Workout B in
+  17 days — but you touched 2 of its exercises this week").
+- **Prescriptive half** (9db5b12 + 51f0450), reshaped per Nathan: NO
+  manual keystone list — picks are data-driven via `model/supportRisk.js`
+  (decay-class windows from exercise tags: power ~10d / strength ~14d /
+  connective ~21d, grounded in detraining literature; regression
+  detection over the last 3 sessions sorts strictly first). The
+  busy-week nudge fires when no full A/B/C session happened but pieces
+  did: acknowledge, then "Next week, try to get: ..." in the focus
+  section's last slot.
+
+Original design note (kept for the reasoning record):
 
 Nathan's observation: on busy weeks he does ELEMENTS of workouts
 A/B/C rather than full sessions, and a small set of exercises are
 "singularly high value" and shouldn't go cold — med ball slams
 (`medBallThrows`) and TRX pull-ups (`weightedPullup`) for him.
 
-Design (discussed, not built — parked by choice):
+Design as originally parked:
 
 - **Fits the coaching rule.** Support training has no recommender
   engine, so the coach layer CAN be prescriptive here without
