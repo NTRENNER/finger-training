@@ -203,3 +203,31 @@ item are already covered:
 
 No code change needed. Closing the item out so it stops anchoring the
 post-lockout backlog.
+
+## 6. Keystone exercises — busy-week support coaching (design note, 2026-07-08)
+
+Nathan's observation: on busy weeks he does ELEMENTS of workouts
+A/B/C rather than full sessions, and a small set of exercises are
+"singularly high value" and shouldn't go cold — med ball slams
+(`medBallThrows`) and TRX pull-ups (`weightedPullup`) for him.
+
+Design (discussed, not built — parked by choice):
+
+- **Fits the coaching rule.** Support training has no recommender
+  engine, so the coach layer CAN be prescriptive here without
+  violating "coaching never argues with the recommender" — this is
+  cross-workout allocation, the same category as the check-in's
+  cross-grip focus items.
+- **Exercise-level last-done tracking** from the workout log's done
+  sets. Also fixes a false positive: the current workout-level
+  staleness ("Workout B hasn't come up in 14 days") nags even when
+  B's key pieces were done piecemeal in a mishmash session.
+- **Keystone list is a user judgment**, not inferrable from data →
+  cloud-synced settings list, seeded with medBallThrows +
+  weightedPullup as defaults.
+- **Two behaviors** in the weekly check-in: (a) keystone gone cold
+  (~10d+) → a line in "What's stuck or missing"; (b) busy week
+  (support+finger days well under baseline — reuse LOW_WEEK_FRAC) →
+  one focus line: "Busy week — one set each of med ball slams and
+  TRX pull-ups keeps the high-value movements warm." Minimal-dose
+  framing, not a guilt trip.
