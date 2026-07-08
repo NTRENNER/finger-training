@@ -32,7 +32,6 @@ import { deloadStatus, buildDeloadGuidance } from "./deload.js";
 import { ZONE_KEYS, ZONE_REF_T, zoneOf } from "./zones.js";
 import { gradeRank, weekKey } from "../lib/climbing-grades.js";
 import { effectiveLoad } from "./load.js";
-import { prescription } from "./prescription.js";
 import { maxTestStaleness } from "./peakForce.js";
 
 // Tunables
@@ -381,33 +380,39 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   const multiDateSessions = [...bySession.values()].filter(e => e.dates.size > 1).length;
   const dataQuality = { noLoad, tinySessions, multiDateSessions };
 
-  // ── Focus candidates (recommender-owned signals + loads) ──
-  // Rough load for a (grip, zone) via the SAME prescription() the plan
-  // card uses — the check-in quotes the engine, never re-decides.
-  let priors = null;
-  try { priors = buildThreeExpPriors(history); } catch (e) { priors = null; }
-  const loadFor = (grip, zone) => {
-    if (!priors) return null;
-    try {
-      const T = ZONE_REF_T[zone];
-      const vals = ["L", "R"]
-        .map(h => prescription(history, h, grip, T, { threeExpPriors: priors })?.value)
-        .filter(v => v != null && v > 0);
-      return vals.length ? round1(sum(vals) / vals.length) : null;
-    } catch (e) { return null; }
-  };
+  // ── Focus candidates — GRIP-LEVEL only (2026-07-08 design call) ──
+  // Once a grip is picked, the recommender's escalating staleness boost
+  // already targets its stale zone — quoting a zone + load here would
+  // be a second recommender, and could DISAGREE with the plan card
+  // (which picks its own continuous T and applies cookedness). What
+  // the engine CANNOT do is choose which grip you train: grip selection
+  // is manual, so a grip's stale zones stay invisible for as long as
+  // you keep picking other grips. Cross-grip allocation is therefore
+  // the check-in's one legitimate prescription — name the grips that
+  // most need a session, say why, and trust the engine with the rest.
   const focus = [];
-  for (const sz of staleZones.slice(0, 2)) {
-    focus.push({
-      key: `zone|${sz.grip}|${sz.zone}`,
-      text: `${sz.grip} ${sz.zone.replace(/_/g, " ")} (~${ZONE_REF_T[sz.zone]}s) — untouched ${sz.days} days` +
-        (loadFor(sz.grip, sz.zone) != null ? `; the engine would start you near ${loadFor(sz.grip, sz.zone)} kg` : ""),
+  const worstZoneByGrip = new Map();
+  for (const sz of staleZones) {
+    if (!worstZoneByGrip.has(sz.grip)) worstZoneByGrip.set(sz.grip, sz);   // staleZones sorted worst-first
+  }
+  const gripCandidates = [];
+  for (const [g, sz] of worstZoneByGrip) {
+    gripCandidates.push({
+      grip: g, days: sz.days,
+      text: `Give ${g} a session — its ${sz.zone.replace(/_/g, " ")} zone (~${ZONE_REF_T[sz.zone]}s) is ${sz.days} days stale, and the engine will queue it once you pick ${g} on Setup.`,
     });
   }
-  for (const g of base.finger.staleGrips.slice(0, 1)) {
-    if (!focus.some(f => f.key.includes(`|${g.grip}|`))) {
-      focus.push({ key: `grip|${g.grip}`, text: `${g.grip} has gone quiet for ${g.days} days — one moderate session re-anchors its curve.` });
+  for (const g of base.finger.staleGrips) {
+    if (!worstZoneByGrip.has(g.grip)) {
+      gripCandidates.push({
+        grip: g.grip, days: g.days,
+        text: `${g.grip} has gone quiet for ${g.days} days — one moderate session re-anchors its curve.`,
+      });
     }
+  }
+  gripCandidates.sort((a, b) => b.days - a.days);
+  for (const c of gripCandidates.slice(0, 3)) {
+    focus.push({ key: `grip|${c.grip}`, text: c.text });
   }
   for (const g of grips) {
     let mt = null;
@@ -468,7 +473,7 @@ export function assembleCheckIn(signals) {
     stuck.push(`Body weight moved ${bw.deltaKg > 0 ? "+" : ""}${bw.deltaKg} kg over the month — relative strength numbers shift with it.`);
   }
 
-  // FOCUS — at most 3, engine-owned.
+  // FOCUS — at most 3, grip-level, engine-owned.
   const focus = (focusCandidates || []).map(f => f.text);
 
   // HEADS UP — data quality, or the all-clear.
