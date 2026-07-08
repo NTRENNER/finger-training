@@ -370,19 +370,44 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
     : null;
 
   // ── Data quality, last 28d ──
+  // Counts AND details (2026-07-08): a bare count is a nag you can't
+  // act on — each flagged item carries grip + date (+ rep count) so
+  // the Heads-up line points straight at the row in History.
   const reps28 = fingerReps.filter(r => r.date >= d28 && r.date <= refDate);
-  const noLoad = reps28.filter(r => !(effectiveLoad(r) > 0)).length;
+  const noLoadByKey = new Map();
+  for (const r of reps28) {
+    if (effectiveLoad(r) > 0) continue;
+    const k = `${r.grip || "?"} ${r.date}`;
+    noLoadByKey.set(k, (noLoadByKey.get(k) || 0) + 1);
+  }
+  const noLoadList = [...noLoadByKey.entries()]
+    .map(([k, n]) => (n > 1 ? `${k} ×${n}` : k))
+    .sort();
+  const noLoad = sum([...noLoadByKey.values()]);
   const bySession = new Map();
   for (const r of reps28) {
     const sid = r.session_id || `${r.date}|nosid`;
-    if (!bySession.has(sid)) bySession.set(sid, { count: 0, dates: new Set() });
+    if (!bySession.has(sid)) bySession.set(sid, { count: 0, dates: new Set(), grip: r.grip || "?" });
     const e = bySession.get(sid);
     e.count += 1;
     e.dates.add(r.date);
   }
-  const tinySessions = [...bySession.values()].filter(e => e.count <= 2).length;
-  const multiDateSessions = [...bySession.values()].filter(e => e.dates.size > 1).length;
-  const dataQuality = { noLoad, tinySessions, multiDateSessions };
+  const tinyList = [...bySession.values()]
+    .filter(e => e.count <= 2)
+    .map(e => `${e.grip} ${[...e.dates].sort()[0]} (${e.count} rep${e.count === 1 ? "" : "s"})`)
+    .sort();
+  const multiDateList = [...bySession.values()]
+    .filter(e => e.dates.size > 1)
+    .map(e => {
+      const ds = [...e.dates].sort();
+      return `${e.grip} ${ds[0]} → ${ds[ds.length - 1]}`;
+    })
+    .sort();
+  const dataQuality = {
+    noLoad, noLoadList,
+    tinySessions: tinyList.length, tinyList,
+    multiDateSessions: multiDateList.length, multiDateList,
+  };
 
   // ── Focus candidates — GRIP-LEVEL only (2026-07-08 design call) ──
   // Once a grip is picked, the recommender's escalating staleness boost
@@ -489,12 +514,22 @@ export function assembleCheckIn(signals) {
   // FOCUS — at most 3, grip-level, engine-owned.
   const focus = (focusCandidates || []).map(f => f.text);
 
-  // HEADS UP — data quality, or the all-clear.
+  // HEADS UP — data quality, or the all-clear. Each line names the
+  // offending sessions (grip + date) so they're findable in History;
+  // long lists truncate to the first three.
+  const listStr = (items, cap = 3) =>
+    items.slice(0, cap).join("; ") + (items.length > cap ? `; +${items.length - cap} more` : "");
   const headsUp = [];
   if (dataQuality) {
-    if (dataQuality.noLoad > 0) headsUp.push(`${dataQuality.noLoad} rep${dataQuality.noLoad === 1 ? "" : "s"} this month have no usable load — fits skip them; add manual loads in History if they were real.`);
-    if (dataQuality.tinySessions > 0) headsUp.push(`${dataQuality.tinySessions} session${dataQuality.tinySessions === 1 ? "" : "s"} with ≤2 reps — accidental starts? Delete them if so.`);
-    if (dataQuality.multiDateSessions > 0) headsUp.push(`${dataQuality.multiDateSessions} session id${dataQuality.multiDateSessions === 1 ? "" : "s"} span multiple dates — worth a look in History.`);
+    if (dataQuality.noLoad > 0) {
+      headsUp.push(`${dataQuality.noLoad} rep${dataQuality.noLoad === 1 ? "" : "s"} this month with no usable load (${listStr(dataQuality.noLoadList)}) — fits skip them; add manual loads in History if they were real.`);
+    }
+    if (dataQuality.tinySessions > 0) {
+      headsUp.push(`${dataQuality.tinySessions} session${dataQuality.tinySessions === 1 ? "" : "s"} with ≤2 reps — accidental starts? ${listStr(dataQuality.tinyList)}. Delete in History if so.`);
+    }
+    if (dataQuality.multiDateSessions > 0) {
+      headsUp.push(`${dataQuality.multiDateSessions} session${dataQuality.multiDateSessions === 1 ? "" : "s"} spanning multiple dates (${listStr(dataQuality.multiDateList)}) — worth a look in History.`);
+    }
   }
   if (!headsUp.length) headsUp.push("Nothing odd — data looks clean.");
 

@@ -74,8 +74,23 @@ describe("gatherCheckInSignals", () => {
     ];
     const s = gatherCheckInSignals(hist, [], [], { refDate: REF });
     expect(s.dataQuality.noLoad).toBe(1);
+    expect(s.dataQuality.noLoadList[0]).toBe("Micro 2026-07-02");
     expect(s.dataQuality.multiDateSessions).toBe(1);
+    expect(s.dataQuality.multiDateList[0]).toBe("Micro 2026-07-02 → 2026-07-03");
     expect(s.dataQuality.tinySessions).toBeGreaterThanOrEqual(1);
+    expect(s.dataQuality.tinyList.join(" ")).toMatch(/Micro 2026-07-01 \(1 rep\)/);
+  });
+
+  test("heads-up lines carry grip + date so sessions are findable", () => {
+    const hist = [
+      rep("2026-07-01", "Micro", 45, 46),          // tiny session
+      rep("2026-06-20", "Crusher", 7, 8),          // tiny session
+    ];
+    const out = assembleCheckIn(gatherCheckInSignals(hist, [], [], { refDate: REF }));
+    const flat = out.sections.headsUp.join(" ");
+    expect(flat).toMatch(/Micro 2026-07-01 \(1 rep\)/);
+    expect(flat).toMatch(/Crusher 2026-06-20 \(1 rep\)/);
+    expect(flat).toMatch(/Delete in History/);
   });
 });
 
