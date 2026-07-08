@@ -48,7 +48,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { C } from "../../ui/theme.js";
 import { Card, Btn } from "../../ui/components.js";
 import { fmtW } from "../../ui/format.js";
-import { ZONE_KEYS, ZONE_REF_T } from "../../model/zones.js";
+import { ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
 import {
   coachingRecommendationContinuous,
@@ -56,10 +56,7 @@ import {
 } from "../../model/coaching.js";
 import { maxTestStaleness } from "../../model/peakForce.js";
 import { ymdLocal } from "../../util.js";
-import { buildCoachNotes, decisiveWhy } from "../../model/coachNotes.js";
-import { fitAmpsForPts } from "../../model/baselines.js";
-import { predForceThreeExp } from "../../model/threeExp.js";
-import { freshFitReps, effectiveLoad } from "../../model/load.js";
+import { decisiveWhy } from "../../model/coachNotes.js";
 import { capacityMultiplier } from "../../model/fatigueBeta.js";
 import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import {
@@ -184,44 +181,6 @@ export function SessionPlanCard({
       : null,
     [history, grip, activeZone, fatigueModel]
   );
-
-  // ── Coach notes (July 2026) ──────────────────────────────
-  // Behavioral signals the recommender doesn't weigh: adherence vs
-  // your own cadence, workload ramp (acute:chronic volume), capacity
-  // trajectory for this grip. Max two, worst first — coaching layer,
-  // never a second recommender (model/coachNotes.js). The trajectory
-  // fit is injected: cumulative fresh-rep fits scored as the geomean
-  // force across the zone refTs (same balanced-score idea the
-  // Curve-Improvement total uses), cached per date.
-  const coachNotes = useMemo(() => {
-    if (!grip || !history || history.length === 0) return [];
-    const gripReps = freshFitReps(history).filter(r =>
-      r.grip === grip && effectiveLoad(r) > 0 && r.actual_time_s > 0);
-    const gripDates = [...new Set(gripReps.map(r => r.date).filter(Boolean))].sort();
-    const scoreCache = new Map();
-    const fitScoreAt = (date) => {
-      if (scoreCache.has(date)) return scoreCache.get(date);
-      let score = null;
-      const upTo = gripReps.filter(r => (r.date || "") <= date);
-      if (upTo.length >= 3) {
-        const amps = fitAmpsForPts(
-          upTo.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
-          grip, threeExpPriors,
-        );
-        if (amps) {
-          let logSum = 0, n = 0;
-          for (const k of ZONE_KEYS) {
-            const f = predForceThreeExp(amps, ZONE_REF_T[k]);
-            if (f > 0) { logSum += Math.log(f); n += 1; }
-          }
-          if (n > 0) score = Math.exp(logSum / n);
-        }
-      }
-      scoreCache.set(date, score);
-      return score;
-    };
-    return buildCoachNotes(history, { todayStr: ymdLocal(), gripDates, fitScoreAt });
-  }, [history, grip, threeExpPriors]);
 
   // ── Per-zone tiles (with per-grip cookedness scale-down) ─────────
   // Every tile gets the same multiplier because β is per-grip. If
@@ -567,29 +526,6 @@ export function SessionPlanCard({
           </button>
         );
       })()}
-
-      {/* Coach notes — behavioral coaching (adherence, workload ramp,
-          trajectory). Rendered between the plan and the slider so they
-          read as context for today's session, not as a second pick. */}
-      {coachNotes.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
-          {coachNotes.map(n => {
-            const noteColor = n.tone === "warn" ? C.orange : n.tone === "good" ? C.green : C.blue;
-            return (
-              <div key={n.key} style={{
-                display: "flex", gap: 8, alignItems: "flex-start",
-                padding: "8px 10px", borderRadius: 8,
-                background: noteColor + "11", border: `1px solid ${noteColor}33`,
-              }}>
-                <span style={{ fontSize: 12, lineHeight: 1.4 }}>
-                  {n.tone === "warn" ? "⚠️" : n.tone === "good" ? "📈" : "💬"}
-                </span>
-                <div style={{ fontSize: 11, color: C.text, lineHeight: 1.5 }}>{n.text}</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {/* Peak-test cadence — an action, not advisory text (July 2026):
           one tap runs SetupView.startMaxTest (3×3s target-less max
