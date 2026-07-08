@@ -163,6 +163,40 @@ describe("assembleCheckIn", () => {
     expect(stuckFlat).not.toMatch(/Support workout B hasn't come up/);
   });
 
+  test("busy-week nudge: partial support week acknowledges + prescribes at-risk exercises", () => {
+    const hist = [rep("2026-07-01", "Micro", 45, 46)];
+    const wlog = [
+      // History: slams trained regularly, but last touch 12d before REF
+      // (power window 10d → at risk). Dips 16d back (strength 14d → at risk).
+      { date: "2026-06-16", workout: "B", exercises: { medBallThrows: { sets: [{ done: true, reps: 8 }] } } },
+      { date: "2026-06-23", workout: "B", exercises: { medBallThrows: { sets: [{ done: true, reps: 8 }] } } },
+      { date: "2026-06-19", workout: "A", exercises: { dips: { sets: [{ done: true, weight: 20, reps: 5 }] } } },
+      // This week: pieces only — one exercise, nowhere near a full session.
+      { date: "2026-07-02", workout: "A", exercises: { weightedPullup: { sets: [{ done: true, reps: 5 }] } } },
+    ];
+    const out = buildCheckIn(hist, [], wlog, { refDate: REF });
+    const nudge = out.sections.focus.find(t => /No full A\/B\/C workout this week/.test(t));
+    expect(nudge).toBeTruthy();
+    expect(nudge).toMatch(/busy stretch\?/);
+    expect(nudge).toMatch(/Next week, try to get:/);
+    expect(nudge).toMatch(/Med Ball Slams \(12d idle\)/);
+    expect(nudge).toMatch(/Power qualities fade fastest/);
+    expect(out.sections.focus.length).toBeLessThanOrEqual(3);
+  });
+
+  test("busy-week nudge stays silent when a full workout happened", () => {
+    const hist = [rep("2026-07-01", "Micro", 45, 46)];
+    const fullA = { date: "2026-07-02", workout: "A", exercises: {
+      weightedPullup: { sets: [{ done: true, reps: 5 }] },
+      dips:           { sets: [{ done: true, reps: 5 }] },
+      heelHookPull:   { sets: [{ done: true, reps: 5 }] },
+      bandedLatPull:  { sets: [{ done: true, reps: 5 }] },
+    } };
+    const stale = { date: "2026-06-16", workout: "B", exercises: { medBallThrows: { sets: [{ done: true, reps: 8 }] } } };
+    const out = buildCheckIn(hist, [], [fullA, stale], { refDate: REF });
+    expect(out.sections.focus.some(t => /No full A\/B\/C workout/.test(t))).toBe(false);
+  });
+
   test("no week activity → plain acknowledgment in did", () => {
     const hist = [rep("2026-05-01", "Micro", 45, 46)];
     const out = buildCheckIn(hist, [], [], { refDate: REF });

@@ -43,6 +43,10 @@ import { buildCoachNotes } from "./coachNotes.js";
 // keystone nudge stays parked.
 import { workouts as SUPPORT_WORKOUTS, exercises as SUPPORT_EXERCISES } from "./supportTraining.js";
 import { migrateExerciseId } from "./exerciseIds.js";
+// Busy-week workout nudge (2026-07-08, BACKLOG #6 prescriptive half,
+// reshaped per Nathan: data-driven risk picks instead of a manual
+// keystone list). See supportRisk.js for the detraining basis.
+import { exerciseSupportRisk } from "./supportRisk.js";
 
 // Tunables
 const BASELINE_WEEKS = 4;
@@ -494,6 +498,31 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
     if (touched.length) partialCredit[sw.workout] = { count: touched.length, names: touched.map(exName) };
   }
 
+  // ── Busy-week workout nudge ──
+  // Fires when the week produced NO full A/B/C session ("full" = a
+  // session touching ≥60% of its workout's exercises) but DID touch
+  // some pieces — Nathan's busy-week pattern. Acknowledge the effort,
+  // then prescribe the exercises most at risk of going cold or
+  // regressing (supportRisk.js: decay-class windows + trend).
+  let anyFull7 = false;
+  for (const w of workoutSessions || []) {
+    if (!w || !w.date || w.date < d7 || w.date > refDate) continue;
+    const def = SUPPORT_WORKOUTS[w.workout];
+    if (!def || !def.exercises?.length) continue;
+    let touched = 0;
+    for (const [exId, ex] of Object.entries(w.exercises || {})) {
+      const done = (Array.isArray(ex?.sets) && ex.sets.some(t => t && t.done)) || ex?.done === true;
+      if (done && def.exercises.some(e => e.id === migrateExerciseId(exId))) touched += 1;
+    }
+    if (touched >= Math.ceil(def.exercises.length * 0.6)) { anyFull7 = true; break; }
+  }
+  let supportNudge = null;
+  if (!anyFull7 && touchedByEx.size > 0) {
+    let picks = [];
+    try { picks = exerciseSupportRisk(workoutSessions, refDate).slice(0, 3); } catch (e) { picks = []; }
+    if (picks.length) supportNudge = { picks };
+  }
+
   // ── Behavioral notes (adherence + volume ramp), as of week end ──
   // buildCoachNotes owns the thresholds and the adherence-suppresses-
   // ramp-drop priority; no trajectory injection here — the check-in's
@@ -501,7 +530,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   let behaviorNotes = [];
   try { behaviorNotes = buildCoachNotes(history, { todayStr: refDate }); } catch (e) { behaviorNotes = []; }
 
-  return { ...base, volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, focusCandidates: focus.slice(0, 3) };
+  return { ...base, volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates: focus.slice(0, 3) };
 }
 
 export function assembleCheckIn(signals) {
@@ -509,7 +538,7 @@ export function assembleCheckIn(signals) {
     return { range: null, headline: "No training logged yet — log a session to start your weekly check-in.", sections: null };
   }
   const digest = assembleReview(signals);
-  const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, focusCandidates, finger } = signals;
+  const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates, finger } = signals;
 
   // WHAT YOU DID — volume/coverage lines.
   const did = [];
@@ -568,8 +597,21 @@ export function assembleCheckIn(signals) {
     stuck.push(`Body weight moved ${bw.deltaKg > 0 ? "+" : ""}${bw.deltaKg} kg over the month — relative strength numbers shift with it.`);
   }
 
-  // FOCUS — at most 3, grip-level, engine-owned.
+  // FOCUS — at most 3 total. Grip-level finger items first (engine-
+  // owned); on a busy week the workout nudge takes the last slot:
+  // acknowledge the piecemeal effort (rhetorical, coach-voice), then
+  // name the exercises most at risk of going cold or regressing.
   const focus = (focusCandidates || []).map(f => f.text);
+  if (supportNudge && supportNudge.picks.length) {
+    const pickStr = supportNudge.picks.map(pk =>
+      `${pk.name} (${pk.regressing ? "trending down" : `${pk.daysSince}d idle`})`
+    ).join(", ");
+    const powerLed = supportNudge.picks[0] && supportNudge.picks[0].windowDays <= 10 && !supportNudge.picks[0].regressing;
+    let nudgeText = `No full A/B/C workout this week, but you got pieces in — busy stretch? That's the right instinct. Next week, try to get: ${pickStr}.`;
+    if (powerLed) nudgeText += " Power qualities fade fastest, which is why the explosive work leads.";
+    if (focus.length >= 3) focus.length = 2;   // nudge takes the third slot
+    focus.push(nudgeText);
+  }
 
   // HEADS UP — data quality, or the all-clear. Each line names the
   // offending sessions (grip + date) so they're findable in History;
