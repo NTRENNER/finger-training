@@ -46,16 +46,20 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card, Btn } from "../../ui/components.js";
 import { fmtW } from "../../ui/format.js";
-import { ZONE_KEYS } from "../../model/zones.js";
+import { ZONE_KEYS, ZONE_REF_T } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
 import {
   coachingRecommendationContinuous,
   FRESH_TEST_SHORT_T_MAX,
 } from "../../model/coaching.js";
-import { MAX_TEST_TARGET_S, MAX_TEST_ATTEMPTS, maxTestStaleness } from "../../model/peakForce.js";
+import { maxTestStaleness } from "../../model/peakForce.js";
 import { ymdLocal } from "../../util.js";
+import { buildCoachNotes, decisiveWhy } from "../../model/coachNotes.js";
+import { fitAmpsForPts } from "../../model/baselines.js";
+import { predForceThreeExp } from "../../model/threeExp.js";
+import { freshFitReps, effectiveLoad } from "../../model/load.js";
 import { capacityMultiplier } from "../../model/fatigueBeta.js";
 import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import {
@@ -100,6 +104,9 @@ export function SessionPlanCard({
   // priorities shift (climbing trip, recovery week). Pill only renders
   // when climbingFocus is non-default ("balanced" stays hidden).
   onNavigateToSettings,
+  // One-tap peak-test launcher (SetupView.startMaxTest) — replaces the
+  // old Why-line peak-test advisory text with an action (July 2026).
+  onStartMaxTest = null,
 }) {
   // ── Recommendation from the continuous engine ──────────────
   // coachingRecommendationContinuous ignores perceivedFatigue +
@@ -153,6 +160,9 @@ export function SessionPlanCard({
   // ── Active zone — defaults to recommended, user can override via tiles ──
   // Stored as the zone key (e.g. "power") or null = "follow recommendation"
   const [overrideZone, setOverrideZone] = useState(null);
+  // Why-line Details expander (July 2026) — receipts and secondary
+  // factors hide behind a tap so the headline stays one sentence.
+  const [showDetails, setShowDetails] = useState(false);
   const activeZone = overrideZone || recommendedZone;
   const isOverridden = overrideZone && overrideZone !== recommendedZone;
 
@@ -174,6 +184,44 @@ export function SessionPlanCard({
       : null,
     [history, grip, activeZone, fatigueModel]
   );
+
+  // ── Coach notes (July 2026) ──────────────────────────────
+  // Behavioral signals the recommender doesn't weigh: adherence vs
+  // your own cadence, workload ramp (acute:chronic volume), capacity
+  // trajectory for this grip. Max two, worst first — coaching layer,
+  // never a second recommender (model/coachNotes.js). The trajectory
+  // fit is injected: cumulative fresh-rep fits scored as the geomean
+  // force across the zone refTs (same balanced-score idea the
+  // Curve-Improvement total uses), cached per date.
+  const coachNotes = useMemo(() => {
+    if (!grip || !history || history.length === 0) return [];
+    const gripReps = freshFitReps(history).filter(r =>
+      r.grip === grip && effectiveLoad(r) > 0 && r.actual_time_s > 0);
+    const gripDates = [...new Set(gripReps.map(r => r.date).filter(Boolean))].sort();
+    const scoreCache = new Map();
+    const fitScoreAt = (date) => {
+      if (scoreCache.has(date)) return scoreCache.get(date);
+      let score = null;
+      const upTo = gripReps.filter(r => (r.date || "") <= date);
+      if (upTo.length >= 3) {
+        const amps = fitAmpsForPts(
+          upTo.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
+          grip, threeExpPriors,
+        );
+        if (amps) {
+          let logSum = 0, n = 0;
+          for (const k of ZONE_KEYS) {
+            const f = predForceThreeExp(amps, ZONE_REF_T[k]);
+            if (f > 0) { logSum += Math.log(f); n += 1; }
+          }
+          if (n > 0) score = Math.exp(logSum / n);
+        }
+      }
+      scoreCache.set(date, score);
+      return score;
+    };
+    return buildCoachNotes(history, { todayStr: ymdLocal(), gripDates, fitScoreAt });
+  }, [history, grip, threeExpPriors]);
 
   // ── Per-zone tiles (with per-grip cookedness scale-down) ─────────
   // Every tile gets the same multiplier because β is per-grip. If
@@ -224,7 +272,7 @@ export function SessionPlanCard({
   const activeEmoji = activeRow?.emoji ?? "🎯";
   const activeLabel = activeRow?.label ?? activeZone;
 
-  // ── Reps / Rest defaults from the active T ─────────────────────────
+  // ── Reps / Rest defaults from the active T ───────────────────
   // Ladder reps win for repeat (grip, zone) sessions; the T-derived
   // formula is the cold-start default for combos with no history.
   // Protocol-driven, no manual override (June 2026): the Hangs/Rest
@@ -241,7 +289,7 @@ export function SessionPlanCard({
       : 5;
   const rest = 20;
 
-  // ── Push to session config ────────────────────────────────────────────
+  // ── Push to session config ──────────────────────────────────
   // ladderLoadByHand: fresh-equivalent pinned loads when the density
   // ladder is active (null otherwise). useSessionRunner.startSession
   // prefers these over a fresh prescription() call so the "same
@@ -259,7 +307,7 @@ export function SessionPlanCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeZone, activeT, reps, rest, ladder]);
 
-  // ── Empty / loading states ─────────────────────────────────────────────
+  // ── Empty / loading states ───────────────────────────────────
   if (!grip) {
     return (
       <Card style={{ marginBottom: 16 }}>
@@ -282,58 +330,18 @@ export function SessionPlanCard({
     );
   }
 
-  // ── Why-text for the recommended zone ─────────────────────────────────
-  const whyParts = [];
-  const room = rec.room ?? (1 - (rec.localRatio ?? 1));
-  // Skip the residual ("below the curve") reasons when the target was
-  // snapped to the zone center for coverage — that signal was measured
-  // at the old argmax T, not where we're now prescribing, so quoting it
-  // would be misleading.
-  if (!rec.coverageSnap) {
-    if (rec.adaptBoost != null && rec.adaptBoost > 1.15) {
-      const pct = Math.round(room * 100);
-      whyParts.push(`reps near here fall ~${pct}% below the curve — biggest AUC-gain opportunity`);
-    } else if (rec.adaptBoost != null && rec.adaptBoost > 1.05) {
-      whyParts.push("reps near here sit slightly below the curve");
-    } else if (rec.adaptBoost != null && rec.adaptBoost < 0.85) {
-      whyParts.push("you're at or above the curve everywhere — picked here on staleness alone");
-    }
-  }
-  if (rec.staleStatus === "stale") {
-    whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is past its detraining window`);
-  } else if (rec.staleStatus === "never") {
-    whyParts.push(`never trained at this duration — exploring it anchors the curve`);
-  } else if (rec.staleStatus === "warning") {
-    whyParts.push(`${rec.zone.replace(/_/g, " ")} zone is approaching stale`);
-  }
-  // Coverage snap → explain the heavier/shorter, mid-window target.
-  if (rec.coverageSnap) {
-    whyParts.push("centered in the zone (heavier · shorter) so a strong rep still lands in-window");
-  }
-  if (rec.recency != null && rec.recency < 0.5) {
-    whyParts.push("zone partially recovered — lighter dose is fine");
-  }
-  if (rec.confidence != null && rec.confidence < 0.5) {
-    whyParts.push("sparse data here — picked to anchor the curve; log a clean rep");
-  }
-  // Climbing-focus bias — surface only when it actually nudged a
-  // non-neutral multiplier on the winning zone. Keeps the line
-  // honest about what tipped the balance.
-  if (rec.focus != null && rec.focus !== 1.0 && rec.climbingFocus && rec.climbingFocus !== "balanced") {
-    const pct = Math.round((rec.focus - 1) * 100);
-    const focusLabel = rec.climbingFocus === "power_endurance" ? "power endurance" : rec.climbingFocus;
-    if (pct > 0) {
-      whyParts.push(`${focusLabel} focus added +${pct}%`);
-    } else {
-      whyParts.push(`${focusLabel} focus despite −${Math.abs(pct)}% de-emphasis`);
-    }
-  }
-  // Density ladder receipts — when active, the plan's reps + load are
-  // protocol-driven (constant load, earn reps via the last-rep gate),
-  // so the Why line must say so and show the gate math. Loads shown
-  // with today's cookedness multiplier applied, matching what the
-  // runner will stamp.
-  if (ladder) {
+  // ── Why-line (July 2026 redesign) ─────────────────────────
+  // ONE plain sentence for the engine's decisive factor (decisiveWhy in
+  // model/coachNotes.js) — explanation, not persuasion; coaching never
+  // argues with the recommender. Everything the old run-on line carried
+  // (staleness arguments, coverage pleas, focus math, receipts) moves
+  // behind a tap-to-expand Details toggle, and the peak-test advisory
+  // is an actual button now (see onStartMaxTest below). When the
+  // density ladder owns the plan, the headline explains the protocol —
+  // those ARE the numbers on screen — and the curve's own decisive
+  // factor drops into Details.
+  const ladderText = (() => {
+    if (!ladder) return null;
     const lb = ladder.basis;
     const lMult = capacityMultiplier(fatigueModel, grip, cooked);
     const loadStr = ["L", "R"]
@@ -341,57 +349,57 @@ export function SessionPlanCard({
       .map(h => `${h} ${fmtW(ladder.loadByHand[h] * lMult, unit)}`)
       .join(" / ");
     if (ladder.decision === "advance") {
-      whyParts.push(`ladder: last rep ${lb.lastRepSec}s ≥ ${lb.gateSec}s gate → ${ladder.reps} reps, same load (${loadStr} ${unit})`);
-    } else if (ladder.decision === "repeat") {
-      whyParts.push(`ladder: last rep ${lb.lastRepSec}s < ${lb.gateSec}s gate → repeat ${ladder.reps} reps, same load (${loadStr} ${unit})`);
-    } else {
-      whyParts.push(`ladder: topped out at ${LADDER_MAX_REPS} reps → +${Math.round(LADDER_LOAD_STEP_FRAC * 100)}% load (${loadStr} ${unit}), back to ${LADDER_MIN_REPS} reps`);
+      return `ladder: last rep ${lb.lastRepSec}s ≥ ${lb.gateSec}s gate → ${ladder.reps} reps, same load (${loadStr} ${unit})`;
     }
+    if (ladder.decision === "repeat") {
+      return `ladder: last rep ${lb.lastRepSec}s < ${lb.gateSec}s gate → repeat ${ladder.reps} reps, same load (${loadStr} ${unit})`;
+    }
+    return `ladder: topped out at ${LADDER_MAX_REPS} reps → +${Math.round(LADDER_LOAD_STEP_FRAC * 100)}% load (${loadStr} ${unit}), back to ${LADDER_MIN_REPS} reps`;
+  })();
+  const whyText = decisiveWhy(rec, { ladderText });
+
+  // Secondary factors + receipts, shown only on demand. Any line that
+  // duplicates the headline is filtered out at the end.
+  const detailParts = [];
+  if (ladderText) {
+    const curveWhy = decisiveWhy(rec);
+    if (curveWhy) detailParts.push(curveWhy);
   }
-  // Cold-start seeding (rec.coldStart, see coaching.js) — a new grip
-  // gets mid-duration sessions first: each one sweeps a range of
-  // failure durations as fatigue accumulates, building the curve's
-  // body before the extremes get tested.
-  if (rec.coldStart) {
-    whyParts.push("new grip — seeding the curve from mid durations first (each failure session covers a range)");
+  if (rec.adaptBoost != null && rec.adaptBoost < 0.85 && !rec.coverageSnap) {
+    detailParts.push("you're at or above the curve everywhere — picked on staleness alone");
   }
-  // Fresh short-T test advisory (rec.freshTest, see coaching.js).
-  // Two flavors:
-  //   • the active pick IS short-T → remind to do it fresh, before
-  //     climbing — and warn when today's climb log says that ship
-  //     has already sailed;
-  //   • the pick isn't short-T but the short end is unanchored →
-  //     prompt scheduling a fresh max-test day so the curve's top
-  //     end gets a real failure anchor instead of extrapolation.
+  if (rec.staleStatus === "stale") {
+    detailParts.push(`${rec.zone.replace(/_/g, " ")} zone is past its detraining window`);
+  } else if (rec.staleStatus === "warning") {
+    detailParts.push(`${rec.zone.replace(/_/g, " ")} zone is approaching stale`);
+  }
+  if (rec.coverageSnap) {
+    detailParts.push("centered in the zone (heavier · shorter) so a strong rep still lands in-window");
+  }
+  if (rec.recency != null && rec.recency < 0.5) {
+    detailParts.push("zone partially recovered — lighter dose is fine");
+  }
+  if (rec.confidence != null && rec.confidence < 0.5) {
+    detailParts.push("sparse data here — log a clean rep to anchor the curve");
+  }
+  if (rec.focus != null && rec.focus !== 1.0 && rec.climbingFocus && rec.climbingFocus !== "balanced") {
+    const fPct = Math.round((rec.focus - 1) * 100);
+    const focusLabel = rec.climbingFocus === "power_endurance" ? "power endurance" : rec.climbingFocus;
+    detailParts.push(fPct > 0
+      ? `${focusLabel} focus added +${fPct}%`
+      : `${focusLabel} focus despite −${Math.abs(fPct)}% de-emphasis`);
+  }
+  // Short-T picks keep their freshness caveat — it changes how you
+  // should RUN the session, so it stays visible in Details.
   const pickIsShort = activeT != null && activeT <= FRESH_TEST_SHORT_T_MAX;
   if (pickIsShort) {
     if (cookedSuggestion && cookedSuggestion.todayFatigue != null && cookedSuggestion.cooked >= 4) {
-      whyParts.push("⚠️ you've climbed today — a max test now will read low; consider repeating it on a fresh day");
+      detailParts.push("⚠️ you've climbed today — a max effort now will read low; consider a fresh day");
     } else {
-      whyParts.push("do this fresh — before climbing — so it anchors the curve's top end honestly");
+      detailParts.push("do this fresh — before climbing — so it anchors the curve's top end honestly");
     }
-  } else if (maxTest?.recommended) {
-    // Peak test due — the actionable, cadenced max-strength read. A
-    // MAX_TEST_ATTEMPTS × MAX_TEST_TARGET_S max effort refreshes the Peak
-    // Force card AND anchors the curve's top end, so it supersedes the
-    // freshTest curve-anchor line below.
-    const proto = `${MAX_TEST_ATTEMPTS}×${MAX_TEST_TARGET_S}s max pulls per hand (before climbing)`;
-    whyParts.push(
-      maxTest.staleDays == null
-        ? `no max reading on record — peak test due: ${proto} to set your top line and anchor the curve`
-        : `last max reading was ${maxTest.staleDays}d ago — peak test due: ${proto} to refresh your top line`
-    );
-  } else if (rec.freshTest?.recommended) {
-    whyParts.push(
-      rec.freshTest.staleDays == null
-        ? "no short-duration failure on record — schedule a fresh ≤10s max test (before climbing) to anchor the curve's top end"
-        : `last short-duration failure was ${rec.freshTest.staleDays}d ago — schedule a fresh ≤10s max test (before climbing) to re-anchor the curve's top end`
-    );
   }
-  if (whyParts.length === 0) {
-    whyParts.push("curve is well-calibrated locally; this T scores best on staleness × recency");
-  }
-  const whyText = whyParts.join(" · ");
+  const detailShown = detailParts.filter(pt => pt && pt !== whyText);
 
   // Total session time (per-hand × 2 if Both)
   const perHandSec = (reps || 0) * (activeT || 0) + Math.max(0, (reps || 1) - 1) * (rest || 0);
@@ -401,7 +409,7 @@ export function SessionPlanCard({
   const s = totalSec % 60;
   const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
 
-  // ── Render ───────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${activeColor}66` }}>
 
@@ -539,10 +547,68 @@ export function SessionPlanCard({
             <div style={{ marginTop: 10, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
               <span style={{ color: recCfg.color, fontWeight: 700 }}>Why: </span>
               {whyText}
+              {detailShown.length > 0 && (
+                <span
+                  onClick={(e) => { e.stopPropagation(); setShowDetails(v => !v); }}
+                  style={{ marginLeft: 6, color: recCfg.color, cursor: "pointer", fontWeight: 700 }}
+                >
+                  {showDetails ? "− less" : `+${detailShown.length} more`}
+                </span>
+              )}
             </div>
+            {showDetails && detailShown.length > 0 && (
+              <div style={{
+                marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.border}`,
+                fontSize: 10.5, color: C.muted, lineHeight: 1.6, textAlign: "left",
+              }}>
+                {detailShown.map((pt, i) => <div key={i}>· {pt}</div>)}
+              </div>
+            )}
           </button>
         );
       })()}
+
+      {/* Coach notes — behavioral coaching (adherence, workload ramp,
+          trajectory). Rendered between the plan and the slider so they
+          read as context for today's session, not as a second pick. */}
+      {coachNotes.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+          {coachNotes.map(n => {
+            const noteColor = n.tone === "warn" ? C.orange : n.tone === "good" ? C.green : C.blue;
+            return (
+              <div key={n.key} style={{
+                display: "flex", gap: 8, alignItems: "flex-start",
+                padding: "8px 10px", borderRadius: 8,
+                background: noteColor + "11", border: `1px solid ${noteColor}33`,
+              }}>
+                <span style={{ fontSize: 12, lineHeight: 1.4 }}>
+                  {n.tone === "warn" ? "⚠️" : n.tone === "good" ? "📈" : "💬"}
+                </span>
+                <div style={{ fontSize: 11, color: C.text, lineHeight: 1.5 }}>{n.text}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Peak-test cadence — an action, not advisory text (July 2026):
+          one tap runs SetupView.startMaxTest (3×3s target-less max
+          preset via startSession's override path). Hidden when the
+          active pick is already short-T — that IS a max effort. */}
+      {maxTest?.recommended && onStartMaxTest && !pickIsShort && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+          padding: "8px 10px", marginBottom: 12, borderRadius: 8,
+          background: C.blue + "11", border: `1px solid ${C.blue}44`,
+        }}>
+          <div style={{ fontSize: 11, color: C.text, lineHeight: 1.4 }}>
+            🎯 Peak test due — {maxTest.staleDays == null
+              ? "no measured max on record"
+              : `last reading ${maxTest.staleDays}d ago`}. Refreshes your top line and anchors the curve.
+          </div>
+          <Btn small color={C.blue} onClick={onStartMaxTest}>Start peak test</Btn>
+        </div>
+      )}
 
       {/* "How cooked today?" slider — 0–10 pre-workout state, defaults
           to 0 (fresh, multiplier = 1, no scale-down). Higher values apply

@@ -65,9 +65,9 @@ import { SessionPlanCard } from "./cards/SessionPlanCard.js";
 import { maxTestStaleness, MAX_TEST_TARGET_S, MAX_TEST_ATTEMPTS } from "../model/peakForce.js";
 import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 
-// ─────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
-// ─────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Inline body-weight prompt — shown in session setup when BW is stale
 // (>3 days). Exported because WorkoutTab also renders it before its
 // session log so users get the same nudge regardless of entry tab.
@@ -173,9 +173,9 @@ export function BwPrompt({ unit = "lbs", onSave }) {
 }
 
 
-// ─────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // SETUP VIEW
-// ─────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 
 export function SetupView({
   config, setConfig, onStart, history,
@@ -335,30 +335,24 @@ export function SetupView({
         fatigueModel={fatigueModel}
         climbingFocus={climbingFocus}
         onNavigateToSettings={onNavigateToSettings}
+        onStartMaxTest={startMaxTest}
       />
 
 
-      {/* Peak test launcher — always available once a grip is picked, so
-          you can run a max test on demand, not only when the cadence is
-          due. Copy + emphasis adapt to whether this grip's measured max
-          reading is overdue (maxTest.recommended). Target-less 3s max
-          preset via startMaxTest → the Peak Force card + cadence update
-          from the logged reps. */}
-      {config.grip && maxTest && (
-        <Card style={{
-          marginBottom: 16,
-          border: `1px solid ${maxTest.recommended ? C.blue : C.border}`,
-          background: maxTest.recommended ? C.blue + "11" : C.card,
-        }}>
+      {/* Peak test launcher — the ON-DEMAND variant. When the cadence
+          is due, the nudge + one-tap button live INSIDE SessionPlanCard
+          (July 2026), so rendering this card too would double-nag;
+          it now shows only when the reading is fresh, as a quiet
+          "run one anyway" affordance. */}
+      {config.grip && maxTest && !maxTest.recommended && (
+        <Card style={{ marginBottom: 16, border: `1px solid ${C.border}` }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 180 }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>
-                🎯 Peak test{maxTest.recommended ? " due" : ""} · {config.grip}
+                🎯 Peak test · {config.grip}
               </div>
               <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.45 }}>
-                {maxTest.staleDays == null
-                  ? "No measured max on record yet."
-                  : `Last max reading ${maxTest.staleDays}d ago${maxTest.recommended ? " — overdue" : ""}.`}{" "}
+                Last max reading {maxTest.staleDays}d ago.{" "}
                 {MAX_TEST_ATTEMPTS}×{MAX_TEST_TARGET_S}s max pulls per hand, full rest — warm up first, Tindeq connected so it captures peak.
               </div>
             </div>
