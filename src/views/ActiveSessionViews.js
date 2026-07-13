@@ -196,10 +196,11 @@ export function ManualOffsetPrompt({ onChoose }) {
 // This view unmounts on every rest phase (App renders RestView between
 // reps), so the override string — if held in local state — reset to ""
 // each rep and the next rep silently fell back to the prescribed weight
-// (Tom's bug, July 2026). Module-scoped and keyed by sessionId so the
-// value survives remounts within a session but clears when a new session
-// starts (startSession mints a fresh sessionId).
-let _overrideBySession = { sessionId: null, str: "" };
+// (Tom's bug, July 2026). Module-scoped and keyed by sessionId, then by
+// hand: L and R are tracked and prescribed independently, so their
+// overrides are independent too. The value survives remounts within a
+// session but clears when a new session starts (fresh sessionId).
+let _overrideBySession = { sessionId: null, byHand: {} };
 
 export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, unit = "lbs", history = [] }) {
   const { config, currentRep, activeHand, sessionReps = [] } = session;
@@ -217,14 +218,25 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   // user typed; convert to kg only where consumed (targetKg).
   // Hydrate the override from the module-scoped store so it persists
   // across this view's per-rep remount; write-through on every change.
+  // Keyed by hand so L and R hold independent override weights (both-mode
+  // does all L reps then all R; single-hand sessions use just that hand).
   const sessionKey = session.sessionId;
+  const overrideHand = config.hand === "Both" ? activeHand : config.hand;
   const [manualWeightStr, setManualWeightStrState] = useState(
-    () => (_overrideBySession.sessionId === sessionKey ? _overrideBySession.str : "")
+    () => (_overrideBySession.sessionId === sessionKey
+      ? (_overrideBySession.byHand[overrideHand] ?? "")
+      : "")
   );
   const setManualWeightStr = useCallback((v) => {
-    _overrideBySession = { sessionId: sessionKey, str: v };
+    const byHand = _overrideBySession.sessionId === sessionKey
+      ? _overrideBySession.byHand
+      : {};
+    _overrideBySession = {
+      sessionId: sessionKey,
+      byHand: { ...byHand, [overrideHand]: v },
+    };
     setManualWeightStrState(v);
-  }, [sessionKey]);
+  }, [sessionKey, overrideHand]);
   const startTimeRef = useRef(null);
   const timerRef     = useRef(null);
   // Latest manual weight override in kg. endRep (a stable useCallback) reads

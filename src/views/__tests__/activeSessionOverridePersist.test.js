@@ -25,9 +25,9 @@ function fakeTindeq() {
     stopMeasuring: async () => ({ avgForce: 0, peakForce: 0 }),
   };
 }
-const baseSession = (sessionId) => ({
-  config: { grip: "Micro", hand: "L", repsPerSet: 5, targetTime: 45, restTime: 20 },
-  currentRep: 0, sessionId, activeHand: "L",
+const baseSession = (sessionId, hand = "L") => ({
+  config: { grip: "Micro", hand: hand === "Both" ? "Both" : hand, repsPerSet: 5, targetTime: 45, restTime: 20 },
+  currentRep: 0, sessionId, activeHand: hand === "Both" ? "L" : hand,
   refWeights: { L: 20, R: 20 }, sessionReps: [],
 });
 const props = (session) => ({
@@ -46,6 +46,30 @@ test("override persists across a remount within the same session", () => {
 
   render(<ActiveSessionView {...props({ ...baseSession("s1"), currentRep: 1 })} />);
   expect(screen.getByPlaceholderText(/Override/i).value).toBe("20"); // persisted
+});
+
+test("L and R hold independent overrides within a session", () => {
+  const sid = "both-1";
+  const both = (activeHand) => ({
+    config: { grip: "Micro", hand: "Both", repsPerSet: 5, targetTime: 45, restTime: 20 },
+    currentRep: 0, sessionId: sid, activeHand,
+    refWeights: { L: 20, R: 20 }, sessionReps: [],
+  });
+
+  // Left hand: set an override.
+  let view = render(<ActiveSessionView {...props(both("L"))} />);
+  fireEvent.change(screen.getByPlaceholderText(/Override/i), { target: { value: "20" } });
+  view.unmount();
+
+  // Switch to right hand — starts fresh (no L bleed-through).
+  view = render(<ActiveSessionView {...props(both("R"))} />);
+  expect(screen.getByPlaceholderText(/Override/i).value).toBe("");
+  fireEvent.change(screen.getByPlaceholderText(/Override/i), { target: { value: "25" } });
+  view.unmount();
+
+  // Back to left — its own override is intact.
+  render(<ActiveSessionView {...props(both("L"))} />);
+  expect(screen.getByPlaceholderText(/Override/i).value).toBe("20");
 });
 
 test("override clears when a new session starts (different sessionId)", () => {
