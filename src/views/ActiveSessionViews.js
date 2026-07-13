@@ -192,6 +192,15 @@ export function ManualOffsetPrompt({ onChoose }) {
 
 // ─────────────────────────────────────────────────────────────
 
+// Manual weight-override persistence across ActiveSessionView remounts.
+// This view unmounts on every rest phase (App renders RestView between
+// reps), so the override string — if held in local state — reset to ""
+// each rep and the next rep silently fell back to the prescribed weight
+// (Tom's bug, July 2026). Module-scoped and keyed by sessionId so the
+// value survives remounts within a session but clears when a new session
+// starts (startSession mints a fresh sessionId).
+let _overrideBySession = { sessionId: null, str: "" };
+
 export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, unit = "lbs", history = [] }) {
   const { config, currentRep, activeHand, sessionReps = [] } = session;
 
@@ -206,7 +215,16 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   // digit weights untypable ("12" → "1.0" after the first key) and
   // drifted values through double kg↔lbs conversion. Keep what the
   // user typed; convert to kg only where consumed (targetKg).
-  const [manualWeightStr, setManualWeightStr] = useState("");
+  // Hydrate the override from the module-scoped store so it persists
+  // across this view's per-rep remount; write-through on every change.
+  const sessionKey = session.sessionId;
+  const [manualWeightStr, setManualWeightStrState] = useState(
+    () => (_overrideBySession.sessionId === sessionKey ? _overrideBySession.str : "")
+  );
+  const setManualWeightStr = useCallback((v) => {
+    _overrideBySession = { sessionId: sessionKey, str: v };
+    setManualWeightStrState(v);
+  }, [sessionKey]);
   const startTimeRef = useRef(null);
   const timerRef     = useRef(null);
   // Latest manual weight override in kg. endRep (a stable useCallback) reads
