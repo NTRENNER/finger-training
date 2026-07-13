@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // useSessionRunner — in-workout finite state machine
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Owns everything the user sees once they hit "Start Session" —
 // the rep counter, the phase machine that drives which view
 // renders, and all the callbacks the active-session views call on
@@ -86,7 +86,7 @@ export function useSessionRunner({
   tindeqConnected,
   onSessionStart,
 }) {
-  // ── Session config (see comment at top) ──────────────────────
+  // ── Session config (see comment at top) ─────────────────────
   // Multi-set fields (numSets, setRestTime) removed — every session
   // is single-set under the curve-trust model.
   const [rawConfig, setConfig] = useState(() => ({
@@ -112,7 +112,7 @@ export function useSessionRunner({
   // No derived fields anymore — config is rawConfig.
   const config = rawConfig;
 
-  // ── Phase machine + per-rep counters ─────────────────────────
+  // ── Phase machine + per-rep counters ──────────────────────
   // (currentSet removed — single-set model. Rep records still write
   // set_num: 1 as a constant for backward compat with the existing
   // Supabase schema; the column is otherwise unused going forward.)
@@ -145,7 +145,7 @@ export function useSessionRunner({
   // were the only consumer. Per-grip baseline data is still available
   // through model/levels.js for any future runtime feature that needs it.)
 
-  // ── Start session ────────────────────────────────────────────────
+  // ── Start session ──────────────────────────────────────
   // refWeights drives the in-workout "Rep 1 suggested weight" display
   // and the weight that gets recorded against each rep. Same prescription
   // chain as the Setup card's "Train at" cell — single unified call to
@@ -270,7 +270,7 @@ export function useSessionRunner({
     }
   }, [phase]);
 
-  // ── Handle rep completion ────────────────────────────────────────
+  // ── Handle rep completion ─────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null }) => {
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
@@ -318,8 +318,14 @@ export function useSessionRunner({
       // live color/auto-fail threshold but never reached the saved rep, so
       // manual users' reps persisted load=0 and every fit read zero. The
       // History rep editor's "Manual load" field still back-fills it later.
+      // Store at ~0.001 kg precision, NOT 0.1 kg. In lbs mode a 0.1 kg
+      // grid quantizes to ~0.22 lb steps, so a user with lb plates can't
+      // land on a round weight — e.g. 20.0 lb snapped to 20.1 or 20.3
+      // (Tom's bug, July 2026). Fine precision lets toDisp reproduce the
+      // exact value they typed. Matches the History rep editor, which
+      // already stores fromDisp(...) unrounded.
       manual_load_kg:     (Number.isFinite(manualLoadKg) && manualLoadKg > 0)
-                            ? Math.round(manualLoadKg * 10) / 10
+                            ? Math.round(manualLoadKg * 1000) / 1000
                             : null,
       actual_time_s:   roundedActual,
       avg_force_kg:    (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
