@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // ACTIVE-SESSION VIEWS
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Everything the user sees once they hit "Start Session" — the
 // big-timer / force-gauge active rep, the rest screen between
 // reps, the switch-hands prompt in Both-mode, and the post-session
@@ -33,6 +33,7 @@ import { downloadCSV } from "../lib/csv.js";
 import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
+import { sessionOverpull } from "../model/overpull.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 
 // Small wrapper used by both ActiveSessionView and AutoRepSessionView
@@ -116,11 +117,11 @@ function LiveRecoveryCard({ history, config, activeHand, sessionReps, embedded =
 const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","⭐","💎","🏆","🌟"];
 
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 
 // SHARED PRIMITIVES
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 
 // BigTimer + ForceGauge moved to ./cards/LiveForceCard.jsx so the
 // adaptive warmup hang can use the same primitives. The contracts
@@ -186,11 +187,11 @@ export function ManualOffsetPrompt({ onChoose }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 
 // ACTIVE-REP SCREEN (manual flow — no BLE)
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 
 // Manual weight-override persistence across ActiveSessionView remounts.
 // This view unmounts on every rest phase (App renders RestView between
@@ -484,13 +485,13 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   );
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 
 // REST / SWITCH-HANDS / BETWEEN-SETS / SUMMARY
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 function playBeep(freq = 880, duration = 0.12, volume = 0.4) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -735,6 +736,21 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
 
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Session Complete</h2>
 
+      {(() => {
+        const op = sessionOverpull(reps);
+        return op.isOver ? (
+          <Card style={{ borderColor: C.orange, marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.orange, marginBottom: 4 }}>
+              You trained ~{op.pct}% over the target weight
+            </div>
+            <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+              Next time, hold the prescribed load to failure. The model learns from where
+              you actually fail, so staying on target gives cleaner data and better progress.
+            </div>
+          </Card>
+        ) : null;
+      })()}
+
       <Card>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, textAlign: "center" }}>
           <div>
@@ -818,11 +834,11 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
   );
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 
 // AUTO-REP SCREEN (Tindeq-driven flow)
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 
 export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs", history = [] }) {
   const { config, currentRep, activeHand, refWeights, sessionReps = [] } = session;
