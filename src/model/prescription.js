@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // PRESCRIPTION LAYER
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // All the load-prescription logic — what weight to train at next
 // session, what your potential ceiling is, what the gap diagnostic
 // says. This module sits on top of the model layer (three-exp as the
@@ -59,9 +59,9 @@ import { PEAK_MAX_PROTOCOL_T } from "./peakForce.js";
 // existing call sites that import them from prescription.js keep working.
 import { sane, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep } from "./load.js";
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 export { sane, prescribedLoad, effectiveLoad, loadedWeight } from "./load.js";
 
 // Stable identity for a rep. Used as the key in freshMap.
@@ -80,9 +80,9 @@ export function isShortfall(actualTime, targetDuration) {
   return actualTime < targetDuration * SHORTFALL_TOL;
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // FATIGUE-ADJUSTED LOAD INDEX  (freshMap)
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Within a set, the same posted load gets HARDER each rep as the
 // muscle fatigues. Plain F-D fits will then misread later reps as
 // "you were weaker than this" and pull the curve down. The fix:
@@ -313,9 +313,9 @@ export function fitDoseK(history, opts = {}) {
 // intrinsically — overshoots pull the amplitude anchor up, undershoots
 // down, no explicit streak multiplier needed.)
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // HISTORICAL ESTIMATION  (fallback path, no curve)
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Returns the weighted-recent-average weight at which the user
 // achieved close to targetDuration seconds to failure. Used as the
 // last-resort emergency fallback when no curve fit is available.
@@ -336,9 +336,9 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
   return wKg / wSum;
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // UNIFIED PRESCRIPTION  (PRIMARY coaching path)
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Returns the load to TRAIN AT for a given (hand, grip, T), plus the
 // unscaled curve "potential" for the gap diagnostic, derived from a
 // SINGLE three-exp fit. Replaces the prior empiricalPrescription /
@@ -401,7 +401,7 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
 
 export const EMPIRICAL_LOOKBACK_DAYS = 30;
 
-// ── Peak-force ceiling (June 2026) ───────────────────────────
+// ── Peak-force ceiling (June 2026) ─────────────────────────
 // The three-exp curve has essentially no data support below ~10s for
 // most training histories (short-end reps are rare, and the recent
 // ones usually aren't failures), so curve_shape(T) extrapolates
@@ -425,6 +425,16 @@ export const EMPIRICAL_LOOKBACK_DAYS = 30;
 // the final value, and only against demonstrated physical capacity.
 export const PEAK_CAP_LOOKBACK_DAYS = 90;
 export const PEAK_CAP_FRACTION = 0.95;
+
+// Anti-collapse extrapolation floor (July 2026). The three-exp F-D
+// curve has no non-zero asymptote, so evaluating it far past the
+// longest hold the user has actually logged can decay to implausibly
+// light loads — a 220s Micro target once extrapolated to 2.5 kg. We
+// have no evidence the curve keeps dropping past our data, so the
+// prescription is floored at the curve value at EXTRAP_FLOOR_MULT ×
+// the longest observed hold. The floor extends automatically as the
+// user logs longer holds, so it never blocks genuine endurance gains.
+export const EXTRAP_FLOOR_MULT = 1.5;
 
 // Clamp a prescribed load to a physical ceiling. With a recent measured
 // peak, that peak IS the ceiling (peakCapKg). WITHOUT one — a new grip, a
@@ -643,7 +653,23 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
         // the uncapped shape. peakCapped tells the UI the value was
         // physically bounded rather than curve-derived.
         const rawRounded = Math.round(valueRaw * 10) / 10;
-        const value = capValue(rawRounded);
+        // Anti-collapse floor: don't trust the curve's downward
+        // extrapolation more than EXTRAP_FLOOR_MULT past the longest
+        // hold we have data for. Beyond that, floor the load at the
+        // curve value at that capped duration (with the same amplitude
+        // scale) so a data-starved long target can't collapse to a
+        // nonsensically light load. Inactive for in-range targets.
+        const longestObservedT = points.reduce(
+          (m, r) => Math.max(m, r.actual_time_s || 0), 0);
+        let extrapFloorRaw = null;
+        if (longestObservedT > 0 && targetDuration > longestObservedT * EXTRAP_FLOOR_MULT) {
+          const floorPot = predForceThreeExp(amps, longestObservedT * EXTRAP_FLOOR_MULT);
+          if (floorPot > 0) extrapFloorRaw = Math.round(floorPot * scale * 10) / 10;
+        }
+        const flooredRaw = extrapFloorRaw != null
+          ? Math.max(rawRounded, extrapFloorRaw)
+          : rawRounded;
+        const value = capValue(flooredRaw);
         return {
           value,
           potential:   Math.round(potentialRaw * 10) / 10,
@@ -655,6 +681,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
           peakCapped:      value < rawRounded,   // ceiling bit
           capacityFloorKg: floorKg,
           capacityFloored: value > rawRounded,   // floor lifted it above the curve
+          extrapFloored:   extrapFloorRaw != null && flooredRaw > rawRounded,
         };
       }
     }
