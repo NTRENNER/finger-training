@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // SETUP VIEW — curve-trust layout (May 2026)
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // The "Setup" tab. Under the curve-trust philosophy, the F-D curve
 // is the source of truth for what to train next. The continuous
 // engine (coachingRecommendationContinuous in src/model/coaching.js)
@@ -62,12 +62,13 @@ import { today } from "../util.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { computeDeload, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.js";
+import { TendonCard } from "./cards/TendonCard.jsx";
 import { maxTestStaleness, MAX_TEST_TARGET_S, MAX_TEST_ATTEMPTS } from "../model/peakForce.js";
 import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 
-// ───────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
 // BW PROMPT — stale-body-weight nudge
-// ───────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
 // Inline body-weight prompt — shown in session setup when BW is stale
 // (>3 days). Exported because WorkoutTab also renders it before its
 // session log so users get the same nudge regardless of entry tab.
@@ -173,9 +174,9 @@ export function BwPrompt({ unit = "lbs", onSave }) {
 }
 
 
-// ───────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
 // SETUP VIEW
-// ───────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
 
 export function SetupView({
   config, setConfig, onStart, history,
@@ -379,6 +380,13 @@ export function SetupView({
       >
         Start Session →
       </Btn>
+
+      {/* Tendon protocol (Abrahangs) — a low-load connective-tissue
+          adjunct, cloud-synced and kept entirely separate from the
+          muscular reps model. */}
+      <div style={{ marginTop: 16 }}>
+        <TendonCard />
+      </div>
 
       {/* Bodyweight quick-log — pinned to the bottom of the page to
           match the Workout tab's placement. Tied to the finger-session
