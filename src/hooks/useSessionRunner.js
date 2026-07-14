@@ -131,6 +131,13 @@ export function useSessionRunner({
   // not state: it must not retrigger effects and is only read once.
   const preSessionHistoryRef = useRef(null);
   const [sessionStartedAt, setSessionStartedAt] = useState("");
+  // Session-anchored local date (YYYY-MM-DD), captured once at
+  // startSession. Every rep in the session is stamped with THIS,
+  // not today() at each rep-completion. A session that crosses local
+  // midnight (e.g. a late-evening hang past 12) otherwise had its
+  // later reps stamped with the next day and split across two
+  // History entries (Nathan's 2026-07-12 Crusher session, July 2026).
+  const [sessionDate, setSessionDate] = useState("");
   const [refWeights,       setRefWeights]        = useState({});
   const [lastRepResult, setLastRepResult] = useState(null);
   const [leveledUp,   setLeveledUp]   = useState(false);
@@ -185,17 +192,22 @@ export function useSessionRunner({
           })();
       rw[h] = base != null ? base * fatigueMod : base;
     });
+    // Anchor the session's local date ONCE, here at start. Reused for
+    // daily_state and stamped on every rep so the whole session stays
+    // on the day it began even if it runs past local midnight.
+    const startedDay = today();
     // Persist today's cookedness so the server-side β trigger can
     // join it onto rep-1 inserts. Fire-and-forget; failure here
     // doesn't block the session, just costs a learning update.
     if (cfg.cooked != null) {
-      pushDailyState(today(), cfg.cooked);
+      pushDailyState(startedDay, cfg.cooked);
     }
     const startedAt = nowISO();
     preSessionHistoryRef.current = history;  // freeze pre-session view for level-up detection
     repDoneLockRef.current = false;   // arm rep-done for the first rep
     setSessionId(sid);
     setSessionStartedAt(startedAt);
+    setSessionDate(startedDay);
     setRefWeights(rw);
     setSessionReps([]);
     setCurrentRep(0);
@@ -299,7 +311,7 @@ export function useSessionRunner({
       // local id ≠ cloud id until the next reconcile — and id-based
       // updateRep/deleteRep calls silently matched 0 cloud rows.
       id:              uuid(),
-      date:            today(),
+      date:            sessionDate || today(),
       grip:            config.grip,
       hand:            effectiveHand,
       target_duration: config.targetTime,
@@ -405,7 +417,7 @@ export function useSessionRunner({
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentRep, refWeights, sessionId, sessionStartedAt, sessionReps, addReps, activeHand, manualOffset, tindeqConnected]);
+  }, [config, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected]);
 
   const handleRestDone = useCallback(() => {
     repDoneLockRef.current = false;   // next rep armed — accept its completion
