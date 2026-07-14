@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // HISTORY VIEW
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // The "History" tab — three-domain (fingers / workout / climbing)
 // session log with full edit capabilities for finger-training reps.
 //
@@ -42,6 +42,7 @@ import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
 import { deleteBW } from "../lib/sync.js";
+import { BadgeCollection } from "./cards/BadgeCollection.jsx";
 
 // Default hand for the "+ Add rep" picker. Resolution order:
 //   1. STICKY — the last hand you added to THIS session (sessKey match),
@@ -467,6 +468,10 @@ export function HistoryView({
           }} color={C.muted}>↓ CSV</Btn>
         </div>
       </div>
+
+      {/* Derived badge collection (fingers only) — a read-only view of
+          your level across every grip/zone you've trained. */}
+      {domain === "fingers" && <BadgeCollection history={history} />}
 
       {/* ── Add Session form ── */}
       {domain === "fingers" && addingSession && (
