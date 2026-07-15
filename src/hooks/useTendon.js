@@ -1,8 +1,8 @@
 // useTendon — loads the tendon-protocol completion log from the cloud
-// and exposes a logger. Self-contained (reads auth via tendonSync), so
-// the card can drop into any view without prop threading.
+// and exposes log/remove. Self-contained (reads auth via tendonSync),
+// so both the Setup card and the History list can use it independently.
 import { useCallback, useEffect, useState } from "react";
-import { fetchTendonSessions, pushTendonSession } from "../lib/tendonSync.js";
+import { fetchTendonSessions, pushTendonSession, deleteTendonSession } from "../lib/tendonSync.js";
 import { uuid, today } from "../util.js";
 
 export function useTendon() {
@@ -19,11 +19,17 @@ export function useTendon() {
 
   const logSession = useCallback(async ({ preset, sets, totalWorkS }) => {
     const rec = { id: uuid(), date: today(), preset, sets, total_work_s: totalWorkS };
-    setSessions(prev => [rec, ...prev]);   // optimistic — reflects in adherence immediately
+    setSessions(prev => [rec, ...prev]);   // optimistic
     await pushTendonSession(rec);
     reload();
     return rec;
   }, [reload]);
 
-  return { sessions, loaded, logSession, reload };
+  const removeSession = useCallback(async (id) => {
+    setSessions(prev => prev.filter(s => s.id !== id));   // optimistic
+    await deleteTendonSession(id);
+    reload();
+  }, [reload]);
+
+  return { sessions, loaded, logSession, removeSession, reload };
 }

@@ -36,3 +36,29 @@ describe("tendonAdherence", () => {
     expect(a.onTrack).toBe(false);
   });
 });
+
+describe("tendon presets", () => {
+  const { TENDON_PRESETS, getPreset, resolvePreset, presetName } = require("../tendon.js");
+
+  test("has Emil (10s) and Barr (30s) presets", () => {
+    const emil = getPreset("abrahangs-emil");
+    const barr = getPreset("barr");
+    expect(emil.workSec).toBe(10);
+    expect(barr.workSec).toBe(30);
+    expect(TENDON_PRESETS.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("resolvePreset applies + clamps time overrides", () => {
+    const p = resolvePreset("abrahangs-emil", { workSec: 25, restSec: 40 });
+    expect(p.workSec).toBe(25);
+    expect(p.restSec).toBe(40);
+    // out-of-range clamps to bounds; junk falls back to base
+    expect(resolvePreset("barr", { workSec: 9999 }).workSec).toBe(120);
+    expect(resolvePreset("barr", { workSec: "x" }).workSec).toBe(30);
+  });
+
+  test("presetName resolves display names", () => {
+    expect(presetName("abrahangs-emil")).toBe("Emil");
+    expect(presetName("barr")).toBe("Barr");
+  });
+});
