@@ -1,28 +1,49 @@
-// Tendon-protocol card for the Fingers/Setup screen. Shows weekly
-// adherence + streak and launches the guided timer. A completed session
-// logs one cloud row (no load). Fully self-contained: reads/writes via
-// useTendon, so it can drop into SetupView with no prop threading. This
-// track is intentionally separate from the muscular reps model.
+// Tendon-protocol card for the Fingers/Setup screen. Preset picker
+// (Emil / Barr) + editable hold/rest seconds, weekly adherence + streak,
+// and the guided timer launcher. A completed session logs one cloud row
+// (no load). Self-contained via useTendon; separate from the reps model.
 import React, { useState } from "react";
 import { C } from "../../ui/theme.js";
 import { Card, Btn } from "../../ui/components.js";
-import { TENDON_PRESET, tendonAdherence, totalSets, totalWorkSeconds } from "../../model/tendon.js";
+import {
+  TENDON_PRESETS, DEFAULT_PRESET_KEY, resolvePreset, getPreset,
+  tendonAdherence, totalSets, totalWorkSeconds,
+} from "../../model/tendon.js";
 import { useTendon } from "../../hooks/useTendon.js";
 import { TendonTimer } from "./TendonTimer.jsx";
 import { today } from "../../util.js";
+import { loadLS, saveLS } from "../../lib/storage.js";
+
+const LS_KEY = "ft_tendon_cfg";
 
 export function TendonCard() {
   const { sessions, logSession } = useTendon();
   const [active, setActive] = useState(false);
+  const [showCfg, setShowCfg] = useState(false);
+  const [cfg, setCfg] = useState(() => loadLS(LS_KEY) || { preset: DEFAULT_PRESET_KEY });
+
+  const preset = resolvePreset(cfg.preset, cfg);
   const adh = tendonAdherence(sessions, today(), 3);
+
+  const persist = (next) => { setCfg(next); saveLS(LS_KEY, next); };
+  // Switching preset resets the times to that preset's defaults (a
+  // clean baseline the user can then nudge with the inputs below).
+  const pickPreset = (key) => {
+    const base = getPreset(key);
+    persist({ preset: key, workSec: base.workSec, restSec: base.restSec });
+  };
+  const setField = (field, val) => {
+    const n = parseInt(val, 10);
+    persist({ ...cfg, [field]: Number.isFinite(n) ? n : undefined });
+  };
 
   if (active) {
     return (
       <Card style={{ marginBottom: 0, borderColor: C.blue }}>
         <TendonTimer
-          preset={TENDON_PRESET}
+          preset={preset}
           onComplete={({ sets, totalWorkS }) =>
-            logSession({ preset: TENDON_PRESET.key, sets, totalWorkS })}
+            logSession({ preset: preset.key, sets, totalWorkS })}
           onCancel={() => setActive(false)}
         />
       </Card>
@@ -33,19 +54,50 @@ export function TendonCard() {
     <Card style={{ marginBottom: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>
-            🩹 Tendon · <span style={{ color: C.blue }}>{TENDON_PRESET.name}</span>
-          </div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>{TENDON_PRESET.subtitle}</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>🩹 Tendon protocol</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>Abrahangs · low-load, high-frequency</div>
         </div>
         <div style={{ fontSize: 11, color: adh.onTrack ? C.green : C.muted, fontWeight: 700 }}>
           {adh.weekCount}/{adh.goalPerWeek} this wk
         </div>
       </div>
 
+      {/* Preset pills */}
+      <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+        {TENDON_PRESETS.map(p => (
+          <button key={p.key} onClick={() => pickPreset(p.key)} style={{
+            flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer",
+            fontSize: 12, fontWeight: 700,
+            background: cfg.preset === p.key ? C.blue : C.border,
+            color: cfg.preset === p.key ? "#fff" : C.muted,
+          }}>{p.name}</button>
+        ))}
+        <button onClick={() => setShowCfg(s => !s)} title="Adjust times" style={{
+          padding: "7px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+          fontSize: 13, background: C.border, color: C.muted,
+        }}>⚙</button>
+      </div>
+
+      {showCfg && (
+        <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "flex-end" }}>
+          <label style={{ fontSize: 10, color: C.muted, flex: 1 }}>
+            Hold (s)
+            <input type="number" value={preset.workSec} min={3} max={120}
+              onChange={e => setField("workSec", e.target.value)}
+              style={{ width: "100%", marginTop: 3, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 14 }} />
+          </label>
+          <label style={{ fontSize: 10, color: C.muted, flex: 1 }}>
+            Rest (s)
+            <input type="number" value={preset.restSec} min={5} max={300}
+              onChange={e => setField("restSec", e.target.value)}
+              style={{ width: "100%", marginTop: 3, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 14 }} />
+          </label>
+        </div>
+      )}
+
       {/* last-7-days adherence dots */}
-      <div style={{ display: "flex", gap: 5, marginTop: 10 }}>
-        {adh.last7.map((d, i) => (
+      <div style={{ display: "flex", gap: 5, marginTop: 12 }}>
+        {adh.last7.map(d => (
           <div key={d.date} title={d.date} style={{
             flex: 1, height: 8, borderRadius: 4,
             background: d.done ? C.green : C.border,
@@ -64,9 +116,8 @@ export function TendonCard() {
         ▶ Start tendon session
       </Btn>
       <div style={{ fontSize: 11, color: C.muted, marginTop: 8, textAlign: "center", lineHeight: 1.5 }}>
-        {totalSets(TENDON_PRESET)} hangs · 10s on / 50s off · ~{Math.round(totalWorkSeconds(TENDON_PRESET))}s
-        under tension · ~{TENDON_PRESET.effortPct}% effort. Do it on your no-hang/board — separate from your
-        Tindeq training.
+        {totalSets(preset)} hangs · {preset.workSec}s on / {preset.restSec}s off · ~{totalWorkSeconds(preset)}s
+        under tension · ~{preset.effortPct}% effort. Separate from your Tindeq training.
       </div>
     </Card>
   );

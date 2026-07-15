@@ -43,6 +43,7 @@ import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
 import { deleteBW } from "../lib/sync.js";
 import { BadgeCollection } from "./cards/BadgeCollection.jsx";
+import { TendonHistoryList } from "./TendonHistoryList.jsx";
 
 // Default hand for the "+ Add rep" picker. Resolution order:
 //   1. STICKY — the last hand you added to THIS session (sessKey match),
@@ -580,7 +581,7 @@ export function HistoryView({
 
       {/* Domain toggle */}
       <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
-        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["climbing", "🧗 Climbing"], ["weight", "⚖️ Weight"]].map(([key, label]) => (
+        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["climbing", "🧗 Climbing"], ["weight", "⚖️ Weight"], ["tendon", "🩹 Tendon"]].map(([key, label]) => (
           <button key={key} onClick={() => switchDomain(key)} style={{
             flex: 1, padding: "8px 0", borderRadius: 20, border: "none", cursor: "pointer",
             fontWeight: 700, fontSize: 13,
@@ -670,6 +671,8 @@ export function HistoryView({
           )}
         </Card>
       )}
+      {domain === "tendon" && <TendonHistoryList />}
+
       {domain === "fingers" && <>
 
       {/* Filters */}
