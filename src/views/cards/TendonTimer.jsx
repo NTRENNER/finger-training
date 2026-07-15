@@ -2,6 +2,11 @@
 // preset's hang sequence (work → rest → next), beeping on transitions,
 // and calls onComplete once when the final work interval finishes.
 // Purely a timer + guidance — no load is measured or recorded.
+//
+// The completion screen reflects the ACTUAL save outcome (saveState),
+// not just "the timer finished": "Saving…" while the cloud write is in
+// flight, "Session logged" only once it succeeds, and a retryable error
+// state if it didn't — so we never falsely claim a session was saved.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { C } from "../../ui/theme.js";
 import { Btn } from "../../ui/components.js";
@@ -20,7 +25,9 @@ function beep(freq = 880, dur = 0.12, vol = 0.35) {
   } catch (e) { /* no audio available */ }
 }
 
-export function TendonTimer({ preset, onComplete, onCancel }) {
+// saveState: "saving" | "ok" | "error" (undefined = treat as saving, so
+// a parent that doesn't wire it in still doesn't over-claim success).
+export function TendonTimer({ preset, onComplete, onCancel, onRetry, saveState }) {
   const intervals = useMemo(() => buildIntervals(preset), [preset]);
   const [idx, setIdx] = useState(0);
   const [phase, setPhase] = useState("ready"); // ready | work | rest | done
@@ -76,16 +83,39 @@ export function TendonTimer({ preset, onComplete, onCancel }) {
   const stop = () => { clearInterval(timerRef.current); onCancel && onCancel(); };
 
   if (phase === "done") {
+    const st = saveState || "saving";
     return (
       <div style={{ textAlign: "center", padding: "8px 4px" }}>
-        <div style={{ fontSize: 40, lineHeight: 1 }}>✅</div>
-        <div style={{ fontSize: 16, fontWeight: 800, color: C.green, marginTop: 6 }}>Session logged</div>
-        <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>
-          {totalSets(preset)} hangs · ~{totalWorkSeconds(preset)}s under tension
+        <div style={{ fontSize: 40, lineHeight: 1 }}>
+          {st === "ok" ? "✅" : st === "error" ? "⚠️" : "⏳"}
         </div>
-        <Btn onClick={onCancel} color={C.green} style={{ marginTop: 14, padding: "10px 28px", borderRadius: 12 }}>
-          Done
-        </Btn>
+        <div style={{
+          fontSize: 16, fontWeight: 800, marginTop: 6,
+          color: st === "ok" ? C.green : st === "error" ? C.red : C.muted,
+        }}>
+          {st === "ok" ? "Session logged" : st === "error" ? "Couldn't save session" : "Saving…"}
+        </div>
+        <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>
+          {st === "error"
+            ? "Your session isn't saved yet. Check your connection and retry."
+            : `${totalSets(preset)} hangs · ~${totalWorkSeconds(preset)}s under tension`}
+        </div>
+        {st === "error" ? (
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 14 }}>
+            <Btn onClick={onRetry} color={C.blue} style={{ padding: "10px 24px", borderRadius: 12 }}>
+              ↻ Retry
+            </Btn>
+            <Btn onClick={onCancel} color={C.muted} style={{ padding: "10px 20px", borderRadius: 12 }}>
+              Dismiss
+            </Btn>
+          </div>
+        ) : (
+          <Btn onClick={onCancel} color={st === "ok" ? C.green : C.muted}
+               disabled={st === "saving"}
+               style={{ marginTop: 14, padding: "10px 28px", borderRadius: 12, opacity: st === "saving" ? 0.6 : 1 }}>
+            Done
+          </Btn>
+        )}
       </div>
     );
   }
