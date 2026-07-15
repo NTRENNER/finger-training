@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // PRESCRIBED LOAD CARD — per-zone load table for the selected grip
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Shows the anchored prescription (curve_shape × amplitude_anchor) at
 // every zone's reference time for one grip, both hands. Tabular sibling
 // of the F-D chart: same fit, expressed as discrete zone buckets.
@@ -81,6 +81,12 @@ export function PrescribedLoadCard({
           : pL?.reliability === "extrapolation" || pR?.reliability === "extrapolation" ? "extrapolation"
           : pL?.reliability === "marginal" || pR?.reliability === "marginal" ? "marginal"
           : "well-supported",
+        // Anti-collapse floor lifted the load above the bare curve value
+        // (the three-exp fit has no non-zero asymptote, so far past your
+        // longest hold it decays to implausibly light loads). Worse/either
+        // hand — surfacing it tells the user the number is a sane floor,
+        // not a literal curve read.
+        extrapFloored: Boolean(pL?.extrapFloored || pR?.extrapFloored),
       };
     }).filter(Boolean);
   }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, fatigueModel, cooked]);
@@ -182,6 +188,14 @@ export function PrescribedLoadCard({
               {r.reliability === "extrapolation" && (
                 <div style={{ fontSize: 9, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
                   extrapolating
+                </div>
+              )}
+              {r.extrapFloored && (
+                <div
+                  style={{ fontSize: 9, color: C.orange, marginTop: 2, fontStyle: "italic" }}
+                  title="This time is far past your longest logged hold, where the curve would collapse to an implausibly light load. The load is held to an anti-collapse floor."
+                >
+                  ⌊ anti-collapse floor
                 </div>
               )}
             </div>
