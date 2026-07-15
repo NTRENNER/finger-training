@@ -1,7 +1,12 @@
 // Tendon-protocol card for the Fingers/Setup screen. Preset picker
 // (Emil / Barr) + editable hold/rest seconds, weekly adherence + streak,
 // and the guided timer launcher. A completed session logs one cloud row
-// (no load). Self-contained via useTendon; separate from the reps model.
+// (no load). Self-contained via the shared useTendon store; separate
+// from the reps model.
+//
+// The card owns the save lifecycle so the timer's completion screen can
+// tell the truth: it awaits the cloud write, tracks saving/ok/error, and
+// offers a retry (reusing the same record so a retry never duplicates).
 import React, { useState } from "react";
 import { C } from "../../ui/theme.js";
 import { Card, Btn } from "../../ui/components.js";
@@ -21,6 +26,9 @@ export function TendonCard() {
   const [active, setActive] = useState(false);
   const [showCfg, setShowCfg] = useState(false);
   const [cfg, setCfg] = useState(() => loadLS(LS_KEY) || { preset: DEFAULT_PRESET_KEY });
+  // Save lifecycle for the just-finished session.
+  const [saveState, setSaveState] = useState(null);   // null | "saving" | "ok" | "error"
+  const [pending, setPending]     = useState(null);   // the record to (re)push
 
   const preset = resolvePreset(cfg.preset, cfg);
   const adh = tendonAdherence(sessions, today(), 3);
@@ -37,14 +45,34 @@ export function TendonCard() {
     persist({ ...cfg, [field]: Number.isFinite(n) ? n : undefined });
   };
 
+  // Persist the completed session, capturing the RESOLVED protocol so
+  // history reflects what was actually done (not just the preset name).
+  const save = async (rec) => {
+    setSaveState("saving");
+    const res = await logSession(rec);
+    setSaveState(res.ok ? "ok" : "error");
+    // Keep the record around (with its stable id) so a retry re-pushes
+    // the same row instead of minting a duplicate.
+    setPending(res.rec);
+  };
+  const handleComplete = ({ sets, totalWorkS }) => {
+    save({
+      preset: preset.key,
+      sets, totalWorkS,
+      workSec: preset.workSec, restSec: preset.restSec, effortPct: preset.effortPct,
+    });
+  };
+  const closeTimer = () => { setActive(false); setSaveState(null); setPending(null); };
+
   if (active) {
     return (
       <Card style={{ marginBottom: 0, borderColor: C.blue }}>
         <TendonTimer
           preset={preset}
-          onComplete={({ sets, totalWorkS }) =>
-            logSession({ preset: preset.key, sets, totalWorkS })}
-          onCancel={() => setActive(false)}
+          saveState={saveState}
+          onComplete={handleComplete}
+          onRetry={() => pending && save(pending)}
+          onCancel={closeTimer}
         />
       </Card>
     );

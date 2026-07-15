@@ -13,6 +13,9 @@ async function currentUserId() {
   }
 }
 
+// Push one completion row. Returns true on success, false on any
+// failure (no auth, network, RLS) WITHOUT throwing — callers rely on
+// the boolean to decide whether to confirm "logged" vs offer a retry.
 export async function pushTendonSession(session) {
   const userId = await currentUserId();
   if (!userId) return false;
@@ -24,6 +27,11 @@ export async function pushTendonSession(session) {
       preset:       session.preset ?? null,
       sets:         session.sets ?? null,
       total_work_s: session.total_work_s ?? null,
+      // Resolved protocol as actually performed (July 2026). Legacy
+      // rows leave these null; readers fall back to the preset default.
+      work_sec:     session.work_sec ?? null,
+      rest_sec:     session.rest_sec ?? null,
+      effort_pct:   session.effort_pct ?? null,
       note:         session.note ?? null,
     }, { onConflict: "id" });
     if (error) { console.warn("tendon push:", error.message); return false; }
@@ -38,7 +46,7 @@ export async function fetchTendonSessions() {
   try {
     const { data, error } = await supabase
       .from("tendon_sessions")
-      .select("id, date, created_at, preset, sets, total_work_s, note")
+      .select("id, date, created_at, preset, sets, total_work_s, work_sec, rest_sec, effort_pct, note")
       .order("date", { ascending: false });
     if (error) { console.warn("tendon fetch:", error.message); return null; }
     return data || [];
@@ -48,11 +56,16 @@ export async function fetchTendonSessions() {
   }
 }
 
+// Delete one row. Returns true only if the delete actually succeeded,
+// so the caller can surface a failure instead of silently assuming it
+// worked (the row is restored on false).
 export async function deleteTendonSession(id) {
   try {
     const { error } = await supabase.from("tendon_sessions").delete().eq("id", id);
-    return !error;
+    if (error) { console.warn("tendon delete:", error.message); return false; }
+    return true;
   } catch (e) {
+    console.warn("tendon delete exception:", e.message);
     return false;
   }
 }
