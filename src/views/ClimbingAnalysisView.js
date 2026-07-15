@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // CLIMBING ANALYSIS VIEW
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Third sibling under the Analysis tab (alongside fingers + lifts).
 // Reads the climbing log entries from `activities` (type === "climbing")
 // and renders a small set of high-signal cards:
@@ -23,7 +23,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ResponsiveContainer, LineChart, Line, BarChart, Bar,
+  ResponsiveContainer, LineChart, Line, BarChart, Bar, ComposedChart,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from "recharts";
 import { PyramidChart } from "./cards/PyramidChart.jsx";
@@ -36,6 +36,7 @@ import {
   disciplineMeta,
 } from "../lib/climbing-grades.js";
 import { inferProjectGrade, computeGraduation } from "../model/gradePyramid.js";
+import { linearTrendline } from "../model/trend.js";
 import { pyramidPinKey } from "../lib/storage.js";
 import { ymdLocal } from "../util.js";
 
@@ -154,7 +155,7 @@ export function ClimbingAnalysisView({
     onPyramidProjectChange(next);
   };
 
-  // ── Max sends card state ────────────────────────────────────
+  // ── Max sends card state ───────────────────────────
   // Independent filter set from the pyramid (above) so the user can
   // look at "all-time max sends on lead" while the pyramid stays
   // narrowed to "boulder, last 90 days." Default window is "All"
@@ -224,6 +225,11 @@ export function ClimbingAnalysisView({
       boulder: byDate[date] || 0,
       __total: byDate[date] || 0,
     }));
+    // Least-squares trend across recent sessions — only once there are
+    // enough to be meaningful, so a straight line isn't drawn through
+    // one or two spiky bars.
+    const trend = rows.length >= 4 ? linearTrendline(rows.map(r => r.boulder)) : null;
+    if (trend) rows.forEach((r, i) => { r.trend = Math.round(trend[i] * 10) / 10; });
     return { rows, disciplines: ["boulder"] };
   }, [allClimbs]);
 
@@ -250,6 +256,8 @@ export function ClimbingAnalysisView({
       date: date.slice(5),
       route: Math.round((byDate[date] || 0) * 10) / 10,  // afa values are fractional
     }));
+    const trend = rows.length >= 4 ? linearTrendline(rows.map(r => r.route)) : null;
+    if (trend) rows.forEach((r, i) => { r.trend = Math.round(trend[i] * 10) / 10; });
     return { rows };
   }, [allClimbs]);
 
@@ -516,19 +524,21 @@ export function ClimbingAnalysisView({
               Lead and top rope are excluded (v-sum is a boulder convention).
             </div>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={sessionVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
+              <ComposedChart data={sessionVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
                 <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
                 <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }}
                   angle={-30} textAnchor="end" interval="preserveStartEnd" />
                 <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={32} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
-                  formatter={(v) => [v, "v-sum"]}
+                  formatter={(v, name) => [v, name === "trend" ? "trend" : "v-sum"]}
                 />
                 <Bar dataKey="boulder"
                   fill={DISCIPLINE_COLORS.boulder || C.orange}
                   isAnimationActive={false} />
-              </BarChart>
+                <Line dataKey="trend" name="trend" stroke={C.text} strokeWidth={2}
+                  strokeDasharray="5 4" dot={false} isAnimationActive={false} connectNulls />
+              </ComposedChart>
             </ResponsiveContainer>
           </Card>
         )}
@@ -548,19 +558,21 @@ export function ClimbingAnalysisView({
               top rope both count; sends and rest-completions, not attempts.
             </div>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={routeVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
+              <ComposedChart data={routeVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
                 <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
                 <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }}
                   angle={-30} textAnchor="end" interval="preserveStartEnd" />
                 <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={32} />
                 <Tooltip
                   contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
-                  formatter={(v) => [v, "afa v-sum"]}
+                  formatter={(v, name) => [v, name === "trend" ? "trend" : "afa v-sum"]}
                 />
                 <Bar dataKey="route"
                   fill={DISCIPLINE_COLORS.lead || C.blue}
                   isAnimationActive={false} />
-              </BarChart>
+                <Line dataKey="trend" name="trend" stroke={C.text} strokeWidth={2}
+                  strokeDasharray="5 4" dot={false} isAnimationActive={false} connectNulls />
+              </ComposedChart>
             </ResponsiveContainer>
           </Card>
         )}
