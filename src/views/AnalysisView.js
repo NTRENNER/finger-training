@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // The "Analysis" tab. Top-to-bottom render order:
 //
 //   1. Force-Duration chart (the source of truth — three-exp fit
@@ -78,6 +78,7 @@ import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 import { CapacityTrajectoryCard, ZoneShareCard } from "./analysis/CapacityChartCards.js";
 import { EnduranceCeilingCard } from "./analysis/EnduranceCeilingCard.jsx";
 import { DeloadGauge } from "./cards/DeloadGauge.jsx";
+import { RecoveryTrajectoryCard } from "./analysis/RecoveryTrajectoryCard.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
@@ -215,7 +216,7 @@ export function AnalysisView({
   };
   const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
 
-  // ── Hand selector (June 2026) ─────────────────────────
+  // ── Hand selector (June 2026) ──────────────────────
   // "pooled" (default) | "L" | "R". One global control, like the
   // Absolute/×BW toggle: scopes the F-D chart's data + fit, the
   // Capacity trajectory (against FROZEN per-hand baselines — see
@@ -728,7 +729,7 @@ export function AnalysisView({
                   <button key={String(opt.key)} onClick={() => normalizeOn !== opt.key && toggleNormalize()} style={{
                     padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
                     background: normalizeOn === opt.key ? C.purple : C.border,
-                    color:      normalizeOn === opt.key ? "#fff"   : C.muted,
+                    color:      normalizeOn === opt.key ? "#fff" : C.muted,
                   }}>{opt.label}</button>
                 ))}
               </div>
@@ -924,6 +925,15 @@ export function AnalysisView({
             condition) so it won't react to one rough session. */}
         <CardBoundary name="Recovery gauge">
         <DeloadGauge status={deloadStatusResult} />
+        </CardBoundary>
+
+        {/* Recovery trajectory — the gauge above is the glanceable
+            green/yellow/red; this is the detail for anyone who wants to
+            see the trend. Recovery fraction (rep2/rep1) and the model
+            gap over time, per grip, trend-first (bold rolling means) so
+            it reads as "am I improving?" not a per-session scoreboard. */}
+        <CardBoundary name="Recovery trajectory">
+        <RecoveryTrajectoryCard history={history} />
         </CardBoundary>
 
         {/* (StrengthBalanceCard — the Crusher:Micro "open-hand vs crimp
