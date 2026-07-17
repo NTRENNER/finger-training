@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // COACH NOTES — behavioral coaching signals (July 2026)
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // The Session Plan's old "Why" line moonlighted as a second recommender
 // (staleness arguments, coverage pleas) — signals the continuous engine
 // already weighs. Design call (2026-07): coaching must never argue with
@@ -25,8 +25,9 @@
 // without driving the SessionPlanCard render tree.
 
 import { effectiveLoad } from "./load.js";
+import { recoveryCoachSignals, GAP_NOISE_BAND } from "./recoveryDynamics.js";
 
-// ── Thresholds ───────────────────────────────────────────
+// ── Thresholds ────────────────────────────────────
 // Adherence: nag only when the current gap is well past the user's OWN
 // cadence — both multiplicative and additive slack so a 2-day-cadence
 // user isn't nagged on day 4, and a 7-day user isn't nagged on day 9.
@@ -154,16 +155,65 @@ export function trendNote(dates, fitScoreAt) {
   return null;
 }
 
+// ── Per-grip recovery note (Aug 2026) ────────────────────
+// Complements the DeloadGauge, which by design only reacts CROSS-grip
+// (every grip down) — so it can't catch one grip slipping and never
+// reassures. For the most salient grip this note does both:
+//   • EARLY-WARN when a grip's recent modeled recovery gap sits below
+//     the noise band (recovering worse than the model predicts) — a
+//     grip-specific fatigue sign before the systemic gauge trips.
+//   • REASSURE when a grip's recovery FRACTION has drifted down but the
+//     gap is still within the band — expected under progressive load,
+//     so the declining line isn't misread as fatigue.
+// Consumes the compact signals from recoveryCoachSignals (percentage
+// points). Pure over the injected array.
+export const RECOVERY_BAND_PP    = Math.round(GAP_NOISE_BAND * 100); // ±10pp "matches model" band
+export const RECOVERY_DECLINE_PP = -8;  // smoothed recovery fraction dropped ≥ this to reassure
+
+export function recoveryNote(signals) {
+  if (!Array.isArray(signals) || signals.length === 0) return null;
+  // Early-warn: the grip whose recent gap is furthest below the band.
+  const slipping = signals
+    .filter(s => Number.isFinite(s.recentGapPct) && s.recentGapPct <= -RECOVERY_BAND_PP)
+    .sort((a, b) => a.recentGapPct - b.recentGapPct);
+  if (slipping.length) {
+    const s = slipping[0];
+    return {
+      key: "recovery-warn", tone: "warn",
+      text: `Between-rep recovery on ${s.grip} is running ~${Math.abs(s.recentGapPct)}pp under your model over recent sessions — a grip-specific early fatigue sign the recovery gauge won't flag until every grip dips. A fresher or lighter ${s.grip} day would help.`,
+    };
+  }
+  // Reassure: biggest recovery decline that's still tracking the model.
+  const declining = signals
+    .filter(s => Number.isFinite(s.recoveryDeltaPct) && s.recoveryDeltaPct <= RECOVERY_DECLINE_PP
+      && (s.recentGapPct == null || s.recentGapPct > -RECOVERY_BAND_PP))
+    .sort((a, b) => a.recoveryDeltaPct - b.recoveryDeltaPct);
+  if (declining.length) {
+    const s = declining[0];
+    return {
+      key: "recovery-ok", tone: "info",
+      text: `Your ${s.grip} between-rep recovery has drifted down lately, but it's still tracking your model — expected as your loads climb, not a fatigue sign.`,
+    };
+  }
+  return null;
+}
+
 // Priority-ordered assembly: regressions first, then workload warnings,
 // then adherence, then the pat on the back. At most two notes so the
 // card coaches instead of lecturing.
-const PRIORITY = ["trend-down", "ramp-spike", "adherence", "ramp-drop", "trend-up"];
+const PRIORITY = ["trend-down", "recovery-warn", "ramp-spike", "adherence", "ramp-drop", "recovery-ok", "trend-up"];
 
-export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreAt = null } = {}) {
+export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreAt = null, recoverySignals = null } = {}) {
+  // Injectable so a caller with memoized fits can pass its own; else
+  // compute internally from history (guarded — the fits can throw on
+  // sparse data). buildCoachNotes already receives history.
+  let recSignals = recoverySignals;
+  if (recSignals == null) { try { recSignals = recoveryCoachSignals(history); } catch (e) { recSignals = []; } }
   const candidates = [
     adherenceNote(history, todayStr),
     volumeRampNote(history, todayStr),
     trendNote(gripDates, fitScoreAt),
+    recoveryNote(recSignals),
   ].filter(Boolean);
   candidates.sort((a, b) => PRIORITY.indexOf(a.key) - PRIORITY.indexOf(b.key));
   // Adherence already explains an empty week — don't also show the drop.
@@ -172,7 +222,7 @@ export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreA
   return out.slice(0, 2);
 }
 
-// ── Recommendation explanation ───────────────────────────────
+// ── Recommendation explanation ────────────────────────
 // ONE plain sentence for the engine's decisive factor — explanation,
 // not persuasion. The engine already picked; this just says why in
 // coach language. Order mirrors the engine's own weighting: a real

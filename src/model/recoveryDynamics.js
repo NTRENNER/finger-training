@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // RECOVERY DYNAMICS — between-rep capacity restoration
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // The F-D model + RepCurveChart already show how force declines
 // during a single rep. This module surfaces the OTHER side of the
 // model: how much capacity comes back between reps.
@@ -27,6 +27,7 @@
 // Pure functions; no React, no Supabase. Tested in isolation.
 
 import { predictRepTimes } from "./fatigue.js";
+import { buildPhysModel } from "./repCurveData.js";
 
 // Observed recovered fraction per rep, computed from a session's
 // rep records. Rep 1 always anchors at 1.0; subsequent reps return
@@ -142,9 +143,9 @@ export function buildRecoveryBundle({ reps, restSeconds, physModel }) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Cross-session trend
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Per-session metrics at the target rep, aggregated across the
 // history for trend rendering in AnalysisView. "Is my recovery
 // improving over weeks/months?" — the question the per-session
@@ -275,3 +276,45 @@ export function withRollingMean(trend, window = 3) {
 // ±0.10 noise on the ratio, so gaps inside ±NOISE_BAND are
 // statistically indistinguishable from "matches the model."
 export const GAP_NOISE_BAND = 0.10;
+
+
+// ──────────────────────────────────────────────────────────────
+// COACHING SIGNALS — compact per-grip recovery read for coachNotes
+// ──────────────────────────────────────────────────────────────
+// The DeloadGauge consumes the same recovery gap but only CROSS-grip
+// (it fires when EVERY grip is down), so it can't catch a single grip
+// slipping and it never reassures. This distills, per grip, the two
+// things the coaching layer needs: the recent smoothed model gap
+// (percentage points — negative = recovering worse than predicted) and
+// how far the smoothed recovery FRACTION has drifted over the last
+// `window` points. Self-contained (builds its own per-grip physModel)
+// so the caller just passes history.
+export const RECOVERY_COACH_MIN_POINTS = 4;   // need this many recovery datapoints to speak up
+export const RECOVERY_TREND_WINDOW     = 3;   // smoothed now vs this many points back
+
+export function recoveryCoachSignals(history, {
+  minPoints = RECOVERY_COACH_MIN_POINTS,
+  window = RECOVERY_TREND_WINDOW,
+} = {}) {
+  if (!Array.isArray(history) || history.length === 0) return [];
+  const grips = [...new Set(history.map(r => r && r.grip).filter(Boolean))];
+  const out = [];
+  for (const grip of grips) {
+    // Seed the physModel with whichever hand actually has reps for this
+    // grip; recovery taus are grip-level so the hand barely moves the gap.
+    const hand = history.some(r => r.grip === grip && r.hand === "R" && Number(r.actual_time_s) > 0) ? "R" : "L";
+    let physModel = null;
+    try { physModel = buildPhysModel(history, hand, grip); } catch (e) { physModel = null; }
+    const trend = withRollingMean(buildRecoveryTrend(history, grip, { physModel }), window);
+    const recPts = trend.filter(r => Number.isFinite(r.observedSmoothed));
+    if (recPts.length < minPoints) continue;
+    const last  = recPts[recPts.length - 1];
+    const prior = recPts[Math.max(0, recPts.length - 1 - window)];
+    const recentGapPct = Number.isFinite(last.gapSmoothed) ? Math.round(last.gapSmoothed * 100) : null;
+    const recoveryDeltaPct = (Number.isFinite(last.observedSmoothed) && Number.isFinite(prior.observedSmoothed))
+      ? Math.round((last.observedSmoothed - prior.observedSmoothed) * 100)
+      : null;
+    out.push({ grip, recentGapPct, recoveryDeltaPct, nPoints: recPts.length });
+  }
+  return out;
+}
