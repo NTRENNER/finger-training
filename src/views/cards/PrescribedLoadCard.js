@@ -87,6 +87,11 @@ export function PrescribedLoadCard({
         // hand — surfacing it tells the user the number is a sane floor,
         // not a literal curve read.
         extrapFloored: Boolean(pL?.extrapFloored || pR?.extrapFloored),
+        // A load reduced to the peak-force ceiling where that ceiling
+        // came from an OLDER measurement (no recent max in the window),
+        // not the generic corruption backstop. Worth flagging so the
+        // number reads as "capped by a stale measured peak — retest."
+        peakStaleCapped: Boolean((pL?.peakCapped && pL?.peakCapStale) || (pR?.peakCapped && pR?.peakCapStale)),
         extrapolationBoundaryS: [pL?.extrapolationBoundaryS, pR?.extrapolationBoundaryS]
           .filter(Number.isFinite)
           .reduce((m, v) => Math.min(m, v), Infinity),
@@ -199,6 +204,14 @@ export function PrescribedLoadCard({
                   title="This duration is beyond the supported data range. The app holds load at the modeled data boundary instead of presenting the flat tail as physiology. Log a longer failure to extend support."
                 >
                   ⚠ unsupported beyond {Number.isFinite(r.extrapolationBoundaryS) ? `${r.extrapolationBoundaryS}s` : "data"} · load held at boundary
+                </div>
+              )}
+              {r.peakStaleCapped && (
+                <div
+                  style={{ fontSize: 9, color: C.muted, marginTop: 2, fontStyle: "italic" }}
+                  title="Capped by your best MEASURED peak force — but that measurement is older than the recent window. A safe physical ceiling; retest your max to refresh it."
+                >
+                  ⓘ ceiling from an older max — retest to refresh
                 </div>
               )}
             </div>

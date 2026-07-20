@@ -57,7 +57,7 @@ export function resolvePreset(baseKey, overrides = {}) {
     Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Math.round(Number(v)))) : dflt;
   return {
     ...base,
-    workSec:   clamp(overrides.workSec, 3, 30, base.workSec),
+    workSec:   clamp(overrides.workSec, 10, 30, base.workSec),
     restSec:   clamp(overrides.restSec, 5, 300, base.restSec),
     effortPct: clamp(overrides.effortPct, 10, 50, base.effortPct),
   };

@@ -270,11 +270,19 @@ export function withRollingMean(trend, window = 3) {
   });
 }
 
-// Threshold for the "matches model" band on the gap chart. Per-rep
-// timing noise of ~10% on rep 1 and rep 2 compounds to roughly
-// ±0.10 noise on the ratio, so gaps inside ±NOISE_BAND are
-// statistically indistinguishable from "matches the model."
-export const GAP_NOISE_BAND = 0.10;
+// Threshold for the "matches model" band on the gap chart, and the
+// per-grip trigger the deload detector reads off. A time-separated
+// holdout of the July 2026 nonlinear constant-force solver on ~5 months
+// of real sessions (see scripts/recovery-validation.md) put the
+// session-to-session gap noise well above the old ±0.10: the 3-session
+// smoothed gap has std ≈ 0.14 (Micro) to 0.24 (Crusher). The old ±0.10
+// — tuned against the retired LINEAR predictor — was ~half the real
+// noise, so most on-track sessions fell "outside" it and the deload
+// trigger / recovery early-warn were needlessly twitchy. Widened to
+// ±0.15 (≈ one smoothed-gap sigma for the better-behaved grip): a band
+// the smoothed line mostly sits inside, and a deload/early-warn trigger
+// that needs a real dip below the user's own baseline, not noise.
+export const GAP_NOISE_BAND = 0.15;
 
 
 // ──────────────────────────────────────────────────────────────

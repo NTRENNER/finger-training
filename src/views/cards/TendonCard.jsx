@@ -110,7 +110,7 @@ export function TendonCard() {
         <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "flex-end" }}>
           <label style={{ fontSize: 10, color: C.muted, flex: 1 }}>
             Hold (s)
-            <input type="number" value={preset.workSec} min={3} max={30}
+            <input type="number" value={preset.workSec} min={10} max={30}
               onChange={e => setField("workSec", e.target.value)}
               style={{ width: "100%", marginTop: 3, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 14 }} />
           </label>

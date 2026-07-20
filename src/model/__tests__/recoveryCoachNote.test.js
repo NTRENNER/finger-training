@@ -7,7 +7,7 @@ import {
   RECOVERY_BAND_PP, RECOVERY_DECLINE_PP,
 } from "../coachNotes.js";
 
-// ── recoveryCoachSignals ──────────────────────────
+// ── recoveryCoachSignals ──────────────────
 describe("recoveryCoachSignals", () => {
   const sess = (id, date, t1, frac) => ([
     { session_id: id, date, grip: "Micro", hand: "L", set_num: 1, rep_num: 1, actual_time_s: t1, rest_s: 20 },
@@ -39,7 +39,7 @@ describe("recoveryCoachSignals", () => {
   });
 });
 
-// ── recoveryNote + buildCoachNotes wiring ─────────────────
+// ── recoveryNote + buildCoachNotes wiring ─────────
 describe("recoveryNote", () => {
   test("early-warns on a grip whose recent gap is below the band", () => {
     const n = recoveryNote([
@@ -82,7 +82,7 @@ describe("recoveryNote", () => {
   });
 
   test("band + decline thresholds are exported and sane", () => {
-    expect(RECOVERY_BAND_PP).toBe(10);
+    expect(RECOVERY_BAND_PP).toBe(15);
     expect(RECOVERY_DECLINE_PP).toBeLessThan(0);
   });
 
