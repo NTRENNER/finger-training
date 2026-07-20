@@ -1,17 +1,15 @@
 // ──────────────────────────────────────────────────────────────
-// TENDON PROTOCOL  (Abrahangs — Keith Baar minimal effective dose)
+// LOW-INTENSITY FINGER LOADING  (Abrahangs-inspired)
 // ──────────────────────────────────────────────────────────────
-// A deliberately SEPARATE, low-load adjunct to the muscular reps
-// model. Submaximal isometric holds for connective-tissue robustness,
-// NOT strength — nothing here touches the reps table or the F-D fit.
-// The app only records "did the session happen"; no load/force.
+// A deliberately SEPARATE, submaximal adjunct to the muscular reps
+// model. Nothing here touches the reps table or F-D fit. The app records
+// completion and an effort cue, not measured force; it therefore must
+// not present this feature as injury prevention or rehabilitation.
 //
-// Two selectable presets, and the hold/rest seconds are editable, so
-// you can slide between "more like Emil" (many short 10s holds) and
-// "more like Keith's actual protocol" (fewer 30s holds). Baar's data
-// says the molecular response is intensity/frequency-independent and
-// caps around ~10 min of loading, so total time under tension is what
-// matters — both presets sit comfortably under that ceiling.
+// Both presets preserve the low-intensity, no-failure intent. Editable
+// bounds stay inside the represented 10–30 second hold range and cap
+// effort at 50%, rather than letting an old saved override turn this
+// adjunct into near-maximal training.
 
 const EMIL_GRIPS = [
   { name: "4-finger crimp",         detail: "14mm edge",               sets: 3 },
@@ -59,9 +57,9 @@ export function resolvePreset(baseKey, overrides = {}) {
     Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Math.round(Number(v)))) : dflt;
   return {
     ...base,
-    workSec:   clamp(overrides.workSec, 3, 120, base.workSec),
+    workSec:   clamp(overrides.workSec, 3, 30, base.workSec),
     restSec:   clamp(overrides.restSec, 5, 300, base.restSec),
-    effortPct: clamp(overrides.effortPct, 10, 90, base.effortPct),
+    effortPct: clamp(overrides.effortPct, 10, 50, base.effortPct),
   };
 }
 

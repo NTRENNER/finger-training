@@ -8,7 +8,10 @@ import { PrescribedLoadCard } from "../PrescribedLoadCard.js";
 
 // Force a floored, extrapolating prescription for every zone/hand.
 jest.mock("../../../model/prescription.js", () => ({
-  prescription: () => ({ value: 5, reliability: "extrapolation", extrapFloored: true }),
+  prescription: () => ({
+    value: 5, reliability: "extrapolation", extrapFloored: true,
+    extrapolationBoundaryS: 180,
+  }),
 }));
 // Keep the rest of the card inert.
 jest.mock("../../../model/coaching.js", () => ({
@@ -37,5 +40,5 @@ test("surfaces the anti-collapse floor caption when a zone is floored", () => {
     />
   );
   // One caption per zone tile (6 zones), all floored in this mock.
-  expect(screen.getAllByText(/anti-collapse floor/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/unsupported beyond 180s/).length).toBeGreaterThan(0);
 });

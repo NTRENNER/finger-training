@@ -6,7 +6,7 @@ import {
   computePersonalRecoveryTaus,
   fatParamsFromTauR,
 } from "../recoveryFit.js";
-import { PHYS_MODEL_DEFAULT } from "../fatigue.js";
+import { PHYS_MODEL_DEFAULT, predictRepTimes } from "../fatigue.js";
 
 const POP = PHYS_MODEL_DEFAULT.tauR;
 
@@ -14,34 +14,18 @@ const POP = PHYS_MODEL_DEFAULT.tauR;
 // recoveryFit fits against. Lets tests inject a known "true" tau and
 // verify the fit recovers it (within shrinkage).
 function simulateSet({ firstT, nReps, restS, tauR, sessionId, hand = "L", grip = "Crusher" }) {
-  const W = PHYS_MODEL_DEFAULT.weights;
-  const D = PHYS_MODEL_DEFAULT.tauD;
-  const comps = [
-    { w: W.fast,   tD: D.fast,   tR: tauR.fast,   avail: 1.0 },
-    { w: W.medium, tD: D.medium, tR: tauR.medium, avail: 1.0 },
-    { w: W.slow,   tD: D.slow,   tR: tauR.slow,   avail: 1.0 },
-  ];
-  const reps = [];
-  for (let i = 0; i < nReps; i++) {
-    const cap = comps.reduce((s, c) => s + c.w * c.avail, 0);
-    const t = Math.max(0.01, firstT * cap);
-    reps.push({
+  const times = predictRepTimes({
+    firstRepTime: firstT, numReps: nReps, restSeconds: restS,
+    physModel: { ...PHYS_MODEL_DEFAULT, tauR }, roundTo: null,
+  });
+  return times.map((t, i) => ({
       session_id: sessionId,
       hand, grip,
       rep_num: i + 1,
-      actual_time_s: t,
+      actual_time_s: Math.max(0.01, t),
       avg_force_kg: 25,
       rest_s: restS,
-    });
-    for (const c of comps) c.avail = Math.max(0, c.avail * Math.exp(-t / c.tD));
-    if (i < nReps - 1) {
-      for (const c of comps) {
-        const rec = 1 - Math.exp(-restS / c.tR);
-        c.avail = Math.min(1, c.avail + (1 - c.avail) * rec);
-      }
-    }
-  }
-  return reps;
+  }));
 }
 
 describe("computePersonalRecoveryTausForGrip", () => {

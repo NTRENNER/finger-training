@@ -10,6 +10,7 @@ import {
   estimateRefWeight,
   EMPIRICAL_LOOKBACK_DAYS, prescription,
   PEAK_CAP_FRACTION, PEAK_CAP_LOOKBACK_DAYS, recentBestPeakKg,
+  historicalBestPeakKg, bestAvailablePeakMeasurement,
   suggestWeight,
   demonstratedCapacityKg,
 } from "../prescription.js";
@@ -715,7 +716,7 @@ describe("peak-force ceiling", () => {
         id: `r${i}`, hand: "L", grip: "Crusher", target_duration: T,
         rep_num: 1, actual_time_s: T, failed: true,
         avg_force_kg: F, peak_force_kg: F * 1.05,
-        date: "2026-04-20", session_id: `s${i}`,
+        date: today, session_id: `s${i}`,
       };
     });
   };
@@ -746,6 +747,19 @@ describe("peak-force ceiling", () => {
     // Retrospective: reps on/after referenceDate are excluded (no
     // leaking the session's own measurement into its reconstruction).
     expect(recentBestPeakKg(history, "L", "Crusher", today)).toBeNull();
+  });
+
+  test("stale measured peak remains a historical safety ceiling", () => {
+    const oldDate = new Date(Date.now() - (PEAK_CAP_LOOKBACK_DAYS + 10) * 86400 * 1000)
+      .toISOString().slice(0, 10);
+    const history = [{
+      hand: "L", grip: "Crusher", target_duration: 5,
+      peak_force_kg: 76, date: oldDate,
+    }];
+    expect(recentBestPeakKg(history, "L", "Crusher")).toBeNull();
+    expect(historicalBestPeakKg(history, "L", "Crusher")).toBe(76);
+    expect(bestAvailablePeakMeasurement(history, "L", "Crusher"))
+      .toEqual({ kg: 76, stale: true });
   });
 
   test("caps short-duration curve extrapolation at PEAK_CAP_FRACTION × best peak", () => {

@@ -23,7 +23,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ResponsiveContainer, LineChart, Line, BarChart, Bar, ComposedChart,
+  ResponsiveContainer, LineChart, Line, Bar, ComposedChart,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from "recharts";
 import { PyramidChart } from "./cards/PyramidChart.jsx";

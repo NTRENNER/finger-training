@@ -1,4 +1,4 @@
-// Tendon-protocol card for the Fingers/Setup screen. Preset picker
+// Low-intensity finger-loading card for the Fingers/Setup screen. Preset picker
 // (Emil / Barr) + editable hold/rest seconds, weekly adherence + streak,
 // and the guided timer launcher. A completed session logs one cloud row
 // (no load). Self-contained via the shared useTendon store; separate
@@ -82,8 +82,8 @@ export function TendonCard() {
     <Card style={{ marginBottom: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>🩹 Tendon protocol</div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>Abrahangs · low-load, high-frequency</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>🩹 Low-intensity finger loading</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>Abrahangs-inspired · submaximal · no failure</div>
         </div>
         <div style={{ fontSize: 11, color: adh.onTrack ? C.green : C.muted, fontWeight: 700 }}>
           {adh.weekCount}/{adh.goalPerWeek} this wk
@@ -110,7 +110,7 @@ export function TendonCard() {
         <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "flex-end" }}>
           <label style={{ fontSize: 10, color: C.muted, flex: 1 }}>
             Hold (s)
-            <input type="number" value={preset.workSec} min={3} max={120}
+            <input type="number" value={preset.workSec} min={3} max={30}
               onChange={e => setField("workSec", e.target.value)}
               style={{ width: "100%", marginTop: 3, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 14 }} />
           </label>
@@ -141,11 +141,14 @@ export function TendonCard() {
 
       <Btn onClick={() => setActive(true)} color={C.blue}
            style={{ marginTop: 12, width: "100%", padding: "12px 0", fontSize: 15, borderRadius: 12 }}>
-        ▶ Start tendon session
+        ▶ Start low-intensity session
       </Btn>
       <div style={{ fontSize: 11, color: C.muted, marginTop: 8, textAlign: "center", lineHeight: 1.5 }}>
         {totalSets(preset)} hangs · {preset.workSec}s on / {preset.restSec}s off · ~{totalWorkSeconds(preset)}s
         under tension · ~{preset.effortPct}% effort. Separate from your Tindeq training.
+      </div>
+      <div style={{ fontSize: 10, color: C.orange, marginTop: 5, textAlign: "center", lineHeight: 1.4 }}>
+        Stop for sharp or increasing pain. This is not an injury-prevention or rehabilitation protocol.
       </div>
     </Card>
   );

@@ -100,24 +100,61 @@ export function getPhysModel(history, hand, grip, opts = {}) {
 // ─────────────────────────────────────────────────────────────
 // Uses the canonical three-timescale depletion/recovery model
 // (PHYS_MODEL_DEFAULT). Each component depletes during a hang and
-// recovers during rest. Returns an array of predicted hold times
-// (seconds) for each rep. Pass an explicit physModel to use a fitted
-// (hand, grip)-specific model; otherwise falls back to defaults.
-export function predictRepTimes({ numReps, firstRepTime, restSeconds, physModel = PHYS_MODEL_DEFAULT }) {
+// recovers during rest. The first failure calibrates the constant
+// external-force threshold:
+//
+//   threshold = sum(A_i * exp(-firstRepTime / tauD_i))
+//
+// A later rep ends when its recovered component state decays back to
+// that SAME threshold. This solves through the nonlinear F-D curve;
+// multiplying first-rep time by a scalar "capacity fraction" is not
+// mathematically valid for a sum-of-exponentials curve.
+//
+// `roundTo: null` exposes unrounded values to the recovery-tau fitter;
+// display callers retain the historical 0.1-second rounding.
+export function predictRepTimes({
+  numReps, firstRepTime, restSeconds,
+  physModel = PHYS_MODEL_DEFAULT,
+  roundTo = 0.1,
+}) {
+  if (!(numReps > 0) || !(firstRepTime > 0) || !(restSeconds >= 0)) return [];
   const comps = [
     { A: physModel.weights.fast,   tauD: physModel.tauD.fast,   tauR: physModel.tauR.fast   },
     { A: physModel.weights.medium, tauD: physModel.tauD.medium, tauR: physModel.tauR.medium },
     { A: physModel.weights.slow,   tauD: physModel.tauD.slow,   tauR: physModel.tauR.slow   },
   ];
   const state = comps.map(c => ({ ...c, avail: 1.0 }));
+  const threshold = comps.reduce(
+    (s, c) => s + c.A * Math.exp(-firstRepTime / c.tauD), 0);
+
+  // At the start of every later rep, solve the monotone force-duration
+  // equation on [0, firstRepTime]. Recovery never raises a component
+  // above fresh, so a later rep cannot outlast the fresh first rep at
+  // the same force. If the recovered start state is already at/below
+  // the threshold, the same load fails immediately (t = 0).
+  const solveFailureTime = () => {
+    const start = state.reduce((s, c) => s + c.A * c.avail, 0);
+    if (start <= threshold + 1e-12) return 0;
+    let lo = 0, hi = firstRepTime;
+    for (let n = 0; n < 32; n++) {
+      const mid = (lo + hi) / 2;
+      const force = state.reduce(
+        (s, c) => s + c.A * c.avail * Math.exp(-mid / c.tauD), 0);
+      if (force > threshold) lo = mid;
+      else hi = mid;
+    }
+    return (lo + hi) / 2;
+  };
+
   const times = [];
   for (let i = 0; i < numReps; i++) {
-    const capacity = state.reduce((s, c) => s + c.A * c.avail, 0);
-    const t = Math.max(0, Math.round(firstRepTime * capacity * 10) / 10);
-    times.push(t);
+    const t = i === 0 ? firstRepTime : solveFailureTime();
+    const shown = roundTo == null
+      ? t
+      : Math.round(t / roundTo) * roundTo;
+    times.push(Math.max(0, shown));
     for (const c of state) {
-      const dep = 1 - Math.exp(-t / c.tauD);
-      c.avail = Math.max(0, c.avail * (1 - dep));
+      c.avail = Math.max(0, c.avail * Math.exp(-t / c.tauD));
     }
     if (i < numReps - 1) {
       for (const c of state) {

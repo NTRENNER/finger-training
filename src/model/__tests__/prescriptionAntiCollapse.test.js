@@ -34,6 +34,7 @@ describe("anti-collapse extrapolation floor", () => {
     // the floor, 600s would prescribe strictly less than 300s.
     expect(near.extrapFloored).toBe(true);
     expect(far.extrapFloored).toBe(true);
+    expect(near.extrapolationBoundaryS).toBe(180);
     expect(far.value).toBe(near.value);
     expect(far.value).toBeGreaterThan(0);
   });

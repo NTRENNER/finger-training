@@ -162,13 +162,13 @@ export function trendNote(dates, fitScoreAt) {
 //   • EARLY-WARN when a grip's recent modeled recovery gap sits below
 //     the noise band (recovering worse than the model predicts) — a
 //     grip-specific fatigue sign before the systemic gauge trips.
-//   • REASSURE when a grip's recovery FRACTION has drifted down but the
+//   • REASSURE when a grip's rep-duration ratio has drifted down but the
 //     gap is still within the band — expected under progressive load,
 //     so the declining line isn't misread as fatigue.
 // Consumes the compact signals from recoveryCoachSignals (percentage
 // points). Pure over the injected array.
 export const RECOVERY_BAND_PP    = Math.round(GAP_NOISE_BAND * 100); // ±10pp "matches model" band
-export const RECOVERY_DECLINE_PP = -8;  // smoothed recovery fraction dropped ≥ this to reassure
+export const RECOVERY_DECLINE_PP = -8;  // smoothed duration ratio dropped ≥ this to reassure
 
 export function recoveryNote(signals) {
   if (!Array.isArray(signals) || signals.length === 0) return null;
@@ -192,7 +192,7 @@ export function recoveryNote(signals) {
     const s = declining[0];
     return {
       key: "recovery-ok", tone: "info",
-      text: `Your ${s.grip} between-rep recovery has drifted down lately, but it's still tracking your model — expected as your loads climb, not a fatigue sign.`,
+      text: `Your ${s.grip} rep-time retention has drifted down lately, but it's still tracking the nonlinear fatigue model — expected as your failure times lengthen, not a fatigue sign by itself.`,
     };
   }
   return null;
@@ -225,8 +225,8 @@ export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreA
 // ── Recommendation explanation ────────────────────────
 // ONE plain sentence for the engine's decisive factor — explanation,
 // not persuasion. The engine already picked; this just says why in
-// coach language. Order mirrors the engine's own weighting: a real
-// below-curve residual is the strongest signal, then coverage states,
+// coach language. Order mirrors the engine's own weighting: a measured
+// below-curve model gap is the strongest signal, then coverage states,
 // then the calibrated default. Ladder sessions explain the protocol
 // instead (the numbers on screen are the ladder's, not the curve's).
 export function decisiveWhy(rec, { ladderText = null } = {}) {
@@ -238,7 +238,7 @@ export function decisiveWhy(rec, { ladderText = null } = {}) {
   const room = rec.room ?? (1 - (rec.localRatio ?? 1));
   if (!rec.coverageSnap && rec.adaptBoost != null && rec.adaptBoost > 1.05) {
     const pct = Math.max(1, Math.round(room * 100));
-    return `reps near ${rec.T != null ? `${Math.round(rec.T)}s` : "here"} run ~${pct}% below your curve — the most room to gain`;
+    return `reps near ${rec.T != null ? `${Math.round(rec.T)}s` : "here"} run ~${pct}% below your modeled curve — the strongest measured gap`;
   }
   if (rec.staleStatus === "never") {
     return "first data at this duration — one honest rep anchors the curve here";
@@ -249,5 +249,5 @@ export function decisiveWhy(rec, { ladderText = null } = {}) {
   if (rec.coverageSnap) {
     return "centered in the zone (heavier · shorter) so a strong rep still lands in-window";
   }
-  return "your curve is well-calibrated here — this pick keeps every zone fresh";
+  return "your curve is best supported here — this pick keeps every zone fresh";
 }

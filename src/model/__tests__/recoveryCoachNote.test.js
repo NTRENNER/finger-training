@@ -64,7 +64,7 @@ describe("recoveryNote", () => {
       { grip: "Crusher", recentGapPct: -2, recoveryDeltaPct: -14, nPoints: 8 },
     ]);
     expect(n).toMatchObject({ key: "recovery-ok", tone: "info" });
-    expect(n.text).toMatch(/tracking your model/i);
+    expect(n.text).toMatch(/tracking the nonlinear fatigue model/i);
     expect(n.text).toMatch(/Crusher/);
   });
 

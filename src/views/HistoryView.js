@@ -975,8 +975,8 @@ export function HistoryView({
                         />
                         {/* Recovery dynamics — paired with RepCurveChart.
                             Same input data (this hand's reps + the same
-                            physModel), different question: how much
-                            capacity comes back between reps? Hidden when
+                            physModel), different question: how much of
+                            rep-1 duration remains between reps? Hidden when
                             fewer than 2 reps because the chart needs at
                             least one inter-rep recovery to be useful. */}
                         {handReps.length >= 2 && (() => {

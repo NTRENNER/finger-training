@@ -87,6 +87,9 @@ export function PrescribedLoadCard({
         // hand — surfacing it tells the user the number is a sane floor,
         // not a literal curve read.
         extrapFloored: Boolean(pL?.extrapFloored || pR?.extrapFloored),
+        extrapolationBoundaryS: [pL?.extrapolationBoundaryS, pR?.extrapolationBoundaryS]
+          .filter(Number.isFinite)
+          .reduce((m, v) => Math.min(m, v), Infinity),
       };
     }).filter(Boolean);
   }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, fatigueModel, cooked]);
@@ -193,9 +196,9 @@ export function PrescribedLoadCard({
               {r.extrapFloored && (
                 <div
                   style={{ fontSize: 9, color: C.orange, marginTop: 2, fontStyle: "italic" }}
-                  title="This time is far past your longest logged hold, where the curve would collapse to an implausibly light load. The load is held to an anti-collapse floor."
+                  title="This duration is beyond the supported data range. The app holds load at the modeled data boundary instead of presenting the flat tail as physiology. Log a longer failure to extend support."
                 >
-                  ⌊ anti-collapse floor
+                  ⚠ unsupported beyond {Number.isFinite(r.extrapolationBoundaryS) ? `${r.extrapolationBoundaryS}s` : "data"} · load held at boundary
                 </div>
               )}
             </div>

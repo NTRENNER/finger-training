@@ -325,7 +325,7 @@ export function SessionPlanCard({
     if (curveWhy) detailParts.push(curveWhy);
   }
   if (rec.adaptBoost != null && rec.adaptBoost < 0.85 && !rec.coverageSnap) {
-    detailParts.push("you're at or above the curve everywhere — picked on staleness alone");
+    detailParts.push("you're at or above the modeled curve everywhere — picked on staleness alone");
   }
   if (rec.staleStatus === "stale") {
     detailParts.push(`${rec.zone.replace(/_/g, " ")} zone is past its detraining window`);

@@ -1,9 +1,9 @@
 // ─────────────────────────────────────────────────────────────
-// RECOVERY CHART — between-rep capacity restoration
+// RECOVERY CHART — between-rep duration retention
 // ─────────────────────────────────────────────────────────────
-// Visualizes how much capacity the user gets back between reps at
-// constant load. The other half of the F-D story: F-D shows force
-// decline within a rep, this shows capacity return between reps.
+// Visualizes how much of rep 1's failure time the user retains on each
+// later rep at constant load. The forecast solves the nonlinear F-D
+// model; the plotted ratio itself is not labeled a capacity fraction.
 //
 // Two series:
 //   observed   — actual_time_s(N) / actual_time_s(1) from session
@@ -126,7 +126,7 @@ function RecoveryChart({
           <span style={{ color: headlineColor, fontWeight: 700 }}>
             {Math.round(headline.observed * 100)}%
           </span>{" "}
-          <span style={{ color: C.muted }}>recovered at rep 2</span>{" "}
+          <span style={{ color: C.muted }}>of rep-1 time on rep 2</span>{" "}
           <span style={{ color: headlineColor, fontStyle: "italic" }}>
             · {headlineText}
           </span>
