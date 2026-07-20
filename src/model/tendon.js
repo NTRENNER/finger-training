@@ -1,15 +1,16 @@
 // ──────────────────────────────────────────────────────────────
-// LOW-INTENSITY FINGER LOADING  (Abrahangs-inspired)
+// TENDON HEALTH PROTOCOL  (Abrahangs — after Keith Baar's work)
 // ──────────────────────────────────────────────────────────────
-// A deliberately SEPARATE, submaximal adjunct to the muscular reps
-// model. Nothing here touches the reps table or F-D fit. The app records
-// completion and an effort cue, not measured force; it therefore must
-// not present this feature as injury prevention or rehabilitation.
+// A deliberately SEPARATE, low-load adjunct to the muscular reps model.
+// Nothing here touches the reps table or F-D fit; the app records
+// completion + an effort cue, not measured force.
 //
-// Both presets preserve the low-intensity, no-failure intent. Editable
-// bounds stay inside the represented 10–30 second hold range and cap
-// effort at 50%, rather than letting an old saved override turn this
-// adjunct into near-maximal training.
+// Keith Baar's low-load isometric work is the gold standard for tendon
+// adaptation in general (~40% of max, longer holds, high frequency);
+// the finger application here is an extrapolation of that work, not
+// finger-specific evidence. Both presets stay low-load and no-failure.
+// Editable bounds stay in the 10–30s hold range and cap effort at 50%
+// so an old saved override can't turn the adjunct into near-max training.
 
 const EMIL_GRIPS = [
   { name: "4-finger crimp",         detail: "14mm edge",               sets: 3 },

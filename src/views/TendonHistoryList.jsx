@@ -1,5 +1,5 @@
-// Low-intensity-loading history — the log of completed submaximal
-// finger-loading sessions, shown under the History tab's Loading domain. Reads the
+// Tendon Health Protocol history — the log of completed low-load
+// tendon sessions, shown under the History tab's Tendon domain. Reads the
 // shared useTendon store (cloud-synced, separate from the reps model),
 // so a session logged on the Setup card appears here without a refetch.
 // Each row: date, preset, resolved timing, and time-under-tension;
@@ -20,7 +20,7 @@ export function TendonHistoryList() {
 
   const handleDelete = async (s) => {
     // eslint-disable-next-line no-alert
-    if (!window.confirm(`Delete low-intensity session from ${s.date}?`)) return;
+    if (!window.confirm(`Delete tendon session from ${s.date}?`)) return;
     setDeleteError(false);
     setBusyId(s.id);
     const res = await removeSession(s.id);
@@ -32,7 +32,7 @@ export function TendonHistoryList() {
     return (
       <Card>
         <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.6 }}>
-          No low-intensity sessions logged yet. Start one from the Low-intensity loading card on the
+          No tendon sessions logged yet. Start one from the Tendon Health Protocol card on the
           Fingers setup screen — it records here once you finish.
         </div>
       </Card>
@@ -47,13 +47,13 @@ export function TendonHistoryList() {
     <>
       <Card style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>Low-intensity sessions</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Tendon sessions</div>
           <div style={{ fontSize: 11, color: adh.onTrack ? C.green : C.muted, fontWeight: 700 }}>
             {adh.weekCount}/{adh.goalPerWeek} this week{adh.streak > 0 ? ` · 🔥 ${adh.streak}` : ""}
           </div>
         </div>
         <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>
-          {sessions.length} total · low-intensity submaximal loading, separate from finger training.
+          {sessions.length} total · low-load tendon work at ~40% of max, separate from your finger training.
         </div>
       </Card>
 
