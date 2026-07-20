@@ -11,7 +11,7 @@ import {
   DELOAD_STALE_DAYS,
 } from "../deload.js";
 
-// ── Session builder ──────────────────────────────────────────
+// ── Session builder ──────────────────────────────────
 // Two reps (rep 1 + rep 2) for one (grip, hand, date). t1/t2 are the
 // rep hold times; rest is large so the model predicts strong recovery,
 // making a low t2/t1 read as a clear negative gap. Exactly 2 reps keeps
@@ -184,5 +184,34 @@ describe("deloadStatus (green/yellow/red gauge)", () => {
     const s = deloadStatus(fine("Crusher"), [], { today: TODAY });
     expect(s.level).toBe("green");
     expect(s.haveSignal).toBe(false);
+  });
+});
+
+describe("recentGapHeldOut (no look-ahead leakage)", () => {
+  const { recentGapHeldOut } = require("../deload.js");
+  const set = (grip, date, times, rest = 20) => times.map((t, i) => ({
+    id: `${grip}-${date}-${i}`, grip, hand: "L", date, session_id: `${grip}-${date}`,
+    set_num: 1, rep_num: i + 1, actual_time_s: t, target_duration: 30, rest_s: rest,
+  }));
+
+  test("returns null with fewer than n gap-bearing sessions", () => {
+    const hist = set("Micro", "2026-05-01", [30, 20]);
+    expect(recentGapHeldOut(hist, "Micro", "2026-05-01", 2)).toBeNull();
+  });
+
+  test("surfaces a genuine recent dip (recent window is held out of its own fit)", () => {
+    // Healthy baseline (3-rep sets so personal taus can engage), then two
+    // collapsed recent sessions. The dip must read clearly negative — the
+    // recent sessions can't pull the baseline toward slower recovery.
+    const hist = [
+      ...["2026-05-01","2026-05-03","2026-05-05","2026-05-07","2026-05-09","2026-05-11"]
+        .flatMap(d => set("Micro", d, [40, 37, 34])),
+      ...set("Micro", "2026-05-14", [40, 12, 8]),
+      ...set("Micro", "2026-05-16", [40, 11, 9]),
+    ];
+    const rg = recentGapHeldOut(hist, "Micro", "2026-05-16", 2);
+    expect(rg).toBeTruthy();
+    expect(rg.mean).toBeLessThan(-0.15);   // clear beyond-noise dip
+    expect(rg.lastDate).toBe("2026-05-16");
   });
 });

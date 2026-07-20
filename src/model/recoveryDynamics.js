@@ -1,6 +1,6 @@
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // RECOVERY DYNAMICS — between-rep capacity restoration
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // The F-D model + RepCurveChart already show how force declines
 // during a single rep. This module surfaces the OTHER side of the
 // model: how repeated failure time changes between reps.
@@ -142,9 +142,9 @@ export function buildRecoveryBundle({ reps, restSeconds, physModel }) {
   };
 }
 
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // Cross-session trend
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // Per-session metrics at the target rep, aggregated across the
 // history for trend rendering in AnalysisView. "Is my recovery
 // improving over weeks/months?" — the question the per-session
@@ -270,24 +270,27 @@ export function withRollingMean(trend, window = 3) {
   });
 }
 
-// Threshold for the "matches model" band on the gap chart, and the
-// per-grip trigger the deload detector reads off. A time-separated
-// holdout of the July 2026 nonlinear constant-force solver on ~5 months
-// of real sessions (see scripts/recovery-validation.md) put the
-// session-to-session gap noise well above the old ±0.10: the 3-session
-// smoothed gap has std ≈ 0.14 (Micro) to 0.24 (Crusher). The old ±0.10
-// — tuned against the retired LINEAR predictor — was ~half the real
-// noise, so most on-track sessions fell "outside" it and the deload
-// trigger / recovery early-warn were needlessly twitchy. Widened to
-// ±0.15 (≈ one smoothed-gap sigma for the better-behaved grip): a band
-// the smoothed line mostly sits inside, and a deload/early-warn trigger
-// that needs a real dip below the user's own baseline, not noise.
+// The "matches model" band for the recovery CHART (shaded region + raw
+// dot / smoothed-line context) and the per-grip COACHING early-warn.
+// Both read the 3-session SMOOTHED gap, so they share this one band.
+//
+// Calibrated on a time-separated holdout of the July 2026 nonlinear
+// constant-force solver over ~5 months of real sessions (reproduced by
+// recoveryModel.validation.test.js; write-up in scripts/recovery-
+// validation.md): the smoothed-gap std is ≈ 0.16 (Micro) to 0.25
+// (Crusher). The retired ±0.10 (tuned to the LINEAR predictor) was ~half
+// that, so most on-track sessions fell "outside" it. ±0.15 ≈ one
+// smoothed-gap sigma for the better-behaved grip.
+//
+// NOTE: the DELOAD detector does NOT read this. It reads a 2-session
+// mean (a different, noisier statistic) and has its own DELOAD_GAP_TRIGGER
+// in deload.js. Don't collapse the two — they're calibrated separately.
 export const GAP_NOISE_BAND = 0.15;
 
 
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // COACHING SIGNALS — compact per-grip recovery read for coachNotes
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // The DeloadGauge consumes the same recovery gap but only CROSS-grip
 // (it fires when EVERY grip is down), so it can't catch a single grip
 // slipping and it never reassures. This distills, per grip, the two

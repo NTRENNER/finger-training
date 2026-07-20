@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // DELOAD DETECTOR
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // Flags accumulating systemic fatigue and proposes a deload. NOT an
 // injury system (the Micro/Crusher tools carry no finger-injury risk)
 // — it's about catching non-functional overreaching, where fatigue is
@@ -41,14 +41,28 @@
 // UI surfaces it and the user accepts before any load is regulated.
 // Pure functions; no React, no Supabase. Tested in isolation.
 
-import { buildRecoveryTrend, GAP_NOISE_BAND } from "./recoveryDynamics.js";
-import { computePersonalRecoveryTaus } from "./recoveryFit.js";
+import { buildRecoveryTrend } from "./recoveryDynamics.js";
+import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 
 // Sustained: cross-grip recovery must be down over at least this many
 // of each grip's most-recent finger sessions. 2 keeps a single rough
 // day from firing while still catching a real run.
 export const DELOAD_MIN_SESSIONS = 2;
+
+// Per-grip trigger for the cross-grip deload gate, on the SAME statistic
+// the gate reads: the mean of each grip's last DELOAD_MIN_SESSIONS
+// HELD-OUT recovery gaps. Deliberately its OWN constant — NOT the chart /
+// coaching band GAP_NOISE_BAND. That band is calibrated to the 3-session
+// SMOOTHED gap; this gate reads a 2-session mean, a wider, noisier
+// statistic (forward-chained holdout on ~5mo real data: std ≈ 0.15 Micro
+// / 0.26 Crusher, centered POSITIVE at +0.09 / +0.14 — the model slightly
+// under-predicts this user's recovery). A grip mean below -0.15 is
+// ~1–1.5σ under the user's own baseline on THIS statistic — a beyond-noise
+// systemic dip, not scatter. It equals the display band numerically on
+// this data by coincidence, not construction. See
+// scripts/recovery-validation.md; re-derive with recoveryModel.validation.
+export const DELOAD_GAP_TRIGGER = 0.15;
 
 // Detraining guard: if the most recent finger session on/before the
 // evaluation date is older than this, return no-deload (rested).
@@ -64,10 +78,9 @@ export const DELOAD_LIFT_MIN_ACUTE_SETS = 12;
 
 const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 
-// physModel for a grip from personally-fit recovery taus, falling back
-// to population taus when the grip has no fit yet.
-function physModelForGrip(personalTaus, grip) {
-  const tauR = (personalTaus && personalTaus.get && personalTaus.get(grip)) || PHYS_MODEL_DEFAULT.tauR;
+// physModel from a fitted recovery-tau triple (or population when null).
+function physModelFromTaus(taus) {
+  const tauR = taus ? { fast: taus.fast, medium: taus.medium, slow: taus.slow } : PHYS_MODEL_DEFAULT.tauR;
   return { weights: PHYS_MODEL_DEFAULT.weights, tauD: PHYS_MODEL_DEFAULT.tauD, tauR };
 }
 
@@ -111,12 +124,27 @@ function liftingSpike(volByDate, today) {
 }
 
 // Mean recovery gap for a grip over its last `n` finger sessions
-// on/before `today`. Null when fewer than `n` sessions carry a gap.
-function recentGap(history, grip, physModel, today, n) {
-  const trend = buildRecoveryTrend(history, grip, { physModel })
+// on/before `today`, scored HELD-OUT: personal recovery taus are fit
+// ONLY on that grip's sessions BEFORE this recent window, then the recent
+// `n` are scored as out-of-sample. Without this, the very sessions being
+// evaluated pulled the tau fit toward their own recovery (worst on sparse
+// grips), partly masking a real dip — the look-ahead leakage the offline
+// validation avoids but production used to have. Null when fewer than `n`
+// gap-bearing sessions exist on/before `today`.
+export function recentGapHeldOut(history, grip, today, n) {
+  // Sessions that can carry a gap (>=2 timed reps), oldest→newest. No
+  // physModel needed just to enumerate the dates.
+  const sessions = buildRecoveryTrend(history, grip, { physModel: null })
+    .filter(r => r.date && r.date <= today);
+  if (sessions.length < n) return null;
+  const recent = sessions.slice(-n);
+  const cutoff = recent[0].date;                    // earliest of the window
+  const baseline = history.filter(r => r.grip === grip && r.date && r.date < cutoff);
+  const physModel = physModelFromTaus(computePersonalRecoveryTausForGrip(baseline, grip));
+  const scored = buildRecoveryTrend(history, grip, { physModel })
     .filter(r => r.date && r.date <= today && Number.isFinite(r.gapAtTarget));
-  if (trend.length < n) return null;
-  const last = trend.slice(-n);
+  if (scored.length < n) return null;
+  const last = scored.slice(-n);
   const mean = last.reduce((s, r) => s + r.gapAtTarget, 0) / last.length;
   return { mean, n: last.length, lastDate: last[last.length - 1].date };
 }
@@ -142,10 +170,9 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
 
   // Per-grip recent recovery gap with personal taus.
   const grips = [...new Set(history.filter(r => r.grip).map(r => r.grip))];
-  const personalTaus = computePersonalRecoveryTaus(history);
   const gripGaps = {};
   for (const g of grips) {
-    const rg = recentGap(history, g, physModelForGrip(personalTaus, g), ref, minSessions);
+    const rg = recentGapHeldOut(history, g, ref, minSessions);
     if (rg) gripGaps[g] = rg;
   }
   const measured = Object.keys(gripGaps);
@@ -157,7 +184,7 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   }
 
   // Cross-grip gate: EVERY measured grip's recent mean gap below the band.
-  const downGrips = measured.filter(g => gripGaps[g].mean < -GAP_NOISE_BAND);
+  const downGrips = measured.filter(g => gripGaps[g].mean < -DELOAD_GAP_TRIGGER);
   signals.downGrips = downGrips;
   signals.crossGripDown = downGrips.length === measured.length;
 
@@ -179,9 +206,9 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   return { deload: true, severity, signals, why };
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // DELOAD READINESS (green / yellow / red gauge)
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // A continuous "how close to a deload am I" status, so a deload has a
 // runway instead of appearing out of nowhere. Driven by the SAME
 // conservative signal as computeDeload (cross-grip recovery gap on
@@ -189,12 +216,17 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
 // and RED is reserved for the full strong-deload condition so a single
 // rough session can't flip the light.
 
-// avgGap of this much (below zero) = full pressure (1.0). The gap noise
-// band is ±0.10; -0.25 is a decisive, beyond-noise recovery deficit.
-export const DELOAD_PRESSURE_SCALE = 0.25;
-// Pressure at/above this flips green → yellow ("watch"). ~0.09 below
-// the band, i.e. recovery has started drifting past noise.
-export const DELOAD_YELLOW_AT = 0.35;
+// The gauge is a deliberate EARLY RUNWAY: it softens the light BEFORE the
+// hard cross-grip deload so a deload never appears out of nowhere.
+// Pressure is scaled so 1.0 lands exactly at the deload line
+// (avgGap = -DELOAD_GAP_TRIGGER); yellow lights partway down that runway.
+// avgGap normally sits POSITIVE here (the model slightly under-predicts
+// this user's recovery), so the gauge is green unless cross-grip recovery
+// genuinely drifts negative.
+export const DELOAD_PRESSURE_SCALE = DELOAD_GAP_TRIGGER;   // full pressure at the deload line
+// green → yellow at/above this pressure. 0.5 ⇒ avgGap ≈ -0.075, about
+// halfway to the deload line — an intentional heads-up, not the decision.
+export const DELOAD_YELLOW_AT = 0.5;
 
 // Returns:
 //   { level: "green"|"yellow"|"red", pressure: 0..1, avgGap, haveSignal,
@@ -236,9 +268,9 @@ export function deloadStatus(history, workoutSessions = [], opts = {}) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // WEEKLY DELOAD PLAN
-// ─────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
 // A deload is a WEEK-scoped intervention, not a per-session tweak. The
 // plan cuts VOLUME ~50% (Climb Strong's deload heuristic) while keeping
 // the loads you do hit near-normal — the recovery comes from less
