@@ -375,9 +375,10 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
 //     reliability: "well-supported" | "marginal" | "extrapolation"
 //     source:      "anchored-curve"  | "unanchored-curve"
 //                | "anchored-linear" | "historical" | "none"
-//     peakCapKg:   <number> | null  ceiling (PEAK_CAP_FRACTION × recent
-//                                   best peak_force_kg), null when no
-//                                   Tindeq peak exists in the window
+//     peakCapKg:   <number> | null  ceiling (PEAK_CAP_FRACTION × best
+//                                   recent peak, with historical measured
+//                                   peak fallback), null with no max peak
+//     peakCapStale:<bool>           true when historical fallback supplied it
 //     peakCapped:  <bool>           true when value was reduced to the
 //                                   ceiling (curve/linear paths only)
 //     capacityFloorKg: <number>|null best load sustained for a hold of
@@ -459,7 +460,7 @@ export function capLoad(v, peakCapKg, absMax = SANE_MAX_KG) {
 // never raises) and missing targets (legacy/manual rows) are kept.
 // referenceDate mirrors prescription()'s retrospective semantics:
 // null = today. Returns null when no qualifying peak exists in the
-// window — callers then run uncapped, the pre-cap behavior.
+// window; prescription() then checks the historical measured fallback.
 export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
   if (!history) return null;
   const refMs = referenceDate
@@ -478,6 +479,33 @@ export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
     if (p != null && (best == null || p > best)) best = p;
   }
   return best;
+}
+
+// Best qualifying peak from all prior history. This is a fallback
+// ceiling only: a recent peak is preferred, but an older measured max
+// remains a far safer physical bound than the generic 200 kg corruption
+// guard. The staleness bit returned by bestAvailablePeakMeasurement lets
+// the UI distinguish "current measurement" from "historical ceiling."
+export function historicalBestPeakKg(history, hand, grip, referenceDate = null) {
+  if (!history) return null;
+  let best = null;
+  for (const r of history) {
+    if (!r || r.hand !== hand || r.grip !== grip) continue;
+    if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
+    if (isSeedArtifactRep(r)) continue;
+    const tgt = Number(r.target_duration);
+    if (Number.isFinite(tgt) && tgt > PEAK_MAX_PROTOCOL_T) continue;
+    const p = sane(r.peak_force_kg);
+    if (p != null && (best == null || p > best)) best = p;
+  }
+  return best;
+}
+
+export function bestAvailablePeakMeasurement(history, hand, grip, referenceDate = null) {
+  const recent = recentBestPeakKg(history, hand, grip, referenceDate);
+  if (recent != null) return { kg: recent, stale: false };
+  const historical = historicalBestPeakKg(history, hand, grip, referenceDate);
+  return historical != null ? { kg: historical, stale: true } : null;
 }
 
 // Best load the user has DEMONSTRABLY sustained for a hold of
@@ -577,13 +605,16 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
     date: anchorRep.date,
   } : null;
 
-  // Peak-force ceiling — see PEAK_CAP_FRACTION above. Null when the
-  // history has no Tindeq peaks in the window (manual users), in
-  // which case capValue() falls back to the SANE_MAX_KG backstop.
-  const bestPeakKg = recentBestPeakKg(history, hand, grip, referenceDate);
+  // Peak-force ceiling — see PEAK_CAP_FRACTION above. Prefer a current
+  // measurement; if the 90-day window is empty, keep the best qualifying
+  // historical measurement as a physical ceiling instead of silently
+  // falling back to 200 kg. Manual histories still have no peak cap.
+  const peakMeasurement = bestAvailablePeakMeasurement(history, hand, grip, referenceDate);
+  const bestPeakKg = peakMeasurement?.kg ?? null;
   const peakCapKg = bestPeakKg != null
     ? Math.round(bestPeakKg * PEAK_CAP_FRACTION * 10) / 10
     : null;
+  const peakCapStale = peakMeasurement?.stale === true;
   // Demonstrated-capacity FLOOR (July 2026) — see demonstratedCapacityKg.
   // Applied inside capValue as floor-then-cap so every return path is
   // bounded to [floor, ceiling]. A sustained avg is under instantaneous
@@ -678,10 +709,14 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
           reliability,
           source,
           peakCapKg,
+          peakCapStale,
           peakCapped:      value < rawRounded,   // ceiling bit
           capacityFloorKg: floorKg,
           capacityFloored: value > rawRounded,   // floor lifted it above the curve
           extrapFloored:   extrapFloorRaw != null && flooredRaw > rawRounded,
+          extrapolationBoundaryS: extrapFloorRaw != null
+            ? Math.round(longestObservedT * EXTRAP_FLOOR_MULT)
+            : null,
         };
       }
     }
@@ -718,6 +753,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
       reliability: "extrapolation",
       source:      "anchored-linear",
       peakCapKg,
+      peakCapStale,
       peakCapped:      value < v,
       capacityFloorKg: floorKg,
       capacityFloored: value > v,
@@ -739,6 +775,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
       reliability: "extrapolation",
       source:      "historical",
       peakCapKg,
+      peakCapStale,
       peakCapped:      value < hv,
       capacityFloorKg: floorKg,
       capacityFloored: value > hv,

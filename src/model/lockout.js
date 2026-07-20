@@ -28,6 +28,27 @@
 
 import { ZONE_KEYS, zoneOf } from "./zones.js";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Convert a local Date/time or stored YYYY-MM-DD into the same
+// timezone-independent calendar-day serial. JavaScript parses a bare
+// YYYY-MM-DD as UTC, while `new Date()` represents a local instant;
+// subtracting those timestamps made a session dated "today" one day
+// old during the local evening.
+function calendarDay(value) {
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return null;
+    return Math.floor(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()) / DAY_MS);
+  }
+  if (typeof value === "string") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    if (m) return Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / DAY_MS);
+  }
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return null;
+  return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS);
+}
+
 // Per-zone detraining timeline in days. After this many days without
 // training the zone, it's "stale" — the recommendation engine boosts
 // the score for that zone and the Setup banner surfaces it.
@@ -100,7 +121,7 @@ export function getLastZoneTrainedDates(history) {
 //   stale   — over the full window (lockout active)
 export function getZoneStaleness(history, today = new Date()) {
   const lastDates = getLastZoneTrainedDates(history);
-  const todayMs = today instanceof Date ? today.getTime() : Date.parse(today);
+  const todayDay = calendarDay(today);
   const out = {};
   for (const k of ZONE_KEYS) {
     const last = lastDates[k];
@@ -108,8 +129,8 @@ export function getZoneStaleness(history, today = new Date()) {
       out[k] = { lastDate: null, days: null, status: "never" };
       continue;
     }
-    const lastMs = Date.parse(last);
-    const days = Math.floor((todayMs - lastMs) / (24 * 60 * 60 * 1000));
+    const lastDay = calendarDay(last);
+    const days = todayDay != null && lastDay != null ? Math.max(0, todayDay - lastDay) : 0;
     const window = LOCKOUT_WINDOW_DAYS[k];
     let status = "ok";
     if (days >= window) status = "stale";
@@ -195,32 +216,31 @@ export function stalenessBoost(zoneKey, stalenessMap) {
 // that's intentional, since Crusher and Micro work load different
 // physiological systems and each "counts" as its own training event.
 export function getRollingSessionPace(history, today = new Date()) {
-  const todayMs = today instanceof Date ? today.getTime() : Date.parse(today);
-  const ms       = 24 * 60 * 60 * 1000;
+  const todayDay = calendarDay(today);
   const window   = 365;
-  const cutoffMs = todayMs - window * ms;
+  const cutoffDay = todayDay - window;
 
   const sessions = new Set();
-  let firstSessionMs = Infinity;
+  let firstSessionDay = Infinity;
   for (const r of history || []) {
     if (!r?.date) continue;
-    const repMs = Date.parse(r.date);
-    if (!isFinite(repMs)) continue;
-    if (repMs < firstSessionMs) firstSessionMs = repMs;
-    if (repMs < cutoffMs) continue;
+    const repDay = calendarDay(r.date);
+    if (repDay == null) continue;
+    if (repDay < firstSessionDay) firstSessionDay = repDay;
+    if (repDay < cutoffDay || repDay > todayDay) continue;
     const sid = r.session_id || r.date;
     sessions.add(sid);
   }
   const current = sessions.size;
 
   let paceYearEnd;
-  if (firstSessionMs === Infinity) {
+  if (firstSessionDay === Infinity) {
     paceYearEnd = 0;
   } else {
     // Extrapolate from the actual active training window. Capped at
     // `window` so a year+ of history just returns `current` directly
     // (no amplification for mature users).
-    const trainingDays = Math.max(1, Math.floor((todayMs - firstSessionMs) / ms));
+    const trainingDays = Math.max(1, todayDay - firstSessionDay);
     const activeDays   = Math.min(window, trainingDays);
     paceYearEnd = Math.round(current * (window / activeDays));
   }

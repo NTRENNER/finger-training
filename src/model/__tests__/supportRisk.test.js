@@ -34,6 +34,13 @@ describe("sessionValue", () => {
     ]});
     expect(v).toEqual({ metric: "reps", value: 20 });
   });
+  test("unilateral weight exercise uses the weaker side-specific load", () => {
+    const v = sessionValue({ logWeight: true, unilateral: true }, { sets: [
+      { done: true, leftWeight: 20, rightWeight: 18, leftReps: 5, rightReps: 5 },
+      { done: true, leftWeight: 22, rightWeight: 21, leftReps: 4, rightReps: 4 },
+    ]});
+    expect(v).toEqual({ metric: "weight", value: 21 });
+  });
   test("nothing done → null; simple done-toggle counts", () => {
     expect(sessionValue({}, { sets: [{ done: false }] })).toBeNull();
     expect(sessionValue({}, { done: true })).toEqual({ metric: "done", value: 1 });
@@ -67,6 +74,18 @@ describe("exerciseSupportRisk", () => {
     const w = (date, weight) => sess(date, "A", { dips: { sets: [{ done: true, weight, reps: 5 }] } });
     const out = exerciseSupportRisk([w("2026-06-20", 30), w("2026-06-27", 32), w("2026-07-04", 29)], REF);
     expect(out.some(r => r.id === "dips" && r.regressing)).toBe(false);
+  });
+
+  test("detects a unilateral side-specific weight regression", () => {
+    const w = (date, weight) => sess(date, "A", { bicepCurls: { sets: [{
+      done: true, leftWeight: weight, rightWeight: weight - 1,
+      leftReps: 5, rightReps: 5,
+    }] } });
+    const out = exerciseSupportRisk([
+      w("2026-06-20", 30), w("2026-06-27", 27), w("2026-07-04", 24),
+    ], REF);
+    const curls = out.find(r => r.id === "bicepCurls");
+    expect(curls?.regressing).toBe(true);
   });
 
   test("never-logged exercises are skipped", () => {

@@ -72,13 +72,13 @@ function LiveRepCurveCard({ history, config, activeHand, sessionReps, embedded =
   return embedded ? inner : <Card style={{ marginBottom: 12 }}>{inner}</Card>;
 }
 
-// Live recovery-dynamics card — between-rep capacity restoration
+// Live recovery-dynamics card — between-rep duration retention
 // for the current set. Renders alongside LiveRepCurveCard once
 // rep 2 has landed (with only rep 1 there's nothing to plot —
 // observed series is just [1.0]). The two charts answer different
 // questions on the same data: LiveRepCurveCard shows hold-time
-// trajectory; LiveRecoveryCard shows what fraction of capacity
-// each rep started with.
+// trajectory; LiveRecoveryCard shows what fraction of rep-1 time
+// remains at the same load.
 function LiveRecoveryCard({ history, config, activeHand, sessionReps, embedded = false }) {
   const bundle = useMemo(() => {
     const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;

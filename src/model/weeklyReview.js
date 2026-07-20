@@ -538,7 +538,7 @@ export function assembleCheckIn(signals) {
     return { range: null, headline: "No training logged yet — log a session to start your weekly check-in.", sections: null };
   }
   const digest = assembleReview(signals);
-  const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates, finger } = signals;
+  const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates } = signals;
 
   // WHAT YOU DID — volume/coverage lines.
   const did = [];

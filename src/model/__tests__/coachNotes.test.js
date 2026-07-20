@@ -133,10 +133,10 @@ describe("decisiveWhy", () => {
     const s = decisiveWhy({ adaptBoost: 1.3, room: 0.12, coverageSnap: true, staleStatus: "ok", zone: "strength" });
     expect(s).toMatch(/centered in the zone/);
   });
-  test("never → anchor; stale → longest-unvisited; default → calibrated", () => {
+  test("never → anchor; stale → longest-unvisited; default → supported", () => {
     expect(decisiveWhy({ staleStatus: "never" })).toMatch(/anchors the curve/);
     expect(decisiveWhy({ staleStatus: "stale", zone: "str_endurance" })).toMatch(/str endurance is your longest-unvisited/);
-    expect(decisiveWhy({ staleStatus: "ok" })).toMatch(/well-calibrated/);
+    expect(decisiveWhy({ staleStatus: "ok" })).toMatch(/best supported/);
   });
   test("cold start explains seeding", () => {
     expect(decisiveWhy({ coldStart: true, adaptBoost: 2 })).toMatch(/new grip/);

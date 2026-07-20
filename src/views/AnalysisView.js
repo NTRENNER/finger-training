@@ -684,7 +684,7 @@ export function AnalysisView({
 
       <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Force-Duration Analysis</h2>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-        Where reps fall relative to your force-duration curve shows which timescale is your limiter — and what to train next.
+        Compare failures with the force-duration model to find measured gaps and under-sampled durations. Gaps guide coverage; they do not guarantee faster adaptation.
       </p>
 
       {/* Bodyweight logging lives on the Setup tab now (next to the

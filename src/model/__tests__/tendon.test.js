@@ -53,8 +53,9 @@ describe("tendon presets", () => {
     expect(p.workSec).toBe(25);
     expect(p.restSec).toBe(40);
     // out-of-range clamps to bounds; junk falls back to base
-    expect(resolvePreset("barr", { workSec: 9999 }).workSec).toBe(120);
+    expect(resolvePreset("barr", { workSec: 9999 }).workSec).toBe(30);
     expect(resolvePreset("barr", { workSec: "x" }).workSec).toBe(30);
+    expect(resolvePreset("barr", { effortPct: 90 }).effortPct).toBe(50);
   });
 
   test("presetName resolves display names", () => {

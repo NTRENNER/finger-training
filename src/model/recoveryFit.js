@@ -8,13 +8,12 @@
 // too short (5–60s holds) to deplete the slow compartment, so there's
 // no signal to constrain it. We hold it at the population value.
 //
-// LOO-CV against ~5 weeks of real data showed:
-//   pooled improvement: +20% RMSE drop vs population taus
-//   Crusher:            +12% (signal real but borderline)
-//   Micro:              +44% (Micro's recovery is dramatically slower
-//                              than the population prior — tauR_med
-//                              jumps from 90s → ~400s in the fit)
-// Validation harness: /tmp/loo_cv.py at the time of shipping.
+// The original fit was cross-validated under a linear
+// `time = firstTime × capacity` predictor. July 2026 replaced that
+// shortcut with the nonlinear constant-force F-D solver used below, so
+// those old RMSE figures no longer describe this implementation. Keep
+// personalization shrinkage conservative until the nonlinear version
+// has its own time-separated validation report.
 //
 // Bayesian shrinkage with PRIOR_WEIGHT (5 effective sets) keeps a
 // new user / sparse-data grip anchored to the population curve until
@@ -28,10 +27,9 @@
 // still useful for the freshMap / predictRepTimes consumers since
 // they're typically scoring 20s-rest sessions anyway.
 
-import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
+import { PHYS_MODEL_DEFAULT, predictRepTimes } from "./fatigue.js";
 
 const POP_TAU_R = PHYS_MODEL_DEFAULT.tauR;       // { fast, medium, slow }
-const POP_TAU_D = PHYS_MODEL_DEFAULT.tauD;       // depletion (held fixed)
 const POP_WEIGHTS = PHYS_MODEL_DEFAULT.weights;
 
 // Bayesian shrinkage strength, in units of "qualifying sets". With
@@ -50,32 +48,17 @@ const RANGE = {
   medium: [20, 400],
 };
 
-// Predict rep-time sequence under a given recovery-tau triple.
-// MUST stay numerically identical to fatigue.js predictRepTimes —
-// any divergence here would invalidate the LOO-CV and the shrunk
-// values plumbed into the freshMap pipeline.
+// Predict rep-time sequence under a given recovery-tau triple through
+// the canonical nonlinear F-D solver. Keeping one implementation avoids
+// the fitter and live forecast silently learning different models.
 function predictDecay(firstT, nReps, restS, tauR) {
-  const comps = [
-    { w: POP_WEIGHTS.fast,   tD: POP_TAU_D.fast,   tR: tauR.fast,   avail: 1.0 },
-    { w: POP_WEIGHTS.medium, tD: POP_TAU_D.medium, tR: tauR.medium, avail: 1.0 },
-    { w: POP_WEIGHTS.slow,   tD: POP_TAU_D.slow,   tR: tauR.slow,   avail: 1.0 },
-  ];
-  const out = [];
-  for (let i = 0; i < nReps; i++) {
-    const cap = comps.reduce((s, c) => s + c.w * c.avail, 0);
-    const t = Math.max(0, firstT * cap);
-    out.push(t);
-    for (const c of comps) {
-      c.avail = Math.max(0, c.avail * Math.exp(-t / c.tD));
-    }
-    if (i < nReps - 1) {
-      for (const c of comps) {
-        const rec = 1 - Math.exp(-restS / c.tR);
-        c.avail = Math.min(1, c.avail + (1 - c.avail) * rec);
-      }
-    }
-  }
-  return out;
+  return predictRepTimes({
+    firstRepTime: firstT,
+    numReps: nReps,
+    restSeconds: restS,
+    physModel: { ...PHYS_MODEL_DEFAULT, tauR },
+    roundTo: null,
+  });
 }
 
 // Sum of squared errors between predicted and actual rep-2..N times

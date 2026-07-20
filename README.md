@@ -61,7 +61,7 @@ publishable browser key, gated by Row-Level Security).
 ```sh
 npm install
 npm start          # dev server on localhost:3000
-npm test           # model + lib test suite (390 tests)
+npm test           # model + lib + UI test suite (702 tests)
 npm run build      # production bundle
 ```
 

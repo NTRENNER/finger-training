@@ -5,12 +5,11 @@
 // shows recovery dynamics for ONE session; this shows the trend across
 // sessions, per grip. Two series on one chart:
 //
-//   • Recovery fraction (green): rep-2 hold time ÷ rep-1 hold time at
-//     the target rep. HIGHER = you hold a bigger share of your opener
-//     on the next rep = better recovery. This is the "improvement" line.
+//   • Duration retention (green): rep-2 hold time ÷ rep-1 hold time at
+//     the target rep. HIGHER = you hold a bigger share of your opener.
 //   • Model gap (purple): observed fraction − what the fatigue model
-//     predicted. Above 0 = recovering BETTER than your model expects;
-//     below 0 = worse (an early fatigue signal). The shaded ±band is
+//     predicted. Above 0 = retaining MORE time than the model expects;
+//     below 0 = less (an early fatigue signal). The shaded ±band is
 //     rep-timing noise — gaps inside it just "match the model", so
 //     don't read a single dip in the band as a problem.
 //
@@ -75,7 +74,7 @@ export function RecoveryTrajectoryCard({ history = [] }) {
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>
-          Recovery trajectory — between-rep recovery over time
+          Recovery trajectory — rep-time retention over time
         </div>
         {grips.length > 1 && (
           <div style={{ display: "flex", gap: 4 }}>
@@ -90,17 +89,17 @@ export function RecoveryTrajectoryCard({ history = [] }) {
         )}
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        Green is how much of your opening rep you still hold by the target rep — <b>higher means recovering better</b>, and a rising green line is the improvement to look for.
-        {hasGap && <> Purple is that same recovery minus what your fatigue model predicted: above 0 you're recovering better than expected, below 0 worse. The shaded ±{BAND}pp band is timing noise — dips inside it just match the model, so read the bold rolling-mean lines, not single dots.</>}
+        Green is how much of your opening rep's time you retain by the target rep. It is a duration ratio, not a direct capacity measurement.
+        {hasGap && <> Purple is that ratio minus the nonlinear fatigue-model forecast: above 0 you retained more time than expected, below 0 less. The shaded ±{BAND}pp band is timing noise — dips inside it just match the model, so read the bold rolling-mean lines, not single dots.</>}
       </div>
       <ResponsiveContainer width="100%" height={210}>
         <ComposedChart data={rows} margin={{ top: 6, right: 8, bottom: 28, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
           <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} angle={-30} textAnchor="end" interval="preserveStartEnd"
             label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
-          {/* Left axis — recovery fraction (%). */}
+          {/* Left axis — rep-duration retention (%). */}
           <YAxis yAxisId="rec" tick={{ fill: C.muted, fontSize: 11 }} width={44} unit="%" domain={[40, 110]}
-            label={{ value: "recovery", angle: -90, position: "insideLeft", fill: REC_COLOR, fontSize: 11 }} />
+            label={{ value: "rep-time", angle: -90, position: "insideLeft", fill: REC_COLOR, fontSize: 11 }} />
           {/* Right axis — model gap (percentage points), centered on 0. */}
           <YAxis yAxisId="gap" orientation="right" tick={{ fill: C.muted, fontSize: 11 }} width={40} unit="pp" domain={[-40, 40]}
             label={{ value: "gap", angle: 90, position: "insideRight", fill: GAP_COLOR, fontSize: 11 }} />
@@ -117,9 +116,9 @@ export function RecoveryTrajectoryCard({ history = [] }) {
           {/* Recovery fraction: faint raw dots + bold smoothed line. */}
           <Line yAxisId="rec" dataKey="recPct" stroke="none"
             dot={{ r: 2.5, fill: REC_COLOR, fillOpacity: 0.5, stroke: "none" }} activeDot={{ r: 4 }}
-            name="recovery (raw)" isAnimationActive={false} />
+            name="rep-time (raw)" isAnimationActive={false} />
           <Line yAxisId="rec" dataKey="recSm" stroke={REC_COLOR} strokeWidth={3} dot={false} connectNulls
-            name="recovery" isAnimationActive={false} />
+            name="rep-time retained" isAnimationActive={false} />
           {/* Model gap: faint raw dots + bold dashed smoothed line. */}
           {hasGap && (
             <Line yAxisId="gap" dataKey="gapPct" stroke="none"
@@ -133,7 +132,7 @@ export function RecoveryTrajectoryCard({ history = [] }) {
         </ComposedChart>
       </ResponsiveContainer>
       <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 4, fontSize: 10, color: C.muted }}>
-        <span style={{ color: REC_COLOR }}>━ recovery %</span>
+        <span style={{ color: REC_COLOR }}>━ rep-time retained</span>
         {hasGap && <span style={{ color: GAP_COLOR }}>┉ vs model (pp)</span>}
       </div>
     </Card>

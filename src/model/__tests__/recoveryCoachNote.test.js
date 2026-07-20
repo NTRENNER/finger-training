@@ -7,7 +7,7 @@ import {
   RECOVERY_BAND_PP, RECOVERY_DECLINE_PP,
 } from "../coachNotes.js";
 
-// ── recoveryCoachSignals ──────────────────────────
+// ── recoveryCoachSignals ──────────────────
 describe("recoveryCoachSignals", () => {
   const sess = (id, date, t1, frac) => ([
     { session_id: id, date, grip: "Micro", hand: "L", set_num: 1, rep_num: 1, actual_time_s: t1, rest_s: 20 },
@@ -39,7 +39,7 @@ describe("recoveryCoachSignals", () => {
   });
 });
 
-// ── recoveryNote + buildCoachNotes wiring ─────────────────
+// ── recoveryNote + buildCoachNotes wiring ─────────
 describe("recoveryNote", () => {
   test("early-warns on a grip whose recent gap is below the band", () => {
     const n = recoveryNote([
@@ -64,7 +64,7 @@ describe("recoveryNote", () => {
       { grip: "Crusher", recentGapPct: -2, recoveryDeltaPct: -14, nPoints: 8 },
     ]);
     expect(n).toMatchObject({ key: "recovery-ok", tone: "info" });
-    expect(n.text).toMatch(/tracking your model/i);
+    expect(n.text).toMatch(/tracking the nonlinear fatigue model/i);
     expect(n.text).toMatch(/Crusher/);
   });
 
@@ -82,7 +82,7 @@ describe("recoveryNote", () => {
   });
 
   test("band + decline thresholds are exported and sane", () => {
-    expect(RECOVERY_BAND_PP).toBe(10);
+    expect(RECOVERY_BAND_PP).toBe(15);
     expect(RECOVERY_DECLINE_PP).toBeLessThan(0);
   });
 

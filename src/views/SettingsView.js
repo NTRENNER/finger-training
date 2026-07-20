@@ -189,7 +189,7 @@ CREATE POLICY "auth_all" ON reps
       <Card>
         <Sect title="Climbing Focus">
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-            Nudges training-zone recommendations toward your climbing goal. Gentle bias — close calls only, the engine's curve-coverage and adaptation signals still drive most picks.
+            Nudges training-zone recommendations toward your climbing goal. Gentle bias — close calls only; curve coverage and confidence-weighted model gaps still drive most picks.
           </div>
           {(() => {
             const opts = [

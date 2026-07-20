@@ -28,7 +28,7 @@
 //
 // Pure module, no React. Consumed by weeklyReview.gatherCheckInSignals.
 
-import { workouts as SUPPORT_WORKOUTS, exercises as SUPPORT_EXERCISES } from "./supportTraining.js";
+import { workouts as SUPPORT_WORKOUTS } from "./supportTraining.js";
 import { migrateExerciseId } from "./exerciseIds.js";
 import { parseRepsCount } from "./workout-volume.js";
 
@@ -58,7 +58,14 @@ export function sessionValue(exDef, ex) {
   for (const t of sets) {
     if (!t || !t.done) continue;
     any = true;
-    const w = Number(t.weight);
+    // Bilateral exercises log `weight`; unilateral exercises log the
+    // two side-specific values. Use the weaker entered side so a
+    // unilateral regression cannot be hidden by the stronger side.
+    const sideWeights = [Number(t.leftWeight), Number(t.rightWeight)]
+      .filter(w => Number.isFinite(w) && w > 0);
+    const w = exDef?.unilateral && sideWeights.length > 0
+      ? Math.min(...sideWeights)
+      : Number(t.weight);
     if (w > 0 && w > topW) topW = w;
     reps += parseRepsCount(t.reps) + parseRepsCount(t.leftReps) + parseRepsCount(t.rightReps);
   }

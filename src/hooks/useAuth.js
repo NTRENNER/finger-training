@@ -39,10 +39,19 @@ import { readRawLastUser, setLastUserRaw, adoptAnonDataForUser } from "../lib/st
 //
 // Returns true when the caller must reload before letting the app run
 // as this user; false when the page's namespace already matches.
-function guardUserSwitch(u) {
-  if (!u?.id) return false;
-
+export function guardUserSwitch(u) {
   const last = readRawLastUser();
+
+  // Signing out is a namespace transition too. The current page is
+  // pinned to the signed-in user's storage namespace and its mounted
+  // hooks still hold that user's data in memory. Point the NEXT page at
+  // the anonymous namespace and reload before rendering a signed-out
+  // app. This also covers cross-tab sign-out and expired sessions.
+  if (!u?.id) {
+    if (last == null) return false;
+    setLastUserRaw(null);
+    return true;
+  }
 
   // Same user re-authenticating (token refresh, re-login after an
   // offline stretch): the namespace already matches. Deliberately

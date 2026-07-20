@@ -3,18 +3,17 @@
 // ──────────────────────────────────────────────────────────────
 // The F-D model + RepCurveChart already show how force declines
 // during a single rep. This module surfaces the OTHER side of the
-// model: how much capacity comes back between reps.
+// model: how repeated failure time changes between reps.
 //
-// At constant load (which the runner enforces post-commit 90),
-// time-to-failure scales monotonically with available capacity at
-// the start of the rep. So the ratio
+// At constant load (which the runner enforces post-commit 90), the
+// directly observed quantity is rep-duration retention:
 //
 //     actual_time_s(N) / actual_time_s(1)
 //
-// is a reasonable proxy for "what fraction of fresh capacity did
-// rep N start with?" Rep 1 is the baseline (always 1.0); subsequent
-// reps land below depending on how well recovery keeps up with
-// depletion over the inter-rep rest interval.
+// Rep 1 is the baseline (always 1.0); subsequent reps land below
+// depending on how well recovery keeps up with depletion. This ratio
+// is NOT labeled a physiological capacity fraction: the model forecast
+// now solves the nonlinear force-duration equation at constant load.
 //
 // The predicted series uses the same three-component physModel
 // that drives RepCurveChart's forecast. The diagnostic is the
@@ -29,7 +28,7 @@
 import { predictRepTimes } from "./fatigue.js";
 import { buildPhysModel } from "./repCurveData.js";
 
-// Observed recovered fraction per rep, computed from a session's
+// Observed rep-duration-retention ratio, computed from a session's
 // rep records. Rep 1 always anchors at 1.0; subsequent reps return
 // actual_time_s(N) / actual_time_s(1).
 //
@@ -58,7 +57,7 @@ export function buildObservedRecoverySeries(reps) {
   });
 }
 
-// Model-predicted recovered fraction per rep using the user's
+// Model-predicted rep-duration-retention ratio using the user's
 // three-component physModel. Forecasts what rep N's time SHOULD
 // be given rep 1's time + the inter-rep rest interval, then
 // converts to a fraction of rep 1.
@@ -271,11 +270,19 @@ export function withRollingMean(trend, window = 3) {
   });
 }
 
-// Threshold for the "matches model" band on the gap chart. Per-rep
-// timing noise of ~10% on rep 1 and rep 2 compounds to roughly
-// ±0.10 noise on the ratio, so gaps inside ±NOISE_BAND are
-// statistically indistinguishable from "matches the model."
-export const GAP_NOISE_BAND = 0.10;
+// Threshold for the "matches model" band on the gap chart, and the
+// per-grip trigger the deload detector reads off. A time-separated
+// holdout of the July 2026 nonlinear constant-force solver on ~5 months
+// of real sessions (see scripts/recovery-validation.md) put the
+// session-to-session gap noise well above the old ±0.10: the 3-session
+// smoothed gap has std ≈ 0.14 (Micro) to 0.24 (Crusher). The old ±0.10
+// — tuned against the retired LINEAR predictor — was ~half the real
+// noise, so most on-track sessions fell "outside" it and the deload
+// trigger / recovery early-warn were needlessly twitchy. Widened to
+// ±0.15 (≈ one smoothed-gap sigma for the better-behaved grip): a band
+// the smoothed line mostly sits inside, and a deload/early-warn trigger
+// that needs a real dip below the user's own baseline, not noise.
+export const GAP_NOISE_BAND = 0.15;
 
 
 // ──────────────────────────────────────────────────────────────

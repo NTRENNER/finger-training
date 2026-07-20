@@ -1,17 +1,18 @@
 // ─────────────────────────────────────────────────────────────
-// COACHING RECOMMENDATION ENGINE  (continuous, AUC-gain)
+// COACHING RECOMMENDATION ENGINE  (continuous coverage + model-gap)
 // ─────────────────────────────────────────────────────────────
-// Picks the (hand, T) where training will most improve the user's
-// physical AUC over the F-D curve. The model is just instrumentation
-// — a side-effect of training the limiter is that the curve gets
-// more accurate too, but that's downstream.
+// Picks the (hand, T) with the strongest confidence-weighted model gap,
+// coverage need, and recency/focus support. A below-curve residual is
+// an observed mismatch, not proof that this duration will adapt faster;
+// the engine uses it as a repeatable training/measurement signal.
 //
 //   score(T) = adaptBoost(T)
 //            × stalenessBoost(zoneOf(T))
 //            × recencyPenalty(zoneOf(T))
 //            × focusBoost(zoneOf(T), climbingFocus)
 //
-// adaptBoost is SYMMETRIC: room = 1 − localRatio, where localRatio is
+// adaptBoost is the historical API name for the symmetric model-gap
+// term: room = 1 − localRatio, where localRatio is
 // the Gaussian-smoothed F_actual / F_curve at T. Below-curve → boost,
 // above-curve → penalty. The room is CONFIDENCE-GATED by local data
 // density (confidence = effN/(effN+CONFIDENCE_K)), so thin-data zones
@@ -55,7 +56,7 @@ import {
 } from "./threeExp.js";
 import {
   effectiveLoad, freshLoadFor, buildFreshLoadMap,
-  prescription, recentBestPeakKg,
+  prescription, bestAvailablePeakMeasurement,
 } from "./prescription.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 
@@ -251,14 +252,11 @@ export const OVERLOAD_FULL_T   = 20;       // s — full overload at/below this 
 export const OVERLOAD_ZERO_T   = 120;      // s — overload fades to 0 by here
 
 // ─────────────────────────────────────────────────────────────
-// CONTINUOUS COACHING ENGINE  (AUC-gain pick, May 2026)
+// CONTINUOUS COACHING ENGINE  (coverage + model-gap pick, May 2026)
 // ─────────────────────────────────────────────────────────────
-// Picks the (hand, T) where training will most improve the user's
-// physical AUC over the F-D curve. Reading B from the architectural
-// review: the engine optimizes for the user's fitness, not the model's
-// calibration. The model is just instrumentation — a side-effect of
-// training the limiter is that the curve gets more accurate too, but
-// that's downstream.
+// Picks the (hand, T) where a confidence-weighted residual and coverage
+// need are strongest. This is a model-guided prioritization heuristic;
+// it does not claim the residual causally predicts adaptation rate.
 //
 // Math:
 //   1. Fit three-exp per hand from all that hand's (T, F) data points
@@ -821,7 +819,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // histories → no cap.
   const capPeak = (hand, v) => {
     if (v == null) return v;
-    const peak = recentBestPeakKg(history, hand, grip);
+    const peak = bestAvailablePeakMeasurement(history, hand, grip)?.kg ?? null;
     return peak != null && v > peak ? peak : v;
   };
 

@@ -5,6 +5,7 @@ import {
   STALE_BOOST_MAX,
   getLastZoneTrainedDates,
   getZoneStaleness,
+  getRollingSessionPace,
 } from "../lockout.js";
 
 describe("stalenessBoost", () => {
@@ -121,7 +122,7 @@ describe("getLastZoneTrainedDates", () => {
 
 describe("getZoneStaleness", () => {
   test("status='never' when no training data exists for zone", () => {
-    const out = getZoneStaleness([], new Date("2026-05-17"));
+    const out = getZoneStaleness([], new Date(2026, 4, 17));
     expect(out.power.status).toBe("never");
     expect(out.power.lastDate).toBeNull();
   });
@@ -129,7 +130,7 @@ describe("getZoneStaleness", () => {
   test("status='ok' for recent training", () => {
     const out = getZoneStaleness(
       [{ grip: "Crusher", date: "2026-05-15", actual_time_s: 30 }],
-      new Date("2026-05-17"),
+      new Date(2026, 4, 17),
     );
     expect(out.power.status).toBe("ok");
     expect(out.power.days).toBe(2);
@@ -139,8 +140,27 @@ describe("getZoneStaleness", () => {
     // Power lockout window is 21d — train > 21d ago → stale.
     const out = getZoneStaleness(
       [{ grip: "Crusher", date: "2026-04-01", actual_time_s: 30 }],
-      new Date("2026-05-17"),
+      new Date(2026, 4, 17),
     );
     expect(out.power.status).toBe("stale");
+  });
+
+  test("a session dated today stays zero days old in the local evening", () => {
+    const out = getZoneStaleness(
+      [{ grip: "Crusher", date: "2026-07-20", actual_time_s: 30 }],
+      new Date(2026, 6, 20, 20, 0, 0),
+    );
+    expect(out.power.days).toBe(0);
+    expect(out.power.status).toBe("ok");
+  });
+});
+
+describe("getRollingSessionPace", () => {
+  test("counts a same-day evening session inside the rolling window", () => {
+    const out = getRollingSessionPace(
+      [{ date: "2026-07-20", session_id: "today" }],
+      new Date(2026, 6, 20, 20, 0, 0),
+    );
+    expect(out.current).toBe(1);
   });
 });

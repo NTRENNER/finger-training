@@ -381,7 +381,7 @@ export function SetupView({
         Start Session →
       </Btn>
 
-      {/* Tendon protocol (Abrahangs) — a low-load connective-tissue
+      {/* Abrahangs-inspired low-intensity finger loading — a submaximal
           adjunct, cloud-synced and kept entirely separate from the
           muscular reps model. */}
       <div style={{ marginTop: 16 }}>

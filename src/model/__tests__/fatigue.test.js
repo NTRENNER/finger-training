@@ -101,6 +101,12 @@ describe("predictRepTimes", () => {
     }
   });
 
+  test("at constant load, a second rep without rest fails immediately", () => {
+    const times = predictRepTimes({ numReps: 2, firstRepTime: 30, restSeconds: 0 });
+    expect(times[0]).toBe(30);
+    expect(times[1]).toBe(0);
+  });
+
   test("longer rest preserves rep duration better", () => {
     const short = predictRepTimes({ numReps: 4, firstRepTime: 10, restSeconds: 5 });
     const long  = predictRepTimes({ numReps: 4, firstRepTime: 10, restSeconds: 300 });

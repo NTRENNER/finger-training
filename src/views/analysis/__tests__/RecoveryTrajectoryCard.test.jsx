@@ -25,9 +25,9 @@ const history = [
 
 test("renders the trajectory card with improvement framing when data exists", () => {
   render(<RecoveryTrajectoryCard history={history} />);
-  expect(screen.getByText(/between-rep recovery over time/i)).toBeInTheDocument();
-  // Trend-first framing that guards against the old scoreboard misread.
-  expect(screen.getByText(/higher means recovering better/i)).toBeInTheDocument();
+  expect(screen.getByText(/rep-time retention over time/i)).toBeInTheDocument();
+  // Explicitly guards against interpreting a duration ratio as direct capacity.
+  expect(screen.getByText(/not a direct capacity measurement/i)).toBeInTheDocument();
 });
 
 test("stays hidden when there isn't enough recovery data", () => {
