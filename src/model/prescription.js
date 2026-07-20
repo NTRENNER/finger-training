@@ -1,6 +1,6 @@
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // PRESCRIPTION LAYER
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // All the load-prescription logic — what weight to train at next
 // session, what your potential ceiling is, what the gap diagnostic
 // says. This module sits on top of the model layer (three-exp as the
@@ -48,6 +48,7 @@ import {
   fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
 import { capacityMultiplier } from "./fatigueBeta.js";
+import { zoneOf } from "./zones.js";
 // Max/power-protocol gate shared with the Peak Force card — both
 // surfaces must agree on what counts as a "max attempt" peak.
 import { PEAK_MAX_PROTOCOL_T } from "./peakForce.js";
@@ -59,9 +60,9 @@ import { PEAK_MAX_PROTOCOL_T } from "./peakForce.js";
 // existing call sites that import them from prescription.js keep working.
 import { sane, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep } from "./load.js";
 
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 export { sane, prescribedLoad, effectiveLoad, loadedWeight } from "./load.js";
 
 // Stable identity for a rep. Used as the key in freshMap.
@@ -80,16 +81,26 @@ export function isShortfall(actualTime, targetDuration) {
   return actualTime < targetDuration * SHORTFALL_TOL;
 }
 
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // FATIGUE-ADJUSTED LOAD INDEX  (freshMap)
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // Within a set, the same posted load gets HARDER each rep as the
 // muscle fatigues. Plain F-D fits will then misread later reps as
 // "you were weaker than this" and pull the curve down. The fix:
-// walk each session/hand/set chronologically, accumulating fatigue
-// via the same model the live workout uses (fatigueDose + fatigueAfterRest),
+// walk each session/hand/set chronologically, accumulating fatigue as a
+// single scalar state (fatigueDose + fatigueAfterRest → availFrac = 1−F),
 // and divide each rep's load by availFrac to get its FRESH-EQUIVALENT
 // load — what you'd be holding if you started the set fresh.
+//
+// NOTE (July 2026): this is a deliberately SEPARATE, empirical within-set
+// de-fatiguing correction — a scalar-F / availFrac model. It is NOT the
+// three-component constant-force state solver that predictRepTimes (the
+// live forecast + recovery-tau fit) now uses; the two answer different
+// questions (recover a fresh-equivalent LOAD for the curve fit vs. forecast
+// a rep TIME) and are intentionally not unified. Unifying freshMap onto the
+// component solver is possible but feeds the F-D curve fit, so it needs its
+// own real-data backtest before swapping — the recovery holdout validated
+// predictRepTimes, not this correction. See scripts/recovery-validation.md.
 //
 // Returns Map<repKey, { fresh, availFrac, load }>. Use freshLoadFor(rep, map)
 // to look up. Falls back to actual load if a rep isn't in the map.
@@ -313,9 +324,9 @@ export function fitDoseK(history, opts = {}) {
 // intrinsically — overshoots pull the amplitude anchor up, undershoots
 // down, no explicit streak multiplier needed.)
 
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // HISTORICAL ESTIMATION  (fallback path, no curve)
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // Returns the weighted-recent-average weight at which the user
 // achieved close to targetDuration seconds to failure. Used as the
 // last-resort emergency fallback when no curve fit is available.
@@ -336,9 +347,9 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
   return wKg / wSum;
 }
 
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // UNIFIED PRESCRIPTION  (PRIMARY coaching path)
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────
 // Returns the load to TRAIN AT for a given (hand, grip, T), plus the
 // unscaled curve "potential" for the gap diagnostic, derived from a
 // SINGLE three-exp fit. Replaces the prior empiricalPrescription /
@@ -402,7 +413,7 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
 
 export const EMPIRICAL_LOOKBACK_DAYS = 30;
 
-// ── Peak-force ceiling (June 2026) ─────────────────────────
+// ── Peak-force ceiling (June 2026) ────────────────────────
 // The three-exp curve has essentially no data support below ~10s for
 // most training histories (short-end reps are rare, and the recent
 // ones usually aren't failures), so curve_shape(T) extrapolates
@@ -551,7 +562,7 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
 
 export function prescription(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
-  const { freshMap = null, threeExpPriors = null, referenceDate = null } = opts;
+  const { freshMap = null, threeExpPriors = null, referenceDate = null, zoneAnchor = false } = opts;
 
   // Anchor: most recent rep 1 (any T) at this (hand, grip), within
   // EMPIRICAL_LOOKBACK_DAYS. Earlier code matched on EXACT
@@ -598,7 +609,34 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   }
   const rep1s = [...sessionRep1.values()]
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  const anchorRep = rep1s[0] || null;
+  // Amplitude anchor selection.
+  //   zoneAnchor=false (DEFAULT): the single most-recent rep 1 at ANY T.
+  //     Cross-zone — a recent overshoot anywhere lifts the whole curve,
+  //     AND the prescription always lies ON the displayed F-D curve
+  //     (one global amplitude), so "what you see is what you get."
+  //   zoneAnchor=true: prefer the most-recent rep 1 in the REQUESTED
+  //     zone (so a light endurance rep can't rescale a max-strength
+  //     prescription), falling back to the newest cross-zone rep when
+  //     this grip/hand has no same-zone history yet. The curve SHAPE is
+  //     still fit cross-zone; only the amplitude anchor is zone-scoped.
+  //
+  // Kept OPT-IN after a held-out backtest (scripts/anchor-backtest.md):
+  // zone-scoping cut the MEAN/tail prescription error (~28% on hit-target
+  // sessions where the anchor differs) but was flat on the median and a
+  // tie head-to-head — and it makes the engine's amplitude zone-local, so
+  // the prescription no longer matches the single displayed curve at
+  // distant zones (breaks the engine/chart consistency the coaching tests
+  // guard). Net-mixed, so the default stays cross-zone; the flag lets a
+  // caller opt into the tail-risk reduction where curve consistency
+  // matters less.
+  let anchorRep;
+  if (zoneAnchor) {
+    const reqZone = zoneOf(targetDuration);
+    anchorRep = rep1s.find(r => zoneOf(r.target_duration || r.actual_time_s) === reqZone)
+      || rep1s[0] || null;
+  } else {
+    anchorRep = rep1s[0] || null;
+  }
   const anchor = anchorRep ? {
     T: anchorRep.actual_time_s,
     F: loadedWeight(anchorRep),
