@@ -52,6 +52,10 @@ import { zoneOf } from "./zones.js";
 // Max/power-protocol gate shared with the Peak Force card — both
 // surfaces must agree on what counts as a "max attempt" peak.
 import { PEAK_MAX_PROTOCOL_T } from "./peakForce.js";
+// Long-duration prescription ceiling (power-law endurance tail). Bounds
+// only long targets; short/mid prescriptions are untouched. See
+// enduranceTail.js + scripts/endurance-tail-backtest.md.
+import { enduranceCeilingKg } from "./enduranceTail.js";
 // Load-extraction helpers (sane / prescribedLoad / effectiveLoad /
 // loadedWeight) moved to ./load.js (May 2026) so lower-level modules
 // like threeExp.js can use effectiveLoad without a circular import
@@ -566,7 +570,7 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
 
 export function prescription(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
-  const { freshMap = null, threeExpPriors = null, referenceDate = null, zoneAnchor = false } = opts;
+  const { freshMap = null, threeExpPriors = null, referenceDate = null, zoneAnchor = false, enduranceCeiling = true } = opts;
 
   // Anchor: most recent rep 1 (any T) at this (hand, grip), within
   // EMPIRICAL_LOOKBACK_DAYS. Earlier code matched on EXACT
@@ -663,7 +667,41 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // peak, so the floor can't legitimately exceed the peak ceiling; if a
   // stale/odd data point ever makes it, the ceiling still wins.
   const floorKg = demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate);
-  const capValue = (v) => capLoad(floorKg != null ? Math.max(v, floorKg) : v, peakCapKg);
+  // Endurance ceiling (July 2026) — a power-law tail bound that only exists
+  // for long targets (T >= CEIL_MIN_T); null for short/mid. It caps the
+  // curve x anchor product so a short-zone amplitude anchor can't inflate a
+  // long-hold load, but it NEVER pulls below the demonstrated floor (a hold
+  // you actually sustained beats the model). See enduranceTail.js.
+  //
+  // Scope: only within the data-supported range. The tail is fit on measured
+  // holds up to the longest one logged; we trust it out to EXTRAP_FLOOR_MULT
+  // past that, no further. Beyond it the anti-collapse extrapolation floor
+  // (below) governs instead, so the two long-hold mechanisms never fight over
+  // the same target. For real histories the trained targets (<= the longest
+  // hold) are always in range; only absurd targets far past any hold defer.
+  let longestMeasuredHoldT = 0;
+  for (const r of history) {
+    if (!r || r.hand !== hand || r.grip !== grip) continue;
+    if (!(r.rep_num == null || r.rep_num === 1)) continue;
+    if (!isMeasuredLoadRep(r) || isSeedArtifactRep(r)) continue;
+    if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
+    if (r.actual_time_s > longestMeasuredHoldT) longestMeasuredHoldT = r.actual_time_s;
+  }
+  const endCeilKg = (enduranceCeiling && longestMeasuredHoldT > 0
+      && targetDuration <= longestMeasuredHoldT * EXTRAP_FLOOR_MULT)
+    ? enduranceCeilingKg(history, hand, grip, targetDuration, referenceDate)
+    : null;
+  // Floor (lift) then peak ceiling — the demonstrated-capacity + physical bounds.
+  const capBase = (v) => capLoad(floorKg != null ? Math.max(v, floorKg) : v, peakCapKg);
+  // Full bounds: capBase, then the endurance ceiling (raised to the floor so
+  // the ceiling can't undercut demonstrated capacity).
+  const capValue = (v) => {
+    const base = capBase(v);
+    if (endCeilKg == null) return base;
+    const ec = floorKg != null ? Math.max(endCeilKg, floorKg) : endCeilKg;
+    return Math.min(base, ec);
+  };
+  const wasEnduranceCeiled = (v) => endCeilKg != null && capValue(v) < capBase(v) - 1e-9;
 
   // Try the three-exp curve fit. Requires a per-grip prior to anchor
   // the shrinkage; without one, small-N fits collapse onto degenerate
@@ -743,6 +781,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
           ? Math.max(rawRounded, extrapFloorRaw)
           : rawRounded;
         const value = capValue(flooredRaw);
+        const enduranceCeiled = wasEnduranceCeiled(flooredRaw);
         return {
           value,
           potential:   Math.round(potentialRaw * 10) / 10,
@@ -759,6 +798,8 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
           extrapolationBoundaryS: extrapFloorRaw != null
             ? Math.round(longestObservedT * EXTRAP_FLOOR_MULT)
             : null,
+          enduranceCeilKg: endCeilKg,
+          enduranceCeiled,                       // long-hold power-law tail bound it
         };
       }
     }
@@ -799,6 +840,8 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
       peakCapped:      value < v,
       capacityFloorKg: floorKg,
       capacityFloored: value > v,
+      enduranceCeilKg: endCeilKg,
+      enduranceCeiled: wasEnduranceCeiled(v),
     };
   }
 
@@ -821,6 +864,8 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
       peakCapped:      value < hv,
       capacityFloorKg: floorKg,
       capacityFloored: value > hv,
+      enduranceCeilKg: endCeilKg,
+      enduranceCeiled: wasEnduranceCeiled(hv),
     };
   }
 
