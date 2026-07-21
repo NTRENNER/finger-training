@@ -58,7 +58,7 @@ import { PEAK_MAX_PROTOCOL_T } from "./peakForce.js";
 // (prescription.js imports threeExp.js). effectiveLoad + loadedWeight
 // are used internally below; all four are re-exported just after so
 // existing call sites that import them from prescription.js keep working.
-import { sane, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep } from "./load.js";
+import { sane, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep, isMeasuredLoadRep } from "./load.js";
 
 // ───────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
@@ -535,9 +535,12 @@ export function bestAvailablePeakMeasurement(history, hand, grip, referenceDate 
 // curve/anchor going higher) is unaffected.
 //
 // Fresh efforts only (rep_num === 1 / null) so a fatigued within-set rep
-// can't set the floor; sane loads only; referenceDate mirrors the
-// retrospective semantics used throughout this file. Returns null when
-// nothing qualifies — the prescription then runs unfloored, as before.
+// can't set the floor; MEASURED (Tindeq) reps only — a spring/manual entry
+// records a nominal load the user pulls against and over-pulls, so it never
+// proves a sustained *force* the way the floor claims (see isMeasuredLoadRep);
+// sane loads only; referenceDate mirrors the retrospective semantics used
+// throughout this file. Returns null when nothing qualifies — the
+// prescription then runs unfloored, as before.
 export const CAPACITY_FLOOR_LOOKBACK_DAYS = 90;
 
 export function demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate = null) {
@@ -551,6 +554,7 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;        // fresh efforts only
     if (isSeedArtifactRep(r)) continue;                           // skip seeded/backfilled twins (avg==peak)
+    if (!isMeasuredLoadRep(r)) continue;                          // measured (Tindeq) reps only — a spring/manual load was never a *sustained force* (July 2026)
     if (!(Number(r.actual_time_s) >= targetDuration)) continue;   // proves capacity at this T-or-shorter
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before

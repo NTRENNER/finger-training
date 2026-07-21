@@ -135,3 +135,20 @@ export function isSeedArtifactRep(r) {
   return Number.isFinite(a) && Number.isFinite(p) && a > 0 && p > 0
     && Math.abs(a - p) < 1e-6;
 }
+
+// A rep whose load was actually MEASURED (Tindeq average force present),
+// as opposed to a manual/spring entry where the recorded load is a nominal
+// setting the user pulls AGAINST — and, with a spring, deliberately
+// over-pulls (see the spring-overpull note). effectiveLoad happily falls
+// back to manual_load_kg / prescribed_load_kg, which is right for curve
+// FITTING (a best-guess data point is better than none), but WRONG for any
+// claim that a specific *sustained force* was demonstrated. The
+// demonstrated-capacity FLOOR makes exactly that claim ("you held F kg for
+// >= T seconds, so never prescribe below F"), so it must count measured
+// reps only — otherwise a spring session logged as "9.1 kg for 258 s"
+// pins an endurance floor at a force that was never actually sustained.
+// July 2026: this is why a 160 s Micro target was floored at 9.1 kg when
+// the genuine measured capacity was ~6-7 kg.
+export function isMeasuredLoadRep(r) {
+  return sane(r?.avg_force_kg) != null;
+}
