@@ -34,9 +34,9 @@ import {
   computeTagDaysSince,
 } from "../supportTraining.js";
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Test fixtures
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Anchor every test to a fixed reference date so day arithmetic is
 // deterministic. Tests build sessions as "N days before refDate".
 
@@ -56,9 +56,9 @@ function sess(workoutId, daysAgo) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // daysBetween
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 
 describe("daysBetween", () => {
   test("returns positive count when b is later", () => {
@@ -77,9 +77,9 @@ describe("daysBetween", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // daysSinceLastOfType
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 
 describe("daysSinceLastOfType", () => {
   test("returns Infinity when no matching session exists", () => {
@@ -133,10 +133,9 @@ describe("daysSinceLastOfType", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // computeTagDaysSince
-// ─────────────────────────────────────────────────────────────
-
+// ───────────────────────────────────────────────────────
 describe("computeTagDaysSince", () => {
   test("workout sessions contribute their template tags", () => {
     // STRETCH tags: positionalCapacity + mobility + restoration.
@@ -188,10 +187,9 @@ describe("computeTagDaysSince", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // recommendNextWorkout — rule-by-rule
-// ─────────────────────────────────────────────────────────────
-
+// ───────────────────────────────────────────────────────
 describe("recommendNextWorkout: A→B→C round-robin", () => {
   test("empty history starts the cycle at A", () => {
     const rec = recommendNextWorkout([], { refDate: REF_DATE });
@@ -290,10 +288,9 @@ describe("recommendNextWorkout: legacy field fallback", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Defensive: malformed input doesn't crash
-// ─────────────────────────────────────────────────────────────
-
+// ───────────────────────────────────────────────────────
 describe("recommendNextWorkout: defensive input handling", () => {
   test("handles undefined workoutHistory", () => {
     const rec = recommendNextWorkout(undefined, { refDate: REF_DATE });
@@ -312,10 +309,9 @@ describe("recommendNextWorkout: defensive input handling", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Workout templates — light sanity
-// ─────────────────────────────────────────────────────────────
-
+// ───────────────────────────────────────────────────────
 describe("workouts (templates)", () => {
   test("all expected workouts exist", () => {
     for (const id of ["A", "B", "C", "STRETCH", "CLIMB", "REST"]) {
@@ -347,8 +343,19 @@ describe("workouts (templates)", () => {
     expect(workouts.REST.exercises).toEqual([]);
   });
 
-  test("A has 6 exercises (prone ER moved to C, June 2026)", () => {
-    expect(workouts.A.exercises).toHaveLength(6);
+  test("A has 5 exercises (prone ER to C June 2026; bicep curls to B July 2026)", () => {
+    expect(workouts.A.exercises).toHaveLength(5);
+    const aIds = workouts.A.exercises.map(e => e.id);
+    expect(aIds).not.toContain("bicepCurls");
+  });
+
+  test("bicep curls live on B (moved off A July 2026), sequenced last, still progressing", () => {
+    const bIds = workouts.B.exercises.map(e => e.id);
+    expect(bIds).toContain("bicepCurls");
+    expect(bIds[bIds.length - 1]).toBe("bicepCurls");           // last, so it can't blunt power work
+    const curl = workouts.B.exercises.find(e => e.id === "bicepCurls");
+    expect(curl.progressionPolicy).toBeUndefined();             // default ladder = load-building
+    expect(workouts.B.tags).toEqual(["power", "explosive"]);    // still a power day at the tag level
   });
 
   test("STRETCH inherits the 3 mobility exercises from old C", () => {
