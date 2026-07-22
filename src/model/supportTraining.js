@@ -1,6 +1,6 @@
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // SUPPORT TRAINING — workout templates + recommender
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Strength / power / mobility training that supports climbing,
 // not the climbing itself. The finger-training side of the app
 // (β learner, three-exp curve, cookedness slider) is finger-
@@ -57,9 +57,9 @@
 //   mobility, restoration, positionalCapacity, core, shoulder,
 //   hamstring, hip, finger, biceps
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Exercises
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Each exercise carries:
 //
 //   Coaching fields (always present): id, name, tags, prescription
@@ -729,9 +729,9 @@ export const exercises = {
   },
 };
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Workouts
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // fatigueClass is the recommender's actionable tag:
 //   "big"      — one per week, max. Competes with climbing for
 //                the user's best non-outdoor day.
@@ -767,12 +767,19 @@ export const workouts = {
     // Prone external rotation moved to C June 2026: rotator-cuff health
     // rewards frequency, and C is the frequent low-fatigue day — a
     // better home than A's once-a-week slot.
+    //
+    // Bicep curls moved to B July 2026 (reverses the June "curls live on
+    // A" call). A already stacks weighted pull-ups + dips + banded lat
+    // pull, so the elbow flexors are pre-fatigued before the curl even
+    // starts — the curl got the day's lowest-quality reps AND piled
+    // isolation volume onto the heaviest session, making it the first
+    // thing skipped ("leave strong, not crushed"). B trains it fresh, on
+    // the most-reliably-completed day. See B below.
     exercises: [
       exercises.weightedPullup,
       exercises.dips,
       exercises.heelHookPull,
       exercises.bandedLatPull,
-      exercises.bicepCurls,
       exercises.hardStyleSitup,
     ],
     coachingNotes: [
@@ -820,6 +827,15 @@ export const workouts = {
     // B gains the TRX hamstring curl — the dynamic partner to A's
     // heel-hook iso pull, so heel-hook/hamstring work happens twice a
     // week. Front lever stays as B's tension piece.
+    //
+    // Bicep curls added July 2026 (moved off the over-stacked A day),
+    // sequenced LAST so they can't blunt the explosive work. B stays a
+    // power day at the workout-tag level — a lone isolation strength
+    // piece no more changes B's stimulus than A's hard-style situp makes
+    // A a core day, so tags stay ["power","explosive"]. The curl keeps
+    // its default ladder (load-building) progression, so it is the one
+    // progressing lift on B: the intended strength stimulus, parked on
+    // the light, high-adherence day where the arms are fresh.
     exercises: [
       exercises.medBallThrows,
       exercises.broadJump,
@@ -827,6 +843,7 @@ export const workouts = {
       exercises.skaterBounds,
       exercises.frontLever,
       exercises.trxHamstringCurl,
+      exercises.bicepCurls,
     ],
     coachingNotes: [
       "Stop while fast and springy.",
@@ -878,7 +895,7 @@ export const workouts = {
     //
     // Bicep curls dropped June 2026: the one-arm TRX row already loads
     // lats and biceps enough on the light day, so a dedicated curl was
-    // redundant. Curls live on A.
+    // redundant. Curls now live on B (moved off A July 2026).
     //
     // Prone external rotation moved here from A June 2026: low-load
     // rotator-cuff prehab belongs on the frequent day, not the weekly
@@ -965,9 +982,9 @@ export const workouts = {
   },
 };
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Recommender
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Decision logic (first match wins):
 //
 //   1. A is overdue (≥7 days)
@@ -1101,9 +1118,9 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Helpers (exported for unit testing)
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 
 // Whole days between two ISO date strings. Positive when `bISO` is
 // later. Floored — partial days don't count.
@@ -1160,9 +1177,9 @@ export function computeTagDaysSince(workoutHistory, refDate) {
   return tagDays;
 }
 
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 // Integration sketch
-// ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────
 //
 //   import { recommendNextWorkout, workouts } from "../model/supportTraining.js";
 //
