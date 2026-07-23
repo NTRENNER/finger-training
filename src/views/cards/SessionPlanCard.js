@@ -134,7 +134,7 @@ export function SessionPlanCard({
     [history, grip, rec]
   );
 
-  // ── Climb-derived cookedness suggestion ──────────────────────
+  // ── Climb-derived cookedness suggestion ────────────────────
   // Derived from today's (+ decayed yesterday's) logged climbs — see
   // suggestCookedFromClimbs. Pre-fills the slider ONCE per mount when
   // the user hasn't touched it (cooked still at the 0 default / null);
@@ -248,7 +248,7 @@ export function SessionPlanCard({
       : 5;
   const rest = 20;
 
-  // ── Push to session config ──────────────────────────────────
+  // ── Push to session config ──────────────────────────────
   // ladderLoadByHand: fresh-equivalent pinned loads when the density
   // ladder is active (null otherwise). useSessionRunner.startSession
   // prefers these over a fresh prescription() call so the "same
@@ -266,7 +266,7 @@ export function SessionPlanCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeZone, activeT, reps, rest, ladder]);
 
-  // ── Empty / loading states ───────────────────────────────────
+  // ── Empty / loading states ───────────────────────────────
   if (!grip) {
     return (
       <Card style={{ marginBottom: 16 }}>
@@ -307,13 +307,25 @@ export function SessionPlanCard({
       .filter(h => ladder.loadByHand[h] != null)
       .map(h => `${h} ${fmtW(ladder.loadByHand[h] * lMult, unit)}`)
       .join(" / ");
+    // Re-pin guard + engine-bounds receipts (July 2026): say so when a
+    // hand was handed back to the engine or its pin was clamped —
+    // otherwise "same load" would misdescribe the numbers on screen.
+    const notes = [];
+    const dropped = Object.keys(lb.droppedByHand || {});
+    if (dropped.length) {
+      notes.push(`${dropped.join("+")} re-prescribed by the engine (rep 1 fell short of ${ladder.T}s last time)`);
+    }
+    if (Object.keys(lb.boundedByHand || {}).length) {
+      notes.push("pin capped by the engine's load ceiling");
+    }
+    const suffix = notes.length ? ` — ${notes.join("; ")}` : "";
     if (ladder.decision === "advance") {
-      return `ladder: last rep ${lb.lastRepSec}s ≥ ${lb.gateSec}s gate → ${ladder.reps} reps, same load (${loadStr} ${unit})`;
+      return `ladder: last rep ${lb.lastRepSec}s ≥ ${lb.gateSec}s gate → ${ladder.reps} reps, same load (${loadStr} ${unit})${suffix}`;
     }
     if (ladder.decision === "repeat") {
-      return `ladder: last rep ${lb.lastRepSec}s < ${lb.gateSec}s gate → repeat ${ladder.reps} reps, same load (${loadStr} ${unit})`;
+      return `ladder: last rep ${lb.lastRepSec}s < ${lb.gateSec}s gate → repeat ${ladder.reps} reps, same load (${loadStr} ${unit})${suffix}`;
     }
-    return `ladder: topped out at ${LADDER_MAX_REPS} reps → +${Math.round(LADDER_LOAD_STEP_FRAC * 100)}% load (${loadStr} ${unit}), back to ${LADDER_MIN_REPS} reps`;
+    return `ladder: topped out at ${LADDER_MAX_REPS} reps → +${Math.round(LADDER_LOAD_STEP_FRAC * 100)}% load (${loadStr} ${unit}), back to ${LADDER_MIN_REPS} reps${suffix}`;
   })();
   const whyText = decisiveWhy(rec, { ladderText });
 
@@ -368,7 +380,7 @@ export function SessionPlanCard({
   const s = totalSec % 60;
   const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
 
-  // ── Render ───────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${activeColor}66` }}>
 
