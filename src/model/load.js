@@ -116,6 +116,21 @@ export function freshFitReps(history) {
   return out;
 }
 
+// A session's OPENING rep — rep 1 of set 1, the fresh effort before any
+// within-session fatigue accumulates. This is the same rep the β
+// learner and the density ladder's re-pin guard read (the cleanest
+// capacity signal). Legacy/manual rows without set/rep numbering are
+// treated as openers — same null convention as freshFitReps above.
+// Lives in this leaf module so the weekly hold-ratio chart and the
+// check-in's perf signal share ONE definition and can't disagree
+// about which reps count (July 2026, per Nathan).
+export function isOpenerRep(r) {
+  if (!r) return false;
+  if (!(r.rep_num == null || Number(r.rep_num) === 1)) return false;
+  if (!(r.set_num == null || Number(r.set_num) === 1)) return false;
+  return true;
+}
+
 // Data-integrity guard (July 2026). A hand-seeded / backfilled rep can
 // carry a single intended load value mirrored into BOTH avg_force_kg and
 // peak_force_kg (that's the signature of the corrupt "andr0520" Micro

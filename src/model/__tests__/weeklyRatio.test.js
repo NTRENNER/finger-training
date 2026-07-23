@@ -1,6 +1,6 @@
 // Tests for src/model/weeklyRatio.js — weekly mean actual/target
 // ratio per grip/hand for the Analysis chart.
-import { buildWeeklyRatio } from "../weeklyRatio.js";
+import { buildWeeklyRatio, rollingMeanSeries } from "../weeklyRatio.js";
 
 const rep = (date, grip, hand, actual, target, load = 20, extra = {}) => ({
   date, grip, hand,
@@ -87,14 +87,25 @@ describe("buildWeeklyRatio", () => {
       rep("2026-07-14", "Crusher", "L", 50, 50),                                  // opener: 1.0
       rep("2026-07-14", "Crusher", "L", 30, 50, 20, { rep_num: 2 }),              // ladder rep, short by design
       rep("2026-07-14", "Crusher", "L", 25, 50, 20, { set_num: 2, rep_num: 1 }),  // set-2 opener ≠ fresh
-      rep("2026-07-14", "Crusher", "L", 40, 50, 20, { set_num: null, rep_num: null }), // unnumbered → excluded
+      rep("2026-07-14", "Crusher", "L", 40, 50, 20, { set_num: null, rep_num: null }), // legacy unnumbered → opener (freshFitReps convention)
     ];
     const openers = buildWeeklyRatio(hist);
-    expect(openers.weeks[0].byGrip.Crusher).toMatchObject({ mean: 1.0, n: 1 });
-    // "all" mode keeps every qualifying rep — the check-in's estimator.
+    expect(openers.weeks[0].byGrip.Crusher).toMatchObject({ mean: 0.9, n: 2 });   // (1.0 + 0.8)/2
+    // "all" mode keeps every qualifying rep — the protocol view.
     const all = buildWeeklyRatio(hist, { repsMode: "all" });
     expect(all.weeks[0].byGrip.Crusher.n).toBe(4);
     expect(all.weeks[0].byGrip.Crusher.mean).toBe(0.73); // (1.0+0.6+0.5+0.8)/4 = 0.725 → 0.73
+  });
+
+  test("rollingMeanSeries: trailing mean skips nulls, stays null on quiet weeks", () => {
+    expect(rollingMeanSeries([1.0, 1.2, null, 0.8], 3)).toEqual([
+      1.0,          // window [1.0]
+      1.1,          // window [1.0, 1.2]
+      null,         // raw null stays null — no invented point
+      1.0,          // window [1.2, null→skip, 0.8] = (1.2+0.8)/2
+    ]);
+    expect(rollingMeanSeries([], 3)).toEqual([]);
+    expect(rollingMeanSeries(null, 3)).toEqual([]);
   });
 
   test("means round to 2 decimals", () => {

@@ -10,10 +10,10 @@
 // Metric: for every timed finger rep with a real target and a real
 // load, ratio = actual_time_s / target_duration. 1.0 = held exactly
 // to target; above = outlasting targets (curve amplitude lifting);
-// below = targets winning. Bucketed by Monday-start weekKey; the
-// "all" mode is exactly the check-in perf signal's estimator
-// (weeklyReview.gatherCheckInSignals), just weekly instead of a
-// 28-day window.
+// below = targets winning. Bucketed by Monday-start weekKey. The
+// default "openers" mode reads the same predicate as the check-in's
+// perf signal (weeklyReview.gatherCheckInSignals), just weekly
+// instead of a 28-day window — the two surfaces agree by construction.
 //
 // Rep filter mirrors weeklyReview's ratioReps:
 //   • actual_time_s > 0        (a timed rep actually happened)
@@ -22,21 +22,18 @@
 //
 // TWO MODES (repsMode option), because the two answer different
 // questions — validated on Nathan's real export before shipping:
-//   • "openers" (DEFAULT): rep 1 of set 1 only — the fresh rep, the
-//     same cleanest-signal rep the β learner and the ladder's re-pin
-//     guard read. Weekly means sit meaningfully around 1.0 and move
-//     with capacity (mid-June Crusher surge 1.5-1.9×, the late-June
-//     over-pull crash to 0.79, the 7/20 endurance miss at 0.45).
-//   • "all": every qualifying rep — same estimator as the check-in's
-//     perf signal. But density-ladder reps 2+ fall short of target BY
-//     DESIGN (short rests), so this mean is dragged toward 0.3-0.6 in
-//     high-rep weeks and mostly measures protocol mix, not capacity.
-//     Kept as a toggle so the chart can reproduce the check-in's
-//     number, not as the default read.
-//
-// "openers" requires rep_num === 1 AND set_num === 1; rows without
-// set/rep numbering are excluded from openers mode (they still count
-// in "all"). Every row in the real dataset carries both fields.
+//   • "openers" (DEFAULT): opening reps only (isOpenerRep — rep 1 of
+//     set 1, the same cleanest-signal rep the β learner and the
+//     ladder's re-pin guard read; the check-in's perf signal shares
+//     the same predicate since July 2026). Weekly means sit
+//     meaningfully around 1.0 and move with capacity (mid-June
+//     Crusher surge 1.5-1.9×, the late-June over-pull crash to 0.79,
+//     the 7/20 endurance miss at 0.45).
+//   • "all": every qualifying rep. Density-ladder reps 2+ fall short
+//     of target BY DESIGN (short rests), so this mean is dragged
+//     toward 0.3-0.6 in high-rep weeks and mostly measures protocol
+//     mix, not capacity. Kept as a toggle for the protocol view, not
+//     as the default read.
 //
 // Output covers EVERY calendar week from the first training week to
 // the last — quiet weeks appear as gaps (null means), so the x-axis
@@ -47,7 +44,7 @@
 // Pure function of history; no store access, no Date.now().
 
 import { weekKey } from "../lib/climbing-grades.js";
-import { effectiveLoad } from "./load.js";
+import { effectiveLoad, isOpenerRep } from "./load.js";
 
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const round2 = (x) => (x == null ? null : Math.round(x * 100) / 100);
@@ -81,7 +78,7 @@ export function buildWeeklyRatio(history = [], opts = {}) {
       Number(r.actual_time_s) > 0 &&
       Number(r.target_duration) > 0 &&
       effectiveLoad(r) > 0 &&
-      (repsMode !== "openers" || (Number(r.rep_num) === 1 && Number(r.set_num) === 1))
+      (repsMode !== "openers" || isOpenerRep(r))
   );
   if (!reps.length) return { grips: [], weeks: [] };
 
@@ -123,4 +120,23 @@ export function buildWeeklyRatio(history = [], opts = {}) {
     weeks.push({ week: wk, byGrip });
   }
   return { grips, weeks };
+}
+
+// Trailing rolling mean over a weekly series that may contain nulls
+// (quiet weeks). Window = the last `n` calendar weeks INCLUDING the
+// current one; nulls inside the window are skipped. Output is null
+// wherever the raw value is null — the trend line only claims weeks
+// that actually have data (connectNulls bridges gaps visually without
+// inventing points). Added July 2026 (per Nathan) so the chart reads
+// direction, not per-week scatter — same trend-first convention as
+// the Recovery trajectory card's 3-session rolling means.
+export function rollingMeanSeries(values, n = 3) {
+  return (values || []).map((v, i) => {
+    if (v == null) return null;
+    const window = [];
+    for (let j = Math.max(0, i - n + 1); j <= i; j++) {
+      if (values[j] != null) window.push(values[j]);
+    }
+    return round2(mean(window));
+  });
 }
