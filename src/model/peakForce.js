@@ -1,31 +1,25 @@
 // ─────────────────────────────────────────────────────────────
-// PEAK FORCE TREND — max-strength trajectory over time
+// PEAK FORCE TREND — observed ceiling + standardized trajectory
 // ─────────────────────────────────────────────────────────────
 // The F-D curve is built on SUSTAINED holds, so it underrepresents true
 // max strength (its T→0 max is an extrapolation, and a long hold never
 // samples peak recruitment). peak_force_kg, captured per rep, is a
-// DIRECT measurement of instantaneous max force — the cleanest, least
-// confounded strength metric in the app: no fit, and it honestly rises
-// as you get stronger.
+// direct measurement of instantaneous force.
 //
-// Caveat baked into the design: a peak is only a MAX measurement when you
-// were actually trying to hit a high. Peak force is instantaneous and
-// neuromuscular — a hard 2-second pull registers your true max just as
-// well as a 7-second one — so the REP's duration is NOT the right filter.
-// What matters is INTENT, and the protocol encodes it: a short-target
-// max/power block (5–10s) is a max effort; a long endurance hold is a
-// sub-max load held to failure, where the peak is low because you weren't
-// reaching for a high (and late reps in such a session fail early from
-// fatigue at low force). So the single filter is:
-//   target_duration ≤ PEAK_MAX_PROTOCOL_T  → max/power session only.
-// We take the best peak from ANY rep in those sessions, regardless of how
-// long the rep lasted or its position in the set (ramp-up reps can
-// out-pull rep 1). Per grip, best peak per session date, plus a running
-// best-to-date PR.
+// The card deliberately carries two different signals:
+//   PR line    — every valid measured peak can raise the observed ceiling.
+//   Trend line — max-intent protocol peaks only, so routine sub-max work
+//                cannot pull the standardized comparison downward.
+// A peak set during any workout is still a real neuromuscular observation;
+// the workout's target zone is attached to each new-PR marker as context.
+// Rep duration is not filtered because peak force is instantaneous. Intent
+// comes from target_duration, with targets at or under
+// PEAK_MAX_PROTOCOL_T treated as max intent.
 //
 // Pure functions; no React. Tested in isolation.
 
 import { SANE_MAX_KG, isSeedArtifactRep } from "./load.js";
+import { classifyZone6 } from "./zones.js";
 
 export const PEAK_MAX_PROTOCOL_T = 12;    // s — target_duration at/under this = max/power block
 const PEAK_MAX_KG = SANE_MAX_KG;          // single sanity ceiling — see load.js (was a stale local 500)
@@ -33,35 +27,27 @@ const PEAK_MAX_KG = SANE_MAX_KG;          // single sanity ceiling — see load.
 // Build the per-grip peak-force time series.
 // Returns:
 //   {
-//     grips: string[],                         // grips with peak data (incl. provisional)
-//     provisional: { [grip]: true },           // grips with NO max/power session yet —
-//                                              //   series built from sub-max-session peaks,
-//                                              //   which UNDERSTATE true max (see below)
-//     rows:  [{ date, [grip]: kg, [grip]_pr: kg }],  // per-session best + running PR
-//     best:  { [grip]: { kg, date } },         // all-time best peak (per its series)
+//     grips: string[],                         // grips with measured peak data
+//     standardizedPending: { [grip]: true },   // no max-intent session yet
+//     rows:  [{ date,
+//               [grip]: kg,                    // best observed peak that day
+//               [grip]_pr: kg,                 // all-session running PR
+//               [grip]_newPr: kg,              // present only when PR advances
+//               [grip]_prContext: object,      // workout zone for new PR
+//               [grip]_trend: kg }],           // max-intent-only smoothed trend
+//     best:  { [grip]: { kg, date, context } },// all-time observed peak
 //     latest:{ [grip]: { kg, date } },         // most recent session best
 //   }
 // or null when no grip has usable peak data.
-//
-// PROVISIONAL GRIPS (June 2026): a new grip's first sessions are
-// mid-duration (cold-start seeding), so it can train for weeks before
-// its first max/power day — and was invisible here the whole time.
-// Rather than hide it or silently mix sub-max peaks into the real
-// series, grips without any qualifying max-protocol peak get included
-// under a `provisional` flag: the card renders them visually distinct
-// and withholds the % badge (a % over sub-max pulls is noise). The
-// moment a real max/power session lands, the grip flips to the
-// qualified series automatically and the provisional history is
-// dropped (it would understate the baseline).
 export function buildPeakForceTrend(history, {
   maxProtocolT = PEAK_MAX_PROTOCOL_T,
 } = {}) {
   if (!Array.isArray(history) || history.length === 0) return null;
 
-  // grip -> Map<date, bestPeakKg>, split into qualified (max/power-
-  // protocol reps) and unqualified (any protocol — provisional source).
-  const byGrip = {};
-  const anyByGrip = {};
+  // grip -> Map<date, { kg, context }>. observedByGrip drives the
+  // record line; maxIntentByGrip is its standardized trend subset.
+  const observedByGrip = {};
+  const maxIntentByGrip = {};
   for (const r of history) {
     if (!r || !r.grip || !r.date) continue;
     // Seed-artifact guard: a seeded/backfilled twin mirrors its (often
@@ -70,63 +56,79 @@ export function buildPeakForceTrend(history, {
     if (isSeedArtifactRep(r)) continue;
     const peak = Number(r.peak_force_kg);
     if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;
+
+    const rawTarget = r.target_duration;
+    const parsedTarget = rawTarget == null || rawTarget === "" ? null : Number(rawTarget);
+    const targetDuration = Number.isFinite(parsedTarget) && parsedTarget > 0 ? parsedTarget : null;
+    const maxIntent = targetDuration == null || targetDuration <= maxProtocolT;
+    const zone = targetDuration == null ? null : classifyZone6(targetDuration);
+    const measurement = {
+      kg: peak,
+      context: {
+        label: zone?.label || "Workout",
+        zoneKey: zone?.key || null,
+        targetDuration,
+        maxIntent,
+      },
+    };
     const put = (map) => {
       if (!map[r.grip]) map[r.grip] = new Map();
-      const cur = map[r.grip].get(r.date) || 0;
-      if (peak > cur) map[r.grip].set(r.date, peak);
+      const cur = map[r.grip].get(r.date);
+      if (!cur || peak > cur.kg) map[r.grip].set(r.date, measurement);
     };
-    put(anyByGrip);
-    // Max/power protocol only — exclude endurance sessions (sub-max load,
-    // peak not a max attempt). Rep duration is intentionally NOT filtered:
-    // peak force is instantaneous, so a hard short pull is a valid max
-    // sample. Missing target_duration (legacy/manual rows) is kept: we
-    // can't prove it was endurance.
-    const tgt = Number(r.target_duration);
-    if (Number.isFinite(tgt) && tgt > maxProtocolT) continue;
-    put(byGrip);
+    put(observedByGrip);
+    if (maxIntent) put(maxIntentByGrip);
   }
 
-  // Provisional: peaks exist, but none from a max/power session.
-  const provisional = {};
-  for (const g of Object.keys(anyByGrip)) {
-    if (!byGrip[g] || byGrip[g].size === 0) {
-      byGrip[g] = anyByGrip[g];
-      provisional[g] = true;
-    }
-  }
-
-  const grips = Object.keys(byGrip).filter(g => byGrip[g].size > 0).sort();
+  const grips = Object.keys(observedByGrip).filter(g => observedByGrip[g].size > 0).sort();
   if (grips.length === 0) return null;
 
-  // First (earliest) session best per grip — the baseline for "% since".
-  const firstBest = {};
+  const standardizedPending = {};
   for (const g of grips) {
-    const earliest = [...byGrip[g].keys()].sort()[0];
-    firstBest[g] = byGrip[g].get(earliest);
+    if (!maxIntentByGrip[g]?.size) standardizedPending[g] = true;
   }
 
-  const allDates = [...new Set(grips.flatMap(g => [...byGrip[g].keys()]))].sort();
+  // First observed session best per grip — the baseline for "% since".
+  const firstBest = {};
+  for (const g of grips) {
+    const earliest = [...observedByGrip[g].keys()].sort()[0];
+    firstBest[g] = observedByGrip[g].get(earliest).kg;
+  }
+
+  const allDates = [...new Set(grips.flatMap(g => [...observedByGrip[g].keys()]))].sort();
   const best = {};
+  const bestRaw = {};
   const latest = {};
-  // Per-grip min/max for a ZOOMED axis — both grips share one chart and
-  // Crusher (~170 lb) vs Micro (~24 lb) on a single 0-based axis makes a
-  // real climb look flat; each grip gets its own domain instead.
   const domain = {};
   const runningPr = Object.fromEntries(grips.map(g => [g, 0]));
 
   const rows = allDates.map(date => {
     const row = { date };
     for (const g of grips) {
-      const v = byGrip[g].get(date);
-      if (v != null) {
-        row[g] = Math.round(v * 10) / 10;
-        if (v > runningPr[g]) runningPr[g] = v;
-        latest[g] = { kg: row[g], date };
-        if (!best[g] || v > best[g].kg) best[g] = { kg: row[g], date };
+      const measurement = observedByGrip[g].get(date);
+      if (measurement) {
+        const v = measurement.kg;
+        const rounded = Math.round(v * 10) / 10;
+        row[g] = rounded;
+        if (v > runningPr[g]) {
+          runningPr[g] = v;
+          row[`${g}_newPr`] = rounded;
+          row[`${g}_prContext`] = measurement.context;
+        } else {
+          row[`${g}_newPr`] = null;
+          row[`${g}_prContext`] = null;
+        }
+        latest[g] = { kg: rounded, date, context: measurement.context };
+        if (bestRaw[g] == null || v > bestRaw[g]) {
+          bestRaw[g] = v;
+          best[g] = { kg: rounded, date, context: measurement.context };
+        }
         const d = domain[g] || { min: v, max: v };
         domain[g] = { min: Math.min(d.min, v), max: Math.max(d.max, v) };
       } else {
-        row[g] = null;  // no near-max sample that day → gap (recharts skips)
+        row[g] = null;
+        row[`${g}_newPr`] = null;
+        row[`${g}_prContext`] = null;
       }
       row[`${g}_pr`] = runningPr[g] > 0 ? Math.round(runningPr[g] * 10) / 10 : null;
     }
@@ -134,19 +136,15 @@ export function buildPeakForceTrend(history, {
   });
 
   // Smoothed session-best trend (June 2026): a 3-point centered
-  // rolling mean over each grip's max-day session bests. The PR line
-  // can only rise or hold — by construction it CANNOT show max
-  // strength decaying, and it shows a breakout only after the PR
-  // falls. This trend line can fall, and it bends upward while a
-  // breakout is still forming. Restricted to qualified grips (every
-  // point is a real max attempt, so the trend is meaningful — unlike
-  // a sub-max session cloud) with ≥3 max days. Keyed as `${g}_trend`
-  // on the same rows.
+  // rolling mean over each grip's max-intent session bests. The PR
+  // line can only rise or hold; this standardized trend can fall.
+  // Ordinary sub-max workout peaks never enter this series.
   for (const g of grips) {
-    if (provisional[g]) continue;   // dashed provisional line is enough there
-    const gDates = allDates.filter(d => byGrip[g].has(d));
+    const maxDays = maxIntentByGrip[g];
+    if (!maxDays) continue;
+    const gDates = [...maxDays.keys()].sort();
     if (gDates.length < 3) continue;
-    const vals = gDates.map(d => byGrip[g].get(d));
+    const vals = gDates.map(d => maxDays.get(d).kg);
     const smByDate = new Map(gDates.map((d, i) => {
       const lo = Math.max(0, i - 1);
       const hi = Math.min(vals.length - 1, i + 1);
@@ -159,17 +157,26 @@ export function buildPeakForceTrend(history, {
     }
   }
 
-  // % climb in your max (best-ever vs first session) per grip.
-  // Provisional grips get null — a % computed over sub-max pulls
-  // measures protocol variation, not strength change.
+  // % climb in the observed ceiling (best-ever vs first measured
+  // session) per grip. The max-intent trend remains the standardized
+  // comparison when protocol consistency matters.
   const changePct = {};
   for (const g of grips) {
-    changePct[g] = (!provisional[g] && firstBest[g] > 0)
-      ? Math.round((best[g].kg / firstBest[g] - 1) * 100)
+    changePct[g] = firstBest[g] > 0
+      ? Math.round((bestRaw[g] / firstBest[g] - 1) * 100)
       : null;
   }
 
-  return { grips, provisional, rows, best, latest, firstBest, changePct, domain };
+  return {
+    grips,
+    standardizedPending,
+    rows,
+    best,
+    latest,
+    firstBest,
+    changePct,
+    domain,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────

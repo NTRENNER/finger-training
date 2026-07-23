@@ -45,6 +45,7 @@ describe("buildPeakForceTrend", () => {
     ]);
     const prs = t.rows.map(r => r.Crusher_pr);
     expect(prs).toEqual([60, 60, 66]);
+    expect(t.rows.map(r => r.Crusher_newPr)).toEqual([60, null, 66]);
   });
 
   test("tracks multiple grips independently", () => {
@@ -69,15 +70,43 @@ describe("buildPeakForceTrend", () => {
     expect(t.domain.Crusher).toEqual({ min: 66, max: 77 });
   });
 
-  test("excludes endurance protocols (sub-max load, not a max attempt)", () => {
+  test("any valid workout peak can raise the PR and carries workout context", () => {
     expect(PEAK_MAX_PROTOCOL_T).toBeGreaterThan(0);
     const t = buildPeakForceTrend([
-      rep("Crusher", "2026-05-01", 8, 170, 7),    // max protocol → counts
-      rep("Crusher", "2026-05-08", 11, 95, 160),  // endurance session → excluded
+      rep("Crusher", "2026-05-01", 8, 70, 7),
+      rep("Crusher", "2026-05-08", 8, 74, 7),
+      rep("Crusher", "2026-05-15", 8, 72, 7),
+      rep("Crusher", "2026-05-22", 11, 80, 115),  // Strength workout → observed PR
     ]);
-    const may8 = t.rows.find(r => r.date === "2026-05-08");
-    expect(may8).toBeUndefined();                 // no max sample that session
-    expect(t.best.Crusher.kg).toBe(170);          // the 95 lb endurance peak is gone
+    const strengthDay = t.rows.find(r => r.date === "2026-05-22");
+    expect(strengthDay.Crusher).toBe(80);
+    expect(strengthDay.Crusher_pr).toBe(80);
+    expect(strengthDay.Crusher_newPr).toBe(80);
+    expect(strengthDay.Crusher_prContext).toEqual({
+      label: "Strength",
+      zoneKey: "strength",
+      targetDuration: 115,
+      maxIntent: false,
+    });
+    expect(t.best.Crusher).toMatchObject({
+      kg: 80,
+      date: "2026-05-22",
+      context: { label: "Strength" },
+    });
+  });
+
+  test("sub-max workout peaks do not enter or depress the max-intent trend", () => {
+    const t = buildPeakForceTrend([
+      rep("Crusher", "2026-05-01", 8, 70, 7),
+      rep("Crusher", "2026-05-08", 8, 76, 7),
+      rep("Crusher", "2026-05-12", 120, 30, 160), // low endurance peak
+      rep("Crusher", "2026-05-15", 8, 82, 7),
+    ]);
+    const enduranceDay = t.rows.find(r => r.date === "2026-05-12");
+    expect(enduranceDay.Crusher).toBe(30);         // retained as an observation
+    expect(enduranceDay.Crusher_pr).toBe(76);      // cannot lower the record
+    expect(enduranceDay.Crusher_trend).toBeNull(); // excluded from standardized trend
+    expect(t.rows.find(r => r.date === "2026-05-08").Crusher_trend).toBe(76);
   });
 
   test("keeps reps with missing target_duration (legacy/manual rows)", () => {
@@ -87,22 +116,20 @@ describe("buildPeakForceTrend", () => {
     expect(t.best.Micro.kg).toBe(24);
   });
 
-  // ── Provisional grips (June 2026) ───────────────────────────
-  // A new grip's cold-start sessions are mid-duration, so it can
-  // train for weeks with no max/power day. It now appears as a
-  // provisional series (sub-max peaks, no % badge) instead of being
-  // invisible — and flips to the qualified series the moment a real
-  // max day lands.
-  test("grip with only sub-max-protocol peaks shows as provisional, no %", () => {
+  // ── Standardized trend availability ────────────────────────
+  // Every valid peak remains on the observed PR line. A grip with
+  // no max-intent session simply has no standardized trend yet.
+  test("grip with only sub-max-protocol peaks keeps its PR with trend pending", () => {
     const t = buildPeakForceTrend([
-      rep("Crusher", "2026-05-01", 8, 170, 7),     // qualified grip
-      rep("Prime",   "2026-06-10", 12, 7.6, 35),   // 35s session only → provisional
+      rep("Crusher", "2026-05-01", 8, 170, 7),
+      rep("Prime",   "2026-06-10", 12, 7.6, 35),
+      rep("Prime",   "2026-06-17", 12, 8.0, 35),
     ]);
     expect(t.grips).toEqual(["Crusher", "Prime"]);
-    expect(t.provisional.Prime).toBe(true);
-    expect(t.provisional.Crusher).toBeUndefined();
-    expect(t.best.Prime.kg).toBe(7.6);
-    expect(t.changePct.Prime).toBeNull();          // % over sub-max pulls is noise
+    expect(t.standardizedPending.Prime).toBe(true);
+    expect(t.standardizedPending.Crusher).toBeUndefined();
+    expect(t.best.Prime.kg).toBe(8);
+    expect(t.changePct.Prime).toBe(5);
     expect(t.changePct.Crusher).not.toBeNull();
   });
 
@@ -139,7 +166,7 @@ describe("buildPeakForceTrend", () => {
     expect(trends.at(-1)).toBeLessThan(rows.at(-1).Crusher_pr);
   });
 
-  test("no trend for provisional grips or fewer than 3 max days", () => {
+  test("no trend before a grip has 3 max-intent days", () => {
     const sparse = buildPeakForceTrend([
       rep("Crusher", "2026-05-01", 8, 70, 7),
       rep("Crusher", "2026-05-08", 8, 76, 7),
@@ -150,19 +177,17 @@ describe("buildPeakForceTrend", () => {
       rep("Prime", "2026-06-05", 12, 7.2, 35),
       rep("Prime", "2026-06-10", 12, 7.6, 35),
     ]);
-    expect(prov.provisional.Prime).toBe(true);
+    expect(prov.standardizedPending.Prime).toBe(true);
     expect(prov.rows.every(r => r.Prime_trend == null)).toBe(true);
   });
 
-  test("first max/power session flips a grip from provisional to qualified", () => {
+  test("first max-intent session starts standardization without dropping observed history", () => {
     const t = buildPeakForceTrend([
       rep("Prime", "2026-06-10", 12, 7.6, 35),     // sub-max era
       rep("Prime", "2026-06-20", 5, 9.1, 5),       // first real max day
     ]);
-    expect(t.provisional.Prime).toBeUndefined();
-    // The provisional history is dropped — it would understate the
-    // baseline the % climbs from.
-    expect(t.rows.find(r => r.date === "2026-06-10")).toBeUndefined();
+    expect(t.standardizedPending.Prime).toBeUndefined();
+    expect(t.rows.find(r => r.date === "2026-06-10").Prime).toBe(7.6);
     expect(t.best.Prime.kg).toBe(9.1);
   });
 });

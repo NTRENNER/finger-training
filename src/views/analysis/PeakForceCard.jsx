@@ -1,12 +1,11 @@
 // ─────────────────────────────────────────────────────────────
 // PeakForceCard — max-strength (peak force) trajectory over time
 // ─────────────────────────────────────────────────────────────
-// Direct measurement of instantaneous max force per grip, from your
-// MAX/POWER protocol sessions (peak_force_kg). The cleanest strength
-// metric in the app — no curve fit, no confound. Peak is neuromuscular
-// and instantaneous, so rep duration is NOT filtered; only endurance
-// PROTOCOLS (sub-max intent) are excluded. Dots = per-session best peak;
-// solid line = running best-to-date (PR). See model/peakForce.js.
+// Direct measurement of instantaneous force per grip. Every valid
+// Tindeq peak can raise the observed PR; the smoothed comparison line
+// remains max-intent-only so routine sub-max pulls cannot depress it.
+// Dots mark PR advances and carry the producing workout's zone.
+// See model/peakForce.js.
 //
 // Axis: ONE shared scale for all grips. Crusher (~170 lb) and Micro
 // (~50 lb) differ ~3×, and that magnitude gap is real and worth showing
@@ -26,6 +25,93 @@ import { Card } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, toDisp } from "../../ui/format.js";
 import { buildPeakForceTrend } from "../../model/peakForce.js";
+
+export function formatPeakForceTooltip(value, name, item, unit) {
+  const context = item?.payload?.[`${item.dataKey}_context`];
+  const contextualName = context?.label
+    ? `${name} during ${context.label} workout`
+    : name;
+  return [value != null ? `${fmt1(value)} ${unit}` : "—", contextualName];
+}
+
+export function peakForceTooltipRows(payload, unit) {
+  const numeric = (payload || []).filter(item =>
+    item?.value != null && Number.isFinite(Number(item.value)) && item?.dataKey !== "date"
+  );
+  const newPrStems = new Set(
+    numeric
+      .filter(item => String(item.dataKey).endsWith("_newPr"))
+      .map(item => String(item.dataKey).replace(/_newPr$/, ""))
+  );
+  const seen = new Set();
+  return numeric
+    .filter(item => {
+      const key = String(item.dataKey);
+      const stem = key.replace(/_pr$/, "");
+      if (key.endsWith("_pr") && newPrStems.has(stem)) return false;
+      const dedupeKey = `${key}|${item.value}`;
+      if (seen.has(dedupeKey)) return false;
+      seen.add(dedupeKey);
+      return true;
+    })
+    .map(item => {
+      const [value, name] = formatPeakForceTooltip(item.value, item.name, item, unit);
+      return { key: String(item.dataKey), value, name, color: item.color };
+    });
+}
+
+function PeakForceTooltip({ active, payload, label, unit }) {
+  if (!active) return null;
+  const rows = peakForceTooltipRows(payload, unit);
+  if (rows.length === 0) return null;
+  return (
+    <div style={{
+      background: C.card,
+      border: `1px solid ${C.border}`,
+      borderRadius: 8,
+      padding: "8px 10px",
+      fontSize: 12,
+      lineHeight: 1.3,
+      width: 270,
+      maxWidth: "calc(100vw - 32px)",
+      boxSizing: "border-box",
+      boxShadow: "0 6px 18px rgba(0,0,0,0.22)",
+    }}>
+      <div style={{ color: C.text, fontWeight: 700, marginBottom: 5 }}>{label}</div>
+      {rows.map(row => (
+        <div key={row.key} style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
+          alignItems: "start",
+          gap: 10,
+          marginTop: 4,
+        }}>
+          <span style={{ color: row.color || C.muted, overflowWrap: "anywhere" }}>{row.name}</span>
+          <b style={{ color: C.text, whiteSpace: "nowrap" }}>{row.value}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PeakForceLegend({ view }) {
+  const items = view.mode === "split"
+    ? view.series.map(({ g, h }) => ({ id: `${g}-${h}`, g, label: `${g} ${h} PR`, dashed: h === "R" }))
+    : view.grips.map(g => ({ id: g, g, label: `${g} PR`, dashed: false }));
+  return (
+    <div style={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: "4px 14px", fontSize: 11 }}>
+      {items.map(({ id, g, label, dashed }) => (
+        <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: C.muted }}>
+          <span style={{
+            width: 16,
+            borderTop: `2px ${dashed ? "dashed" : "solid"} ${GRIP_COLORS[g] || C.blue}`,
+          }} />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function PeakForceCard({ history, unit = "lbs" }) {
   const trend = useMemo(() => buildPeakForceTrend(history), [history]);
@@ -60,9 +146,9 @@ export function PeakForceCard({ history, unit = "lbs" }) {
           for (const g of byHand[h].grips) {
             const pr = src?.[`${g}_pr`];
             o[`${g}_${h}_pr`] = pr != null ? toDisp(pr, unit) : null;
-            // Same PR-set-only dot rule as pooled mode.
-            o[`${g}_${h}`] = (src?.[g] != null && pr != null && src[g] >= pr)
-              ? toDisp(src[g], unit) : null;
+            const newPr = src?.[`${g}_newPr`];
+            o[`${g}_${h}_newPr`] = newPr != null ? toDisp(newPr, unit) : null;
+            o[`${g}_${h}_newPr_context`] = src?.[`${g}_prContext`] ?? null;
           }
         }
         return o;
@@ -70,7 +156,7 @@ export function PeakForceCard({ history, unit = "lbs" }) {
       const series = [];
       for (const h of hands) {
         for (const g of byHand[h].grips) {
-          series.push({ g, h, provisional: !!byHand[h].provisional?.[g] });
+          series.push({ g, h });
         }
       }
       const hi = Math.max(...series.map(({ g, h }) => toDisp(byHand[h].best[g].kg, unit)));
@@ -81,24 +167,18 @@ export function PeakForceCard({ history, unit = "lbs" }) {
         // numbers shouldn't jump when the user pokes at detail.
         grips: trend.grips, best: trend.best,
         changePct: trend.changePct,
-        provisional: trend.provisional || {},
+        standardizedPending: trend.standardizedPending || {},
       };
     }
     const rows = trend.rows.map(r => {
       const o = { date: r.date.slice(5) };
       for (const g of trend.grips) {
         o[`${g}_pr`] = r[`${g}_pr`] != null ? toDisp(r[`${g}_pr`], unit) : null;
-        // Dots only on sessions that SET (or matched) the running PR.
-        // Sub-PR session bests are expected — most days aren't max
-        // days, and a submax dot below the line reads as regression
-        // when it's just a normal session (June 2026). The card's job
-        // is "watch the PR climb"; the line carries that, dots mark
-        // the sessions that moved it.
-        o[g] = (r[g] != null && r[`${g}_pr`] != null && r[g] >= r[`${g}_pr`])
-          ? toDisp(r[g], unit)
-          : null;
+        const newPr = r[`${g}_newPr`];
+        o[`${g}_newPr`] = newPr != null ? toDisp(newPr, unit) : null;
+        o[`${g}_newPr_context`] = r[`${g}_prContext`] ?? null;
         // Smoothed max-day trend — the line that CAN fall (see
-        // peakForce.js). Null for provisional grips and <3 max days.
+        // peakForce.js). Null until there are at least 3 max days.
         o[`${g}_trend`] = r[`${g}_trend`] != null ? toDisp(r[`${g}_trend`], unit) : null;
       }
       return o;
@@ -111,7 +191,7 @@ export function PeakForceCard({ history, unit = "lbs" }) {
       mode: "pooled",
       rows, grips: trend.grips, best: trend.best,
       changePct: trend.changePct, axisMax,
-      provisional: trend.provisional || {},
+      standardizedPending: trend.standardizedPending || {},
     };
   }, [trend, unit, split, history]);
 
@@ -119,9 +199,11 @@ export function PeakForceCard({ history, unit = "lbs" }) {
 
   return (
     <Card style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>Peak force — max strength over time</div>
+      <div style={{ marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, flex: "1 1 190px", minWidth: 0 }}>
+            Peak force — max strength over time
+          </div>
           <div style={{ display: "flex", gap: 4 }}>
             {[{ k: false, label: "Pooled" }, { k: true, label: "L / R" }].map(opt => (
               <button key={String(opt.k)} onClick={() => setSplit(opt.k)} style={{
@@ -132,12 +214,20 @@ export function PeakForceCard({ history, unit = "lbs" }) {
             ))}
           </div>
         </div>
-        <div style={{ fontSize: 12, color: C.muted }}>
+        <div style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          flexWrap: "wrap",
+          gap: "2px 12px",
+          marginTop: 4,
+          fontSize: 12,
+          color: C.muted,
+        }}>
           {view.grips.map(g => {
             const pct = view.changePct[g];
             const pctColor = pct == null ? C.muted : pct > 0 ? C.green : pct < 0 ? C.red : C.muted;
             return (
-              <span key={g} style={{ marginLeft: 12 }}>
+              <span key={g}>
                 <span style={{ color: GRIP_COLORS[g] || C.blue }}>{g}</span>{" "}
                 <b style={{ color: C.text }}>{fmt1(toDisp(view.best[g].kg, unit))} {unit}</b>
                 {pct != null && (
@@ -145,8 +235,8 @@ export function PeakForceCard({ history, unit = "lbs" }) {
                     {pct > 0 ? "+" : ""}{pct}%
                   </b>
                 )}
-                {view.provisional[g] && (
-                  <i style={{ color: C.muted, marginLeft: 4, fontSize: 11 }}>prov.</i>
+                {view.standardizedPending[g] && (
+                  <i style={{ color: C.muted, marginLeft: 4, fontSize: 11 }}>trend pending</i>
                 )}
               </span>
             );
@@ -154,21 +244,20 @@ export function PeakForceCard({ history, unit = "lbs" }) {
         </div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        Best instantaneous pull from your max/power sessions — a direct
-        max-strength measurement (peak force is instantaneous, so rep
-        length doesn't matter). The line is your running best-to-date;
-        dots mark the sessions that raised it, and the % is how much
-        your max has climbed. One shared scale, so each grip sits at
-        its true magnitude. Endurance sessions are excluded.
+        Highest valid Tindeq peak observed in any workout. The solid line
+        is your running best-to-date; dots mark new PRs and identify the
+        workout that produced them. The % is how much your observed
+        ceiling has climbed. One shared scale keeps each grip at its true
+        magnitude.
         {view.mode === "split"
-          ? " L solid · R dashed, per-hand PR lines. (The smoothed trend is pooled-mode only.)"
-          : " The thin dotted line is the smoothed trend of max-day session bests — unlike the PR line it can fall, so it's the early warning for both breakouts and decline."}
-        {Object.keys(view.provisional).length > 0 && (
+          ? " L solid · R dashed, per-hand PR lines. The standardized trend is pooled-mode only."
+          : " The dotted line uses max-intent sessions only, so ordinary sub-max pulls cannot drag it down. It can fall, making it the standardized signal for breakouts and decline."}
+        {" "}Periodic 3 × 3s peak tests keep that comparison calibrated,
+        but any workout can advance the PR.
+        {Object.keys(view.standardizedPending).length > 0 && (
           <span style={{ fontStyle: "italic" }}>
-            {" "}Dashed = provisional: no max/power session logged yet
-            for that grip, so its line shows best pulls from sub-max
-            sessions and understates true max — the first real max day
-            replaces it.
+            {" "}Trend pending means that grip has no max-intent session yet;
+            its observed PR is still retained.
           </span>
         )}
       </div>
@@ -184,26 +273,24 @@ export function PeakForceCard({ history, unit = "lbs" }) {
             unit={` ${unit}`}
           />
           <Tooltip
-            contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
-            formatter={(v, name) => [v != null ? `${fmt1(v)} ${unit}` : "—", name]}
+            content={<PeakForceTooltip unit={unit} />}
           />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Legend content={() => <PeakForceLegend view={view} />} />
           {view.mode === "split" ? (
             <>
-              {view.series.map(({ g, h, provisional }) => (
+              {view.series.map(({ g, h }) => (
                 <Line key={`${g}-${h}-pr`} type="monotone" dataKey={`${g}_${h}_pr`}
-                  name={`${g} ${h}${provisional ? " (prov.)" : ""}`}
+                  name={`${g} ${h} PR`}
                   stroke={GRIP_COLORS[g] || C.blue}
                   strokeWidth={h === "L" ? 2 : 1.5}
                   strokeDasharray={h === "R" ? "6 4" : undefined}
-                  opacity={provisional ? 0.6 : 1}
                   dot={false} connectNulls isAnimationActive={false} />
               ))}
               {/* PR-set dots per hand — out of the legend to keep it
                   to one entry per (grip, hand) line. */}
               {view.series.map(({ g, h }) => (
-                <Scatter key={`${g}-${h}-dots`} dataKey={`${g}_${h}`}
-                  name={`${g} ${h} new PR`} legendType="none"
+                <Scatter key={`${g}-${h}-dots`} dataKey={`${g}_${h}_newPr`}
+                  name={`${g} ${h}: New PR`} legendType="none"
                   fill={GRIP_COLORS[g] || C.blue} isAnimationActive={false} />
               ))}
             </>
@@ -211,30 +298,27 @@ export function PeakForceCard({ history, unit = "lbs" }) {
             <>
               {view.grips.map(g => {
                 const color = GRIP_COLORS[g] || C.blue;
-                const prov = view.provisional[g];
                 return (
                   <Line key={`${g}-pr`} type="monotone" dataKey={`${g}_pr`}
-                    name={prov ? `${g} (prov.)` : `${g} PR`}
+                    name={`${g} PR`}
                     stroke={color} strokeWidth={2} dot={false}
-                    strokeDasharray={prov ? "6 4" : undefined}
-                    opacity={prov ? 0.7 : 1}
                     connectNulls isAnimationActive={false} />
                 );
               })}
-              {/* Faint smoothed max-day trend — kept out of the legend
-                  (legendType none) so the legend stays PR-focused; the
-                  description text explains the dotted line. */}
-              {view.grips.filter(g => !view.provisional[g]).map(g => (
+              {/* Smoothed max-day trend stays out of the custom legend
+                  so the key remains PR-focused; the description text
+                  explains the dotted line. */}
+              {view.grips.filter(g => !view.standardizedPending[g]).map(g => (
                 <Line key={`${g}-trend`} type="monotone" dataKey={`${g}_trend`}
                   name={`${g} trend`} legendType="none"
-                  stroke={GRIP_COLORS[g] || C.blue} strokeWidth={1.5}
-                  strokeDasharray="2 3" opacity={0.45} dot={false}
+                  stroke={GRIP_COLORS[g] || C.blue} strokeWidth={2}
+                  strokeDasharray="2 3" opacity={0.7} dot={false}
                   connectNulls isAnimationActive={false} />
               ))}
               {view.grips.map(g => {
                 const color = GRIP_COLORS[g] || C.blue;
                 return (
-                  <Scatter key={`${g}-dots`} dataKey={g} name={`${g} new PR`}
+                  <Scatter key={`${g}-dots`} dataKey={`${g}_newPr`} name={`${g}: New PR`}
                     fill={color} isAnimationActive={false} />
                 );
               })}
