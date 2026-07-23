@@ -76,7 +76,6 @@ import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
 import { CapacityTrajectoryCard, ZoneShareCard } from "./analysis/CapacityChartCards.js";
-import { EnduranceCeilingCard } from "./analysis/EnduranceCeilingCard.jsx";
 import { DeloadGauge } from "./cards/DeloadGauge.jsx";
 import { RecoveryTrajectoryCard } from "./analysis/RecoveryTrajectoryCard.jsx";
 import { WeeklyRatioCard } from "./analysis/WeeklyRatioCard.jsx";
@@ -867,19 +866,16 @@ export function AnalysisView({
         <PeakForceCard history={history} unit={unit} />
         </CardBoundary>
 
-        {/* Endurance ceiling — sustained (240s curve force) ÷ measured
-            peak, per grip. One-number limiter diagnostic bridging the
-            curve fits and the peak measurements (June 2026). */}
-        <CardBoundary name="Endurance Ceiling">
-        <EnduranceCeilingCard
-          history={history}
-          grip3xEstimates={grip3xEstimates}
-          perHandGripEstimates={perHandGripEstimates}
-          handView={handView}
-          onHandViewChange={setHandView}
-          unit={unit}
-        />
-        </CardBoundary>
+        {/* (Endurance Ceiling / Sustained-vs-max card retired July
+            2026, per Nathan — second retirement of this idea. v1
+            (F180/F5, May 2026) was invariant to proportional gains;
+            v2 (modeled F(240s) ÷ measured peak, June 2026) had a
+            self-referential numerator — the fit's extrapolated tail
+            inherits amplitude from max gains; v3 (measured ≥120s
+            holds ÷ measured peak) was honest but sparse, and its two
+            halves already live on the F-D chart / Capacity trajectory
+            (sustained) and the Peak Force card (max). Verdict: the
+            ratio never earned a card of its own.) */}
 
 
         {/* (Force Curves — vs baseline overlay merged INTO
