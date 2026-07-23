@@ -22,6 +22,18 @@
 // count. The curve fit keeps learning from every rep regardless, and
 // takes over again for new (grip, zone) combos or after resets.
 //
+// July 2026 hardening (the 7/20 + 7/22 endurance misses were pins,
+// not engine output):
+//   • RE-PIN GUARD — a hand only re-pins if its previous rep 1
+//     actually reached the target (isShortfall's 95% tolerance).
+//     A failed rep 1 means the load was NOT absorbed; that hand falls
+//     back to prescription(), which owns the correction. This also
+//     kills the over-pull ratchet (pinning a failing rep's inflated
+//     avg force as the next session's load).
+//   • ENGINE BOUNDS — surviving pins are clamped by loadBounds()
+//     (peak-force ceiling + endurance-tail ceiling), so the pin path
+//     can never exceed the physics the engine enforces.
+//
 // COOKEDNESS NORMALIZATION: recorded prescribed loads are post-
 // cooked-scale-down (the runner multiplies exp(-β·cooked) before
 // stamping). Pinning that raw value would compound the scale-down
@@ -34,6 +46,10 @@
 import { zoneOf } from "./zones.js";
 import { prescribedLoad, effectiveLoad } from "./load.js";
 import { capacityMultiplier } from "./fatigueBeta.js";
+// Engine bounds + shortfall test (July 2026 — see the RE-PIN GUARD
+// comment below). prescription.js does not import this module, so the
+// dependency is acyclic.
+import { loadBounds, isShortfall } from "./prescription.js";
 
 export const LADDER_MIN_REPS = 4;
 export const LADDER_MAX_REPS = 6;
@@ -152,9 +168,35 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   // with no recorded actual. De-cooked by the capacity multiplier
   // that was active when the rep was stamped (session_cooked; 1.0
   // when absent or no β model).
+  // RE-PIN GUARD (July 2026). "Same weight, more reps" presupposes the
+  // weight was ABSORBED — rep 1 (the fresh rep) actually reached its
+  // target. Without this guard the ladder re-pinned a failed session's
+  // load forever ("repeat" never lowers it), and because the pin reads
+  // the ACTUAL held load, an over-pulled failing rep RAISED the next
+  // pin: Micro 160s walked 5.5 → 9.0 → 10.6 → 10.5 kg across four
+  // consecutive failed sessions (2026-07-03 → 07-22), and Crusher 220s
+  // replayed a 3-week-old failed rep-1 load (23.4 kg incl. a nominal
+  // manual/spring entry) that lasted 101 of 220 s. A hand whose rep 1
+  // fell short (isShortfall, same 95% tolerance as the engine's failure
+  // semantics) gets NO pin — the runner falls back to prescription()
+  // for that hand, which owns the correction. Both hands short → no
+  // ladder at all.
+  // The absorption readout is the FIRST set's rep 1 — the only truly
+  // fresh rep. A later set's rep 1 runs under cumulative fatigue and
+  // may fall short of T even when the load is right, so it must not
+  // trip the guard (the pin itself still reads the LAST set's rep 1,
+  // unchanged).
+  const droppedByHand = {};
   const loadByHand = {};
   for (const [h, reps] of Object.entries(byHand)) {
     const rep1 = reps[0];
+    const firstSetNum = Math.min(...byHandSet[h].keys());
+    const freshRep1 = [...byHandSet[h].get(firstSetNum)]
+      .sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1))[0];
+    if (isShortfall(freshRep1.actual_time_s, T)) {
+      droppedByHand[h] = round1(Number(freshRep1.actual_time_s) || 0);
+      continue;
+    }
     const recorded = effectiveLoad(rep1) || prescribedLoad(rep1);
     if (!(recorded > 0)) continue;
     const thenMult = capacityMultiplier(fatigueModel, grip, rep1.session_cooked ?? 0);
@@ -180,6 +222,29 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
     reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
   }
 
+  // ENGINE BOUNDS (July 2026). The pin path bypasses prescription()
+  // by design ("same weight, more reps" must not drift with the
+  // curve), but it must still respect the same PHYSICS the engine
+  // enforces: the peak-force ceiling and the long-hold endurance-tail
+  // ceiling (PR #41 — which the pin path silently escaped). Ceilings
+  // only: the demonstrated-capacity floor is NOT applied as a lift,
+  // because pinning deliberately holds the user's last actual load
+  // even when they've demonstrated more (the engine's floor still
+  // raises the endurance ceiling before it clamps, same as capValue).
+  const boundedByHand = {};
+  for (const [h, kg] of Object.entries(loadByHand)) {
+    const b = loadBounds(history, h, grip, T);
+    let bounded = kg;
+    if (b.peakCapKg != null && bounded > b.peakCapKg) bounded = b.peakCapKg;
+    if (b.endCeilKg != null) {
+      const ec = b.floorKg != null ? Math.max(b.endCeilKg, b.floorKg) : b.endCeilKg;
+      if (bounded > ec) bounded = ec;
+    }
+    bounded = round1(bounded);
+    if (bounded !== kg) boundedByHand[h] = { from: kg, to: bounded };
+    loadByHand[h] = bounded;
+  }
+
   return {
     T,
     reps,
@@ -191,6 +256,11 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       gateSec,
       lastRepSec: round1(lastRepSec),
       lastRepSecByHand,
+      // Hands whose previous rep 1 fell short of T (value = that rep-1
+      // time, s): no pin — the runner re-prescribes them via the engine.
+      droppedByHand,
+      // Hands whose pin was clamped by the engine bounds: { from, to }.
+      boundedByHand,
     },
   };
 }
