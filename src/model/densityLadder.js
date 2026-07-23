@@ -3,14 +3,20 @@
 // ─────────────────────────────────────────────────────────────
 // Progression scheme from device-based training practice (June 2026):
 // instead of raising the LOAD every session (the curve-fit default),
-// hold the load constant and earn REPS, gated by the LAST rep's
-// duration. The last rep is the most fatigued, so its hold time is a
-// clean readout of whether the dose was absorbed:
+// hold the load constant and earn REPS, gated by the FIRST and LAST
+// reps of the previous completed session. The first rep checks whether
+// the load was calibrated to the target at all; the last rep is the
+// most fatigued and shows whether the dose was absorbed:
 //
 //   protocol: T-seconds max hold · short rest · N reps
-//   • last rep ≥ gate (25% of T) → next session: same load, N+1 reps
-//   • last rep <  gate          → next session: same load, same N
-//   • N reaches 6 with the gate passed → add 5% load, reset to 4 reps
+//   • first rep < 95% of T       → next session: lower load, same N
+//   • first rep hits T and last rep ≥ 25% of T
+//                                → next session: same load, N+1 reps
+//   • first rep hits T and last rep < 25% of T
+//                                → next session: same load, same N
+//   • N reaches 6 with both gates passed
+//                                → add 5% load, reset to 4 reps
+//   • missing/uneven expected hands → next session: repeat, no advance
 //
 // Examples from practice: 40s max / 20s rest / 4 reps with a 10s gate
 // (10 = 0.25 × 40); 90s strength holds gate at ~22s (≈ 0.25 × 90 —
@@ -49,7 +55,7 @@ import { capacityMultiplier } from "./fatigueBeta.js";
 // Engine bounds + shortfall test (July 2026 — see the RE-PIN GUARD
 // comment below). prescription.js does not import this module, so the
 // dependency is acyclic.
-import { loadBounds, isShortfall } from "./prescription.js";
+import { loadBounds, isShortfall, SHORTFALL_TOL } from "./prescription.js";
 // Personal recovery-model forecast (July 2026 — see the COLLAPSE
 // DOWN-STEP comment below). repCurveData imports fatigue/recoveryFit/
 // zones only, so this dependency is acyclic too.
@@ -57,12 +63,20 @@ import { buildPhysModel, buildForecastSeries } from "./repCurveData.js";
 
 export const LADDER_MIN_REPS = 4;
 export const LADDER_MAX_REPS = 6;
+// Rep 1 must reach 95% of T before the ladder can hold or advance the
+// load. A shortfall means the NEXT session recalibrates downward; the
+// workout already underway is never changed.
+export const LADDER_FIRST_REP_TARGET_FRAC = SHORTFALL_TOL;
 // Last-rep gate as a fraction of the session's target duration.
 // 0.25 reproduces the source protocol at both anchor points:
 // 10s @ 40s, ~22s @ 90s.
 export const LADDER_GATE_FRAC = 0.25;
 // Load bump when the ladder tops out (6 reps, gate passed).
 export const LADDER_LOAD_STEP_FRAC = 0.05;
+// If the updated curve does not move a missed hand down by itself,
+// guarantee a modest reduction rather than repeating the known-high
+// load indefinitely.
+export const LADDER_RECALIBRATION_STEP_FRAC = 0.05;
 
 // ── COLLAPSE DOWN-STEP (July 2026, per Nathan) ────────────────
 // The re-pin guard catches OPENER failures; this catches the other
@@ -165,14 +179,19 @@ function latestSessionInZone(history, grip, zoneKey) {
 //     reps,         // rep count to prescribe next
 //     loadByHand,   // { L?, R? } fresh-equivalent kg (see header)
 //     decision,     // "advance" | "repeat" | "step_load" | "down_step"
+//                   //   | "recalibrate" | "incomplete"
+//     previousLoadByHand, // all prior fresh-equivalent loads
 //     basis: {      // receipts for the Why line
-//       date, prevReps, gateSec,
+//       date, prevReps, gateSec, firstRepTargetSec,
+//       firstRepSec, firstRepSecByHand,
 //       lastRepSec,        // worst (min) last-rep time across hands
 //       lastRepSecByHand,  // { L?, R? }
+//       expectedHands, missingHands, shortfallHands,
+//       repCountByHand, unevenRepCounts
 //     },
 //   }
 export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
-  const { fatigueModel = null } = opts;
+  const { fatigueModel = null, expectedHands = null } = opts;
   if (!grip || !zoneKey) return null;
   const sess = latestSessionInZone(history, grip, zoneKey);
   if (!sess) return null;
@@ -209,19 +228,54 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   // The session's protocol T — every rep shares it; read off rep 1.
   const T = Number(sess.reps[0].target_duration) || 0;
   if (!(T > 0)) return null;
+  const firstRepTargetSec = round1(T * LADDER_FIRST_REP_TARGET_FRAC);
   const gateSec = round1(T * LADDER_GATE_FRAC);
 
-  // Last-rep time per hand; the WORST hand gates progression so both
-  // hands climb the ladder together (the source protocol prescribes
-  // one rep count, not per-hand counts).
+  // Evaluate only the hands the upcoming session expects. When the
+  // caller does not specify them (legacy callers/tests), infer them
+  // from the latest session to preserve single-hand behavior.
+  const inferredHands = Object.keys(byHand).sort();
+  const requiredHands = Array.isArray(expectedHands) && expectedHands.length > 0
+    ? [...new Set(expectedHands.filter(h => h === "L" || h === "R"))]
+    : inferredHands;
+  if (requiredHands.length === 0) return null;
+
+  // First/last rep receipts plus completeness. Both-mode progression
+  // requires both hands and equal rep counts; a lost/aborted hand is
+  // an incomplete session, never evidence to advance.
+  const firstRepSecByHand = {};
   const lastRepSecByHand = {};
-  let prevReps = 0;
-  for (const [h, reps] of Object.entries(byHand)) {
+  const repCountByHand = {};
+  const missingHands = [];
+  for (const h of requiredHands) {
+    const reps = byHand[h] || [];
+    repCountByHand[h] = reps.length;
+    if (reps.length === 0) {
+      missingHands.push(h);
+      continue;
+    }
+    const firstSetNum = Math.min(...byHandSet[h].keys());
+    const first = [...byHandSet[h].get(firstSetNum)]
+      .sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1))[0];
     const last = reps[reps.length - 1];
+    firstRepSecByHand[h] = Number(first.actual_time_s) || 0;
     lastRepSecByHand[h] = Number(last.actual_time_s) || 0;
-    prevReps = Math.max(prevReps, reps.length);
   }
-  const lastRepSec = Math.min(...Object.values(lastRepSecByHand));
+  const presentCounts = Object.values(repCountByHand).filter(n => n > 0);
+  const prevReps = presentCounts.length > 0 ? Math.max(...presentCounts) : 0;
+  const unevenRepCounts = new Set(presentCounts).size > 1;
+  const incomplete = missingHands.length > 0 || unevenRepCounts;
+  const shortfallHands = requiredHands.filter(h =>
+    firstRepSecByHand[h] != null && isShortfall(firstRepSecByHand[h], T)
+  );
+  const firstRepSecValues = Object.values(firstRepSecByHand);
+  const firstRepSec = firstRepSecValues.length > 0
+    ? Math.min(...firstRepSecValues)
+    : 0;
+  const lastRepSecValues = Object.values(lastRepSecByHand);
+  const lastRepSec = lastRepSecValues.length > 0
+    ? Math.min(...lastRepSecValues)
+    : 0;
   const gatePassed = lastRepSec >= gateSec;
 
   // Fresh-equivalent pinned load per hand (see header). ACTUAL load
@@ -244,31 +298,33 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   // replayed a 3-week-old failed rep-1 load (23.4 kg incl. a nominal
   // manual/spring entry) that lasted 101 of 220 s. A hand whose rep 1
   // fell short (isShortfall, same 95% tolerance as the engine's failure
-  // semantics) gets NO pin — the runner falls back to prescription()
-  // for that hand, which owns the correction. Both hands short → no
-  // ladder at all.
+  // semantics) gets NO pin. SessionPlanCard re-prescribes that hand
+  // for the NEXT workout and guarantees that the result is lower than
+  // this known-too-high load.
   // The absorption readout is the FIRST set's rep 1 — the only truly
   // fresh rep. A later set's rep 1 runs under cumulative fatigue and
   // may fall short of T even when the load is right, so it must not
   // trip the guard (the pin itself still reads the LAST set's rep 1,
   // unchanged).
   const droppedByHand = {};
-  const loadByHand = {};
-  for (const [h, reps] of Object.entries(byHand)) {
+  const previousLoadByHand = {};
+  for (const h of requiredHands) {
+    const reps = byHand[h] || [];
+    if (reps.length === 0) continue;
     const rep1 = reps[0];
     const firstSetNum = Math.min(...byHandSet[h].keys());
     const freshRep1 = [...byHandSet[h].get(firstSetNum)]
       .sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1))[0];
-    if (isShortfall(freshRep1.actual_time_s, T)) {
-      droppedByHand[h] = round1(Number(freshRep1.actual_time_s) || 0);
-      continue;
-    }
     const recorded = effectiveLoad(rep1) || prescribedLoad(rep1);
     if (!(recorded > 0)) continue;
     const thenMult = capacityMultiplier(fatigueModel, grip, rep1.session_cooked ?? 0);
-    loadByHand[h] = round1(thenMult > 0 ? recorded / thenMult : recorded);
+    previousLoadByHand[h] = round1(thenMult > 0 ? recorded / thenMult : recorded);
+    if (isShortfall(freshRep1.actual_time_s, T)) {
+      droppedByHand[h] = round1(Number(freshRep1.actual_time_s) || 0);
+    }
   }
-  if (Object.keys(loadByHand).length === 0) return null;
+  const loadByHand = { ...previousLoadByHand };
+  for (const h of shortfallHands) delete loadByHand[h];
 
   // COLLAPSE DOWN-STEP (see the constants block for rationale +
   // backtest). Runs only on hands that SURVIVED the re-pin guard —
@@ -296,7 +352,13 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   // the CURRENT rung before the ladder climbs again (and definitely
   // before any +5% step).
   let decision, reps;
-  if (collapsed) {
+  if (shortfallHands.length > 0) {
+    decision = "recalibrate";
+    reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
+  } else if (incomplete) {
+    decision = "incomplete";
+    reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
+  } else if (collapsed) {
     decision = "down_step";
     reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
   } else if (gatePassed && prevReps >= LADDER_MAX_REPS) {
@@ -340,15 +402,19 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
     T,
     reps,
     loadByHand,
+    previousLoadByHand,
     decision,
     basis: {
       date: sess.date,
       prevReps,
       gateSec,
+      firstRepTargetSec,
+      firstRepSec: round1(firstRepSec),
+      firstRepSecByHand,
       lastRepSec: round1(lastRepSec),
       lastRepSecByHand,
       // Hands whose previous rep 1 fell short of T (value = that rep-1
-      // time, s): no pin — the runner re-prescribes them via the engine.
+      // time, s): no pin — the next workout resolves a lower load.
       droppedByHand,
       // Hands whose previous session's reps 2+ decayed below the
       // personal recovery model's forecast (C < LADDER_COLLAPSE_TOL):
@@ -356,6 +422,49 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       collapseByHand,
       // Hands whose pin was clamped by the engine bounds: { from, to }.
       boundedByHand,
+      expectedHands: requiredHands,
+      missingHands,
+      shortfallHands,
+      repCountByHand,
+      unevenRepCounts,
     },
   };
+}
+
+// Resolve the actual fresh-equivalent loads for the next session.
+// Normal ladder hands keep their pins. Recalibrating hands use the
+// newly-fitted curve at the pinned T, with a guaranteed 5% reduction
+// if that fit would otherwise repeat or raise the known-too-high load.
+// Missing hands in an incomplete Both-mode session use their curve
+// prescription without forcing a reduction (there was no failed load
+// on that hand to calibrate from).
+export function resolveDensityLadderLoads(ladder, curveLoadByHand = {}) {
+  if (!ladder) return null;
+  const out = {};
+  const hands = new Set([
+    ...Object.keys(ladder.previousLoadByHand || {}),
+    ...Object.keys(ladder.loadByHand || {}),
+    ...Object.keys(curveLoadByHand || {}),
+    ...(ladder.basis?.expectedHands || []),
+  ]);
+  const shortfallHands = new Set(ladder.basis?.shortfallHands || []);
+
+  for (const h of hands) {
+    const pinned = Number(ladder.loadByHand?.[h]);
+    if (pinned > 0) {
+      out[h] = round1(pinned);
+      continue;
+    }
+
+    const curve = Number(curveLoadByHand?.[h]);
+    const previous = Number(ladder.previousLoadByHand?.[h]);
+    if (shortfallHands.has(h) && previous > 0) {
+      const ceiling = previous * (1 - LADDER_RECALIBRATION_STEP_FRAC);
+      out[h] = round1(curve > 0 ? Math.min(curve, ceiling) : ceiling);
+    } else if (curve > 0) {
+      out[h] = round1(curve);
+    }
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
 }

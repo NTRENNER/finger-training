@@ -1,15 +1,17 @@
-// Tests for src/model/densityLadder.js — rep-count progression at
-// constant load, gated by the previous session's last-rep duration.
+// Tests for src/model/densityLadder.js — next-workout progression and
+// load recalibration from the previous session's first and last reps.
 //
 // Source protocol (June 2026): 40s max / 20s rest / 4 reps; last rep
 // ≥ 10s → next session same load, 5 reps (then 6); last rep < 10s →
-// repeat. 90s strength holds gate at ~22s. Gate = 25% of target T.
-// Top out at 6 reps → +5% load, back to 4.
+// repeat. Rep 1 below 95% of target lowers the next session's load.
+// 90s strength holds gate at ~22s. Gate = 25% of target T. Top out at
+// 6 reps → +5% load, back to 4.
 
 import {
-  computeDensityLadder,
+  computeDensityLadder, resolveDensityLadderLoads,
   LADDER_MIN_REPS, LADDER_MAX_REPS,
-  LADDER_GATE_FRAC, LADDER_LOAD_STEP_FRAC,
+  LADDER_FIRST_REP_TARGET_FRAC, LADDER_GATE_FRAC,
+  LADDER_LOAD_STEP_FRAC, LADDER_RECALIBRATION_STEP_FRAC,
 } from "../densityLadder.js";
 import { capacityMultiplier } from "../fatigueBeta.js";
 import { enduranceCeilingKg } from "../enduranceTail.js";
@@ -70,6 +72,40 @@ describe("computeDensityLadder", () => {
     expect(out.loadByHand.L).toBeCloseTo(58.8, 1);
   });
 
+  test("rep 1 shortfall recalibrates NEXT workout even when the last-rep gate passes", () => {
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 60,
+      // The known-too-heavy pattern: rep 1 misses 95% of target, but
+      // the final rep still reaches the old 25% progression gate.
+      times: { L: [30, 20, 13, 10] },
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power", {
+      expectedHands: ["L"],
+    });
+    expect(out.decision).toBe("recalibrate");
+    expect(out.reps).toBe(4);
+    expect(out.basis.firstRepTargetSec).toBe(
+      40 * LADDER_FIRST_REP_TARGET_FRAC
+    );
+    expect(out.basis.shortfallHands).toEqual(["L"]);
+    expect(out.previousLoadByHand.L).toBe(60);
+    // The old pin is deliberately removed so the updated curve can
+    // set the next workout's load.
+    expect(out.loadByHand.L).toBeUndefined();
+  });
+
+  test("rep 1 at exactly 95% of target remains eligible to advance", () => {
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 60,
+      times: { L: [38, 24, 16, 10] },
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power", {
+      expectedHands: ["L"],
+    });
+    expect(out.decision).toBe("advance");
+    expect(out.reps).toBe(5);
+  });
+
   test("90s strength holds gate at ~22s (25% of T)", () => {
     const passing = session({
       id: "s1", date: "2026-06-01", T: 90, loadKg: 44,
@@ -117,6 +153,50 @@ describe("computeDensityLadder", () => {
     // Both hands keep their own pinned loads.
     expect(out.loadByHand.L).toBeCloseTo(58.8, 1);
     expect(out.loadByHand.R).toBeCloseTo(58.8, 1);
+  });
+
+  test("missing expected hand marks the previous workout incomplete", () => {
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 58.8,
+      times: { L: [40.2, 24, 16.5, 12.1] },
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power", {
+      expectedHands: ["L", "R"],
+    });
+    expect(out.decision).toBe("incomplete");
+    expect(out.reps).toBe(4);
+    expect(out.basis.missingHands).toEqual(["R"]);
+    expect(out.loadByHand.L).toBeCloseTo(58.8, 1);
+    expect(out.loadByHand.R).toBeUndefined();
+  });
+
+  test("uneven Both-mode rep counts repeat without advancing", () => {
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 58.8,
+      times: {
+        L: [40.2, 24, 16.5, 12.1],
+        R: [40.1, 25],
+      },
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power", {
+      expectedHands: ["L", "R"],
+    });
+    expect(out.decision).toBe("incomplete");
+    expect(out.reps).toBe(4);
+    expect(out.basis.unevenRepCounts).toBe(true);
+    expect(out.basis.repCountByHand).toEqual({ L: 4, R: 2 });
+  });
+
+  test("single-hand plans can advance from a complete single-hand session", () => {
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 58.8,
+      times: { L: [40.2, 24, 16.5, 12.1] },
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power", {
+      expectedHands: ["L"],
+    });
+    expect(out.decision).toBe("advance");
+    expect(out.reps).toBe(5);
   });
 
   test("uses the LATEST session in the zone, not an older one", () => {
@@ -246,14 +326,18 @@ describe("computeDensityLadder", () => {
 // including the PR #41 endurance-tail ceiling. See
 // finger-training-density-ladder-pin project memory.
 describe("re-pin guard + engine bounds", () => {
-  test("a session whose rep 1 fell short of T does not re-pin (single hand → no ladder)", () => {
+  test("a session whose rep 1 fell short recalibrates the next workout", () => {
     // Micro-7/20-shaped: 160s target, rep 1 died at 32s. "Same
     // weight, more reps" has no basis — the weight was never absorbed.
     const hist = session({
       id: "s1", date: "2026-07-20", T: 160, loadKg: 10.6,
       times: { L: [32.2, 21.5, 20.3, 13.4] },
     });
-    expect(computeDensityLadder(hist, "Crusher", "strength_endurance")).toBeNull();
+    const out = computeDensityLadder(hist, "Crusher", "strength_endurance");
+    expect(out.decision).toBe("recalibrate");
+    expect(out.reps).toBe(4);
+    expect(out.loadByHand.L).toBeUndefined();
+    expect(out.previousLoadByHand.L).toBeCloseTo(10.6, 1);
   });
 
   test("per-hand: the short hand is dropped (engine takes it), the passing hand still pins", () => {
@@ -266,6 +350,7 @@ describe("re-pin guard + engine bounds", () => {
     });
     const out = computeDensityLadder(hist, "Crusher", "power");
     expect(out).not.toBeNull();
+    expect(out.decision).toBe("recalibrate");
     expect(out.loadByHand.L).toBeCloseTo(50, 1);
     expect(out.loadByHand.R).toBeUndefined();
     expect(out.basis.droppedByHand.R).toBeCloseTo(20, 1);
@@ -396,14 +481,16 @@ describe("re-pin guard + engine bounds", () => {
     expect(out.basis.collapseByHand.R).toBeUndefined();
   });
 
-  test("opener shortfall still wins: a dropped hand is re-prescribed, not down-stepped", () => {
+  test("opener shortfall still wins: a dropped hand recalibrates, not down-steps", () => {
     // Rep 1 fails the target → the re-pin guard hands it back to the
     // engine; the collapse rule must not resurrect a pin for it.
     const hist = session({
       id: "s1", date: "2026-06-01", T: 40, loadKg: 60,
       times: { L: [20, 8, 5, 4] },    // opener 20s ≪ 40s target
     });
-    expect(computeDensityLadder(hist, "Crusher", "power")).toBeNull();  // only hand dropped
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out.decision).toBe("recalibrate");
+    expect(out.loadByHand.L).toBeUndefined();
   });
 
   test("too few later reps → no conformance judgment, no down-step", () => {
@@ -414,5 +501,53 @@ describe("re-pin guard + engine bounds", () => {
     const out = computeDensityLadder(hist, "Crusher", "power");
     expect(out.decision).not.toBe("down_step");
     expect(out.loadByHand.L).toBeCloseTo(60, 1);
+  });
+});
+
+describe("resolveDensityLadderLoads", () => {
+  const recalibrate = {
+    decision: "recalibrate",
+    loadByHand: { R: 55 },
+    previousLoadByHand: { L: 60, R: 55 },
+    basis: {
+      expectedHands: ["L", "R"],
+      shortfallHands: ["L"],
+    },
+  };
+
+  test("uses the lower curve result for a missed hand", () => {
+    const out = resolveDensityLadderLoads(recalibrate, { L: 50 });
+    expect(out).toEqual({ L: 50, R: 55 });
+  });
+
+  test("guarantees a reduction when the updated curve stays too high", () => {
+    const out = resolveDensityLadderLoads(recalibrate, { L: 62 });
+    expect(out.L).toBeCloseTo(
+      60 * (1 - LADDER_RECALIBRATION_STEP_FRAC),
+      1
+    );
+    expect(out.R).toBe(55);
+  });
+
+  test("falls back to the guaranteed reduction when the curve has no load", () => {
+    const out = resolveDensityLadderLoads(recalibrate, {});
+    expect(out.L).toBeCloseTo(
+      60 * (1 - LADDER_RECALIBRATION_STEP_FRAC),
+      1
+    );
+  });
+
+  test("fills a missing incomplete hand from its curve without reducing it", () => {
+    const incomplete = {
+      decision: "incomplete",
+      loadByHand: { L: 58.8 },
+      previousLoadByHand: { L: 58.8 },
+      basis: {
+        expectedHands: ["L", "R"],
+        shortfallHands: [],
+      },
+    };
+    expect(resolveDensityLadderLoads(incomplete, { R: 54 }))
+      .toEqual({ L: 58.8, R: 54 });
   });
 });

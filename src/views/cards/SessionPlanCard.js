@@ -7,14 +7,12 @@
 //   * SessionRPECard ("Session RPE — today")
 //
 // The unified flow (top → bottom):
-//   1. Recommended button — the primary tile. Pure-math curve pick
-//      (TARGET / LOAD / L·R / Why). Always shows the engine's unscaled
-//      output regardless of slider position. Clickable: tapping it
-//      clears any tile override and makes the recommendation the
-//      active selection (highlighted bright). When the user has
-//      overridden via an alternative tile, this button dims to
-//      indicate "not the active pick" but still surfaces what the
-//      curve wanted.
+//   1. Recommended button — the primary tile (TARGET / LOAD / L·R / Why).
+//      It shows the density ladder's resolved next-workout plan when
+//      available, otherwise the curve recommendation. Clickable: tapping
+//      it clears any tile override and makes the recommendation the active
+//      selection (highlighted bright). When the user has overridden via an
+//      alternative tile, this button dims but still surfaces the curve pick.
 //   2. Cookedness slider — "How cooked today?" (0–10, defaults to fresh).
 //      Scales the prescribed LOAD per-grip via exp(-β·c) without
 //      changing which zone the engine picks. Upserted to daily_state
@@ -60,7 +58,7 @@ import { decisiveWhy } from "../../model/coachNotes.js";
 import { capacityMultiplier } from "../../model/fatigueBeta.js";
 import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import {
-  computeDensityLadder,
+  computeDensityLadder, resolveDensityLadderLoads,
   LADDER_MAX_REPS, LADDER_MIN_REPS, LADDER_LOAD_STEP_FRAC,
   LADDER_COLLAPSE_STEP_FRAC,
 } from "../../model/densityLadder.js";
@@ -168,19 +166,25 @@ export function SessionPlanCard({
   // carry into Micro silently.
   useEffect(() => { setOverrideZone(null); }, [grip]);
 
-  // ── Density ladder for the active (grip, zone) ─────────────
-  // Rep-count progression at constant load, gated by the previous
-  // session's LAST-rep duration (see model/densityLadder.js). Non-null
-  // whenever this (grip, zone) has been trained before — in that case
-  // the ladder pins the previous session's T + load and prescribes the
-  // rep count, while the engine still owns WHICH zone gets recommended
-  // (its coverage/staleness/focus logic is unchanged). Brand-new
-  // (grip, zone) combos fall through to the curve-fit defaults.
+  // ── Density ladder for the active (grip, zone) ───────────────
+  // Next-workout progression at constant load, gated by the previous
+  // session's first/last reps and completeness (see densityLadder.js).
+  // Non-null whenever this (grip, zone) has been trained before — in
+  // that case the ladder pins T, resolves the next load, and prescribes
+  // the rep count, while the engine still owns WHICH zone gets
+  // recommended. New (grip, zone) combos use the curve-fit defaults.
+  const expectedHands = useMemo(
+    () => hand === "Both" ? ["L", "R"] : [hand === "R" ? "R" : "L"],
+    [hand]
+  );
   const ladder = useMemo(
     () => (grip && activeZone)
-      ? computeDensityLadder(history, grip, activeZone, { fatigueModel })
+      ? computeDensityLadder(history, grip, activeZone, {
+          fatigueModel,
+          expectedHands,
+        })
       : null,
-    [history, grip, activeZone, fatigueModel]
+    [history, grip, activeZone, fatigueModel, expectedHands]
   );
 
   // ── Per-zone tiles (with per-grip cookedness scale-down) ─────────
@@ -222,6 +226,25 @@ export function SessionPlanCard({
     ? activeRow?.T
     : (rec?.T ?? activeRow?.T);
   const activeT = ladder?.T ?? curveT;
+  // A first-rep miss removes that hand's old pin from the ladder.
+  // Re-fit at the same T using the now-complete session, then resolve
+  // the final next-workout loads with a guaranteed modest reduction
+  // if the curve itself did not move down. Missing hands from an
+  // incomplete Both-mode session also use their current curve load.
+  const ladderCurveLoadByHand = useMemo(() => {
+    if (!ladder || !(activeT > 0)) return null;
+    const out = {};
+    for (const h of expectedHands) {
+      if (Number(ladder.loadByHand?.[h]) > 0) continue;
+      const p = prescription(history, h, grip, activeT, { freshMap, threeExpPriors });
+      if (p?.value > 0) out[h] = p.value;
+    }
+    return out;
+  }, [ladder, activeT, expectedHands, history, grip, freshMap, threeExpPriors]);
+  const ladderPlanLoadByHand = useMemo(
+    () => resolveDensityLadderLoads(ladder, ladderCurveLoadByHand),
+    [ladder, ladderCurveLoadByHand]
+  );
   // Per-hand load values used to feed a separate "active TARGET/LOAD"
   // big-numbers panel — that panel was retired May 2026 since the
   // Recommended button (above) and the highlighted alternative tile
@@ -262,10 +285,10 @@ export function SessionPlanCard({
       targetTime: activeT,
       repsPerSet: reps,
       restTime: rest,
-      ladderLoadByHand: ladder?.loadByHand ?? null,
+      ladderLoadByHand: ladder ? ladderPlanLoadByHand : null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeZone, activeT, reps, rest, ladder]);
+  }, [activeZone, activeT, reps, rest, ladder, ladderPlanLoadByHand]);
 
   // ── Empty / loading states ───────────────────────────────────
   if (!grip) {
@@ -305,21 +328,30 @@ export function SessionPlanCard({
     const lb = ladder.basis;
     const lMult = capacityMultiplier(fatigueModel, grip, cooked);
     const loadStr = ["L", "R"]
-      .filter(h => ladder.loadByHand[h] != null)
-      .map(h => `${h} ${fmtW(ladder.loadByHand[h] * lMult, unit)}`)
+      .filter(h => ladderPlanLoadByHand?.[h] != null)
+      .map(h => `${h} ${fmtW(ladderPlanLoadByHand[h] * lMult, unit)}`)
       .join(" / ");
-    // Re-pin guard + engine-bounds receipts (July 2026): say so when a
-    // hand was handed back to the engine or its pin was clamped —
-    // otherwise "same load" would misdescribe the numbers on screen.
     const notes = [];
-    const dropped = Object.keys(lb.droppedByHand || {});
-    if (dropped.length) {
-      notes.push(`${dropped.join("+")} re-prescribed by the engine (rep 1 fell short of ${ladder.T}s last time)`);
-    }
     if (Object.keys(lb.boundedByHand || {}).length) {
       notes.push("pin capped by the engine's load ceiling");
     }
+    const collapsedHands = Object.keys(lb.collapseByHand || {});
+    if (collapsedHands.length && ladder.decision !== "down_step") {
+      notes.push(`${collapsedHands.join("+")} load also stepped down after recovery collapse`);
+    }
     const suffix = notes.length ? ` — ${notes.join("; ")}` : "";
+    if (ladder.decision === "recalibrate") {
+      const misses = lb.shortfallHands
+        .map(h => `${h} rep 1 ${lb.firstRepSecByHand[h]}s`)
+        .join(", ");
+      return `ladder: ${misses} missed the ${lb.firstRepTargetSec}s minimum for a ${ladder.T}s target → next workout lowers load (${loadStr} ${unit}) and repeats ${ladder.reps} reps${suffix}`;
+    }
+    if (ladder.decision === "incomplete") {
+      const detail = lb.missingHands.length > 0
+        ? `missing ${lb.missingHands.join("/")}`
+        : "uneven rep counts";
+      return `ladder: last workout incomplete (${detail}) → repeat ${ladder.reps} reps, no advance (${loadStr} ${unit})${suffix}`;
+    }
     if (ladder.decision === "down_step") {
       // Collapse down-step (July 2026): reps 2+ decayed below the
       // personal recovery model's forecast last time, so the load
@@ -432,13 +464,12 @@ export function SessionPlanCard({
         </div>
       </div>
 
-      {/* Recommended Session — pure-math curve pick. Always shows the
-          engine's unscaled output (TARGET / LOAD / why) regardless of
-          where the RPE slider is set or whether the user has overridden
-          via a tile click. The cookedness slider scales the displayed
-          load here AND on the per-zone tiles below AND the load the
-          runner stamps onto each rep — single multiplier, three render
-          sites, so what the user sees matches what they'll lift. */}
+      {/* Recommended Session. When following the recommendation and a
+          density ladder is active, show the resolved NEXT-workout T/load
+          that the runner will actually use. With no ladder (or while an
+          alternative tile is selected), retain the continuous engine's
+          recommendation. The cookedness multiplier remains identical
+          between display and runner. */}
       {(() => {
         const recCfg = GOAL_CONFIG[rec.zone] ?? { color: C.blue, label: rec.zone, emoji: "🎯" };
         // Per-grip cookedness multiplier — same factor the tiles below
@@ -456,9 +487,9 @@ export function SessionPlanCard({
         const recLadder = isOverridden ? null : ladder;
         const recT = recLadder ? recLadder.T : rec.T;
         let recLoadKg, recL, recR;
-        if (recLadder) {
-          recL = recLadder.loadByHand?.L != null ? recLadder.loadByHand.L * recMult : null;
-          recR = recLadder.loadByHand?.R != null ? recLadder.loadByHand.R * recMult : null;
+        if (recLadder && ladderPlanLoadByHand) {
+          recL = ladderPlanLoadByHand.L != null ? ladderPlanLoadByHand.L * recMult : null;
+          recR = ladderPlanLoadByHand.R != null ? ladderPlanLoadByHand.R * recMult : null;
           const vals = [recL, recR].filter(v => v != null);
           recLoadKg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
         } else {
