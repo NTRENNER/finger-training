@@ -577,10 +577,13 @@ export function SessionPlanCard({
             {cooked === 0
               ? "fresh — no scale-down"
               : `cooked ${cooked}/10`}
-            {cooked > 0 && fatigueModel && grip && (() => {
-              const b = fatigueModel[grip]?.beta;
-              if (!(b > 0)) return null;
-              const mult = Math.exp(-b * cooked);
+            {cooked > 0 && grip && (() => {
+              // Report the multiplier ACTUALLY applied (fixed manual
+              // scaling — see fatigueBeta.capacityMultiplier). The old
+              // label computed exp(-β·cooked) directly and advertised
+              // a discount that was never applied while scaling was
+              // disabled (July 2026).
+              const mult = capacityMultiplier(fatigueModel, grip, cooked);
               const pct = Math.round((1 - mult) * 100);
               if (pct < 1) return null;
               return (

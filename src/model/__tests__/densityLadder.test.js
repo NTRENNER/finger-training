@@ -131,23 +131,24 @@ describe("computeDensityLadder", () => {
   });
 
   test("cooked sessions pin the FRESH-EQUIVALENT load (no compounding scale-down)", () => {
-    // β = 0.02, cooked 5 → recorded load was fresh × exp(-0.1) ≈ 0.905×.
-    // The ladder must divide that back out, or consecutive cooked
-    // sessions would ratchet the pin downward.
-    const beta = 0.02;
-    const fatigueModel = { Crusher: { beta } };
+    // Fixed manual scaling (July 2026): a session recorded at cooked 5
+    // ran at fresh × capacityMultiplier(·, ·, 5). The ladder must
+    // divide that back out, or consecutive cooked sessions would
+    // ratchet the pin downward (each pin inheriting the previous
+    // discount, then getting discounted again). Assert against
+    // capacityMultiplier itself so the test tracks the fixed rate.
+    const fatigueModel = { Crusher: { beta: 0.02 } }; // beta is ignored by the multiplier
+    const mult = capacityMultiplier(fatigueModel, "Crusher", 5);
     const fresh = 60;
-    const recorded = fresh * Math.exp(-beta * 5);
+    const recorded = fresh * mult;
     const hist = session({
       id: "s1", date: "2026-06-01", T: 40, loadKg: recorded,
       times: { L: [40, 24, 16, 12] }, cooked: 5,
     });
     const out = computeDensityLadder(hist, "Crusher", "power", { fatigueModel });
-    expect(out.loadByHand.L).toBeCloseTo(recorded, 0); // July 2026: cookedness no longer de-cooks the pin
-    // Without a model, capacityMultiplier falls back to DEFAULT_BETA —
-    // the ladder de-cooks with the same default the scale-down side
-    // uses, keeping the round-trip symmetric. Assert against the
-    // function itself so the test tracks the fallback.
+    expect(out.loadByHand.L).toBeCloseTo(fresh, 0);   // de-cooked back to fresh-equivalent
+    // Model-less call: the multiplier is model-independent now, so the
+    // round-trip must be identical with no fatigueModel at all.
     const raw = computeDensityLadder(hist, "Crusher", "power");
     expect(raw.loadByHand.L).toBeCloseTo(
       recorded / capacityMultiplier(null, "Crusher", 5), 0

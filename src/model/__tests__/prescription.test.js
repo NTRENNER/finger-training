@@ -15,6 +15,7 @@ import {
   demonstratedCapacityKg,
 } from "../prescription.js";
 import { buildThreeExpPriors } from "../threeExp.js";
+import { capacityMultiplier } from "../fatigueBeta.js";
 
 // ─────────────────────────────────────────────────────────────
 // effectiveLoad / loadedWeight / repKey
@@ -193,10 +194,11 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     expect(freshLoadFor({ avg_force_kg: 30 }, null)).toBe(30);
   });
 
-  test("cookedness no longer scales the fresh load (disabled July 2026)", () => {
+  test("cookedness de-cooks the fresh load at the FIXED manual rate (July 2026)", () => {
     // Same rep on two different dates — one tagged cooked, one fresh.
-    // Cookedness is disabled as a load rescaler, so both report their
-    // logged load unchanged (no de-cook).
+    // Fixed manual scaling: the cooked rep's load divides by
+    // capacityMultiplier (beta-independent), recovering the
+    // fresh-equivalent the curve fit should see.
     const history = [
       { id: "fresh", hand: "L", grip: "Crusher",
         session_id: "s_fresh", set_num: 1, rep_num: 1,
@@ -207,14 +209,17 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
         avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
         date: "2026-05-02" },
     ];
-    const fatigueModel = { Crusher: { beta: 0.5 } }; // even a big beta must not move loads
+    const fatigueModel = { Crusher: { beta: 0.5 } }; // beta must NOT drive the rate
     const cookedByDate = { "2026-05-02": 10 };
     const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
     expect(map.get("id:fresh").fresh).toBeCloseTo(25, 4);
-    expect(map.get("id:cooked").fresh).toBeCloseTo(25, 4); // no de-cook
+    expect(map.get("id:cooked").fresh)
+      .toBeCloseTo(25 / capacityMultiplier(fatigueModel, "Crusher", 10), 4); // 25/0.75
+    // The old runaway (exp(-0.5*10) -> 148x) is structurally impossible:
+    expect(map.get("id:cooked").fresh).toBeLessThanOrEqual(25 * 3); // MAX_FRESH_INFLATION
   });
 
-  test("neither session_cooked nor cookedByDate moves the fresh load anymore (July 2026)", () => {
+  test("session_cooked overrides day-level cooked; both use the fixed rate (July 2026)", () => {
     const history = [
       { id: "morning", hand: "L", grip: "Crusher",
         session_id: "s_morning", set_num: 1, rep_num: 1,
@@ -228,8 +233,12 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     const fatigueModel = { Crusher: { beta: 0.5 } };
     const cookedByDate = { "2026-05-02": 8 };
     const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
-    expect(map.get("id:morning").fresh).toBeCloseTo(25, 4);
-    expect(map.get("id:evening").fresh).toBeCloseTo(25, 4);
+    // morning: per-session override (cooked 2) wins over the day value.
+    expect(map.get("id:morning").fresh)
+      .toBeCloseTo(25 / capacityMultiplier(fatigueModel, "Crusher", 2), 4);
+    // evening: session_cooked null falls back to the day value (cooked 8).
+    expect(map.get("id:evening").fresh)
+      .toBeCloseTo(25 / capacityMultiplier(fatigueModel, "Crusher", 8), 4);
   });
 
   test("session_cooked: 0 explicitly suppresses day-level compensation", () => {

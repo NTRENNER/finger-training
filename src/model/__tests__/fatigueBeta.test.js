@@ -8,6 +8,8 @@ import {
   updateBeta,
   DEFAULT_BETA,
   BETA_MAX,
+  COOKED_SCALE_PER_POINT,
+  COOKED_SCALE_FLOOR,
 } from "../fatigueBeta.js";
 
 describe("defaultFatigueModel", () => {
@@ -44,7 +46,11 @@ describe("currentBeta", () => {
   });
 });
 
-describe("capacityMultiplier (cookedness disabled as a load rescaler, July 2026)", () => {
+describe("capacityMultiplier (fixed manual scaling, July 2026)", () => {
+  // Third regime: -COOKED_SCALE_PER_POINT per cooked point, floored at
+  // COOKED_SCALE_FLOOR. Deliberate, transparent, no learner in the
+  // loop -- the learned beta is a diagnostic only and must not move
+  // the multiplier.
   test("returns 1.0 at cooked = 0 (fresh)", () => {
     const m = defaultFatigueModel();
     expect(capacityMultiplier(m, "Crusher", 0)).toBeCloseTo(1.0);
@@ -57,17 +63,35 @@ describe("capacityMultiplier (cookedness disabled as a load rescaler, July 2026)
     expect(capacityMultiplier(m, "Crusher", undefined)).toBeCloseTo(1.0);
   });
 
-  test("returns 1.0 for ANY cookedness -- loads are no longer rescaled", () => {
-    const m = { Crusher: { beta: 0.10 }, Micro: { beta: 0.5 } };
-    for (const c of [0, 2, 4, 6, 8, 10]) {
-      expect(capacityMultiplier(m, "Crusher", c)).toBe(1.0);
-      expect(capacityMultiplier(m, "Micro",   c)).toBe(1.0);
+  test("scales linearly at the fixed per-point rate", () => {
+    const m = defaultFatigueModel();
+    for (const c of [1, 2, 4, 6, 8]) {
+      expect(capacityMultiplier(m, "Crusher", c))
+        .toBeCloseTo(1 - COOKED_SCALE_PER_POINT * c, 6);
     }
+    // cooked 7 (the 2026-07-22 evening) -> -17.5%
+    expect(capacityMultiplier(m, "Crusher", 7)).toBeCloseTo(0.825, 6);
   });
 
-  test("ignores beta entirely -- even a large beta doesn't move the load", () => {
-    expect(capacityMultiplier({ Crusher: { beta: 0.5 } }, "Crusher", 10)).toBe(1.0);
-    expect(capacityMultiplier(defaultFatigueModel(), "MysteryGrip", 5)).toBe(1.0);
+  test("floors at COOKED_SCALE_FLOOR and clamps out-of-range cooked", () => {
+    const m = defaultFatigueModel();
+    expect(capacityMultiplier(m, "Crusher", 10)).toBeCloseTo(COOKED_SCALE_FLOOR, 6);
+    expect(capacityMultiplier(m, "Crusher", 25)).toBeCloseTo(COOKED_SCALE_FLOOR, 6); // clamped to 10
+    expect(capacityMultiplier(m, "Crusher", -3)).toBeCloseTo(1.0);                   // clamped to 0
+  });
+
+  test("ignores the learned beta entirely -- runaway beta cannot move loads", () => {
+    // Same cooked, wildly different betas: identical multiplier. The
+    // learned-beta regime's failure mode (beta ~0.46 -> up-to-3x
+    // corrections) must be structurally impossible, not just tuned away.
+    const hot  = { Crusher: { beta: 0.5 }, Micro: { beta: 0.46 } };
+    const cold = { Crusher: { beta: 0.0009 } };
+    expect(capacityMultiplier(hot, "Crusher", 6))
+      .toBeCloseTo(capacityMultiplier(cold, "Crusher", 6), 9);
+    expect(capacityMultiplier(hot, "Micro", 6))
+      .toBeCloseTo(capacityMultiplier(null, "MysteryGrip", 6), 9);
+    // And the multiplier can never approach the old exp(-0.46*7)=0.04 disaster:
+    expect(capacityMultiplier(hot, "Micro", 10)).toBeGreaterThanOrEqual(COOKED_SCALE_FLOOR);
   });
 });
 
