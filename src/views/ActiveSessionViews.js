@@ -575,6 +575,27 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
         </div>
       </Card>
 
+      {/* OVER-PULL WARNING (July 2026, per Nathan). Spring/anchor
+          setups let the user pull whatever they like — and pulling
+          well over the prescribed load is what quietly collapsed the
+          June 2026 sessions (opener at +18% looks strong, then reps
+          2+ die at 15-30s and the session's stimulus lands in the
+          wrong zone). Flag it during rest, when there's still time to
+          ease off for the remaining reps. Threshold 110%: the same
+          ~10% grid the ladder's steps use; ordinary Tindeq noise sits
+          well inside it. */}
+      {lastRep && lastRep.prescribedWeight > 0 && lastRep.avgForce > lastRep.prescribedWeight * 1.1 && !isLastRepInSet && (
+        <Card style={{ borderColor: C.orange }}>
+          <div style={{ fontSize: 13, color: C.orange, fontWeight: 700, marginBottom: 4 }}>
+            Pulling {Math.round((lastRep.avgForce / lastRep.prescribedWeight - 1) * 100)}% over prescription
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+            Avg {fmtW(lastRep.avgForce, unit)} {unit} vs {fmtW(lastRep.prescribedWeight, unit)} {unit} prescribed.
+            Heavier feels strong on rep 1, but the next reps won't recover in {restSeconds}s — ease off toward the prescription to keep the set in its zone.
+          </div>
+        </Card>
+      )}
+
       {lastRep && (
         <Card>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Last rep result</div>
