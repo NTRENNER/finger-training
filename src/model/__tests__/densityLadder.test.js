@@ -58,9 +58,11 @@ describe("computeDensityLadder", () => {
   });
 
   test("source protocol: last rep under the gate → repeat the same reps", () => {
+    // Decay stays conformant with the recovery model (C ≈ 0.79) so the
+    // collapse down-step doesn't fire — this test is about the GATE.
     const hist = session({
       id: "s1", date: "2026-06-01", T: 40, loadKg: 58.8,
-      times: { L: [40.2, 22.0, 12.3, 7.4] },    // last rep 7.4s < 10s
+      times: { L: [40.2, 22.0, 15.0, 9.5] },    // last rep 9.5s < 10s
     });
     const out = computeDensityLadder(hist, "Crusher", "power");
     expect(out.decision).toBe("repeat");
@@ -106,12 +108,12 @@ describe("computeDensityLadder", () => {
       id: "s1", date: "2026-06-01", T: 40, loadKg: 58.8,
       times: {
         L: [40.2, 24.0, 16.5, 12.1],             // L passes (12.1 ≥ 10)
-        R: [38.0, 20.0, 12.0, 8.2],              // R fails  (8.2 < 10)
+        R: [38.0, 21.0, 14.5, 9.0],              // R fails  (9.0 < 10), decay conformant
       },
     });
     const out = computeDensityLadder(hist, "Crusher", "power");
     expect(out.decision).toBe("repeat");
-    expect(out.basis.lastRepSec).toBeCloseTo(8.2, 1);
+    expect(out.basis.lastRepSec).toBeCloseTo(9.0, 1);
     // Both hands keep their own pinned loads.
     expect(out.loadByHand.L).toBeCloseTo(58.8, 1);
     expect(out.loadByHand.R).toBeCloseTo(58.8, 1);
@@ -122,7 +124,7 @@ describe("computeDensityLadder", () => {
       ...session({ id: "s1", date: "2026-06-01", T: 40, loadKg: 50,
         times: { L: [40, 20, 12, 11] } }),       // older: would advance
       ...session({ id: "s2", date: "2026-06-05", T: 40, loadKg: 58.8,
-        times: { L: [40, 18, 10, 6] } }),        // newer: fails gate
+        times: { L: [40, 21, 15, 9.8] } }),      // newer: fails gate, decay conformant
     ];
     const out = computeDensityLadder(hist, "Crusher", "power");
     expect(out.decision).toBe("repeat");
@@ -209,11 +211,11 @@ describe("computeDensityLadder", () => {
       times: { L: times },
     }).map(r => ({ ...r, id: `${r.id}-set${setNum}`, set_num: setNum }));
     const hist = [
-      ...set(2, [36, 20, 12, 8]),    // last set FAILS the 10s gate…
+      ...set(2, [36, 20, 14, 9]),    // last set FAILS the 10s gate…
       ...set(1, [40, 26, 18, 12]),   // …listed after set 1 passed it
     ];
     const out = computeDensityLadder(hist, "Crusher", "power");
-    expect(out.basis.lastRepSec).toBeCloseTo(8, 1);
+    expect(out.basis.lastRepSec).toBeCloseTo(9, 1);
     expect(out.decision).toBe("repeat");
     expect(out.reps).toBe(4);
     expect(out.loadByHand.L).toBeCloseTo(50, 1);
@@ -235,7 +237,7 @@ describe("computeDensityLadder", () => {
   });
 });
 
-// ── Re-pin guard + engine bounds (July 2026) ──────────────────────
+// ── Re-pin guard + engine bounds (July 2026) ──────────────────
 // The 2026-07-20 and 07-22 endurance misses were ladder pins, not
 // engine output: the pin re-played a failed session's rep-1 load
 // (which, via effectiveLoad, was the over-pulled avg force — so the
@@ -342,5 +344,75 @@ describe("re-pin guard + engine bounds", () => {
     expect(out).not.toBeNull();
     expect(out.loadByHand.L).toBeCloseTo(24, 1);
     expect(out.basis.boundedByHand.L).toBeUndefined();
+  });
+
+  // ── COLLAPSE DOWN-STEP (July 2026) ──────────────────────
+  // Reps 2+ decaying far below the personal recovery model's forecast
+  // (given the session's own opener) = the load was too heavy to
+  // recover between rests, even though rep 1 looked fine. Backtested:
+  // re-pinning that load repeats the collapse; −10% restores decay
+  // conformance. See densityLadder.js for the numbers.
+
+  test("a collapsed session (reps 2+ far below forecast) pins 10% lighter and holds the rung", () => {
+    // Opener over target (46s @ 40s) — passes the re-pin guard — but
+    // later reps crater to ~35% of the model's forecast (C ≈ 0.35).
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 60,
+      times: { L: [46, 10, 7, 5] },
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out.decision).toBe("down_step");
+    expect(out.reps).toBe(4);                          // rung held, not advanced
+    expect(out.loadByHand.L).toBeCloseTo(54, 1);       // 60 × 0.9
+    expect(out.basis.collapseByHand.L.from).toBeCloseTo(60, 1);
+    expect(out.basis.collapseByHand.L.to).toBeCloseTo(54, 1);
+    expect(out.basis.collapseByHand.L.C).toBeLessThan(0.75);
+  });
+
+  test("a collapse overrides step_load — no +5% off a session that wasn't absorbed", () => {
+    // Six reps with the last over the gate (would top out → +5%), but
+    // the middle reps crater far below forecast.
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 60,
+      times: { L: [46, 10, 6, 5, 5, 11] },   // last 11s ≥ 10s gate, C ≪ 0.75
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out.decision).toBe("down_step");
+    expect(out.loadByHand.L).toBeCloseTo(54, 1);       // −10%, not +5%
+  });
+
+  test("only the collapsed hand steps down; a conforming hand keeps its pin", () => {
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 60,
+      times: {
+        L: [46, 10, 7, 5],            // collapsed (C ≈ 0.35)
+        R: [40.2, 24, 16.5, 12.1],    // conformant (C ≈ 0.90)
+      },
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out.decision).toBe("down_step");
+    expect(out.loadByHand.L).toBeCloseTo(54, 1);
+    expect(out.loadByHand.R).toBeCloseTo(60, 1);
+    expect(out.basis.collapseByHand.R).toBeUndefined();
+  });
+
+  test("opener shortfall still wins: a dropped hand is re-prescribed, not down-stepped", () => {
+    // Rep 1 fails the target → the re-pin guard hands it back to the
+    // engine; the collapse rule must not resurrect a pin for it.
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 60,
+      times: { L: [20, 8, 5, 4] },    // opener 20s ≪ 40s target
+    });
+    expect(computeDensityLadder(hist, "Crusher", "power")).toBeNull();  // only hand dropped
+  });
+
+  test("too few later reps → no conformance judgment, no down-step", () => {
+    const hist = session({
+      id: "s1", date: "2026-06-01", T: 40, loadKg: 60,
+      times: { L: [46, 5] },          // one later rep — below MIN_LATER_REPS
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out.decision).not.toBe("down_step");
+    expect(out.loadByHand.L).toBeCloseTo(60, 1);
   });
 });
