@@ -384,7 +384,16 @@ export function useSessionRunner({
                             : null,
     };
 
-    setLastRepResult({ actualTime: adjTime, avgForce, peakForce, targetTime: config.targetTime });
+    // prescribedWeight rides along for the RestView's over-pull check
+    // (July 2026, per Nathan): with a spring/anchor setup the user
+    // controls the pull, and pulling well over prescription is what
+    // collapsed the June sessions (e.g. 2026-06-19: 70.5 lb prescribed,
+    // 83 lb pulled, reps 2+ died at 15-30s).
+    setLastRepResult({
+      actualTime: adjTime, avgForce, peakForce,
+      targetTime: config.targetTime,
+      prescribedWeight: roundedPrescribed,
+    });
     setSessionReps(reps => [...reps, repRecord]);
     addReps([repRecord]);
 
