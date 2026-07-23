@@ -31,7 +31,7 @@ import { computeDensityLadder } from "./densityLadder.js";
 import { deloadStatus, buildDeloadGuidance } from "./deload.js";
 import { ZONE_KEYS, ZONE_REF_T, zoneOf } from "./zones.js";
 import { gradeRank, weekKey } from "../lib/climbing-grades.js";
-import { effectiveLoad } from "./load.js";
+import { effectiveLoad, isOpenerRep } from "./load.js";
 import { maxTestStaleness } from "./peakForce.js";
 // Behavioral notes (adherence vs own cadence, acute:chronic volume
 // ramp) migrated INTO the check-in from the Session Plan card
@@ -343,8 +343,15 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   staleZones.sort((a, b) => b.days - a.days);
 
   // ── Performance ratio (actual/target), 28d vs prior 28d ──
+  // OPENERS ONLY (July 2026, per Nathan): rep 1 of set 1 — the fresh
+  // rep, shared predicate with the Weekly hold-ratio chart (isOpenerRep,
+  // load.js). Pooling all reps made the mean track protocol mix, not
+  // capacity: density-ladder reps 2+ fall short of target BY DESIGN
+  // (short rests), so high-rep weeks read 0.3-0.6 and "targets are
+  // winning" fired off ladder structure rather than performance.
   const ratioReps = (from, to) => fingerReps.filter(r =>
-    r.date >= from && r.date <= to && Number(r.target_duration) > 0 && effectiveLoad(r) > 0);
+    r.date >= from && r.date <= to && Number(r.target_duration) > 0 &&
+    effectiveLoad(r) > 0 && isOpenerRep(r));
   const meanRatio = (rs) => rs.length
     ? sum(rs.map(r => r.actual_time_s / r.target_duration)) / rs.length : null;
   const cur = ratioReps(d28, refDate);
@@ -596,7 +603,7 @@ export function assembleCheckIn(signals) {
   const moving = digest.points.filter(p => p.kind === "win").map(p => p.text);
   if (perf && perf.ratioNow != null && perf.ratioPrev != null && perf.n >= 10) {
     const dir = perf.ratioNow - perf.ratioPrev;
-    if (dir >= 0.05) moving.push(`You're outlasting targets more: avg hold ratio ${perf.ratioPrev} → ${perf.ratioNow} over the last month — the curve amplitude is lifting.`);
+    if (dir >= 0.05) moving.push(`You're outlasting targets more: opening-rep hold ratio ${perf.ratioPrev} → ${perf.ratioNow} over the last month — the curve amplitude is lifting.`);
   }
   if (perf && perf.overshoots >= 3) moving.push(`${perf.overshoots} reps beat their target by 40%+ this month — the engine will chase those with heavier prescriptions.`);
   if (deloadBanked) moving.push(deloadBanked);
@@ -635,7 +642,7 @@ export function assembleCheckIn(signals) {
     stuck.push(`${sz.grip} ${sz.zone.replace(/_/g, " ")} hasn't been trained in ${sz.days} days.`);
   }
   if (perf && perf.ratioNow != null && perf.ratioPrev != null && perf.ratioNow - perf.ratioPrev <= -0.05 && perf.n >= 10) {
-    stuck.push(`Hold ratio slipped ${perf.ratioPrev} → ${perf.ratioNow} vs the prior month — targets are winning more often.`);
+    stuck.push(`Opening-rep hold ratio slipped ${perf.ratioPrev} → ${perf.ratioNow} vs the prior month — your fresh reps are ending short of target more often.`);
   }
   if (bw && Math.abs(bw.deltaKg) >= 1) {
     stuck.push(`Body weight moved ${bw.deltaKg > 0 ? "+" : ""}${bw.deltaKg} kg over the month — relative strength numbers shift with it.`);
