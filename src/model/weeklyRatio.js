@@ -10,10 +10,10 @@
 // Metric: for every timed finger rep with a real target and a real
 // load, ratio = actual_time_s / target_duration. 1.0 = held exactly
 // to target; above = outlasting targets (curve amplitude lifting);
-// below = targets winning. Bucketed by Monday-start weekKey; the
-// "all" mode is exactly the check-in perf signal's estimator
-// (weeklyReview.gatherCheckInSignals), just weekly instead of a
-// 28-day window.
+// below = targets winning. Bucketed by Monday-start weekKey. The
+// default "openers" mode reads the same predicate as the check-in's
+// perf signal (weeklyReview.gatherCheckInSignals), just weekly
+// instead of a 28-day window — the two surfaces agree by construction.
 //
 // Rep filter mirrors weeklyReview's ratioReps:
 //   • actual_time_s > 0        (a timed rep actually happened)

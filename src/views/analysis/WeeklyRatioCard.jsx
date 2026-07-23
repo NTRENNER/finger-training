@@ -17,7 +17,9 @@
 // capacity events; the all-reps mean is dragged to 0.3-0.6 in
 // high-rep weeks because density-ladder reps 2+ fall short BY DESIGN
 // (short rests), so it measures protocol mix. "All reps" stays as a
-// toggle — it's the check-in perf signal's estimator.
+// toggle for the protocol view. The check-in's perf signal reads the
+// SAME opener predicate (isOpenerRep, load.js) since July 2026, so
+// chart and coach agree by construction.
 //
 // Instead of a week-scrubbing slider (Nathan's first idea), the whole
 // timeline is visible at once — the trend IS the point — and tapping
@@ -38,7 +40,7 @@ import {
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
-import { buildWeeklyRatio } from "../../model/weeklyRatio.js";
+import { buildWeeklyRatio, rollingMeanSeries } from "../../model/weeklyRatio.js";
 
 const HANDS = ["All", "L", "R"];
 const MODES = [["openers", "Openers"], ["all", "All reps"]];
@@ -57,15 +59,26 @@ export function WeeklyRatioCard({ history = [] }) {
     [history, mode]
   );
 
-  // Chart rows: one field per grip, respecting the hand filter.
-  const rows = useMemo(() => weeks.map((w) => {
-    const row = { week: w.week, label: fmtWeek(w.week) };
+  // Chart rows: raw weekly mean + 3-week rolling mean per grip,
+  // respecting the hand filter. Trend-first (July 2026, per Nathan):
+  // the bold line is the rolling mean so the eye reads direction; raw
+  // weekly means stay visible as faint dots — same convention as the
+  // Recovery trajectory card.
+  const rows = useMemo(() => {
+    const base = weeks.map((w) => {
+      const row = { week: w.week, label: fmtWeek(w.week) };
+      for (const g of grips) {
+        const b = w.byGrip[g];
+        row[g] = b == null ? null : (hand === "All" ? b.mean : b.hands[hand].mean);
+      }
+      return row;
+    });
     for (const g of grips) {
-      const b = w.byGrip[g];
-      row[g] = b == null ? null : (hand === "All" ? b.mean : b.hands[hand].mean);
+      const sm = rollingMeanSeries(base.map((r) => r[g]), 3);
+      base.forEach((r, i) => { r[`${g}_sm`] = sm[i]; });
     }
-    return row;
-  }), [weeks, grips, hand]);
+    return base;
+  }, [weeks, grips, hand]);
 
   // Need at least two weeks with data for a trend to mean anything.
   const dataWeeks = weeks.filter((w) => Object.keys(w.byGrip).length > 0);
@@ -100,8 +113,8 @@ export function WeeklyRatioCard({ history = [] }) {
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
         {mode === "openers"
-          ? <>Each point is that week's mean opening-rep hold ÷ target — the fresh rep of each session, the cleanest capacity signal. </>
-          : <>Each point is that week's mean hold ÷ target across every loaded rep — the check-in's estimator. Ladder reps 2+ run short by design, so this reads lower than Openers in high-rep weeks. </>}
+          ? <>Bold lines are 3-week rolling means of opening-rep hold ÷ target — the fresh rep of each session, the same signal the check-in reads. Faint dots are the raw weekly means. </>
+          : <>Bold lines are 3-week rolling means of hold ÷ target across every loaded rep; faint dots are the raw weekly means. Ladder reps 2+ run short by design, so this reads lower than Openers in high-rep weeks. </>}
         Above the dashed 1.0 line you're outlasting the engine's targets — usually curve amplitude lifting;
         below it, targets are winning. Tap a week for its receipts. Gaps are weeks with no qualifying reps.
       </div>
@@ -127,10 +140,18 @@ export function WeeklyRatioCard({ history = [] }) {
             formatter={(val, name) => [val == null ? "—" : `${val}×`, name]}
             labelFormatter={(l) => `Week of ${l}`}
           />
+          {/* Raw weekly means: faint dots (no line). The click/tooltip
+              targets live here so receipts read the actual week. */}
           {grips.map((g) => (
-            <Line key={g} dataKey={g} stroke={GRIP_COLORS[g] || C.blue} strokeWidth={2.5} connectNulls
-              dot={{ r: 3, fill: GRIP_COLORS[g] || C.blue, stroke: "none" }} activeDot={{ r: 5 }}
-              name={g} isAnimationActive={false} />
+            <Line key={`${g}-raw`} dataKey={g} stroke="none" connectNulls
+              dot={{ r: 2.5, fill: GRIP_COLORS[g] || C.blue, fillOpacity: 0.45, stroke: "none" }}
+              activeDot={{ r: 5 }}
+              name={`${g} (weekly)`} isAnimationActive={false} />
+          ))}
+          {/* 3-week rolling means: the bold trend lines. */}
+          {grips.map((g) => (
+            <Line key={g} dataKey={`${g}_sm`} stroke={GRIP_COLORS[g] || C.blue} strokeWidth={3} connectNulls
+              dot={false} name={g} isAnimationActive={false} />
           ))}
         </ComposedChart>
       </ResponsiveContainer>
