@@ -568,6 +568,52 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
   return best;
 }
 
+// ── Shared load bounds (July 2026) ────────────────────────────────
+// Every bound the engine puts on a trainable load, packaged so that
+// OTHER load surfaces (the density-ladder pin, which deliberately does
+// NOT call prescription()) can apply the exact same physics:
+//   - demonstrated-capacity FLOOR (lift)      — demonstratedCapacityKg
+//   - peak-force CEILING (clamp)              — PEAK_CAP_FRACTION × best peak
+//   - endurance-tail CEILING for long targets — enduranceCeilingKg, gated
+//     to the data-supported range and never below the floor
+// Extracted verbatim from prescription(), which now consumes this
+// helper — behavior there is unchanged. capValue(v) applies
+// floor → peak cap → endurance ceiling; wasEnduranceCeiled(v) reports
+// whether the endurance ceiling (not the peak cap) is what bound v.
+export function loadBounds(history, hand, grip, targetDuration, opts = {}) {
+  const { referenceDate = null, enduranceCeiling = true } = opts;
+  const peakMeasurement = bestAvailablePeakMeasurement(history, hand, grip, referenceDate);
+  const bestPeakKg = peakMeasurement?.kg ?? null;
+  const peakCapKg = bestPeakKg != null
+    ? Math.round(bestPeakKg * PEAK_CAP_FRACTION * 10) / 10
+    : null;
+  const peakCapStale = peakMeasurement?.stale === true;
+  const floorKg = demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate);
+  // Endurance ceiling scope: only within the data-supported range (see
+  // the block comment at the prescription() call site below).
+  let longestMeasuredHoldT = 0;
+  for (const r of history || []) {
+    if (!r || r.hand !== hand || r.grip !== grip) continue;
+    if (!(r.rep_num == null || r.rep_num === 1)) continue;
+    if (!isMeasuredLoadRep(r) || isSeedArtifactRep(r)) continue;
+    if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
+    if (r.actual_time_s > longestMeasuredHoldT) longestMeasuredHoldT = r.actual_time_s;
+  }
+  const endCeilKg = (enduranceCeiling && longestMeasuredHoldT > 0
+      && targetDuration <= longestMeasuredHoldT * EXTRAP_FLOOR_MULT)
+    ? enduranceCeilingKg(history, hand, grip, targetDuration, referenceDate)
+    : null;
+  const capBase = (v) => capLoad(floorKg != null ? Math.max(v, floorKg) : v, peakCapKg);
+  const capValue = (v) => {
+    const base = capBase(v);
+    if (endCeilKg == null) return base;
+    const ec = floorKg != null ? Math.max(endCeilKg, floorKg) : endCeilKg;
+    return Math.min(base, ec);
+  };
+  const wasEnduranceCeiled = (v) => endCeilKg != null && capValue(v) < capBase(v) - 1e-9;
+  return { peakCapKg, peakCapStale, floorKg, endCeilKg, capBase, capValue, wasEnduranceCeiled };
+}
+
 export function prescription(history, hand, grip, targetDuration, opts = {}) {
   if (!history || !hand || !grip || !targetDuration) return null;
   const { freshMap = null, threeExpPriors = null, referenceDate = null, zoneAnchor = false, enduranceCeiling = true } = opts;
@@ -655,18 +701,13 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // measurement; if the 90-day window is empty, keep the best qualifying
   // historical measurement as a physical ceiling instead of silently
   // falling back to 200 kg. Manual histories still have no peak cap.
-  const peakMeasurement = bestAvailablePeakMeasurement(history, hand, grip, referenceDate);
-  const bestPeakKg = peakMeasurement?.kg ?? null;
-  const peakCapKg = bestPeakKg != null
-    ? Math.round(bestPeakKg * PEAK_CAP_FRACTION * 10) / 10
-    : null;
-  const peakCapStale = peakMeasurement?.stale === true;
+  //
   // Demonstrated-capacity FLOOR (July 2026) — see demonstratedCapacityKg.
   // Applied inside capValue as floor-then-cap so every return path is
   // bounded to [floor, ceiling]. A sustained avg is under instantaneous
   // peak, so the floor can't legitimately exceed the peak ceiling; if a
   // stale/odd data point ever makes it, the ceiling still wins.
-  const floorKg = demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate);
+  //
   // Endurance ceiling (July 2026) — a power-law tail bound that only exists
   // for long targets (T >= CEIL_MIN_T); null for short/mid. It caps the
   // curve x anchor product so a short-zone amplitude anchor can't inflate a
@@ -679,29 +720,11 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // (below) governs instead, so the two long-hold mechanisms never fight over
   // the same target. For real histories the trained targets (<= the longest
   // hold) are always in range; only absurd targets far past any hold defer.
-  let longestMeasuredHoldT = 0;
-  for (const r of history) {
-    if (!r || r.hand !== hand || r.grip !== grip) continue;
-    if (!(r.rep_num == null || r.rep_num === 1)) continue;
-    if (!isMeasuredLoadRep(r) || isSeedArtifactRep(r)) continue;
-    if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
-    if (r.actual_time_s > longestMeasuredHoldT) longestMeasuredHoldT = r.actual_time_s;
-  }
-  const endCeilKg = (enduranceCeiling && longestMeasuredHoldT > 0
-      && targetDuration <= longestMeasuredHoldT * EXTRAP_FLOOR_MULT)
-    ? enduranceCeilingKg(history, hand, grip, targetDuration, referenceDate)
-    : null;
-  // Floor (lift) then peak ceiling — the demonstrated-capacity + physical bounds.
-  const capBase = (v) => capLoad(floorKg != null ? Math.max(v, floorKg) : v, peakCapKg);
-  // Full bounds: capBase, then the endurance ceiling (raised to the floor so
-  // the ceiling can't undercut demonstrated capacity).
-  const capValue = (v) => {
-    const base = capBase(v);
-    if (endCeilKg == null) return base;
-    const ec = floorKg != null ? Math.max(endCeilKg, floorKg) : endCeilKg;
-    return Math.min(base, ec);
-  };
-  const wasEnduranceCeiled = (v) => endCeilKg != null && capValue(v) < capBase(v) - 1e-9;
+  //
+  // All three live in loadBounds() (shared with the density-ladder pin).
+  const {
+    peakCapKg, peakCapStale, floorKg, endCeilKg, capValue, wasEnduranceCeiled,
+  } = loadBounds(history, hand, grip, targetDuration, { referenceDate, enduranceCeiling });
 
   // Try the three-exp curve fit. Requires a per-grip prior to anchor
   // the shrinkage; without one, small-N fits collapse onto degenerate
