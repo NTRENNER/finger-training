@@ -14,7 +14,7 @@
 //     light-but-recovered week reads as good rest, not as slacking.
 //   • finger progress  → buildGripImprovement (curve Δ% vs baseline),
 //     computeDensityLadder (earned load bumps).
-//   • climbing progress → gradeRank on clean sends, per discipline.
+//   • climbing progress → gradeRank on clean sends, per venue/wall context.
 //   • staleness        → last-trained gap per grip / support workout.
 //
 // "What changed THIS week" is derived by running a signal on full
@@ -30,9 +30,10 @@ import { buildGripBaselines, buildGripEstimates, buildGripImprovement } from "./
 import { computeDensityLadder } from "./densityLadder.js";
 import { deloadStatus, buildDeloadGuidance } from "./deload.js";
 import { ZONE_KEYS, ZONE_REF_T, zoneOf } from "./zones.js";
-import { gradeRank, weekKey } from "../lib/climbing-grades.js";
+import { gradeRank, isClimbingPrSend, weekKey } from "../lib/climbing-grades.js";
 import { effectiveLoad, isOpenerRep } from "./load.js";
 import { maxTestStaleness } from "./peakForce.js";
+import { CLIMBING_PR_CONTEXTS, climbingPrContext } from "./climbingPrBadges.js";
 // Behavioral notes (adherence vs own cadence, acute:chronic volume
 // ramp) migrated INTO the check-in from the Session Plan card
 // (2026-07-08 — coaching lives in Analysis; the plan card plans).
@@ -55,11 +56,10 @@ const SUPPORT_STALE_DAYS = 14;  // an A/B/C workout counts as skipped past this
 const CURVE_TICK_PP = 3;        // curve Δ% (percentage points) this week to call a win (≥3 = earned, filters fit noise)
 const LOW_WEEK_FRAC = 0.7;      // finger days below this × baseline = a "lighter week"
 
-// "Sent" = clean send OR a completion that took a mid-route rest — the
-// same bar the app's "hardest send over time" card uses (ClimbingAnalysisView
-// SENT_STYLES). Kept in sync here; excludes pure attempts/falls.
-const SENT_STYLES = new Set(["onsight", "flash", "redpoint", "rest"]);
-const wasSent = (a) => a && SENT_STYLES.has(a.ascent);
+// Completed climbs are useful for weekly volume context even when the
+// climber rested. PRs use the stricter shared clean-send predicate.
+const COMPLETED_STYLES = new Set(["onsight", "flash", "redpoint", "rest"]);
+const wasCompleted = (activity) => activity && COMPLETED_STYLES.has(activity.ascent);
 
 const round1 = (v) => Math.round(v * 10) / 10;
 function addDays(ymd, n) {
@@ -134,19 +134,32 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
     .filter(g => g.days >= STALE_DAYS)
     .sort((a, b) => b.days - a.days);
 
-  // Climbing: grade PR this week, per discipline (ranks aren't comparable across).
-  const sent = climbs.filter(wasSent);
+  // Climbing: clean-send PRs this week. Indoor boulders split by wall
+  // system; outdoor boulders and indoor/outdoor routes each get their
+  // own progression.
+  const cleanSends = climbs.filter(isClimbingPrSend);
   const prs = [];
-  for (const [label, pred] of [["boulder", c => c.discipline === "boulder"], ["rope", c => c.discipline !== "boulder"]]) {
-    const wk = sent.filter(c => inWeek(c.date) && pred(c));
-    const pr = sent.filter(c => c.date < weekStart && pred(c));
+  for (const context of CLIMBING_PR_CONTEXTS) {
+    const matchesContext = climb => climbingPrContext(climb)?.key === context.key;
+    const wk = cleanSends.filter(climb => inWeek(climb.date) && matchesContext(climb));
+    const prior = cleanSends.filter(climb => climb.date < weekStart && matchesContext(climb));
     if (!wk.length) continue;
-    const best = wk.reduce((b, c) => (gradeRank(c.grade) > gradeRank(b.grade) ? c : b));
+
+    const best = wk.reduce((current, climb) =>
+      gradeRank(climb.grade) > gradeRank(current.grade) ? climb : current);
     const bestRank = gradeRank(best.grade);
-    const priorRank = pr.reduce((m, c) => Math.max(m, gradeRank(c.grade)), -1);
-    if (bestRank > 0 && bestRank > priorRank) {
-      const prevGrade = pr.length ? pr.reduce((b, c) => (gradeRank(c.grade) > gradeRank(b.grade) ? c : b)).grade : null;
-      prs.push({ discipline: label, grade: best.grade, prevGrade });
+    const priorRank = prior.reduce((rank, climb) => Math.max(rank, gradeRank(climb.grade)), -1);
+    if (bestRank >= 0 && bestRank > priorRank) {
+      const priorBest = prior.reduce((current, climb) =>
+        !current || gradeRank(climb.grade) > gradeRank(current.grade) ? climb : current, null);
+      prs.push({
+        discipline: context.discipline,
+        contextKey: context.key,
+        contextLabel: context.label,
+        narrativeLabel: context.narrativeLabel,
+        grade: best.grade,
+        prevGrade: priorBest?.grade || null,
+      });
     }
   }
 
@@ -202,10 +215,10 @@ export function assembleReview(signals) {
 
   // WINS — climbing PRs first (most motivating), then earned bumps, then curve.
   for (const p of climbing.prs) {
-    const where = p.discipline === "boulder" ? "boulder" : "route";
+    const where = p.narrativeLabel || (p.discipline === "boulder" ? "boulder" : "route");
     wins.push({ kind: "win", text: p.prevGrade
-      ? `New ${where} grade PR — you sent ${p.grade} (past best was ${p.prevGrade}). That's a real level up.`
-      : `New ${where} grade PR — you sent ${p.grade}. Bank it.` });
+      ? `New ${where} grade PR — you sent ${p.grade} (past best was ${p.prevGrade}). Badge upgraded.`
+      : `First ${where} PR — you sent ${p.grade}. Badge earned.` });
   }
   for (const b of finger.ladderBumps) {
     wins.push({ kind: "win", text: `You earned a load bump on ${b.grip} ${b.T}s — six clean reps, so the weight steps up (+5%). Progress by the book.` });
@@ -368,7 +381,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   const climbs7 = (activities || []).filter(a =>
     a && a.type === "climbing" && a.date >= d7 && a.date <= refDate);
   const rpes = climbs7.map(a => Number(a.rpe)).filter(v => v > 0);
-  const sent7 = climbs7.filter(wasSent);
+  const sent7 = climbs7.filter(wasCompleted);
   const hardest = sent7.length
     ? sent7.reduce((b, c) => (gradeRank(c.grade) > gradeRank(b.grade) ? c : b))
     : null;

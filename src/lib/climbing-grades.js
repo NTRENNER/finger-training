@@ -41,6 +41,15 @@ export const ASCENT_STYLES = [
   { key: "attempt",  label: "Attempt",          desc: "Worked but didn't send"    },
 ];
 
+const CLIMBING_PR_ASCENTS = new Set(["onsight", "flash", "redpoint"]);
+
+// A climbing PR is a new clean-send grade. Repeats still count toward
+// consolidation/volume analytics, and rested completions still count as
+// completed climbs, but neither should advance an achievement badge.
+export function isClimbingPrSend(activity) {
+  return !!activity && CLIMBING_PR_ASCENTS.has(activity.ascent);
+}
+
 // Boulder wall types — V-grades on a MoonBoard / Kilter are notably
 // stiffer than the same number on a commercial set, so we capture the
 // surface alongside the grade. Only meaningful for indoor boulders;

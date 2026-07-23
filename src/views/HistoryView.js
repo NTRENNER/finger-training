@@ -43,6 +43,7 @@ import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
 import { deleteBW } from "../lib/sync.js";
 import { BadgeCollection } from "./cards/BadgeCollection.jsx";
+import { ClimbingPrBadgeCollection } from "./cards/ClimbingPrBadgeCollection.jsx";
 import { TendonHistoryList } from "./TendonHistoryList.jsx";
 
 // Default hand for the "+ Add rep" picker. Resolution order:
@@ -107,6 +108,13 @@ export function HistoryView({
   // the heatmap's expensive per-day rollup memo depends on.
   const wLogRaw = useLSValue(LS_WORKOUT_LOG_KEY);
   const wLogForCalendar = useMemo(() => wLogRaw || [], [wLogRaw]);
+  const climbingActivities = useMemo(
+    () => activities
+      .filter(activity => activity.type === "climbing")
+      .slice()
+      .sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+    [activities]
+  );
   const [grip,        setGrip]        = useState("");
   const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
@@ -603,14 +611,14 @@ export function HistoryView({
         />
       )}
       {domain === "climbing" && (
-        <ClimbingHistoryList
-          climbs={activities
-            .filter(a => a.type === "climbing")
-            .slice()
-            .sort((a, b) => (b.date || "").localeCompare(a.date || ""))}
-          onDeleteActivity={onDeleteActivity}
-          onUpdateActivity={onUpdateActivity}
-        />
+        <>
+          <ClimbingPrBadgeCollection climbs={climbingActivities} />
+          <ClimbingHistoryList
+            climbs={climbingActivities}
+            onDeleteActivity={onDeleteActivity}
+            onUpdateActivity={onUpdateActivity}
+          />
+        </>
       )}
       {domain === "weight" && (
         <Card>

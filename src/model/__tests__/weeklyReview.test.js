@@ -39,11 +39,13 @@ describe("assembleReview", () => {
   });
 
   test("climbing PR is a win and drives the headline", () => {
-    const r = assembleReview(makeSignals({ climbing: { daysThisWeek: 1, daysPerWeekBaseline: 2, prs: [{ discipline: "boulder", grade: "V6", prevGrade: "V5" }] } }));
+    const r = assembleReview(makeSignals({ climbing: { daysThisWeek: 1, daysPerWeekBaseline: 2, prs: [{ discipline: "boulder", narrativeLabel: "MoonBoard", grade: "V6", prevGrade: "V5" }] } }));
     const win = r.points.find(p => p.kind === "win");
     expect(win).toBeTruthy();
     expect(win.text).toMatch(/V6/);
+    expect(win.text).toMatch(/MoonBoard/);
     expect(win.text).toMatch(/past best was V5/);
+    expect(win.text).toMatch(/Badge upgraded/);
     expect(r.headline).toMatch(/Strong week|Big week/i);
   });
 
@@ -104,7 +106,7 @@ describe("assembleReview", () => {
 describe("gatherSignals detectors", () => {
   const climb = (daysAgo, grade, over = {}) => ({ date: addDays(REF, -daysAgo), type: "climbing", discipline: "boulder", grade, ascent: "redpoint", ...over });
 
-  test("grade PR per discipline, gated by ascent style", () => {
+  test("grade PR per context, gated by ascent style", () => {
     const acts = [
       climb(0, "V6"),                       // this week (06-30), sent
       climb(10, "V5"),                      // prior best sent
@@ -126,11 +128,33 @@ describe("gatherSignals detectors", () => {
   test("boulder and rope PRs are tracked independently", () => {
     const acts = [
       climb(0, "V6"), climb(12, "V5"),
-      { date: addDays(REF, 0), type: "climbing", discipline: "sport", grade: "5.12a", ascent: "redpoint" },
-      { date: addDays(REF, -12), type: "climbing", discipline: "sport", grade: "5.11c", ascent: "redpoint" },
+      { date: addDays(REF, 0), type: "climbing", discipline: "lead", venue: "indoor", grade: "5.12a", ascent: "redpoint" },
+      { date: addDays(REF, -12), type: "climbing", discipline: "top_rope", venue: "indoor", grade: "5.11c", ascent: "redpoint" },
     ];
     const s = gatherSignals([], acts, [], { refDate: REF });
-    expect(s.climbing.prs.map(p => p.discipline).sort()).toEqual(["boulder", "rope"]);
+    expect(s.climbing.prs.map(p => p.discipline).sort()).toEqual(["boulder", "route"]);
+  });
+
+  test("commercial, MoonBoard, Kilter, and outdoor boulders advance independently", () => {
+    const acts = [
+      climb(12, "V8"),
+      climb(10, "V4", { wall: "moonboard" }),
+      climb(0, "V5", { wall: "moonboard" }),
+      climb(0, "V3", { wall: "kilter" }),
+      climb(0, "V6", { venue: "outdoor", wall: undefined }),
+    ];
+
+    const s = gatherSignals([], acts, [], { refDate: REF });
+    expect(s.climbing.prs.map(p => [p.contextKey, p.grade, p.prevGrade])).toEqual([
+      ["boulder_indoor_moonboard", "V5", "V4"],
+      ["boulder_indoor_kilter", "V3", null],
+      ["boulder_outdoor", "V6", null],
+    ]);
+  });
+
+  test.each(["repeat", "rest", "attempt"])("%s cannot create a weekly PR", ascent => {
+    const s = gatherSignals([], [climb(0, "V6", { ascent })], [], { refDate: REF });
+    expect(s.climbing.prs).toHaveLength(0);
   });
 
   test("staleness: a grip untrained ≥12 days is flagged", () => {

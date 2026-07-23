@@ -27,6 +27,7 @@ import {
   CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS, VENUES,
   gradesFor, defaultGradeFor,
 } from "../../lib/climbing-grades.js";
+import { newClimbingPrForEntry } from "../../model/climbingPrBadges.js";
 
 // Per-RPE descriptive label rendered under the slider. Calibrated
 // for PER-CLIMB effort (not session intensity) — the question is
@@ -57,6 +58,7 @@ export function ClimbingLogCard({ activities = [], onLog }) {
   const [wall, setWall]             = useState("commercial");
   const [rpe, setRpe]               = useState(7);
   const [logged, setLogged]         = useState(false);
+  const [prAward, setPrAward]       = useState(null);
   // Outdoor-only metadata. Free text, all optional. Cleared after
   // save so the next outdoor log starts blank rather than pre-
   // populated with the previous climb's route name (which would
@@ -117,7 +119,9 @@ export function ClimbingLogCard({ activities = [], onLog }) {
     if (stars >= 1 && stars <= 5) entry.stars = stars;
     const nt = notes.trim();
     if (nt) entry.notes = nt;
+    const award = newClimbingPrForEntry(activities, entry);
     onLog(entry);
+    setPrAward(award);
     setLogged(true);
     setOpen(false);
     // Reset all the per-climb fields so the next log starts clean.
@@ -125,7 +129,10 @@ export function ClimbingLogCard({ activities = [], onLog }) {
     // user-session defaults than per-climb data).
     setRouteName(""); setCrag(""); setArea("");
     setStars(0); setNotes("");
-    setTimeout(() => setLogged(false), 2500);
+    setTimeout(() => {
+      setLogged(false);
+      setPrAward(null);
+    }, 2500);
   };
 
   // Collapsed state — single-row tappable button.
@@ -146,9 +153,20 @@ export function ClimbingLogCard({ activities = [], onLog }) {
             color: C.text, fontSize: 13, fontWeight: 600,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 16 }}>🧗</span>
-            <span>{logged ? "Logged ✓" : "Log a climb"}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <span style={{ fontSize: 16 }}>{prAward ? "🏆" : "🧗"}</span>
+            <span style={{ minWidth: 0, textAlign: "left" }}>
+              <span style={{ display: "block" }}>
+                {prAward ? `${prAward.grade} ${prAward.shortLabel} PR!` : logged ? "Logged ✓" : "Log a climb"}
+              </span>
+              {prAward && (
+                <span style={{ display: "block", color: C.green, fontSize: 10, fontWeight: 600, marginTop: 2 }}>
+                  {prAward.previousGrade
+                    ? `Badge upgraded · ${prAward.previousGrade} → ${prAward.grade}`
+                    : "Badge earned"}
+                </span>
+              )}
+            </span>
           </div>
           <div style={{ fontSize: 11, color: C.muted, fontWeight: 400 }}>
             {todayClimbing.length > 0
