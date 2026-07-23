@@ -127,10 +127,11 @@ export function PrescribedLoadCard({
           </div>
           <div style={{ fontSize: 10, color: C.muted }}>
             {cooked === 0 ? "fresh — no scale-down" : `cooked ${cooked}/10`}
-            {cooked > 0 && fatigueModel && grip && (() => {
-              const b = fatigueModel[grip]?.beta;
-              if (!(b > 0)) return null;
-              const pct = Math.round((1 - Math.exp(-b * cooked)) * 100);
+            {cooked > 0 && grip && (() => {
+              // True applied multiplier (fixed manual scaling) — not
+              // the β-derived discount the disabled learner would have
+              // applied. Keeps this card honest alongside SessionPlanCard.
+              const pct = Math.round((1 - capacityMultiplier(fatigueModel, grip, cooked)) * 100);
               if (pct < 1) return null;
               return (
                 <span style={{ marginLeft: 6, color: C.purple, fontStyle: "italic" }}>
