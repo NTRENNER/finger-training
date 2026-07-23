@@ -1,34 +1,38 @@
 // ─────────────────────────────────────────────────────────────
-// EnduranceCeilingCard — sustained force vs max, over time
+// EnduranceCeilingCard — measured sustained holds vs measured max
 // ─────────────────────────────────────────────────────────────
-// Two things per grip, tracked across your history:
-//   • the "endurance ceiling" — the curve's force at
-//     ENDURANCE_CEILING_T (240s, deep slow-component territory),
-//     recomputed at each session date from the cumulative fit; and
-//   • your measured max — the SMOOTHED peak-force trend (peakForce.js).
-// A dual line lets you watch the gap between what you can pull once
-// and what you can sustain widen or close, which is the limiter story
-// that matters: is endurance catching up to max, or is max pulling
-// away? The headline % (current ceiling ÷ current smoothed max) is the
-// snapshot; the lines are the trajectory.
+// (File/export name kept for wiring stability; the card's identity is
+// now "Sustained vs max — measured".)
 //
-// Why a dual line, not a single ratio: the ratio is a quotient of a
-// MODELED long-duration force and a SPARSE measured peak, so a single
-// off max-test day makes the ratio jump for reasons that have nothing
-// to do with endurance. Plotting the two series separately keeps the
-// (smooth, informative) sustained line readable and lets the max line's
-// noise stay visibly its own. We use the SMOOTHED peak trend (not the
-// monotonic PR) as the denominator so a rising max reads as a rising
-// max, not a falling endurance %.
+// REWORKED July 2026 (per Nathan): the previous version plotted the
+// three-exp curve's modeled F(240s) against the measured max. Nathan
+// called the coupling: the modeled tail inherits the curve's overall
+// amplitude, so a max gain lifts the extrapolated 240s value through
+// the fit's prior/shrinkage even with zero endurance change — the
+// ratio was partially self-referential (the same structural critique
+// that retired the original F(180)/F(5) card in May 2026, half-fixed
+// by measuring the denominator but not the numerator). And the tail
+// region is exactly where the July 2026 endurance-ceiling work showed
+// the model runs hot.
 //
-// Honesty gate: for a grip whose longest real hold is shorter than
-// ENDURANCE_CEILING_T, the ceiling is extrapolation — we still plot it
-// but flag "modeled beyond your Ns longest hold" so it's not read as
-// measured. Provisional-peak grips (no max/power session yet) show the
-// sustained line but no ratio — dividing by a sub-max peak would lie.
+// Now BOTH series are measurements:
+//   • solid line — smoothed measured max (peak tests, peakForce.js),
+//     unchanged;
+//   • dots + dashed line — the heaviest load actually held ≥120s on
+//     each date (sustainedHolds.js: Tindeq-measured, seed-artifacts
+//     excluded, manual/nominal loads excluded). No model anywhere.
 //
-// Per-date fits mirror useHistoryOverlay / useAucHistoryByGrip: fresh
-// (rep-1) reps up to each date, leak-free per-date prior, three-exp fit.
+// The headline % is the best qualifying hold in the last 90 days as a
+// share of the current smoothed max — a demonstrated lower bound, so
+// it's annotated with the hold that earned it (load × duration, date).
+// Honesty notes: a stale max test or a stale long hold is flagged
+// instead of silently divided by. Grips with measured reps but no
+// ≥120s hold yet (e.g. Prime) get one quiet line, not a fake panel.
+//
+// The old cross-grip "wider gap" comparison line is gone: each grip's
+// % now reads at ITS best hold's duration (163s vs 230s are different
+// claims), so cross-grip ratio comparisons would mislead. Compare each
+// grip against itself over time.
 
 import React, { useMemo } from "react";
 import {
@@ -39,117 +43,94 @@ import { C } from "../../ui/theme.js";
 import { Card, HandViewPills } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { fmt1, fmtW, toDisp } from "../../ui/format.js";
-import { predForceThreeExp, ENDURANCE_CEILING_T, buildThreeExpPriors } from "../../model/threeExp.js";
-import { fitAmpsForPts } from "../../model/baselines.js";
-import { effectiveLoad, freshFitReps } from "../../model/load.js";
-import { buildPeakForceTrend } from "../../model/peakForce.js";
+import { buildPeakForceTrend, maxTestStaleness, MAX_TEST_STALE_DAYS } from "../../model/peakForce.js";
+import {
+  buildSustainedHolds, bestHoldSince, lastHold,
+  SUSTAINED_MIN_S, SUSTAINED_RECENT_D,
+} from "../../model/sustainedHolds.js";
+import { today } from "../../util.js";
 
-const T_CEIL = ENDURANCE_CEILING_T;
+function addDays(ymd, n) {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function daysBetween(a, b) {
+  return Math.round((new Date(`${b}T00:00:00Z`) - new Date(`${a}T00:00:00Z`)) / 86400000);
+}
+function fmtShortDate(ymd) {
+  return new Date(`${ymd}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
 
 export function EnduranceCeilingCard({
   history,
   // Hand selector (June 2026): in L/R mode the series run on that
-  // hand's fresh reps and that hand's measured peaks.
+  // hand's holds and that hand's measured peaks.
   handView = "pooled",
   onHandViewChange = null,
   unit = "lbs",
 }) {
-  const rows = useMemo(() => {
+  const todayStr = today();
+  const { rows, quiet } = useMemo(() => {
     const split = handView === "L" || handView === "R";
     const scoped = split ? (history || []).filter(r => r?.hand === handView) : (history || []);
+    const sustained = buildSustainedHolds(scoped, { hand: null });  // already scoped
     const trend = buildPeakForceTrend(scoped);
-    if (!trend) return [];
+    const recentFrom = addDays(todayStr, -SUSTAINED_RECENT_D);
 
-    // Leak-free per-date prior cache — same priorsAt pattern as the
-    // overlay / AUC-history hooks; built once per date across grips.
-    const priorCache = new Map();
-    const priorsAt = (date) => {
-      if (!priorCache.has(date)) priorCache.set(date, buildThreeExpPriors(scoped, { upTo: date }));
-      return priorCache.get(date);
-    };
+    const rows = [];
+    for (const grip of Object.keys(sustained.grips)) {
+      const { holds, longestHoldS } = sustained.grips[grip];
 
-    const fresh = freshFitReps(scoped).filter(r => effectiveLoad(r) > 0 && r.actual_time_s > 0);
-    const grips = [...new Set(fresh.map(r => r.grip).filter(Boolean))].sort();
-
-    const out = [];
-    for (const grip of grips) {
-      const gr = fresh.filter(r => r.grip === grip)
-        .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-      if (gr.length < 3) continue;
-      const maxHold = gr.reduce((m, r) => Math.max(m, r.actual_time_s || 0), 0);
-      const dates = [...new Set(gr.map(r => r.date))].sort();
-
-      // Sustained ceiling series — cumulative three-exp fit at each date.
-      const susByDate = new Map();
-      for (const date of dates) {
-        const upTo = gr.filter(r => (r.date || "") <= date);
-        const durs = new Set(upTo.map(r => r.target_duration));
-        if (upTo.length < 3 || durs.size < 2) continue;   // too thin for a stable fit
-        const amps = fitAmpsForPts(
-          upTo.map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) })),
-          grip,
-          priorsAt(date),
-        );
-        if (!amps) continue;
-        const v = predForceThreeExp(amps, T_CEIL);
-        if (v > 0) susByDate.set(date, v);
-      }
-      if (susByDate.size === 0) continue;
-
-      // Max series — SMOOTHED peak trend, fall back to session best.
-      const provisional = !!trend.provisional?.[grip];
+      // Max series — SMOOTHED peak trend; provisional grips (no real
+      // max/power session) get holds but no ratio.
+      const provisional = !trend || !!trend.provisional?.[grip];
       const maxByDate = new Map();
-      for (const row of trend.rows) {
-        const v = provisional ? null : (row[`${grip}_trend`] ?? row[grip] ?? null);
-        if (v != null && v > 0) maxByDate.set(row.date, v);
+      if (trend && !provisional) {
+        for (const row of trend.rows) {
+          const v = row[`${grip}_trend`] ?? row[grip] ?? null;
+          if (v != null && v > 0) maxByDate.set(row.date, v);
+        }
       }
 
-      const allDates = [...new Set([...susByDate.keys(), ...maxByDate.keys()])].sort();
-      // Series stay in KG here — display conversion happens at render.
-      // Putting toDisp inside this memo forced `unit` into the deps, so
-      // toggling lbs/kg re-ran every per-date NNLS fit for a pure unit
-      // change (July 2026).
+      const holdByDate = new Map(holds.map(h => [h.date, h]));
+      const allDates = [...new Set([...holdByDate.keys(), ...maxByDate.keys()])].sort();
+      // Series stay in KG here — display conversion happens at render
+      // so the unit toggle doesn't re-run the memo.
       const data = allDates.map(d => ({
         date: d,
-        sus: susByDate.has(d) ? susByDate.get(d) : null,
+        hold: holdByDate.has(d) ? holdByDate.get(d).loadKg : null,
+        holdS: holdByDate.has(d) ? holdByDate.get(d).holdS : null,
         max: maxByDate.has(d) ? maxByDate.get(d) : null,
       }));
 
-      // Snapshot ratio = current ceiling ÷ current SMOOTHED max (the
-      // chart's right edge), not the PR.
-      const lastSusKg = [...susByDate.values()].pop();
+      // Ratio: best hold in the trailing window ÷ current smoothed max.
+      // Nothing recent → fall back to the last hold ever, flagged stale.
+      const recent = bestHoldSince(holds, recentFrom);
+      const ref = recent || lastHold(holds);
+      const refStale = !recent && ref ? daysBetween(ref.date, todayStr) : null;
       const lastMaxDate = [...maxByDate.keys()].pop();
       const lastMaxKg = lastMaxDate != null ? maxByDate.get(lastMaxDate) : null;
-      const pct = (lastMaxKg > 0) ? Math.round((lastSusKg / lastMaxKg) * 100) : null;
+      const pct = ref && lastMaxKg > 0 ? Math.round((ref.loadKg / lastMaxKg) * 100) : null;
 
-      out.push({
-        grip, data, pct, lastSusKg, lastMaxKg,
-        maxHold: Math.round(maxHold),
-        extrapolated: maxHold < T_CEIL,
+      const staleness = maxTestStaleness(scoped.filter(r => r?.grip === grip), todayStr);
+
+      rows.push({
+        grip, data, pct, ref, refStale, lastMaxKg, longestHoldS,
         provisional,
+        maxStaleDays: staleness.recommended ? staleness.staleDays : null,
       });
     }
-    return out.sort((a, b) => a.grip.localeCompare(b.grip));
-  }, [history, handView]);
+    return { rows: rows.sort((a, b) => a.grip.localeCompare(b.grip)), quiet: sustained.quiet };
+  }, [history, handView, todayStr]);
 
-  if (rows.length === 0) return null;
-
-  // Cross-grip comparison line — only when ≥2 grips have a real %.
-  const scored = rows.filter(r => r.pct != null);
-  const comparison = scored.length >= 2 ? (() => {
-    const hi = scored.reduce((m, r) => (r.pct > m.pct ? r : m));
-    const lo = scored.reduce((m, r) => (r.pct < m.pct ? r : m));
-    if (hi.pct - lo.pct < 3) return null;
-    return `${lo.grip} has the wider max-to-sustained gap — its endurance end has relatively more room than ${hi.grip}'s.`;
-  })() : null;
-
-  const fmtDate = (d) => (d || "").slice(5);   // MM-DD
+  if (rows.length === 0 && quiet.length === 0) return null;
 
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>
-          Endurance ceiling — sustained vs max
+          Sustained vs max — measured
           {(handView === "L" || handView === "R") && (
             <span style={{ color: handView === "R" ? C.orange : C.blue, marginLeft: 8, fontSize: 12 }}>
               {handView === "R" ? "Right hand" : "Left hand"}
@@ -159,11 +140,13 @@ export function EnduranceCeilingCard({
         {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-        Your curve's force at {T_CEIL}s (sustained ceiling) tracked against
-        your smoothed measured max. A widening gap = raw max pulling ahead
-        of endurance; a closing gap = endurance catching up. The % is the
-        current ceiling as a share of your current max. Compare across your
-        grips, not against outside numbers.
+        Both series are measurements — no curve model. Solid line: your
+        smoothed measured max from peak tests. Dots: the heaviest load you
+        actually held for ≥{SUSTAINED_MIN_S}s that day. The % is your best
+        such hold in the last {SUSTAINED_RECENT_D} days as a share of your
+        current max — a demonstrated lower bound, annotated with the hold
+        that earned it. Hold durations differ between grips, so compare each
+        grip against itself over time, not grip vs grip.
       </div>
 
       {rows.map((r, i) => {
@@ -171,7 +154,7 @@ export function EnduranceCeilingCard({
         // kg → display units (the memo above is unit-agnostic).
         const data = r.data.map(p => ({
           ...p,
-          sus: p.sus != null ? toDisp(p.sus, unit) : null,
+          hold: p.hold != null ? toDisp(p.hold, unit) : null,
           max: p.max != null ? toDisp(p.max, unit) : null,
         }));
         return (
@@ -186,7 +169,8 @@ export function EnduranceCeilingCard({
                 <div style={{ fontSize: 12, color: C.muted }}>
                   <b style={{ color: C.text, fontSize: 15 }}>{r.pct}%</b> of max
                   <span style={{ marginLeft: 6 }}>
-                    · {fmt1(toDisp(r.lastSusKg, unit))} sustained / {fmt1(toDisp(r.lastMaxKg, unit))} max {unit}
+                    · {fmt1(toDisp(r.ref.loadKg, unit))} {unit} × {r.ref.holdS}s ({fmtShortDate(r.ref.date)})
+                    {" / "}{fmt1(toDisp(r.lastMaxKg, unit))} max
                   </span>
                 </div>
               ) : (
@@ -199,32 +183,43 @@ export function EnduranceCeilingCard({
             <ResponsiveContainer width="100%" height={150}>
               <LineChart data={data} margin={{ top: 6, right: 12, bottom: 4, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: C.muted, fontSize: 10 }} minTickGap={24} />
+                <XAxis dataKey="date" tickFormatter={(d) => (d || "").slice(5)} tick={{ fill: C.muted, fontSize: 10 }} minTickGap={24} />
                 <YAxis tick={{ fill: C.muted, fontSize: 10 }} width={34} domain={[0, "auto"]} />
                 <Tooltip
                   contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
                   labelFormatter={(d) => d}
-                  formatter={(val, name) => [val == null ? "—" : `${fmtW(val, unit)} ${unit}`, name]}
+                  formatter={(val, name, p) => {
+                    if (val == null) return ["—", name];
+                    const isHold = name && name.startsWith("Held");
+                    const dur = isHold && p?.payload?.holdS ? ` × ${p.payload.holdS}s` : "";
+                    return [`${fmtW(val, unit)} ${unit}${dur}`, name];
+                  }}
                 />
                 <Line dataKey="max" name="Max (smoothed)" stroke={color} strokeWidth={2}
                   dot={false} connectNulls isAnimationActive={false} />
-                <Line dataKey="sus" name={`Sustained @${T_CEIL}s`} stroke={C.blue} strokeWidth={2}
-                  strokeDasharray="5 4" dot={false} connectNulls isAnimationActive={false} />
+                <Line dataKey="hold" name={`Held ≥${SUSTAINED_MIN_S}s`} stroke={C.blue} strokeWidth={2}
+                  strokeDasharray="5 4" connectNulls isAnimationActive={false}
+                  dot={{ r: 3.5, fill: C.blue, stroke: "none" }} activeDot={{ r: 5 }} />
               </LineChart>
             </ResponsiveContainer>
 
-            {r.extrapolated && (
+            {r.refStale != null && (
               <div style={{ fontSize: 10, color: C.muted, marginTop: 4, fontStyle: "italic", lineHeight: 1.4 }}>
-                Sustained line is modeled beyond your {r.maxHold}s longest hold on this grip — extend your long holds to measure it directly.
+                Last ≥{SUSTAINED_MIN_S}s hold was {r.refStale} days ago — the % reads against an old demonstration. A new long hold refreshes it.
+              </div>
+            )}
+            {r.maxStaleDays != null && (
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 4, fontStyle: "italic", lineHeight: 1.4 }}>
+                Max last tested {r.maxStaleDays} days ago (cadence is ~{MAX_TEST_STALE_DAYS}) — retest to keep the denominator honest.
               </div>
             )}
           </div>
         );
       })}
 
-      {comparison && (
-        <div style={{ fontSize: 11, color: C.muted, marginTop: 10, fontStyle: "italic", lineHeight: 1.4 }}>
-          {comparison}
+      {quiet.length > 0 && (
+        <div style={{ fontSize: 11, color: C.muted, marginTop: rows.length ? 10 : 0, fontStyle: "italic", lineHeight: 1.4 }}>
+          {quiet.map(g => `${g} — no measured holds ≥${SUSTAINED_MIN_S}s yet; nothing demonstrated to plot.`).join(" ")}
         </div>
       )}
     </Card>
