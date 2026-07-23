@@ -70,6 +70,7 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
         {review.sections && (
           <button
             onClick={() => setExpanded(v => !v)}
+            aria-expanded={expanded}
             style={{
               background: "none", border: "none", cursor: "pointer", padding: 0,
               fontSize: 11, fontWeight: 700, color: C.blue,
@@ -83,35 +84,37 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
         {review.headline}
       </div>
 
-      {!expanded && (review.points || []).map((p, i) => (
+      {(review.points || []).map((p, i) => (
         <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 8 }}>
           <span style={{ flexShrink: 0 }}>{MARK[p.kind] || "•"}</span>
           <span style={{ color: COLOR[p.kind] || C.text, fontSize: 14, lineHeight: 1.4 }}>{p.text}</span>
         </div>
       ))}
 
-      {expanded && review.sections && SECTIONS.map(([key, label]) => {
-        const items = review.sections[key] || [];
-        if (!items.length) return null;
-        const numbered = key === "focus";
-        return (
-          <div key={key} style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: C.muted, marginBottom: 4 }}>
-              {label}
-            </div>
-            {items.map((t, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 4 }}>
-                <span style={{ flexShrink: 0, color: C.muted, fontSize: 13 }}>
-                  {numbered ? `${i + 1}.` : "·"}
-                </span>
-                <span style={{ color: C.text, fontSize: 13, lineHeight: 1.45 }}>{t}</span>
+      {expanded && review.sections && (
+        <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 14, paddingTop: 2 }}>
+          {SECTIONS.map(([key, label]) => {
+            const items = review.sections[key] || [];
+            if (!items.length) return null;
+            const numbered = key === "focus";
+            return (
+              <div key={key} style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: C.muted, marginBottom: 4 }}>
+                  {label}
+                </div>
+                {items.map((t, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 4 }}>
+                    <span style={{ flexShrink: 0, color: C.muted, fontSize: 13 }}>
+                      {numbered ? `${i + 1}.` : "·"}
+                    </span>
+                    <span style={{ color: C.text, fontSize: 13, lineHeight: 1.45 }}>{t}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        );
-      })}
-      {expanded && (
-        <div style={{ marginTop: 12, fontSize: 11, color: C.muted, fontStyle: "italic" }}>— Coach</div>
+            );
+          })}
+          <div style={{ marginTop: 12, fontSize: 11, color: C.muted, fontStyle: "italic" }}>— Coach</div>
+        </div>
       )}
     </Card>
   );
