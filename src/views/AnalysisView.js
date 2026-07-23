@@ -79,6 +79,7 @@ import { CapacityTrajectoryCard, ZoneShareCard } from "./analysis/CapacityChartC
 import { EnduranceCeilingCard } from "./analysis/EnduranceCeilingCard.jsx";
 import { DeloadGauge } from "./cards/DeloadGauge.jsx";
 import { RecoveryTrajectoryCard } from "./analysis/RecoveryTrajectoryCard.jsx";
+import { WeeklyRatioCard } from "./analysis/WeeklyRatioCard.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
@@ -936,6 +937,15 @@ export function AnalysisView({
         <RecoveryTrajectoryCard history={history} />
         </CardBoundary>
 
+        {/* Weekly hold ratio — the coach's month-over-month actual/target
+            comparison ("0.85 → 1.04") made continuous: weekly means per
+            grip against the 1.0 line, hand toggle, tap-a-week receipts.
+            Lives next to Recovery trajectory as the other "is training
+            actually landing?" trend view. */}
+        <CardBoundary name="Weekly hold ratio">
+        <WeeklyRatioCard history={history} />
+        </CardBoundary>
+
         {/* (StrengthBalanceCard — the Crusher:Micro "open-hand vs crimp
             dominance" ratio — removed May 2026. The ratio is dominated by
             the Micro probe's much smaller edge geometry, not by trainable
@@ -958,7 +968,8 @@ export function AnalysisView({
             Improvement, and Curve Coverage cards all cover the same
             diagnostic ground more cleanly. The dose-decomposition
             math also leaned on mechanistic-flavored language that
-            doesn't survive the phenomenological-model framing.) */}
+            doesn't survive the phenomenological-model framing.)
+            */}
 
       </>)}
     </div>
