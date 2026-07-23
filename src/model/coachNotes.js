@@ -111,15 +111,18 @@ export function volumeRampNote(history, todayStr) {
   const chronicWeekly = chronic / (RAMP_WINDOW_CHRONIC_D / 7);
   if (!(chronicWeekly > 0)) return null;
   const ratio = acute / chronicWeekly;
+  // `ratio` rides along on both notes (July 2026) so the weekly
+  // check-in can cross-reference the drop against the recovery signal
+  // and rephrase (deload framing) instead of quoting this text verbatim.
   if (ratio >= RAMP_SPIKE_RATIO) {
     return {
-      key: "ramp-spike", tone: "warn",
+      key: "ramp-spike", tone: "warn", ratio,
       text: `This week's finger volume is running ~${ratio.toFixed(1)}× your monthly average — tendons adapt slower than muscles, so ramp gently.`,
     };
   }
   if (ratio <= RAMP_DROP_RATIO) {
     return {
-      key: "ramp-drop", tone: "info",
+      key: "ramp-drop", tone: "info", ratio,
       text: `This week's volume is well under your monthly norm (~${Math.round(ratio * 100)}%). If life got busy, a lighter session still protects the base you've built.`,
     };
   }
@@ -155,7 +158,7 @@ export function trendNote(dates, fitScoreAt) {
   return null;
 }
 
-// ── Per-grip recovery note (Aug 2026) ────────────────────
+// ── Per-grip recovery note (Aug 2026) ────────────────────────
 // Complements the DeloadGauge, which by design only reacts CROSS-grip
 // (every grip down) — so it can't catch one grip slipping and never
 // reassures. For the most salient grip this note does both:
@@ -222,7 +225,7 @@ export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreA
   return out.slice(0, 2);
 }
 
-// ── Recommendation explanation ────────────────────────
+// ── Recommendation explanation ────────────────────────────
 // ONE plain sentence for the engine's decisive factor — explanation,
 // not persuasion. The engine already picked; this just says why in
 // coach language. Order mirrors the engine's own weighting: a measured

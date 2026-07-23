@@ -5,9 +5,9 @@
 // the digest headline + 2-4 points from src/model/weeklyReview.js —
 // with a tap-to-expand FULL CHECK-IN (July 2026): the five-section
 // coach report (What you did / What's moving / What's stuck or
-// missing / What I'd focus on / Heads up) modeled on the scheduled-
-// task coach prompt. Both views come from the same buildCheckIn()
-// call; the compact card just renders the digest subset.
+// missing / What the engine will recommend / Heads up) modeled on the
+// scheduled-task coach prompt. Both views come from the same
+// buildCheckIn() call; the compact card just renders the digest subset.
 //
 // COMPLETED-WEEK MODE: refDate is the Sunday that ended the last full
 // Mon–Sun week (weekStart-of-today minus one day), so the card always
@@ -36,11 +36,14 @@ const MARK = { win: "✅", concern: "⚠️", info: "•" };
 const COLOR = { win: C.green, concern: C.orange, info: C.muted };
 
 // Section order + display copy for the expanded check-in.
+// "focus" header (July 2026, per Nathan): the section EXPLAINS what the
+// recommender will do and why (staleness receipts), rather than issuing
+// a parallel set of orders — item voice in weeklyReview.js matches.
 const SECTIONS = [
   ["did",     "What you did"],
   ["moving",  "What's moving"],
   ["stuck",   "What's stuck or missing"],
-  ["focus",   "What I'd focus on this week"],
+  ["focus",   "What the engine will recommend — and why"],
   ["headsUp", "Heads up"],
 ];
 

@@ -127,6 +127,80 @@ describe("assembleCheckIn", () => {
     expect(Array.isArray(out.points)).toBe(true);
   });
 
+  test("focus items explain the engine, not prescribe (July 2026 voice)", () => {
+    const hist = [
+      rep("2026-04-01", "Micro", 200, 190),          // stale endurance zone → focus
+      rep("2026-07-01", "Micro", 45, 50),
+    ];
+    const out = buildCheckIn(hist, [], [], { refDate: REF });
+    const staleItem = out.sections.focus.find(t => /days stale/.test(t));
+    expect(staleItem).toBeTruthy();
+    expect(staleItem).toMatch(/the engine will queue it once you pick Micro on Setup/);
+    expect(out.sections.focus.some(t => /^Give /.test(t))).toBe(false);
+  });
+
+  // ── Recovery × volume cross-reference (July 2026, per Nathan) ──
+  // A drop history: steady chronic volume for three weeks, then one
+  // LIGHT session in the acute week (a total absence trips the
+  // adherence note instead, which suppresses ramp-drop) →
+  // volumeRampNote fires "ramp-drop". The recovery level is then
+  // overridden on the gathered signals (deloadStatus is hard to
+  // synthesize) before assembleCheckIn, which re-reads it.
+  const dropHistory = () => {
+    const dates = ["2026-06-08", "2026-06-10", "2026-06-13", "2026-06-15",
+                   "2026-06-17", "2026-06-20", "2026-06-22", "2026-06-24"];
+    const hist = dates.map(d => rep(d, "Micro", 45, 45, 10));
+    hist.push(rep("2026-07-01", "Micro", 45, 45, 2));   // light deload-week session
+    return hist;
+  };
+
+  test("recovery softening + deload-sized week merge into ONE line with deload framing", () => {
+    const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
+    s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
+    const out = assembleCheckIn(s);
+    const merged = out.sections.stuck.find(t => /volume already came down/.test(t));
+    expect(merged).toBeTruthy();
+    expect(merged).toMatch(/busy stretch or an intentional deload/);
+    expect(merged).toMatch(/platform to advance/);
+    // Neither original line survives alongside the merge.
+    expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
+    expect(out.sections.stuck.some(t => /don't add load this week/.test(t))).toBe(false);
+  });
+
+  test("red recovery + light week says the deload hasn't caught up — extend the rest", () => {
+    const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
+    s.recovery = { level: "red", label: "Recovery is down", guidanceAction: null };
+    const out = assembleCheckIn(s);
+    const merged = out.sections.stuck.find(t => /deload hasn't caught up/.test(t));
+    expect(merged).toBeTruthy();
+    expect(merged).toMatch(/Extend the rest/);
+    expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
+  });
+
+  test("green recovery + light week reads as a banked deload in WHAT'S MOVING", () => {
+    const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
+    s.recovery = { level: "green", label: null, guidanceAction: null };
+    const out = assembleCheckIn(s);
+    expect(out.sections.moving.some(t => /banked deload/.test(t))).toBe(true);
+    expect(out.sections.moving.join(" ")).toMatch(/Good week to advance/);
+    // The raw drop note is consumed, not duplicated into stuck.
+    expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
+  });
+
+  test("recovery concern without a volume drop passes through verbatim", () => {
+    // Normal acute volume (sessions inside the last week too) → no
+    // ramp-drop → the digest's recovery concern is untouched.
+    const hist = [...dropHistory(),
+      rep("2026-06-29", "Micro", 45, 45, 10),
+      rep("2026-07-01", "Micro", 45, 45, 10),
+      rep("2026-07-03", "Micro", 45, 45, 10)];
+    const s = gatherCheckInSignals(hist, [], [], { refDate: REF });
+    s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
+    const out = assembleCheckIn(s);
+    expect(out.sections.stuck.some(t => /don't add load this week/.test(t))).toBe(true);
+    expect(out.sections.stuck.some(t => /volume already came down/.test(t))).toBe(false);
+  });
+
   test("behavior notes (volume ramp / adherence) land in stuck", () => {
     // Chronic base: one 45s×10kg rep (~450 kg·s) twice a week for four
     // weeks, then two 3×-load days inside the last week → acute spike.

@@ -286,10 +286,11 @@ export function formatWeeklyReview(review) {
 // ─────────────────────────────────────────────────────────────
 // The structured big sibling of the digest above, modeled on Nathan's
 // scheduled-task coach prompt: What you did / What's moving / What's
-// stuck or missing / What I'd focus on / Heads up. Same philosophy —
-// narration over EXISTING signals, and the focus section never argues
-// with the recommender: focus items come from zone/grip staleness, the
-// peak-test cadence, and prescription() loads, all engine-owned.
+// stuck or missing / What the engine will recommend / Heads up. Same
+// philosophy — narration over EXISTING signals, and the focus section
+// never argues with the recommender: focus items come from zone/grip
+// staleness, the peak-test cadence, and prescription() loads, all
+// engine-owned.
 //
 // gatherCheckInSignals() layers the extra signals over gatherSignals();
 // assembleCheckIn() is pure phrasing/ranking over the combined object.
@@ -434,18 +435,24 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   for (const sz of staleZones) {
     if (!worstZoneByGrip.has(sz.grip)) worstZoneByGrip.set(sz.grip, sz);   // staleZones sorted worst-first
   }
+  // Voice (July 2026, per Nathan): these are EXPLANATIONS of what the
+  // engine will do and why — "X zone is N days stale; the engine will
+  // queue it once you pick X" — not imperatives ("Give X a session").
+  // The check-in narrates the recommender's reasoning; it doesn't issue
+  // a parallel set of orders. The rendered section header matches
+  // (WeeklyReviewCard: "What the engine will recommend — and why").
   const gripCandidates = [];
   for (const [g, sz] of worstZoneByGrip) {
     gripCandidates.push({
       grip: g, days: sz.days,
-      text: `Give ${g} a session — its ${sz.zone.replace(/_/g, " ")} zone (~${ZONE_REF_T[sz.zone]}s) is ${sz.days} days stale, and the engine will queue it once you pick ${g} on Setup.`,
+      text: `${g} — its ${sz.zone.replace(/_/g, " ")} zone (~${ZONE_REF_T[sz.zone]}s) is ${sz.days} days stale; the engine will queue it once you pick ${g} on Setup.`,
     });
   }
   for (const g of base.finger.staleGrips) {
     if (!worstZoneByGrip.has(g.grip)) {
       gripCandidates.push({
         grip: g.grip, days: g.days,
-        text: `${g.grip} has gone quiet for ${g.days} days — one moderate session re-anchors its curve.`,
+        text: `${g.grip} — no sessions in ${g.days} days; its whole curve is drifting, so any moderate session re-anchors it.`,
       });
     }
   }
@@ -460,8 +467,8 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
       focus.push({
         key: `peak|${g}`,
         text: mt.staleDays == null
-          ? `No measured max on ${g} yet — a 3×3s peak test sets the top line.`
-          : `${g} peak reading is ${mt.staleDays}d old — a 3×3s peak test refreshes it.`,
+          ? `${g} — no measured max yet; the engine's ceilings are guesses until a 3×3s peak test sets the top line.`
+          : `${g} — its peak reading is ${mt.staleDays}d old; a 3×3s peak test refreshes the ceiling the engine caps loads with.`,
       });
     }
   }
@@ -539,6 +546,30 @@ export function assembleCheckIn(signals) {
   }
   const digest = assembleReview(signals);
   const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates } = signals;
+  const recovery = signals.recovery || { level: "green", label: null };
+
+  // ── Recovery × volume cross-reference (July 2026, per Nathan) ──
+  // "Recovery softening — ease up" and "volume is well under your norm"
+  // are the SAME story told twice: the athlete already eased up. When
+  // both fire, merge them into one line that credits the lighter week
+  // (busy stretch or intentional deload — either way the right
+  // response) and then branches on what recovery says NOW:
+  //   green  → the deload banked; frame it as a platform to advance
+  //            (lands in WHAT'S MOVING, not stuck).
+  //   yellow → right direction, not done — hold light until green.
+  //   red    → the rest hasn't caught up — extend it.
+  // With no volume drop, the recovery concern passes through verbatim.
+  const rampDrop = (behaviorNotes || []).find(n => n.key === "ramp-drop");
+  const dropPct = rampDrop && Number.isFinite(rampDrop.ratio)
+    ? Math.round(rampDrop.ratio * 100) : null;
+  const mergedRecoveryVolume = rampDrop && recovery.level !== "green" && recovery.label
+    ? (recovery.level === "red"
+      ? `Recovery is still down even after a light week (~${dropPct}% of your monthly norm) — the deload hasn't caught up yet. Extend the rest: easy sessions only until the trend turns.`
+      : `Recovery was softening, but your volume already came down this week (~${dropPct}% of your monthly norm) — a busy stretch or an intentional deload, either way the right response. Hold it light until recovery reads green, then use the freshness as a platform to advance.`)
+    : null;
+  const deloadBanked = rampDrop && recovery.level === "green"
+    ? `Volume ran well under your monthly norm (~${dropPct}%) and recovery reads green — that's a banked deload, not lost ground. Good week to advance: you'll meet the engine's numbers fresh.`
+    : null;
 
   // WHAT YOU DID — volume/coverage lines.
   const did = [];
@@ -568,6 +599,7 @@ export function assembleCheckIn(signals) {
     if (dir >= 0.05) moving.push(`You're outlasting targets more: avg hold ratio ${perf.ratioPrev} → ${perf.ratioNow} over the last month — the curve amplitude is lifting.`);
   }
   if (perf && perf.overshoots >= 3) moving.push(`${perf.overshoots} reps beat their target by 40%+ this month — the engine will chase those with heavier prescriptions.`);
+  if (deloadBanked) moving.push(deloadBanked);
 
   // WHAT'S STUCK OR MISSING — digest concerns + behavior (workload
   // ramp / adherence) + stale zones + falling ratio.
@@ -578,6 +610,12 @@ export function assembleCheckIn(signals) {
   // owned by assembleReview in THIS file — keep the two in sync.
   const stuck = digest.points.filter(p => p.kind === "concern").map(p => p.text)
     .map(t => {
+      // Recovery concern × volume drop → the merged line (see above),
+      // replacing the digest's "don't add load" phrasing in place so
+      // it keeps the concern's slot at the top of the section.
+      if (mergedRecoveryVolume && recovery.label && t.startsWith(recovery.label)) {
+        return mergedRecoveryVolume;
+      }
       const m = t.match(/^Support workout (\S+) hasn't come up in (\d+) days/);
       if (m && partialCredit && partialCredit[m[1]]) {
         const pc = partialCredit[m[1]];
@@ -586,7 +624,13 @@ export function assembleCheckIn(signals) {
       }
       return t;
     });
-  for (const n of behaviorNotes || []) stuck.push(n.text);
+  // The raw ramp-drop note is consumed by the merge (yellow/red) or the
+  // banked-deload line in WHAT'S MOVING (green) — never shown verbatim
+  // alongside either.
+  for (const n of behaviorNotes || []) {
+    if (rampDrop && n === rampDrop && (mergedRecoveryVolume || deloadBanked)) continue;
+    stuck.push(n.text);
+  }
   for (const sz of (staleZones || []).slice(0, 3)) {
     stuck.push(`${sz.grip} ${sz.zone.replace(/_/g, " ")} hasn't been trained in ${sz.days} days.`);
   }
