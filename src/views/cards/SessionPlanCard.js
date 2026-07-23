@@ -134,7 +134,7 @@ export function SessionPlanCard({
     [history, grip, rec]
   );
 
-  // ── Climb-derived cookedness suggestion ────────────────────
+  // ── Climb-derived cookedness suggestion ──────────────────────
   // Derived from today's (+ decayed yesterday's) logged climbs — see
   // suggestCookedFromClimbs. Pre-fills the slider ONCE per mount when
   // the user hasn't touched it (cooked still at the 0 default / null);
@@ -248,7 +248,7 @@ export function SessionPlanCard({
       : 5;
   const rest = 20;
 
-  // ── Push to session config ──────────────────────────────
+  // ── Push to session config ──────────────────────────────────
   // ladderLoadByHand: fresh-equivalent pinned loads when the density
   // ladder is active (null otherwise). useSessionRunner.startSession
   // prefers these over a fresh prescription() call so the "same
@@ -266,7 +266,7 @@ export function SessionPlanCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeZone, activeT, reps, rest, ladder]);
 
-  // ── Empty / loading states ───────────────────────────────
+  // ── Empty / loading states ───────────────────────────────────
   if (!grip) {
     return (
       <Card style={{ marginBottom: 16 }}>
@@ -380,7 +380,7 @@ export function SessionPlanCard({
   const s = totalSec % 60;
   const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
 
-  // ── Render ───────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${activeColor}66` }}>
 
