@@ -7,7 +7,7 @@
 import {
   computeDeload, liftingVolumeByDate,
   fingerSessionsThisWeek, deloadPlan, buildDeloadGuidance,
-  deloadStatus,
+  deloadStatus, recoveryStatusDates,
   DELOAD_STALE_DAYS,
 } from "../deload.js";
 
@@ -60,6 +60,20 @@ describe("liftingVolumeByDate", () => {
   test("handles empty / missing input", () => {
     expect(liftingVolumeByDate([])).toEqual({});
     expect(liftingVolumeByDate(null)).toEqual({});
+  });
+});
+
+describe("recoveryStatusDates", () => {
+  test("starts when two grips have enough recovery sessions and appends Now", () => {
+    const history = [...fine("Crusher"), ...fine("Micro")];
+    expect(recoveryStatusDates(history, { today: "2026-05-23" })).toEqual([
+      ...D.slice(1),
+      "2026-05-23",
+    ]);
+  });
+
+  test("stays empty while recovery is measurable for only one grip", () => {
+    expect(recoveryStatusDates(fine("Crusher"), { today: TODAY })).toEqual([]);
   });
 });
 
@@ -153,6 +167,12 @@ describe("weekly deload plan", () => {
 });
 
 describe("deloadStatus (green/yellow/red gauge)", () => {
+  test("historical evaluation rewinds before a later recovery decline", () => {
+    const history = [...fatiguedRecent("Crusher"), ...fatiguedRecent("Micro")];
+    expect(deloadStatus(history, [], { today: D[3] }).level).toBe("green");
+    expect(deloadStatus(history, [], { today: TODAY }).level).toBe("yellow");
+  });
+
   test("healthy recovery across grips → green", () => {
     const history = [...fine("Crusher"), ...fine("Micro")];
     const s = deloadStatus(history, [], { today: TODAY });

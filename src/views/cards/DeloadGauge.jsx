@@ -15,20 +15,44 @@ import { Card } from "../../ui/components.js";
 
 const LEVEL_COLOR = { green: C.green, yellow: C.yellow, red: C.red };
 
-export function DeloadGauge({ status }) {
+const formatDate = ymd => new Date(`${ymd}T00:00:00Z`).toLocaleDateString("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+export function DeloadGauge({
+  status,
+  timelineDates = [],
+  asOfDate = null,
+  currentDate = null,
+  onAsOfDateChange = null,
+}) {
   if (!status) return null;
   const { level, pressure, label, haveSignal, deload } = status;
   const color = LEVEL_COLOR[level] || C.green;
   const markerPct = Math.max(1, Math.min(99, (haveSignal ? pressure : 0) * 100));
+  const matchedIndex = timelineDates.indexOf(asOfDate);
+  const selectedIndex = matchedIndex >= 0 ? matchedIndex : Math.max(0, timelineDates.length - 1);
+  const hasTimeline = timelineDates.length > 1 && onAsOfDateChange;
+  const isHistorical = asOfDate && currentDate && asOfDate !== currentDate;
 
   return (
     <Card style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        flexWrap: "wrap",
+        gap: 6,
+        marginBottom: 4,
+      }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>Recovery status</div>
         <div style={{ fontSize: 12.5, fontWeight: 700, color }}>{label}</div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
-        How close you are to needing a deload, read from your cross-grip
+        How close you {isHistorical ? "were" : "are"} to needing a deload, read from your cross-grip
         between-rep recovery. Green = absorbing your load; yellow = recovery
         softening, ease up soon; red = deload recommended. Intentionally slow
         to move — it won't react to a single rough session.
@@ -48,6 +72,34 @@ export function DeloadGauge({ status }) {
           background: `linear-gradient(90deg, ${C.green} 0%, ${C.green} 30%, ${C.yellow} 42%, ${C.yellow} 70%, ${C.red} 84%, ${C.red} 100%)`,
         }} />
       </div>
+
+      {hasTimeline && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 8,
+            marginBottom: 4,
+            fontSize: 11,
+            color: C.muted,
+          }}>
+            <span>
+              As of: <b style={{ color }}>{isHistorical ? formatDate(asOfDate) : "Now"}</b>
+            </span>
+            <span>{selectedIndex + 1} of {timelineDates.length}</span>
+          </div>
+          <input
+            aria-label="Recovery status history"
+            type="range"
+            min={0}
+            max={timelineDates.length - 1}
+            step={1}
+            value={selectedIndex}
+            onChange={event => onAsOfDateChange(timelineDates[Number(event.target.value)])}
+            style={{ width: "100%", accentColor: color, cursor: "pointer" }}
+          />
+        </div>
+      )}
 
       {!haveSignal && (
         <div style={{ fontSize: 11, color: C.muted, marginTop: 12 }}>

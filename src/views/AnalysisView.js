@@ -44,7 +44,7 @@ import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY, LS_WORKOUT_LOG_KEY 
 import { useLSValue } from "../hooks/useLSValue.js";
 import { today } from "../util.js";
 import { STRENGTH_MAX } from "../model/zones.js";
-import { deloadStatus } from "../model/deload.js";
+import { deloadStatus, recoveryStatusDates } from "../model/deload.js";
 import {
   predForceThreeExp,
   buildThreeExpPriors,
@@ -111,12 +111,21 @@ export function AnalysisView({
   // calculation too. Could be lifted to App if it becomes hot.
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
 
-  // Recovery-readiness status for the DeloadGauge. Cross-grip recovery
-  // (personal taus) + lifting-volume context, evaluated as of today.
+  // Recovery-readiness history for the DeloadGauge. The model already
+  // evaluates leak-free at an arbitrary date, so scrubbing recomputes the
+  // real historical status with only data available at that checkpoint.
   const todayStr = today();
-  const deloadStatusResult = useMemo(
-    () => deloadStatus(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: todayStr }),
+  const recoveryTimelineDates = useMemo(
+    () => recoveryStatusDates(history, { today: todayStr }),
     [history, todayStr]
+  );
+  const [selectedRecoveryDate, setSelectedRecoveryDate] = useState(null);
+  const recoveryAsOfDate = selectedRecoveryDate && recoveryTimelineDates.includes(selectedRecoveryDate)
+    ? selectedRecoveryDate
+    : todayStr;
+  const deloadStatusResult = useMemo(
+    () => deloadStatus(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: recoveryAsOfDate }),
+    [history, recoveryAsOfDate]
   );
 
   const [selectedSessionId, setSelectedSessionId] = useState(null);
@@ -661,7 +670,13 @@ export function AnalysisView({
       </p>
 
       <CardBoundary name="Recovery status">
-        <DeloadGauge status={deloadStatusResult} />
+        <DeloadGauge
+          status={deloadStatusResult}
+          timelineDates={recoveryTimelineDates}
+          asOfDate={recoveryAsOfDate}
+          currentDate={todayStr}
+          onAsOfDateChange={date => setSelectedRecoveryDate(date === todayStr ? null : date)}
+        />
       </CardBoundary>
 
       {/* Bodyweight logging lives on the Setup tab now (next to the

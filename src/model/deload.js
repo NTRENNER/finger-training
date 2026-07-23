@@ -78,6 +78,45 @@ export const DELOAD_LIFT_MIN_ACUTE_SETS = 12;
 
 const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 
+// Dates where the recovery gauge has enough cross-grip history to be
+// meaningful. Once two grips each have `minSessions` gap-bearing sessions,
+// every subsequent recovery session is a useful checkpoint. `today` is
+// appended as the live endpoint so the slider can return to "Now" even
+// when the last finger session was several days ago.
+export function recoveryStatusDates(history, opts = {}) {
+  const {
+    today = null,
+    minSessions = DELOAD_MIN_SESSIONS,
+  } = opts;
+  if (!Array.isArray(history) || history.length === 0) return [];
+
+  const grips = [...new Set(history.map(rep => rep?.grip).filter(Boolean))];
+  const datesByGrip = new Map();
+  const dateUnion = new Set();
+  for (const grip of grips) {
+    const dates = buildRecoveryTrend(history, grip, { physModel: null })
+      .map(row => row.date)
+      .filter(date => date && (!today || date <= today));
+    datesByGrip.set(grip, dates);
+    for (const date of dates) dateUnion.add(date);
+  }
+
+  const checkpoints = [...dateUnion].sort().filter(date => {
+    let measurableGrips = 0;
+    for (const dates of datesByGrip.values()) {
+      if (dates.filter(candidate => candidate <= date).length >= minSessions) {
+        measurableGrips++;
+      }
+    }
+    return measurableGrips >= 2;
+  });
+
+  if (today && checkpoints.length > 0 && today >= checkpoints[0]) {
+    checkpoints.push(today);
+  }
+  return [...new Set(checkpoints)].sort();
+}
+
 // physModel from a fitted recovery-tau triple (or population when null).
 function physModelFromTaus(taus) {
   const tauR = taus ? { fast: taus.fast, medium: taus.medium, slow: taus.slow } : PHYS_MODEL_DEFAULT.tauR;
