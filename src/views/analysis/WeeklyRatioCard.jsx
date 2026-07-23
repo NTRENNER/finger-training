@@ -60,10 +60,11 @@ export function WeeklyRatioCard({ history = [] }) {
   );
 
   // Chart rows: raw weekly mean + 3-week rolling mean per grip,
-  // respecting the hand filter. Trend-first (July 2026, per Nathan):
-  // the bold line is the rolling mean so the eye reads direction; raw
-  // weekly means stay visible as faint dots — same convention as the
-  // Recovery trajectory card.
+  // respecting the hand filter. Display (July 2026, per Nathan, second
+  // iteration): the RAW weekly line carries the story — he wants the
+  // ups and downs visible, not smoothed away — and the rolling mean is
+  // OVERLAID as a soft wide band on top, showing the trajectory
+  // (moving up or moving down) without hiding the variation.
   const rows = useMemo(() => {
     const base = weeks.map((w) => {
       const row = { week: w.week, label: fmtWeek(w.week) };
@@ -113,8 +114,8 @@ export function WeeklyRatioCard({ history = [] }) {
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
         {mode === "openers"
-          ? <>Bold lines are 3-week rolling means of opening-rep hold ÷ target — the fresh rep of each session, the same signal the check-in reads. Faint dots are the raw weekly means. </>
-          : <>Bold lines are 3-week rolling means of hold ÷ target across every loaded rep; faint dots are the raw weekly means. Ladder reps 2+ run short by design, so this reads lower than Openers in high-rep weeks. </>}
+          ? <>Each point is that week's mean opening-rep hold ÷ target — the fresh rep of each session, the same signal the check-in reads. The soft wide band behind each line is the 3-week trend: its slope says whether you're moving up or down. </>
+          : <>Each point is that week's mean hold ÷ target across every loaded rep; the soft wide band is the 3-week trend. Ladder reps 2+ run short by design, so this reads lower than Openers in high-rep weeks. </>}
         Above the dashed 1.0 line you're outlasting the engine's targets — usually curve amplitude lifting;
         below it, targets are winning. Tap a week for its receipts. Gaps are weeks with no qualifying reps.
       </div>
@@ -140,18 +141,21 @@ export function WeeklyRatioCard({ history = [] }) {
             formatter={(val, name) => [val == null ? "—" : `${val}×`, name]}
             labelFormatter={(l) => `Week of ${l}`}
           />
-          {/* Raw weekly means: faint dots (no line). The click/tooltip
-              targets live here so receipts read the actual week. */}
+          {/* Trend overlay FIRST so the raw line draws on top of it:
+              3-week rolling mean as a wide translucent band — the
+              trajectory (up or down) without hiding the variation. */}
           {grips.map((g) => (
-            <Line key={`${g}-raw`} dataKey={g} stroke="none" connectNulls
-              dot={{ r: 2.5, fill: GRIP_COLORS[g] || C.blue, fillOpacity: 0.45, stroke: "none" }}
-              activeDot={{ r: 5 }}
-              name={`${g} (weekly)`} isAnimationActive={false} />
+            <Line key={`${g}-trend`} dataKey={`${g}_sm`} stroke={GRIP_COLORS[g] || C.blue}
+              strokeWidth={7} strokeOpacity={0.28} strokeLinecap="round" connectNulls
+              dot={false} name={`${g} (trend)`} isAnimationActive={false} />
           ))}
-          {/* 3-week rolling means: the bold trend lines. */}
+          {/* Raw weekly means: the full ups-and-downs line + dots.
+              The click/tooltip targets live here so receipts read the
+              actual week. */}
           {grips.map((g) => (
-            <Line key={g} dataKey={`${g}_sm`} stroke={GRIP_COLORS[g] || C.blue} strokeWidth={3} connectNulls
-              dot={false} name={g} isAnimationActive={false} />
+            <Line key={g} dataKey={g} stroke={GRIP_COLORS[g] || C.blue} strokeWidth={2} connectNulls
+              dot={{ r: 3, fill: GRIP_COLORS[g] || C.blue, stroke: "none" }} activeDot={{ r: 5 }}
+              name={g} isAnimationActive={false} />
           ))}
         </ComposedChart>
       </ResponsiveContainer>
