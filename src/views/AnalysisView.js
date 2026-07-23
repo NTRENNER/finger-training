@@ -3,22 +3,12 @@
 // ──────────────────────────────────────────────────────────────
 // The "Analysis" tab. Top-to-bottom render order:
 //
-//   1. Force-Duration chart (the source of truth — three-exp fit
-//      over recent reps, optional bootstrap band, click-a-dot
-//      session detail modal).
-//   2. Per-grip Curve Improvement summary (zone-bucketed % gain
-//      vs personal baseline).
-//   3. Total Capacity (AUC) trajectory — % vs baseline with a
-//      3-session rolling-mean trend line. Optional ×BW normalize.
-//   4. Force Curves history overlay (per-session three-exp curves
-//      stacked so you can see the shape evolve over time).
-//   5. OneRMPRCard — recent PR snapshots per grip.
-//   6. Recovery Trend — gap (observed − predicted) between rep 1
-//      and rep 2 at the target time, robust to rep 1 lengthening.
-//   7. Strength Balance — Crusher (open hand) vs Micro (crimp)
-//      ratio at 10s, classified against the user's own baseline.
-//   8. Curve Coverage — per-zone data freshness + annual session
-//      pace (the diagnostic that anchors the page).
+//   1. Recovery Status — glanceable readiness / deload pressure.
+//   2. Whole-Curve Capacity — 28-day change plus % vs baseline.
+//   3. Force-Duration chart — the fitted curve and measured reps.
+//   4. Curve Improvement — zone-bucketed gain vs baseline.
+//   5. Peak Force — direct short-duration max trend.
+//   6. Curve Coverage — only when sampled data needs attention.
 //
 // State comes in via props: history, freshMap (built in
 // useRepHistory), activities, bodyWeight. threeExpPriors are
@@ -26,7 +16,7 @@
 // primary state, no BLE, no live session state — pure
 // read-and-render over the rep array.
 //
-// Cross-cutting App config (GOAL_CONFIG, RM_GRIPS) is passed in as
+// Cross-cutting App config (GOAL_CONFIG) is passed in as
 // props so this module stays decoupled from App.js's constant block;
 // pure model helpers are imported directly from the model layer.
 //
@@ -67,7 +57,6 @@ import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
 import { prescription, prescribedLoad, effectiveLoad, freshLoadFor } from "../model/prescription.js";
 import { freshFitReps } from "../model/load.js";
-import { OneRMPRCard } from "./analysis/OneRMPRCard.js";
 import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 // EnduranceCeilingCard dropped May 2026 — the F(180s)/F(5s) ratio is
 // invariant to proportional strength gains (so it reads "NEEDS WORK"
@@ -75,15 +64,13 @@ import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
 // benchmark bands aren't validated against personal performance, and
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
-import { CapacityTrajectoryCard, ZoneShareCard } from "./analysis/CapacityChartCards.js";
+import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
 import { DeloadGauge } from "./cards/DeloadGauge.jsx";
-import { RecoveryTrajectoryCard } from "./analysis/RecoveryTrajectoryCard.jsx";
-import { WeeklyRatioCard } from "./analysis/WeeklyRatioCard.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
 import { PeakForceCard } from "./analysis/PeakForceCard.jsx";
-import { useAucHistoryByGrip } from "../hooks/useAucHistoryByGrip.js";
+import { useCapacityHistoryByGrip } from "../hooks/useCapacityHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
 import { useHistoryOverlay } from "../hooks/useHistoryOverlay.js";
 export function AnalysisView({
@@ -93,7 +80,6 @@ export function AnalysisView({
   // Cross-cutting App config — passed in rather than imported so this
   // module doesn't reach back into App.js for view-level constants.
   GOAL_CONFIG = {},
-  RM_GRIPS = [],
   // Frozen per-grip baselines + save callback, threaded down from App
   // via useUserSettings. Pass-through to useGripFits, which owns the
   // pin-on-first-seed effect. See LS_PINNED_GRIP_BASELINES_KEY for
@@ -200,7 +186,7 @@ export function AnalysisView({
   }, [selectedSessionId, history, freshMap, threeExpPriors]);
 
   // BW normalization toggle. When ON, every metric surface (F-D chart,
-  // AUC trajectory, Curve Improvement, Hand Asymmetry) renders in
+  // capacity trajectory, Curve Improvement, Hand Asymmetry) renders in
   // bodyweight-relative units. Per-session-date BW (via bwOnDate +
   // bwLog) is used so historical points get divided by the BW from
   // THAT date, not just current BW — the honest comparison. The
@@ -372,19 +358,9 @@ export function AnalysisView({
   // is the Hand Asymmetry rows below the F-D chart, which compute
   // per-grip L/R gaps from three-exp fits at T=30s.)
 
-  // Note: 120s capacity over time chart removed — superseded by
-  // aucHistoryByGrip (Total Capacity over time), which integrates the
-  // whole curve from 5 to 180s rather than reading a single F(120)
-  // slice. The Performance vs. Model chart already covers per-zone
-  // progress more meaningfully.
-
-  // Note: AUC values used to live here (aucEstimate / aucBaseline /
-  // aucHistory) backing a dedicated "Climbing Endurance · AUC" card.
-  // That card was removed because the Endurance Improvement card
-  // already shows each grip's Total % (which IS the AUC % gain) and
-  // the CF & W' Over Time chart already shows trajectory. AUC math
-  // still lives in computeAUC and is used by the recommendation
-  // engine and ΔAUC ranking.
+  // The whole-curve capacity trajectory supersedes the old single-time
+  // capacity and literal AUC cards. Its balanced score gives equal
+  // influence to proportional changes at six duration references.
 
   // Fitted force-duration curve points for overlay.
   const F_D_T_MIN = 5;
@@ -426,14 +402,11 @@ export function AnalysisView({
   // selected — there's no single grip to tint to.
   const curveColor = selGrip ? (GRIP_COLORS[selGrip] || C.purple) : C.purple;
 
-  // ── Gap-narrowing tracker over time ──
-  // ── Total AUC over time, per-grip ──
-  // Single number per grip per training date: ∫ F(t) dt over [5, 180]s
-  // under the three-exp curve fit on that grip's failures up to that
-  // date. Captures total work capacity in a single scalar — more
-  // actionable than three zone lines for the "am I getting bigger
-  // overall?" question. Same integration window the badges ladder uses,
-  // so the chart and the badge progression are reading the same metric.
+  // ── Whole-curve capacity over time, per grip ──
+  // Single balanced score per grip per training date: the geometric
+  // mean of fitted force at all six zone reference durations. This
+  // answers "is my capacity up or down?" without letting the high-force
+  // short end or the slow tail dominate the result.
   //
   // Scope: per-grip lines, never pooled (pooling FDP-pinch and FDS-crush
   // hides each muscle's individual trajectory and inflates the headline
@@ -443,7 +416,7 @@ export function AnalysisView({
   // dedicated hook in late May 2026 (BACKLOG #156 partial pass) so
   // the 120 lines of fit + smoothing logic don't visually crowd the
   // AnalysisView render. Same memo deps as before.
-  const aucHistoryByGrip = useAucHistoryByGrip({
+  const capacityHistoryByGrip = useCapacityHistoryByGrip({
     history, grips, gripBaselines, threeExpPriors, bwLog,
     // Hand scoping (June 2026): in L/R mode the trajectory runs on
     // that hand's reps against the FROZEN per-hand baselines.
@@ -684,8 +657,12 @@ export function AnalysisView({
 
       <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Force-Duration Analysis</h2>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-        Compare failures with the force-duration model to find measured gaps and under-sampled durations. Gaps guide coverage; they do not guarantee faster adaptation.
+        Track recovery and capacity across your force-duration curve. Measured gaps guide coverage; they do not guarantee faster adaptation.
       </p>
+
+      <CardBoundary name="Recovery status">
+        <DeloadGauge status={deloadStatusResult} />
+      </CardBoundary>
 
       {/* Bodyweight logging lives on the Setup tab now (next to the
           climb logger). Analysis stays focused on viewing — the only
@@ -753,10 +730,17 @@ export function AnalysisView({
         )}
       </Card>
 
-      {/* F-D chart hoisted to the top of AnalysisView — most important
-          visual on this view. Empty-state placeholder still appears
-          below in the {reps.length === 0 ? ...} block. */}
       {reps.length > 0 && (<>
+        <CardBoundary name="Whole-Curve Capacity">
+          <CapacityTrajectoryCard
+            capacityHistoryByGrip={capacityHistoryByGrip}
+            normalizeOn={normalizeOn}
+            activities={activities}
+            handView={handView}
+            onHandViewChange={setHandView}
+          />
+        </CardBoundary>
+
         {/* ── Force-Duration scatter ──
             Display mode (Absolute vs × BW) is driven by the global
             normalize toggle in the page header — the per-card pill that
@@ -807,11 +791,8 @@ export function AnalysisView({
             — currently 7s / 45s / 120s. The blue Endurance cell is the
             one true endurance signal; Power and Strength are the other
             two reference points on the same curve.)
-            Rendered right under the F-D chart as the per-zone summary
-            of "where are the gains coming from" — the chart shows the
-            shape, this card shows the deltas. The CapacityTrajectory
-            % trend follows immediately so the reader can pivot from
-            "where" (zones) to "when" (over time).
+            Rendered under the F-D chart as the per-zone summary of
+            where gains are coming from.
             Card extracted to CurveImprovementCard (May 2026 BACKLOG
             #156 fifth pass). The three branch modes (perGripMode,
             selGrip-with-baseline, pooled fallback) and their early-days
@@ -837,30 +818,9 @@ export function AnalysisView({
         />
         </CardBoundary>
 
-        <CardBoundary name="Total Capacity trajectory">
-        <CapacityTrajectoryCard
-          aucHistoryByGrip={aucHistoryByGrip}
-          normalizeOn={normalizeOn}
-          activities={activities}
-          handView={handView}
-          onHandViewChange={setHandView}
-        />
-        </CardBoundary>
-
-        {/* Capacity shape — zone share of the balanced score over time.
-            The trajectory above says how much the curve grew; this says
-            where the growth came from (June 2026). */}
-        <CardBoundary name="Capacity zone share">
-        <ZoneShareCard
-          aucHistoryByGrip={aucHistoryByGrip}
-          handView={handView}
-          onHandViewChange={setHandView}
-        />
-        </CardBoundary>
-
         {/* Peak force — direct max-strength measurement over time, from
             short near-max reps. Complements the curve (sustained force)
-            and the AUC trajectory (whole-curve capacity) with the one
+            and the whole-curve capacity trajectory with the one
             thing they underrepresent: instantaneous max recruitment. */}
         <CardBoundary name="Peak Force trend">
         <PeakForceCard history={history} unit={unit} />
@@ -884,16 +844,7 @@ export function AnalysisView({
             drives the zone tiles too. The standalone card and its
             Pooled/Per-hand + grip pills were removed.) */}
 
-        {/* (CurveCoverageCard moved to the bottom of Analysis — see
-            the closing block. Lives last so the freshness rundown
-            anchors the page rather than interrupting the metric
-            stack mid-scroll.) */}
       </>)}
-
-      {/* ── 1RM PR tracker ── */}
-      <CardBoundary name="1RM PR tracker">
-        <OneRMPRCard activities={activities} rmGrips={RM_GRIPS} unit={unit} />
-        </CardBoundary>
 
       {reps.length === 0 ? (
         <Card>
@@ -905,68 +856,11 @@ export function AnalysisView({
         </Card>
       ) : (<>
 
-        {/* (Critical Force Estimate, Climbing Endurance chart, Train
-            block, and the absolute-kg·s Capacity card all removed under
-            the three-exp / curve-trust direction. The absolute AUC was
-            redundant — magnitude is already visible on the F-D chart
-            and Strength Balance card, and the kg·s unit on the chart
-            axis was opaque. The % vs baseline trajectory tells the
-            actual training-progress story.) */}
-
-        {/* Recovery readiness gauge. Replaced the two raw recovery-trend
-            charts (May 2026) — they were diagnostic deviation metrics
-            that read like scoreboards and invited "it's going down, is
-            that bad?" misreads. Same cross-grip recovery signal, reframed
-            as a glanceable green/yellow/red light with a runway toward a
-            deload. Conservatively gated (red only at the strong-deload
-            condition) so it won't react to one rough session. */}
-        <CardBoundary name="Recovery gauge">
-        <DeloadGauge status={deloadStatusResult} />
-        </CardBoundary>
-
-        {/* Recovery trajectory — the gauge above is the glanceable
-            green/yellow/red; this is the detail for anyone who wants to
-            see the trend. Recovery fraction (rep2/rep1) and the model
-            gap over time, per grip, trend-first (bold rolling means) so
-            it reads as "am I improving?" not a per-session scoreboard. */}
-        <CardBoundary name="Recovery trajectory">
-        <RecoveryTrajectoryCard history={history} />
-        </CardBoundary>
-
-        {/* Weekly hold ratio — the coach's month-over-month actual/target
-            comparison ("0.85 → 1.04") made continuous: weekly means per
-            grip against the 1.0 line, hand toggle, tap-a-week receipts.
-            Lives next to Recovery trajectory as the other "is training
-            actually landing?" trend view. */}
-        <CardBoundary name="Weekly hold ratio">
-        <WeeklyRatioCard history={history} />
-        </CardBoundary>
-
-        {/* (StrengthBalanceCard — the Crusher:Micro "open-hand vs crimp
-            dominance" ratio — removed May 2026. The ratio is dominated by
-            the Micro probe's much smaller edge geometry, not by trainable
-            strength balance, so it sat ~constant against the user's own
-            median and produced no actionable signal. Per-grip progress is
-            already visible on the Curve-Improvement trajectory.) */}
-
-        {/* Curve Coverage — per-zone data freshness + annual pace.
-            Anchors the bottom of Analysis: it's a "how good is your
-            data" rundown rather than a training-signal card, so it
-            reads naturally as the final summary of the page. */}
+        {/* Curve Coverage is an exception card: it stays at the bottom
+            and renders only when sampled data is stale or aging. */}
         <CardBoundary name="Curve Coverage">
         <CurveCoverageCard history={history} />
         </CardBoundary>
-
-        {/* (Per-Compartment Dose AUC chart + Energy System Breakdown
-            card removed under curve-trust — both were zone-keyed
-            descriptive surfaces that pre-dated the continuous engine.
-            The F-D chart, Total Capacity AUC over time, Curve
-            Improvement, and Curve Coverage cards all cover the same
-            diagnostic ground more cleanly. The dose-decomposition
-            math also leaned on mechanistic-flavored language that
-            doesn't survive the phenomenological-model framing.)
-            */}
-
       </>)}
     </div>
   );

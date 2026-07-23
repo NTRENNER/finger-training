@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-// useAucHistoryByGrip — per-grip AUC trajectory builder
+// useCapacityHistoryByGrip — per-grip whole-curve capacity trajectory
 // ─────────────────────────────────────────────────────────────
 // Extracted from AnalysisView.js (late May 2026 BACKLOG #156, partial
 // pass). Builds the per-grip "Curve Improvement %" trajectory that
@@ -15,7 +15,6 @@
 // Output shape:
 //   {
 //     grips: string[],         // ordered grip ids present in the data
-//     absRows: { date, [grip]_abs }[],         // absolute AUC per date
 //     pctRows: { date, [grip]_pct, [grip]_pct_sm }[],  // raw % vs baseline + smoothed
 //     pctRowsBW: { date, [grip]_pct, [grip]_pct_sm }[],  // BW-normalized
 //     hasPct: boolean,         // any grip has a baseline?
@@ -24,11 +23,11 @@
 
 import { useMemo } from "react";
 import { bwOnDate } from "../ui/format.js";
-import { computeBalancedCurveScore, computeZoneShares, buildThreeExpPriors } from "../model/threeExp.js";
+import { computeBalancedCurveScore, buildThreeExpPriors } from "../model/threeExp.js";
 import { fitAmpsForPts } from "../model/baselines.js";
 import { effectiveLoad, freshFitReps } from "../model/load.js";
 
-export function useAucHistoryByGrip({
+export function useCapacityHistoryByGrip({
   history,
   grips,
   gripBaselines,
@@ -43,18 +42,18 @@ export function useAucHistoryByGrip({
   perHandBaselines = null,
 }) {
   return useMemo(() => {
-    // Per-grip date-keyed map of AUC values (and % vs baseline).
+    // Per-grip date-keyed map of balanced capacity scores.
     // We compute BOTH the raw % and the BW-normalized % in one pass
     // and let the render pick which to show based on normalizeOn —
     // toggling the pill should not retrigger the expensive curve fits.
     //
     // BW-normalized math: dividing both numerator and denominator by
     // their respective BWs gives
-    //   pct_bw = (abs/sessionBW) / (baseAUC/baseBW) − 1
-    //          = (abs/baseAUC) × (baseBW/sessionBW) − 1
+    //   pct_bw = (score/sessionBW) / (baseScore/baseBW) − 1
+    //          = (score/baseScore) × (baseBW/sessionBW) − 1
     // which collapses to pct_raw whenever sessionBW == baseBW.
-    const perGrip = {};            // grip -> Map<date, { abs, pct, pctBW }>
-    const baselineByGrip = {};     // grip -> { auc, bw }
+    const perGrip = {};            // grip -> Map<date, { pct, pctBW }>
+    const baselineByGrip = {};     // grip -> { score, bw }
     const datesUnion = new Set();
     // Leak-free per-date prior cache — same priorsAt pattern as
     // useHistoryOverlay. buildThreeExpPriors returns EVERY grip's
@@ -81,7 +80,7 @@ export function useAucHistoryByGrip({
       for (const r of gripFails) if (r.date) datesSet.add(r.date);
       const dates = [...datesSet].sort();
       if (dates.length < 2) continue;
-      // Baseline AUC + the BW that prevailed at the baseline date.
+      // Baseline score + the BW that prevailed at the baseline date.
       // bwOnDate returns the most-recent-on-or-before entry, so a
       // baseline dated before the first BW log just yields null and
       // pctBW falls back to the raw pct in the render.
@@ -89,9 +88,9 @@ export function useAucHistoryByGrip({
         ? perHandBaselines?.[`${g}|${hand}`]
         : gripBaselines[g];
       if (base?.amps) {
-        const baseAUC = computeBalancedCurveScore(base.amps);
+        const baseScore = computeBalancedCurveScore(base.amps);
         const baseBwEntry = base.date ? bwOnDate(bwLog, base.date) : null;
-        baselineByGrip[g] = { auc: baseAUC, bw: baseBwEntry?.kg ?? null };
+        baselineByGrip[g] = { score: baseScore, bw: baseBwEntry?.kg ?? null };
       }
       const seriesMap = new Map();
       let anchored = false;   // first plotted point is clamped to baseline (0%)
@@ -120,25 +119,22 @@ export function useAucHistoryByGrip({
         // silently never fired and the line started mid-climb. Clamping
         // the leftmost plotted point is robust to that and to pinned
         // baselines (which don't carry a window-close date).
-        const hasBase = baselineByGrip[g]?.auc > 0;
-        const abs = (!anchored && hasBase)
-          ? baselineByGrip[g].auc
+        const hasBase = baselineByGrip[g]?.score > 0;
+        const score = (!anchored && hasBase)
+          ? baselineByGrip[g].score
           : computeBalancedCurveScore(amps);
         if (hasBase) anchored = true;
-        if (!(abs > 0)) continue;
-        const baseAUC = baselineByGrip[g]?.auc;
+        if (!(score > 0)) continue;
+        const baseScore = baselineByGrip[g]?.score;
         const baseBW  = baselineByGrip[g]?.bw;
         const sessionBW = bwOnDate(bwLog, date)?.kg ?? null;
-        const pct = baseAUC && baseAUC > 0
-          ? Math.round((abs / baseAUC - 1) * 100)
+        const pct = baseScore && baseScore > 0
+          ? Math.round((score / baseScore - 1) * 100)
           : null;
-        const pctBW = (baseAUC && baseAUC > 0 && baseBW > 0 && sessionBW > 0)
-          ? Math.round((abs / baseAUC * baseBW / sessionBW - 1) * 100)
+        const pctBW = (baseScore && baseScore > 0 && baseBW > 0 && sessionBW > 0)
+          ? Math.round((score / baseScore * baseBW / sessionBW - 1) * 100)
           : pct;  // fall back to raw pct if any BW is missing
-        // Zone shares from the fitted amps (shape, not level — so the
-        // baseline-anchored first point still uses its own fit's shape).
-        const shares = computeZoneShares(amps);
-        seriesMap.set(date, { abs: Math.round(abs), pct, pctBW, shares });
+        seriesMap.set(date, { pct, pctBW });
         datesUnion.add(date);
       }
       // Baseline required: this hook feeds the "% vs baseline" card,
@@ -146,7 +142,7 @@ export function useAucHistoryByGrip({
       // would render as a ghost legend entry with no line during the
       // window between its 3rd fresh rep and its baseline seeding
       // (June 2026, observed while waiting for Prime to qualify).
-      if (seriesMap.size >= 2 && baselineByGrip[g]?.auc > 0) perGrip[g] = seriesMap;
+      if (seriesMap.size >= 2 && baselineByGrip[g]?.score > 0) perGrip[g] = seriesMap;
     }
     if (Object.keys(perGrip).length === 0) return null;
     // Per-grip 3-point centered rolling mean over each grip's own
@@ -181,39 +177,27 @@ export function useAucHistoryByGrip({
       smoothedByGrip[g] = sm;
     }
     const dates = [...datesUnion].sort();
-    const absRows = [];
     const pctRows = [];
     const pctRowsBW = [];
-    const shareRows = [];
     for (const date of dates) {
-      const aRow = { date };
       const pRow = { date };
       const pBwRow = { date };
-      const sRow = { date };
       for (const g of Object.keys(perGrip)) {
         const v = perGrip[g].get(date);
         const sv = smoothedByGrip[g]?.get(date);
-        aRow[`${g}_abs`]      = v ? v.abs   : null;
         pRow[`${g}_pct`]      = v ? v.pct   : null;
         pRow[`${g}_pct_sm`]   = sv ? sv.pctSm   : null;
         pBwRow[`${g}_pct`]    = v ? v.pctBW : null;
         pBwRow[`${g}_pct_sm`] = sv ? sv.pctBWSm : null;
-        sRow[`${g}_power`]     = v?.shares ? v.shares.power     : null;
-        sRow[`${g}_strength`]  = v?.shares ? v.shares.strength  : null;
-        sRow[`${g}_endurance`] = v?.shares ? v.shares.endurance : null;
       }
-      absRows.push(aRow);
       pctRows.push(pRow);
       pctRowsBW.push(pBwRow);
-      shareRows.push(sRow);
     }
     return {
       grips: Object.keys(perGrip),
-      absRows,
       pctRows,
       pctRowsBW,
-      shareRows,
-      hasPct: Object.values(baselineByGrip).some(v => v.auc > 0),
+      hasPct: Object.values(baselineByGrip).some(v => v.score > 0),
     };
   }, [history, grips, gripBaselines, threeExpPriors, bwLog, hand, perHandBaselines]);
 }

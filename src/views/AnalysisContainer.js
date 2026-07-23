@@ -3,8 +3,8 @@
 // ─────────────────────────────────────────────────────────────
 // Top-level "Analysis" tab. Hosts a Fingers / Lifts / Climbs / Weight
 // pill bar and renders one of four underlying views:
-//   * AnalysisView            — Tindeq finger training (F-D curve, AUC,
-//                               Hand Asymmetry, Critical Force).
+//   * AnalysisView            — Tindeq finger training capacity,
+//                               force-duration, and recovery analysis.
 //   * WorkoutAnalysisView     — gym lifting progression (per-exercise
 //                               top weight + volume over time).
 //   * ClimbingAnalysisView    — climbing log analytics (grade pyramid,
@@ -42,7 +42,7 @@ export function AnalysisContainer(props) {
     // AnalysisView (fingers) props
     history, unit, bodyWeight, activities,
     freshMap,
-    GOAL_CONFIG, RM_GRIPS,
+    GOAL_CONFIG,
     // Frozen per-grip baselines threaded from App.useUserSettings — see
     // LS_PINNED_GRIP_BASELINES_KEY for the rationale. baselinePinReady
     // gates the pin-on-first-seed WRITE until both cloud reconciles
@@ -122,7 +122,6 @@ export function AnalysisContainer(props) {
           activities={activities}
           freshMap={freshMap}
           GOAL_CONFIG={GOAL_CONFIG}
-          RM_GRIPS={RM_GRIPS}
           pinnedGripBaselines={pinnedGripBaselines}
           onSavePinnedGripBaselines={onSavePinnedGripBaselines}
           pinnedPerHandBaselines={pinnedPerHandBaselines}

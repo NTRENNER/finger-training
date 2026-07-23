@@ -77,8 +77,7 @@ import {
 // state (history, activities, bodyWeight, trip),
 // the reconcile/sync orchestration that owns those pieces, and
 // the tab-switch render gate. Plus GOAL_CONFIG (passed to
-// SetupView + AnalysisView), RM_GRIPS (passed to AnalysisView
-// for the 1RM tracker), and the TABS array used by the top-nav
+// SetupView + AnalysisView) and the TABS array used by the top-nav
 // router.
 
 // LS_HISTORY_KEY (formerly LS_KEY = "ft_v3") now lives in src/lib/storage.js;
@@ -165,17 +164,6 @@ const GOAL_CONFIG = {
     refTime: 220, restDefault: 60, repsDefault: 3,
   },
 };
-
-// ─────────────────────────────────────────────────────────────
-// 1RM PR TRACKER (legacy)
-// ─────────────────────────────────────────────────────────────
-// The standalone OneRMWidget was retired now that the power
-// protocol (6 × 5–7s max hangs at 20s rest) doubles as a 1RM-
-// equivalent warm-up. RM_GRIPS stays so the 1RM PR tracker on
-// the Analysis tab can still render historical data, and so
-// computeZoneCoverage credits any legacy `type: "oneRM"`
-// activity entries to Power.
-const RM_GRIPS = ["Micro", "Crusher", "Prime"];
 
 // Tab order. Fingers + Workout + Climb are the three "doing the work"
 // tabs and sit next to each other at the front, in training-day order
@@ -750,7 +738,6 @@ export default function App() {
           activities={activities}
           freshMap={freshMap}
           GOAL_CONFIG={GOAL_CONFIG}
-          RM_GRIPS={RM_GRIPS}
           defaultWorkouts={ALL_WORKOUTS_LOOKUP}
           pyramidProjectMap={pyramidProjectMap}
           onPyramidProjectChange={savePyramidProjectMap}
@@ -763,7 +750,7 @@ export default function App() {
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
-          was gamification on top of AUC % growth, which Curve
+          was gamification on top of capacity growth, which Curve
           Improvement on Analysis already shows directly. Lifts
           retired as a top-level tab in May 2026 and folded into
           Analysis via AnalysisContainer's Fingers / Lifts pill.
@@ -809,7 +796,7 @@ export default function App() {
         />
       )}
       {/* (Trends tab removed May 2026 — finger trends shown on
-          Analysis as Total Capacity AUC over time; body weight and
+          Analysis as Whole-Curve Capacity over time; body weight and
           lifts have their own homes too. Climbing trends were also
           dropped when the Climbing tab was retired.) */}
       {tab === SETTINGS_TAB && (

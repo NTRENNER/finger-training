@@ -6,7 +6,6 @@ import {
   THREE_EXP_LAMBDA_DEFAULT,
   fitThreeExpAmps, fitThreeExpAmpsLOO,
   predForceThreeExp, buildThreeExpPriors,
-  computeZoneShares, ZONE_SHARE_BUCKETS,
   THREE_EXP_TAUS,
 } from "../threeExp.js";
 import { PHYS_MODEL_DEFAULT } from "../fatigue.js";
@@ -272,49 +271,5 @@ describe("fitThreeExpAmpsLOO", () => {
       expect(r).toBeGreaterThan(0);
       expect(r).toBeLessThan(5);
     }
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// computeZoneShares — capacity-shape decomposition
-// ─────────────────────────────────────────────────────────────
-describe("computeZoneShares", () => {
-  test("null on unusable amps", () => {
-    expect(computeZoneShares(null)).toBeNull();
-    expect(computeZoneShares([1, 2])).toBeNull();
-    expect(computeZoneShares([0, 0, 0])).toBeNull();
-  });
-
-  test("buckets cover all six zones exactly once", () => {
-    const all = Object.values(ZONE_SHARE_BUCKETS).flat();
-    expect(all.sort()).toEqual([
-      "endurance", "max_strength", "power",
-      "power_strength", "strength", "strength_endurance",
-    ].sort());
-    expect(all.length).toBe(6);
-  });
-
-  test("shares are positive and sum to ~100", () => {
-    const s = computeZoneShares([30, 12, 6]);
-    expect(s).not.toBeNull();
-    const sum = s.power + s.strength + s.endurance;
-    expect(sum).toBeGreaterThan(99.5);
-    expect(sum).toBeLessThan(100.5);
-    for (const v of Object.values(s)) expect(v).toBeGreaterThan(0);
-  });
-
-  test("a slow-heavy curve has a higher endurance share than a fast-heavy one", () => {
-    const fastHeavy = computeZoneShares([40, 8, 3]);
-    const slowHeavy = computeZoneShares([10, 8, 12]);
-    expect(slowHeavy.endurance).toBeGreaterThan(fastHeavy.endurance);
-    expect(fastHeavy.power).toBeGreaterThan(slowHeavy.power);
-  });
-
-  test("shape is scale-invariant — doubling every amp leaves shares unchanged", () => {
-    const a = computeZoneShares([30, 12, 6]);
-    const b = computeZoneShares([60, 24, 12]);
-    expect(b.power).toBeCloseTo(a.power, 1);
-    expect(b.strength).toBeCloseTo(a.strength, 1);
-    expect(b.endurance).toBeCloseTo(a.endurance, 1);
   });
 });
