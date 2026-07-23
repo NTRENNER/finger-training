@@ -58,7 +58,9 @@ describe("assembleReview", () => {
   test("yellow recovery → softening headline", () => {
     const r = assembleReview(makeSignals({ recovery: { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null } }));
     expect(r.headline).toMatch(/eye on recovery/i);
-    expect(r.points.find(p => p.kind === "concern").text).toMatch(/softening/i);
+    const concern = r.points.find(p => p.kind === "concern").text;
+    expect(concern).toMatch(/softening/i);
+    expect(concern).toMatch(/Keep it light until recovery reads green/i);
   });
 
   test("stale grip surfaces as a concern", () => {

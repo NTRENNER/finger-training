@@ -224,7 +224,7 @@ export function assembleReview(signals) {
   } else if (recovery.level === "yellow") {
     concerns.push({ kind: "concern", text: recovery.guidanceAction
       ? `${recovery.label}. ${recovery.guidanceAction}`
-      : `${recovery.label}. Nothing alarming yet — just don't add load this week.` });
+      : `${recovery.label}. Keep it light until recovery reads green.` });
   }
   for (const g of finger.staleGrips.slice(0, 2)) {
     concerns.push({ kind: "concern", text: `${g.grip} has gone quiet — ${g.days} days since you last trained it. Worth a session before the curve drifts.` });
@@ -556,7 +556,7 @@ export function assembleCheckIn(signals) {
   const recovery = signals.recovery || { level: "green", label: null };
 
   // ── Recovery × volume cross-reference (July 2026, per Nathan) ──
-  // "Recovery softening — ease up" and "volume is well under your norm"
+  // "Recovery softening" and "volume is well under your norm"
   // are the SAME story told twice: the athlete already eased up. When
   // both fire, merge them into one line that credits the lighter week
   // (busy stretch or intentional deload — either way the right
@@ -569,14 +569,29 @@ export function assembleCheckIn(signals) {
   const rampDrop = (behaviorNotes || []).find(n => n.key === "ramp-drop");
   const dropPct = rampDrop && Number.isFinite(rampDrop.ratio)
     ? Math.round(rampDrop.ratio * 100) : null;
+  const volumeRead = dropPct != null
+    ? (dropPct <= 5 ? "near zero" : `~${dropPct}% of your monthly norm`)
+    : null;
   const mergedRecoveryVolume = rampDrop && recovery.level !== "green" && recovery.label
     ? (recovery.level === "red"
-      ? `Recovery is still down even after a light week (~${dropPct}% of your monthly norm) — the deload hasn't caught up yet. Extend the rest: easy sessions only until the trend turns.`
-      : `Recovery was softening, but your volume already came down this week (~${dropPct}% of your monthly norm) — a busy stretch or an intentional deload, either way the right response. Hold it light until recovery reads green, then use the freshness as a platform to advance.`)
+      ? `Recovery is still down despite volume falling to ${volumeRead} this week. Extend the deload: easy sessions only until the trend turns.`
+      : `Recovery was softening, but volume was already ${volumeRead} this week. That's the right response; keep it light until recovery turns green, then advance fresh.`)
     : null;
   const deloadBanked = rampDrop && recovery.level === "green"
-    ? `Volume ran well under your monthly norm (~${dropPct}%) and recovery reads green — that's a banked deload, not lost ground. Good week to advance: you'll meet the engine's numbers fresh.`
+    ? `Volume fell to ${volumeRead} this week and recovery reads green — that's a banked deload, not lost ground. Advance while you're fresh.`
     : null;
+  const compactRecoveryVolume = rampDrop && recovery.level !== "green" && recovery.label
+    ? (recovery.level === "red"
+      ? `Recovery still down despite volume falling to ${volumeRead} this week. Extend the deload until the trend turns.`
+      : `Recovery softening — volume was already ${volumeRead} this week. Keep it light until recovery turns green.`)
+    : null;
+  const compactPoints = compactRecoveryVolume
+    ? digest.points.map(p =>
+        p.kind === "concern" && p.text.startsWith(recovery.label)
+          ? { ...p, text: compactRecoveryVolume }
+          : p
+      )
+    : digest.points;
 
   // WHAT YOU DID — volume/coverage lines.
   const did = [];
@@ -618,8 +633,8 @@ export function assembleCheckIn(signals) {
   const stuck = digest.points.filter(p => p.kind === "concern").map(p => p.text)
     .map(t => {
       // Recovery concern × volume drop → the merged line (see above),
-      // replacing the digest's "don't add load" phrasing in place so
-      // it keeps the concern's slot at the top of the section.
+      // replacing the digest's generic "keep it light" phrasing in
+      // place so it keeps the concern's slot at the top of the section.
       if (mergedRecoveryVolume && recovery.label && t.startsWith(recovery.label)) {
         return mergedRecoveryVolume;
       }
@@ -686,7 +701,7 @@ export function assembleCheckIn(signals) {
   return {
     range: signals.range,
     headline: digest.headline,
-    points: digest.points,          // compact card keeps rendering these
+    points: compactPoints,
     sections: { did, moving, stuck, focus, headsUp },
   };
 }

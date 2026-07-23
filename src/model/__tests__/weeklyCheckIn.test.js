@@ -154,26 +154,41 @@ describe("assembleCheckIn", () => {
     return hist;
   };
 
-  test("recovery softening + deload-sized week merge into ONE line with deload framing", () => {
+  test("recovery softening + deload-sized week credits the lower volume in both views", () => {
     const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
     s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
     const out = assembleCheckIn(s);
-    const merged = out.sections.stuck.find(t => /volume already came down/.test(t));
+    const compact = out.points.find(p => p.kind === "concern" && /Recovery softening/.test(p.text));
+    const merged = out.sections.stuck.find(t => /volume was already/.test(t));
+    expect(compact).toBeTruthy();
+    expect(compact.text).toMatch(/volume was already/);
+    expect(compact.text).toMatch(/Keep it light until recovery turns green/);
     expect(merged).toBeTruthy();
-    expect(merged).toMatch(/busy stretch or an intentional deload/);
-    expect(merged).toMatch(/platform to advance/);
+    expect(merged).toMatch(/right response/);
+    expect(merged).toMatch(/advance fresh/);
     // Neither original line survives alongside the merge.
     expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
-    expect(out.sections.stuck.some(t => /don't add load this week/.test(t))).toBe(false);
+    expect(out.sections.stuck.some(t => /ease up soon/.test(t))).toBe(false);
   });
 
-  test("red recovery + light week says the deload hasn't caught up — extend the rest", () => {
+  test("near-zero volume is phrased naturally instead of as ~0% of norm", () => {
+    const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
+    s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
+    s.behaviorNotes = [{ key: "ramp-drop", ratio: 0, text: "raw ramp-drop note" }];
+    const out = assembleCheckIn(s);
+
+    expect(out.points.find(p => p.kind === "concern").text).toMatch(/volume was already near zero/);
+    expect(out.sections.stuck.join(" ")).toMatch(/volume was already near zero/);
+    expect([...out.points.map(p => p.text), ...out.sections.stuck].join(" ")).not.toMatch(/~0%/);
+  });
+
+  test("red recovery + light week says to extend the deload", () => {
     const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
     s.recovery = { level: "red", label: "Recovery is down", guidanceAction: null };
     const out = assembleCheckIn(s);
-    const merged = out.sections.stuck.find(t => /deload hasn't caught up/.test(t));
+    const merged = out.sections.stuck.find(t => /despite volume falling/.test(t));
     expect(merged).toBeTruthy();
-    expect(merged).toMatch(/Extend the rest/);
+    expect(merged).toMatch(/Extend the deload/);
     expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
   });
 
@@ -182,7 +197,7 @@ describe("assembleCheckIn", () => {
     s.recovery = { level: "green", label: null, guidanceAction: null };
     const out = assembleCheckIn(s);
     expect(out.sections.moving.some(t => /banked deload/.test(t))).toBe(true);
-    expect(out.sections.moving.join(" ")).toMatch(/Good week to advance/);
+    expect(out.sections.moving.join(" ")).toMatch(/Advance while you're fresh/);
     // The raw drop note is consumed, not duplicated into stuck.
     expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
   });
@@ -197,8 +212,8 @@ describe("assembleCheckIn", () => {
     const s = gatherCheckInSignals(hist, [], [], { refDate: REF });
     s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
     const out = assembleCheckIn(s);
-    expect(out.sections.stuck.some(t => /don't add load this week/.test(t))).toBe(true);
-    expect(out.sections.stuck.some(t => /volume already came down/.test(t))).toBe(false);
+    expect(out.sections.stuck.some(t => /Keep it light until recovery reads green/.test(t))).toBe(true);
+    expect(out.sections.stuck.some(t => /volume was already/.test(t))).toBe(false);
   });
 
   test("behavior notes (volume ramp / adherence) land in stuck", () => {
