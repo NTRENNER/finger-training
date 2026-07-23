@@ -62,6 +62,7 @@ import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import {
   computeDensityLadder,
   LADDER_MAX_REPS, LADDER_MIN_REPS, LADDER_LOAD_STEP_FRAC,
+  LADDER_COLLAPSE_STEP_FRAC,
 } from "../../model/densityLadder.js";
 import { today } from "../../util.js";
 
@@ -319,6 +320,14 @@ export function SessionPlanCard({
       notes.push("pin capped by the engine's load ceiling");
     }
     const suffix = notes.length ? ` — ${notes.join("; ")}` : "";
+    if (ladder.decision === "down_step") {
+      // Collapse down-step (July 2026): reps 2+ decayed below the
+      // personal recovery model's forecast last time, so the load
+      // steps down 10% and the rung holds. Show the worst hand's C so
+      // the claim is inspectable.
+      const worstC = Math.min(...Object.values(lb.collapseByHand || {}).map(c => c.C));
+      return `ladder: last session's reps 2+ decayed to ${Math.round(worstC * 100)}% of your recovery model's forecast → −${Math.round(LADDER_COLLAPSE_STEP_FRAC * 100)}% load (${loadStr} ${unit}), same ${ladder.reps} reps until it's absorbed${suffix}`;
+    }
     if (ladder.decision === "advance") {
       return `ladder: last rep ${lb.lastRepSec}s ≥ ${lb.gateSec}s gate → ${ladder.reps} reps, same load (${loadStr} ${unit})${suffix}`;
     }
@@ -380,7 +389,7 @@ export function SessionPlanCard({
   const s = totalSec % 60;
   const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
 
-  // ── Render ───────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${activeColor}66` }}>
 
