@@ -12,6 +12,7 @@ import {
   LADDER_GATE_FRAC, LADDER_LOAD_STEP_FRAC,
 } from "../densityLadder.js";
 import { capacityMultiplier } from "../fatigueBeta.js";
+import { enduranceCeilingKg } from "../enduranceTail.js";
 
 // Build one session's reps: `times[hand]` is the per-rep hold times in
 // rep order; every rep carries the same T, load, session id, and date.
@@ -230,5 +231,115 @@ describe("computeDensityLadder", () => {
   test("gate fraction reproduces both source anchors", () => {
     expect(40 * LADDER_GATE_FRAC).toBeCloseTo(10, 5);
     expect(Math.round(90 * LADDER_GATE_FRAC)).toBeGreaterThanOrEqual(20);
+  });
+});
+
+// ── Re-pin guard + engine bounds (July 2026) ──────────────────────
+// The 2026-07-20 and 07-22 endurance misses were ladder pins, not
+// engine output: the pin re-played a failed session's rep-1 load
+// (which, via effectiveLoad, was the over-pulled avg force — so the
+// pin RATCHETED UP across four consecutive failed Micro 160s
+// sessions) and bypassed every bound prescription() enforces,
+// including the PR #41 endurance-tail ceiling. See
+// finger-training-density-ladder-pin project memory.
+describe("re-pin guard + engine bounds", () => {
+  test("a session whose rep 1 fell short of T does not re-pin (single hand → no ladder)", () => {
+    // Micro-7/20-shaped: 160s target, rep 1 died at 32s. "Same
+    // weight, more reps" has no basis — the weight was never absorbed.
+    const hist = session({
+      id: "s1", date: "2026-07-20", T: 160, loadKg: 10.6,
+      times: { L: [32.2, 21.5, 20.3, 13.4] },
+    });
+    expect(computeDensityLadder(hist, "Crusher", "strength_endurance")).toBeNull();
+  });
+
+  test("per-hand: the short hand is dropped (engine takes it), the passing hand still pins", () => {
+    const hist = session({
+      id: "s1", date: "2026-07-20", T: 40, loadKg: 50,
+      times: {
+        L: [40.2, 24, 16.5, 12.1],   // absorbed → pin
+        R: [20.0, 15, 10, 8],        // rep 1 short → engine
+      },
+    });
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out).not.toBeNull();
+    expect(out.loadByHand.L).toBeCloseTo(50, 1);
+    expect(out.loadByHand.R).toBeUndefined();
+    expect(out.basis.droppedByHand.R).toBeCloseTo(20, 1);
+    expect(out.basis.droppedByHand.L).toBeUndefined();
+  });
+
+  test("the guard reads the FIRST set's rep 1 (fresh), not a later set's fatigued rep 1", () => {
+    const set = (setNum, times) => session({
+      id: "s1", date: "2026-06-21", T: 40, loadKg: 50,
+      times: { L: times },
+    }).map(r => ({ ...r, id: `${r.id}-set${setNum}`, set_num: setNum }));
+    const hist = [
+      ...set(1, [40, 26, 18, 12]),   // fresh rep 1 absorbed the load…
+      ...set(2, [30, 20, 12, 8]),    // …set 2's rep 1 is fatigued, not a failure signal
+    ];
+    const out = computeDensityLadder(hist, "Crusher", "power");
+    expect(out).not.toBeNull();
+    expect(out.loadByHand.L).toBeCloseTo(50, 1);
+  });
+
+  test("a surviving pin is clamped by the endurance-tail ceiling it used to bypass", () => {
+    // Crusher-7/22-shaped: a manual/spring rep-1 "success" carries a
+    // nominal load that is not a measured force — it neither sets the
+    // capacity floor nor enters the tail fit, so the measured tail
+    // must cap the pin. Measured fresh failures (rep 1, avg_force):
+    const measured = [
+      { T: 40, F: 40 }, { T: 60, F: 35 }, { T: 90, F: 30 },
+      { T: 120, F: 26 }, { T: 160, F: 22 },
+    ].map((p, i) => ({
+      id: `m${i}`, session_id: `m${i}`, date: `2026-06-0${i + 1}`,
+      grip: "Crusher", hand: "L", target_duration: p.T,
+      actual_time_s: p.T, avg_force_kg: p.F, prescribed_load_kg: p.F,
+      rep_num: 1, set_num: 1, failed: true, session_cooked: null,
+    }));
+    // Latest endurance-zone session: manual 30 kg nominal, rep 1 held
+    // 203s of 200 → passes the re-pin guard; 30 kg is the pin input.
+    const manual = {
+      id: "man1", session_id: "man1", date: "2026-06-20",
+      grip: "Crusher", hand: "L", target_duration: 200,
+      actual_time_s: 203, manual_load_kg: 30, prescribed_load_kg: 22,
+      rep_num: 1, set_num: 1, failed: false, session_cooked: null,
+    };
+    const hist = [...measured, manual];
+    const out = computeDensityLadder(hist, "Crusher", "endurance");
+    expect(out).not.toBeNull();
+    const ceil = enduranceCeilingKg(hist, "L", "Crusher", 200);
+    expect(ceil).not.toBeNull();
+    expect(ceil).toBeLessThan(30);                       // the bound is real
+    expect(out.loadByHand.L).toBeCloseTo(ceil, 1);       // pin clamped to it
+    expect(out.basis.boundedByHand.L.from).toBeCloseTo(30, 1);
+    expect(out.basis.boundedByHand.L.to).toBeCloseTo(ceil, 1);
+  });
+
+  test("an absorbed measured pin at its own demonstrated load is NOT clamped", () => {
+    // A measured success IS demonstrated capacity: the floor rises to
+    // meet it, the floor raises the endurance ceiling, and the pin
+    // passes through unchanged — clamping here would argue with the
+    // athlete's own logged hold.
+    const measured = [
+      { T: 40, F: 40 }, { T: 60, F: 35 }, { T: 90, F: 30 },
+      { T: 120, F: 26 }, { T: 160, F: 22 },
+    ].map((p, i) => ({
+      id: `m${i}`, session_id: `m${i}`, date: `2026-06-0${i + 1}`,
+      grip: "Crusher", hand: "L", target_duration: p.T,
+      actual_time_s: p.T, avg_force_kg: p.F, prescribed_load_kg: p.F,
+      rep_num: 1, set_num: 1, failed: true, session_cooked: null,
+    }));
+    const success = {
+      id: "ok1", session_id: "ok1", date: "2026-06-20",
+      grip: "Crusher", hand: "L", target_duration: 200,
+      actual_time_s: 203, avg_force_kg: 24, prescribed_load_kg: 24,
+      rep_num: 1, set_num: 1, failed: false, session_cooked: null,
+    };
+    const hist = [...measured, success];
+    const out = computeDensityLadder(hist, "Crusher", "endurance");
+    expect(out).not.toBeNull();
+    expect(out.loadByHand.L).toBeCloseTo(24, 1);
+    expect(out.basis.boundedByHand.L).toBeUndefined();
   });
 });
