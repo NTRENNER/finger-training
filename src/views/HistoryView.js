@@ -478,9 +478,11 @@ export function HistoryView({
         </div>
       </div>
 
-      {/* Derived badge collection (fingers only) — a read-only view of
-          your level across every grip/zone you've trained. */}
+      {/* Domain-specific achievements share one stable slot above the
+          all-activity calendar, so switching domains doesn't move the
+          collection to a different level of the page. */}
       {domain === "fingers" && <BadgeCollection history={history} />}
+      {domain === "climbing" && <ClimbingPrBadgeCollection climbs={climbingActivities} />}
 
       {/* ── Add Session form ── */}
       {domain === "fingers" && addingSession && (
@@ -611,14 +613,11 @@ export function HistoryView({
         />
       )}
       {domain === "climbing" && (
-        <>
-          <ClimbingPrBadgeCollection climbs={climbingActivities} />
-          <ClimbingHistoryList
-            climbs={climbingActivities}
-            onDeleteActivity={onDeleteActivity}
-            onUpdateActivity={onUpdateActivity}
-          />
-        </>
+        <ClimbingHistoryList
+          climbs={climbingActivities}
+          onDeleteActivity={onDeleteActivity}
+          onUpdateActivity={onUpdateActivity}
+        />
       )}
       {domain === "weight" && (
         <Card>
