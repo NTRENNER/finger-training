@@ -3,9 +3,10 @@
 // ─────────────────────────────────────────────────────────────
 // One card, one block per grip. Each grip block shows:
 //   • header: grip name + "since <baselineDate>"
-//   • total Δ% + the six zone tiles (Max … End)
+//   • total Δ% + six clickable zone tiles (Max … End)
 //   • the baseline (dashed) vs Now (solid) force curve
 //   • a "Now" slider over that grip's post-baseline session dates
+//   • a zone-history modal comparing every matching workout
 //
 // The slider drives BOTH the curve AND the tiles: scrubbing recomputes
 // every zone Δ% and the total for the selected date, so there's a single
@@ -37,6 +38,7 @@ import { ZONE6, ZONE_REF_T } from "../../model/zones.js";
 import { improvementForAmps, SUPPORT_MIN_HOLD_FRAC, perZoneBaselineAmps } from "../../model/baselines.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
 import { effectiveLoad } from "../../model/load.js";
+import { ZoneSessionHistoryModal } from "./ZoneSessionHistoryModal.jsx";
 
 // Per-grip baseline-unlock thresholds. Match the gates in
 // buildGripBaselines so the "X of 5 failures" copy is honest.
@@ -72,7 +74,13 @@ function BasisNote() {
 
 // Static per-grip block: header (grip + since date) + tiles. The
 // fallback shape for grips without an interactive overlay.
-function StaticGripTiles({ grip, imp, divider }) {
+function StaticGripTiles({
+  grip,
+  imp,
+  divider,
+  onZoneSelect = null,
+  selectedZoneKey = null,
+}) {
   return (
     <div style={{
       paddingBottom: divider ? 14 : 0,
@@ -83,13 +91,23 @@ function StaticGripTiles({ grip, imp, divider }) {
         <div style={{ fontSize: 13, fontWeight: 700, color: GRIP_COLORS[grip] || C.blue }}>{grip}</div>
         <div style={{ fontSize: 11, color: C.muted }}>since {imp.baselineDate}</div>
       </div>
-      <ImprovementRow label={null} imp={imp} />
+      <ImprovementRow
+        label={null}
+        imp={imp}
+        onZoneSelect={onZoneSelect ? zoneKey => onZoneSelect(grip, zoneKey, null) : null}
+        selectedZoneKey={selectedZoneKey}
+      />
     </div>
   );
 }
 
 // Total Δ% + the six zone tiles. Shared by every render path.
-function ImprovementRow({ label, imp }) {
+function ImprovementRow({
+  label,
+  imp,
+  onZoneSelect = null,
+  selectedZoneKey = null,
+}) {
   return (
     <div style={{ marginBottom: 10 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
@@ -111,11 +129,9 @@ function ImprovementRow({ label, imp }) {
           // starting point to compare against. Show it as "new", muted, and
           // it's already excluded from the total.
           const unbaselined = val == null;
-          return (
-            <div key={z.key} title={unbaselined ? "No baseline data — this zone wasn't trained when your baseline was set" : undefined} style={{
-              background: C.bg, borderRadius: 10, padding: "8px 6px", textAlign: "center",
-              border: `1px solid ${z.color}30`, opacity: unbaselined ? 0.5 : 1,
-            }}>
+          const selected = selectedZoneKey === z.key;
+          const content = (
+            <>
               <div style={{ fontSize: 9, color: C.muted, marginBottom: 3 }}>{z.short}</div>
               {unbaselined ? (
                 <div style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>new</div>
@@ -124,7 +140,42 @@ function ImprovementRow({ label, imp }) {
                   {val >= 0 ? "+" : ""}{val}%
                 </div>
               )}
-            </div>
+            </>
+          );
+          const style = {
+            width: "100%",
+            minHeight: 51,
+            background: selected ? `${z.color}18` : C.bg,
+            borderRadius: 8,
+            padding: "8px 6px",
+            textAlign: "center",
+            border: `1px solid ${selected ? z.color : `${z.color}30`}`,
+            opacity: unbaselined ? 0.5 : 1,
+            boxSizing: "border-box",
+          };
+          const title = unbaselined
+            ? "No baseline data — this zone wasn't trained when your baseline was set"
+            : `${z.label} session history`;
+
+          return onZoneSelect ? (
+            <button
+              key={z.key}
+              type="button"
+              onClick={() => onZoneSelect(z.key)}
+              aria-label={`${z.label} session history`}
+              aria-pressed={selected}
+              title={title}
+              style={{
+                ...style,
+                color: C.text,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {content}
+            </button>
+          ) : (
+            <div key={z.key} title={title} style={style}>{content}</div>
           );
         })}
       </div>
@@ -207,7 +258,17 @@ function OverlayChart({ baselineAmps, nowAmps, candidateAmps, unit, maxDur, colo
 }
 
 // One grip's full block: header, tiles (at slider date), curve, slider.
-function GripBlock({ grip, overlay, unit, maxDur, nowIdx, onScrub, divider }) {
+function GripBlock({
+  grip,
+  overlay,
+  unit,
+  maxDur,
+  nowIdx,
+  onScrub,
+  divider,
+  onZoneSelect = null,
+  selectedZoneKey = null,
+}) {
   const dates = overlay.dates;
   const last = Math.max(0, dates.length - 1);
   const idx = nowIdx == null ? last : Math.max(0, Math.min(last, nowIdx));
@@ -239,7 +300,16 @@ function GripBlock({ grip, overlay, unit, maxDur, nowIdx, onScrub, divider }) {
         <div style={{ fontSize: 11, color: C.muted }}>since {overlay.baselineDate}</div>
       </div>
 
-      {imp && <ImprovementRow label={null} imp={imp} />}
+      {imp && (
+        <ImprovementRow
+          label={null}
+          imp={imp}
+          onZoneSelect={onZoneSelect
+            ? zoneKey => onZoneSelect(grip, zoneKey, nowDate)
+            : null}
+          selectedZoneKey={selectedZoneKey}
+        />
+      )}
 
       <OverlayChart
         baselineAmps={overlay.baselineAmps}
@@ -299,7 +369,11 @@ export function CurveImprovementCard({
 }) {
   // Per-grip "Now" slider index. null → latest date for that grip.
   const [nowIdxByGrip, setNowIdxByGrip] = useState({});
+  const [zoneDetail, setZoneDetail] = useState(null);
   const scrub = (grip, idx) => setNowIdxByGrip(prev => ({ ...prev, [grip]: idx }));
+  const openZoneDetail = (grip, zoneKey, throughDate = null) => {
+    setZoneDetail({ grip, zoneKey, throughDate });
+  };
 
 
   if (!improvement && Object.keys(gripImprovement).length === 0) return null;
@@ -314,6 +388,21 @@ export function CurveImprovementCard({
   const overlayGrips = new Set(
     Object.keys(historyOverlay).filter(g => historyOverlay[g]?.dates?.length > 0)
   );
+  const fallbackGrip = selGrip
+    || Object.keys(grip3xEstimates)[0]
+    || (history || []).find(rep => rep?.grip)?.grip
+    || null;
+  const zoneHistoryModal = zoneDetail ? (
+    <ZoneSessionHistoryModal
+      history={history}
+      grip={zoneDetail.grip}
+      zoneKey={zoneDetail.zoneKey}
+      handView={handView}
+      throughDate={zoneDetail.throughDate}
+      unit={unit}
+      onClose={() => setZoneDetail(null)}
+    />
+  ) : null;
 
   // ── Per-hand mode: static tiles vs frozen per-hand baselines ──
   if (handView === "L" || handView === "R") {
@@ -356,6 +445,7 @@ export function CurveImprovementCard({
       .sort((a, b) => a[0].localeCompare(b[0]));
     return (
       <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
+        {zoneHistoryModal}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>
             Curve Improvement
@@ -372,7 +462,10 @@ export function CurveImprovementCard({
         <BasisNote />
         {entries.length > 0 ? entries.map(([grip, imp], i, arr) => (
           <StaticGripTiles key={grip} grip={grip} imp={imp}
-            divider={i < arr.length - 1} />
+            divider={i < arr.length - 1}
+            onZoneSelect={openZoneDetail}
+            selectedZoneKey={zoneDetail?.grip === grip ? zoneDetail.zoneKey : null}
+          />
         )) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
             No {handView === "R" ? "right" : "left"}-hand baseline seeded
@@ -386,6 +479,7 @@ export function CurveImprovementCard({
 
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
+      {zoneHistoryModal}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Improvement</div>
         {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
@@ -401,12 +495,22 @@ export function CurveImprovementCard({
                 return (
                   <GripBlock key={grip} grip={grip} overlay={historyOverlay[grip]}
                     unit={unit} maxDur={maxDur}
-                    nowIdx={nowIdxByGrip[grip]} onScrub={scrub} divider={divider} />
+                    nowIdx={nowIdxByGrip[grip]} onScrub={scrub} divider={divider}
+                    onZoneSelect={openZoneDetail}
+                    selectedZoneKey={zoneDetail?.grip === grip ? zoneDetail.zoneKey : null}
+                  />
                 );
               }
               // No overlay — static tiles at latest.
               return (
-                <StaticGripTiles key={grip} grip={grip} imp={imp} divider={divider} />
+                <StaticGripTiles
+                  key={grip}
+                  grip={grip}
+                  imp={imp}
+                  divider={divider}
+                  onZoneSelect={openZoneDetail}
+                  selectedZoneKey={zoneDetail?.grip === grip ? zoneDetail.zoneKey : null}
+                />
               );
             })}
             {/* Early-days placeholder for grips with a current fit but no
@@ -438,7 +542,10 @@ export function CurveImprovementCard({
         overlayGrips.has(selGrip) ? (
           <GripBlock grip={selGrip} overlay={historyOverlay[selGrip]}
             unit={unit} maxDur={maxDur}
-            nowIdx={nowIdxByGrip[selGrip]} onScrub={scrub} divider={false} />
+            nowIdx={nowIdxByGrip[selGrip]} onScrub={scrub} divider={false}
+            onZoneSelect={openZoneDetail}
+            selectedZoneKey={zoneDetail?.grip === selGrip ? zoneDetail.zoneKey : null}
+          />
         ) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
             Need ≥{FAIL_THRESHOLD} failures across ≥{DUR_THRESHOLD} target durations on <b>{selGrip}</b> for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
@@ -468,7 +575,14 @@ export function CurveImprovementCard({
               since {global3xBaseline.date}
             </div>
           )}
-          <ImprovementRow label={null} imp={gateGlobalImprovement(improvement, global3xBaseline?.maxHoldS ?? null)} />
+          <ImprovementRow
+            label={null}
+            imp={gateGlobalImprovement(improvement, global3xBaseline?.maxHoldS ?? null)}
+            onZoneSelect={fallbackGrip
+              ? zoneKey => openZoneDetail(fallbackGrip, zoneKey, null)
+              : null}
+            selectedZoneKey={zoneDetail?.grip === fallbackGrip ? zoneDetail.zoneKey : null}
+          />
         </>
       ) : null}
     </Card>
