@@ -89,7 +89,10 @@
 //   CREATE INDEX activities_type_idx ON activities (type);
 
 import { supabase } from "./supabase.js";
-import { loadLS, saveLS, LS_REP_DELETED_KEY } from "./storage.js";
+import {
+  loadLS, saveLS,
+  LS_REP_DELETED_KEY, LS_USER_SETTINGS_PATCH_KEY,
+} from "./storage.js";
 import { today } from "../util.js";
 
 // localStorage key for the offline retry queue. Reps that failed an
@@ -782,6 +785,53 @@ export async function pushUserSettingsPatch(patch) {
     console.warn("Supabase settings patch exception:", e.message);
     return false;
   }
+}
+
+// Merge a user_settings patch into the durable offline queue. Later values
+// win per top-level key, matching the server RPC's JSONB merge semantics.
+export function enqueueUserSettingsPatch(patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return;
+  const current = loadLS(LS_USER_SETTINGS_PATCH_KEY);
+  const queued = current && typeof current === "object" && !Array.isArray(current)
+    ? current
+    : {};
+  saveLS(LS_USER_SETTINGS_PATCH_KEY, { ...queued, ...patch });
+}
+
+let settingsPatchFlushPromise = null;
+
+// Push the current settings patch and remove only the values that were
+// actually confirmed. If another edit changes a key while the request is in
+// flight, that newer value remains queued for the next pass.
+export function flushUserSettingsPatch() {
+  if (settingsPatchFlushPromise) return settingsPatchFlushPromise;
+
+  settingsPatchFlushPromise = (async () => {
+    while (true) {
+      const queued = loadLS(LS_USER_SETTINGS_PATCH_KEY);
+      if (!queued || typeof queued !== "object" || Array.isArray(queued)
+          || Object.keys(queued).length === 0) return true;
+
+      const ok = await pushUserSettingsPatch(queued);
+      if (!ok) return false;
+
+      const fresh = loadLS(LS_USER_SETTINGS_PATCH_KEY);
+      if (!fresh || typeof fresh !== "object" || Array.isArray(fresh)) return true;
+      const remaining = { ...fresh };
+      for (const [key, value] of Object.entries(queued)) {
+        if (JSON.stringify(fresh[key]) === JSON.stringify(value)) {
+          delete remaining[key];
+        }
+      }
+      saveLS(LS_USER_SETTINGS_PATCH_KEY, remaining);
+      // Loop once more so edits queued while the request was in flight
+      // are confirmed before a waiting cloud reconcile reads settings.
+    }
+  })().finally(() => {
+    settingsPatchFlushPromise = null;
+  });
+
+  return settingsPatchFlushPromise;
 }
 
 // ─────────────────────────────────────────────────────────────

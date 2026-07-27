@@ -91,7 +91,12 @@ function addRepTombstones(ids) {
   if (changed) saveLS(LS_REP_DELETED_KEY, [...existing]);
 }
 
-export function useRepHistory({ user, fatigueModel = null, dailyState = null }) {
+export function useRepHistory({
+  user,
+  fatigueModel = null,
+  dailyState = null,
+  syncSignal = 0,
+}) {
   const [history, setHistory] = useState(() => loadLS(LS_HISTORY_KEY) || []);
   // NOTE: block body, not a concise arrow. saveLS now returns a
   // boolean (so callers can detect quota failures), and a concise
@@ -256,7 +261,7 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, syncSignal]);
 
   // True once the full reconcile below has landed (or immediately
   // when signed out — local is the authority then). Consumed by
@@ -268,7 +273,7 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
   const [historySynced, setHistorySynced] = useState(false);
   useEffect(() => {
     if (!user) setHistorySynced(true);
-  }, [user]);
+  }, [user, syncSignal]);
 
   // Cloud reconcile: runs when `user` flips from null → signed-in
   // (and on every subsequent user change). The cancelled flag
@@ -429,7 +434,7 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, syncSignal]);
 
   // ── Workout-session sync ────────────────────────────────────
   // Lives here (rather than in a separate hook) because it shares
@@ -561,7 +566,7 @@ export function useRepHistory({ user, fatigueModel = null, dailyState = null }) 
       saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, syncSignal]);
 
   // ── CRUD ────────────────────────────────────────────────────
   // Each mutation updates local state immediately, then mirrors

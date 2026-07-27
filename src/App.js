@@ -43,6 +43,8 @@ import { useDailyState } from "./hooks/useDailyState.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import { useUserSettings } from "./hooks/useUserSettings.js";
 import { useActivities } from "./hooks/useActivities.js";
+import { useConnectivity } from "./hooks/useConnectivity.js";
+import { usePendingSyncCount } from "./hooks/usePendingSyncCount.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue, LS_QUEUE_KEY,
   fetchRepTombstoneIds, fetchRepSlotTombstoneKeys, fetchSessionTombstoneIds,
@@ -193,6 +195,9 @@ const TABS = ["Fingers", "Workout", "Climb", "Analysis", "History"];
 const SETTINGS_TAB = 5;
 
 export default function App() {
+  const { isOnline, syncSignal, retrySync } = useConnectivity();
+  const pendingSyncCount = usePendingSyncCount();
+
   // ── Auth + OTP login (see src/hooks/useAuth.js) ──────────
   const {
     user,
@@ -219,13 +224,13 @@ export default function App() {
     pinnedPerHandBaselines, savePinnedPerHandBaselines,
     fatigueModel, setFatigueModel,
     settingsSynced,
-  } = useUserSettings({ user });
+  } = useUserSettings({ user, syncSignal });
 
   // ── Activities (climbing log + 1RM) ──────────────────────
   // (see src/hooks/useActivities.js)
   const {
     activities, addActivity, deleteActivity, updateActivity,
-  } = useActivities({ user });
+  } = useActivities({ user, syncSignal });
 
   // (Trip / climbing focus / pyramid pin maps / fatigue model state +
   // their cloud reconcile all moved to useUserSettings — see hook
@@ -251,7 +256,7 @@ export default function App() {
   // modal. dailyState (the raw map) is fed into useRepHistory below
   // so the freshMap rebuild can apply per-rep capacity multipliers
   // without the curve fit needing to know about the cookedness model.
-  const { dailyState, cookedOnDate, saveCooked } = useDailyState({ user });
+  const { dailyState, cookedOnDate, saveCooked } = useDailyState({ user, syncSignal });
 
   // ── Rep history + freshMap + cloud reconcile + CRUD ──────
   // (see src/hooks/useRepHistory.js)
@@ -263,11 +268,11 @@ export default function App() {
     history,
     historySynced,
     freshMap, threeExpPriors,
-    pendingCount, refreshPending,
+    refreshPending,
     addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
     replaceHistory,
     handleWorkoutSessionSaved,
-  } = useRepHistory({ user, fatigueModel, dailyState });
+  } = useRepHistory({ user, fatigueModel, dailyState, syncSignal });
 
   // Gate for useGripFits' pin-on-first-seed write (threaded through
   // AnalysisContainer → AnalysisView). Both cloud reconciles must land
@@ -547,6 +552,9 @@ export default function App() {
             both to the far-right edge regardless of how many tabs
             render to the left. */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          {!isOnline && (
+            <span style={{ fontSize: 11, color: C.orange, whiteSpace: "nowrap" }}>● Offline</span>
+          )}
           {tindeq.connected && (
             <span style={{ fontSize: 11, color: C.green }}>⚡ Tindeq</span>
           )}
@@ -567,8 +575,8 @@ export default function App() {
         </div>
       </div>
 
-      {/* Unsaved reps warning banner */}
-      {pendingCount > 0 && (
+      {/* Connection + durable local-sync status */}
+      {(!isOnline || pendingSyncCount > 0) && (
         <div style={{
           background: "#3a1f00", borderBottom: `1px solid ${C.orange}`,
           padding: "8px 16px", display: "flex", alignItems: "center", gap: 10,
@@ -576,11 +584,12 @@ export default function App() {
         }}>
           <span>⚠️</span>
           <span>
-            {pendingCount} rep{pendingCount !== 1 ? "s" : ""} couldn't sync to the cloud.
-            {user ? " Retrying…" : " Sign in to retry."}
+            {!isOnline
+              ? `Offline. Changes stay on this device${pendingSyncCount > 0 ? ` (${pendingSyncCount} waiting)` : ""} and sync when connected.`
+              : `${pendingSyncCount} change${pendingSyncCount !== 1 ? "s are" : " is"} waiting to sync.${user ? " Retrying…" : " Sign in to sync."}`}
           </span>
-          {user && (
-            <button onClick={() => flushQueue().then(refreshPending)} style={{
+          {user && isOnline && pendingSyncCount > 0 && (
+            <button onClick={retrySync} style={{
               marginLeft: "auto", background: "none", border: `1px solid ${C.orange}`,
               color: C.orange, borderRadius: 6, padding: "2px 10px", cursor: "pointer", fontSize: 12,
             }}>Retry now</button>

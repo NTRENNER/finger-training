@@ -39,7 +39,7 @@ import { readRawLastUser, setLastUserRaw, adoptAnonDataForUser } from "../lib/st
 //
 // Returns true when the caller must reload before letting the app run
 // as this user; false when the page's namespace already matches.
-export function guardUserSwitch(u) {
+export function guardUserSwitch(u, { offline = false } = {}) {
   const last = readRawLastUser();
 
   // Signing out is a namespace transition too. The current page is
@@ -49,6 +49,11 @@ export function guardUserSwitch(u) {
   // app. This also covers cross-tab sign-out and expired sessions.
   if (!u?.id) {
     if (last == null) return false;
+    // A failed token refresh can surface as a missing session while
+    // disconnected. Keep the current user's namespace pinned until an
+    // online session check can distinguish a real sign-out from a
+    // network failure.
+    if (offline) return false;
     setLastUserRaw(null);
     return true;
   }
@@ -106,12 +111,27 @@ export function useAuth() {
     // keep writing to the OLD namespace (storage.js pins nsUid at
     // module load), so nothing bleeds between accounts in the interim.
     const apply = (u) => {
-      if (guardUserSwitch(u)) { window.location.reload(); return; }
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      if (guardUserSwitch(u, { offline })) { window.location.reload(); return; }
+      if (!u?.id && offline && readRawLastUser() != null) return;
       setUser(u);
     };
-    supabase.auth.getSession().then(({ data }) => apply(data.session?.user ?? null));
+    const readSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (!error) apply(data.session?.user ?? null);
+      } catch {
+        // The cached user and storage namespace remain authoritative
+        // until the next successful online session check.
+      }
+    };
+    readSession();
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => apply(s?.user ?? null));
-    return () => sub.subscription.unsubscribe();
+    window.addEventListener("online", readSession);
+    return () => {
+      window.removeEventListener("online", readSession);
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const sendOtp = async () => {

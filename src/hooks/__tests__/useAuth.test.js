@@ -24,6 +24,12 @@ test("sign-out moves the next page to the anonymous namespace", () => {
   expect(mockSetLastUserRaw).toHaveBeenCalledWith(null);
 });
 
+test("offline missing session preserves the pinned user namespace", () => {
+  mockReadRawLastUser.mockReturnValue("user-a");
+  expect(guardUserSwitch(null, { offline: true })).toBe(false);
+  expect(mockSetLastUserRaw).not.toHaveBeenCalled();
+});
+
 test("an already-anonymous page does not reload-loop", () => {
   mockReadRawLastUser.mockReturnValue(null);
   expect(guardUserSwitch(null)).toBe(false);
@@ -35,4 +41,3 @@ test("same-user refresh is idempotent", () => {
   expect(guardUserSwitch({ id: "user-a" })).toBe(false);
   expect(mockSetLastUserRaw).not.toHaveBeenCalled();
 });
-

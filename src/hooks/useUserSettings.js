@@ -38,7 +38,7 @@ import { today } from "../util.js";
 import { DEFAULT_TRIP } from "../lib/trip.js";
 import {
   pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates, removeBWTombstones,
-  fetchUserSettings, pushUserSettingsPatch,
+  fetchUserSettings, enqueueUserSettingsPatch, flushUserSettingsPatch,
 } from "../lib/sync.js";
 import { defaultFatigueModel } from "../model/fatigueBeta.js";
 
@@ -90,7 +90,7 @@ function confirmBWPushed(date, kg) {
   if (same) clearDirty(LS_BW_DIRTY_KEY, date);
 }
 
-export function useUserSettings({ user }) {
+export function useUserSettings({ user, syncSignal = 0 }) {
   // ── Unit preference ───────────────────────────────────────
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
   const saveUnit = useCallback((u) => {
@@ -253,7 +253,7 @@ export function useUserSettings({ user }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, syncSignal]);
 
   // ── Trip (user-editable target trip) ──────────────────────
   const [trip, setTrip] = useState(() => {
@@ -283,13 +283,8 @@ export function useUserSettings({ user }) {
   const saveClimbingFocus = useCallback((next) => {
     setClimbingFocusState(next);
     saveLS(LS_CLIMBING_FOCUS_KEY, next);
-    // Fire-and-forget cloud push so cross-device sync is automatic.
-    // Patch RPC merges server-side (settings || patch) — no fetch-
-    // first read-modify-write window, so this can no longer erase
-    // keys written concurrently (β trigger, other devices' pins).
-    if (user) {
-      pushUserSettingsPatch({ climbing_focus: next }).catch(() => {});
-    }
+    enqueueUserSettingsPatch({ climbing_focus: next });
+    if (user) flushUserSettingsPatch();
   }, [user]);
 
   // ── Climbing pyramid project pin (per filter combination) ──
@@ -317,10 +312,8 @@ export function useUserSettings({ user }) {
   const savePyramidProjectMap = useCallback((next) => {
     setPyramidProjectMapState(next);
     saveLS(LS_PYRAMID_PROJECT_KEY, next);
-    if (user) {
-      // Server-side merge — see saveClimbingFocus for why.
-      pushUserSettingsPatch({ pyramid_project: next }).catch(() => {});
-    }
+    enqueueUserSettingsPatch({ pyramid_project: next });
+    if (user) flushUserSettingsPatch();
   }, [user]);
 
   // ── Pinned per-grip baselines ─────────────────────────────
@@ -341,10 +334,8 @@ export function useUserSettings({ user }) {
     const stamped = { ...next, _v: PIN_SCHEMA_VERSION };
     setPinnedGripBaselinesState(stamped);
     saveLS(LS_PINNED_GRIP_BASELINES_KEY, stamped);
-    if (user) {
-      // Server-side merge — see saveClimbingFocus for why.
-      pushUserSettingsPatch({ pinned_grip_baselines: stamped }).catch(() => {});
-    }
+    enqueueUserSettingsPatch({ pinned_grip_baselines: stamped });
+    if (user) flushUserSettingsPatch();
   }, [user]);
 
   // ── Pinned per-(grip, hand) baselines ─────────────────────
@@ -359,10 +350,8 @@ export function useUserSettings({ user }) {
     const stamped = { ...next, _v: PIN_SCHEMA_VERSION };
     setPinnedPerHandBaselinesState(stamped);
     saveLS(LS_PINNED_PERHAND_BASELINES_KEY, stamped);
-    if (user) {
-      // Server-side merge — see saveClimbingFocus for why.
-      pushUserSettingsPatch({ pinned_perhand_baselines: stamped }).catch(() => {});
-    }
+    enqueueUserSettingsPatch({ pinned_perhand_baselines: stamped });
+    if (user) flushUserSettingsPatch();
   }, [user]);
 
   // ── Fatigue β model (per-grip) ───────────────────────────
@@ -397,6 +386,11 @@ export function useUserSettings({ user }) {
     setSettingsSynced(false);
     let cancelled = false;
     (async () => {
+      // Offline edits queue before their first network attempt. Flush
+      // them before reading cloud state so the subsequent fetch cannot
+      // overwrite a newer local preference with an older server value.
+      const settingsFlushed = await flushUserSettingsPatch();
+      if (cancelled || !settingsFlushed) return;
       const cloud = await fetchUserSettings();
       if (cancelled || !cloud) return;
       const cf = cloud.climbing_focus;
@@ -444,7 +438,7 @@ export function useUserSettings({ user }) {
       setSettingsSynced(true);
     })();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, syncSignal]);
 
   return {
     unit, saveUnit,

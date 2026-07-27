@@ -74,7 +74,7 @@ function confirmPushed(date, pushedCooked) {
   if (same) clearDirty(LS_DAILY_STATE_DIRTY_KEY, date);
 }
 
-export function useDailyState({ user }) {
+export function useDailyState({ user, syncSignal = 0 }) {
   const [dailyState, setDailyState] = useState(() => loadFromLS());
 
   // Cloud reconcile on sign-in. Same shape as useActivities:
@@ -139,7 +139,7 @@ export function useDailyState({ user }) {
       saveLS(LS_DAILY_STATE_SYNCED_ONCE_KEY, true);
     })();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, syncSignal]);
 
   // saveCooked writes LS immediately (so freshMap rebuilds see the
   // new value on the next render tick) and pushes to cloud in the

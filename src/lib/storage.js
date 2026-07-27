@@ -603,6 +603,12 @@ export const LS_ACTIVITY_DIRTY_KEY = "ft_activity_dirty";
 // Per-date body-weight edits (Set<"YYYY-MM-DD">).
 export const LS_BW_DIRTY_KEY = "ft_bw_dirty";
 
+// Unconfirmed top-level user_settings JSONB patch. Settings are merged
+// server-side by key, so the offline queue can safely coalesce repeated
+// edits into one object and retry it without replacing unrelated cloud
+// settings.
+export const LS_USER_SETTINGS_PATCH_KEY = "ft_user_settings_patch";
+
 export function loadDirtySet(key) {
   const raw = loadLS(key);
   return new Set(Array.isArray(raw) ? raw.filter(Boolean) : []);

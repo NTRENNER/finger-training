@@ -72,7 +72,7 @@ function confirmPushed(id, pushedEntry) {
   if (same) clearDirty(LS_ACTIVITY_DIRTY_KEY, id);
 }
 
-export function useActivities({ user }) {
+export function useActivities({ user, syncSignal = 0 }) {
   const [activities, setActivities] = useState(() => loadLS(LS_ACTIVITY_KEY) || []);
 
   // Cloud reconcile on sign-in. Same shape as the BW reconcile in
@@ -154,7 +154,7 @@ export function useActivities({ user }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, syncSignal]);
 
   const addActivity = useCallback((act) => {
     const stamped = { ...act, id: uid() };
