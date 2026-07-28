@@ -37,9 +37,9 @@ import {
   ReferenceLine, ReferenceArea,
 } from "recharts";
 import { C } from "../../ui/theme.js";
-import { Card, HandViewPills } from "../../ui/components.js";
+import { Card } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
-import { fmt1, fmtW, toDisp, forceOverBW } from "../../ui/format.js";
+import { bwOnDate, fmt1, fmtW, toDisp, forceOverBW } from "../../ui/format.js";
 import { ZONE6 } from "../../model/zones.js";
 import {
   predForceThreeExp,
@@ -94,14 +94,12 @@ export function ForceDurationCard({
   // Display context
   unit,
   bodyWeight,
+  bwLog = [],
   useRel,
   normalizeOn,
-  // Global hand-view state, repeated here as a local control so the
-  // user can flip hands without scrolling to the top (June 2026).
   // Single-grip mode's dots/curve arrive pre-scoped via props; the
   // split-mode block below scopes its own per-grip fits by handView.
   handView = "pooled",
-  onHandViewChange = null,
   // Raw / Fresh-eq basis for the modeled-capacity curve (July 2026).
   fdBasis = "fresh",
   onFdBasisChange = null,
@@ -193,7 +191,10 @@ export function ForceDurationCard({
       ).map(r => ({
         x: r.actual_time_s,
         y: useRel && bodyWeight > 0
-          ? forceOverBW(effectiveLoad(r), bodyWeight)
+          ? forceOverBW(
+              effectiveLoad(r),
+              bwOnDate(bwLog, r.date)?.kg ?? bodyWeight
+            )
           : toDisp(effectiveLoad(r), unit),
         grip, date: r.date, hand: r.hand,
         session_id: r.session_id,
@@ -203,7 +204,7 @@ export function ForceDurationCard({
       out.push({ grip, color, teeCurve, ref180, dots });
     }
     return out;
-  }, [fdSplitData, history, threeExpPriors, freshMap, handView, useRel, bodyWeight, unit, maxDur]);
+  }, [fdSplitData, history, threeExpPriors, freshMap, handView, useRel, bodyWeight, bwLog, unit, maxDur]);
 
   return (
     <Card style={{ marginBottom: 16 }}>
@@ -211,7 +212,6 @@ export function ForceDurationCard({
         <div style={{ fontSize: 14, fontWeight: 700 }}>Force vs. Duration</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {onFdBasisChange && <BasisPills value={fdBasis} onChange={onFdBasisChange} />}
-          {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
         </div>
       </div>
       <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>

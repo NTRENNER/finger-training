@@ -35,7 +35,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine,
 } from "recharts";
 import { C } from "../../ui/theme.js";
-import { Card, HandViewPills } from "../../ui/components.js";
+import { Card } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import { buildCapacityChanges } from "../../model/capacityTrend.js";
@@ -43,8 +43,7 @@ import { today } from "../../util.js";
 
 export function CapacityTrajectoryCard({
   capacityHistoryByGrip, normalizeOn, activities = [],
-  // Global hand-view state, repeated as a local control (June 2026).
-  handView = "pooled", onHandViewChange = null,
+  handView = "pooled",
 }) {
   const asOfDate = today();
   // Climbing-load strip: the same same-day + decayed-yesterday
@@ -69,7 +68,7 @@ export function CapacityTrajectoryCard({
 
   return (
     <Card style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+      <div style={{ marginBottom: 4 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>
           Whole-Curve Capacity — % vs baseline
           {normalizeOn && <span style={{ color: C.purple, fontSize: 12, marginLeft: 6 }}>· × BW</span>}
@@ -79,7 +78,6 @@ export function CapacityTrajectoryCard({
             </span>
           )}
         </div>
-        {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
       </div>
       {capacityChanges.length > 0 && (
         <div

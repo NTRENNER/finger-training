@@ -71,3 +71,58 @@ test("uses the active hand when opening a per-hand tile", () => {
   expect(screen.getByText("10.0 kg")).toBeInTheDocument();
   expect(screen.queryByText("20.0 kg")).not.toBeInTheDocument();
 });
+
+test("focused grip also scopes the per-hand improvement view", () => {
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{ Crusher: improvement, Micro: improvement }}
+      grip3xEstimates={{ Crusher: [1, 1, 1], Micro: [1, 1, 1] }}
+      gripBaselines={{}}
+      global3xBaseline={null}
+      selGrip="Crusher"
+      history={[rep(160, 170, 10)]}
+      handView="L"
+      perHandGripImprovement={{
+        "Crusher|L": improvement,
+        "Micro|L": improvement,
+      }}
+      perHandGripEstimates={{}}
+      unit="kg"
+    />
+  );
+
+  expect(screen.getByText("Crusher")).toBeInTheDocument();
+  expect(screen.queryByText("Micro")).not.toBeInTheDocument();
+});
+
+test("bodyweight scale recomputes improvement instead of relabeling absolute gains", () => {
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{ Crusher: improvement }}
+      grip3xEstimates={{ Crusher: [12, 12, 12] }}
+      gripBaselines={{ Crusher: { date: "2026-06-01", amps: [10, 10, 10], maxHoldS: 240 } }}
+      global3xBaseline={null}
+      selGrip="Crusher"
+      history={[rep(160, 170, 10, { date: "2026-07-01" })]}
+      handView="L"
+      perHandGripImprovement={{ "Crusher|L": improvement }}
+      perHandGripBaselines={{
+        "Crusher|L": { date: "2026-06-01", amps: [10, 10, 10], maxHoldS: 240 },
+      }}
+      perHandGripEstimates={{ "Crusher|L": [12, 12, 12] }}
+      normalizeOn
+      bodyWeight={60}
+      bwLog={[
+        { date: "2026-06-01", kg: 50 },
+        { date: "2026-07-01", kg: 60 },
+      ]}
+      unit="kg"
+    />
+  );
+
+  expect(screen.getByText("· × BW")).toBeInTheDocument();
+  expect(screen.getAllByText("+0%").length).toBeGreaterThan(0);
+  expect(screen.queryByText("+12%")).not.toBeInTheDocument();
+});

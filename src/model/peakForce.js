@@ -39,8 +39,12 @@ const PEAK_MAX_KG = SANE_MAX_KG;          // single sanity ceiling — see load.
 //     latest:{ [grip]: { kg, date } },         // most recent session best
 //   }
 // or null when no grip has usable peak data.
+// `valueForRep` optionally transforms each validated kg measurement before
+// the trend is built (used for per-date bodyweight-relative display).
 export function buildPeakForceTrend(history, {
   maxProtocolT = PEAK_MAX_PROTOCOL_T,
+  valueForRep = null,
+  roundDigits = 1,
 } = {}) {
   if (!Array.isArray(history) || history.length === 0) return null;
 
@@ -54,8 +58,10 @@ export function buildPeakForceTrend(history, {
     // inflated) load into peak_force_kg too — avg==peak is not a real
     // measurement, so it can't set a PR or a session best.
     if (isSeedArtifactRep(r)) continue;
-    const peak = Number(r.peak_force_kg);
-    if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;
+    const measuredPeak = Number(r.peak_force_kg);
+    if (!(measuredPeak > 0 && measuredPeak < PEAK_MAX_KG)) continue;
+    const peak = valueForRep ? Number(valueForRep(measuredPeak, r)) : measuredPeak;
+    if (!(peak > 0 && Number.isFinite(peak))) continue;
 
     const rawTarget = r.target_duration;
     const parsedTarget = rawTarget == null || rawTarget === "" ? null : Number(rawTarget);
@@ -104,11 +110,15 @@ export function buildPeakForceTrend(history, {
 
   const rows = allDates.map(date => {
     const row = { date };
+    const round = value => {
+      const factor = 10 ** roundDigits;
+      return Math.round(value * factor) / factor;
+    };
     for (const g of grips) {
       const measurement = observedByGrip[g].get(date);
       if (measurement) {
         const v = measurement.kg;
-        const rounded = Math.round(v * 10) / 10;
+        const rounded = round(v);
         row[g] = rounded;
         if (v > runningPr[g]) {
           runningPr[g] = v;
@@ -150,7 +160,8 @@ export function buildPeakForceTrend(history, {
       const hi = Math.min(vals.length - 1, i + 1);
       let s = 0, n = 0;
       for (let j = lo; j <= hi; j++) { s += vals[j]; n++; }
-      return [d, Math.round((s / n) * 10) / 10];
+      const factor = 10 ** roundDigits;
+      return [d, Math.round((s / n) * factor) / factor];
     }));
     for (const row of rows) {
       row[`${g}_trend`] = smByDate.get(row.date) ?? null;

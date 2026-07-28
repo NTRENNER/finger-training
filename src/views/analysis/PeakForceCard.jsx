@@ -15,7 +15,7 @@
 // shared axis is both honest about magnitude and not hiding a big climb.
 // The per-grip % climb still appears in the header.
 
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ResponsiveContainer, ComposedChart, Line, Scatter,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -23,7 +23,7 @@ import {
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
-import { fmt1, toDisp } from "../../ui/format.js";
+import { bwOnDate, fmt1, toDisp } from "../../ui/format.js";
 import { buildPeakForceTrend } from "../../model/peakForce.js";
 
 export function formatPeakForceTooltip(value, name, item, unit) {
@@ -31,7 +31,9 @@ export function formatPeakForceTooltip(value, name, item, unit) {
   const contextualName = context?.label
     ? `${name} during ${context.label} workout`
     : name;
-  return [value != null ? `${fmt1(value)} ${unit}` : "—", contextualName];
+  if (value == null) return ["—", contextualName];
+  const formatted = unit === "× BW" ? Number(value).toFixed(2) : fmt1(value);
+  return [`${formatted} ${unit}`, contextualName];
 }
 
 export function peakForceTooltipRows(payload, unit) {
@@ -113,14 +115,52 @@ function PeakForceLegend({ view }) {
   );
 }
 
-export function PeakForceCard({ history, unit = "lbs" }) {
-  const trend = useMemo(() => buildPeakForceTrend(history), [history]);
+export function PeakForceCard({
+  history = [],
+  unit = "lbs",
+  grip = "",
+  handView = "pooled",
+  normalizeOn = false,
+  bodyWeight = null,
+  bwLog = [],
+}) {
+  const gripHistory = useMemo(
+    () => history.filter(rep => !grip || rep?.grip === grip),
+    [history, grip]
+  );
+  const scopedHistory = useMemo(
+    () => handView === "pooled"
+      ? gripHistory
+      : gripHistory.filter(rep => rep?.hand === handView),
+    [gripHistory, handView]
+  );
+  const trendOptions = useMemo(() => {
+    if (!normalizeOn) return undefined;
+    return {
+      roundDigits: 3,
+      valueForRep: (peak, rep) => {
+        const bw = bwOnDate(bwLog, rep.date)?.kg ?? bodyWeight;
+        return bw > 0 ? peak / bw : peak;
+      },
+    };
+  }, [normalizeOn, bwLog, bodyWeight]);
+  const trend = useMemo(
+    () => buildPeakForceTrend(scopedHistory, trendOptions),
+    [scopedHistory, trendOptions]
+  );
 
   // Pooled (default) vs per-hand detail. Pooled is the clean daily
   // read; the L/R split is on-demand for asymmetry questions —
   // June 2026, after the pooled redesign proved cleaner but hid the
   // per-hand picture entirely.
-  const [split, setSplit] = useState(false);
+  const [compareHands, setCompareHands] = useState(false);
+  const split = compareHands && handView === "pooled";
+  const displayUnit = normalizeOn ? "× BW" : unit;
+  const displayValue = useCallback(
+    value => normalizeOn ? value : toDisp(value, unit),
+    [normalizeOn, unit]
+  );
+  const formatValue = value => normalizeOn ? Number(value).toFixed(2) : fmt1(value);
 
   const view = useMemo(() => {
     if (!trend) return null;
@@ -131,7 +171,10 @@ export function PeakForceCard({ history, unit = "lbs" }) {
       // series is exactly the clutter pooled mode exists to avoid.
       const byHand = {};
       for (const h of ["L", "R"]) {
-        const t = buildPeakForceTrend((history || []).filter(r => r?.hand === h));
+        const t = buildPeakForceTrend(
+          gripHistory.filter(r => r?.hand === h),
+          trendOptions
+        );
         if (t) byHand[h] = t;
       }
       const hands = Object.keys(byHand);
@@ -145,9 +188,9 @@ export function PeakForceCard({ history, unit = "lbs" }) {
           const src = byHand[h].rows.find(x => x.date === date);
           for (const g of byHand[h].grips) {
             const pr = src?.[`${g}_pr`];
-            o[`${g}_${h}_pr`] = pr != null ? toDisp(pr, unit) : null;
+            o[`${g}_${h}_pr`] = pr != null ? displayValue(pr) : null;
             const newPr = src?.[`${g}_newPr`];
-            o[`${g}_${h}_newPr`] = newPr != null ? toDisp(newPr, unit) : null;
+            o[`${g}_${h}_newPr`] = newPr != null ? displayValue(newPr) : null;
             o[`${g}_${h}_newPr_context`] = src?.[`${g}_prContext`] ?? null;
           }
         }
@@ -159,8 +202,9 @@ export function PeakForceCard({ history, unit = "lbs" }) {
           series.push({ g, h });
         }
       }
-      const hi = Math.max(...series.map(({ g, h }) => toDisp(byHand[h].best[g].kg, unit)));
-      const axisMax = Math.ceil((hi * 1.12) / 5) * 5;
+      const hi = Math.max(...series.map(({ g, h }) => displayValue(byHand[h].best[g].kg)));
+      const axisStep = normalizeOn ? 0.1 : 5;
+      const axisMax = Math.ceil((hi * 1.12) / axisStep) * axisStep;
       return {
         mode: "split", rows, series, axisMax,
         // Header stats stay pooled in both modes — the summary
@@ -173,27 +217,28 @@ export function PeakForceCard({ history, unit = "lbs" }) {
     const rows = trend.rows.map(r => {
       const o = { date: r.date.slice(5) };
       for (const g of trend.grips) {
-        o[`${g}_pr`] = r[`${g}_pr`] != null ? toDisp(r[`${g}_pr`], unit) : null;
+        o[`${g}_pr`] = r[`${g}_pr`] != null ? displayValue(r[`${g}_pr`]) : null;
         const newPr = r[`${g}_newPr`];
-        o[`${g}_newPr`] = newPr != null ? toDisp(newPr, unit) : null;
+        o[`${g}_newPr`] = newPr != null ? displayValue(newPr) : null;
         o[`${g}_newPr_context`] = r[`${g}_prContext`] ?? null;
         // Smoothed max-day trend — the line that CAN fall (see
         // peakForce.js). Null until there are at least 3 max days.
-        o[`${g}_trend`] = r[`${g}_trend`] != null ? toDisp(r[`${g}_trend`], unit) : null;
+        o[`${g}_trend`] = r[`${g}_trend`] != null ? displayValue(r[`${g}_trend`]) : null;
       }
       return o;
     });
     // Single shared axis: 0 → a little above the strongest grip's best,
     // so every grip sits at its true height and the magnitude gap shows.
-    const hi = Math.max(...trend.grips.map(g => toDisp(trend.best[g].kg, unit)));
-    const axisMax = Math.ceil((hi * 1.12) / 5) * 5;
+    const hi = Math.max(...trend.grips.map(g => displayValue(trend.best[g].kg)));
+    const axisStep = normalizeOn ? 0.1 : 5;
+    const axisMax = Math.ceil((hi * 1.12) / axisStep) * axisStep;
     return {
       mode: "pooled",
       rows, grips: trend.grips, best: trend.best,
       changePct: trend.changePct, axisMax,
       standardizedPending: trend.standardizedPending || {},
     };
-  }, [trend, unit, split, history]);
+  }, [trend, split, gripHistory, trendOptions, normalizeOn, displayValue]);
 
   if (!view || view.rows.length < 1) return null;
 
@@ -204,15 +249,25 @@ export function PeakForceCard({ history, unit = "lbs" }) {
           <div style={{ fontSize: 14, fontWeight: 700, flex: "1 1 190px", minWidth: 0 }}>
             Peak force — max strength over time
           </div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {[{ k: false, label: "Pooled" }, { k: true, label: "L / R" }].map(opt => (
-              <button key={String(opt.k)} onClick={() => setSplit(opt.k)} style={{
-                padding: "2px 10px", borderRadius: 20, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
-                background: split === opt.k ? C.purple : C.border,
-                color:      split === opt.k ? "#fff"   : C.muted,
-              }}>{opt.label}</button>
-            ))}
-          </div>
+          {handView === "pooled" && (
+            <div style={{ display: "flex", gap: 4 }} aria-label="Peak force display">
+              {[{ k: false, label: "Trend" }, { k: true, label: "Compare hands" }].map(opt => (
+                <button
+                  key={String(opt.k)}
+                  type="button"
+                  aria-pressed={compareHands === opt.k}
+                  onClick={() => setCompareHands(opt.k)}
+                  style={{
+                    padding: "2px 10px", borderRadius: 20, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                    background: compareHands === opt.k ? C.purple : C.border,
+                    color:      compareHands === opt.k ? "#fff"   : C.muted,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{
           display: "flex",
@@ -229,7 +284,7 @@ export function PeakForceCard({ history, unit = "lbs" }) {
             return (
               <span key={g}>
                 <span style={{ color: GRIP_COLORS[g] || C.blue }}>{g}</span>{" "}
-                <b style={{ color: C.text }}>{fmt1(toDisp(view.best[g].kg, unit))} {unit}</b>
+                <b style={{ color: C.text }}>{formatValue(displayValue(view.best[g].kg))} {displayUnit}</b>
                 {pct != null && (
                   <b style={{ color: pctColor, marginLeft: 4 }}>
                     {pct > 0 ? "+" : ""}{pct}%
@@ -244,7 +299,9 @@ export function PeakForceCard({ history, unit = "lbs" }) {
         </div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        Highest valid Tindeq peak observed in any workout. The solid line
+        Highest valid Tindeq peak observed in any workout
+        {handView === "pooled" ? "" : ` for the ${handView === "L" ? "left" : "right"} hand`}.
+        {normalizeOn ? " Values are normalized to bodyweight on each measurement date." : ""} The solid line
         is your running best-to-date; dots mark new PRs and identify the
         workout that produced them. The % is how much your observed
         ceiling has climbed. One shared scale keeps each grip at its true
@@ -270,10 +327,10 @@ export function PeakForceCard({ history, unit = "lbs" }) {
             domain={[0, view.axisMax]}
             tick={{ fill: C.muted, fontSize: 10 }}
             width={46}
-            unit={` ${unit}`}
+            unit={normalizeOn ? "" : ` ${unit}`}
           />
           <Tooltip
-            content={<PeakForceTooltip unit={unit} />}
+            content={<PeakForceTooltip unit={displayUnit} />}
           />
           <Legend content={() => <PeakForceLegend view={view} />} />
           {view.mode === "split" ? (

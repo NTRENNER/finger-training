@@ -39,7 +39,7 @@ import React, { useMemo, useState } from "react";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import { CardBoundary } from "../ui/ErrorBoundary.jsx";
-import { toDisp, forceOverBW } from "../ui/format.js";
+import { bwOnDate, toDisp, forceOverBW } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
 import { useLSValue } from "../hooks/useLSValue.js";
 import { today } from "../util.js";
@@ -57,7 +57,11 @@ import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
 import { prescription, prescribedLoad, effectiveLoad, freshLoadFor } from "../model/prescription.js";
 import { freshFitReps } from "../model/load.js";
-import { CurveCoverageCard } from "./analysis/CurveCoverageCard.js";
+import { buildForceDurationGripScope } from "../model/analysisScope.js";
+import {
+  CurveCoverageCard,
+  curveCoverageAttentionByGrip,
+} from "./analysis/CurveCoverageCard.js";
 // EnduranceCeilingCard dropped May 2026 — the F(180s)/F(5s) ratio is
 // invariant to proportional strength gains (so it reads "NEEDS WORK"
 // even while the user is measurably getting stronger), the literature
@@ -70,6 +74,7 @@ import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
 import { PeakForceCard } from "./analysis/PeakForceCard.jsx";
+import { AnalysisScopeToolbar } from "./analysis/AnalysisScopeToolbar.jsx";
 import { useCapacityHistoryByGrip } from "../hooks/useCapacityHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
 import { useHistoryOverlay } from "../hooks/useHistoryOverlay.js";
@@ -202,14 +207,12 @@ export function AnalysisView({
   // per-chart relMode that used to live on the F-D card has been
   // promoted to this single global state.
   const [normalizeOn, setNormalizeOn] = useState(() => loadLS(LS_BW_NORMALIZE_KEY) === true);
-  const toggleNormalize = () => {
-    setNormalizeOn(v => {
-      const next = !v;
-      saveLS(LS_BW_NORMALIZE_KEY, next);
-      return next;
-    });
+  const setNormalizePreference = next => {
+    setNormalizeOn(next);
+    saveLS(LS_BW_NORMALIZE_KEY, next);
   };
-  const relMode = normalizeOn;  // alias retained so existing relMode reads keep working
+  const normalizationActive = normalizeOn && bodyWeight > 0;
+  const relMode = normalizationActive;
 
   // ── Hand selector (June 2026) ──────────────────────
   // "pooled" (default) | "L" | "R". One global control, like the
@@ -246,16 +249,18 @@ export function AnalysisView({
     [...new Set(history.map(r => r.grip).filter(Boolean))].sort(),
     [history]
   );
+  const scopedGrips = useMemo(
+    () => selGrip ? [selGrip] : grips,
+    [selGrip, grips]
+  );
 
-  // All reps with usable force + time data for the selected filters.
-  // L+R are always pooled at the view level — the F-D chart shows an
-  // at-a-glance picture, and per-hand views happen inside the cards
-  // that genuinely need them (Strength Balance, Hand Asymmetry).
+  // All reps with usable force + time data for the shared grip/hand scope.
   const reps = useMemo(() => history.filter(r =>
     (!selGrip || r.grip === selGrip) &&
+    (handView === "pooled" || r.hand === handView) &&
     effectiveLoad(r) > 0 &&
     r.actual_time_s > 0
-  ), [history, selGrip]);
+  ), [history, selGrip, handView]);
 
   // Train-to-failure model (May 2026): every rep with a valid
   // actual_time_s is a failure data point. The legacy success/failure
@@ -277,12 +282,7 @@ export function AnalysisView({
   // untouched; in L/R mode the chart shows that hand's reps and a
   // curve fitted to them alone (handView state is declared above with
   // the BW-normalize toggle).
-  const fdFailures = useMemo(
-    () => (handView === "pooled"
-      ? freshFailures
-      : freshFailures.filter(r => r.hand === handView)),
-    [freshFailures, handView]
-  );
+  const fdFailures = freshFailures;
 
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
@@ -375,33 +375,25 @@ export function AnalysisView({
   const F_D_T_MIN = 5;
 
   // Per-grip split-mode flag for the F-D chart. When no grip filter
-  // is active and ≥2 grips have ≥2 data points each, we render per-
-  // grip three-exp curves + dots side-by-side. Pooling Micro and
+  // is active and ≥2 grips have data, we render per-grip curves +
+  // dots side-by-side. A sparse grip may have dots but no fitted line
+  // until its second point arrives. Pooling Micro and
   // Crusher onto one chart conflates two different muscles (FDP pinch
   // vs FDS crush) — the cross-muscle amplitude difference dominates
   // and the user can't see what's happening to each grip individually.
   //
-  // Output is `{ [grip]: true }` for grips that qualify, or null. The
+  // Output is `{ [grip]: true }` for grips that are present, or null. The
   // shape used to be `{ [grip]: { fit, curve, failures, successes } }`
   // back when this also computed a per-grip Monod fit for the chart;
   // the actual curves drawn are now three-exp via fitThreeExpAmps in
   // the chart render block, so all this hook needs to do is gate
   // splitMode on/off.
   const fdSplitData = useMemo(() => {
-    if (selGrip) return null;
-    const byGrip = {};
-    for (const r of history) {
-      if (!r.grip) continue;
-      if (!(effectiveLoad(r) > 0)) continue;
-      if (!(r.actual_time_s > 0)) continue;
-      byGrip[r.grip] = (byGrip[r.grip] || 0) + 1;
-    }
-    const qualifyingGrips = Object.entries(byGrip)
-      .filter(([, count]) => count >= 2)
-      .map(([grip]) => grip);
-    if (qualifyingGrips.length < 2) return null;
-    return Object.fromEntries(qualifyingGrips.map(g => [g, true]));
-  }, [history, selGrip]);
+    return buildForceDurationGripScope(history, {
+      grip: selGrip,
+      hand: handView,
+    });
+  }, [history, selGrip, handView]);
 
   // F-D curve stroke color. When a grip is selected (single-curve mode)
   // we tint the curve and its 3-min sustainable reference with the
@@ -426,7 +418,7 @@ export function AnalysisView({
   // the 120 lines of fit + smoothing logic don't visually crowd the
   // AnalysisView render. Same memo deps as before.
   const capacityHistoryByGrip = useCapacityHistoryByGrip({
-    history, grips, gripBaselines, threeExpPriors, bwLog,
+    history, grips: scopedGrips, gripBaselines, threeExpPriors, bwLog,
     // Hand scoping (June 2026): in L/R mode the trajectory runs on
     // that hand's reps against the FROZEN per-hand baselines.
     hand: handView === "pooled" ? null : handView,
@@ -534,7 +526,9 @@ export function AnalysisView({
   // from the pooled scatter while still shaping the curve.
   const buildDot = (r) => ({
     x: r.actual_time_s,
-    y: useRel ? forceOverBW(effectiveLoad(r), bodyWeight) : toDisp(effectiveLoad(r), unit),
+    y: useRel
+      ? forceOverBW(effectiveLoad(r), bwOnDate(bwLog, r.date)?.kg ?? bodyWeight)
+      : toDisp(effectiveLoad(r), unit),
     date: r.date, grip: r.grip, hand: r.hand,
     // session_id lets click handlers gather the full session's reps to
     // pop up the RepCurveChart for that workout.
@@ -554,7 +548,10 @@ export function AnalysisView({
   // ignores manual-load reps and can clip their dots.
   const maxForceRel = Math.max(
     ...(useRel
-      ? reps.map(r => forceOverBW(effectiveLoad(r), bodyWeight) ?? 0)
+      ? reps.map(r => forceOverBW(
+          effectiveLoad(r),
+          bwOnDate(bwLog, r.date)?.kg ?? bodyWeight
+        ) ?? 0)
       : reps.map(r => toDisp(effectiveLoad(r), unit))),
     useRel ? 0.5 : 40
   );
@@ -583,6 +580,18 @@ export function AnalysisView({
   const { historyOverlay } = useHistoryOverlay({
     history, grips, gripBaselines, perHandGripBaselines, threeExpPriors,
   });
+
+  const coverageAttentionByGrip = useMemo(
+    () => curveCoverageAttentionByGrip(history, { handView }),
+    [history, handView]
+  );
+  const coverageAttentionCounts = useMemo(
+    () => Object.fromEntries(
+      Object.entries(coverageAttentionByGrip)
+        .map(([grip, value]) => [grip, value.attentionZones.length])
+    ),
+    [coverageAttentionByGrip]
+  );
 
   // (overlayActiveGrip / overlayDates / overlayLast / overlayNowI
   // moved into ForceCurvesOverlayCard — only that card consumed them.
@@ -684,75 +693,25 @@ export function AnalysisView({
           BW-related control here is the Absolute / × BW units toggle
           inside the filter card below. */}
 
-      {/* Filters */}
-      <Card style={{ marginBottom: 16 }}>
-        {/* Filter card: grip pills (left) + Absolute / × BW units
-            toggle (right). Renders if EITHER grips exist OR a BW is
-            set — previously gated on grips alone, which hid the units
-            toggle for users with BW but no Tindeq reps.
-
-            No hand selector: page-level hand filtering was retired
-            because it added a confusing default state (a stale "L"
-            selection used to silently hide Micro reps logged as R).
-            Per-hand views happen inside the specific cards that need
-            them (Strength Balance, Hand Asymmetry, the F-D chart's
-            optional L/R overlay); the page as a whole is hand-pooled. */}
-        {(grips.length > 0 || bodyWeight > 0) && (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {grips.length > 0 && (
-                <button onClick={() => setSelGrip("")} style={{
-                  padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
-                  background: !selGrip ? C.orange : C.border, color: !selGrip ? "#fff" : C.muted,
-                }}>All Grips</button>
-              )}
-              {grips.map(g => (
-                <button key={g} onClick={() => setSelGrip(g)} style={{
-                  padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
-                  background: selGrip === g ? C.orange : C.border, color: selGrip === g ? "#fff" : C.muted,
-                }}>{g}</button>
-              ))}
-            </div>
-            {/* Absolute / × BW units toggle. Hidden when no BW is set,
-                since × BW would be inert without a divisor. */}
-            {bodyWeight > 0 && (
-              <div style={{ display: "flex", gap: 4 }}>
-                {[{ key: false, label: "Absolute" }, { key: true, label: "× BW" }].map(opt => (
-                  <button key={String(opt.key)} onClick={() => normalizeOn !== opt.key && toggleNormalize()} style={{
-                    padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
-                    background: normalizeOn === opt.key ? C.purple : C.border,
-                    color:      normalizeOn === opt.key ? "#fff" : C.muted,
-                  }}>{opt.label}</button>
-                ))}
-              </div>
-            )}
-            {/* Hand selector — scopes the F-D chart, Capacity
-                trajectory, Curve Improvement tiles, and Endurance
-                Ceiling to one hand. Pooled is the default clean view;
-                per-hand fits run on half the data, so expect noise. */}
-            <div style={{ display: "flex", gap: 4 }}>
-              {[{ key: "pooled", label: "Pooled" }, { key: "L", label: "L" }, { key: "R", label: "R" }].map(opt => (
-                <button key={opt.key} onClick={() => setHandView(opt.key)} style={{
-                  padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
-                  background: handView === opt.key
-                    ? (opt.key === "R" ? C.orange : opt.key === "L" ? C.blue : C.purple)
-                    : C.border,
-                  color:      handView === opt.key ? "#fff" : C.muted,
-                }}>{opt.label}</button>
-              ))}
-            </div>
-          </div>
-        )}
-      </Card>
+      <AnalysisScopeToolbar
+        grips={grips}
+        grip={selGrip}
+        onGripChange={setSelGrip}
+        hand={handView}
+        onHandChange={setHandView}
+        normalizeOn={normalizeOn}
+        onNormalizeChange={setNormalizePreference}
+        canNormalize={bodyWeight > 0}
+        attentionCounts={coverageAttentionCounts}
+      />
 
       {reps.length > 0 && (<>
         <CardBoundary name="Whole-Curve Capacity">
           <CapacityTrajectoryCard
             capacityHistoryByGrip={capacityHistoryByGrip}
-            normalizeOn={normalizeOn}
+            normalizeOn={normalizationActive}
             activities={activities}
             handView={handView}
-            onHandViewChange={setHandView}
           />
         </CardBoundary>
 
@@ -767,10 +726,10 @@ export function AnalysisView({
         <ForceDurationCard
           unit={unit}
           bodyWeight={bodyWeight}
+          bwLog={bwLog}
           useRel={useRel}
-          normalizeOn={normalizeOn}
+          normalizeOn={normalizationActive}
           handView={handView}
-          onHandViewChange={setHandView}
           fdBasis={fdBasis}
           onFdBasisChange={setFdBasis}
           fdSplitData={fdSplitData}
@@ -780,7 +739,9 @@ export function AnalysisView({
           dotsRel={dotsRel}
           maxDur={maxDur}
           maxForceRel={maxForceRel}
-          handAsymmetry={handAsymmetry}
+          handAsymmetry={handView === "pooled"
+            ? handAsymmetry.filter(item => !selGrip || item.grip === selGrip)
+            : []}
           history={history}
           freshMap={fdFreshMap}
           threeExpPriors={threeExpPriors}
@@ -824,12 +785,15 @@ export function AnalysisView({
           historyOverlay={historyOverlay}
           maxDur={maxDur}
           unit={unit}
+          normalizeOn={normalizationActive}
+          bodyWeight={bodyWeight}
+          bwLog={bwLog}
           handView={handView}
           perHandGripImprovement={perHandGripImprovement}
+          perHandGripBaselines={perHandGripBaselines}
           perHandGripEstimates={perHandGripEstimates}
           gripImprovementFresh={gripImprovementFresh}
           perHandGripImprovementFresh={perHandGripImprovementFresh}
-          onHandViewChange={setHandView}
         />
         </CardBoundary>
 
@@ -838,7 +802,15 @@ export function AnalysisView({
             and the whole-curve capacity trajectory with the one
             thing they underrepresent: instantaneous max recruitment. */}
         <CardBoundary name="Peak Force trend">
-        <PeakForceCard history={history} unit={unit} />
+        <PeakForceCard
+          history={history}
+          unit={unit}
+          grip={selGrip}
+          handView={handView}
+          normalizeOn={normalizationActive}
+          bodyWeight={bodyWeight}
+          bwLog={bwLog}
+        />
         </CardBoundary>
 
         {/* (Endurance Ceiling / Sustained-vs-max card retired July
@@ -874,7 +846,7 @@ export function AnalysisView({
         {/* Curve Coverage is an exception card: it stays at the bottom
             and renders only when sampled data is stale or aging. */}
         <CardBoundary name="Curve Coverage">
-        <CurveCoverageCard history={history} />
+        <CurveCoverageCard history={history} grip={selGrip} handView={handView} />
         </CardBoundary>
       </>)}
     </div>

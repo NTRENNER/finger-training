@@ -1,4 +1,22 @@
-import { formatPeakForceTooltip, peakForceTooltipRows } from "../PeakForceCard.jsx";
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import {
+  PeakForceCard,
+  formatPeakForceTooltip,
+  peakForceTooltipRows,
+} from "../PeakForceCard.jsx";
+
+beforeAll(() => {
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+});
+
+afterAll(() => {
+  delete global.ResizeObserver;
+});
 
 test("new-PR tooltip names the workout that produced the peak", () => {
   const item = {
@@ -46,4 +64,71 @@ test("tooltip rows drop scatter internals and replace the matching PR line", () 
       color: "red",
     },
   ]);
+});
+
+const rep = (grip, hand, peak) => ({
+  grip,
+  hand,
+  date: hand === "L" ? "2026-07-01" : "2026-07-02",
+  rep_num: 1,
+  target_duration: 7,
+  actual_time_s: 8,
+  peak_force_kg: peak,
+  avg_force_kg: peak * 0.9,
+});
+
+test("focused grip removes every other grip from the card", () => {
+  render(
+    <PeakForceCard
+      history={[
+        rep("Crusher", "L", 60),
+        rep("Micro", "L", 24),
+      ]}
+      grip="Crusher"
+      unit="kg"
+    />
+  );
+
+  expect(screen.getByText("Crusher")).toBeInTheDocument();
+  expect(screen.queryByText("Micro")).not.toBeInTheDocument();
+});
+
+test("page hand scope replaces the card's compare-hands control", () => {
+  render(
+    <PeakForceCard
+      history={[
+        rep("Crusher", "L", 60),
+        rep("Crusher", "R", 70),
+      ]}
+      grip="Crusher"
+      handView="L"
+      unit="kg"
+    />
+  );
+
+  expect(screen.getByText(/60.0 kg/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Compare hands" })).not.toBeInTheDocument();
+  expect(screen.getByText(/left hand/i)).toBeInTheDocument();
+});
+
+test("bodyweight scale uses the weight on each measurement date", () => {
+  render(
+    <PeakForceCard
+      history={[
+        { ...rep("Crusher", "L", 60), date: "2026-07-01" },
+        { ...rep("Crusher", "L", 66), date: "2026-07-08" },
+      ]}
+      grip="Crusher"
+      normalizeOn
+      bodyWeight={80}
+      bwLog={[
+        { date: "2026-07-01", kg: 75 },
+        { date: "2026-07-08", kg: 80 },
+      ]}
+      unit="kg"
+    />
+  );
+
+  expect(screen.getByText(/0.82 × BW/)).toBeInTheDocument();
+  expect(screen.getByText(/\+3%/)).toBeInTheDocument();
 });

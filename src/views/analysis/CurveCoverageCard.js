@@ -1,7 +1,7 @@
 // Curve coverage is an exception surface: it stays out of the metric stack
 // unless a previously sampled zone is stale or approaching its lockout.
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { ZONE_KEYS, ZONE6 } from "../../model/zones.js";
@@ -17,69 +17,44 @@ const zoneRangeLabel = zone =>
   : `${zone.min}–${zone.max}s`;
 const ZONE_RANGE = Object.fromEntries(ZONE6.map(zone => [zone.key, zoneRangeLabel(zone)]));
 
-export function CurveCoverageCard({ history = [] }) {
-  const [selectedGrip, setSelectedGrip] = useState(null);
-  const presentGrips = useMemo(() => {
-    const set = new Set(history.map(rep => rep?.grip).filter(Boolean));
-    const ordered = GRIP_ORDER.filter(grip => set.has(grip));
-    for (const grip of set) if (!ordered.includes(grip)) ordered.push(grip);
-    return ordered;
-  }, [history]);
+export function curveCoverageAttentionByGrip(history = [], { handView = "pooled" } = {}) {
+  const scopedHistory = handView === "pooled"
+    ? history
+    : history.filter(rep => rep?.hand === handView);
+  const set = new Set(scopedHistory.map(rep => rep?.grip).filter(Boolean));
+  const presentGrips = GRIP_ORDER.filter(grip => set.has(grip));
+  for (const grip of set) if (!presentGrips.includes(grip)) presentGrips.push(grip);
 
-  const coverageByGrip = useMemo(() => {
-    const byGrip = new Map();
-    for (const grip of presentGrips) {
-      byGrip.set(grip, getZoneStaleness(history.filter(rep => rep?.grip === grip)));
-    }
-    return byGrip;
-  }, [history, presentGrips]);
+  const out = {};
+  for (const grip of presentGrips) {
+    const staleness = getZoneStaleness(scopedHistory.filter(rep => rep?.grip === grip));
+    const attentionZones = ZONE_KEYS.filter(zone =>
+      ATTENTION_STATUSES.has(staleness?.[zone]?.status)
+    );
+    if (attentionZones.length === 0) continue;
+    const staleCount = attentionZones.filter(zone => staleness[zone].status === "stale").length;
+    out[grip] = {
+      staleness,
+      attentionZones,
+      staleCount,
+      warningCount: attentionZones.length - staleCount,
+    };
+  }
+  return out;
+}
 
-  const attentionGrips = presentGrips.filter(grip =>
-    ZONE_KEYS.some(zone => ATTENTION_STATUSES.has(coverageByGrip.get(grip)?.[zone]?.status))
-  );
-  if (attentionGrips.length === 0) return null;
-
-  const activeGrip = selectedGrip && attentionGrips.includes(selectedGrip)
-    ? selectedGrip
-    : attentionGrips[0];
-  const staleness = coverageByGrip.get(activeGrip);
-  const attentionZones = ZONE_KEYS.filter(zone => ATTENTION_STATUSES.has(staleness[zone].status));
-  const staleCount = attentionZones.filter(zone => staleness[zone].status === "stale").length;
-  const warningCount = attentionZones.length - staleCount;
-
+function GripCoverage({ grip, coverage, showGrip }) {
+  const { staleness, attentionZones, staleCount, warningCount } = coverage;
   return (
-    <Card style={{ marginBottom: 16 }}>
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Coverage</div>
-        <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-          Data that needs attention
-        </div>
-      </div>
-
-      {attentionGrips.length > 1 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-          {attentionGrips.map(grip => {
-            const active = activeGrip === grip;
-            const color = GRIP_COLORS[grip] || C.blue;
-            return (
-              <button
-                key={grip}
-                onClick={() => setSelectedGrip(grip)}
-                style={{
-                  padding: "4px 12px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  border: `1px solid ${active ? color : C.border}`,
-                  background: active ? `${color}22` : "transparent",
-                  color: active ? color : C.muted,
-                }}
-              >
-                {grip}
-              </button>
-            );
-          })}
+    <div style={{ marginTop: showGrip ? 16 : 0 }}>
+      {showGrip && (
+        <div style={{
+          marginBottom: 8,
+          color: GRIP_COLORS[grip] || C.blue,
+          fontSize: 12,
+          fontWeight: 700,
+        }}>
+          {grip}
         </div>
       )}
 
@@ -147,6 +122,43 @@ export function CurveCoverageCard({ history = [] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+export function CurveCoverageCard({ history = [], grip = "", handView = "pooled" }) {
+  const attentionByGrip = useMemo(
+    () => curveCoverageAttentionByGrip(history, { handView }),
+    [history, handView]
+  );
+  const attentionGrips = useMemo(() => {
+    const available = Object.keys(attentionByGrip);
+    if (grip) return available.includes(grip) ? [grip] : [];
+    const ordered = GRIP_ORDER.filter(item => available.includes(item));
+    for (const item of available) if (!ordered.includes(item)) ordered.push(item);
+    return ordered;
+  }, [attentionByGrip, grip]);
+
+  if (attentionGrips.length === 0) return null;
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: attentionGrips.length > 1 ? 0 : 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Coverage</div>
+        <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+          Data that needs attention
+          {handView !== "pooled" && ` · ${handView === "L" ? "left" : "right"} hand`}
+        </div>
+      </div>
+
+      {attentionGrips.map(item => (
+        <GripCoverage
+          key={item}
+          grip={item}
+          coverage={attentionByGrip[item]}
+          showGrip={!grip}
+        />
+      ))}
     </Card>
   );
 }

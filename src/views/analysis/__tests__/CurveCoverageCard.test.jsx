@@ -2,12 +2,13 @@ import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { CurveCoverageCard } from "../CurveCoverageCard.js";
 
-const rep = (date, actual_time_s) => ({
+const rep = (date, actual_time_s, over = {}) => ({
   grip: "Crusher",
   hand: "L",
   date,
   rep_num: 1,
   actual_time_s,
+  ...over,
 });
 
 beforeEach(() => {
@@ -37,4 +38,38 @@ test("renders only when a sampled zone needs attention", () => {
   expect(screen.getByText(/1 stale/i)).toBeInTheDocument();
   expect(screen.queryByText(/modeled/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/last 12 months/i)).not.toBeInTheDocument();
+});
+
+test("all-grips mode shows every grip needing attention without local selectors", () => {
+  render(
+    <CurveCoverageCard
+      history={[
+        rep("2026-05-01", 30),
+        rep("2026-05-01", 70, { grip: "Micro" }),
+      ]}
+    />
+  );
+
+  expect(screen.getByText("Crusher")).toBeInTheDocument();
+  expect(screen.getByText("Micro")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Crusher" })).not.toBeInTheDocument();
+});
+
+test("focused grip and hand remove unrelated coverage", () => {
+  render(
+    <CurveCoverageCard
+      grip="Crusher"
+      handView="L"
+      history={[
+        rep("2026-05-01", 30),
+        rep("2026-05-01", 70, { grip: "Micro" }),
+        rep("2026-05-01", 115, { hand: "R" }),
+      ]}
+    />
+  );
+
+  expect(screen.getByText(/left hand/i)).toBeInTheDocument();
+  expect(screen.getByText(/Power/i)).toBeInTheDocument();
+  expect(screen.queryByText("Micro")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Strength$/i)).not.toBeInTheDocument();
 });

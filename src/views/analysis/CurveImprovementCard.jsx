@@ -14,6 +14,7 @@
 // progression forward in time. Both grips are always shown — no pills,
 // no pooled/per-hand toggle. The fit is the pooled (L+R) per-grip three-
 // exp, the same one the headline % uses, so the curve and tiles agree.
+// The page-level grip scope can narrow this to one block.
 //
 // (Merged May 2026: absorbed the standalone "Force Curves — vs baseline"
 // card. Curve sampling, the fixed y-axis, and the slider all live here
@@ -25,17 +26,22 @@
 //   • selGrip — that grip's block (or an early-days placeholder).
 //   • pooled fallback — static total + tiles (no overlay/slider).
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ResponsiveContainer, LineChart, Line,
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import { C } from "../../ui/theme.js";
-import { Card, HandViewPills } from "../../ui/components.js";
+import { Card } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
-import { fmt1, fmtW, toDisp } from "../../ui/format.js";
+import { bwOnDate, fmt1, toDisp } from "../../ui/format.js";
 import { ZONE6, ZONE_REF_T } from "../../model/zones.js";
-import { improvementForAmps, SUPPORT_MIN_HOLD_FRAC, perZoneBaselineAmps } from "../../model/baselines.js";
+import {
+  buildGripImprovement,
+  improvementForAmps,
+  SUPPORT_MIN_HOLD_FRAC,
+  perZoneBaselineAmps,
+} from "../../model/baselines.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
 import { effectiveLoad } from "../../model/load.js";
 import { ZoneSessionHistoryModal } from "./ZoneSessionHistoryModal.jsx";
@@ -44,6 +50,66 @@ import { ZoneSessionHistoryModal } from "./ZoneSessionHistoryModal.jsx";
 // buildGripBaselines so the "X of 5 failures" copy is honest.
 const FAIL_THRESHOLD = 5;
 const DUR_THRESHOLD  = 3;
+
+const scaleAmps = (amps, bw) =>
+  Array.isArray(amps) && bw > 0 ? amps.map(value => value / bw) : amps;
+
+function latestDateForKey(history, key) {
+  const [grip, hand] = key.split("|");
+  let latest = null;
+  for (const rep of history || []) {
+    if (rep?.grip !== grip || (hand && rep?.hand !== hand) || !rep?.date) continue;
+    if (!(effectiveLoad(rep) > 0) || !(rep.actual_time_s > 0)) continue;
+    if (latest == null || rep.date > latest) latest = rep.date;
+  }
+  return latest;
+}
+
+function normalizeBaselineMap(baselines, bwForDate) {
+  return Object.fromEntries(Object.entries(baselines || {}).map(([key, baseline]) => [
+    key,
+    {
+      ...baseline,
+      amps: scaleAmps(baseline?.amps, bwForDate(baseline?.date)),
+    },
+  ]));
+}
+
+function normalizeEstimateMap(estimates, history, bwForDate) {
+  return Object.fromEntries(Object.entries(estimates || {}).map(([key, amps]) => [
+    key,
+    scaleAmps(amps, bwForDate(latestDateForKey(history, key))),
+  ]));
+}
+
+function normalizeHistoryOverlay(historyOverlay, bwForDate) {
+  const out = {};
+  for (const [grip, overlay] of Object.entries(historyOverlay || {})) {
+    const normalizeBranch = branch => {
+      if (!branch) return branch;
+      return {
+        ...branch,
+        baselineAmps: scaleAmps(branch.baselineAmps, bwForDate(branch.baselineDate)),
+        ampsByDate: new Map(
+          [...(branch.ampsByDate || new Map()).entries()].map(([date, amps]) => [
+            date,
+            scaleAmps(amps, bwForDate(date)),
+          ])
+        ),
+      };
+    };
+    out[grip] = {
+      ...normalizeBranch(overlay),
+      perHand: Object.fromEntries(
+        Object.entries(overlay.perHand || {}).map(([hand, branch]) => [
+          hand,
+          normalizeBranch(branch),
+        ])
+      ),
+    };
+  }
+  return out;
+}
 
 function baselineProgress(history, grip, hand = null) {
   let failures = 0;
@@ -216,23 +282,36 @@ function gateGlobalImprovement(imp, maxHoldS) {
 // Baseline vs Now force-curve chart with a FIXED y-axis (sized once from
 // the tallest curve any slider position can draw, so scrubbing doesn't
 // rescale the axis). tMin..tMax sampled at 80 points.
-function OverlayChart({ baselineAmps, nowAmps, candidateAmps, unit, maxDur, color, baselineDate, nowDate }) {
+function OverlayChart({
+  baselineAmps,
+  nowAmps,
+  candidateAmps,
+  unit,
+  normalizeOn,
+  maxDur,
+  color,
+  baselineDate,
+  nowDate,
+}) {
   const tMin = 5;
   const tMax = Math.max(180, maxDur || 0);
+  const displayForce = force => normalizeOn ? force : toDisp(force, unit);
+  const displayUnit = normalizeOn ? "× BW" : unit;
+  const axisStep = normalizeOn ? 0.1 : 10;
   const samples = [];
   for (let i = 0; i < 80; i++) {
     const t = tMin + ((tMax - tMin) / 79) * i;
     samples.push({
       x: t,
-      past: baselineAmps ? toDisp(Math.max(predForceThreeExp(baselineAmps, t), 0), unit) : null,
-      now:  nowAmps      ? toDisp(Math.max(predForceThreeExp(nowAmps, t), 0), unit)      : null,
+      past: baselineAmps ? displayForce(Math.max(predForceThreeExp(baselineAmps, t), 0)) : null,
+      now:  nowAmps      ? displayForce(Math.max(predForceThreeExp(nowAmps, t), 0))      : null,
     });
   }
   const yPeak = candidateAmps.reduce(
-    (m, a) => Math.max(m, toDisp(Math.max(predForceThreeExp(a, tMin), 0), unit)),
-    1
+    (m, a) => Math.max(m, displayForce(Math.max(predForceThreeExp(a, tMin), 0))),
+    normalizeOn ? 0.1 : 1
   );
-  const yDomain = [0, Math.ceil(yPeak * 1.1 / 10) * 10];
+  const yDomain = [0, Math.ceil(yPeak * 1.1 / axisStep) * axisStep];
 
   return (
     <ResponsiveContainer width="100%" height={200}>
@@ -242,10 +321,20 @@ function OverlayChart({ baselineAmps, nowAmps, candidateAmps, unit, maxDur, colo
           tick={{ fill: C.muted, fontSize: 11 }}
           label={{ value: "Duration (s)", position: "insideBottom", offset: -14, fill: C.muted, fontSize: 11 }}
         />
-        <YAxis domain={yDomain} tick={{ fill: C.muted, fontSize: 11 }} width={44} unit={` ${unit}`} />
+        <YAxis
+          domain={yDomain}
+          tick={{ fill: C.muted, fontSize: 11 }}
+          width={44}
+          unit={normalizeOn ? "" : ` ${unit}`}
+        />
         <Tooltip
           contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
-          formatter={(val, name) => [val == null ? "—" : `${fmtW(val, unit)} ${unit}`, name]}
+          formatter={(val, name) => [
+            val == null
+              ? "—"
+              : `${normalizeOn ? Number(val).toFixed(2) : fmt1(val)} ${displayUnit}`,
+            name,
+          ]}
           labelFormatter={(t) => `${fmt1(t)}s`}
         />
         <Line dataKey="past" stroke={C.muted} strokeWidth={2} strokeDasharray="6 4"
@@ -262,6 +351,7 @@ function GripBlock({
   grip,
   overlay,
   unit,
+  normalizeOn,
   maxDur,
   nowIdx,
   onScrub,
@@ -316,6 +406,7 @@ function GripBlock({
         nowAmps={nowAmps}
         candidateAmps={candidateAmps}
         unit={unit}
+        normalizeOn={normalizeOn}
         maxDur={maxDur}
         color={color}
         baselineDate={overlay.baselineDate}
@@ -353,6 +444,9 @@ export function CurveImprovementCard({
   historyOverlay = {},
   maxDur = 180,
   unit = "lbs",
+  normalizeOn = false,
+  bodyWeight = null,
+  bwLog = [],
   // Hand selector (June 2026): "pooled" | "L" | "R". In L/R mode the
   // card renders STATIC per-grip tiles from perHandGripImprovement
   // (keys `${grip}|${hand}`, vs the FROZEN per-hand baselines) — the
@@ -360,12 +454,11 @@ export function CurveImprovementCard({
   // have the data density to be worth scrubbing.
   handView = "pooled",
   perHandGripImprovement = {},
+  perHandGripBaselines = {},
   // Current per-hand fits (keys `grip|hand`) — the "now" amps the L/R
   // tiles' supported zones are built from; used so the per-zone fill
   // shares the same basis (July 2026).
   perHandGripEstimates = {},
-  // Repeated local control for the global hand-view state (June 2026).
-  onHandViewChange = null,
 }) {
   // Per-grip "Now" slider index. null → latest date for that grip.
   const [nowIdxByGrip, setNowIdxByGrip] = useState({});
@@ -375,18 +468,75 @@ export function CurveImprovementCard({
     setZoneDetail({ grip, zoneKey, throughDate });
   };
 
+  const scaledData = useMemo(() => {
+    if (!normalizeOn) {
+      return {
+        gripImprovement,
+        perHandGripImprovement,
+        perHandGripEstimates,
+        historyOverlay,
+        improvement,
+      };
+    }
+    const bwForDate = date => bwOnDate(bwLog, date)?.kg ?? bodyWeight;
+    const scaledGripBaselines = normalizeBaselineMap(gripBaselines, bwForDate);
+    const scaledGripEstimates = normalizeEstimateMap(grip3xEstimates, history, bwForDate);
+    const scaledPerHandBaselines = normalizeBaselineMap(perHandGripBaselines, bwForDate);
+    const scaledPerHandEstimates = normalizeEstimateMap(
+      perHandGripEstimates,
+      history,
+      bwForDate
+    );
+    const fallbackGrip = selGrip || Object.keys(scaledGripEstimates)[0];
+    const fallbackCurrent = fallbackGrip ? scaledGripEstimates[fallbackGrip] : null;
+    const fallbackBaseline = global3xBaseline?.amps
+      ? scaleAmps(global3xBaseline.amps, bwForDate(global3xBaseline.date))
+      : null;
+    return {
+      gripImprovement: buildGripImprovement(scaledGripBaselines, scaledGripEstimates),
+      perHandGripImprovement: buildGripImprovement(
+        scaledPerHandBaselines,
+        scaledPerHandEstimates
+      ),
+      perHandGripEstimates: scaledPerHandEstimates,
+      historyOverlay: normalizeHistoryOverlay(historyOverlay, bwForDate),
+      improvement: fallbackCurrent && fallbackBaseline
+        ? improvementForAmps(
+            fallbackCurrent,
+            fallbackBaseline,
+            global3xBaseline?.maxHoldS ?? null
+          )
+        : improvement,
+    };
+  }, [
+    normalizeOn,
+    gripImprovement,
+    perHandGripImprovement,
+    perHandGripEstimates,
+    historyOverlay,
+    improvement,
+    bwLog,
+    bodyWeight,
+    gripBaselines,
+    perHandGripBaselines,
+    grip3xEstimates,
+    history,
+    selGrip,
+    global3xBaseline,
+  ]);
 
-  if (!improvement && Object.keys(gripImprovement).length === 0) return null;
+  if (!scaledData.improvement && Object.keys(scaledData.gripImprovement).length === 0) return null;
 
   const perGripMode = !selGrip && Object.keys(grip3xEstimates).length >= 2;
-  const impMap = gripImprovement;
+  const impMap = scaledData.gripImprovement;
   const gripImpEntries = Object.entries(impMap);
 
   // Grips that have an interactive overlay (baseline + ≥1 post-baseline
   // fit). These render as full blocks; grips with an improvement but no
   // overlay fall back to a static tiles row.
   const overlayGrips = new Set(
-    Object.keys(historyOverlay).filter(g => historyOverlay[g]?.dates?.length > 0)
+    Object.keys(scaledData.historyOverlay)
+      .filter(g => scaledData.historyOverlay[g]?.dates?.length > 0)
   );
   const fallbackGrip = selGrip
     || Object.keys(grip3xEstimates)[0]
@@ -406,9 +556,12 @@ export function CurveImprovementCard({
 
   // ── Per-hand mode: static tiles vs frozen per-hand baselines ──
   if (handView === "L" || handView === "R") {
-    const handImpMap = perHandGripImprovement;
+    const handImpMap = scaledData.perHandGripImprovement;
     const entries = Object.entries(handImpMap)
-      .filter(([key]) => key.endsWith(`|${handView}`))
+      .filter(([key]) =>
+        key.endsWith(`|${handView}`)
+        && (!selGrip || key.startsWith(`${selGrip}|`))
+      )
       .map(([key, imp]) => {
         // Fill this hand's long-hold "new" tiles the same way the pooled
         // block does: anchor each zone the hand baseline never reached to
@@ -416,7 +569,7 @@ export function CurveImprovementCard({
         // the previously-null zones so the existing supported-zone numbers
         // and the `total` are untouched.
         const grip = key.split("|")[0];
-        const ph = historyOverlay[grip]?.perHand?.[handView];
+        const ph = scaledData.historyOverlay[grip]?.perHand?.[handView];
         let merged = imp;
         if (ph?.ampsByDate && ph.dates?.length) {
           // "Now" basis for the filled zones = the CURRENT per-hand
@@ -425,7 +578,7 @@ export function CurveImprovementCard({
           // perHandGripEstimates), so filled and supported tiles can't
           // disagree about what "now" means. The overlay's last-date
           // cumulative fit is only the fallback (partial estimates map).
-          const nowAmps = perHandGripEstimates[key]
+          const nowAmps = scaledData.perHandGripEstimates[key]
             ?? ph.ampsByDate.get(ph.dates[ph.dates.length - 1]);
           const zoneRef = perZoneBaselineAmps(
             ph.dates, ph.ampsByDate, ph.maxHoldByDate, ph.baselineMaxHoldS ?? null,
@@ -452,8 +605,10 @@ export function CurveImprovementCard({
             <span style={{ color: handView === "R" ? C.orange : C.blue, marginLeft: 8, fontSize: 12 }}>
               {handView === "R" ? "Right hand" : "Left hand"}
             </span>
+            {normalizeOn && (
+              <span style={{ color: C.purple, marginLeft: 8, fontSize: 12 }}>· × BW</span>
+            )}
           </div>
-          {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
         </div>
         <div style={{ fontSize: 11, color: C.muted, marginBottom: 4, lineHeight: 1.4 }}>
           Per-hand fits vs that hand's frozen baseline — half the data
@@ -481,8 +636,12 @@ export function CurveImprovementCard({
     <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
       {zoneHistoryModal}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Improvement</div>
-        {onHandViewChange && <HandViewPills value={handView} onChange={onHandViewChange} />}
+        <div style={{ fontSize: 14, fontWeight: 700 }}>
+          Curve Improvement
+          {normalizeOn && (
+            <span style={{ color: C.purple, marginLeft: 8, fontSize: 12 }}>· × BW</span>
+          )}
+        </div>
       </div>
       <BasisNote />
 
@@ -493,8 +652,8 @@ export function CurveImprovementCard({
               const divider = i < arr.length - 1;
               if (overlayGrips.has(grip)) {
                 return (
-                  <GripBlock key={grip} grip={grip} overlay={historyOverlay[grip]}
-                    unit={unit} maxDur={maxDur}
+                  <GripBlock key={grip} grip={grip} overlay={scaledData.historyOverlay[grip]}
+                    unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
                     nowIdx={nowIdxByGrip[grip]} onScrub={scrub} divider={divider}
                     onZoneSelect={openZoneDetail}
                     selectedZoneKey={zoneDetail?.grip === grip ? zoneDetail.zoneKey : null}
@@ -540,8 +699,8 @@ export function CurveImprovementCard({
         )
       ) : selGrip ? (
         overlayGrips.has(selGrip) ? (
-          <GripBlock grip={selGrip} overlay={historyOverlay[selGrip]}
-            unit={unit} maxDur={maxDur}
+          <GripBlock grip={selGrip} overlay={scaledData.historyOverlay[selGrip]}
+            unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
             nowIdx={nowIdxByGrip[selGrip]} onScrub={scrub} divider={false}
             onZoneSelect={openZoneDetail}
             selectedZoneKey={zoneDetail?.grip === selGrip ? zoneDetail.zoneKey : null}
@@ -567,7 +726,7 @@ export function CurveImprovementCard({
             </div>
           </div>
         )
-      ) : improvement ? (
+      ) : scaledData.improvement ? (
         // Global fallback (single-grip histories) — the pooled global fit.
         <>
           {global3xBaseline && (
@@ -577,7 +736,7 @@ export function CurveImprovementCard({
           )}
           <ImprovementRow
             label={null}
-            imp={gateGlobalImprovement(improvement, global3xBaseline?.maxHoldS ?? null)}
+            imp={gateGlobalImprovement(scaledData.improvement, global3xBaseline?.maxHoldS ?? null)}
             onZoneSelect={fallbackGrip
               ? zoneKey => openZoneDetail(fallbackGrip, zoneKey, null)
               : null}

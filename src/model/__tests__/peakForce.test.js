@@ -58,6 +58,20 @@ describe("buildPeakForceTrend", () => {
     expect(t.best.Micro.kg).toBe(22);
   });
 
+  test("supports precise transformed values for bodyweight-relative trends", () => {
+    const t = buildPeakForceTrend([
+      rep("Crusher", "2026-05-01", 8, 60),
+      rep("Crusher", "2026-05-08", 8, 66),
+    ], {
+      valueForRep: peak => peak / 75,
+      roundDigits: 3,
+    });
+
+    expect(t.rows[0].Crusher_pr).toBe(0.8);
+    expect(t.best.Crusher.kg).toBe(0.88);
+    expect(t.changePct.Crusher).toBe(10);
+  });
+
   test("changePct = best-ever vs first session; per-grip zoom domain", () => {
     const t = buildPeakForceTrend([
       rep("Crusher", "2026-04-27", 8, 66),   // first
