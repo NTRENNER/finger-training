@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────
 // CalendarHeatmap — GitHub-style year activity heatmap
 // ─────────────────────────────────────────────────────────────
-// Compact 7×~53 grid of small squares showing the last 365 days of
+// Responsive 7×~53 grid of squares showing the last 365 days of
 // training activity at a glance. Each square is one day; color
 // intensity scales with how many distinct activities were logged
 // that day (finger sessions + workouts + climbs + stretch markers,
@@ -37,20 +37,14 @@ const RAMP = [
   "#5fd95f",          // 4+
 ];
 
-// Cell size tuned to fit a full 53-week year inside the History
-// view's 480px max-width card. 53 cols × 8px = 424px, plus the
-// weekday-label column and card padding still leaves a few pixels of
-// breathing room. The grid stays scrollable as a fallback for even
-// narrower viewports.
-const CELL    = 7;
-const GAP     = 1;
+// Sized for the shared 720px PageFrame. A 53-column year uses nearly
+// the full card width on desktop; the existing scroll wrapper keeps
+// the newest weeks reachable on phones.
+const CELL    = 10;
+const GAP     = 2;
 const ROW_H   = CELL + GAP;
 const COL_W   = CELL + GAP;
-// Minimum span — even a brand-new user with one logged session gets
-// at least 12 weeks of context so the grid doesn't render as a single
-// lonely cell. 84 days × 1 col/week = ~12 cols, which still reads as
-// a calendar rather than a sparkline.
-const MIN_DAYS = 84;
+const YEAR_DAYS = 365;
 const WEEKDAY = ["", "Mon", "", "Wed", "", "Fri", ""]; // sparse so the labels don't crowd
 
 // Build the per-day activity map from raw inputs. Single pass over
@@ -104,11 +98,13 @@ function intensity(entry) {
 // `days` is the inclusive span — buildGrid covers the most recent
 // `days` calendar days ending on endDate.
 function buildGrid(endDate, days) {
-  const end = new Date(endDate + "T00:00:00");
-  const startMs = end.getTime() - (days - 1) * 86400000;
+  const start = new Date(endDate + "T12:00:00");
+  start.setDate(start.getDate() - (days - 1));
   const dates = [];
   for (let i = 0; i < days; i++) {
-    dates.push(new Date(startMs + i * 86400000));
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    dates.push(date);
   }
   // Pad the front so column 0 starts on Sunday.
   const firstDow = dates[0].getDay();
@@ -142,17 +138,6 @@ function earliestActivityDate({ history, activities, wLog }) {
   return earliest;
 }
 
-// Compute the day count between two ymd strings, inclusive. Used to
-// derive the heatmap span from the earliest activity date back to
-// today. Returns 1 for same-day, null for invalid inputs.
-function daysBetweenInclusive(startYmd, endYmd) {
-  if (!startYmd || !endYmd) return null;
-  const a = new Date(startYmd + "T00:00:00").getTime();
-  const b = new Date(endYmd   + "T00:00:00").getTime();
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-  return Math.max(1, Math.round((b - a) / 86400000) + 1);
-}
-
 // Group adjacent columns by the month their FIRST in-range day falls
 // in, so we can render a small month label above each new month's
 // first column.
@@ -168,7 +153,13 @@ function buildMonthBands(cols) {
       lastLabel = label;
     }
   });
-  return bands;
+  // A rolling year usually begins partway through a month. Suppress
+  // labels for one- or two-column fragments so the opening month
+  // cannot collide with the next full month (for example "JulAug").
+  return bands.filter((band, i) => {
+    const nextCol = bands[i + 1]?.col ?? cols.length;
+    return nextCol - band.col >= 3;
+  });
 }
 
 export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
@@ -181,35 +172,29 @@ export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
 
   const today = ymdLocal();
 
-  // Dynamic span: start at the user's earliest logged activity (so a
-  // 2-month-old account doesn't show 10 months of empty cells), but
-  // never less than MIN_DAYS so the grid keeps enough context to
-  // read as a calendar instead of a tiny strip. End is always today.
+  // The visible window is always one rolling year. Keeping the scale
+  // stable makes density comparable over time and fills the desktop
+  // card; dates before the first log get a distinct untracked state.
   const earliest = useMemo(
     () => earliestActivityDate({ history, activities, wLog }),
     [history, activities, wLog],
   );
-  const spanDays = useMemo(() => {
-    const fromEarliest = daysBetweenInclusive(earliest, today);
-    if (fromEarliest == null) return MIN_DAYS;
-    return Math.max(fromEarliest, MIN_DAYS);
-  }, [earliest, today]);
-
-  const cols = useMemo(() => buildGrid(today, spanDays), [today, spanDays]);
+  const cols = useMemo(() => buildGrid(today, YEAR_DAYS), [today]);
   const monthBands = useMemo(() => buildMonthBands(cols), [cols]);
-
-  // Friendly header label — "Last N days" while the span is short
-  // enough that a day count reads cleanly; "Since {Month YYYY}" once
-  // the user has more than a couple of months of history and the
-  // day count would be too noisy to parse at a glance.
-  const headerLabel = useMemo(() => {
-    if (spanDays <= 60) return `Last ${spanDays} days`;
-    const startDate = new Date(today + "T00:00:00").getTime() - (spanDays - 1) * 86400000;
-    const startLabel = new Date(startDate).toLocaleString(undefined, {
+  const windowStart = useMemo(() => {
+    for (const col of cols) {
+      const first = col.find(Boolean);
+      if (first) return ymdLocal(first);
+    }
+    return today;
+  }, [cols, today]);
+  const trackingLabel = useMemo(() => {
+    if (!earliest) return "No activity logged yet";
+    const label = new Date(earliest + "T00:00:00").toLocaleString(undefined, {
       month: "long", year: "numeric",
     });
-    return `Since ${startLabel}`;
-  }, [spanDays, today]);
+    return `Tracking since ${label}`;
+  }, [earliest]);
 
   // Scroll the grid to its right edge on mount so the most recent
   // (and most likely active) cells are in view. Without this, users
@@ -229,7 +214,8 @@ export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
   // climb-heavy days dominating the totals strip.
   const totals = useMemo(() => {
     let f = 0, w = 0, c = 0, s = 0, activeDays = 0;
-    for (const entry of dayIndex.values()) {
+    for (const [date, entry] of dayIndex.entries()) {
+      if (date < windowStart || date > today) continue;
       if (intensity(entry) === 0) continue;
       activeDays += 1;
       if (entry.fingers.size > 0)   f += 1;
@@ -238,14 +224,17 @@ export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
       if (entry.stretches.length > 0) s += 1;
     }
     return { fingers: f, workouts: w, climbs: c, stretches: s, activeDays };
-  }, [dayIndex]);
+  }, [dayIndex, today, windowStart]);
 
   const selectedEntry = selectedDate ? dayIndex.get(selectedDate) : null;
 
   return (
-    <Card style={{ marginBottom: 16, padding: "12px 14px" }}>
+    <Card style={{ marginBottom: 16, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
-        <div style={{ fontSize: 13, fontWeight: 700 }}>{headerLabel}</div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Last 12 months</div>
+          <div style={{ marginTop: 2, fontSize: 9, color: C.muted }}>{trackingLabel}</div>
+        </div>
         <div style={{ fontSize: 11, color: C.muted }}>
           {totals.activeDays} active {totals.activeDays === 1 ? "day" : "days"}
           {" · "}
@@ -306,19 +295,24 @@ export function CalendarHeatmap({ history = [], activities = [], wLog = [] }) {
             const lvl = intensity(entry);
             const isToday = ymd === today;
             const isSel   = ymd === selectedDate;
+            const isTracked = earliest != null && ymd >= earliest;
             return (
               <button
                 key={`${ci}-${r}`}
+                disabled={!isTracked}
                 onClick={() => setSelectedDate(sel => sel === ymd ? null : ymd)}
-                title={`${ymd}${lvl > 0 ? ` · ${lvl} ${lvl === 1 ? "activity" : "activities"}` : ""}`}
+                title={!isTracked
+                  ? `${ymd} · Before tracking began`
+                  : `${ymd}${lvl > 0 ? ` · ${lvl} ${lvl === 1 ? "activity" : "activities"}` : ""}`}
                 style={{
                   gridColumn: ci + 2, gridRow: r + 2,
                   width: CELL, height: CELL,
-                  background: RAMP[lvl],
+                  background: isTracked ? RAMP[lvl] : C.bg,
                   border: isSel ? `1px solid ${C.blue}`
                         : isToday ? `1px solid ${C.muted}`
                         : "none",
-                  borderRadius: 2, padding: 0, cursor: "pointer",
+                  borderRadius: 2, padding: 0,
+                  cursor: isTracked ? "pointer" : "default",
                 }}
               />
             );
