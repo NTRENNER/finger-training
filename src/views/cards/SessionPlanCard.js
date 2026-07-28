@@ -50,6 +50,8 @@ import { ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
 import {
   coachingRecommendationContinuous,
+  COLD_START_BOUNDARY_REPS,
+  COLD_START_BOUNDARY_REST_S,
   FRESH_TEST_SHORT_T_MAX,
 } from "../../model/coaching.js";
 import { maxTestStaleness } from "../../model/peakForce.js";
@@ -281,16 +283,14 @@ export function SessionPlanCard({
   // bump hazard; commitment to the protocol is the point of the
   // ladder. The Hangs/Rest/Time summary strip below still shows the
   // plan read-only.
-  const reps = rec?.coldStartStage === "upper"
-    ? 3
-    : rec?.coldStartStage === "lower"
-      ? 1
-      : ladder
+  const reps = rec?.boundaryProbe
+    ? COLD_START_BOUNDARY_REPS
+    : ladder
     ? ladder.reps
     : activeT
       ? Math.max(4, Math.min(6, Math.round(6 - (activeT - 5) / 117.5)))
       : 5;
-  const rest = rec?.coldStartStage === "upper" ? 180 : 20;
+  const rest = rec?.boundaryProbe ? COLD_START_BOUNDARY_REST_S : 20;
 
   // ── Push to session config ──────────────────────────────────
   // ladderLoadByHand: fresh-equivalent pinned loads when the density

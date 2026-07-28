@@ -24,6 +24,8 @@ import {
   COLD_START_MIN_DURATIONS,
   COLD_START_SHORT_TARGET_T,
   COLD_START_LONG_TARGET_T,
+  COLD_START_BOUNDARY_REPS,
+  COLD_START_BOUNDARY_REST_S,
   COLD_START_LONG_MIN_FRACTION,
   COLD_START_LONG_RETRY_MARGIN,
   coldStartSeedWeight,
@@ -146,7 +148,9 @@ describe("coachingRecommendationContinuous", () => {
     const priors = buildThreeExpPriors(history);
     const rec = coachingRecommendationContinuous(history, "Crusher", { threeExpPriors: priors, today });
     expect(rec).not.toBeNull();
-    expect(rec.T).toBeGreaterThanOrEqual(5);
+    // Sparse grips may intentionally return the exact 3s upper-bound
+    // protocol even though the ordinary coaching sweep starts at 5s.
+    expect(rec.T).toBeGreaterThanOrEqual(COLD_START_SHORT_TARGET_T);
     expect(rec.T).toBeLessThanOrEqual(240);
     expect(rec.hand).toBe("L");
     expect(rec.loadKg).toBeGreaterThan(0);
@@ -875,6 +879,9 @@ describe("cold-start seeding", () => {
   test("COLD_START_MIN_DURATIONS matches the baseline gate's duration requirement", () => {
     expect(COLD_START_MIN_REPS).toBe(5);
     expect(COLD_START_MIN_DURATIONS).toBe(3);
+    expect(COLD_START_SHORT_TARGET_T).toBe(3);
+    expect(COLD_START_BOUNDARY_REPS).toBe(4);
+    expect(COLD_START_BOUNDARY_REST_S).toBe(20);
   });
 
   test("mid-only sparse grip gets the upper-bound probe first", () => {
@@ -932,6 +939,36 @@ describe("cold-start seeding", () => {
     expect(left.value).toBeCloseTo(6 * COLD_START_LONG_MIN_FRACTION, 1);
     expect(right.value).toBeCloseTo(8 * COLD_START_LONG_MIN_FRACTION, 1);
     expect(left.fraction).toBeGreaterThanOrEqual(COLD_START_LONG_MIN_FRACTION);
+  });
+
+  test("the strongest valid short rep in the sequence sets the upper anchor", () => {
+    const sequence = [
+      rep(3, 1, 6, 10),
+      rep(3, 2, 7.5, 10),
+      rep(3, 3, 7, 10),
+      rep(3, 4, 6.5, 10),
+    ];
+    const probe = coldStartLongProbeLoad(sequence, "L");
+    expect(probe.anchor.F).toBe(7.5);
+    expect(probe.value).toBeCloseTo(7.5 * COLD_START_LONG_MIN_FRACTION, 1);
+  });
+
+  test("later fatigued long reps cannot lower the next fresh probe", () => {
+    const sequence = [
+      rep(3, 1, 6, 10),
+      {
+        ...rep(220, 1, 1.2, 2),
+        actual_time_s: 100,
+        id: "prime-long-opener",
+      },
+      {
+        ...rep(220, 2, 1.2, 2),
+        actual_time_s: 30,
+        id: "prime-long-fatigued",
+      },
+    ];
+    const retry = coldStartLongProbeLoad(sequence, "L");
+    expect(retry.anchor.T).toBe(100);
   });
 
   test("a too-heavy long probe steps down instead of repeating", () => {

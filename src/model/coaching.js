@@ -58,7 +58,7 @@ import {
   effectiveLoad, freshLoadFor, buildFreshLoadMap,
   prescription, bestAvailablePeakMeasurement,
 } from "./prescription.js";
-import { freshFitReps } from "./load.js";
+import { freshFitReps, isOpenerRep, isSeedArtifactRep } from "./load.js";
 import { TAIL_B_PRIOR } from "./enduranceTail.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 
@@ -394,14 +394,17 @@ export const FRESH_TEST_STALE_DAYS = 45;
 
 // ── Cold-start boundary seeding (July 2026) ───────────────────
 // A sparse grip should identify the curve before optimizing training:
-//   1. a short, heavy failure anchors the upper end;
-//   2. a deliberately conservative long hold anchors the lower end;
+//   1. four short, heavy efforts anchor the upper end;
+//   2. four deliberately conservative long holds anchor the lower end;
 //   3. the normal coverage engine fills the middle.
 //
-// This avoids fitting six apparently precise loads from one narrow
-// duration band. A too-light long probe is still useful: its eventual
-// failure time becomes real endurance data, after which the ordinary
-// prescription model can work backward through the middle.
+// Both boundary sessions use the normal short-rest workout protocol.
+// The best valid short effort supplies the upper anchor; only the fresh
+// opening long hold supplies the lower anchor. Every later rep remains
+// useful recovery data without being mistaken for fresh curve capacity.
+// A too-light long probe is still useful: its eventual failure time
+// becomes real endurance data, after which the ordinary prescription
+// model can work backward through the middle.
 //
 // Cold start uses the same 5-rep / 3-duration gate as the per-grip
 // baseline. Established grips therefore bypass this state machine.
@@ -409,8 +412,10 @@ export const COLD_START_MIN_REPS = 5;
 export const COLD_START_MIN_DURATIONS = 3;
 export const COLD_START_SHORT_ANCHOR_MAX_T = 10;
 export const COLD_START_LONG_ANCHOR_MIN_T = 140;
-export const COLD_START_SHORT_TARGET_T = 5;
+export const COLD_START_SHORT_TARGET_T = 3;
 export const COLD_START_LONG_TARGET_T = 220;
+export const COLD_START_BOUNDARY_REPS = 4;
+export const COLD_START_BOUNDARY_REST_S = 20;
 export const COLD_START_LONG_MIN_FRACTION = 0.20;
 export const COLD_START_LONG_RETRY_MARGIN = 0.90;
 
@@ -423,23 +428,35 @@ export function coldStartSeedWeight(T) {
   return 1 + 0.3 * Math.exp(-(x * x) / (2 * 0.5 * 0.5));
 }
 
-// Conservative lower-bound probe derived from a measured short anchor.
-// The population tail exponent supplies shape only; amplitude remains
-// specific to this hand/grip. A 20% floor prevents very short anchors
-// from producing an impractically tiny load. Returns null until the
-// requested hand has a valid short fresh rep.
-export function coldStartLongProbeLoad(freshGripReps, hand, targetT = COLD_START_LONG_TARGET_T) {
-  const reps = freshGripReps || [];
-  const candidates = reps.filter(rep =>
+// Strongest valid sustained-force observation from a short max-intent
+// sequence. The upper probe is deliberately best-of-four: rep 1 can be
+// technically tentative, while later declines are recovery observations,
+// not evidence that the demonstrated ceiling was lower.
+function coldStartUpperAnchorRep(gripReps, hand) {
+  const candidates = (gripReps || []).filter(rep =>
     rep?.hand === hand
+    && Number(rep.target_duration) > 0
+    && Number(rep.target_duration) <= COLD_START_SHORT_ANCHOR_MAX_T
     && rep.actual_time_s > 0
     && rep.actual_time_s <= COLD_START_SHORT_ANCHOR_MAX_T
     && effectiveLoad(rep) > 0
+    && !isSeedArtifactRep(rep)
   );
-  if (candidates.length === 0 || !(targetT > 0)) return null;
-  const anchorRep = candidates.reduce((best, rep) =>
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, rep) =>
     effectiveLoad(rep) > effectiveLoad(best) ? rep : best
   );
+}
+
+// Conservative lower-bound probe derived from the strongest valid short
+// observation. The population tail exponent supplies shape only; amplitude
+// remains specific to this hand/grip. A 20% floor prevents very short anchors
+// from producing an impractically tiny load. Returns null until the requested
+// hand has a valid short max-intent rep.
+export function coldStartLongProbeLoad(gripReps, hand, targetT = COLD_START_LONG_TARGET_T) {
+  const reps = gripReps || [];
+  const anchorRep = coldStartUpperAnchorRep(reps, hand);
+  if (!anchorRep || !(targetT > 0)) return null;
   const anchorT = Math.max(1, Number(anchorRep.actual_time_s));
   const anchorF = effectiveLoad(anchorRep);
   const populationFraction = Math.pow(targetT / anchorT, -TAIL_B_PRIOR);
@@ -459,6 +476,7 @@ export function coldStartLongProbeLoad(freshGripReps, hand, targetT = COLD_START
   const shortLongAttempts = reps
     .filter(rep =>
       rep?.hand === hand
+      && isOpenerRep(rep)
       && rep.target_duration >= COLD_START_LONG_ANCHOR_MIN_T
       && rep.actual_time_s > COLD_START_SHORT_ANCHOR_MAX_T
       && rep.actual_time_s < COLD_START_LONG_ANCHOR_MIN_T
@@ -643,10 +661,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // Boundary-anchor state is hand-aware. In Both mode, one hand's
   // short/long point must not silently stand in for the other.
   const fitHands = Object.keys(handFits);
-  const hasUpperAnchor = hand => freshGripReps.some(rep =>
-    rep.hand === hand && rep.actual_time_s > 0
-    && rep.actual_time_s <= COLD_START_SHORT_ANCHOR_MAX_T
-  );
+  const hasUpperAnchor = hand => coldStartUpperAnchorRep(gripHistory, hand) != null;
   const hasLowerAnchor = hand => freshGripReps.some(rep =>
     rep.hand === hand && rep.actual_time_s >= COLD_START_LONG_ANCHOR_MIN_T
   );
@@ -899,7 +914,13 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // margin, and because the curve is higher at the shorter hold it
   // naturally prescribes a HEAVIER load for a SHORTER target — the
   // overshoot-tolerant dose that actually clears the stale flag.
-  if (best.staleStatus === "stale" || best.staleStatus === "never") {
+  // Boundary probes carry an exact measurement duration (3s upper,
+  // 220s lower). The generic zone-reference snap must not rewrite that
+  // protocol merely because the new grip's zone is necessarily "never."
+  if (
+    !best.boundaryProbe
+    && (best.staleStatus === "stale" || best.staleStatus === "never")
+  ) {
     const refT = ZONE_REF_T[best.zone];
     if (refT > 0 && Math.abs(best.T - refT) > 1e-6) {
       best.T = Math.max(tMin, Math.min(tMax, refT));
@@ -938,7 +959,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
 
   const headPres = prescription(history, best.hand, grip, best.T, presOpts);
   const headProbe = coldStartStage === "lower"
-    ? coldStartLongProbeLoad(freshGripReps, best.hand, best.T)
+    ? coldStartLongProbeLoad(gripHistory, best.hand, best.T)
     : null;
   const headBase = headProbe?.value
     ?? (headPres ? headPres.value : predForceThreeExp(handFits[best.hand].amps, best.T));
@@ -956,7 +977,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   for (const hand of Object.keys(handFits)) {
     const p = prescription(history, hand, grip, best.T, presOpts);
     const probe = coldStartStage === "lower"
-      ? coldStartLongProbeLoad(freshGripReps, hand, best.T)
+      ? coldStartLongProbeLoad(gripHistory, hand, best.T)
       : null;
     const base = probe?.value ?? p?.value;
     loadByHand[hand] = base > 0 ? capPeak(hand, base * oFactor) : null;

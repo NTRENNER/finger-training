@@ -236,10 +236,10 @@ export function decisiveWhy(rec, { ladderText = null } = {}) {
   if (ladderText) return ladderText;
   if (!rec) return null;
   if (rec.coldStartStage === "upper") {
-    return "new grip — establish the heavy short-duration anchor first";
+    return "new grip — four short max efforts establish the upper anchor and its recovery pattern";
   }
   if (rec.coldStartStage === "lower") {
-    return "upper anchor set — use one conservative long hold to establish the lower bound; an overshoot is still useful data";
+    return "upper anchor set — the first long hold establishes the lower bound; the next three measure short-rest recovery";
   }
   if (rec.coldStartStage === "middle") {
     return "upper and lower bounds set — now fill the middle of the curve";

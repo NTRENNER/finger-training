@@ -56,20 +56,20 @@ test("upper-bound stage hides unsupported alternatives and sends the exact probe
 
   expect(screen.getAllByText("after upper anchor")).toHaveLength(5);
   expect(screen.getAllByRole("button").filter(button => button.disabled)).toHaveLength(5);
-  expect(document.body).toHaveTextContent("Hangs3");
-  expect(document.body).toHaveTextContent("Rest180s");
+  expect(document.body).toHaveTextContent("Hangs4");
+  expect(document.body).toHaveTextContent("Rest20s");
 
   await waitFor(() => expect(onApplyPlan).toHaveBeenCalled());
   expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({
     goal: "max_strength",
-    targetTime: 5,
-    repsPerSet: 3,
-    restTime: 180,
+    targetTime: 3,
+    repsPerSet: 4,
+    restTime: 20,
   });
   expect(onApplyPlan.mock.calls.at(-1)[0].plannedLoadByHand.L).toBeGreaterThan(0);
 });
 
-test("lower-bound stage uses one conservative long probe and defers the middle", async () => {
+test("lower-bound stage uses the four-rep recovery protocol and defers the middle", async () => {
   const history = [
     rep("L", 5, 5, 6, 1),
     rep("R", 5, 5, 8, 1),
@@ -77,7 +77,7 @@ test("lower-bound stage uses one conservative long probe and defers the middle",
   const onApplyPlan = renderCard(history);
 
   expect(screen.getAllByText("after lower anchor")).toHaveLength(5);
-  expect(document.body).toHaveTextContent("Hangs1");
+  expect(document.body).toHaveTextContent("Hangs4");
   expect(document.body).toHaveTextContent("Rest20s");
 
   await waitFor(() => expect(onApplyPlan).toHaveBeenCalled());
@@ -85,7 +85,7 @@ test("lower-bound stage uses one conservative long probe and defers the middle",
   expect(plan).toMatchObject({
     goal: "endurance",
     targetTime: 220,
-    repsPerSet: 1,
+    repsPerSet: 4,
     restTime: 20,
   });
   expect(plan.plannedLoadByHand.L).toBeCloseTo(1.2, 1);
