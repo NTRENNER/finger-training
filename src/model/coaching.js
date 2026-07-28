@@ -58,6 +58,8 @@ import {
   effectiveLoad, freshLoadFor, buildFreshLoadMap,
   prescription, bestAvailablePeakMeasurement,
 } from "./prescription.js";
+import { freshFitReps } from "./load.js";
+import { TAIL_B_PRIOR } from "./enduranceTail.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 
 // Population mean of COACH_RECOVERY_TAU_DAYS — the normalizer for the
@@ -390,32 +392,101 @@ export const FRESH_TEST_SHORT_T_MAX = 10;   // seconds
 // fires while the cap still has a valid peak to protect with.
 export const FRESH_TEST_STALE_DAYS = 45;
 
-// ── Cold-start seeding (June 2026) ────────────────────────────
-// A brand-new grip has every zone "never trained", so the staleness
-// tiebreak fell to the first zone in the list — Max Strength — and
-// the first Prime session got prescribed a 5s max day. Backwards for
-// cold start: a mid-duration session to failure sweeps a RANGE of
-// durations as fatigue accumulates (a 40s-class session produces
-// failures from ~40s down to ~6s across its reps), unlocks the
-// per-grip baseline faster (≥5 failures across ≥3 distinct
-// durations), and sits where the population prior is most
-// trustworthy. Short-T testing earns its keep RE-anchoring an
-// established curve's top end — with no curve yet, there's nothing
-// to anchor.
+// ── Cold-start boundary seeding (July 2026) ───────────────────
+// A sparse grip should identify the curve before optimizing training:
+//   1. a short, heavy failure anchors the upper end;
+//   2. a deliberately conservative long hold anchors the lower end;
+//   3. the normal coverage engine fills the middle.
 //
-// A grip is cold-start until it has logged this many distinct target
-// durations (matches the baseline gate's duration requirement).
+// This avoids fitting six apparently precise loads from one narrow
+// duration band. A too-light long probe is still useful: its eventual
+// failure time becomes real endurance data, after which the ordinary
+// prescription model can work backward through the middle.
+//
+// Cold start uses the same 5-rep / 3-duration gate as the per-grip
+// baseline. Established grips therefore bypass this state machine.
+export const COLD_START_MIN_REPS = 5;
 export const COLD_START_MIN_DURATIONS = 3;
+export const COLD_START_SHORT_ANCHOR_MAX_T = 10;
+export const COLD_START_LONG_ANCHOR_MIN_T = 140;
+export const COLD_START_SHORT_TARGET_T = 5;
+export const COLD_START_LONG_TARGET_T = 220;
+export const COLD_START_LONG_MIN_FRACTION = 0.20;
+export const COLD_START_LONG_RETRY_MARGIN = 0.90;
 
-// Multiplicative score bias applied during cold start: a smooth bump
-// in log-T space peaking at 45s (+30%), ~+20% at 30s/70s, fading to
-// ~1.0 at the extremes (5s, 220s). Big enough to win the flat
-// never-trained tiebreak, small enough that a strong genuine signal
-// (real residuals, recency) still dominates.
+// Once both boundary anchors exist but the baseline is still sparse,
+// this smooth score bump fills the middle before normal coaching takes
+// over. It is not used to choose the first two boundary probes.
 export function coldStartSeedWeight(T) {
   if (!(T > 0)) return 1;
   const x = Math.log(T / 45);
   return 1 + 0.3 * Math.exp(-(x * x) / (2 * 0.5 * 0.5));
+}
+
+// Conservative lower-bound probe derived from a measured short anchor.
+// The population tail exponent supplies shape only; amplitude remains
+// specific to this hand/grip. A 20% floor prevents very short anchors
+// from producing an impractically tiny load. Returns null until the
+// requested hand has a valid short fresh rep.
+export function coldStartLongProbeLoad(freshGripReps, hand, targetT = COLD_START_LONG_TARGET_T) {
+  const reps = freshGripReps || [];
+  const candidates = reps.filter(rep =>
+    rep?.hand === hand
+    && rep.actual_time_s > 0
+    && rep.actual_time_s <= COLD_START_SHORT_ANCHOR_MAX_T
+    && effectiveLoad(rep) > 0
+  );
+  if (candidates.length === 0 || !(targetT > 0)) return null;
+  const anchorRep = candidates.reduce((best, rep) =>
+    effectiveLoad(rep) > effectiveLoad(best) ? rep : best
+  );
+  const anchorT = Math.max(1, Number(anchorRep.actual_time_s));
+  const anchorF = effectiveLoad(anchorRep);
+  const populationFraction = Math.pow(targetT / anchorT, -TAIL_B_PRIOR);
+  const fraction = Math.max(
+    COLD_START_LONG_MIN_FRACTION,
+    Math.min(1, populationFraction)
+  );
+  let value = anchorF * fraction;
+  let anchor = { T: anchorT, F: anchorF, date: anchorRep.date };
+
+  // A previous lower-bound attempt that still failed before the long
+  // anchor threshold is useful evidence that the first probe was not
+  // conservative enough. Project that attempt to target duration with
+  // the same population tail and a small retry margin, then take the
+  // lower of the two candidates. This prevents repeating an identical
+  // too-heavy "probe" indefinitely.
+  const shortLongAttempts = reps
+    .filter(rep =>
+      rep?.hand === hand
+      && rep.target_duration >= COLD_START_LONG_ANCHOR_MIN_T
+      && rep.actual_time_s > COLD_START_SHORT_ANCHOR_MAX_T
+      && rep.actual_time_s < COLD_START_LONG_ANCHOR_MIN_T
+      && effectiveLoad(rep) > 0
+    )
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const lastAttempt = shortLongAttempts[0];
+  if (lastAttempt) {
+    const retryFraction = Math.pow(
+      targetT / Math.max(1, Number(lastAttempt.actual_time_s)),
+      -TAIL_B_PRIOR
+    );
+    const retryValue =
+      effectiveLoad(lastAttempt) * retryFraction * COLD_START_LONG_RETRY_MARGIN;
+    if (retryValue > 0 && retryValue < value) {
+      value = retryValue;
+      anchor = {
+        T: Number(lastAttempt.actual_time_s),
+        F: effectiveLoad(lastAttempt),
+        date: lastAttempt.date,
+      };
+    }
+  }
+  return {
+    value: Math.round(value * 10) / 10,
+    fraction: value / anchorF,
+    anchor,
+  };
 }
 
 // Days since this grip's last fresh (rep-1) rep at target ≤
@@ -507,16 +578,18 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const gripHistory = history.filter(r => r?.grip === grip);
   const stalenessMap = getZoneStaleness(gripHistory, today);
 
-  // Cold start: fewer than COLD_START_MIN_DURATIONS distinct target
-  // durations logged on this grip. Biases the pick toward the middle
-  // of the duration range (coldStartSeedWeight) and suppresses the
-  // fresh-test advisory — see the constants above for the rationale.
+  // Cold start uses the exact fresh, de-duplicated fit basis. Later
+  // within-session reps must not graduate a grip from data collection.
+  const freshGripReps = freshFitReps(gripHistory)
+    .filter(rep => rep.actual_time_s > 0 && effectiveLoad(rep) > 0);
   const distinctDurations = new Set(
-    gripHistory
-      .filter(r => r.actual_time_s > 0 && r.target_duration > 0)
+    freshGripReps
+      .filter(r => r.target_duration > 0)
       .map(r => r.target_duration)
   );
-  const coldStart = distinctDurations.size < COLD_START_MIN_DURATIONS;
+  const coldStart =
+    freshGripReps.length < COLD_START_MIN_REPS
+    || distinctDurations.size < COLD_START_MIN_DURATIONS;
   const fmap = freshMap || buildFreshLoadMap(history);
   const prior = (threeExpPriors && threeExpPriors.get) ? threeExpPriors.get(grip) : null;
   const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
@@ -566,6 +639,26 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   }
 
   if (Object.keys(handFits).length === 0) return null;
+
+  // Boundary-anchor state is hand-aware. In Both mode, one hand's
+  // short/long point must not silently stand in for the other.
+  const fitHands = Object.keys(handFits);
+  const hasUpperAnchor = hand => freshGripReps.some(rep =>
+    rep.hand === hand && rep.actual_time_s > 0
+    && rep.actual_time_s <= COLD_START_SHORT_ANCHOR_MAX_T
+  );
+  const hasLowerAnchor = hand => freshGripReps.some(rep =>
+    rep.hand === hand && rep.actual_time_s >= COLD_START_LONG_ANCHOR_MIN_T
+  );
+  const missingUpperHand = fitHands.find(hand => !hasUpperAnchor(hand));
+  const missingLowerHand = fitHands.find(hand => !hasLowerAnchor(hand));
+  const coldStartStage = !coldStart
+    ? null
+    : missingUpperHand
+      ? "upper"
+      : missingLowerHand
+        ? "lower"
+        : "middle";
 
   // Weaker-hand boost factor per hand (1.0 unless both hands fit and the
   // hand is the weaker one). asym = (strong − weak)/strong at 30s.
@@ -774,6 +867,26 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   if (!best) return null;
   delete best._effectiveScore;
 
+  // Sparse-grip boundary probes override only the selected target. The
+  // scoring engine remains intact underneath and resumes automatically
+  // for the middle-fill stage and for every established grip.
+  if (coldStartStage === "upper") {
+    best.T = COLD_START_SHORT_TARGET_T;
+    best.hand = missingUpperHand;
+    best.zone = zoneOf(best.T);
+    best.staleStatus = stalenessMap[best.zone]?.status ?? "never";
+    best.coverageSnap = false;
+    best.boundaryProbe = true;
+  } else if (coldStartStage === "lower") {
+    best.T = COLD_START_LONG_TARGET_T;
+    best.hand = missingLowerHand;
+    best.zone = zoneOf(best.T);
+    best.staleStatus = stalenessMap[best.zone]?.status ?? "never";
+    best.coverageSnap = false;
+    best.boundaryProbe = true;
+  }
+  best.coldStartStage = coldStartStage;
+
   // Coverage-driven picks → target the zone's REFERENCE time, not the
   // residual-argmax T. When a zone wins because it's stale/never (a
   // coverage pick, not a confident in-zone limiter), the within-zone
@@ -824,18 +937,29 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   };
 
   const headPres = prescription(history, best.hand, grip, best.T, presOpts);
-  const headBase = headPres ? headPres.value : predForceThreeExp(handFits[best.hand].amps, best.T);
+  const headProbe = coldStartStage === "lower"
+    ? coldStartLongProbeLoad(freshGripReps, best.hand, best.T)
+    : null;
+  const headBase = headProbe?.value
+    ?? (headPres ? headPres.value : predForceThreeExp(handFits[best.hand].amps, best.T));
   best.loadKg = capPeak(best.hand, headBase != null ? headBase * oFactor : headBase);
   best.loadBeforeOverload = headBase;
-  best.scale = headPres ? headPres.scale : 1.0;
-  best.anchor = headPres ? headPres.anchor : null;
-  best.peakCapped = headPres?.peakCapped === true
-    || (headBase != null && best.loadKg != null && best.loadKg < headBase * oFactor);
+  best.scale = headProbe?.fraction ?? (headPres ? headPres.scale : 1.0);
+  best.anchor = headProbe?.anchor ?? (headPres ? headPres.anchor : null);
+  best.source = headProbe ? "cold-start-long-probe" : headPres?.source;
+  best.peakCapped = !headProbe && (
+    headPres?.peakCapped === true
+    || (headBase != null && best.loadKg != null && best.loadKg < headBase * oFactor)
+  );
 
   const loadByHand = {};
   for (const hand of Object.keys(handFits)) {
     const p = prescription(history, hand, grip, best.T, presOpts);
-    loadByHand[hand] = p && p.value > 0 ? capPeak(hand, p.value * oFactor) : null;
+    const probe = coldStartStage === "lower"
+      ? coldStartLongProbeLoad(freshGripReps, hand, best.T)
+      : null;
+    const base = probe?.value ?? p?.value;
+    loadByHand[hand] = base > 0 ? capPeak(hand, base * oFactor) : null;
   }
   best.loadByHand = loadByHand;
 

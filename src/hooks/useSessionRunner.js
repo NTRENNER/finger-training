@@ -107,6 +107,10 @@ export function useSessionRunner({
     // onApplyPlan; startSession prefers these over re-prescribing so
     // "same weight, more reps" holds between ladder rungs.
     ladderLoadByHand: null,
+    // Exact fresh-equivalent loads for one-off measurement protocols
+    // such as sparse-grip upper/lower boundary probes. Null during
+    // ordinary curve-driven sessions.
+    plannedLoadByHand: null,
   }));
 
   // No derived fields anymore — config is rawConfig.
@@ -182,7 +186,8 @@ export function useSessionRunner({
       // session's fresh-equivalent load — "same weight, more reps" only
       // holds if we DON'T re-prescribe from the (still-learning) curve.
       // Today's cooked multiplier still applies, same as the curve path.
-      const pinned = cfg.ladderLoadByHand?.[h];
+      const pinned =
+        cfg.ladderLoadByHand?.[h] ?? cfg.plannedLoadByHand?.[h];
       const base = pinned > 0
         ? pinned
         : (() => {

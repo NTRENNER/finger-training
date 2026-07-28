@@ -20,8 +20,14 @@ import {
   shortEndFailureStaleness,
   FRESH_TEST_SHORT_T_MAX,
   FRESH_TEST_STALE_DAYS,
+  COLD_START_MIN_REPS,
   COLD_START_MIN_DURATIONS,
+  COLD_START_SHORT_TARGET_T,
+  COLD_START_LONG_TARGET_T,
+  COLD_START_LONG_MIN_FRACTION,
+  COLD_START_LONG_RETRY_MARGIN,
   coldStartSeedWeight,
+  coldStartLongProbeLoad,
 } from "../coaching.js";
 import { buildThreeExpPriors, predForceThreeExp } from "../threeExp.js";
 import { buildGripEstimates } from "../baselines.js";
@@ -827,6 +833,8 @@ describe("shortEndFailureStaleness / freshTest advisory", () => {
       { ...rep(30, 3, true), avg_force_kg: 22 },
       { ...rep(60, 5, true), avg_force_kg: 18 },
       { ...rep(120, 8, true), avg_force_kg: 12 },   // 3 distinct durations → not cold start
+      { ...rep(60, 9, true), avg_force_kg: 17 },
+      { ...rep(120, 10, true), avg_force_kg: 11 },
     ];
     const priors = buildThreeExpPriors(hist);
     const rec = coachingRecommendationContinuous(hist, "Crusher",
@@ -840,14 +848,11 @@ describe("shortEndFailureStaleness / freshTest advisory", () => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// Cold-start seeding — new grips get mid-duration sessions first
+// Cold-start seeding — bracket the curve, then fill the middle
 // ─────────────────────────────────────────────────────────────
-// Regression for the first Prime session (June 2026): with every
-// zone never-trained, the flat staleness tiebreak fell to Max
-// Strength and prescribed a 5s max day on a grip with no curve —
-// and the fresh-test advisory reinforced it. Cold-start grips
-// (< COLD_START_MIN_DURATIONS distinct durations) now get a smooth
-// mid-T score bump and a suppressed fresh-test advisory.
+// Sparse grips establish a short heavy anchor, then a conservative
+// long lower bound. Once both exist, the ordinary cold-start score
+// bump fills the middle until the 5-rep / 3-duration gate is met.
 describe("cold-start seeding", () => {
   const daysAgoStr = (n) =>
     new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
@@ -868,25 +873,90 @@ describe("cold-start seeding", () => {
   });
 
   test("COLD_START_MIN_DURATIONS matches the baseline gate's duration requirement", () => {
+    expect(COLD_START_MIN_REPS).toBe(5);
     expect(COLD_START_MIN_DURATIONS).toBe(3);
   });
 
-  test("one-session grip: cold start flagged, mid-duration pick, advisory suppressed", () => {
-    // Shaped like the first Prime session: six 5s max reps, 10 days
-    // ago (so recency has recovered and the pure tiebreak is what's
-    // being tested).
+  test("mid-only sparse grip gets the upper-bound probe first", () => {
+    const hist = [1, 2, 3, 4, 5, 6].map(i => rep(30, i, 8 - i * 0.3, 10));
+    const priors = buildThreeExpPriors(hist);
+    const rec = coachingRecommendationContinuous(hist, "Prime",
+      { threeExpPriors: priors, today: new Date() });
+    expect(rec).not.toBeNull();
+    expect(rec.coldStart).toBe(true);
+    expect(rec.coldStartStage).toBe("upper");
+    expect(rec.T).toBe(COLD_START_SHORT_TARGET_T);
+    expect(rec.zone).toBe("max_strength");
+    expect(rec.freshTest.recommended).toBe(false);
+  });
+
+  test("short anchor advances to a conservative long lower-bound probe", () => {
     const hist = [1, 2, 3, 4, 5, 6].map(i => rep(5, i, 6 - i * 0.3, 10));
     const priors = buildThreeExpPriors(hist);
     const rec = coachingRecommendationContinuous(hist, "Prime",
       { threeExpPriors: priors, today: new Date() });
     expect(rec).not.toBeNull();
     expect(rec.coldStart).toBe(true);
-    // The seeding bump pulls the pick into the curve's body — not
-    // another 5s max day, not a 220s endurance flyer.
-    expect(rec.T).toBeGreaterThanOrEqual(15);
-    expect(rec.T).toBeLessThanOrEqual(110);
-    // Advisory exists but must not push short-T testing on a curve
-    // that doesn't exist yet.
+    expect(rec.coldStartStage).toBe("lower");
+    expect(rec.T).toBe(COLD_START_LONG_TARGET_T);
+    expect(rec.zone).toBe("endurance");
+    expect(rec.source).toBe("cold-start-long-probe");
+    expect(rec.loadByHand.L).toBeGreaterThan(0);
+    expect(rec.loadByHand.L).toBeLessThan(6);
+    expect(rec.scale).toBeGreaterThanOrEqual(COLD_START_LONG_MIN_FRACTION);
     expect(rec.freshTest.recommended).toBe(false);
+  });
+
+  test("both bounds present advances to middle-fill coaching", () => {
+    const hist = [
+      rep(5, 1, 6, 10),
+      rep(220, 1, 1.5, 8),
+    ];
+    const priors = buildThreeExpPriors(hist);
+    const rec = coachingRecommendationContinuous(hist, "Prime",
+      { threeExpPriors: priors, today: new Date() });
+    expect(rec).not.toBeNull();
+    expect(rec.coldStart).toBe(true);
+    expect(rec.coldStartStage).toBe("middle");
+    expect(rec.T).not.toBe(COLD_START_SHORT_TARGET_T);
+    expect(rec.T).not.toBe(COLD_START_LONG_TARGET_T);
+  });
+
+  test("population-tail long probe is conservative and hand-specific", () => {
+    const fresh = [
+      rep(5, 1, 6, 10),
+      { ...rep(5, 1, 8, 10), hand: "R", id: "prime-r" },
+    ];
+    const left = coldStartLongProbeLoad(fresh, "L");
+    const right = coldStartLongProbeLoad(fresh, "R");
+    expect(left.value).toBeCloseTo(6 * COLD_START_LONG_MIN_FRACTION, 1);
+    expect(right.value).toBeCloseTo(8 * COLD_START_LONG_MIN_FRACTION, 1);
+    expect(left.fraction).toBeGreaterThanOrEqual(COLD_START_LONG_MIN_FRACTION);
+  });
+
+  test("a too-heavy long probe steps down instead of repeating", () => {
+    const fresh = [
+      rep(5, 1, 6, 10),
+      {
+        ...rep(220, 1, 1.2, 2),
+        actual_time_s: 100,
+        id: "prime-long-shortfall",
+      },
+    ];
+    const retry = coldStartLongProbeLoad(fresh, "L");
+    expect(COLD_START_LONG_RETRY_MARGIN).toBeLessThan(1);
+    expect(retry.value).toBeLessThan(1.2);
+    expect(retry.anchor.T).toBe(100);
+  });
+
+  test("established grip bypasses every boundary-probe override", () => {
+    const Ts = [5, 30, 70, 115, 160, 220];
+    const hist = Ts.map((T, i) => rep(T, 1, 12 - i, 20 - i));
+    const priors = buildThreeExpPriors(hist);
+    const rec = coachingRecommendationContinuous(hist, "Prime",
+      { threeExpPriors: priors, today: new Date() });
+    expect(rec.coldStart).toBe(false);
+    expect(rec.coldStartStage).toBeNull();
+    expect(rec.boundaryProbe).not.toBe(true);
   });
 });

@@ -52,3 +52,13 @@ test("no override → manual_load_kg stays null (Tindeq/legacy path unchanged)",
   const rep = addReps.mock.calls[0][0][0];
   expect(rep.manual_load_kg).toBeNull();
 });
+
+test("a boundary probe starts with its exact planned load", () => {
+  const { hook } = setup();
+  act(() => hook.result.current.startSession({
+    ...cfg,
+    plannedLoadByHand: { L: 1.4 },
+    cooked: 0,
+  }));
+  expect(hook.result.current.refWeights.L).toBeCloseTo(1.4, 5);
+});

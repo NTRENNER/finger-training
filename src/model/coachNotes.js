@@ -235,8 +235,17 @@ export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreA
 export function decisiveWhy(rec, { ladderText = null } = {}) {
   if (ladderText) return ladderText;
   if (!rec) return null;
+  if (rec.coldStartStage === "upper") {
+    return "new grip — establish the heavy short-duration anchor first";
+  }
+  if (rec.coldStartStage === "lower") {
+    return "upper anchor set — use one conservative long hold to establish the lower bound; an overshoot is still useful data";
+  }
+  if (rec.coldStartStage === "middle") {
+    return "upper and lower bounds set — now fill the middle of the curve";
+  }
   if (rec.coldStart) {
-    return "new grip — mid-length sessions first, so each failure maps a stretch of the curve";
+    return "new grip — collecting enough clean durations to stabilize the curve";
   }
   const room = rec.room ?? (1 - (rec.localRatio ?? 1));
   if (!rec.coverageSnap && rec.adaptBoost != null && rec.adaptBoost > 1.05) {

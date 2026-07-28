@@ -266,6 +266,7 @@ export function SetupView({
       restTime: 150,
       hand: "Both",
       ladderLoadByHand: null,
+      plannedLoadByHand: null,
     });
   };
 

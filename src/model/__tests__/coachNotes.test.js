@@ -141,4 +141,9 @@ describe("decisiveWhy", () => {
   test("cold start explains seeding", () => {
     expect(decisiveWhy({ coldStart: true, adaptBoost: 2 })).toMatch(/new grip/);
   });
+  test("cold-start boundary stages explain the measurement sequence", () => {
+    expect(decisiveWhy({ coldStartStage: "upper" })).toMatch(/heavy short-duration anchor/);
+    expect(decisiveWhy({ coldStartStage: "lower" })).toMatch(/conservative long hold/);
+    expect(decisiveWhy({ coldStartStage: "middle" })).toMatch(/fill the middle/);
+  });
 });

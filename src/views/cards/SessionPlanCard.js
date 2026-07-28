@@ -178,13 +178,13 @@ export function SessionPlanCard({
     [hand]
   );
   const ladder = useMemo(
-    () => (grip && activeZone)
+    () => (grip && activeZone && !rec?.boundaryProbe)
       ? computeDensityLadder(history, grip, activeZone, {
           fatigueModel,
           expectedHands,
         })
       : null,
-    [history, grip, activeZone, fatigueModel, expectedHands]
+    [history, grip, activeZone, fatigueModel, expectedHands, rec]
   );
 
   // ── Per-zone tiles (with per-grip cookedness scale-down) ─────────
@@ -198,13 +198,29 @@ export function SessionPlanCard({
       const cfg = GOAL_CONFIG[key];
       if (!cfg) return null;
       const T = cfg.refTime;
+      const deferredReason =
+        rec?.coldStartStage === "upper" && key !== "max_strength"
+          ? "after upper anchor"
+          : rec?.coldStartStage === "lower" && key !== "endurance"
+            ? "after lower anchor"
+            : null;
       const pL = prescription(history, "L", grip, T, { freshMap, threeExpPriors });
       const pR = prescription(history, "R", grip, T, { freshMap, threeExpPriors });
+      const useLowerProbe = rec?.coldStartStage === "lower" && key === "endurance";
       return {
         key, label: cfg.label, emoji: cfg.emoji, color: cfg.color, T,
-        L: pL?.value != null ? pL.value * fatigueMod : null,
-        R: pR?.value != null ? pR.value * fatigueMod : null,
+        L: deferredReason
+          ? null
+          : useLowerProbe
+            ? (rec.loadByHand?.L != null ? rec.loadByHand.L * fatigueMod : null)
+            : (pL?.value != null ? pL.value * fatigueMod : null),
+        R: deferredReason
+          ? null
+          : useLowerProbe
+            ? (rec.loadByHand?.R != null ? rec.loadByHand.R * fatigueMod : null)
+            : (pR?.value != null ? pR.value * fatigueMod : null),
         fatigueMod,
+        deferredReason,
         // Reliability dimming — same logic as PrescribedLoadCard.
         reliability:
           !pL && !pR ? null
@@ -213,7 +229,7 @@ export function SessionPlanCard({
           : "well-supported",
       };
     }).filter(Boolean);
-  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, fatigueModel, cooked]);
+  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, fatigueModel, cooked, rec]);
 
   // ── Active row — drives the bottom session-details panel ──────────────
   const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
@@ -265,12 +281,16 @@ export function SessionPlanCard({
   // bump hazard; commitment to the protocol is the point of the
   // ladder. The Hangs/Rest/Time summary strip below still shows the
   // plan read-only.
-  const reps = ladder
+  const reps = rec?.coldStartStage === "upper"
+    ? 3
+    : rec?.coldStartStage === "lower"
+      ? 1
+      : ladder
     ? ladder.reps
     : activeT
       ? Math.max(4, Math.min(6, Math.round(6 - (activeT - 5) / 117.5)))
       : 5;
-  const rest = 20;
+  const rest = rec?.coldStartStage === "upper" ? 180 : 20;
 
   // ── Push to session config ──────────────────────────────────
   // ladderLoadByHand: fresh-equivalent pinned loads when the density
@@ -286,9 +306,18 @@ export function SessionPlanCard({
       repsPerSet: reps,
       restTime: rest,
       ladderLoadByHand: ladder ? ladderPlanLoadByHand : null,
+      // Boundary probes must run at the exact load displayed above.
+      // Otherwise startSession would call prescription() again and the
+      // conservative lower-bound probe would silently revert to the old
+      // sparse-curve extrapolation.
+      plannedLoadByHand:
+        rec?.boundaryProbe && !isOverridden ? rec.loadByHand : null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeZone, activeT, reps, rest, ladder, ladderPlanLoadByHand]);
+  }, [
+    activeZone, activeT, reps, rest, ladder, ladderPlanLoadByHand,
+    rec, isOverridden,
+  ]);
 
   // ── Empty / loading states ───────────────────────────────────
   if (!grip) {
@@ -751,19 +780,24 @@ export function SessionPlanCard({
           const isActive = isOverridden && r.key === activeZone;
           const isRec = r.key === recommendedZone;
           const dim = r.reliability === "extrapolation";
+          const deferred = Boolean(r.deferredReason);
           const scalePct = r.fatigueMod < 0.999 ? Math.round((1 - r.fatigueMod) * 100) : 0;
           return (
             <button
               key={r.key}
-              onClick={() => setOverrideZone(r.key === recommendedZone ? null : r.key)}
+              disabled={deferred}
+              onClick={() => {
+                if (!deferred) setOverrideZone(r.key === recommendedZone ? null : r.key);
+              }}
+              title={deferred ? `Complete the ${r.deferredReason.replace("after ", "")} first` : undefined}
               style={{
-                textAlign: "left", cursor: "pointer", font: "inherit",
+                textAlign: "left", cursor: deferred ? "default" : "pointer", font: "inherit",
                 padding: "10px 12px", borderRadius: 8,
                 background: isActive ? r.color + "22" : C.bg,
                 border: isActive
                   ? `2px solid ${r.color}`
                   : `1px solid ${C.border}`,
-                opacity: dim ? 0.55 : 1,
+                opacity: deferred ? 0.35 : dim ? 0.55 : 1,
                 // Compensate the active border thickness so tiles stay aligned
                 margin: isActive ? 0 : 1,
               }}
@@ -794,7 +828,11 @@ export function SessionPlanCard({
                   </div>
                 </div>
               </div>
-              {r.reliability === "extrapolation" && (
+              {deferred ? (
+                <div style={{ fontSize: 9, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
+                  {r.deferredReason}
+                </div>
+              ) : r.reliability === "extrapolation" && (
                 <div style={{ fontSize: 9, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
                   extrapolating
                 </div>
