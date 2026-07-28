@@ -7,6 +7,7 @@ import {
   buildGripBaselines, buildGripEstimates, buildGripImprovement,
   buildPerHandGripEstimates,
   improvementForAmps, SUPPORT_MIN_HOLD_FRAC,
+  gripBaselineProgress,
 } from "../baselines.js";
 import { buildThreeExpPriors, predForceThreeExp } from "../threeExp.js";
 import { freshFitReps } from "../load.js";
@@ -72,6 +73,44 @@ describe("freshFitReps", () => {
   test("handles empty / null", () => {
     expect(freshFitReps([])).toEqual([]);
     expect(freshFitReps(null)).toEqual([]);
+  });
+});
+
+describe("gripBaselineProgress", () => {
+  test("uses the same fresh, de-duplicated reps as the baseline fit", () => {
+    const opener = r({
+      grip: "Prime",
+      date: "2026-07-20",
+      target_duration: 30,
+      actual_time_s: 32,
+      avg_force_kg: 10,
+    });
+    const out = gripBaselineProgress([
+      opener,
+      { ...opener },
+      r({
+        grip: "Prime",
+        date: "2026-07-27",
+        target_duration: 180,
+        actual_time_s: 190,
+        avg_force_kg: 6,
+      }),
+      r({
+        grip: "Prime",
+        date: "2026-07-27",
+        rep_num: 2,
+        target_duration: 180,
+        actual_time_s: 120,
+        avg_force_kg: 6,
+      }),
+    ], "Prime");
+
+    expect(out).toEqual({
+      qualifyingReps: 2,
+      distinctDurations: 2,
+      distinctDates: 2,
+      ready: false,
+    });
   });
 });
 

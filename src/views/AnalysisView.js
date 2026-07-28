@@ -781,6 +781,7 @@ export function AnalysisView({
           gripBaselines={gripBaselines}
           global3xBaseline={global3xBaseline}
           selGrip={selGrip}
+          grips={scopedGrips}
           history={history}
           historyOverlay={historyOverlay}
           maxDur={maxDur}

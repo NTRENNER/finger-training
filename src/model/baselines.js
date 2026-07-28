@@ -34,6 +34,36 @@ import { capacityMultiplier } from "./fatigueBeta.js";
 // zone key. Keeps the improvement loop tight.
 const REF_T_BY_ZONE = Object.fromEntries(ZONE_KEYS.map(k => [k, ZONE_REF_T[k]]));
 
+// Shared per-grip baseline gate. Keep the model and every progress
+// surface on the same numbers so a grip cannot appear "ready" in the
+// UI while buildGripBaselines is still waiting for usable data.
+export const GRIP_BASELINE_REP_THRESHOLD = 5;
+export const GRIP_BASELINE_DURATION_THRESHOLD = 3;
+
+export function gripBaselineProgress(history, grip, hand = null) {
+  const durations = new Set();
+  const dates = new Set();
+  let qualifyingReps = 0;
+
+  for (const rep of freshFitReps(history)) {
+    if (rep?.grip !== grip) continue;
+    if (hand && rep?.hand !== hand) continue;
+    if (!(effectiveLoad(rep) > 0) || !(rep.actual_time_s > 0)) continue;
+    qualifyingReps += 1;
+    durations.add(rep.target_duration);
+    if (rep.date) dates.add(rep.date);
+  }
+
+  return {
+    qualifyingReps,
+    distinctDurations: durations.size,
+    distinctDates: dates.size,
+    ready:
+      qualifyingReps >= GRIP_BASELINE_REP_THRESHOLD
+      && durations.size >= GRIP_BASELINE_DURATION_THRESHOLD,
+  };
+}
+
 
 // Three-exp fit with adaptive grip-prior shrinkage. Falls back to a
 // flat-prior fit when the grip isn't known or has no learned prior.
@@ -207,7 +237,10 @@ export function buildGripBaselines(history, threeExpPriors) {
     for (const r of reps) {
       acc.push(r);
       durs.add(r.target_duration);
-      if (acc.length >= 5 && durs.size >= 3) {
+      if (
+        acc.length >= GRIP_BASELINE_REP_THRESHOLD
+        && durs.size >= GRIP_BASELINE_DURATION_THRESHOLD
+      ) {
         // LEAK-FREE prior: anchor the baseline toward only the data that
         // existed when this window closed, not the whole (future-
         // inclusive) history. Passing the whole-history threeExpPriors
@@ -255,7 +288,10 @@ export function buildPerHandGripBaselines(history, threeExpPriors) {
     for (const r of reps) {
       acc.push(r);
       durs.add(r.target_duration);
-      if (acc.length >= 5 && durs.size >= 3) {
+      if (
+        acc.length >= GRIP_BASELINE_REP_THRESHOLD
+        && durs.size >= GRIP_BASELINE_DURATION_THRESHOLD
+      ) {
         const grip = key.split("|")[0];
         // Leak-free prior — see buildGripBaselines. The per-hand baseline
         // window is even smaller, so the future-leak distortion is larger.

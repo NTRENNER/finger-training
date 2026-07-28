@@ -17,14 +17,20 @@
 //     grips: string[],         // ordered grip ids present in the data
 //     pctRows: { date, [grip]_pct, [grip]_pct_sm }[],  // raw % vs baseline + smoothed
 //     pctRowsBW: { date, [grip]_pct, [grip]_pct_sm }[],  // BW-normalized
-//     hasPct: boolean,         // any grip has a baseline?
+//     hasPct: boolean,         // any grip has a plotted trajectory?
+//     readinessByGrip: {       // progress for grips not plotted yet
+//       [grip]: {
+//         qualifyingReps, distinctDurations, distinctDates,
+//         baselineReady, plottedSessions, trajectoryReady
+//       }
+//     },
 //   }
-//   or null when not enough data to render anything.
+//   or null when there are neither plotted nor qualifying data.
 
 import { useMemo } from "react";
 import { bwOnDate } from "../ui/format.js";
 import { computeBalancedCurveScore, buildThreeExpPriors } from "../model/threeExp.js";
-import { fitAmpsForPts } from "../model/baselines.js";
+import { fitAmpsForPts, gripBaselineProgress } from "../model/baselines.js";
 import { effectiveLoad, freshFitReps } from "../model/load.js";
 
 export function useCapacityHistoryByGrip({
@@ -54,6 +60,7 @@ export function useCapacityHistoryByGrip({
     // which collapses to pct_raw whenever sessionBW == baseBW.
     const perGrip = {};            // grip -> Map<date, { pct, pctBW }>
     const baselineByGrip = {};     // grip -> { score, bw }
+    const readinessByGrip = {};
     const datesUnion = new Set();
     // Leak-free per-date prior cache — same priorsAt pattern as
     // useHistoryOverlay. buildThreeExpPriors returns EVERY grip's
@@ -68,6 +75,16 @@ export function useCapacityHistoryByGrip({
       return priorCache.get(date);
     };
     for (const g of grips) {
+      const base = hand
+        ? perHandBaselines?.[`${g}|${hand}`]
+        : gripBaselines[g];
+      const progress = gripBaselineProgress(history, g, hand);
+      readinessByGrip[g] = {
+        ...progress,
+        baselineReady: Boolean(base?.amps),
+        plottedSessions: 0,
+        trajectoryReady: false,
+      };
       // Fresh + de-duped — same fit basis as the baseline / overlay /
       // Curve-Improvement cards so the Capacity % agrees with them.
       const gripFails = freshFitReps(history).filter(r =>
@@ -84,9 +101,6 @@ export function useCapacityHistoryByGrip({
       // bwOnDate returns the most-recent-on-or-before entry, so a
       // baseline dated before the first BW log just yields null and
       // pctBW falls back to the raw pct in the render.
-      const base = hand
-        ? perHandBaselines?.[`${g}|${hand}`]
-        : gripBaselines[g];
       if (base?.amps) {
         const baseScore = computeBalancedCurveScore(base.amps);
         const baseBwEntry = base.date ? bwOnDate(bwLog, base.date) : null;
@@ -135,16 +149,23 @@ export function useCapacityHistoryByGrip({
           ? Math.round((score / baseScore * baseBW / sessionBW - 1) * 100)
           : pct;  // fall back to raw pct if any BW is missing
         seriesMap.set(date, { pct, pctBW });
-        datesUnion.add(date);
       }
       // Baseline required: this hook feeds the "% vs baseline" card,
       // and a grip with no baseline yet has only null pct values — it
       // would render as a ghost legend entry with no line during the
       // window between its 3rd fresh rep and its baseline seeding
       // (June 2026, observed while waiting for Prime to qualify).
-      if (seriesMap.size >= 2 && baselineByGrip[g]?.score > 0) perGrip[g] = seriesMap;
+      readinessByGrip[g].plottedSessions = seriesMap.size;
+      readinessByGrip[g].trajectoryReady =
+        seriesMap.size >= 2 && baselineByGrip[g]?.score > 0;
+      if (readinessByGrip[g].trajectoryReady) {
+        perGrip[g] = seriesMap;
+        for (const date of seriesMap.keys()) datesUnion.add(date);
+      }
     }
-    if (Object.keys(perGrip).length === 0) return null;
+    const hasQualifyingData = Object.values(readinessByGrip)
+      .some(progress => progress.qualifyingReps > 0);
+    if (Object.keys(perGrip).length === 0 && !hasQualifyingData) return null;
     // Per-grip 3-point centered rolling mean over each grip's own
     // ordered session-date series (NOT over the union — gaps between
     // grips' training days should not smear one grip into another's
@@ -197,7 +218,8 @@ export function useCapacityHistoryByGrip({
       grips: Object.keys(perGrip),
       pctRows,
       pctRowsBW,
-      hasPct: Object.values(baselineByGrip).some(v => v.score > 0),
+      hasPct: Object.keys(perGrip).length > 0,
+      readinessByGrip,
     };
   }, [history, grips, gripBaselines, threeExpPriors, bwLog, hand, perHandBaselines]);
 }

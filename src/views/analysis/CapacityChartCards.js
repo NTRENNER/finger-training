@@ -39,6 +39,10 @@ import { Card } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import { buildCapacityChanges } from "../../model/capacityTrend.js";
+import {
+  GRIP_BASELINE_REP_THRESHOLD,
+  GRIP_BASELINE_DURATION_THRESHOLD,
+} from "../../model/baselines.js";
 import { today } from "../../util.js";
 
 export function CapacityTrajectoryCard({
@@ -51,7 +55,7 @@ export function CapacityTrajectoryCard({
   // plotted session date. Computed before any early return so the
   // hook order stays stable across renders.
   const rows = useMemo(() => {
-    if (!capacityHistoryByGrip || !capacityHistoryByGrip.hasPct) return null;
+    if (!capacityHistoryByGrip || !capacityHistoryByGrip.hasPct) return [];
     const src = normalizeOn ? capacityHistoryByGrip.pctRowsBW : capacityHistoryByGrip.pctRows;
     return src.map(r => {
       const climb = suggestCookedFromClimbs(activities, r.date);
@@ -63,7 +67,12 @@ export function CapacityTrajectoryCard({
     [rows, capacityHistoryByGrip, asOfDate]
   );
 
-  if (!rows) return null;
+  if (!capacityHistoryByGrip) return null;
+  const pendingGrips = Object.entries(capacityHistoryByGrip.readinessByGrip || {})
+    .filter(([, progress]) =>
+      progress.qualifyingReps > 0 && !progress.trajectoryReady
+    );
+  if (rows.length === 0 && pendingGrips.length === 0) return null;
   const hasClimb = rows.some(r => r.climbLoad != null);
 
   return (
@@ -79,6 +88,47 @@ export function CapacityTrajectoryCard({
           )}
         </div>
       </div>
+      {pendingGrips.length > 0 && (
+        <div
+          aria-label="Capacity baseline progress"
+          style={{
+            display: "grid",
+            gap: 6,
+            padding: "9px 0",
+            marginBottom: 8,
+            borderTop: `1px solid ${C.border}`,
+            borderBottom: rows.length > 0 ? `1px solid ${C.border}` : "none",
+            fontSize: 11,
+            color: C.muted,
+          }}
+        >
+          {pendingGrips.map(([grip, progress]) => (
+            <div key={grip} style={{ lineHeight: 1.5 }}>
+              <b style={{ color: GRIP_COLORS[grip] || C.text }}>{grip}</b>
+              <span>{" — "}</span>
+              {progress.baselineReady ? (
+                <span>
+                  baseline ready · {Math.min(progress.plottedSessions, 2)} of 2 fitted session dates
+                </span>
+              ) : (
+                <span>
+                  building baseline · {Math.min(progress.qualifyingReps, GRIP_BASELINE_REP_THRESHOLD)}
+                  {" of "}{GRIP_BASELINE_REP_THRESHOLD} fresh reps ·{" "}
+                  {Math.min(progress.distinctDurations, GRIP_BASELINE_DURATION_THRESHOLD)}
+                  {" of "}{GRIP_BASELINE_DURATION_THRESHOLD} target durations
+                </span>
+              )}
+            </div>
+          ))}
+          {rows.length === 0 && (
+            <div>
+              The capacity line will appear automatically after the baseline is stable and two session dates can be compared.
+            </div>
+          )}
+        </div>
+      )}
+      {rows.length > 0 && (
+        <>
       {capacityChanges.length > 0 && (
         <div
           aria-label="28-day capacity change"
@@ -160,6 +210,8 @@ export function CapacityTrajectoryCard({
         ))}
         {hasClimb && <span style={{ color: C.orange, opacity: 0.7 }}>▮ climbing load</span>}
       </div>
+        </>
+      )}
     </Card>
   );
 }

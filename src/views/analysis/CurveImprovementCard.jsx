@@ -41,15 +41,13 @@ import {
   improvementForAmps,
   SUPPORT_MIN_HOLD_FRAC,
   perZoneBaselineAmps,
+  gripBaselineProgress,
+  GRIP_BASELINE_REP_THRESHOLD,
+  GRIP_BASELINE_DURATION_THRESHOLD,
 } from "../../model/baselines.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
 import { effectiveLoad } from "../../model/load.js";
 import { ZoneSessionHistoryModal } from "./ZoneSessionHistoryModal.jsx";
-
-// Per-grip baseline-unlock thresholds. Match the gates in
-// buildGripBaselines so the "X of 5 failures" copy is honest.
-const FAIL_THRESHOLD = 5;
-const DUR_THRESHOLD  = 3;
 
 const scaleAmps = (amps, bw) =>
   Array.isArray(amps) && bw > 0 ? amps.map(value => value / bw) : amps;
@@ -111,22 +109,38 @@ function normalizeHistoryOverlay(historyOverlay, bwForDate) {
   return out;
 }
 
-function baselineProgress(history, grip, hand = null) {
-  let failures = 0;
-  const durs = new Set();
-  for (const r of history || []) {
-    if (r.grip !== grip) continue;
-    if (hand && r.hand !== hand) continue;
-    if (!(effectiveLoad(r) > 0)) continue;
-    if (!(r.actual_time_s > 0)) continue;
-    failures += 1;
-    if (r.target_duration) durs.add(r.target_duration);
-  }
-  return {
-    failures,
-    distinctDurations: durs.size,
-    ready: failures >= FAIL_THRESHOLD && durs.size >= DUR_THRESHOLD,
-  };
+function BaselineProgressRow({ grip, history, hand = null, divider = false }) {
+  const progress = gripBaselineProgress(history, grip, hand);
+  return (
+    <div style={{
+      paddingTop: divider ? 12 : 0,
+      marginTop: divider ? 12 : 0,
+      borderTop: divider ? `1px solid ${C.border}` : "none",
+      fontSize: 11,
+      color: C.muted,
+      lineHeight: 1.5,
+    }}>
+      <b style={{ color: GRIP_COLORS[grip] || C.text }}>{grip}</b>
+      <span>{" — building baseline · "}</span>
+      <span style={{
+        color: progress.qualifyingReps >= GRIP_BASELINE_REP_THRESHOLD ? C.green : C.text,
+      }}>
+        {Math.min(progress.qualifyingReps, GRIP_BASELINE_REP_THRESHOLD)}
+        {" of "}
+        {GRIP_BASELINE_REP_THRESHOLD}
+        {" fresh reps"}
+      </span>
+      <span>{" · "}</span>
+      <span style={{
+        color: progress.distinctDurations >= GRIP_BASELINE_DURATION_THRESHOLD ? C.green : C.text,
+      }}>
+        {Math.min(progress.distinctDurations, GRIP_BASELINE_DURATION_THRESHOLD)}
+        {" of "}
+        {GRIP_BASELINE_DURATION_THRESHOLD}
+        {" target durations"}
+      </span>
+    </div>
+  );
 }
 
 // One-line explainer under the header.
@@ -438,6 +452,7 @@ export function CurveImprovementCard({
   gripBaselines,
   global3xBaseline,
   selGrip,
+  grips = [],
   history,
   // Merged-in overlay data (per grip: baselineAmps, baselineDate, dates,
   // ampsByDate). Supplies the curve + slider.
@@ -525,11 +540,23 @@ export function CurveImprovementCard({
     global3xBaseline,
   ]);
 
-  if (!scaledData.improvement && Object.keys(scaledData.gripImprovement).length === 0) return null;
-
-  const perGripMode = !selGrip && Object.keys(grip3xEstimates).length >= 2;
   const impMap = scaledData.gripImprovement;
-  const gripImpEntries = Object.entries(impMap);
+  const scopedGripNames = [...new Set([
+    ...(selGrip ? [selGrip] : grips),
+    ...Object.keys(grip3xEstimates || {}),
+    ...Object.keys(impMap),
+  ])];
+  if (
+    !scaledData.improvement
+    && Object.keys(impMap).length === 0
+    && scopedGripNames.length === 0
+  ) return null;
+
+  const perGripMode = !selGrip && scopedGripNames.length >= 2;
+  const gripImpEntries = scopedGripNames
+    .filter(grip => impMap[grip])
+    .map(grip => [grip, impMap[grip]]);
+  const pendingGrips = scopedGripNames.filter(grip => !impMap[grip]);
 
   // Grips that have an interactive overlay (baseline + ≥1 post-baseline
   // fit). These render as full blocks; grips with an improvement but no
@@ -624,8 +651,8 @@ export function CurveImprovementCard({
         )) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
             No {handView === "R" ? "right" : "left"}-hand baseline seeded
-            yet — a hand needs ≥{FAIL_THRESHOLD} failures across
-            ≥{DUR_THRESHOLD} durations of its own before its frame freezes.
+            yet — a hand needs ≥{GRIP_BASELINE_REP_THRESHOLD} fresh reps across
+            ≥{GRIP_BASELINE_DURATION_THRESHOLD} durations of its own before its frame freezes.
           </div>
         )}
       </Card>
@@ -646,10 +673,10 @@ export function CurveImprovementCard({
       <BasisNote />
 
       {perGripMode ? (
-        gripImpEntries.length > 0 ? (
+        gripImpEntries.length > 0 || pendingGrips.length > 0 ? (
           <>
             {gripImpEntries.map(([grip, imp], i, arr) => {
-              const divider = i < arr.length - 1;
+              const divider = i < arr.length - 1 || pendingGrips.length > 0;
               if (overlayGrips.has(grip)) {
                 return (
                   <GripBlock key={grip} grip={grip} overlay={scaledData.historyOverlay[grip]}
@@ -672,25 +699,14 @@ export function CurveImprovementCard({
                 />
               );
             })}
-            {/* Early-days placeholder for grips with a current fit but no
-                qualifying baseline yet. */}
-            {Object.keys(grip3xEstimates).filter(g => !impMap[g]).map(grip => {
-              const p = baselineProgress(history, grip);
-              return (
-                <div key={grip} style={{
-                  paddingTop: 12, marginTop: 12, borderTop: `1px solid ${C.border}`,
-                  fontSize: 11, color: C.muted, lineHeight: 1.5,
-                }}>
-                  <b style={{ color: C.text }}>{grip}</b>{" · "}
-                  <span style={{ color: p.failures >= FAIL_THRESHOLD ? C.green : C.text }}>
-                    {Math.min(p.failures, FAIL_THRESHOLD)} of {FAIL_THRESHOLD} failures
-                  </span>{" · "}
-                  <span style={{ color: p.distinctDurations >= DUR_THRESHOLD ? C.green : C.text }}>
-                    {Math.min(p.distinctDurations, DUR_THRESHOLD)} of {DUR_THRESHOLD} durations
-                  </span>
-                </div>
-              );
-            })}
+            {pendingGrips.map((grip, index) => (
+              <BaselineProgressRow
+                key={grip}
+                grip={grip}
+                history={history}
+                divider={gripImpEntries.length > 0 || index > 0}
+              />
+            ))}
           </>
         ) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
@@ -707,23 +723,9 @@ export function CurveImprovementCard({
           />
         ) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-            Need ≥{FAIL_THRESHOLD} failures across ≥{DUR_THRESHOLD} target durations on <b>{selGrip}</b> for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
-            <div style={{ marginTop: 6, fontSize: 11 }}>
-              Progress:{" "}
-              {(() => {
-                const p = baselineProgress(history, selGrip);
-                return (
-                  <>
-                    <span style={{ color: p.failures >= FAIL_THRESHOLD ? C.green : C.text, fontWeight: 600 }}>
-                      {Math.min(p.failures, FAIL_THRESHOLD)} of {FAIL_THRESHOLD} failures
-                    </span>{" · "}
-                    <span style={{ color: p.distinctDurations >= DUR_THRESHOLD ? C.green : C.text, fontWeight: 600 }}>
-                      {Math.min(p.distinctDurations, DUR_THRESHOLD)} of {DUR_THRESHOLD} durations
-                    </span>
-                  </>
-                );
-              })()}
-            </div>
+            Need ≥{GRIP_BASELINE_REP_THRESHOLD} fresh reps across
+            ≥{GRIP_BASELINE_DURATION_THRESHOLD} target durations on <b>{selGrip}</b> for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
+            <BaselineProgressRow grip={selGrip} history={history} divider />
           </div>
         )
       ) : scaledData.improvement ? (

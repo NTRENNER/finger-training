@@ -126,3 +126,37 @@ test("bodyweight scale recomputes improvement instead of relabeling absolute gai
   expect(screen.getAllByText("+0%").length).toBeGreaterThan(0);
   expect(screen.queryByText("+12%")).not.toBeInTheDocument();
 });
+
+test("shows sparse grips even before they have a current fit", () => {
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{
+        Crusher: improvement,
+        Micro: improvement,
+      }}
+      grip3xEstimates={{
+        Crusher: [12, 12, 12],
+        Micro: [6, 6, 6],
+      }}
+      gripBaselines={{}}
+      global3xBaseline={null}
+      selGrip={null}
+      grips={["Crusher", "Micro", "Prime"]}
+      history={[
+        rep(30, 32, 10, { grip: "Prime", date: "2026-07-20" }),
+        rep(180, 190, 6, { grip: "Prime", date: "2026-07-27" }),
+        rep(180, 120, 6, {
+          grip: "Prime",
+          date: "2026-07-27",
+          rep_num: 2,
+        }),
+      ]}
+      unit="kg"
+    />
+  );
+
+  expect(screen.getByText("Prime")).toBeInTheDocument();
+  expect(screen.getByText(/2 of 5 fresh reps/)).toBeInTheDocument();
+  expect(screen.getByText(/2 of 3 target durations/)).toBeInTheDocument();
+});

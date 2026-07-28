@@ -14,7 +14,7 @@ import { buildThreeExpPriors, computeBalancedCurveScore } from "../../model/thre
 import { fitAmpsForPts } from "../../model/baselines.js";
 import { effectiveLoad, freshFitReps } from "../../model/load.js";
 
-const D1 = "2026-06-01", D2 = "2026-06-08", D3 = "2026-06-15";
+const D1 = "2026-06-01", D2 = "2026-06-08", D3 = "2026-06-15", D4 = "2026-06-22";
 const rep = (grip, date, T, t, F) => ({
   grip, hand: "L", date, rep_num: 1, set_num: 1,
   target_duration: T, actual_time_s: t, avg_force_kg: F,
@@ -88,5 +88,54 @@ describe("useCapacityHistoryByGrip", () => {
     // First plotted date stays clamped to the baseline (0% anchor).
     const d1Row = out.pctRows.find(r => r.date === D1);
     expect(d1Row.Crusher_pct).toBe(0);
+  });
+
+  test("returns honest readiness instead of hiding a sparse grip", () => {
+    const primeHistory = [
+      rep("Prime", D1, 30, 32, 10),
+      rep("Prime", D2, 180, 190, 6),
+      { ...rep("Prime", D2, 180, 120, 6), rep_num: 2 },
+    ];
+    const threeExpPriors = buildThreeExpPriors(primeHistory);
+    const { result } = renderHook(() => useCapacityHistoryByGrip({
+      history: primeHistory,
+      grips: ["Prime"],
+      gripBaselines: {},
+      threeExpPriors,
+      bwLog: [],
+    }));
+
+    expect(result.current).not.toBeNull();
+    expect(result.current.hasPct).toBe(false);
+    expect(result.current.grips).toEqual([]);
+    expect(result.current.readinessByGrip.Prime).toMatchObject({
+      qualifyingReps: 2,
+      distinctDurations: 2,
+      distinctDates: 2,
+      baselineReady: false,
+      trajectoryReady: false,
+    });
+  });
+
+  test("an unready grip does not add ghost dates to eligible chart lines", () => {
+    const mixedHistory = [
+      ...history,
+      rep("Prime", D1, 10, 11, 15),
+      rep("Prime", D1, 40, 42, 10),
+      rep("Prime", D1, 120, 125, 6),
+      rep("Prime", D4, 40, 45, 11),
+    ];
+    const threeExpPriors = buildThreeExpPriors(mixedHistory);
+    const { result } = renderHook(() => useCapacityHistoryByGrip({
+      history: mixedHistory,
+      grips: ["Crusher", "Micro", "Prime"],
+      gripBaselines,
+      threeExpPriors,
+      bwLog: [],
+    }));
+
+    expect(result.current.grips.sort()).toEqual(["Crusher", "Micro"]);
+    expect(result.current.readinessByGrip.Prime.trajectoryReady).toBe(false);
+    expect(result.current.pctRows.map(row => row.date)).not.toContain(D4);
   });
 });
