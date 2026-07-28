@@ -28,6 +28,7 @@
 
 import React, { useState } from "react";
 import { C } from "../ui/theme.js";
+import { PageFrame } from "../ui/components.js";
 import { loadLS, saveLS, LS_ANALYSIS_SUBTAB_KEY } from "../lib/storage.js";
 import { AnalysisView } from "./AnalysisView.js";
 import { WorkoutAnalysisView } from "./WorkoutAnalysisView.js";
@@ -97,21 +98,13 @@ export function AnalysisContainer(props) {
   };
 
   return (
-    <div>
-      {/* Width-constrained header (July 2026): every sub-view centers
-          itself at maxWidth 480, but this container's own children — the
-          check-in card and the sub-tab pills — rendered unconstrained,
-          so on desktop the card stretched the full window width above a
-          narrow column. Same 480px centered column here so the whole
-          tab reads as one column on any screen. */}
-      <div style={{ maxWidth: 480, margin: "0 auto" }}>
-        <WeeklyReviewCard history={history} activities={activities} />
-        <div style={{ display: "flex", gap: 6, padding: "12px 16px 0" }}>
-          {pill("Fingers", "fingers")}
-          {pill("Lifts", "lifts")}
-          {pill("Climbs", "climbing")}
-          {pill("Weight", "weight")}
-        </div>
+    <PageFrame data-testid="analysis-content">
+      <WeeklyReviewCard history={history} activities={activities} />
+      <div style={{ display: "flex", gap: 6, padding: "12px 16px 0" }}>
+        {pill("Fingers", "fingers")}
+        {pill("Lifts", "lifts")}
+        {pill("Climbs", "climbing")}
+        {pill("Weight", "weight")}
       </div>
 
       {sub === "fingers" && (
@@ -147,6 +140,6 @@ export function AnalysisContainer(props) {
       {sub === "weight" && (
         <BodyWeightAnalysisView unit={unit} />
       )}
-    </div>
+    </PageFrame>
   );
 }

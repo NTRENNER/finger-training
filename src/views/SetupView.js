@@ -52,7 +52,7 @@
 import React, { useMemo, useState } from "react";
 
 import { C } from "../ui/theme.js";
-import { Card, Btn } from "../ui/components.js";
+import { Card, Btn, PageFrame } from "../ui/components.js";
 import { fmt0, toDisp, fromDisp } from "../ui/format.js";
 
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY, LS_DELOAD_WEEK_KEY } from "../lib/storage.js";
@@ -271,7 +271,7 @@ export function SetupView({
   };
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <PageFrame style={{ padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
 
       <DeloadBanner
@@ -396,6 +396,6 @@ export function SetupView({
       <div style={{ marginTop: 16 }}>
         <BwPrompt unit={unit} onSave={onBwSave} />
       </div>
-    </div>
+    </PageFrame>
   );
 }

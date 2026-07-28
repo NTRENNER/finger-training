@@ -8,6 +8,29 @@
 import React from "react";
 import { C } from "./theme.js";
 
+// Shared responsive shell for every top-level app view. It fills narrow
+// screens and caps desktop reading/interaction width so switching tabs
+// never changes the page geometry.
+export const PAGE_MAX_WIDTH = 720;
+
+export function PageFrame({ children, style, ...props }) {
+  return (
+    <div
+      data-page-frame=""
+      {...props}
+      style={{
+        width: "100%",
+        maxWidth: PAGE_MAX_WIDTH,
+        margin: "0 auto",
+        boxSizing: "border-box",
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // Elevated card surface — the default content container in every view.
 export function Card({ children, style }) {
   return (

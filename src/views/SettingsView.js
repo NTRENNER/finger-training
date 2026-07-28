@@ -22,7 +22,7 @@
 
 import React, { useState } from "react";
 import { C } from "../ui/theme.js";
-import { Card, Btn, Sect } from "../ui/components.js";
+import { Card, Btn, PageFrame, Sect } from "../ui/components.js";
 import { KG_TO_LBS, fmt0, toDisp, fromDisp } from "../ui/format.js";
 import { tripCountdown } from "../lib/trip.js";
 import { longBuildLabel } from "../lib/buildInfo.js";
@@ -75,7 +75,7 @@ CREATE POLICY "auth_all" ON reps
 -- UPDATE reps SET prescribed_load_kg = weight_kg WHERE prescribed_load_kg IS NULL;`;
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <PageFrame style={{ padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Settings</h2>
 
       <Card>
@@ -505,6 +505,6 @@ CREATE POLICY "auth_all" ON reps
           </div>
         </Sect>
       </Card>
-    </div>
+    </PageFrame>
   );
 }

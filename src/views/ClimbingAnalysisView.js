@@ -473,7 +473,7 @@ export function ClimbingAnalysisView({
   // ── Empty state ──
   if (!headline.hasData) {
     return (
-      <div style={{ padding: "16px 20px", maxWidth: 720, margin: "0 auto" }}>
+      <div style={{ padding: "16px 20px" }}>
         <Sect title="Climbing">
           <Card>
             <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.6 }}>
@@ -490,7 +490,7 @@ export function ClimbingAnalysisView({
 
   // ── Render ──
   return (
-    <div style={{ padding: "16px 20px", maxWidth: 720, margin: "0 auto" }}>
+    <div style={{ padding: "16px 20px" }}>
       <Sect title="Climbing">
         {/* Headline metrics */}
         <Card>

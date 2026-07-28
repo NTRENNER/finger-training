@@ -47,7 +47,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { C } from "../ui/theme.js";
-import { Card } from "../ui/components.js";
+import { Card, PageFrame } from "../ui/components.js";
 
 import {
   loadLS, saveLS,
@@ -512,7 +512,7 @@ export function WorkoutTab({
     : "";
 
   return (
-    <div style={{ padding: "16px 16px 80px", position: "relative" }}>
+    <PageFrame style={{ padding: "16px 16px 80px", position: "relative" }}>
       {/* Build version stamp — auto-bumped per commit via the
           build script (see src/lib/buildInfo.js). Confirms which
           bundle a device is running without opening DevTools. */}
@@ -789,7 +789,7 @@ export function WorkoutTab({
           <BwPrompt unit={unit} onSave={onBwSave} />
         </>
       )}
-    </div>
+    </PageFrame>
   );
 }
 
@@ -798,4 +798,3 @@ export function WorkoutTab({
 // to src/views/workout/workoutHelpers.js in late May 2026 — pure data
 // transforms with no React deps, easier to test in isolation and use
 // from sibling row components without circular-import gymnastics.
-

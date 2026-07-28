@@ -20,7 +20,7 @@
 
 import React, { useMemo, useRef, useState } from "react";
 import { C } from "../ui/theme.js";
-import { Card, Btn } from "../ui/components.js";
+import { Card, Btn, PageFrame } from "../ui/components.js";
 import {
   fmt1, fmtW, fmtTime, toDisp, fromDisp, fmtClock, bwOnDate,
 } from "../ui/format.js";
@@ -460,7 +460,7 @@ export function HistoryView({
   }, [grouped, history, showAllSessions]);
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <PageFrame style={{ padding: "20px 16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 22 }}>History</h2>
         <div style={{ display: "flex", gap: 8 }}>
@@ -1294,6 +1294,6 @@ export function HistoryView({
         >Show all {grouped.length} sessions</button>
       )}
       </>}
-    </div>
+    </PageFrame>
   );
 }

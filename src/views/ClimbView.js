@@ -20,7 +20,7 @@
 
 import React, { useState } from "react";
 import { C } from "../ui/theme.js";
-import { Card } from "../ui/components.js";
+import { Card, PageFrame } from "../ui/components.js";
 import { ClimbingLogCard } from "./cards/ClimbingLogCard.js";
 import { WarmupView } from "./WarmupView.js";
 import {
@@ -132,7 +132,7 @@ export function ClimbView({
   if (warmupActive) {
     const wLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
     return (
-      <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+      <PageFrame style={{ padding: "20px 16px" }}>
         <WarmupView
           history={history}
           wLog={wLog}
@@ -141,7 +141,7 @@ export function ClimbView({
           unit={unit}
           onClose={() => setWarmupActive(false)}
         />
-      </div>
+      </PageFrame>
     );
   }
 
@@ -172,7 +172,7 @@ export function ClimbView({
   ).size;
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <PageFrame style={{ padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Climb</h2>
 
       {deloadActive && (
@@ -258,6 +258,6 @@ export function ClimbView({
           </>
         )}
       </Card>
-    </div>
+    </PageFrame>
   );
 }

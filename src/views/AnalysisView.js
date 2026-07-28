@@ -598,7 +598,7 @@ export function AnalysisView({
   // ScatterTooltip likewise moved into ForceDurationCard.)
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <div style={{ padding: "20px 16px" }}>
       {/* Click-to-expand session detail modal — triggered by tapping
           any dot on the F-D scatter. Renders one RepCurveChart per
           hand (so mixed-hand sessions don't artifactually splice L+R

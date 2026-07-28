@@ -131,7 +131,7 @@ export function BodyWeightAnalysisView({ unit = "lbs" }) {
   // logging happens.
   if (!headline) {
     return (
-      <div style={{ padding: "16px 20px", maxWidth: 720, margin: "0 auto" }}>
+      <div style={{ padding: "16px 20px" }}>
         <Sect title="Bodyweight">
           <Card>
             <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.6 }}>
@@ -153,7 +153,7 @@ export function BodyWeightAnalysisView({ unit = "lbs" }) {
   const deltaColor = (kg) => kg == null ? C.muted : kg > 0 ? C.orange : kg < 0 ? C.blue : C.muted;
 
   return (
-    <div style={{ padding: "16px 20px", maxWidth: 720, margin: "0 auto" }}>
+    <div style={{ padding: "16px 20px" }}>
       <Sect title="Bodyweight">
         {/* Headline metrics. Δ vs 30/90 days are signed: + means heavier,
             − means lighter. Color is informational only (orange for

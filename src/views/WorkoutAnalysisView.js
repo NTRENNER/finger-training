@@ -428,7 +428,7 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
   }, [exIndex, wLog, bodyWeight, bwLog, unit]);
 
   return (
-    <div style={{ padding: "16px 20px", maxWidth: 720, margin: "0 auto" }}>
+    <div style={{ padding: "16px 20px" }}>
       {/* Absolute / × BW units toggle. Same two-pill segmented
           control as the Fingers sub-tab; both share LS_BW_NORMALIZE_KEY
           so the choice flows between them. Hidden when no BW is set,

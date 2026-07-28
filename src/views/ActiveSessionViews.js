@@ -23,7 +23,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { C } from "../ui/theme.js";
-import { Card, Btn, Label } from "../ui/components.js";
+import { Card, Btn, Label, PageFrame } from "../ui/components.js";
 import { fmtW, fmtTime, fromDisp } from "../ui/format.js";
 import { BigTimer, ForceGauge } from "./cards/LiveForceCard.jsx";
 
@@ -155,7 +155,7 @@ function RepDots({ total, done, current }) {
 // matches real failure time. Tindeq sessions never reach this phase.
 export function ManualOffsetPrompt({ onChoose }) {
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <PageFrame style={{ padding: "20px 16px" }}>
       <Card style={{ textAlign: "center" }}>
         <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Manual timing</div>
         <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.6, marginBottom: 20 }}>
@@ -183,7 +183,7 @@ export function ManualOffsetPrompt({ onChoose }) {
           </Btn>
         </div>
       </Card>
-    </div>
+    </PageFrame>
   );
 }
 
@@ -353,7 +353,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   }, [tindeq, repPhase, targetKg]);
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <PageFrame style={{ padding: "20px 16px" }}>
       {/* Header — single-set under curve-trust commit C; just show
           grip + hand. The "Set X of Y" line is gone. */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
@@ -481,7 +481,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
           sessionReps={sessionReps}
         />
       </div>
-    </div>
+    </PageFrame>
   );
 }
 
@@ -558,7 +558,7 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
   const isLastRepInSet = repNum >= repsPerSet;
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <PageFrame style={{ padding: "20px 16px" }}>
       <Card>
         <div style={{ textAlign: "center", paddingBottom: 8 }}>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>
@@ -651,7 +651,7 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
       >
         Skip rest →
       </Btn>
-    </div>
+    </PageFrame>
   );
 }
 
@@ -683,7 +683,7 @@ export function SwitchHandsView({ onReady }) {
   }, [remaining]);
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "40px 16px", textAlign: "center" }}>
+    <PageFrame style={{ padding: "40px 16px", textAlign: "center" }}>
       <div style={{ fontSize: 56 }}>🤚➡️✋</div>
       <h2 style={{ margin: "16px 0 8px" }}>Switch to Right Hand</h2>
       <p style={{ color: C.muted, marginBottom: 24 }}>Left hand complete. Get ready to train right hand.</p>
@@ -699,7 +699,7 @@ export function SwitchHandsView({ onReady }) {
         style={{ padding: "14px 40px", fontSize: 16, borderRadius: 12 }}>
         Ready →
       </Btn>
-    </div>
+    </PageFrame>
   );
 }
 
@@ -739,7 +739,7 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
   const hasPeak    = sessionPeak > 0;
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <PageFrame style={{ padding: "20px 16px" }}>
       {leveledUp && (
         <Card style={{ background: "#1c1f0a", borderColor: C.green, marginBottom: 20 }}>
           <div style={{ textAlign: "center" }}>
@@ -851,7 +851,7 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
           Back to Setup
         </Btn>
       </div>
-    </div>
+    </PageFrame>
   );
 }
 
@@ -929,7 +929,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   const targetReached = elapsed >= config.targetTime;
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px" }}>
+    <PageFrame style={{ padding: "20px 16px" }}>
       {/* Header — single-set under curve-trust commit C; just show
           grip + hand. The "Set X of Y" line is gone. */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
@@ -1028,6 +1028,6 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
           sessionReps={sessionReps}
         />
       </div>
-    </div>
+    </PageFrame>
   );
 }
