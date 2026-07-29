@@ -26,7 +26,7 @@ import {
   COLD_START_LONG_TARGET_T,
   COLD_START_BOUNDARY_REPS,
   COLD_START_BOUNDARY_REST_S,
-  COLD_START_LONG_MIN_FRACTION,
+  COLD_START_LONG_INITIAL_MIN_FRACTION,
   COLD_START_LONG_RETRY_MARGIN,
   coldStartSeedWeight,
   coldStartLongProbeLoad,
@@ -910,7 +910,7 @@ describe("cold-start seeding", () => {
     expect(rec.source).toBe("cold-start-long-probe");
     expect(rec.loadByHand.L).toBeGreaterThan(0);
     expect(rec.loadByHand.L).toBeLessThan(6);
-    expect(rec.scale).toBeGreaterThanOrEqual(COLD_START_LONG_MIN_FRACTION);
+    expect(rec.scale).toBeGreaterThanOrEqual(COLD_START_LONG_INITIAL_MIN_FRACTION);
     expect(rec.freshTest.recommended).toBe(false);
   });
 
@@ -936,9 +936,9 @@ describe("cold-start seeding", () => {
     ];
     const left = coldStartLongProbeLoad(fresh, "L");
     const right = coldStartLongProbeLoad(fresh, "R");
-    expect(left.value).toBeCloseTo(6 * COLD_START_LONG_MIN_FRACTION, 1);
-    expect(right.value).toBeCloseTo(8 * COLD_START_LONG_MIN_FRACTION, 1);
-    expect(left.fraction).toBeGreaterThanOrEqual(COLD_START_LONG_MIN_FRACTION);
+    expect(left.value).toBeCloseTo(6 * COLD_START_LONG_INITIAL_MIN_FRACTION, 1);
+    expect(right.value).toBeCloseTo(8 * COLD_START_LONG_INITIAL_MIN_FRACTION, 1);
+    expect(left.fraction).toBeGreaterThanOrEqual(COLD_START_LONG_INITIAL_MIN_FRACTION);
   });
 
   test("the strongest valid short rep in the sequence sets the upper anchor", () => {
@@ -950,7 +950,7 @@ describe("cold-start seeding", () => {
     ];
     const probe = coldStartLongProbeLoad(sequence, "L");
     expect(probe.anchor.F).toBe(7.5);
-    expect(probe.value).toBeCloseTo(7.5 * COLD_START_LONG_MIN_FRACTION, 1);
+    expect(probe.value).toBeCloseTo(7.5 * COLD_START_LONG_INITIAL_MIN_FRACTION, 1);
   });
 
   test("later fatigued long reps cannot lower the next fresh probe", () => {
@@ -983,6 +983,7 @@ describe("cold-start seeding", () => {
     const retry = coldStartLongProbeLoad(fresh, "L");
     expect(COLD_START_LONG_RETRY_MARGIN).toBeLessThan(1);
     expect(retry.value).toBeLessThan(1.2);
+    expect(retry.fraction).toBeLessThan(COLD_START_LONG_INITIAL_MIN_FRACTION);
     expect(retry.anchor.T).toBe(100);
   });
 

@@ -268,7 +268,6 @@ export default function App() {
     history,
     historySynced,
     freshMap, threeExpPriors,
-    refreshPending,
     addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
     replaceHistory,
     handleWorkoutSessionSaved,
@@ -357,8 +356,7 @@ export default function App() {
     if (!user) return;
     setPullStatus("pulling");
     try {
-      const flushed = await flushQueue();
-      if (flushed > 0) refreshPending();
+      await flushQueue();
 
       // Reps — reconcile any local-only reps before overwriting state.
       // Tombstone filter (LS_REP_DELETED_KEY) prevents re-uploading
@@ -474,7 +472,6 @@ export default function App() {
         saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
       }
 
-      refreshPending();
       setLastPulledAt(Date.now());
       setPullStatus("ok");
     } catch (e) {

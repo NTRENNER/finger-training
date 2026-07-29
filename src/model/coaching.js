@@ -416,7 +416,7 @@ export const COLD_START_SHORT_TARGET_T = 3;
 export const COLD_START_LONG_TARGET_T = 220;
 export const COLD_START_BOUNDARY_REPS = 4;
 export const COLD_START_BOUNDARY_REST_S = 20;
-export const COLD_START_LONG_MIN_FRACTION = 0.20;
+export const COLD_START_LONG_INITIAL_MIN_FRACTION = 0.20;
 export const COLD_START_LONG_RETRY_MARGIN = 0.90;
 
 // Once both boundary anchors exist but the baseline is still sparse,
@@ -461,7 +461,7 @@ export function coldStartLongProbeLoad(gripReps, hand, targetT = COLD_START_LONG
   const anchorF = effectiveLoad(anchorRep);
   const populationFraction = Math.pow(targetT / anchorT, -TAIL_B_PRIOR);
   const fraction = Math.max(
-    COLD_START_LONG_MIN_FRACTION,
+    COLD_START_LONG_INITIAL_MIN_FRACTION,
     Math.min(1, populationFraction)
   );
   let value = anchorF * fraction;

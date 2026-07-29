@@ -17,7 +17,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "REACT_APP_BUILD_SHA=${VERCEL_GIT_COMMIT_SHA:-$(git rev-parse --short HEAD 2>/dev/null || echo dev)} REACT_APP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) react-scripts build",
-    "postbuild": "node scripts/generate-service-worker.js",
+    "postbuild": "node scripts/generate-service-worker.js && node scripts/verify-service-worker.js",
     "verify:offline": "node scripts/verify-service-worker.js",
     "preview": "npx serve -s build -l 5000",
     "test": "react-scripts test",

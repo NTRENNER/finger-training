@@ -63,7 +63,6 @@ import { buildThreeExpPriors } from "../model/threeExp.js";
 import { computeDeload, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.js";
 import { TendonCard } from "./cards/TendonCard.jsx";
-import { maxTestStaleness, MAX_TEST_TARGET_S, MAX_TEST_ATTEMPTS } from "../model/peakForce.js";
 import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 
 // ────────────────────────────────────────────────────────────────
@@ -242,34 +241,6 @@ export function SetupView({
     setDeloadWeek(null);
   };
 
-  // Peak-test cadence for the selected grip — drives the "peak test due"
-  // launcher below. maxTestStaleness keys on a MEASURED peak (Tindeq), so a
-  // grip whose last max reading is overdue (or never) surfaces the button.
-  const maxTest = useMemo(
-    () => config.grip
-      ? maxTestStaleness(history.filter(r => r?.grip === config.grip), todayStr)
-      : null,
-    [history, config.grip, todayStr]
-  );
-
-  // Launch a target-less max test: a 3s, best-of-MAX_TEST_ATTEMPTS
-  // max-strength preset started through startSession's override path so
-  // the SessionPlanCard's onApplyPlan can't clobber it. Reps log with
-  // target_duration = 3 + the Tindeq peak, so the Peak Force card and the
-  // cadence pick them up with no special tagging.
-  const startMaxTest = () => {
-    onStart({
-      ...config,
-      goal: "max_strength",
-      targetTime: MAX_TEST_TARGET_S,
-      repsPerSet: MAX_TEST_ATTEMPTS,
-      restTime: 150,
-      hand: "Both",
-      ladderLoadByHand: null,
-      plannedLoadByHand: null,
-    });
-  };
-
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
@@ -337,31 +308,7 @@ export function SetupView({
         fatigueModel={fatigueModel}
         climbingFocus={climbingFocus}
         onNavigateToSettings={onNavigateToSettings}
-        onStartMaxTest={startMaxTest}
       />
-
-
-      {/* Peak test launcher — the ON-DEMAND variant. When the cadence
-          is due, the nudge + one-tap button live INSIDE SessionPlanCard
-          (July 2026), so rendering this card too would double-nag;
-          it now shows only when the reading is fresh, as a quiet
-          "run one anyway" affordance. */}
-      {config.grip && maxTest && !maxTest.recommended && (
-        <Card style={{ marginBottom: 16, border: `1px solid ${C.border}` }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>
-                🎯 Peak test · {config.grip}
-              </div>
-              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.45 }}>
-                Last max reading {maxTest.staleDays}d ago.{" "}
-                {MAX_TEST_ATTEMPTS}×{MAX_TEST_TARGET_S}s max pulls per hand, full rest — warm up first, Tindeq connected so it captures peak.
-              </div>
-            </div>
-            <Btn color={C.blue} onClick={startMaxTest}>Start peak test</Btn>
-          </div>
-        </Card>
-      )}
 
       {/* Curve Coverage moved to Analysis tab — it's a per-zone
           reference view, not a session-prep input, so it lives with

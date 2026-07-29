@@ -423,8 +423,20 @@ export function buildStretchPlan({
     })
     .forEach(add);
 
-  const categories = selected.slice(0, desiredCategories);
-  const baseMinutes = Math.floor(prefs.targetMinutes / categories.length);
+  // Filter before allocating time. Most categories currently retain a
+  // no-equipment fallback, but this keeps a future equipment-only category
+  // from silently shortening the session after its minutes were assigned.
+  const available = selected
+    .map(category => ({
+      category,
+      options: availableExercises(category, prefs.equipment),
+    }))
+    .filter(item => item.options.length > 0)
+    .slice(0, desiredCategories);
+  const categories = available.map(item => item.category);
+  const baseMinutes = categories.length
+    ? Math.floor(prefs.targetMinutes / categories.length)
+    : 0;
   let remainder = prefs.targetMinutes - baseMinutes * categories.length;
   const minutePriority = [
     ...prefs.priorities.filter(key => categories.includes(key)),
@@ -437,17 +449,15 @@ export function buildStretchPlan({
     remainder -= 1;
   }
 
-  const items = categories.map(category => {
-    const options = availableExercises(category, prefs.equipment);
-    const exercise = options[0];
+  const items = available.map(({ category, options }) => {
     return {
       category,
       categoryLabel: STRETCH_CATEGORIES[category].label,
       minutes: minutesByCategory[category],
-      exercise,
+      exercise: options[0],
       options,
     };
-  }).filter(item => item.exercise);
+  });
 
   return {
     targetMinutes: prefs.targetMinutes,

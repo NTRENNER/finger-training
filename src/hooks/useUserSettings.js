@@ -24,11 +24,12 @@
 // App.js needs to apply a server-trigger update without going through
 // the cloud-push path.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   loadLS, saveLS,
   LS_BW_LOG_KEY,
   LS_BW_DIRTY_KEY, loadDirtySet, markDirty, clearDirty,
+  LS_USER_SETTINGS_PATCH_KEY,
   LS_PYRAMID_PROJECT_KEY,
   LS_PINNED_GRIP_BASELINES_KEY,
   LS_PINNED_PERHAND_BASELINES_KEY,
@@ -376,24 +377,55 @@ export function useUserSettings({ user, syncSignal = 0 }) {
   // signed in if the fetch errors (offline) — pinning waits for a
   // reconcile that actually saw the cloud.
   const [settingsSynced, setSettingsSynced] = useState(false);
+  const [settingsRetrySignal, setSettingsRetrySignal] = useState(0);
+  const settingsRetryDelayRef = useRef(2000);
 
   // Pull climbing focus + pyramid pins + fatigue model from cloud on
-  // sign-in. Cloud-wins for scalars/maps that already exist on the
-  // cloud row — keeps cross-device state coherent without a more
-  // elaborate merge protocol.
+  // sign-in. Confirmed cloud values win, but any still-queued offline
+  // patch wins per key. Map values merge cloud underneath the pending
+  // local map so retrying the patch cannot erase pins made elsewhere.
   useEffect(() => {
-    if (!user) { setSettingsSynced(true); return; }
+    if (!user) {
+      settingsRetryDelayRef.current = 2000;
+      setSettingsSynced(true);
+      return undefined;
+    }
     setSettingsSynced(false);
     let cancelled = false;
+    let retryTimer = null;
+    const scheduleRetry = () => {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+      const delay = settingsRetryDelayRef.current;
+      retryTimer = setTimeout(() => {
+        if (!cancelled) setSettingsRetrySignal(value => value + 1);
+      }, delay);
+      settingsRetryDelayRef.current = Math.min(delay * 2, 30000);
+    };
     (async () => {
       // Offline edits queue before their first network attempt. Flush
       // them before reading cloud state so the subsequent fetch cannot
       // overwrite a newer local preference with an older server value.
       const settingsFlushed = await flushUserSettingsPatch();
-      if (cancelled || !settingsFlushed) return;
+      if (cancelled) return;
       const cloud = await fetchUserSettings();
-      if (cancelled || !cloud) return;
-      const cf = cloud.climbing_focus;
+      if (cancelled) return;
+      if (!cloud) {
+        scheduleRetry();
+        return;
+      }
+
+      const rawPending = loadLS(LS_USER_SETTINGS_PATCH_KEY);
+      const pending = rawPending && typeof rawPending === "object" && !Array.isArray(rawPending)
+        ? rawPending
+        : {};
+      const hasPending = key => Object.prototype.hasOwnProperty.call(pending, key);
+
+      const pendingFocus = hasPending("climbing_focus")
+        && typeof pending.climbing_focus === "string"
+        && pending.climbing_focus
+        ? pending.climbing_focus
+        : null;
+      const cf = pendingFocus || cloud.climbing_focus;
       if (typeof cf === "string" && cf) {
         setClimbingFocusState(cf);
         saveLS(LS_CLIMBING_FOCUS_KEY, cf);
@@ -403,42 +435,80 @@ export function useUserSettings({ user, syncSignal = 0 }) {
       // discipline-keyed shape gets normalized before it lands in
       // local state. (cloud.pyramid_warmup is ignored as of the
       // warmup-floor removal — see comment above the pin map state.)
-      if (cloud.pyramid_project && typeof cloud.pyramid_project === "object") {
-        const migrated = migrateLegacyPyramidPins(cloud.pyramid_project);
-        setPyramidProjectMapState(migrated);
-        saveLS(LS_PYRAMID_PROJECT_KEY, migrated);
+      const cloudPyramid = cloud.pyramid_project && typeof cloud.pyramid_project === "object"
+        ? migrateLegacyPyramidPins(cloud.pyramid_project)
+        : {};
+      const pendingPyramid = pending.pyramid_project && typeof pending.pyramid_project === "object"
+        ? migrateLegacyPyramidPins(pending.pyramid_project)
+        : {};
+      if (cloud.pyramid_project || hasPending("pyramid_project")) {
+        const merged = hasPending("pyramid_project")
+          ? { ...cloudPyramid, ...pendingPyramid }
+          : cloudPyramid;
+        setPyramidProjectMapState(merged);
+        saveLS(LS_PYRAMID_PROJECT_KEY, merged);
+        if (hasPending("pyramid_project")) {
+          enqueueUserSettingsPatch({ pyramid_project: merged });
+        }
       }
       // Pinned grip baselines — frozen { [grip]: {date, amps} } map.
       // Cloud-wins for the same reason as pyramid pins: the user might
       // have seeded baselines on a different device and we want those
       // to follow them, not get clobbered by a freshly-computed local
       // baseline from a leaner local rep history.
-      if (cloud.pinned_grip_baselines && typeof cloud.pinned_grip_baselines === "object") {
+      if (cloud.pinned_grip_baselines || hasPending("pinned_grip_baselines")) {
         // Drop stale, unversioned cloud pins (pre-fix contamination) so
         // they re-seed clean instead of clobbering local with a stale
         // frozen baseline.
-        const migrated = migratePins(cloud.pinned_grip_baselines);
-        setPinnedGripBaselinesState(migrated);
-        saveLS(LS_PINNED_GRIP_BASELINES_KEY, migrated);
+        const cloudPins = migratePins(cloud.pinned_grip_baselines);
+        const pendingPins = migratePins(pending.pinned_grip_baselines);
+        const merged = hasPending("pinned_grip_baselines")
+          ? { ...cloudPins, ...pendingPins, _v: PIN_SCHEMA_VERSION }
+          : cloudPins;
+        setPinnedGripBaselinesState(merged);
+        saveLS(LS_PINNED_GRIP_BASELINES_KEY, merged);
+        if (hasPending("pinned_grip_baselines")) {
+          enqueueUserSettingsPatch({ pinned_grip_baselines: merged });
+        }
       }
       // Per-hand pins — same cloud-wins rationale as the pooled map.
-      if (cloud.pinned_perhand_baselines && typeof cloud.pinned_perhand_baselines === "object") {
-        const migrated = migratePins(cloud.pinned_perhand_baselines);
-        setPinnedPerHandBaselinesState(migrated);
-        saveLS(LS_PINNED_PERHAND_BASELINES_KEY, migrated);
+      if (cloud.pinned_perhand_baselines || hasPending("pinned_perhand_baselines")) {
+        const cloudPins = migratePins(cloud.pinned_perhand_baselines);
+        const pendingPins = migratePins(pending.pinned_perhand_baselines);
+        const merged = hasPending("pinned_perhand_baselines")
+          ? { ...cloudPins, ...pendingPins, _v: PIN_SCHEMA_VERSION }
+          : cloudPins;
+        setPinnedPerHandBaselinesState(merged);
+        saveLS(LS_PINNED_PERHAND_BASELINES_KEY, merged);
+        if (hasPending("pinned_perhand_baselines")) {
+          enqueueUserSettingsPatch({ pinned_perhand_baselines: merged });
+        }
       }
       // Pull fatigue_model so the client uses the same β the server
       // trigger is updating. Falls back to local defaults if cloud
       // has no value yet (first-run before any rep-1 insert).
-      if (cloud.fatigue_model && typeof cloud.fatigue_model === "object") {
-        setFatigueModel(cloud.fatigue_model);
+      const fatigue = hasPending("fatigue_model")
+        && pending.fatigue_model
+        && typeof pending.fatigue_model === "object"
+        ? pending.fatigue_model
+        : cloud.fatigue_model;
+      if (fatigue && typeof fatigue === "object") {
+        setFatigueModel(fatigue);
       }
       // Reconcile landed — pinned baselines (and everything else) now
       // reflect the cloud. Safe to let the auto-pin effect write.
       setSettingsSynced(true);
+      if (settingsFlushed) {
+        settingsRetryDelayRef.current = 2000;
+      } else {
+        scheduleRetry();
+      }
     })();
-    return () => { cancelled = true; };
-  }, [user, syncSignal]);
+    return () => {
+      cancelled = true;
+      clearTimeout(retryTimer);
+    };
+  }, [user, syncSignal, settingsRetrySignal]);
 
   return {
     unit, saveUnit,

@@ -1,8 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
 
-import { useConnectivity } from "../useConnectivity.js";
+import {
+  ONLINE_SYNC_DEBOUNCE_MS,
+  useConnectivity,
+} from "../useConnectivity.js";
 
 afterEach(() => {
+  jest.useRealTimers();
   Object.defineProperty(navigator, "onLine", {
     configurable: true,
     value: true,
@@ -10,6 +14,7 @@ afterEach(() => {
 });
 
 test("tracks offline state and emits a sync retry when connectivity returns", () => {
+  jest.useFakeTimers();
   Object.defineProperty(navigator, "onLine", {
     configurable: true,
     value: false,
@@ -23,8 +28,14 @@ test("tracks offline state and emits a sync retry when connectivity returns", ()
     configurable: true,
     value: true,
   });
-  act(() => window.dispatchEvent(new Event("online")));
+  act(() => {
+    window.dispatchEvent(new Event("online"));
+    window.dispatchEvent(new Event("online"));
+  });
 
   expect(result.current.isOnline).toBe(true);
+  expect(result.current.syncSignal).toBe(0);
+
+  act(() => jest.advanceTimersByTime(ONLINE_SYNC_DEBOUNCE_MS));
   expect(result.current.syncSignal).toBe(1);
 });

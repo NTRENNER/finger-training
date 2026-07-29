@@ -70,6 +70,17 @@ describe("stretching session planner", () => {
     expect(plan.items.reduce((sum, item) => sum + item.minutes, 0)).toBe(5);
   });
 
+  test.each([5, 10])("every %i-minute equipment profile fills its time target", targetMinutes => {
+    for (const equipment of [[], ["band"], ["box"], ["weight"], ["band", "box", "weight"]]) {
+      const plan = buildStretchPlan({
+        targetMinutes,
+        priorities: ["hamstrings", "highStep"],
+        equipment,
+      });
+      expect(plan.items.reduce((sum, item) => sum + item.minutes, 0)).toBe(targetMinutes);
+    }
+  });
+
   test("weekly coverage reads timed stretch exercises from synced session shape", () => {
     const sessions = [
       {

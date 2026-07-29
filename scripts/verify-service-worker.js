@@ -20,6 +20,9 @@ const cache = {
     shellUrls = [...urls];
     for (const url of urls) stored.set(url, { cachedUrl: url });
   },
+  async add(url) {
+    stored.set(url, { cachedUrl: url });
+  },
   async match(request) {
     const key = typeof request === "string"
       ? request
@@ -77,6 +80,12 @@ async function run() {
   for (const asset of Object.values(manifest.files || {})) {
     if (typeof asset === "string" && /\.(?:css|js)$/.test(asset)) {
       assert(stored.has(asset), `install did not cache ${asset}`);
+    }
+  }
+  for (const asset of ["/manifest.json", "/favicon.ico", "/logo192.png", "/logo512.png"]) {
+    const filePath = path.join(buildDir, asset.replace(/^\//, ""));
+    if (fs.existsSync(filePath)) {
+      assert(stored.has(asset), `install did not cache optional shell file ${asset}`);
     }
   }
 

@@ -205,6 +205,7 @@ export function buildPeakForceTrend(history, {
 // short-end fresh-test gate, so it needs no special protocol tagging.
 export const MAX_TEST_TARGET_S = 3;
 export const MAX_TEST_ATTEMPTS = 3;
+export const MAX_TEST_REST_S = 150;
 // Cadence. Peak is fairly flat month-to-month, so ~4 weeks between
 // tests keeps the reading fresh without over-testing. This is a
 // MEASUREMENT-freshness window (when did we last read your max),

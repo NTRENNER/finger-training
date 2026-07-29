@@ -10,8 +10,6 @@
 //     state with the merged set. Skips replacing when Supabase
 //     returns no rows so a network hiccup or RLS-blocked JWT
 //     can't silently wipe the local cache.
-//   * `pendingCount` — how many reps are stuck in the offline
-//     retry queue, surfaced by App.js as a "N pending" badge.
 //   * `freshMap` / `threeExpPriors` — App-level memos that all
 //     three callers (Setup card prescription, Analysis chart,
 //     in-workout startSession) consume so the prescribed loads
@@ -199,13 +197,6 @@ export function useRepHistory({
     [freshMapFp] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // Pending-sync queue size. App.js displays this as a badge so
-  // the user can tell when offline reps are accumulating.
-  const [pendingCount, setPendingCount] = useState(() => (loadLS(LS_QUEUE_KEY) || []).length);
-  const refreshPending = useCallback(() => {
-    setPendingCount((loadLS(LS_QUEUE_KEY) || []).length);
-  }, []);
-
   // Fast tombstone scrub. Fires alongside the full reconcile (below)
   // but only does the cheap part: fetch synced tombstones, strip any
   // local-history reps whose ids match. This lets the chart update
@@ -284,8 +275,7 @@ export function useRepHistory({
     setHistorySynced(false);
     let cancelled = false;
     (async () => {
-      const flushed = await flushQueue();
-      if (!cancelled && flushed > 0) refreshPending();
+      await flushQueue();
       // Retry pending EDITS before fetching, so an edit made offline
       // lands in cloud and the fetch below returns the edited row
       // (instead of the stale one that applyPendingUpdates would
@@ -430,7 +420,6 @@ export function useRepHistory({
         setHistorySynced(true);
       }
 
-      if (!cancelled) refreshPending();
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -591,7 +580,7 @@ export function useRepHistory({
     if (user) {
       stamped.forEach(rep => {
         pushRep(rep).then(result => {
-          if (result === "error") { enqueueReps([rep]); refreshPending(); }
+          if (result === "error") enqueueReps([rep]);
           // result === "ok" → nothing to do
           // result === "tombstoned" → rep matched a server tombstone (rare
           //   race: addReps called for a rep whose id was tombstoned on
@@ -600,7 +589,7 @@ export function useRepHistory({
         });
       });
     }
-  }, [user, refreshPending]);
+  }, [user]);
 
   const updateSession = useCallback(async (sessionKey, updates) => {
     // updates: { hand?, grip?, target_duration? }
@@ -749,7 +738,6 @@ export function useRepHistory({
     history,
     historySynced,
     freshMap, freshMapFp, threeExpPriors,
-    pendingCount, refreshPending,
     addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
     replaceHistory,
     handleWorkoutSessionSaved,

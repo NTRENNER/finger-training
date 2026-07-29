@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SessionPlanCard } from "../SessionPlanCard.js";
 import { buildThreeExpPriors } from "../../../model/threeExp.js";
 
@@ -90,4 +90,59 @@ test("lower-bound stage uses the four-rep recovery protocol and defers the middl
   });
   expect(plan.plannedLoadByHand.L).toBeCloseTo(1.2, 1);
   expect(plan.plannedLoadByHand.R).toBeCloseTo(1.6, 1);
+});
+
+test("peak test is a full-width selectable plan that uses the normal apply path", async () => {
+  const history = [
+    rep("L", 5, 5, 6, 1),
+    rep("R", 5, 5, 8, 1),
+  ];
+  const onApplyPlan = renderCard(history);
+  const peakOption = screen.getByRole("button", { name: "Run peak test" });
+
+  expect(peakOption).toHaveStyle({ gridColumn: "1 / -1" });
+  fireEvent.click(peakOption);
+
+  await waitFor(() => expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({
+    goal: "max_strength",
+    targetTime: 3,
+    repsPerSet: 3,
+    restTime: 150,
+    ladderLoadByHand: null,
+    plannedLoadByHand: null,
+  }));
+  expect(document.body).toHaveTextContent("Pulls3");
+  expect(document.body).toHaveTextContent("Rest150s");
+
+  fireEvent.click(screen.getByRole("button", { name: "Use recommended session" }));
+  await waitFor(() => expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({
+    goal: "endurance",
+    targetTime: 220,
+    repsPerSet: 4,
+    restTime: 20,
+  }));
+});
+
+test("clicking the starred zone tile selects its displayed reference time", async () => {
+  const durations = [5, 30, 70, 115, 160, 220];
+  const history = ["L", "R"].flatMap(hand =>
+    durations.map((T, index) =>
+      rep(hand, T, T + 2, Math.max(1.5, 12 - index * 1.5), index + 1)
+    )
+  );
+  const onApplyPlan = renderCard(history);
+  const starredTile = screen.getAllByRole("button")
+    .find(button =>
+      button.getAttribute("aria-label")?.startsWith("Train ")
+      && button.textContent.includes("★")
+    );
+  const displayedTime = Number(
+    starredTile.getAttribute("aria-label").match(/at (\d+) seconds/)[1]
+  );
+
+  fireEvent.click(starredTile);
+
+  await waitFor(() =>
+    expect(onApplyPlan.mock.calls.at(-1)[0].targetTime).toBe(displayedTime)
+  );
 });

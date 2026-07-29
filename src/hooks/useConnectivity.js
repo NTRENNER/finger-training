@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
+export const ONLINE_SYNC_DEBOUNCE_MS = 750;
+
 function readOnlineState() {
   if (typeof navigator === "undefined" || typeof navigator.onLine !== "boolean") {
     return true;
@@ -18,15 +20,22 @@ export function useConnectivity() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
 
+    let retryTimer = null;
     const handleOnline = () => {
       setIsOnline(true);
-      retrySync();
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(retrySync, ONLINE_SYNC_DEBOUNCE_MS);
     };
-    const handleOffline = () => setIsOnline(false);
+    const handleOffline = () => {
+      setIsOnline(false);
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    };
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
     return () => {
+      clearTimeout(retryTimer);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
