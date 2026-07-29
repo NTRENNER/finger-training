@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-// StretchPill — daily-habit selector for hip + forearm mobility
+// StretchPill — flexible climbing-mobility selector
 // ─────────────────────────────────────────────────────────────
 // Renders full-width below the A/B/C picker. Tapping the pill selects
 // STRETCH as today's workout — the card below the picker then renders
@@ -31,11 +31,9 @@ import React from "react";
 import { C } from "../../ui/theme.js";
 
 export function StretchPill({ done, daysSince, selected = false, onSelect }) {
-  // Color band: green when done today, gray when fresh, yellow at
-  // mid-staleness, orange at high. Thresholds matched to the
-  // literature's "every few days is fine, weekly is not" — yellow
-  // appears around the threshold where adaptation starts to drift
-  // back; orange when you'd notice the lost range in climbing.
+  // Color band: green when done today, gray when recent, yellow at
+  // mid-staleness, orange at high. This is an adherence cue, not a
+  // claim that range disappears at a precise day threshold.
   let accent = C.muted;
   let pillBg = "transparent";
   let textColor = C.muted;
@@ -89,7 +87,7 @@ export function StretchPill({ done, daysSince, selected = false, onSelect }) {
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: textColor, letterSpacing: 0.3 }}>
-          Daily Stretching
+          Climbing Mobility
         </div>
         <div style={{ fontSize: 11, color: textColor, opacity: 0.85 }}>
           {subtitle}

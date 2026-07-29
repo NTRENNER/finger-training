@@ -79,18 +79,31 @@ export function downloadWorkoutCSV(log, resolveName) {
           const isUni = set.leftReps != null  || set.leftWeight  != null
                      || set.rightReps != null || set.rightWeight != null;
           if (isUni) {
-            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "L", set.leftReps ?? "",  set.leftWeight ?? "",  set.done ? "yes" : "no"]);
-            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "R", set.rightReps ?? "", set.rightWeight ?? "", set.done ? "yes" : "no"]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "L", set.leftReps ?? "",  set.leftWeight ?? "",  set.done ? "yes" : "no", "", ""]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "R", set.rightReps ?? "", set.rightWeight ?? "", set.done ? "yes" : "no", "", ""]);
           } else {
-            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "",  set.reps ?? "",      set.weight ?? "",      set.done ? "yes" : "no"]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "",  set.reps ?? "",      set.weight ?? "",      set.done ? "yes" : "no", "", ""]);
           }
         });
       } else {
-        rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, "", "", "", "", exData.done ? "yes" : "no"]);
+        rows.push([
+          s.date,
+          s.completedAt || "",
+          s.workout || "",
+          s.sessionNumber || "",
+          exName,
+          "",
+          "",
+          "",
+          "",
+          exData.done ? "yes" : "no",
+          Number(exData.minutes) > 0 ? Number(exData.minutes) : "",
+          exData.category || "",
+        ]);
       }
     }
   }
-  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "side", "reps", "weight", "done"];
+  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "side", "reps", "weight", "done", "minutes", "mobility_category"];
   const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const a = Object.assign(document.createElement("a"), {

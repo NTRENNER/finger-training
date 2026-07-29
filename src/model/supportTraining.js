@@ -24,7 +24,7 @@
 //   A       — Strength Support      (BIG, ~45 min, one per week)
 //   B       — Athletic Power        (FREQUENT, ~30 min, recovers fast)
 //   C       — Neural Strength Touch (FREQUENT, ~15 min, the easy yes)
-//   STRETCH — Daily Stretching      (DAILY HABIT, ~5–10 min, hip + forearm)
+//   STRETCH — Climbing Mobility     (FLEXIBLE HABIT, 5/10/15 min menu)
 //   CLIMB   — primary climbing session (loggable marker only — the
 //             recommender never pushes you to climb, and climbing no
 //             longer feeds the recommendation; it's logged for its own
@@ -33,10 +33,9 @@
 //             output — the user signals their own rest needs.)
 //
 // Rename history (May 2026): Old C (Positional Capacity, the dedicated
-// mobility session) was moved out of the picker rotation entirely —
-// the literature is clear that mobility adapts to frequency, not dose,
-// so it lives as a daily-habit pill below the A/B/C picker rather than
-// competing weekly with strength/power for a slot. Old D (Neural
+// mobility session) was moved out of the picker rotation entirely.
+// It lives as a flexible time-budget habit below the A/B/C picker
+// rather than competing weekly with strength/power for a slot. Old D (Neural
 // Strength Touch) was promoted into the now-empty C slot so the picker
 // reads A/B/C cleanly. A one-shot migration in WorkoutTab rewrites
 // historical sessions with workoutId "D" → "C" on first load; no
@@ -95,7 +94,14 @@
 //   The `tags` field feeds the recommender's tag-staleness engine
 //   downstream — independent of the logging fields.
 
+import {
+  STRETCH_EXERCISES,
+  STRETCH_EXERCISE_MAP,
+} from "./stretching.js";
+
 export const exercises = {
+  ...STRETCH_EXERCISE_MAP,
+
   weightedPullup: {
     id: "weightedPullup",
     name: "Weighted Pull-Up",
@@ -660,73 +666,6 @@ export const exercises = {
     videoUrl: "https://www.youtube.com/shorts/7FBTF01LBUI",
   },
 
-  supineWeightedFrog: {
-    id: "supineWeightedFrog",
-    name: "Supine Weighted Frog",
-    tags: ["mobility", "positionalCapacity", "hip", "restoration"],
-    prescription: "2–3 × 90–120 sec",
-    intent:
-      "Hip opening for hips-close-to-wall climbing. Supine removes floor friction so the stretch actually loads end-range; weight goes on the knees.",
-    progression: [
-      "Add load gently (5–10 kg per knee is the working range).",
-      "Improve relaxation quality.",
-      "Extend duration gradually.",
-    ],
-    // Non-loggable: time-based hold with bilateral weight. Numeric
-    // load tracking is overkill; notes field can capture weight if
-    // it matters that session.
-    loggable: false,
-    type: "H",
-    // Lattice "Vacuum Style" with Aidan Roberts — same video covers
-    // pancake + pancake leg lifts (different timestamps). Jumps to
-    // the Frog chapter (1:17 / 77s) where Aidan demos the supine
-    // variation specifically.
-    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw&t=77s",
-  },
-
-  weightedPancake: {
-    id: "weightedPancake",
-    name: "Weighted Pancake",
-    tags: ["mobility", "positionalCapacity", "hip", "hamstring"],
-    prescription: "3 × 6 slow reps",
-    intent:
-      "Loaded hamstring / adductor mobility — opens wide stems, drop knees, far-away heel hooks. Slow tempo into end range, pause 1–2 sec, optional 10-sec final hold.",
-    progression: [
-      "Start regressed (standing, leaning back to wall) if seated pancake isn't accessible yet.",
-      "Lower hip height as flexibility improves (yoga blocks → floor).",
-      "Add load only once end-range control is solid.",
-    ],
-    loggable: true,
-    type: "H",
-    sets: 3,
-    reps: "6",
-    logWeight: true,
-    // Jumps to the Weighted Pancake chapter (3:06 / 186s) of the
-    // Lattice video — Aidan walks through tempo, regressions, and
-    // the standing-against-wall variation.
-    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw&t=186s",
-  },
-
-  pancakeLegLifts: {
-    id: "pancakeLegLifts",
-    name: "Pancake Leg Lifts",
-    tags: ["mobility", "strength", "positionalCapacity", "hip"],
-    prescription: "3 × 6 / side",
-    intent:
-      "End-range hip-flexor strength for high feet and heel hooks. Flexibility without strength means you can passively sit in the position but can't generate from it — this exercise closes that gap.",
-    progression: [
-      "Increase object height as control improves.",
-      "Keep reps strict — no hip rotation to cheat.",
-    ],
-    // Non-loggable: progression is "height of the object you're
-    // lifting your heel over", not numeric load.
-    loggable: false,
-    type: "H",
-    // Jumps to the Leg Lift chapter (6:48 / 408s) of the Lattice
-    // video — Aidan demos heel-over-block from pancake position,
-    // and explains the flexibility-before-mobility-strength order.
-    videoUrl: "https://www.youtube.com/watch?v=UYsvnlpSLdw&t=408s",
-  },
 };
 
 // ───────────────────────────────────────────────────────
@@ -921,17 +860,13 @@ export const workouts = {
   STRETCH: {
     id: "STRETCH",
     shortName: "Stretch",
-    name: "Daily Stretching",
-    purpose: "Hip and forearm mobility — adaptation comes from frequency, not dose.",
+    name: "Climbing Mobility",
+    purpose: "Time-based mobility for hips, forearms, shoulders, lats, and chest.",
     // Was Workout C (Positional Capacity) before the May 2026 rename.
-    // Pulled out of the weekly picker because the literature on hip
-    // and forearm mobility is clear: short, regular sessions drive
-    // adaptation; dedicating one weekly slot is the wrong shape. The
-    // exercises are unchanged — they now live behind a daily-habit
-    // pill rendered below the A/B/C picker in WorkoutTab. The pill
-    // toggles between done / not-done for today and logs a marker
-    // session each time so history, streaks, and CSV export all keep
-    // working through the existing workout_sessions schema.
+    // The former fixed three-exercise prescription is now a menu. The
+    // planner allocates a 5/10/15-minute budget across personal
+    // priorities, climbing-specific core categories, and weekly
+    // coverage deficits. Every category has a no-equipment option.
     fatigueClass: "frequent",
     fatigueCost: 0,
     // Same tag set as old C. computeTagDaysSince still feeds these
@@ -941,15 +876,11 @@ export const workouts = {
     // the tags here lets future surfaces — analytics, end-of-week
     // briefings — read "days since mobility" without special-casing.
     tags: ["mobility", "positionalCapacity", "restoration"],
-    exercises: [
-      exercises.supineWeightedFrog,
-      exercises.weightedPancake,
-      exercises.pancakeLegLifts,
-    ],
+    exercises: STRETCH_EXERCISES,
     coachingNotes: [
-      "Short and regular beats long and rare.",
-      "Hip access for steep climbing positions.",
-      "Leave loose, not exhausted.",
+      "Accumulate useful range without forcing it.",
+      "Pair passive range with active end-range control.",
+      "Stop for joint pain, numbness, or tingling.",
     ],
   },
 
@@ -1022,7 +953,7 @@ export const workouts = {
 //   did A, B, C, A in a single week, next week starts with B.
 //
 //   STRETCH and REST never count toward rotation advancement —
-//   STRETCH is a daily habit the user toggles directly, and REST
+//   STRETCH is a separate mobility habit the user logs directly, and REST
 //   is an explicit "no workout" marker. The engine still won't ever
 //   *recommend* STRETCH or REST.
 //

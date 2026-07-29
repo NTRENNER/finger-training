@@ -10,8 +10,8 @@
 //   A  — Strength Support (big, weekly slot)
 //   B  — Athletic Power (frequent)
 //   C  — Neural Strength Touch (frequent; was D before the rename)
-//   STRETCH — Daily Stretching (was C; pulled out of the picker
-//             rotation into a daily-habit pill in WorkoutTab)
+//   STRETCH — Climbing Mobility (was C; pulled out of the picker
+//             rotation into a separate habit pill in WorkoutTab)
 //
 // Rules (first match wins):
 //   1. A overdue → A
@@ -358,12 +358,18 @@ describe("workouts (templates)", () => {
     expect(workouts.B.tags).toEqual(["power", "explosive"]);    // still a power day at the tag level
   });
 
-  test("STRETCH inherits the 3 mobility exercises from old C", () => {
-    // Old C's frog → pancake → pancake leg lifts moved verbatim into
-    // STRETCH when the rename pulled mobility out of the picker. Pin
-    // the contents so an accidental edit doesn't drop one.
+  test("STRETCH exposes the climbing mobility menu", () => {
     const ids = workouts.STRETCH.exercises.map(e => e.id);
-    expect(ids).toEqual(["supineWeightedFrog", "weightedPancake", "pancakeLegLifts"]);
+    expect(ids).toEqual(expect.arrayContaining([
+      "shinBoxes",
+      "couchStretch",
+      "bandedLatStretch",
+      "weightedPancake",
+      "pancakeLegLifts",
+      "wristRockbacks",
+      "doorwayPecStretch",
+    ]));
+    expect(new Set(workouts.STRETCH.exercises.map(e => e.mobilityCategory)).size).toBe(8);
   });
 
   test("C presses with bench, A presses with dips (June 2026 swap)", () => {

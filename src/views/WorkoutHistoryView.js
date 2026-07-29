@@ -369,14 +369,17 @@ export function WorkoutHistoryView({
           || defaultWorkouts[`legacy_${session.workout}`]
           || defaultWorkouts[session.workout]
           || {};
+        const isMobility = (session.workoutId || session.workout) === "STRETCH";
 
         return (
           <Card key={origIdx} style={{ marginBottom: 10 }}>
             {/* Session header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div>
-                <span style={{ fontWeight: 700, fontSize: 15 }}>Workout {session.workout}</span>
-                {wkDef.name && !isEditing && (
+                <span style={{ fontWeight: 700, fontSize: 15 }}>
+                  {isMobility ? (wkDef.name || "Climbing Mobility") : `Workout ${session.workout}`}
+                </span>
+                {wkDef.name && !isEditing && !isMobility && (
                   <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>{wkDef.name}</span>
                 )}
               </div>
@@ -769,6 +772,9 @@ export function WorkoutHistoryView({
                 return (
                   <div key={id} style={{ fontSize: 12, color: C.muted, marginBottom: 3 }}>
                     <span style={{ color: C.green, marginRight: 5 }}>✓</span>{exName}
+                    {Number(data.minutes) > 0 && (
+                      <span style={{ marginLeft: 5 }}>· {Number(data.minutes)} min</span>
+                    )}
                   </div>
                 );
               }

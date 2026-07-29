@@ -404,6 +404,11 @@ export const LS_BW_LOG_KEY = "ft_bw_log";
 // rotation-derivation useMemo cares about them.
 export const LS_WORKOUT_LOG_KEY = "ft_workout_log";
 
+// Mobility-builder preferences. The completed session itself is stored
+// in LS_WORKOUT_LOG_KEY and synced through workout_sessions; this key is
+// only the local default for time, priorities, and available equipment.
+export const LS_STRETCH_PREFS_KEY = "ft_stretch_preferences";
+
 // Marker workout name for rotation-override entries (see comment
 // above). Kept in storage.js so WorkoutTab, WorkoutHistoryView,
 // TrendsView, and the CSV export can all import the same constant.

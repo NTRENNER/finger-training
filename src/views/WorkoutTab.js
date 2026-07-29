@@ -5,8 +5,8 @@
 // Rebuilt May 2026 around the supportTraining schema (see
 // src/model/supportTraining.js) — one BIG workout per week (A)
 // plus two frequent low-friction sessions (B / C), with a daily
-// stretching pill rendered below the picker for mobility (it's
-// a daily habit, not a weekly slot). The previous 3-day rotation
+// mobility pill rendered below the picker (it's a flexible habit,
+// not a weekly slot). The previous 3-day rotation
 // (legacy A/B/C, "Lift Day 1" / "Lift Day 2" / "Power") was prone
 // to skipped sessions because the high-volume days took too long;
 // the new shape addresses that directly.
@@ -52,7 +52,7 @@ import { Card, PageFrame } from "../ui/components.js";
 import {
   loadLS, saveLS,
   LS_WORKOUT_LOG_KEY, LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
-  LS_DELOAD_WEEK_KEY, ROTATION_PIN_KEY,
+  LS_DELOAD_WEEK_KEY, LS_STRETCH_PREFS_KEY, ROTATION_PIN_KEY,
 } from "../lib/storage.js";
 import { DELOAD_WEEK_DAYS } from "../model/deload.js";
 import {
@@ -71,6 +71,10 @@ import {
   workouts as SUPPORT_WORKOUTS,
   recommendNextWorkout,
 } from "../model/supportTraining.js";
+import {
+  sanitizeStretchPreferences,
+  weeklyStretchCoverage,
+} from "../model/stretching.js";
 
 import { BwPrompt } from "./SetupView.js";
 
@@ -82,6 +86,7 @@ import { SimpleExRow } from "./workout/SimpleExRow.js";
 import { RecommendationCard } from "./workout/RecommendationCard.js";
 import { WorkoutPicker } from "./workout/WorkoutPicker.js";
 import { StretchPill } from "./workout/StretchPill.js";
+import { StretchSessionBuilder } from "./workout/StretchSessionBuilder.js";
 import { ExercisePicker } from "./workout/ExercisePicker.js";
 import {
   countSupportSessions, setSummary, findLastSessionFor,
@@ -223,6 +228,19 @@ export function WorkoutTab({
     }
     return { todaySession, daysSince, done: !!todaySession };
   }, [wLog]);
+
+  const stretchPrefsRaw = useLSValue(LS_STRETCH_PREFS_KEY);
+  const stretchPreferences = useMemo(
+    () => sanitizeStretchPreferences(stretchPrefsRaw),
+    [stretchPrefsRaw]
+  );
+  const stretchCoverage = useMemo(
+    () => weeklyStretchCoverage(wLog, today()),
+    [wLog]
+  );
+  const updateStretchPreferences = next => {
+    saveLS(LS_STRETCH_PREFS_KEY, sanitizeStretchPreferences(next));
+  };
 
   // Per-exercise seed builder. Pulled out of startSession so the
   // mid-session swap/add picker can reuse it for a single exercise
@@ -416,13 +434,13 @@ export function WorkoutTab({
     setPickedId(null);
   };
 
-  // Toggle today's STRETCH marker. If a session for today already
-  // exists, remove it (LS + synced set + tombstone, mirroring the
-  // WorkoutHistoryView delete path); otherwise log a fresh marker.
+  // Save or remove today's mobility session. The chosen exercise menu
+  // is stored inside the existing exercises JSON so it round-trips
+  // through workout_sessions without a database migration.
   // Tombstoning is what stops a deleted-today stretch from
   // resurrecting on the next cloud pull — same defense the rest
   // of the workout-delete flow relies on.
-  const toggleTodaysStretch = () => {
+  const toggleTodaysStretch = (mobilityPlan = null) => {
     const todayStr = today();
     const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
     // Match by either workoutId or workout for the same reason
@@ -443,6 +461,18 @@ export function WorkoutTab({
       deleteWorkoutSession(existing.id).catch(() => {});
       return;
     }
+    const mobilityExercises = {};
+    for (const item of mobilityPlan?.items || []) {
+      const exercise = item?.exercise;
+      if (!exercise?.id) continue;
+      mobilityExercises[exercise.id] = {
+        done: true,
+        minutes: Number(item.minutes) || 0,
+        category: item.category || exercise.mobilityCategory || null,
+        mode: exercise.mobilityMode || null,
+        equipment: exercise.equipment || [],
+      };
+    }
     const session = {
       id: genId(),
       date: todayStr,
@@ -451,7 +481,7 @@ export function WorkoutTab({
       workoutId: "STRETCH",
       sessionNumber: countSupportSessions(freshLog) + 1,
       wasRecommended: false,
-      exercises: {},
+      exercises: mobilityExercises,
       notes: "",
     };
     const nextLog = [...freshLog, session];
@@ -698,7 +728,7 @@ export function WorkoutTab({
 
           {/* StretchPill sits below the picker, intentionally on its
               own row at full width — width is the visual cue that this
-              is a daily habit, not another picker option competing
+              is a flexible habit, not another picker option competing
               with A/B/C for today's slot. Tap = select STRETCH so the
               card below renders the stretch exercises; the marker log
               lives on the green button inside that card. */}
@@ -709,7 +739,18 @@ export function WorkoutTab({
             onSelect={() => setPickedId("STRETCH")}
           />
 
-          {activeWorkout && (
+          {activeWorkout && activeId === "STRETCH" && (
+            <StretchSessionBuilder
+              preferences={stretchPreferences}
+              coverage={stretchCoverage}
+              completedSession={stretchState.todaySession}
+              onPreferencesChange={updateStretchPreferences}
+              onLog={toggleTodaysStretch}
+              onRemove={() => toggleTodaysStretch()}
+            />
+          )}
+
+          {activeWorkout && activeId !== "STRETCH" && (
             <Card>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
                 <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>
@@ -762,26 +803,17 @@ export function WorkoutTab({
                 </div>
               )}
               <button
-                onClick={
-                  // STRETCH is a daily habit, not a tracked session — the
-                  // green button toggles today's marker directly instead
-                  // of dropping into the active-session per-exercise UI.
-                  activeId === "STRETCH" ? toggleTodaysStretch : startSession
-                }
+                onClick={startSession}
                 style={{
                   width: "100%", padding: "12px",
-                  background: activeId === "STRETCH" && stretchState.done
-                    ? C.muted
-                    : (WORKOUT_COLORS[activeId] || C.blue),
+                  background: WORKOUT_COLORS[activeId] || C.blue,
                   color: "#000", border: "none", borderRadius: 8,
                   fontSize: 15, fontWeight: 700, cursor: "pointer",
                 }}
               >
-                {activeId === "STRETCH"
-                  ? (stretchState.done ? "Un-log Today's Stretch" : "Log Today's Stretch")
-                  : activeWorkout.exercises.length === 0
-                    ? `Log ${activeWorkout.shortName} marker`
-                    : `Start ${activeWorkout.shortName}`}
+                {activeWorkout.exercises.length === 0
+                  ? `Log ${activeWorkout.shortName} marker`
+                  : `Start ${activeWorkout.shortName}`}
               </button>
             </Card>
           )}

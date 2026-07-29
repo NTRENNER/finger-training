@@ -1,22 +1,17 @@
 // ─────────────────────────────────────────────────────────────
 // VideoLink — small "▶ demo" link next to novel exercise names
 // ─────────────────────────────────────────────────────────────
-// Renders when an exercise carries a videoUrl. Opens the source
-// video (typically YouTube — Lattice, Climb Strong, Judd
-// Lienhard) in a new tab. Only attached to exercises where the
-// movement is novel enough that a 90-second demo beats reading
-// the form cues (hard-style situp, banded chops, weighted
-// pancake / leg lifts, supine frog, prone external rotation).
-// Standard lifts (bench, pullup, dips) intentionally don't
-// carry a videoUrl — a "demo" link there would feel condescending.
+// Renders when an exercise carries a videoUrl and opens the
+// movement demonstration in a new tab.
 
 import React from "react";
 import { C } from "../../ui/theme.js";
 
-export function VideoLink({ href, label = "▶ demo" }) {
+export function VideoLink({ href, label = "▶ demo", ariaLabel }) {
   return (
     <a
       href={href}
+      aria-label={ariaLabel}
       target="_blank"
       rel="noopener noreferrer"
       style={{
