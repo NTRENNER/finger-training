@@ -697,6 +697,11 @@ export function WorkoutTab({
               excludeIds={liveExercises
                 .filter((_, i) => i !== pickerState.index)
                 .map(ex => ex.id)}
+              substituteForId={
+                pickerState.index < liveExercises.length
+                  ? liveExercises[pickerState.index]?.id
+                  : null
+              }
               onPick={handlePickerPick}
               onCancel={() => setPickerState(null)}
             />

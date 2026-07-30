@@ -46,21 +46,23 @@ export function migrateExerciseId(id) {
   return ID_MIGRATIONS[id] || id;
 }
 
-// Build a flat { id → exDef } map from a workout plan, applying id
-// migration so a legacy `kb_snatch` exercise lands at the same key
-// as the current `kbSnatch`. Last definition wins so when a current
-// supportTraining def collides with a legacy one (post-migration),
-// the current name and metadata take precedence. Caller is
-// responsible for the iteration order of `plan` — for
-// ALL_WORKOUTS_LOOKUP that's legacy first, then current, which is
-// exactly what we want here.
-export function buildExerciseDefIndex(plan) {
+// Build a flat { id → exDef } map from a workout plan plus an optional
+// standalone exercise catalog. Catalog definitions win so substitutions
+// that are intentionally absent from every default workout still retain
+// their current name and logging metadata in history, analysis, and CSV.
+// ID migration makes a legacy `kb_snatch` land at the same key as the
+// current `kbSnatch`.
+export function buildExerciseDefIndex(plan, catalog = null) {
   const index = {};
   for (const wk of Object.values(plan || {})) {
     for (const ex of (wk?.exercises || [])) {
       if (!ex?.id) continue;
       index[migrateExerciseId(ex.id)] = ex;
     }
+  }
+  for (const ex of Object.values(catalog || {})) {
+    if (!ex?.id) continue;
+    index[migrateExerciseId(ex.id)] = ex;
   }
   return index;
 }

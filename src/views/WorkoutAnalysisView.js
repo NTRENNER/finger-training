@@ -32,6 +32,7 @@ import {
 } from "../lib/storage.js";
 import { bwOnDate, toDisp } from "../ui/format.js";
 import { migrateExerciseId, buildExerciseDefIndex } from "../model/exerciseIds.js";
+import { exercises as SUPPORT_EXERCISES } from "../model/supportTraining.js";
 import { useLSValue } from "../hooks/useLSValue.js";
 
 // Locally re-declared to match WorkoutTab's storage key (which is
@@ -388,7 +389,7 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
     };
     return {
       ...buildExerciseDefIndex(migrate(planStored)),
-      ...buildExerciseDefIndex(migrate(defaultWorkouts)),
+      ...buildExerciseDefIndex(migrate(defaultWorkouts), SUPPORT_EXERCISES),
     };
   }, [planStored, defaultWorkouts]);
 

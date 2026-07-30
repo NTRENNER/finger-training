@@ -27,6 +27,7 @@
 // override handles the rare case where they want a lighter session.
 
 import {
+  exercises,
   workouts,
   recommendNextWorkout,
   daysBetween,
@@ -382,6 +383,18 @@ describe("workouts (templates)", () => {
     const aIds = workouts.A.exercises.map(e => e.id);
     expect(aIds).toContain("dips");
     expect(aIds).not.toContain("benchPress");
+  });
+
+  test("90° lock-off eccentric is a suggested TRX-row substitute, not C's default pull", () => {
+    const fallback = exercises.lockoffEccentric;
+    expect(fallback).toBeTruthy();
+    expect(fallback.substitutesFor).toContain("trxRow");
+    expect(fallback.circlesOnly).toBe(true);
+    expect(fallback.reps).toBe("3");
+
+    const cIds = workouts.C.exercises.map(e => e.id);
+    expect(cIds).toContain("trxRow");
+    expect(cIds).not.toContain("lockoffEccentric");
   });
 
   test("every exercise carries an id, tags, prescription, intent", () => {

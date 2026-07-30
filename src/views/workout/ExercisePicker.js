@@ -48,7 +48,13 @@ function typeBadge(type) {
   );
 }
 
-export function ExercisePicker({ title = "Pick exercise", excludeIds = [], onPick, onCancel }) {
+export function ExercisePicker({
+  title = "Pick exercise",
+  excludeIds = [],
+  substituteForId = null,
+  onPick,
+  onCancel,
+}) {
   const [q, setQ] = useState("");
 
   // Stable Set for "already in this workout" lookup. Kept outside the
@@ -74,10 +80,16 @@ export function ExercisePicker({ title = "Pick exercise", excludeIds = [], onPic
     // Without this, the user could add a duplicate that resolves to
     // the same canonical exercise.
     const excluded = new Set((excludeIds || []).map(migrateExerciseId));
+    const replacementId = substituteForId ? migrateExerciseId(substituteForId) : null;
     const all = Object.values(EXERCISE_CATALOG)
       .filter(ex => ex && typeof ex === "object" && ex.id && ex.name)
       .filter(ex => ex.loggable !== false)         // skip non-loggable workout templates
-      .map(ex => ({ ...ex, _alreadyAdded: excluded.has(migrateExerciseId(ex.id)) }));
+      .map(ex => ({
+        ...ex,
+        _alreadyAdded: excluded.has(migrateExerciseId(ex.id)),
+        _suggestedSubstitute: !!replacementId
+          && (ex.substitutesFor || []).map(migrateExerciseId).includes(replacementId),
+      }));
     // Case-insensitive substring match across name + intent + tags so
     // a user can type "press", "shoulder", or "snatch" and find the
     // right exercise without remembering its exact catalog key.
@@ -92,14 +104,17 @@ export function ExercisePicker({ title = "Pick exercise", excludeIds = [], onPic
           return hay.includes(needle);
         })
       : all;
-    // Sort: pickable first (so the user sees actionable options up
-    // top), then alphabetical within each group.
+    // Sort suggested replacements first, then other pickable items,
+    // then already-present exercises. Alphabetize within each group.
     return filtered.sort((a, b) => {
       if (a._alreadyAdded !== b._alreadyAdded) return a._alreadyAdded ? 1 : -1;
+      if (a._suggestedSubstitute !== b._suggestedSubstitute) {
+        return a._suggestedSubstitute ? -1 : 1;
+      }
       return (a.name || "").localeCompare(b.name || "");
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, excludedKey]);
+  }, [q, excludedKey, substituteForId]);
 
   return (
     <div
@@ -197,6 +212,14 @@ export function ExercisePicker({ title = "Pick exercise", excludeIds = [], onPic
                         textTransform: "uppercase", letterSpacing: 0.5,
                       }}>
                         already added
+                      </span>
+                    )}
+                    {ex._suggestedSubstitute && (
+                      <span style={{
+                        fontSize: 9, color: C.green, marginLeft: 6,
+                        textTransform: "uppercase", letterSpacing: 0.5,
+                      }}>
+                        suggested substitute
                       </span>
                     )}
                     {ex.prescription && (

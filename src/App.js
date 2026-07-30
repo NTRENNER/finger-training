@@ -35,6 +35,7 @@ import {
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
 import { exerciseName, buildExerciseDefIndex } from "./model/exerciseIds.js";
+import { exercises as SUPPORT_EXERCISES } from "./model/supportTraining.js";
 
 // App-level hooks (see src/hooks/).
 import { useAuth } from "./hooks/useAuth.js";
@@ -794,7 +795,7 @@ export default function App() {
             // labels the rest of the app shows, instead of the raw
             // logged ids ("slam_balls", "kb_snatch") and the snake-
             // to-space fallback the CSV would otherwise use.
-            const exIndex = buildExerciseDefIndex(ALL_WORKOUTS_LOOKUP);
+            const exIndex = buildExerciseDefIndex(ALL_WORKOUTS_LOOKUP, SUPPORT_EXERCISES);
             downloadWorkoutCSV(log, (exId) => exerciseName(exId, exIndex));
           }}
           onDownloadClimbingCSV={() => downloadClimbingCSV(activities)}

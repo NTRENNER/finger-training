@@ -34,6 +34,7 @@ import {
 import {
   migrateExerciseId, buildExerciseDefIndex,
 } from "../model/exerciseIds.js";
+import { exercises as SUPPORT_EXERCISES } from "../model/supportTraining.js";
 import { BAND_COLOR_LOOKUP, normalizeBands } from "./workout/workoutConstants.js";
 import { SessionExRow } from "./workout/SessionExRow.js";
 import { SimpleExRow } from "./workout/SimpleExRow.js";
@@ -119,7 +120,7 @@ export function WorkoutHistoryView({
   // legacy "Slam balls"). Used for rendering names and querying
   // metadata like isBodyweightAdditive at row-render time.
   const exDefs = useMemo(
-    () => buildExerciseDefIndex(defaultWorkouts),
+    () => buildExerciseDefIndex(defaultWorkouts, SUPPORT_EXERCISES),
     [defaultWorkouts],
   );
 

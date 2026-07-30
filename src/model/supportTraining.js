@@ -163,6 +163,38 @@ export const exercises = {
     progressionPolicy: "maintain",
   },
 
+  lockoffEccentric: {
+    id: "lockoffEccentric",
+    name: "90° Lock-Off + Eccentric",
+    tags: ["strength", "neural", "connective", "shoulder", "biceps", "climbing"],
+    prescription: "3 × 3 · 1–2s lock-off + 5–8s lower",
+    intent:
+      "Pull-up-bar fallback when TRX rows are unavailable. Maintains lock-off control and eccentric pulling strength, but does not replace the row's horizontal scapular-retraction stimulus.",
+    progression: [
+      "Use a step or small jump to enter the 90° position if you want to minimize concentric fatigue.",
+      "Own the lock-off, then lower smoothly through the full range.",
+      "Extend the eccentric before adding reps; keep Workout C submaximal.",
+    ],
+    cautions: [
+      "No shaking or grinders.",
+      "Stop if the elbow, distal biceps, or front of the shoulder feels irritated.",
+      "Return to horizontal rows when equipment is available.",
+    ],
+    // Suggested, equipment-light replacement in the generic Swap
+    // picker. It stays out of Workout C's default template because
+    // vertical lock-off work cannot supply the row's horizontal
+    // scapular-retraction stimulus.
+    substitutesFor: ["trxRow"],
+    loggable: true,
+    type: "S",
+    sets: 3,
+    reps: "3",
+    // Reps + done circles are the useful progression record here.
+    // Added weight would undermine C's low-fatigue intent.
+    circlesOnly: true,
+    progressionPolicy: "maintain",
+  },
+
   benchPress: {
     id: "benchPress",
     name: "Bench Press",
