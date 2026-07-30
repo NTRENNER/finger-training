@@ -18,6 +18,7 @@
 import { predictRepTimes, getPhysModel } from "./fatigue.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 import { zoneOf } from "./zones.js";
+import { effectiveLoad } from "./load.js";
 
 // How far out to run the recovery model to read the asymptote. With
 // the default time constants the system converges within ~20-30 reps;
@@ -57,8 +58,10 @@ export function buildForecastSeries({
 }
 
 // Build the Actual series from a list of rep records sorted by
-// (set_num, rep_num). Returns { rep, t } per rep. Caller filters
-// to the session of interest before passing in.
+// (set_num, rep_num). Returns { rep, t, weightKg, date } per rep so the
+// chart can show the exact load × time actually performed and identify
+// the previous comparable session. Caller filters to the session of
+// interest before passing in.
 export function buildActualSeries(reps) {
   if (!Array.isArray(reps) || reps.length === 0) return [];
   const sorted = [...reps].sort((a, b) => {
@@ -68,7 +71,12 @@ export function buildActualSeries(reps) {
   });
   return sorted
     .filter(r => Number(r.actual_time_s) > 0)
-    .map((r, i) => ({ rep: i + 1, t: Number(r.actual_time_s) }));
+    .map((r, i) => ({
+      rep: i + 1,
+      t: Number(r.actual_time_s),
+      weightKg: effectiveLoad(r) || null,
+      date: r.date || null,
+    }));
 }
 
 // Find the most recent prior session for the same (grip, hand) that

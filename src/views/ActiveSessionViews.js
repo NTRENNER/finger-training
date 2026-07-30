@@ -41,9 +41,12 @@ import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 // rep curve. Seeds the forecast from rep 1's actual hold if available,
 // otherwise from the configured target_duration so the user sees the
 // engine's prediction before they've moved.
-function LiveRepCurveCard({ history, config, activeHand, sessionReps, embedded = false }) {
+function LiveRepCurveCard({
+  history, config, activeHand, sessionReps, refWeights,
+  unit = "lbs", embedded = false,
+}) {
+  const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
   const bundle = useMemo(() => {
-    const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
     const sameHandReps = (sessionReps || []).filter(r => r.hand === handForLookup);
     const rep1 = sameHandReps[0];
     const firstRepTime = rep1?.actual_time_s > 0 ? rep1.actual_time_s : config.targetTime;
@@ -57,7 +60,8 @@ function LiveRepCurveCard({ history, config, activeHand, sessionReps, embedded =
       targetDuration: config.targetTime,
       beforeDate: undefined, // live session — match any prior date
     });
-  }, [history, config, activeHand, sessionReps]);
+  }, [history, config, handForLookup, sessionReps]);
+  const targetWeightKg = suggestWeight(refWeights?.[handForLookup] ?? null, 0) || null;
   const inner = (
     <RepCurveChart
       forecasted={bundle.forecasted}
@@ -65,6 +69,8 @@ function LiveRepCurveCard({ history, config, activeHand, sessionReps, embedded =
       prevSession={bundle.prevSession}
       asymptoticHold={bundle.asymptoticHold}
       targetS={bundle.targetS}
+      targetWeightKg={targetWeightKg}
+      unit={unit}
       height={160}
       showLegend={false}
     />
@@ -472,6 +478,8 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
           config={config}
           activeHand={activeHand}
           sessionReps={sessionReps}
+          refWeights={session.refWeights}
+          unit={unit}
         />
 
         <LiveRecoveryCard
@@ -1019,6 +1027,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
           config={config}
           activeHand={activeHand}
           sessionReps={sessionReps}
+          refWeights={refWeights}
+          unit={unit}
         />
 
         <LiveRecoveryCard

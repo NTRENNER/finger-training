@@ -57,15 +57,15 @@ describe("buildForecastSeries", () => {
 describe("buildActualSeries", () => {
   test("returns sorted by (set_num, rep_num)", () => {
     const reps = [
-      rep({ set_num: 1, rep_num: 3, actual_time_s: 22 }),
-      rep({ set_num: 1, rep_num: 1, actual_time_s: 30 }),
-      rep({ set_num: 1, rep_num: 2, actual_time_s: 26 }),
+      rep({ set_num: 1, rep_num: 3, actual_time_s: 22, avg_force_kg: 12 }),
+      rep({ set_num: 1, rep_num: 1, actual_time_s: 30, avg_force_kg: 14 }),
+      rep({ set_num: 1, rep_num: 2, actual_time_s: 26, avg_force_kg: 13 }),
     ];
     const out = buildActualSeries(reps);
     expect(out).toEqual([
-      { rep: 1, t: 30 },
-      { rep: 2, t: 26 },
-      { rep: 3, t: 22 },
+      { rep: 1, t: 30, weightKg: 14, date: "2026-05-15" },
+      { rep: 2, t: 26, weightKg: 13, date: "2026-05-15" },
+      { rep: 3, t: 22, weightKg: 12, date: "2026-05-15" },
     ]);
   });
 
