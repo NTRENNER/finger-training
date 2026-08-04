@@ -24,6 +24,9 @@
 // Modes preserved:
 //   • perGripMode (no filter, ≥2 grips) — a block per grip with overlay.
 //   • selGrip — that grip's block (or an early-days placeholder).
+//   • handView L/R — a block per grip off that hand's overlay branch
+//     (curve + slider, Aug 2026); static tiles when the hand has an
+//     improvement but no overlay yet.
 //   • pooled fallback — static total + tiles (no overlay/slider).
 
 import React, { useMemo, useState } from "react";
@@ -462,11 +465,15 @@ export function CurveImprovementCard({
   normalizeOn = false,
   bodyWeight = null,
   bwLog = [],
-  // Hand selector (June 2026): "pooled" | "L" | "R". In L/R mode the
-  // card renders STATIC per-grip tiles from perHandGripImprovement
-  // (keys `${grip}|${hand}`, vs the FROZEN per-hand baselines) — the
-  // interactive overlay + slider stay pooled-only, where the fits
-  // have the data density to be worth scrubbing.
+  // Hand selector (June 2026): "pooled" | "L" | "R". In L/R mode a
+  // hand with its own overlay branch (per-hand baseline + ≥1 fitable
+  // post-baseline date from useHistoryOverlay) renders the SAME
+  // interactive block as pooled — curve + Now slider — off the
+  // cumulative per-hand fits (Aug 2026; the slider was pooled-only
+  // before that, when the per-hand branches didn't carry the dates/
+  // maxHold maps GripBlock needs). Hands without an overlay fall back
+  // to static tiles from perHandGripImprovement (keys `${grip}|${hand}`,
+  // vs the FROZEN per-hand baselines).
   handView = "pooled",
   perHandGripImprovement = {},
   perHandGripBaselines = {},
@@ -581,46 +588,28 @@ export function CurveImprovementCard({
     />
   ) : null;
 
-  // ── Per-hand mode: static tiles vs frozen per-hand baselines ──
+  // ── Per-hand mode: interactive blocks where the hand has an overlay,
+  // static tiles vs frozen per-hand baselines otherwise ──
   if (handView === "L" || handView === "R") {
     const handImpMap = scaledData.perHandGripImprovement;
+    // [grip, staticImp, handOverlay|null]. When the hand overlay exists
+    // (per-hand baseline + ≥1 fitable date) GripBlock computes its own
+    // tiles from the cumulative per-hand fits — the same basis the
+    // pooled blocks use, and the only basis that can follow the slider
+    // — so staticImp is only the no-overlay fallback. (This replaced
+    // the old static-tiles zone-fill merge, which ran under exactly
+    // the same ph.dates gate GripBlock now claims: at the latest
+    // slider position the tile numbers may differ a point or two from
+    // the old perHandGripEstimates-based tiles, same as pooled.)
     const entries = Object.entries(handImpMap)
       .filter(([key]) =>
         key.endsWith(`|${handView}`)
         && (!selGrip || key.startsWith(`${selGrip}|`))
       )
       .map(([key, imp]) => {
-        // Fill this hand's long-hold "new" tiles the same way the pooled
-        // block does: anchor each zone the hand baseline never reached to
-        // the earliest per-hand cumulative fit that reached it. Merge ONLY
-        // the previously-null zones so the existing supported-zone numbers
-        // and the `total` are untouched.
         const grip = key.split("|")[0];
         const ph = scaledData.historyOverlay[grip]?.perHand?.[handView];
-        let merged = imp;
-        if (ph?.ampsByDate && ph.dates?.length) {
-          // "Now" basis for the filled zones = the CURRENT per-hand
-          // estimate — the SAME amps the supported-zone tiles were
-          // computed from (perHandGripImprovement is built on
-          // perHandGripEstimates), so filled and supported tiles can't
-          // disagree about what "now" means. The overlay's last-date
-          // cumulative fit is only the fallback (partial estimates map).
-          const nowAmps = scaledData.perHandGripEstimates[key]
-            ?? ph.ampsByDate.get(ph.dates[ph.dates.length - 1]);
-          const zoneRef = perZoneBaselineAmps(
-            ph.dates, ph.ampsByDate, ph.maxHoldByDate, ph.baselineMaxHoldS ?? null,
-          );
-          if (nowAmps && Object.keys(zoneRef).length) {
-            const filled = improvementForAmps(nowAmps, ph.baselineAmps, ph.baselineMaxHoldS ?? null, zoneRef);
-            if (filled) {
-              merged = { ...imp };
-              for (const zk of Object.keys(zoneRef)) {
-                if (imp[zk] == null && typeof filled[zk] === "number") merged[zk] = filled[zk];
-              }
-            }
-          }
-        }
-        return [grip, merged];
+        return [grip, imp, ph?.dates?.length > 0 ? ph : null];
       })
       .sort((a, b) => a[0].localeCompare(b[0]));
     return (
@@ -642,13 +631,32 @@ export function CurveImprovementCard({
           of the pooled view, so expect noisier numbers.
         </div>
         <BasisNote />
-        {entries.length > 0 ? entries.map(([grip, imp], i, arr) => (
-          <StaticGripTiles key={grip} grip={grip} imp={imp}
-            divider={i < arr.length - 1}
-            onZoneSelect={openZoneDetail}
-            selectedZoneKey={zoneDetail?.grip === grip ? zoneDetail.zoneKey : null}
-          />
-        )) : (
+        {entries.length > 0 ? entries.map(([grip, imp, ph], i, arr) => {
+          const divider = i < arr.length - 1;
+          const selectedZoneKey = zoneDetail?.grip === grip ? zoneDetail.zoneKey : null;
+          if (ph) {
+            // Scrub state keyed per grip AND hand so the L, R, and
+            // pooled sliders for the same grip don't share an index
+            // (their date lists differ in length).
+            return (
+              <GripBlock key={grip} grip={grip} overlay={ph}
+                unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
+                nowIdx={nowIdxByGrip[`${grip}|${handView}`]}
+                onScrub={(g, idx) => scrub(`${g}|${handView}`, idx)}
+                divider={divider}
+                onZoneSelect={openZoneDetail}
+                selectedZoneKey={selectedZoneKey}
+              />
+            );
+          }
+          return (
+            <StaticGripTiles key={grip} grip={grip} imp={imp}
+              divider={divider}
+              onZoneSelect={openZoneDetail}
+              selectedZoneKey={selectedZoneKey}
+            />
+          );
+        }) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
             No {handView === "R" ? "right" : "left"}-hand baseline seeded
             yet — a hand needs ≥{GRIP_BASELINE_REP_THRESHOLD} fresh reps across
