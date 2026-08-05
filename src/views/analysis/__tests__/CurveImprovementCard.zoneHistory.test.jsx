@@ -2,6 +2,20 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { CurveImprovementCard } from "../CurveImprovementCard.jsx";
 
+// recharts' ResponsiveContainer (the hand-view overlay chart) needs
+// ResizeObserver, which jsdom doesn't ship. Same stub as PeakForceCard.
+beforeAll(() => {
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+});
+
+afterAll(() => {
+  delete global.ResizeObserver;
+});
+
 const improvement = {
   total: 12,
   max_strength: 10,
@@ -70,6 +84,72 @@ test("uses the active hand when opening a per-hand tile", () => {
   expect(screen.getByText("Crusher · Left hand")).toBeInTheDocument();
   expect(screen.getByText("10.0 kg")).toBeInTheDocument();
   expect(screen.queryByText("20.0 kg")).not.toBeInTheDocument();
+});
+
+test("hand view renders the curve + Now slider when the hand has overlay data", () => {
+  const branch = () => ({
+    baselineAmps: [10, 10, 10],
+    baselineDate: "2026-06-01",
+    baselineMaxHoldS: 240,
+    dates: ["2026-06-08", "2026-07-01"],
+    ampsByDate: new Map([
+      ["2026-06-08", [10, 10, 10]],
+      ["2026-07-01", [12, 12, 12]],
+    ]),
+    maxHoldByDate: new Map([
+      ["2026-06-08", 200],
+      ["2026-07-01", 240],
+    ]),
+  });
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{ Crusher: improvement }}
+      grip3xEstimates={{ Crusher: [1, 1, 1] }}
+      gripBaselines={{}}
+      global3xBaseline={null}
+      selGrip={null}
+      history={[rep(160, 170, 10)]}
+      historyOverlay={{ Crusher: { ...branch(), perHand: { L: branch() } } }}
+      handView="L"
+      perHandGripImprovement={{ "Crusher|L": improvement }}
+      perHandGripEstimates={{}}
+      unit="kg"
+    />
+  );
+
+  // Interactive block: slider present, defaulting to the latest date.
+  const slider = screen.getByRole("slider");
+  expect(screen.getByText(/2 of 2 sessions since baseline/)).toBeInTheDocument();
+  expect(screen.getByText("2026-07-01")).toBeInTheDocument();
+
+  // Scrub back to the first post-baseline session.
+  fireEvent.change(slider, { target: { value: "0" } });
+  expect(screen.getByText(/1 of 2 sessions since baseline/)).toBeInTheDocument();
+  expect(screen.getByText("2026-06-08")).toBeInTheDocument();
+});
+
+test("hand view falls back to static tiles when the hand has no overlay", () => {
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{ Crusher: improvement }}
+      grip3xEstimates={{ Crusher: [1, 1, 1] }}
+      gripBaselines={{}}
+      global3xBaseline={null}
+      selGrip={null}
+      history={[rep(160, 170, 10)]}
+      historyOverlay={{}}
+      handView="L"
+      perHandGripImprovement={{ "Crusher|L": improvement }}
+      perHandGripEstimates={{}}
+      unit="kg"
+    />
+  );
+
+  expect(screen.queryByRole("slider")).not.toBeInTheDocument();
+  // total 12 and power_strength 12 both render "+12%" — static tiles up.
+  expect(screen.getAllByText("+12%").length).toBeGreaterThan(0);
 });
 
 test("focused grip also scopes the per-hand improvement view", () => {
