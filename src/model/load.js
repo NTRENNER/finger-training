@@ -25,7 +25,7 @@
 // guards every downstream consumer (fits, ladder, peak, prescription)
 // from garbage. Was 500 until June 2026, which let a 284 kg glitch
 // slip through; the strongest real pull on record is ~77 kg.
-import { isValidFailureRep } from "./forceRecording.js";
+import { isCapacityEvidenceRep } from "./forceRecording.js";
 
 export const SANE_MAX_KG = 200;
 
@@ -101,7 +101,7 @@ export function freshFitReps(history) {
   const seen = new Set();
   const out = [];
   for (const r of history || []) {
-    if (!isValidFailureRep(r)) continue;
+    if (!isCapacityEvidenceRep(r)) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;
     // Seed-artifact guard (July 2026, see isSeedArtifactRep below): an
     // avg==peak seeded/backfilled twin is not a real measurement, and
@@ -127,7 +127,7 @@ export function freshFitReps(history) {
 // check-in's perf signal share ONE definition and can't disagree
 // about which reps count (July 2026, per Nathan).
 export function isOpenerRep(r) {
-  if (!isValidFailureRep(r)) return false;
+  if (!isCapacityEvidenceRep(r)) return false;
   if (!(r.rep_num == null || Number(r.rep_num) === 1)) return false;
   if (!(r.set_num == null || Number(r.set_num) === 1)) return false;
   return true;
@@ -147,7 +147,7 @@ export function isOpenerRep(r) {
 // not a finite peak — so genuine manual endurance entries still count.
 export function isSeedArtifactRep(r) {
   if (!r) return false;
-  if (r.force_recording?.version === 1) return false;
+  if (r.force_recording?.version >= 1) return false;
   const a = Number(r.avg_force_kg);
   const p = Number(r.peak_force_kg);
   return Number.isFinite(a) && Number.isFinite(p) && a > 0 && p > 0

@@ -1,4 +1,4 @@
-import { isValidFailureRep } from "./forceRecording.js";
+import { recoveryEvidence } from "./recoveryEvidence.js";
 // ───────────────────────────────────────────────────────────────
 // RECOVERY DYNAMICS — between-rep capacity restoration
 // ───────────────────────────────────────────────────────────────
@@ -66,12 +66,12 @@ export function buildObservedRecoverySeries(reps) {
 // By construction predictedFraction at rep 1 is 1.0 (the seed).
 // Returns [] when inputs are insufficient to run the model.
 export function buildPredictedRecoverySeries({
-  numReps, firstRepTime, restSeconds, physModel,
+  numReps, firstRepTime, restSeconds, restIntervals = null, physModel,
 }) {
-  if (!(numReps > 0) || !(firstRepTime > 0) || !(restSeconds >= 0)) return [];
+  if (!(numReps > 0) || !(firstRepTime > 0)) return [];
   if (!physModel) return [];
   const predictedTimes = predictRepTimes({
-    numReps, firstRepTime, restSeconds, physModel,
+    numReps, firstRepTime, restSeconds, restIntervals, physModel,
   });
   if (!Array.isArray(predictedTimes) || predictedTimes.length === 0) return [];
   const t1 = predictedTimes[0];
@@ -123,12 +123,13 @@ export function buildRecoveryBundle({ reps, restSeconds, physModel }) {
   if (!Array.isArray(reps) || reps.length === 0) {
     return { observed: [], predicted: [], gapAtTarget: null, observedAtTarget: null };
   }
-  const sorted = [...reps].sort((a, b) => (a.rep_num ?? 0) - (b.rep_num ?? 0));
+  const evidence = recoveryEvidence(reps);
+  const sorted = evidence.reps;
   const firstRepTime = Number(sorted[0]?.actual_time_s);
   const observed = buildObservedRecoverySeries(sorted);
-  const predicted = (firstRepTime > 0 && restSeconds >= 0 && physModel)
+  const predicted = (evidence.eligible && physModel)
     ? buildPredictedRecoverySeries({
-        numReps: sorted.length, firstRepTime, restSeconds, physModel,
+        numReps: sorted.length, firstRepTime, restIntervals: evidence.rests, physModel,
       })
     : [];
   const obsAtTarget = observed.find(p => p.rep === GAP_TARGET_REP)?.observedFraction ?? null;
@@ -137,7 +138,7 @@ export function buildRecoveryBundle({ reps, restSeconds, physModel }) {
     ? obsAtTarget - predAtTarget
     : null;
   return {
-    observed, predicted,
+    observed, predicted, eligibility: evidence.status, reason: evidence.reason,
     gapAtTarget,
     observedAtTarget: obsAtTarget,
   };
@@ -185,7 +186,7 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
   const groups = new Map();
   for (const r of history) {
     if (r.grip !== grip) continue;
-    if (!(Number(r.actual_time_s) > 0)) continue;
+
     const sessKey = r.session_id || r.date;
     const handKey = r.hand || "L";
     const key = `${sessKey}|${handKey}|${r.set_num ?? 1}`;
@@ -200,11 +201,11 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
   // per-session datapoint (avoids double-plotting Both-mode sessions).
   const bySession = new Map();
   for (const grp of groups.values()) {
-    if (!grp.reps.every(isValidFailureRep)) continue;
-    if (grp.reps.length < GAP_TARGET_REP) continue;
-    const sorted = [...grp.reps].sort((a, b) => (a.rep_num ?? 0) - (b.rep_num ?? 0));
+    const evidence = recoveryEvidence(grp.reps);
+    if (evidence.reps.length < GAP_TARGET_REP) continue;
+    const sorted = evidence.reps;
     const rep1 = sorted[0];
-    const repTarget = sorted.find(r => r.rep_num === GAP_TARGET_REP) ?? sorted[GAP_TARGET_REP - 1];
+    const repTarget = sorted[GAP_TARGET_REP - 1];
     const t1 = Number(rep1?.actual_time_s);
     const tT = Number(repTarget?.actual_time_s);
     if (!(t1 > 0) || !(tT > 0)) continue;
@@ -215,12 +216,11 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
     // missing on the rep row (same convention as HistoryView).
     let gap = null;
     if (physModel) {
-      const rawRest = Number(rep1.rest_s);
-      const rest = Number.isFinite(rawRest) && rawRest >= 0 ? rawRest : 20;
+
       const predTimes = predictRepTimes({
         numReps: GAP_TARGET_REP,
         firstRepTime: t1,
-        restSeconds: rest,
+        restIntervals: evidence.rests.slice(0, GAP_TARGET_REP - 1),
         physModel,
       });
       if (Array.isArray(predTimes) && predTimes.length >= GAP_TARGET_REP && predTimes[0] > 0) {

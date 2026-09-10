@@ -1,4 +1,4 @@
-import { isValidFailureRep } from "./forceRecording.js";
+import { recoveryEvidence } from "./recoveryEvidence.js";
 // ─────────────────────────────────────────────────────────────
 // PERSONAL RECOVERY TAU FIT
 // ─────────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ function predictDecay(firstT, nReps, restS, tauR) {
   return predictRepTimes({
     firstRepTime: firstT,
     numReps: nReps,
-    restSeconds: restS,
+    restIntervals: restS,
     physModel: { ...PHYS_MODEL_DEFAULT, tauR },
     roundTo: null,
   });
@@ -125,19 +125,16 @@ function setsForGrip(history, grip) {
   for (const r of history || []) {
     if (!r || r.grip !== grip) continue;
     if (r.hand !== "L" && r.hand !== "R") continue;
-    if (!(r.actual_time_s > 0) || !r.session_id) continue;
+    if (!r.session_id) continue;
     const key = `${r.session_id}|${r.hand}|${r.set_num ?? 1}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   }
   const sets = [];
   for (const reps of groups.values()) {
-    if (!reps.every(isValidFailureRep)) continue;
-    reps.sort((a, b) => (a.rep_num || 0) - (b.rep_num || 0));
-    if (reps.length < MIN_REPS_PER_SET) continue;
-    const times = reps.map(r => r.actual_time_s);
-    const rest  = reps.reduce((s, r) => s + (r.rest_s || 20), 0) / reps.length;
-    sets.push({ times, rest });
+    const evidence = recoveryEvidence(reps);
+    if (evidence.reps.length < MIN_REPS_PER_SET) continue;
+    sets.push({ times: evidence.reps.map(r => r.actual_time_s), rest: evidence.rests });
   }
   return sets;
 }

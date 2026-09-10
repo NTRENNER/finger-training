@@ -288,7 +288,7 @@ export function useSessionRunner({
   }, [phase]);
 
   // ── Handle rep completion ─────────────────────────────────
-  const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null, failureValid = true, endReason = "muscular_failure", forceRecording = null }) => {
+  const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null, failureValid = true, endReason = "muscular_failure", forceRecording = null, startedAtMs = null, endedAtMs = null, loadProvenance = null }) => {
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
@@ -308,6 +308,15 @@ export function useSessionRunner({
       ? Math.max(MIN_HOLD_S, actualTime - MANUAL_OFFSET_S)
       : actualTime;
     const roundedActual = Math.round(adjTime * 10) / 10;
+    const measuredTiming = Number.isFinite(startedAtMs) && Number.isFinite(endedAtMs)
+      && endedAtMs >= startedAtMs;
+    const adjustedEnd = measuredTiming ? endedAtMs - (actualTime - adjTime) * 1000 : null;
+    const previousRep = [...sessionReps].reverse().find(r => r.hand === effectiveHand);
+    const previousEnd = previousRep?.rep_timing?.ended_at_ms;
+    const restBefore = measuredTiming && currentRep > 0 && Number.isFinite(previousEnd)
+      && startedAtMs >= previousEnd ? (startedAtMs - previousEnd) / 1000 : null;
+    const provenance = loadProvenance || (avgForce > 0 ? "measured_force"
+      : manualLoadKg > 0 ? "nominal_setting" : "prescription_only");
     const derivedFailed = failed || isShortfall(roundedActual, config.targetTime);
     const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {
@@ -344,6 +353,10 @@ export function useSessionRunner({
       manual_load_kg:     (Number.isFinite(manualLoadKg) && manualLoadKg > 0)
                             ? Math.round(manualLoadKg * 1000) / 1000
                             : null,
+      rep_timing: { version: 1, started_at_ms: measuredTiming ? startedAtMs : null,
+        ended_at_ms: adjustedEnd, rest_before_s: restBefore,
+        source: measuredTiming ? (forceRecording ? "device_aligned" : "manual_tap") : "unknown" },
+      load_provenance: provenance,
       failure_valid: failureValid,
       end_reason: endReason,
       force_recording: forceRecording,
@@ -399,6 +412,7 @@ export function useSessionRunner({
     // 83 lb pulled, reps 2+ died at 15-30s).
     setLastRepResult({
       actualTime: adjTime, avgForce, peakForce, failureValid, endReason,
+      forceRecording, restBefore, loadProvenance: provenance,
       targetTime: config.targetTime,
       prescribedWeight: roundedPrescribed,
     });

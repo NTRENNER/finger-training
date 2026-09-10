@@ -6,7 +6,9 @@ import { freshFitReps } from '../../model/load.js';
 test('cloud round-trip retains interrupted activity and excludes it from fitting', async () => {
   const rep = {id: 'rep', date: '2026-09-10', grip: 'Micro', hand: 'L', rep_num: 1, set_num: 1,
     actual_time_s: 12, avg_force_kg: 17.5, failure_valid: false, end_reason: 'interrupted',
-    force_recording: {version: 1, method: 'time_weighted', duration_s: 12}};
+    force_recording: {version: 2, method: 'time_weighted', duration_s: 12, capacity_eligible: false},
+    load_provenance: 'measured_force',
+    rep_timing: {version: 1, started_at_ms: 100000, ended_at_ms: 112000, rest_before_s: 35}};
   const payload = repPayload(rep, 'user');
   mockOrder.mockResolvedValue({data: [payload], error: null});
   const [restored] = await fetchReps();

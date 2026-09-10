@@ -1,3 +1,4 @@
+import { measuredRecoveryFields } from "../../testHelpers/recovery.js";
 // Coverage for the per-grip recovery coaching signal (Aug 2026):
 // recoveryCoachSignals (the compact per-grip read) + recoveryNote (the
 // early-warn / reassure copy) + its buildCoachNotes priority.
@@ -10,8 +11,8 @@ import {
 // ── recoveryCoachSignals ──────────────────
 describe("recoveryCoachSignals", () => {
   const sess = (id, date, t1, frac) => ([
-    { session_id: id, date, grip: "Micro", hand: "L", set_num: 1, rep_num: 1, actual_time_s: t1, rest_s: 20 },
-    { session_id: id, date, grip: "Micro", hand: "L", set_num: 1, rep_num: 2, actual_time_s: Math.round(t1 * frac), rest_s: 20 },
+    { ...measuredRecoveryFields(), session_id: id, date, grip: "Micro", hand: "L", set_num: 1, rep_num: 1, actual_time_s: t1, rest_s: 20 },
+    { ...measuredRecoveryFields(), session_id: id, date, grip: "Micro", hand: "L", set_num: 1, rep_num: 2, actual_time_s: Math.round(t1 * frac), rest_s: 20 },
   ]);
 
   test("too few sessions → no signal for the grip", () => {

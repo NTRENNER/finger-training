@@ -1,3 +1,4 @@
+import { measuredRecoveryFields } from "../../testHelpers/recovery.js";
 // Tests for src/model/recoveryDynamics.js — between-rep capacity
 // restoration metrics that feed the RecoveryChart.
 
@@ -21,8 +22,8 @@ import { getPhysModel } from "../fatigue.js";
 // model's recovery predictions are deterministic given a physModel.
 const physModel = getPhysModel([], "L", "Crusher");
 
-function rep(repNum, actual_time_s) {
-  return { rep_num: repNum, actual_time_s };
+function rep(repNum, actual_time_s, rest = 20) {
+  return { ...measuredRecoveryFields(rest), rep_num: repNum, actual_time_s };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -162,7 +163,7 @@ describe("buildRecoveryBundle", () => {
     // Long rest + a rep 2 close to rep 1 means the user recovered
     // about as well as the model predicts (or maybe better). Use
     // a very long rest so the model predicts near-full recovery.
-    const reps = [rep(1, 30), rep(2, 29)]; // ~97% recovered observed
+    const reps = [rep(1, 30), rep(2, 29, 300)]; // ~97% recovered observed
     const out = buildRecoveryBundle({ reps, restSeconds: 300, physModel });
     // With 5 minutes of rest the model should predict near-full
     // recovery too, so the gap shouldn't be wildly off either way.
@@ -174,7 +175,7 @@ describe("buildRecoveryBundle", () => {
     // Short rest + a poor rep 2 vs long rest + same poor rep 2.
     // The short-rest version predicts low recovery (smaller gap);
     // the long-rest version predicts high recovery (bigger gap).
-    const repsBadRecovery = [rep(1, 30), rep(2, 5)]; // 17% observed
+    const repsBadRecovery = [rep(1, 30), rep(2, 5, 300)]; // 17% observed
     const longRest = buildRecoveryBundle({
       reps: repsBadRecovery, restSeconds: 300, physModel,
     });
@@ -216,7 +217,7 @@ describe("buildRecoveryBundle", () => {
 // ─────────────────────────────────────────────────────────────
 
 function repRow({ session_id, date, grip, hand, rep_num, actual_time_s }) {
-  return { session_id, date, grip, hand, rep_num, actual_time_s };
+  return { ...measuredRecoveryFields(), session_id, date, grip, hand, rep_num, actual_time_s };
 }
 
 describe("buildRecoveryTrend", () => {
@@ -321,7 +322,7 @@ describe("buildRecoveryTrend", () => {
     expect(out[0].gapAtTarget).toBeLessThan(out[0].observedAtTarget);
   });
 
-  test("missing rest_s falls back to 20s, gap still computed", () => {
+  test("missing planned rest does not erase measured actual rest", () => {
     const history = [
       repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 1, actual_time_s: 30 }),
       repRow({ session_id: "s1", date: "2026-05-01", grip: "Crusher", hand: "L", rep_num: 2, actual_time_s: 24 }),

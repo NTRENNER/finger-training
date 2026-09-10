@@ -1,4 +1,4 @@
-import { isValidFailureRep } from "./forceRecording.js";
+import { isCapacityEvidenceRep } from "./forceRecording.js";
 // ─────────────────────────────────────────────────────
 // ENDURANCE TAIL  (long-duration prescription ceiling)
 // ─────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ export function enduranceTailFit(history, hand, grip, referenceDate = null) {
   if (!history) return null;
   const pts = [];
   for (const r of history) {
-    if (!isValidFailureRep(r)) continue;
+    if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;   // fresh efforts only
     if (isSeedArtifactRep(r)) continue;

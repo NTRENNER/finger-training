@@ -33,9 +33,9 @@ test('manual interruption does not reuse stale sensor averages', () => {
 test('rest explains force, time, and validity', () => {
   render(<RestView lastRep={{actualTime: 30, avgForce: 17.5, failureValid: false, targetTime: 40}} restSeconds={20} repNum={1} repsPerSet={4} unit="kg" onRestDone={() => {}} />);
   expect(screen.getByText(/17.5 kg time-weighted average over 30.0s/)).toBeInTheDocument();
-  expect(screen.getByText(/activity saved; excluded from failure learning/)).toBeInTheDocument();
+  expect(screen.getByText(/Interrupted — activity only/)).toBeInTheDocument();
 });
 test('final rep retains its interruption status in session summary', () => {
   render(<SessionSummaryView config={config} reps={[{rep_num: 1, set_num: 1, actual_time_s: 12, avg_force_kg: 18, failure_valid: false}]} onDone={() => {}} />);
-  expect(screen.getByText(/Interrupted · excluded from failure learning/)).toBeInTheDocument();
+  expect(screen.getByText(/Interrupted — activity only/)).toBeInTheDocument();
 });

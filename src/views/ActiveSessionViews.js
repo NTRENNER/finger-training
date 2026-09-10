@@ -1,3 +1,4 @@
+import { evidenceLabel } from "../model/forceRecording.js";
 // ──────────────────────────────────────────────────────────────
 // ACTIVE-SESSION VIEWS
 // ──────────────────────────────────────────────────────────────
@@ -89,8 +90,7 @@ function LiveRecoveryCard({ history, config, activeHand, sessionReps, embedded =
   const bundle = useMemo(() => {
     const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
     const sameHandReps = (sessionReps || [])
-      .filter(r => r.hand === handForLookup)
-      .filter(r => Number(r.actual_time_s) > 0);
+      .filter(r => r.hand === handForLookup);
     // Rep 2 is the first inter-rep recovery measurement. Until
     // that's in the books there's no recovery to show.
     if (sameHandReps.length < 2) return null;
@@ -101,7 +101,9 @@ function LiveRecoveryCard({ history, config, activeHand, sessionReps, embedded =
       physModel,
     });
   }, [history, config, activeHand, sessionReps]);
-  if (!bundle || bundle.observed.length === 0) return null;
+  if (!bundle) return null;
+  if (bundle.eligibility === "descriptive_only") return <p>Activity recorded. Recovery comparison needs measured rest and comparable force.</p>;
+  if (bundle.observed.length === 0) return null;
   const classification = classifyRecovery(bundle.observedAtTarget);
   const inner = (
     <RecoveryChart
@@ -301,7 +303,9 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     const failed = autoFailedRef.current;
     autoFailedRef.current = false;
     clearInterval(timerRef.current);
-    const actualTime = (Date.now() - startTimeRef.current) / 1000;
+    const startedAtMs = startTimeRef.current;
+    const endedAtMs = Date.now();
+    const actualTime = (endedAtMs - startedAtMs) / 1000;
     startTimeRef.current = null;
     setRepPhase("ready");
     // Use the completed measurement; manual reps must not reuse stale BLE stats.
@@ -319,7 +323,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     // without it the rep persists load=0 and every downstream fit reads
     // zero (the elcerritotom bug, July 2026). Tindeq reps still prefer the
     // measured avg_force_kg via effectiveLoad, so this is a no-op there.
-    onRepDone({ actualTime, avgForce, peakForce, failed, ...measurement,
+    onRepDone({ actualTime, avgForce, peakForce, failed, startedAtMs, endedAtMs, ...measurement,
       failureValid: interrupted === true ? false : (measurement.failureValid ?? true),
       endReason: interrupted === true ? "interrupted" : (measurement.endReason ?? "muscular_failure"),
       manualLoadKg: manualKgRef.current });
@@ -376,7 +380,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       </div>
 
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
-      <p>Target time guides the prescribed load. Continue until muscular failure.</p>
+      <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
 
 
       {/* Phase cards (countdown / timer / ready) render FIRST so the
@@ -613,9 +617,12 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
       {lastRep && (
         <Card>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Last rep result</div>
-          <p>{lastRep.failureValid === false
-            ? "Interrupted or incomplete measurement — activity saved; excluded from failure learning."
-            : "Muscular failure recorded — valid failure data."}</p>
+          <p>{evidenceLabel({ failure_valid: lastRep.failureValid,
+            force_recording: lastRep.forceRecording, load_provenance: lastRep.loadProvenance })}.</p>
+          {lastRep.restBefore != null && <p>Actual rest before this rep: {lastRep.restBefore.toFixed(1)}s.</p>}
+          {lastRep.forceRecording?.plateau?.duration_s > 0 && <p>
+            Strong phase: {fmtW(lastRep.forceRecording.plateau.avg_force_kg, unit)} {unit} for {lastRep.forceRecording.plateau.duration_s.toFixed(1)}s.
+          </p>}
           <p>{lastRep.avgForce > 0 ? `${fmtW(lastRep.avgForce, unit)} ${unit} time-weighted average over ${lastRep.actualTime.toFixed(1)}s.` : "Manually timed effort."}</p>
           <div style={{ display: "flex", gap: 32 }}>
             <div>
@@ -840,8 +847,7 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
               {sReps.map(r => (
                 <tr key={r.rep_num} style={{ borderTop: `1px solid ${C.border}` }}>
                   <td style={{ padding: "6px 0" }}>{r.rep_num}
-                    <div style={{ fontSize: 11 }}>{r.failure_valid === false
-                      ? "Interrupted · excluded from failure learning" : "Valid failure data"}</div>
+                    <div style={{ fontSize: 11 }}>{evidenceLabel(r)}</div>
                   </td>
                   <td style={{ textAlign: "right" }}>{fmtW(prescribedLoad(r), unit)} {unit}</td>
                   <td style={{ textAlign: "right", color: r.actual_time_s >= config.targetTime ? C.green : C.red }}>
@@ -961,7 +967,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
       </div>
 
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
-      <p>Target time guides the prescribed load. Continue until muscular failure.</p>
+      <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
+      {suggestedKg > 0 && <p>The rep ends when force drops below {fmtW(suggestedKg, unit)} {unit}. Overshooting is recorded at the force you actually pull.</p>}
       {repActive && <Btn onClick={() => handleRepEnd({
         ...tindeq.endRepAndRequireRelease(), failureValid: false, endReason: "interrupted",
       })}>Rep interrupted</Btn>}
@@ -972,7 +979,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
       <Card style={{ textAlign: "center", padding: "32px 16px", marginTop: 12 }}>
         {repActive ? (
           <>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Continue until muscular failure</div>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Maintain the prescribed force until muscular failure</div>
             <div style={{
               fontSize: 96, fontWeight: 900, lineHeight: 1,
               color: targetReached ? C.green : C.blue,

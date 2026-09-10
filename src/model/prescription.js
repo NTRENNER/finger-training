@@ -1,4 +1,4 @@
-import { isValidFailureRep } from "./forceRecording.js";
+import { isCapacityEvidenceRep } from "./forceRecording.js";
 // ───────────────────────────────────────────────────────────────
 // PRESCRIPTION LAYER
 // ───────────────────────────────────────────────────────────────
@@ -124,7 +124,7 @@ const MAX_FRESH_INFLATION = 3;
 export function buildSMaxIndex(history) {
   const out = new Map();
   for (const r of history || []) {
-    if (!isValidFailureRep(r)) continue;
+    if (!isCapacityEvidenceRep(r)) continue;
     if (!r.hand || !r.grip) continue;
     const load = effectiveLoad(r);
     if (!(load > 0)) continue;
@@ -170,7 +170,7 @@ export function buildFreshLoadMap(history, opts = {}) {
   // Group by session + hand (fatigue state is per-hand at runtime).
   const groups = new Map();
   for (const r of history) {
-    if (!isValidFailureRep(r)) continue;
+    if (!r) continue;
     const sid = r.session_id || `nosid|${r.date}`;
     const k = `${sid}|${r.hand}`;
     if (!groups.has(k)) groups.set(k, []);
@@ -205,16 +205,21 @@ export function buildFreshLoadMap(history, opts = {}) {
     let F = 0;
     let prevSetNum = null;
     let prevRest = 0;
+    let sequenceValid = true;
 
     for (const r of sorted) {
       const setNum = r.set_num || 1;
       if (prevSetNum !== null && setNum !== prevSetNum) {
         F = 0;
+        sequenceValid = true;
       } else if (prevSetNum !== null) {
-        F = fatigueAfterRest(F, prevRest, gripFatParamsFor(r.grip));
+        const actualRest = r.rep_timing?.rest_before_s;
+        if (r.rep_timing && (!Number.isFinite(actualRest) || actualRest < 0)) sequenceValid = false;
+        F = fatigueAfterRest(F, Number.isFinite(actualRest) && actualRest >= 0 ? actualRest : prevRest, gripFatParamsFor(r.grip));
       }
 
-      const af = availFrac(F);
+      if (!isCapacityEvidenceRep(r)) sequenceValid = false;
+      const af = sequenceValid ? availFrac(F) : 1;
       const load = effectiveLoad(r);
       // Within-set fatigue compensation (existing path): divide by
       // availFrac to recover the fresh-equivalent load given how
@@ -248,7 +253,7 @@ export function buildFreshLoadMap(history, opts = {}) {
       const cappedFresh = load > 0
         ? Math.min(fresh, load * MAX_FRESH_INFLATION, SANE_MAX_KG)
         : fresh;
-      out.set(repKey(r), { fresh: cappedFresh, availFrac: af, load });
+      if (isCapacityEvidenceRep(r)) out.set(repKey(r), { fresh: cappedFresh, availFrac: af, load });
 
       const sMax = sMaxByKey.get(`${r.hand}|${r.grip}`) || 20;
       const dose = fatigueDose(load, r.actual_time_s || 0, sMax, doseK);
@@ -279,7 +284,7 @@ export function fitDoseK(history, opts = {}) {
 
   const sets = new Map();
   for (const r of history) {
-    if (!isValidFailureRep(r)) continue;
+    if (!isCapacityEvidenceRep(r)) continue;
     if (!(r.actual_time_s > 0) || effectiveLoad(r) <= 0) continue;
     const sid = r.session_id || `nosid|${r.date}`;
     const k = `${sid}|${r.hand}|${r.set_num || 1}`;
@@ -341,7 +346,7 @@ export function fitDoseK(history, opts = {}) {
 export function estimateRefWeight(history, hand, grip, targetDuration) {
   if (!history || history.length === 0) return null;
   const tol = targetDuration * 0.40;
-  const matches = history.filter(r => isValidFailureRep(r) &&
+  const matches = history.filter(r => isCapacityEvidenceRep(r) &&
     r.hand === hand &&
     (!grip || r.grip === grip) &&
     r.actual_time_s > 0 &&
@@ -488,7 +493,7 @@ export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
   const cutoff = ymdLocal(new Date(refMs - PEAK_CAP_LOOKBACK_DAYS * 86400 * 1000));
   let best = null;
   for (const r of history) {
-    if (!isValidFailureRep(r)) continue;
+    if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
@@ -510,7 +515,7 @@ export function historicalBestPeakKg(history, hand, grip, referenceDate = null) 
   if (!history) return null;
   let best = null;
   for (const r of history) {
-    if (!isValidFailureRep(r)) continue;
+    if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
     if (isSeedArtifactRep(r)) continue;
@@ -561,7 +566,7 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
   const cutoff = ymdLocal(new Date(refMs - CAPACITY_FLOOR_LOOKBACK_DAYS * 86400 * 1000));
   let best = null;
   for (const r of history) {
-    if (!isValidFailureRep(r)) continue;
+    if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;        // fresh efforts only
     if (isSeedArtifactRep(r)) continue;                           // skip seeded/backfilled twins (avg==peak)
@@ -600,7 +605,7 @@ export function loadBounds(history, hand, grip, targetDuration, opts = {}) {
   // the block comment at the prescription() call site below).
   let longestMeasuredHoldT = 0;
   for (const r of history || []) {
-    if (!isValidFailureRep(r)) continue;
+    if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;
     if (!isMeasuredLoadRep(r) || isSeedArtifactRep(r)) continue;
@@ -659,7 +664,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // reconstruction on reps from its own future.
   const sessionRep1 = new Map();
   for (const r of history) {
-    if (!isValidFailureRep(r)) continue;
+    if (!isCapacityEvidenceRep(r)) continue;
     if (r.hand !== hand || r.grip !== grip) continue;
     if ((r.rep_num || 1) !== 1) continue;
     if (!(r.actual_time_s > 0)) continue;
@@ -738,7 +743,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // Try the three-exp curve fit. Requires a per-grip prior to anchor
   // the shrinkage; without one, small-N fits collapse onto degenerate
   // mixes and we fall through to the cold-start paths.
-  const points = history.filter(r => isValidFailureRep(r) &&
+  const points = history.filter(r => isCapacityEvidenceRep(r) &&
     r.hand === hand && r.grip === grip
     && r.actual_time_s > 0 && effectiveLoad(r) > 0
     && !isSeedArtifactRep(r)      // seeded twins would distort the fit

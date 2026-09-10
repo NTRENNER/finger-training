@@ -1,17 +1,25 @@
 # Force-duration recording and interrupted reps
 
-The recording uses device sample timestamps (including counter rollover), not Bluetooth packet arrival time. It integrates every force interval from the first pull sample to the first release sample. Weaker work stays in the measurement. The release-confirmation delay is excluded from both duration and average. Peak remains a separate metric. The average describes variable effort; it does not claim the force was constant throughout the hold.
+Target time determines the prescribed load. The athlete maintains that load until muscular failure; continuing at a substantially reduced force does not extend the rep.
 
-For example, 5 seconds at 30 kg plus 25 seconds at 15 kg records a 17.5 kg time-weighted average over 30 seconds, with a 30 kg peak. The saved recording metadata includes observed duration and force-time integral.
+## Target-loss policy
 
-Target time determines the prescribed load. The athlete continues to muscular failure. During a rep, “Rep interrupted” saves the effort with `failure_valid: false`. Sensor disconnects, device sample gaps over one second, and a silent stream over 1.5 seconds automatically invalidate the observed effort. Automatic release detection cannot distinguish muscular failure from a mechanical slip; the athlete uses the interruption action for a known interruption.
+Once the athlete reaches the prescribed force, the first reading below that force ends the rep. There is no lower percentage allowance or confirmation delay. Initial ramp-up does not arm failure detection until target acquisition. For a 55 lb prescription the boundary is 55 lb. The athlete must release before another rep can start. With no prescribed target, release detection remains the endpoint.
 
-The recorded effort remains visible in activity/history. Invalid efforts are excluded from force-duration fitting, prescription anchors, endurance fitting, performance levels and server fatigue learning. Recovery comparisons reject a set containing an interrupted rep instead of joining the remaining reps across a missing effort. The latest interrupted session cannot advance the density ladder.
+The device sample clock determines elapsed duration, including timestamp rollover. Force is integrated over the same interval as duration. Peak is separate. Recording metadata also retains variability, signal completeness, and the longest contiguous phase above 80% of peak with its own average and duration. That descriptive phase is not substituted for full-rep capacity evidence.
 
-Existing protocol, ladder constants, and zone names are unchanged. Historical rows retain their previous failure-protocol semantics. New measured steady pulls are not mistaken for legacy seeded rows just because rounded average equals peak. Old recordings cannot be corrected without their original sample traces.
+Opening overshoot, sustained overshoot, and force variation remain usable for curve fitting. The fitted observation uses actual time-weighted force over its recorded duration, never substitutes the prescription for measured force, and does not reject a valid failure because its force varies. Variability and plateau metrics are descriptive. Incomplete sensor records and interrupted efforts remain excluded. A targeted attempt that never reaches target is not valid failure evidence.
 
-## Rollout
+“Rep interrupted” preserves activity and excludes failure learning. Disconnects, sample gaps over one second, and silent streams over 1.5 seconds invalidate the observed effort. A mechanical slip cannot always be distinguished from failure; the interruption action is available for known interruptions. Interrupted efforts cannot establish peak records.
 
-Apply `supabase/migrations/20260910_rep_force_recording.sql` before deploying this client. It adds nullable recording fields and gates the existing server fatigue trigger. Applied to the production Grip Lab database on September 10, 2026; all three fields and the learner guard were verified. Deploy the client only after the migration succeeds; an older schema will reject the new payload columns and leave writes queued locally.
+## Actual rest and recovery
 
-Automated checks exercise steady/fluctuating/declining pulls, abrupt release, unequal sample spacing, batched Bluetooth packets, interruption and release gating, disconnection, silent equipment failure, manual recording, model exclusions, and cloud payload round-trip. Physical Tindeq validation remains a rollout check.
+New records retain start/end timestamps and actual same-hand rep-end-to-next-start rest separately from prescribed rest. Unknown rest remains unknown. New nominal spring settings and prescription-only loads remain activity rather than measured capacity evidence. Existing historical records retain their previous capacity semantics and display measurement uncertainty.
+
+Recovery learning requires a consecutive opening sequence with valid endings, measured comparable loads (maximum/minimum at most 1.10), consistent setup and load source, and measured rest at every interval. Predictions use each interval individually, including zero rest. An interruption ends the comparable prefix; earlier valid comparisons remain available. Fitting requires at least three eligible reps. Historical sets without actual rest or force-quality metadata remain descriptive for recovery.
+
+## Release status and verification
+
+The original force-recording migration was applied on September 10, 2026. This follow-up also requires `supabase/migrations/20260911_rep_timing_and_evidence.sql` before its client deployment. It adds timing/provenance fields and extends the existing server learner guard. The follow-up migration was applied and verified on September 10, 2026; this release includes the matching client.
+
+Tests cover steady pulls, normal fluctuations, opening overshoot, gradual decline, sustained target loss, brief dips, abrupt release, batched timestamps, rollover, interruptions, real rest, recovery comparability, and cloud round-trip. Production and offline-shell builds pass. Physical Tindeq validation remains outstanding. Protocol, ladder constants, and zone names remain unchanged.

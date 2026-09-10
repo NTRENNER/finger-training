@@ -437,7 +437,7 @@ CREATE POLICY "auth_all" ON reps
               The Tindeq Progressor connects via Web Bluetooth. Use <b>Chrome</b> on desktop or Android.
             </p>
             <p>
-              Connect from the training screen. Continue until muscular failure; target time guides the prescribed load. Reps end automatically after release. Use “Rep interrupted” during a rep if an unexpected interruption ends the effort.
+              Connect from the training screen. Maintain the prescribed force until muscular failure; target time guides the load, not when to stop. Once you reach the target force, the rep ends when force drops below it. Overshooting remains usable data at the force you actually pull. Release once the rep ends. Use “Rep interrupted” during a rep if an unexpected interruption ends the effort.
             </p>
             <p style={{ marginBottom: 0 }}>
               If readings seem off, your firmware may use a slightly different BLE packet format — contact support.

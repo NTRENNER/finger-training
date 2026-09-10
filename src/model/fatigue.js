@@ -113,11 +113,15 @@ export function getPhysModel(history, hand, grip, opts = {}) {
 // `roundTo: null` exposes unrounded values to the recovery-tau fitter;
 // display callers retain the historical 0.1-second rounding.
 export function predictRepTimes({
-  numReps, firstRepTime, restSeconds,
+  numReps, firstRepTime, restSeconds, restIntervals = null,
   physModel = PHYS_MODEL_DEFAULT,
   roundTo = 0.1,
 }) {
-  if (!(numReps > 0) || !(firstRepTime > 0) || !(restSeconds >= 0)) return [];
+  if (!(numReps > 0) || !(firstRepTime > 0)) return [];
+  if (restIntervals != null) {
+    if (!Array.isArray(restIntervals) || restIntervals.length !== numReps - 1
+      || restIntervals.some(t => !Number.isFinite(t) || t < 0)) return [];
+  } else if (!Number.isFinite(restSeconds) || restSeconds < 0) return [];
   const comps = [
     { A: physModel.weights.fast,   tauD: physModel.tauD.fast,   tauR: physModel.tauR.fast   },
     { A: physModel.weights.medium, tauD: physModel.tauD.medium, tauR: physModel.tauR.medium },
@@ -158,7 +162,7 @@ export function predictRepTimes({
     }
     if (i < numReps - 1) {
       for (const c of state) {
-        const rec = 1 - Math.exp(-restSeconds / c.tauR);
+        const rec = 1 - Math.exp(-(restIntervals ? restIntervals[i] : restSeconds) / c.tauR);
         c.avail = Math.min(1, c.avail + (1 - c.avail) * rec);
       }
     }

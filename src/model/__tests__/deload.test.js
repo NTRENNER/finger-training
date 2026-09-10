@@ -1,3 +1,4 @@
+import { measuredRecoveryFields } from "../../testHelpers/recovery.js";
 // Tests for src/model/deload.js — cross-grip fatigue / deload detector.
 // Covers liftingVolumeByDate parsing and computeDeload's trigger logic:
 // fires only on sustained CROSS-GRIP recovery decline (single-grip dips
@@ -19,9 +20,9 @@ import {
 // uses deterministic population taus.
 let _id = 0;
 const sess = (grip, hand, date, t1, t2, rest = 120) => [
-  { id: `r${_id++}`, grip, hand, date, session_id: `${grip}-${hand}-${date}`,
+  { ...measuredRecoveryFields(rest), id: `r${_id++}`, grip, hand, date, session_id: `${grip}-${hand}-${date}`,
     rep_num: 1, set_num: 1, actual_time_s: t1, avg_force_kg: 30, target_duration: 30, rest_s: rest },
-  { id: `r${_id++}`, grip, hand, date, session_id: `${grip}-${hand}-${date}`,
+  { ...measuredRecoveryFields(rest), id: `r${_id++}`, grip, hand, date, session_id: `${grip}-${hand}-${date}`,
     rep_num: 2, set_num: 1, actual_time_s: t2, avg_force_kg: 30, target_duration: 30, rest_s: rest },
 ];
 
@@ -210,7 +211,7 @@ describe("deloadStatus (green/yellow/red gauge)", () => {
 describe("recentGapHeldOut (no look-ahead leakage)", () => {
   const { recentGapHeldOut } = require("../deload.js");
   const set = (grip, date, times, rest = 20) => times.map((t, i) => ({
-    id: `${grip}-${date}-${i}`, grip, hand: "L", date, session_id: `${grip}-${date}`,
+    ...measuredRecoveryFields(rest), id: `${grip}-${date}-${i}`, grip, hand: "L", date, session_id: `${grip}-${date}`,
     set_num: 1, rep_num: i + 1, actual_time_s: t, target_duration: 30, rest_s: rest,
   }));
 

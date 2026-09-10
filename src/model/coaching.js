@@ -1,4 +1,4 @@
-import { isValidFailureRep } from "./forceRecording.js";
+import { isCapacityEvidenceRep } from "./forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // COACHING RECOMMENDATION ENGINE  (continuous coverage + model-gap)
 // ─────────────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ export function recencyPenalty(zone, history, grip, tauScale = 1) {
   const tau = (COACH_RECOVERY_TAU_DAYS[zone] ?? 2) * (tauScale > 0 ? tauScale : 1);
   const matchingDates = history
     .filter(r => {
-      if (!isValidFailureRep(r)) return false;
+      if (!isCapacityEvidenceRep(r)) return false;
       if (r.grip !== grip) return false;
       // Fresh efforts only (rep_num === 1, or null for legacy/manual) —
       // a zone is "recently trained" only when a fresh first rep landed
@@ -154,7 +154,7 @@ export function recencyPenalty(zone, history, grip, tauScale = 1) {
 // consumers (deload, display); this continuous one is engine-internal.
 export function buildContinuousRecency(history, grip, { sigmaLog = 0.35, tauScale = 1, today = ymdLocal() } = {}) {
   const efforts = (history || [])
-    .filter(r => isValidFailureRep(r) && r.grip === grip && (r.rep_num == null || r.rep_num === 1))
+    .filter(r => isCapacityEvidenceRep(r) && r.grip === grip && (r.rep_num == null || r.rep_num === 1))
     .map(r => {
       const td = r.actual_time_s > 0 ? r.actual_time_s : r.target_duration;
       if (!(td > 0) || !r.date) return null;
@@ -435,7 +435,7 @@ export function coldStartSeedWeight(T) {
 // technically tentative, while later declines are recovery observations,
 // not evidence that the demonstrated ceiling was lower.
 function coldStartUpperAnchorRep(gripReps, hand) {
-  const candidates = (gripReps || []).filter(rep => isValidFailureRep(rep) &&
+  const candidates = (gripReps || []).filter(rep => isCapacityEvidenceRep(rep) &&
     rep?.hand === hand
     && Number(rep.target_duration) > 0
     && Number(rep.target_duration) <= COLD_START_SHORT_ANCHOR_MAX_T
@@ -476,7 +476,7 @@ export function coldStartLongProbeLoad(gripReps, hand, targetT = COLD_START_LONG
   // lower of the two candidates. This prevents repeating an identical
   // too-heavy "probe" indefinitely.
   const shortLongAttempts = reps
-    .filter(rep => isValidFailureRep(rep) &&
+    .filter(rep => isCapacityEvidenceRep(rep) &&
       rep?.hand === hand
       && isOpenerRep(rep)
       && rep.target_duration >= COLD_START_LONG_ANCHOR_MIN_T
@@ -595,7 +595,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // The Setup tab's Curve Coverage card uses the all-grips view of
   // getZoneStaleness for its zone-balance framing; here we want the
   // grip-scoped view so the engine recommends what THIS grip needs.
-  const gripHistory = history.filter(r => isValidFailureRep(r) && r?.grip === grip);
+  const gripHistory = history.filter(r => isCapacityEvidenceRep(r) && r?.grip === grip);
   const stalenessMap = getZoneStaleness(gripHistory, today);
 
   // Cold start uses the exact fresh, de-duplicated fit basis. Later
@@ -631,7 +631,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // argmax can favor the weaker hand (more pooled-AUC gain per session).
   const handFits = {};   // hand -> { amps, ratios, strength }
   for (const hand of ["L", "R"]) {
-    const handPts = (history || []).filter(r => isValidFailureRep(r) &&
+    const handPts = (history || []).filter(r => isCapacityEvidenceRep(r) &&
       r.hand === hand && r.grip === grip
       && r.actual_time_s > 0 && effectiveLoad(r) > 0
     );

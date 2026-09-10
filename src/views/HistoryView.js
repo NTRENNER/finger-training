@@ -1,3 +1,4 @@
+import { evidenceLabel } from "../model/forceRecording.js";
 // ──────────────────────────────────────────────────────────────
 // HISTORY VIEW
 // ──────────────────────────────────────────────────────────────
@@ -420,7 +421,7 @@ export function HistoryView({
     const map = new Map();
     for (const sess of (showAllSessions ? grouped : grouped.slice(0, SESSION_CAP))) {
       const cardKey = `${sess.reps[0]?.session_id || sess.date}|${sess.date}`;
-      const validReps = sess.reps.filter(r => Number(r.actual_time_s) > 0);
+      const validReps = sess.reps;
       if (validReps.length < 2) continue;
       const hands = sess.hand === "B"
         ? ["L", "R"].filter(h => validReps.some(r => r.hand === h))
@@ -994,10 +995,13 @@ export function HistoryView({
                             restSeconds: restS,
                             physModel,
                           });
-                          if (recBundle.observed.length === 0) return null;
+                          if (recBundle.eligibility === "descriptive_only" || recBundle.observed.length < 2) return (
+                            <p>Descriptive only — recovery comparison needs measured rest and comparable force in consecutive valid reps.</p>
+                          );
                           const classification = classifyRecovery(recBundle.observedAtTarget);
                           return (
                             <div style={{ marginTop: 12 }}>
+                              {recBundle.eligibility === "partial" && <p>Recovery comparison uses the valid opening reps only.</p>}
                               <RecoveryChart
                                 observed={recBundle.observed}
                                 predicted={recBundle.predicted}
@@ -1049,8 +1053,15 @@ export function HistoryView({
                         </span>
                       )}
                       <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
-                      {r.failure_valid === false && <span> · Interrupted — excluded from failure learning</span>}
-                      {r.force_recording?.version === 1 && <span> · Time-weighted average</span>}
+                      <span> · {evidenceLabel(r)}</span>
+                      {r.force_recording?.version >= 1 && <span> · Time-weighted average</span>}
+                      <div>{r.rep_timing?.rest_before_s != null
+                        ? `Actual rest before rep: ${r.rep_timing.rest_before_s.toFixed(1)}s`
+                        : "Actual rest not recorded"} · Planned rest: {r.rest_s ?? 20}s</div>
+                      {r.force_recording?.plateau?.duration_s > 0 && <div>
+                        Strong phase: {fmtW(r.force_recording.plateau.avg_force_kg, unit)} {unit} for {r.force_recording.plateau.duration_s.toFixed(1)}s
+                        · Force variation: {Math.round((r.force_recording.force_cv || 0) * 100)}%
+                      </div>}
                       {/* Rest interval — small muted suffix so it's
                           visible at a glance for verifying edits and
                           spotting protocol drift, without crowding

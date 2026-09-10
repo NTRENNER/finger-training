@@ -1,3 +1,4 @@
+import { measuredRecoveryFields } from "../../testHelpers/recovery.js";
 // Tests for src/model/repCurveData.js — assembly helpers for the
 // shared RepCurveChart component.
 
@@ -189,7 +190,7 @@ describe("buildPhysModel personalization", () => {
   // every RepCurveChart forecast.
   const decaySession = (sid, times) =>
     times.map((t, i) => rep({
-      session_id: sid, rep_num: i + 1, actual_time_s: t, rest_s: 20,
+      session_id: sid, rep_num: i + 1, actual_time_s: t, rest_s: 20, ...measuredRecoveryFields(),
     }));
 
   // Steep within-set decay → fitted taus differ from population.

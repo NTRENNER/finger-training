@@ -1,7 +1,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { useTindeq, TINDEQ_NOTIFY } from '../tindeq.js';
 
-async function setup() {
+async function setup(targetKg = null) {
   const listeners = {};
   const deviceListeners = {};
   const data = { addEventListener: (key, cb) => { listeners[key] = cb; }, removeEventListener: jest.fn(), startNotifications: async () => {}, stopNotifications: async () => {} };
@@ -12,6 +12,7 @@ async function setup() {
   Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { requestDevice: async () => device } });
   const hook = renderHook(() => useTindeq());
   await act(async () => { await hook.result.current.connect(); });
+  hook.result.current.targetKgRef.current = targetKg;
   const onStart = jest.fn(), onEnd = jest.fn();
   await act(async () => { await hook.result.current.startAutoDetect(onStart, onEnd); });
   const packet = samples => {
@@ -72,4 +73,30 @@ test('device timestamp rollover preserves duration', async () => {
   const base = 4294900;
   packet([[base, 20], [base + 500, 20], [base + 1000, 20], [base + 1500, 20], [base + 2000, 0], [base + 2500, 0]]);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime: 2, avgForce: 20, failureValid: true});
+});
+
+test('sustained target loss ends once while still pulling and requires release', async () => {
+  const { packet, onStart, onEnd } = await setup(25);
+  for (let ms = 0; ms <= 6000; ms += 100) packet([[ms, ms < 3000 ? 25 : 15]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  const stats = onEnd.mock.calls[0][0];
+  expect(stats.endReason).toBe('target_force_failure');
+  expect(stats.failureValid).toBe(true);
+  expect(stats.actualTime).toBeGreaterThanOrEqual(3);
+  expect(stats.actualTime).toBeLessThan(3.4);
+  expect(onStart).toHaveBeenCalledTimes(1);
+  packet([[6100, 0], [6200, 25]]);
+  expect(onStart).toHaveBeenCalledTimes(2);
+});
+test('a drop below target finishes a live rep', async () => {
+  const { packet, onEnd } = await setup(25);
+  for (let ms = 0; ms <= 4000; ms += 100) packet([[ms, ms >= 2000 && ms < 2200 ? 20 : 25]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0].actualTime).toBe(2);
+});
+test('batched timestamps align rep start and end with wall time', async () => {
+  const { packet, onEnd } = await setup();
+  const arrival = Date.now();
+  packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 0], [2500, 0]]);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({startedAtMs: arrival - 2500, endedAtMs: arrival - 500});
 });

@@ -18,6 +18,7 @@
 //
 // Pure functions; no React. Tested in isolation.
 
+import { isValidFailureRep } from "./forceRecording.js";
 import { SANE_MAX_KG, isSeedArtifactRep } from "./load.js";
 import { classifyZone6 } from "./zones.js";
 
@@ -53,7 +54,7 @@ export function buildPeakForceTrend(history, {
   const observedByGrip = {};
   const maxIntentByGrip = {};
   for (const r of history) {
-    if (!r || !r.grip || !r.date) continue;
+    if (!isValidFailureRep(r) || !r.grip || !r.date) continue;
     // Seed-artifact guard: a seeded/backfilled twin mirrors its (often
     // inflated) load into peak_force_kg too — avg==peak is not a real
     // measurement, so it can't set a PR or a session best.

@@ -147,6 +147,8 @@ export function useRepHistory({
       r.manual_load_kg,
       r.weight_kg,
       r.failed ? 1 : 0,
+      r.failure_valid, r.load_provenance,
+      JSON.stringify(r.force_recording), JSON.stringify(r.rep_timing),
       r.rep_num,
       r.rest_s,
       // Per-session cookedness override — when this changes (the

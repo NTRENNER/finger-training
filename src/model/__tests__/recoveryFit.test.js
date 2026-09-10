@@ -1,3 +1,4 @@
+import { measuredRecoveryFields } from "../../testHelpers/recovery.js";
 // Tests for src/model/recoveryFit.js — personal recovery tau fit
 // with Bayesian shrinkage toward the population prior.
 
@@ -24,7 +25,7 @@ function simulateSet({ firstT, nReps, restS, tauR, sessionId, hand = "L", grip =
       rep_num: i + 1,
       actual_time_s: Math.max(0.01, t),
       avg_force_kg: 25,
-      rest_s: restS,
+      rest_s: restS, ...measuredRecoveryFields(restS),
   }));
 }
 
