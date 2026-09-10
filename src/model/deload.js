@@ -1,46 +1,8 @@
 // ──────────────────────────────────────────────────────────────
 // DELOAD DETECTOR
 // ──────────────────────────────────────────────────────────────
-// Flags accumulating systemic fatigue and proposes a deload. NOT an
-// injury system (the Micro/Crusher tools carry no finger-injury risk)
-// — it's about catching non-functional overreaching, where fatigue is
-// suppressing adaptation and backing off lets supercompensation happen.
-//
-// DESIGN (validated against real history, May 2026):
-//
-//  • The finger-training data is the SENSOR. It's densely instrumented
-//    (per-rep failure curves), so total systemic fatigue — climbing +
-//    lifting + life — shows up in it. Lifting/climbing are coarsely
-//    logged by comparison, so they're CONTEXT, not the trigger.
-//
-//  • Trigger = cross-grip recovery-gap down. The per-grip rep2/rep1
-//    recovery gap (observed − model-predicted, see recoveryDynamics)
-//    must be below the noise band for EVERY trained grip over the last
-//    N sessions. Cross-grip agreement is the key false-positive guard:
-//    a single grip dipping is almost always a zone/training-phase
-//    artifact (we saw Crusher dip in May purely from a shift to long
-//    holds while Micro stayed flat — NOT fatigue). Real systemic
-//    fatigue pulls every grip down together.
-//
-//  • Personal recovery taus (recoveryFit), not population, so "worse
-//    than the model expects" means worse than YOUR normal — this
-//    strips the long-hold tau-mismatch that otherwise masquerades as
-//    fatigue.
-//
-//  • Lifting volume is the DISAMBIGUATOR / severity booster, not the
-//    trigger. A completed-set acute-vs-chronic spike turns an ambiguous
-//    cross-grip dip into a confident "strong" deload (both grips down
-//    AND your heaviest lifting week = real overreaching). Set count, not
-//    tonnage — the workout logs are too messy (string reps, empty =
-//    bodyweight, unilateral L/R, duplicate rows) for reliable tonnage.
-//
-//  • Detraining guard: if there's no recent finger session, you're
-//    rested, not fatigued — never deload.
-//
-// The detector only PROPOSES (returns a why-string for a banner); the
-// UI surfaces it and the user accepts before any load is regulated.
-// Pure functions; no React, no Supabase. Tested in isolation.
-
+// Recovery comparisons can suggest reduced training; they do not establish
+// systemic fatigue, injury risk, or readiness in the absence of current data.
 import { buildRecoveryTrend } from "./recoveryDynamics.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
@@ -108,7 +70,7 @@ export function recoveryStatusDates(history, opts = {}) {
         measurableGrips++;
       }
     }
-    return measurableGrips >= 2;
+    return measurableGrips >= 1;
   });
 
   if (today && checkpoints.length > 0 && today >= checkpoints[0]) {
@@ -176,6 +138,7 @@ export function recentGapHeldOut(history, grip, today, n) {
   const sessions = buildRecoveryTrend(history, grip, { physModel: null })
     .filter(r => r.date && r.date <= today);
   if (sessions.length < n) return null;
+  if (daysBetween(sessions[sessions.length - n].date, today) > DELOAD_STALE_DAYS) return null;
   const recent = sessions.slice(-n);
   const cutoff = recent[0].date;                    // earliest of the window
   const baseline = history.filter(r => r.grip === grip && r.date && r.date < cutoff);
@@ -193,7 +156,7 @@ export function recentGapHeldOut(history, grip, today, n) {
 // `signals` exposes the raw inputs so the UI can show its work.
 export function computeDeload(history, workoutSessions = [], opts = {}) {
   const { today = null, minSessions = DELOAD_MIN_SESSIONS } = opts;
-  const none = (why, signals = {}) => ({ deload: false, severity: "none", signals, why });
+  const none = (why, signals = {}, state = "insufficient") => ({ deload: false, severity: "none", state, signals, why });
 
   if (!Array.isArray(history) || history.length === 0) return none("No training history.");
 
@@ -204,7 +167,7 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   // Detraining guard — most recent finger session on/before ref.
   const lastOnOrBefore = datesAsc.filter(d => d <= ref).pop();
   if (!lastOnOrBefore || daysBetween(lastOnOrBefore, ref) > DELOAD_STALE_DAYS) {
-    return none("No recent finger sessions — rested, not fatigued.");
+    return none("No recent finger recovery evidence — current recovery is unknown.");
   }
 
   // Per-grip recent recovery gap with personal taus.
@@ -218,20 +181,20 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   const lifting = liftingSpike(liftingVolumeByDate(workoutSessions), ref);
   const signals = { today: ref, gripGaps, lifting };
 
-  if (measured.length < 2) {
-    return none("Not enough cross-grip recovery data yet.", signals);
+  if (measured.length === 0) {
+    return none("Not enough current recovery data yet.", signals);
   }
 
   // Cross-grip gate: EVERY measured grip's recent mean gap below the band.
   const downGrips = measured.filter(g => gripGaps[g].mean < -DELOAD_GAP_TRIGGER);
   signals.downGrips = downGrips;
-  signals.crossGripDown = downGrips.length === measured.length;
+  signals.crossGripDown = measured.length >= 2 && downGrips.length === measured.length;
 
   if (!signals.crossGripDown) {
     const why = downGrips.length > 0
-      ? `Only ${downGrips.join(", ")} recovery is down — looks grip-specific (a zone/phase artifact), not systemic. No deload.`
-      : "Recovery is within your normal range across grips. No deload.";
-    return none(why, signals);
+      ? `Only ${downGrips.join(", ")} recovery is down — a grip-specific concern. Consider an easier session for that grip; systemic recovery is not established.`
+      : "Observed recovery is within the model range for the currently measured grips.";
+    return none(why, signals, downGrips.length > 0 ? "local_concern" : "normal");
   }
 
   const severity = lifting.spike ? "strong" : "mild";
@@ -239,10 +202,10 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
     .map(g => `${g} ${gripGaps[g].mean >= 0 ? "+" : ""}${gripGaps[g].mean.toFixed(2)}`)
     .join(", ");
   const why = lifting.spike
-    ? `Both grips' between-rep recovery is below your model over the last ${minSessions} sessions (${gapStr}), and lifting volume is ${lifting.ratio.toFixed(1)}× your 4-week average. Signs of accumulating systemic fatigue — consider an easier finger session and trimming your next lifting workout.`
-    : `Both grips' between-rep recovery is below your model over the last ${minSessions} sessions (${gapStr}). An early fatigue signal — consider a lighter finger session.`;
+    ? `Current grips' between-rep recovery is below your model over the last ${minSessions} sessions (${gapStr}), and lifting volume is ${lifting.ratio.toFixed(1)}× your 4-week average. Signs of accumulating systemic fatigue — consider an easier finger session and trimming your next lifting workout.`
+    : `Current grips' between-rep recovery is below your model over the last ${minSessions} sessions (${gapStr}). An early fatigue signal — consider a lighter finger session.`;
 
-  return { deload: true, severity, signals, why };
+  return { deload: true, severity, state: "systemic_concern", signals, why };
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -275,7 +238,7 @@ export function deloadStatus(history, workoutSessions = [], opts = {}) {
   const res = computeDeload(history, workoutSessions, opts);
   const gaps = res.signals && res.signals.gripGaps ? res.signals.gripGaps : {};
   const means = Object.values(gaps).map(g => g.mean).filter(Number.isFinite);
-  const haveSignal = means.length >= 2;
+  const haveSignal = means.length >= 1;
   const avgGap = haveSignal ? means.reduce((s, v) => s + v, 0) / means.length : 0;
 
   // Pressure rises as average cross-grip recovery degrades below zero.
@@ -287,18 +250,20 @@ export function deloadStatus(history, workoutSessions = [], opts = {}) {
   // mild deload OR meaningful pressure; green otherwise. Mirrors the
   // computeDeload severity so the gauge and the banner never disagree.
   let level;
-  if (res.severity === "strong") level = "red";
-  else if (res.severity === "mild") level = "yellow";
+  if (!haveSignal) level = "unknown";
+  else if (res.severity === "strong") level = "red";
+  else if (res.severity === "mild" || res.state === "local_concern") level = "yellow";
   else if (haveSignal && pressure >= DELOAD_YELLOW_AT) level = "yellow";
   else level = "green";
 
   const label =
     level === "red" ? "Deload recommended" :
     level === "yellow" ? "Recovery softening — ease up soon" :
-    haveSignal ? "Fresh — absorbing your load well" : "Not enough recent data";
+    haveSignal ? "Observed recovery within range" : "Not enough recent data";
 
   return {
     level,
+    state: res.state,
     pressure: Math.round(pressure * 100) / 100,
     avgGap: haveSignal ? Math.round(avgGap * 100) / 100 : null,
     haveSignal,

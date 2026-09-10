@@ -13,7 +13,7 @@ import React from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 
-const LEVEL_COLOR = { green: C.green, yellow: C.yellow, red: C.red };
+const LEVEL_COLOR = { green: C.green, yellow: C.yellow, red: C.red, unknown: C.muted };
 
 const formatDate = ymd => new Date(`${ymd}T00:00:00Z`).toLocaleDateString("en-US", {
   month: "short",
@@ -31,7 +31,7 @@ export function DeloadGauge({
 }) {
   if (!status) return null;
   const { level, pressure, label, haveSignal, deload } = status;
-  const color = LEVEL_COLOR[level] || C.green;
+  const color = LEVEL_COLOR[level] || C.muted;
   const markerPct = Math.max(1, Math.min(99, (haveSignal ? pressure : 0) * 100));
   const matchedIndex = timelineDates.indexOf(asOfDate);
   const selectedIndex = matchedIndex >= 0 ? matchedIndex : Math.max(0, timelineDates.length - 1);
@@ -53,7 +53,7 @@ export function DeloadGauge({
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
         How close you {isHistorical ? "were" : "are"} to needing a deload, read from your cross-grip
-        between-rep recovery. Green = absorbing your load; yellow = recovery
+        between-rep recovery. Gray = insufficient current evidence; green = observed recovery within range; yellow = recovery
         softening, ease up soon; red = deload recommended. Intentionally slow
         to move — it won't react to a single rough session.
       </div>
@@ -65,11 +65,11 @@ export function DeloadGauge({
           width: 0, height: 0,
           borderLeft: "5px solid transparent", borderRight: "5px solid transparent",
           borderTop: `7px solid ${C.text}`,
-          opacity: haveSignal ? 1 : 0.35,
+          opacity: haveSignal ? 1 : 0,
         }} />
         <div style={{
           height: 10, borderRadius: 5, opacity: haveSignal ? 1 : 0.4,
-          background: `linear-gradient(90deg, ${C.green} 0%, ${C.green} 30%, ${C.yellow} 42%, ${C.yellow} 70%, ${C.red} 84%, ${C.red} 100%)`,
+          background: !haveSignal ? C.muted : `linear-gradient(90deg, ${C.green} 0%, ${C.green} 30%, ${C.yellow} 42%, ${C.yellow} 70%, ${C.red} 84%, ${C.red} 100%)`,
         }} />
       </div>
 
@@ -103,7 +103,7 @@ export function DeloadGauge({
 
       {!haveSignal && (
         <div style={{ fontSize: 11, color: C.muted, marginTop: 12 }}>
-          Log a few more sessions across both grips to activate.
+          Recent comparable sessions are needed to assess recovery. Missing data does not establish readiness.
         </div>
       )}
       {level !== "green" && deload?.why && (

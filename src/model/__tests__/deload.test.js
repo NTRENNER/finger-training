@@ -73,8 +73,8 @@ describe("recoveryStatusDates", () => {
     ]);
   });
 
-  test("stays empty while recovery is measurable for only one grip", () => {
-    expect(recoveryStatusDates(fine("Crusher"), { today: TODAY })).toEqual([]);
+  test("offers history for one measured grip", () => {
+    expect(recoveryStatusDates(fine("Crusher"), { today: TODAY })).toEqual(D.slice(1));
   });
 });
 
@@ -121,13 +121,13 @@ describe("computeDeload", () => {
     const stale = `2026-07-01`; // ~6 weeks after last session
     const r = computeDeload(history, [], { today: stale });
     expect(r.deload).toBe(false);
-    expect(r.why).toMatch(/rested/i);
+    expect(r.state).toBe("insufficient");
   });
 
   test("only one grip trained → insufficient cross-grip data", () => {
     const r = computeDeload(fatiguedRecent("Crusher"), [], { today: TODAY });
     expect(r.deload).toBe(false);
-    expect(r.why).toMatch(/cross-grip/i);
+    expect(r.state).toBe("local_concern");
   });
 
   test("stale-day constant is sane", () => {
@@ -201,9 +201,9 @@ describe("deloadStatus (green/yellow/red gauge)", () => {
     expect(s.level).not.toBe("red");
   });
 
-  test("insufficient data → green, flagged no signal", () => {
-    const s = deloadStatus(fine("Crusher"), [], { today: TODAY });
-    expect(s.level).toBe("green");
+  test("insufficient data → neutral, flagged no signal", () => {
+    const s = deloadStatus([], [], { today: TODAY });
+    expect(s.level).toBe("unknown");
     expect(s.haveSignal).toBe(false);
   });
 });
@@ -235,4 +235,20 @@ describe("recentGapHeldOut (no look-ahead leakage)", () => {
     expect(rg.mean).toBeLessThan(-0.15);   // clear beyond-noise dip
     expect(rg.lastDate).toBe("2026-05-16");
   });
+});
+
+test('stale healthy grip cannot veto current declines', () => {
+ const current = [...fatiguedRecent('Micro'), ...fatiguedRecent('Crusher')];
+ const stale = ['2026-01-01','2026-01-05'].flatMap(d => sess('Prime','L',d,30,28));
+ expect(computeDeload([...current,...stale],[],{today:TODAY}).severity).toBe('mild');
+ expect(computeDeload([...current,...stale],[],{today:TODAY}).signals.gripGaps.Prime).toBeUndefined();
+});
+test('one current session cannot revive an old recovery window', () => {
+ const h = [...sess('Micro','L','2026-01-01',30,28), ...sess('Micro','L',TODAY,30,10)];
+ expect(deloadStatus(h,[],{today:TODAY}).level).toBe('unknown');
+});
+test('one trained grip has a useful local concern without a systemic claim', () => {
+ const r=deloadStatus(fatiguedRecent('Micro'),[],{today:TODAY});
+ expect(r.state).toBe('local_concern'); expect(r.level).toBe('yellow');
+ expect(r.deload.deload).toBe(false);
 });

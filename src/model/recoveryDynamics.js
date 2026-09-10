@@ -1,3 +1,4 @@
+import { compareSessionOrder } from "./sessionOrder.js";
 import { recoveryEvidence } from "./recoveryEvidence.js";
 // ───────────────────────────────────────────────────────────────
 // RECOVERY DYNAMICS — between-rep capacity restoration
@@ -230,7 +231,7 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
     }
 
     const entry = bySession.get(grp.sessKey) || {
-      date: grp.date, observedVals: [], gapVals: [],
+      date: grp.date, session_id: grp.sessKey, session_started_at: grp.reps.map(r => r.session_started_at || r.created_at || "").filter(Boolean).sort()[0] || "", observedVals: [], gapVals: [],
     };
     entry.observedVals.push(observed);
     if (gap != null && Number.isFinite(gap)) entry.gapVals.push(gap);
@@ -242,12 +243,12 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
   // Aggregate per-session: mean of L/R values, sorted by date ASC.
   const mean = (vals) => vals.reduce((s, v) => s + v, 0) / vals.length;
   return [...bySession.values()]
-    .map(({ date, observedVals, gapVals }) => ({
-      date,
+    .map(({ date, session_id, session_started_at, observedVals, gapVals }) => ({
+      date, session_id, session_started_at,
       observedAtTarget: observedVals.length > 0 ? mean(observedVals) : null,
       gapAtTarget: gapVals.length > 0 ? mean(gapVals) : null,
     }))
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    .sort(compareSessionOrder);
 }
 
 // Add 3-session rolling-mean columns to a trend series so the chart

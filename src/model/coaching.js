@@ -1,3 +1,4 @@
+import { compareSessionOrder } from "./sessionOrder.js";
 import { isCapacityEvidenceRep } from "./forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // COACHING RECOMMENDATION ENGINE  (continuous coverage + model-gap)
@@ -484,7 +485,7 @@ export function coldStartLongProbeLoad(gripReps, hand, targetT = COLD_START_LONG
       && rep.actual_time_s < COLD_START_LONG_ANCHOR_MIN_T
       && effectiveLoad(rep) > 0
     )
-    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    .sort((a, b) => compareSessionOrder(b, a));
   const lastAttempt = shortLongAttempts[0];
   if (lastAttempt) {
     const retryFraction = Math.pow(

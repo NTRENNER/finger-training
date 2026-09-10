@@ -718,7 +718,9 @@ describe("coaching fit vs chart (buildGripEstimates) fit consistency", () => {
   const F = (T) => 30*Math.exp(-T/10) + 12*Math.exp(-T/30) + 6*Math.exp(-T/180);
   const mk = (T, d, i) => ({ id:`c-${T}-${d}-${i}`, hand:"L", grip:"Crusher",
     target_duration:T, actual_time_s:T, avg_force_kg:F(T), rep_num:1,
-    date:new Date(Date.now()-d*86400000).toISOString().slice(0,10), session_id:`c-${d}-${T}` });
+    date:new Date(Date.now()-d*86400000).toISOString().slice(0,10),
+    // Explicit order: the short effort is latest, independent of array order.
+    session_started_at:new Date(Date.now()-d*86400000-T*60000).toISOString(), session_id:`c-${d}-${T}` });
 
   test("both fit paths agree within 5% at every zone reference time", () => {
     // All fresh rep_num===1 reps, spread over dates and durations.

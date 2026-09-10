@@ -1,3 +1,4 @@
+import { compareSessionOrder, compareOpeningRep } from "./sessionOrder.js";
 import { isCapacityEvidenceRep } from "./forceRecording.js";
 // ───────────────────────────────────────────────────────────────
 // PRESCRIPTION LAYER
@@ -354,7 +355,7 @@ export function estimateRefWeight(history, hand, grip, targetDuration) {
     effectiveLoad(r) > 0
   );
   if (matches.length === 0) return null;
-  const sorted = [...matches].sort((a, b) => a.date < b.date ? -1 : 1).slice(-10);
+  const sorted = [...matches].sort(compareSessionOrder).slice(-10);
   let wSum = 0, wKg = 0;
   sorted.forEach((r, i) => { const w = i + 1; wSum += w; wKg += effectiveLoad(r) * w; });
   return wKg / wSum;
@@ -535,27 +536,11 @@ export function bestAvailablePeakMeasurement(history, hand, grip, referenceDate 
 }
 
 // Best load the user has DEMONSTRABLY sustained for a hold of
-// targetDuration-or-longer, within the lookback window — a hard FLOOR
-// for the prescription. Holding F kg for actual_time_s d seconds proves
-// the user can sustain at least F for any target <= d (a shorter hold at
-// the same load is strictly easier). So for a target T no prescription
-// should fall below max{ effectiveLoad(r) : fresh rep, actual_time_s >= T }.
-//
-// Why this is needed: the F-D fit is unweighted least-squares in ABSOLUTE
-// kg, so sparse low-force endurance points sit well below the curve (a real
-// 189s @ 5.5 kg Micro hold reads ~37% above the fit). The prescription is
-// curve x anchor with a peak-force CEILING but no floor, so it could
-// recommend LESS load than the user just sustained for a longer hold. This
-// floor makes that impossible; it's a minimum, so genuine progression (the
-// curve/anchor going higher) is unaffected.
-//
-// Fresh efforts only (rep_num === 1 / null) so a fatigued within-set rep
-// can't set the floor; MEASURED (Tindeq) reps only — a spring/manual entry
-// records a nominal load the user pulls against and over-pulls, so it never
-// proves a sustained *force* the way the floor claims (see isMeasuredLoadRep);
-// sane loads only; referenceDate mirrors the retrospective semantics used
-// throughout this file. Returns null when nothing qualifies — the
-// prescription then runs unfloored, as before.
+// targetDuration-or-longer. Preserve protection against implausible curve
+// collapse, but three independent recent lower performances at comparable
+// durations can revise the working floor. Best-ever records are unchanged.
+// Only valid measured opening efforts qualify; retrospective calls exclude
+// the evaluation date and all future records.
 export const CAPACITY_FLOOR_LOOKBACK_DAYS = 90;
 
 export function demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate = null) {
@@ -564,18 +549,41 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
     ? new Date(`${referenceDate}T00:00:00`).getTime()
     : Date.now();
   const cutoff = ymdLocal(new Date(refMs - CAPACITY_FLOOR_LOOKBACK_DAYS * 86400 * 1000));
+  const candidates = [];
   let best = null;
   for (const r of history) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;        // fresh efforts only
+    if ((Number(r.set_num) || 1) !== 1) continue;                 // only the session opener
     if (isSeedArtifactRep(r)) continue;                           // skip seeded/backfilled twins (avg==peak)
     if (!isMeasuredLoadRep(r)) continue;                          // measured (Tindeq) reps only — a spring/manual load was never a *sustained force* (July 2026)
     if (!(Number(r.actual_time_s) >= targetDuration)) continue;   // proves capacity at this T-or-shorter
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
     const load = sane(effectiveLoad(r));
+    if (load != null) candidates.push({ ...r, load });
     if (load != null && (best == null || load > best)) best = load;
+  }
+  // Keep an old best through isolated bad days. Three newer independent
+  // opening efforts at comparable duration can recalibrate the working floor.
+  const sessions = new Map();
+  for (const r of candidates) {
+    const key = r.session_id || r.date;
+    const prior = sessions.get(key);
+    if (!prior || compareOpeningRep(r, prior) < 0) sessions.set(key, r);
+  }
+  const ordered = [...sessions.values()].sort(compareSessionOrder);
+  const bestRep = [...ordered].reverse().find(r => r.load === best);
+  if (bestRep) {
+    const recentCutoff = ymdLocal(new Date(refMs - 30 * 86400 * 1000));
+    const recent = ordered.filter(r => compareSessionOrder(r, bestRep) > 0
+      && r.date >= recentCutoff && r.actual_time_s <= bestRep.actual_time_s * 1.25
+      && r.actual_time_s >= bestRep.actual_time_s * 0.8
+      && (r.setup_id ?? null) === (bestRep.setup_id ?? null)).slice(-3);
+    if (recent.length === 3 && recent.every(r => r.load < best * 0.9)) {
+      return Math.max(...recent.map(r => r.load));
+    }
   }
   return best;
 }
@@ -673,10 +681,11 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
     const sid = r.session_id || r.date || "unknown";
-    sessionRep1.set(sid, r);
+    const existing = sessionRep1.get(sid);
+    if (!existing || compareOpeningRep(r, existing) < 0) sessionRep1.set(sid, r);
   }
   const rep1s = [...sessionRep1.values()]
-    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    .sort((a, b) => compareSessionOrder(b, a));
   // Amplitude anchor selection.
   //   zoneAnchor=false (DEFAULT): the single most-recent rep 1 at ANY T.
   //     Cross-zone — a recent overshoot anywhere lifts the whole curve,
