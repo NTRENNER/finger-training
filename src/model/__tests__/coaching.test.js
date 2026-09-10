@@ -15,7 +15,6 @@ import {
   recencyPenalty,
   coachingRecommendationContinuous,
   buildContinuousRecency,
-  personalTauScale,
   overloadFactor,
   shortEndFailureStaleness,
   FRESH_TEST_SHORT_T_MAX,
@@ -622,25 +621,6 @@ describe("overloadFactor", () => {
     expect(on.overloadFactor).toBeGreaterThan(1);
     expect(on.loadKg).toBeGreaterThan(off.loadKg);          // overload raised the load
     expect(on.loadBeforeOverload).toBeCloseTo(off.loadKg, 6);
-  });
-});
-
-describe("personalTauScale", () => {
-  test("returns 1.0 with no personal fit", () => {
-    expect(personalTauScale(null, "Crusher")).toBe(1);
-    expect(personalTauScale(new Map(), "Crusher")).toBe(1);
-  });
-  test("slow-recovering grip scales recency tau up, fast-recovering down", () => {
-    const slow = personalTauScale({ medium: 400 }, "Micro");
-    const fast = personalTauScale({ medium: 45 }, "Crusher");
-    expect(slow).toBeGreaterThan(1);
-    expect(fast).toBeLessThan(1);
-    expect(slow).toBeGreaterThan(fast);
-  });
-  test("accepts a Map keyed by grip", () => {
-    const m = new Map([["Micro", { medium: 400 }]]);
-    expect(personalTauScale(m, "Micro")).toBeGreaterThan(1);
-    expect(personalTauScale(m, "Crusher")).toBe(1);   // grip absent → neutral
   });
 });
 

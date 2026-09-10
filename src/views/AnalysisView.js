@@ -1,3 +1,4 @@
+import { MeasuredProgressCard } from "./cards/MeasuredProgressCard.jsx";
 // ──────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
 // ──────────────────────────────────────────────────────────────
@@ -704,6 +705,12 @@ export function AnalysisView({
         canNormalize={bodyWeight > 0}
         attentionCounts={coverageAttentionCounts}
       />
+
+      {(selGrip ? [selGrip] : grips).map(g => (handView === "pooled" ? ["L", "R"] : [handView]).map(h =>
+        <CardBoundary key={`progress-${g}-${h}`} name="Measured progress">
+          <MeasuredProgressCard history={history} grip={g} hand={h} unit={unit} />
+        </CardBoundary>
+      ))}
 
       {reps.length > 0 && (<>
         <CardBoundary name="Whole-Curve Capacity">

@@ -1,3 +1,4 @@
+import { effectiveSessionCount } from "./sessionConfidence.js";
 import { compareSessionOrder } from "./sessionOrder.js";
 import { isCapacityEvidenceRep } from "./forceRecording.js";
 // ─────────────────────────────────────────────────────────────
@@ -62,7 +63,6 @@ import {
 } from "./prescription.js";
 import { freshFitReps, isOpenerRep, isSeedArtifactRep } from "./load.js";
 import { TAIL_B_PRIOR } from "./enduranceTail.js";
-import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 
 // Population mean of COACH_RECOVERY_TAU_DAYS — the normalizer for the
 // recovery-cost denominator (see RECOVERY_COST_WEIGHT). Computed once so
@@ -88,6 +88,21 @@ export const COACH_RECOVERY_TAU_DAYS = {
   endurance:          3.5,   // long-T sustained — slowest adaptation cycle
 };
 
+// Smooth calendar-recency/cost policy through the existing reference points.
+// Zone labels remain discrete; adjacent durations get adjacent scoring values.
+export function calendarRecencyDays(T) {
+  const points = Object.entries(ZONE_REF_T).map(([zone,t]) => [t,COACH_RECOVERY_TAU_DAYS[zone]]).sort((a,b)=>a[0]-b[0]);
+  if (!(T > points[0][0])) return points[0][1];
+  for(let i=1;i<points.length;i++) {
+    if(T<=points[i][0]) {
+      const [lo,a]=points[i-1], [hi,b]=points[i];
+      const fraction=Math.log(T/lo)/Math.log(hi/lo);
+      return a+(b-a)*fraction;
+    }
+  }
+  return points.at(-1)[1];
+}
+
 // Recovery curve: returns 0 immediately after training the zone, rising
 // asymptotically to 1.0 as days_ago grows. Zone-specific tau means
 // Power recovers faster than Endurance. Returns 1.0 if zone never trained.
@@ -105,13 +120,10 @@ export const COACH_RECOVERY_TAU_DAYS = {
 // like the user's Crusher S·E never won the recommendation despite
 // being correctly flagged as "never sampled" by the coverage card.
 // See conversation re: T=160s never being recommended on Crusher.
-// `tauScale` (default 1) multiplies the zone's population recovery tau —
-// the engine passes a per-grip personal scale derived from the user's
-// fitted recovery taus (see personalTauScale) so a grip that recovers
-// slower than the population prior holds its recency penalty longer.
-export function recencyPenalty(zone, history, grip, tauScale = 1) {
+// This is a training-recency heuristic, not measured next-session readiness.
+export function recencyPenalty(zone, history, grip) {
   if (!grip || !history || history.length === 0) return 1.0;
-  const tau = (COACH_RECOVERY_TAU_DAYS[zone] ?? 2) * (tauScale > 0 ? tauScale : 1);
+  const tau = (COACH_RECOVERY_TAU_DAYS[zone] ?? 2);
   const matchingDates = history
     .filter(r => {
       if (!isCapacityEvidenceRep(r)) return false;
@@ -150,10 +162,10 @@ export function recencyPenalty(zone, history, grip, tauScale = 1) {
 // penalty(T) = 1 − maxᵢ[ exp(−dᵢ/τ(T)) · kernel(Tᵢ,T) ]; 1.0 where
 // nothing nearby was trained recently. Returns a function of T.
 //
-// τ(T) interpolates COACH_RECOVERY_TAU_DAYS via zoneOf(T) and is scaled
-// by tauScale (personal recovery). The zone version is kept for other
+// τ(T) interpolates the existing calendar-recency constants,
+// independently of within-set recovery. The zone version is kept for other
 // consumers (deload, display); this continuous one is engine-internal.
-export function buildContinuousRecency(history, grip, { sigmaLog = 0.35, tauScale = 1, today = ymdLocal() } = {}) {
+export function buildContinuousRecency(history, grip, { sigmaLog = 0.35, today = ymdLocal() } = {}) {
   const efforts = (history || [])
     .filter(r => isCapacityEvidenceRep(r) && r.grip === grip && (r.rep_num == null || r.rep_num === 1))
     .map(r => {
@@ -168,7 +180,7 @@ export function buildContinuousRecency(history, grip, { sigmaLog = 0.35, tauScal
   const twoSig2 = 2 * sigmaLog * sigmaLog;
   return (T) => {
     if (efforts.length === 0 || !(T > 0)) return 1.0;
-    const tau = (COACH_RECOVERY_TAU_DAYS[zoneOf(T)] ?? 2) * (tauScale > 0 ? tauScale : 1);
+    const tau = calendarRecencyDays(T);
     let maxInfluence = 0;
     for (const e of efforts) {
       const dl = Math.log(e.T) - Math.log(T);
@@ -177,35 +189,14 @@ export function buildContinuousRecency(history, grip, { sigmaLog = 0.35, tauScal
       const influence = kernel * timeFresh;
       if (influence > maxInfluence) maxInfluence = influence;
     }
-    return 1 - maxInfluence;   // 0 = just trained right here, 1 = fully recovered/untrained
+    return 1 - maxInfluence;   // 0 = just trained right here, 1 = no recent matching exposure
   };
 }
 
-// Personal recovery scale for a grip: ratio of the user's fitted medium
-// recovery tau to the population prior, gently compressed and clamped so
-// a noisy fit can't swing recency wildly. 1.0 when no personal fit. The
-// medium compartment is the one recoveryFit actually personalizes (fast
-// is short-set-noisy, slow is held at population), and it's the dominant
-// timescale across the training durations the engine sweeps.
-export function personalTauScale(personalTaus, grip) {
-  // Accept either a Map<grip,taus> (memoized by the hook) or a bare taus
-  // object ({fast,medium,slow}) for a single grip.
-  let t = null;
-  if (personalTaus && typeof personalTaus.get === "function") t = personalTaus.get(grip);
-  else if (personalTaus && personalTaus.medium != null) t = personalTaus;
-  if (!t || !(t.medium > 0)) return 1;
-  // recoveryFit medium prior is PHYS_MODEL_DEFAULT.tauR.medium (~90s).
-  const POP_MED = 90;
-  const raw = t.medium / POP_MED;
-  // Compress toward 1 (sqrt) and clamp to a sane band.
-  const compressed = Math.sqrt(raw);
-  return Math.max(0.6, Math.min(2.5, compressed));
-}
-
 // Confidence-gate strength for the residual signal, in units of
-// "effective nearby reps" (effN = Gaussian-weighted local sample size).
+// "effective nearby sessions" (each session contributes at most one).
 // confidence = effN/(effN+CONFIDENCE_K): at effN=K confidence is 0.5,
-// so the adaptation room is half-weighted; it takes ~3 nearby reps to
+// so the adaptation room is half-weighted; it takes ~3 recent sessions to
 // reach ~2/3 weight. Tuned against Nathan's Crusher/Micro history so
 // the thin zones the jackknife flagged as unstable stop producing
 // confident limiter picks. Re-sweep if the data distribution shifts.
@@ -287,7 +278,7 @@ export const OVERLOAD_ZERO_T   = 120;      // s — overload fades to 0 by here
 //        room       = 1 − localRatio   (positive = below curve, room to
 //                                       grow; negative = at ceiling)
 //        confidence = effN / (effN + CONFIDENCE_K)   (effN = Gaussian-
-//                     weighted local sample size = weightSum)
+//                     weighted independent session count)
 //        adaptBoost = clamp(1 + room × 3 × confidence, 0.2, 3.0)
 //      So with ample nearby data: localRatio 0.7 → adaptBoost ≈ 1.9
 //      (limiter, train here); 1.0 → 1.0 (neutral); 1.2 → ≈ 0.4 (skip).
@@ -295,10 +286,10 @@ export const OVERLOAD_ZERO_T   = 120;      // s — overload fades to 0 by here
 //      so adaptBoost → 1.0 and staleness drives — we never act on a
 //      residual the data can't support (see jackknife instability note).
 //      stalenessBoost preserves curve coverage incentive.
-//      recencyAt(T) crushes just-trained DURATIONS (continuous, no zone-
-//      boundary cliff), decaying over the local recovery tau scaled by
-//      the grip's personal recovery fit (max_strength fast → endurance
-//      slow). costFactor divides by the zone's recovery cost so the pick
+//      recencyAt(T) downweights just-trained durations within a
+//      duration neighborhood, decaying over the existing
+//      fixed calendar-recency constants (max_strength short → endurance
+//      long). costFactor divides by the zone's assumed cost so the pick
 //      favors curve-lift per calendar day. handBoost favors the weaker
 //      hand in proportion to measured L/R asymmetry.
 //      focusBoost biases the pick toward the zones the user's current
@@ -556,10 +547,6 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     tStep = CONTINUOUS_T_STEP,
     bandwidthLog = CONTINUOUS_BANDWIDTH_LOG,
     climbingFocus = "balanced",
-    // Per-grip personal recovery taus (Map<grip,{fast,medium,slow}>) from
-    // recoveryFit.computePersonalRecoveryTaus. When present, scales the
-    // recency penalty so a slow-recovering grip holds its penalty longer.
-    personalTaus = null,
     // Recovery-cost efficiency weight (see RECOVERY_COST_WEIGHT). Override
     // to 0 to disable the fatigue-cost denominator.
     recoveryCostWeight = RECOVERY_COST_WEIGHT,
@@ -616,16 +603,10 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
   const twoSig2Log = 2 * bandwidthLog * bandwidthLog;
 
-  // Personal recovery scale for this grip (1.0 if no personal fit) and a
-  // continuous-in-T recency function built once over this grip's efforts.
-  // If the caller didn't pass a memoized personalTaus map, fit this one
-  // grip's taus here (cheap; the card memoizes the whole rec call).
-  const gripTaus = (personalTaus && typeof personalTaus.get === "function")
-    ? personalTaus.get(grip)
-    : (personalTaus || computePersonalRecoveryTausForGrip(history, grip));
-  const tauScale = personalTauScale(gripTaus, grip);
+  // Calendar recency remains a scheduling heuristic. Within-set recovery
+  // fits do not establish how many days the athlete needs between sessions.
   const todayStr = today instanceof Date ? ymdLocal(today) : (today || ymdLocal());
-  const recencyAt = buildContinuousRecency(history, grip, { sigmaLog: bandwidthLog, tauScale, today: todayStr });
+  const recencyAt = buildContinuousRecency(history, grip, { sigmaLog: bandwidthLog, today: todayStr });
 
   // Per-hand: fit curve, pre-compute DE-BIASED (leave-one-out) residual
   // ratios, sweep T. Also record a mid-curve strength per hand so the
@@ -656,7 +637,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     // Mid-curve strength (force at 30s) — the asymmetry reference, same
     // duration computeHandAsymmetry uses.
     const strength = predForceThreeExp(amps, 30);
-    handFits[hand] = { amps, ratios, strength };
+    handFits[hand] = { amps, ratios, strength, evidence: handPts };
   }
 
   if (Object.keys(handFits).length === 0) return null;
@@ -694,7 +675,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
 
   // Sweep T per hand, find argmax score across (hand, T).
   let best = null;
-  for (const [hand, { ratios }] of Object.entries(handFits)) {
+  for (const [hand, { ratios, evidence }] of Object.entries(handFits)) {
     for (let T = tMin; T <= tMax; T += tStep) {
       // LOG-T Gaussian-smoothed local residual ratio at T. Distance is
       // measured in log-duration so the neighborhood scales with T — a
@@ -714,22 +695,9 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // staleness drives the score in those regions).
       const localRatio = weightSum > 1e-6 ? ratioSum / weightSum : 1.0;
 
-      // CONFIDENCE GATE (May 2026): weightSum is the sum of Gaussian
-      // kernel weights from observed reps near T — i.e. an effective
-      // local sample size (a rep at T contributes ~1.0; reps within σ
-      // contribute ~0.6 each). The residual signal (localRatio vs the
-      // curve) is self-referential and noisy where data is thin: a
-      // single off rep can masquerade as a limiter. So we shrink the
-      // adaptation ROOM toward neutral in proportion to local density,
-      // confidence = effN/(effN+K). With little nearby data the room
-      // fades to 0, adaptBoost → 1.0 (neutral), and the score is handed
-      // to staleness — the right behavior, since a thin/never zone
-      // should be driven by the exploration boost, not by an
-      // untrustworthy residual. (Jackknife on real per-grip data showed
-      // the fitted amplitudes — hence the curve, hence the residuals —
-      // swing wildly when one point is dropped in sparse regions; this
-      // is the runtime guard against acting on that instability.)
-      const effN = weightSum;
+      // Curve fitting and residual averaging retain every usable rep.
+      // Certainty depends on nearby evidence repeated across sessions.
+      const effN = effectiveSessionCount(evidence, T, todayStr, bandwidthLog);
       const confidence = effN / (effN + confidenceK);
 
       // SYMMETRIC adaptation room: positive when below curve (limiter,
@@ -774,8 +742,8 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       const stale = stalenessBoost(zoneKey, stalenessMap);
       // Recency: just-trained durations get crushed (~0 immediately after
       // training, recovering to 1.0 over the local recovery tau). Now
-      // CONTINUOUS in T (buildContinuousRecency) — no zone-boundary cliff
-      // — and scaled by the grip's personal recovery tau (tauScale).
+      // Duration-local influence (buildContinuousRecency)
+      // — using fixed calendar-recency constants.
       const recency = recencyAt(T);
       // NOTE on fatigue: recent-climbing and in-the-moment readiness are
       // INTENTIONALLY NOT factored into the recommendation pick. The
@@ -802,11 +770,11 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // score: a zone you're already on-curve at (adaptBoost ≈ 1, no lift)
       // gets no cost bonus, so a cheap on-curve zone can't poach the pick
       // from a genuine limiter. costMult = (meanTau/zoneTau)^w (>1 cheap,
-      // <1 expensive, 1 at the mean); the grip's personal tauScale cancels
-      // in the ratio. Gated to SAMPLED zones — never-sampled exploration
+      // <1 expensive, 1 at the mean); this is a fixed policy assumption,
+      // gated to SAMPLED zones — never-sampled exploration
       // is a coverage objective decided by staleness/refT, independent of
       // recovery cost (you need the measurement regardless). w=0 disables.
-      const zoneTau = (COACH_RECOVERY_TAU_DAYS[zoneKey] ?? meanTau);
+      const zoneTau = calendarRecencyDays(T);
       const costMult = (recoveryCostWeight > 0 && zoneStatus !== "never")
         ? Math.pow(meanTau / zoneTau, recoveryCostWeight)
         : 1;
@@ -861,12 +829,13 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
           stalenessBoost: stale,
           recency,
           // Confidence in the residual signal at this T: effN is the
-          // effective local sample size (Gaussian-weighted), confidence
+          // effective nearby session count (age/quality weighted), confidence
           // = effN/(effN+K) in [0,1). Low confidence means the pick was
           // driven by staleness/exploration rather than a trusted
           // residual — the UI uses this to label the pick "estimated /
           // collect a clean rep here" instead of a confident limiter.
           effN,
+          confidenceBasis: "independent_sessions",
           confidence,
           focus,           // climbing-focus multiplier at this zone
           climbingFocus,   // the focus key (for "Why" line surfacing)

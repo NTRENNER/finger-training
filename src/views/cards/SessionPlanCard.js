@@ -1,3 +1,6 @@
+import { measuredProgress } from "../../model/measuredProgress.js";
+import { sessionPerformanceContext } from "../../model/sessionPerformanceContext.js";
+import { trainingPurpose } from "../../model/trainingPurpose.js";
 // ─────────────────────────────────────────────────────────────
 // SESSION PLAN CARD — single-box session picker for Setup
 // ─────────────────────────────────────────────────────────────
@@ -125,6 +128,11 @@ export function SessionPlanCard({
     [history, grip, freshMap, threeExpPriors, activities, cooked, climbingFocus]
   );
   const recommendedZone = rec?.zone;
+  const sessionContext = useMemo(() => {
+    if (!grip) return [];
+    const hands = hand === "Both" ? ["L", "R"] : [hand === "R" ? "R" : "L"];
+    return hands.map(h => ({hand:h,text:sessionPerformanceContext(measuredProgress(history,grip,h,ymdLocal()))}));
+  }, [history,grip,hand]);
 
   // Peak-test cadence (MVP): is a fresh MEASURED max reading overdue for
   // this grip? Computed here from grip-filtered history (the coaching
@@ -435,10 +443,10 @@ export function SessionPlanCard({
     detailParts.push("centered in the zone (heavier · shorter) so a strong rep still lands in-window");
   }
   if (rec.recency != null && rec.recency < 0.5) {
-    detailParts.push("zone partially recovered — lighter dose is fine");
+    detailParts.push("similar durations were trained recently");
   }
   if (rec.confidence != null && rec.confidence < 0.5) {
-    detailParts.push("sparse data here — log a clean rep to anchor the curve");
+    detailParts.push("limited repeat evidence here — comparable sessions will strengthen confidence");
   }
   if (rec.focus != null && rec.focus !== 1.0 && rec.climbingFocus && rec.climbingFocus !== "balanced") {
     const fPct = Math.round((rec.focus - 1) * 100);
@@ -510,6 +518,11 @@ export function SessionPlanCard({
         </div>
       </div>
 
+      <details style={{fontSize:12,color:C.muted,marginBottom:12}}>
+        <summary style={{cursor:"pointer"}}>Recent session performance</summary>
+        {sessionContext.map(item=><p key={item.hand}><b>{item.hand === "L" ? "Left" : "Right"}:</b> {item.text}</p>)}
+      </details>
+
       {/* Recommended Session. When following the recommendation and a
           density ladder is active, show the resolved NEXT-workout T/load
           that the runner will actually use. With no ladder (or while an
@@ -531,6 +544,7 @@ export function SessionPlanCard({
         // Under a tile override the ladder belongs to the override zone,
         // so the Recommended card falls back to the engine's curve pick.
         const recLadder = isOverridden ? null : ladder;
+        const purpose = trainingPurpose(rec, recLadder);
         const recT = recLadder ? recLadder.T : rec.T;
         let recLoadKg, recL, recR;
         if (recLadder && ladderPlanLoadByHand) {
@@ -605,6 +619,7 @@ export function SessionPlanCard({
                 )}
               </div>
             </div>
+            <div style={{ marginTop: 10, fontSize: 12 }}><b>{purpose.label}:</b> {purpose.text}</div>
             <div style={{ marginTop: 10, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
               <span style={{ color: recCfg.color, fontWeight: 700 }}>Why: </span>
               {whyText}
