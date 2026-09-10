@@ -12,6 +12,6 @@ Existing protocol, ladder constants, and zone names are unchanged. Historical ro
 
 ## Rollout
 
-Apply `supabase/migrations/20260910_rep_force_recording.sql` before deploying this client. It adds nullable recording fields and gates the existing server fatigue trigger. The migration has not been applied to a live database by this change. Deploy the client only after the migration succeeds; an older schema will reject the new payload columns and leave writes queued locally.
+Apply `supabase/migrations/20260910_rep_force_recording.sql` before deploying this client. It adds nullable recording fields and gates the existing server fatigue trigger. Applied to the production Grip Lab database on September 10, 2026; all three fields and the learner guard were verified. Deploy the client only after the migration succeeds; an older schema will reject the new payload columns and leave writes queued locally.
 
 Automated checks exercise steady/fluctuating/declining pulls, abrupt release, unequal sample spacing, batched Bluetooth packets, interruption and release gating, disconnection, silent equipment failure, manual recording, model exclusions, and cloud payload round-trip. Physical Tindeq validation remains a rollout check.
