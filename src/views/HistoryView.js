@@ -1049,6 +1049,8 @@ export function HistoryView({
                         </span>
                       )}
                       <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
+                      {r.failure_valid === false && <span> · Interrupted — excluded from failure learning</span>}
+                      {r.force_recording?.version === 1 && <span> · Time-weighted average</span>}
                       {/* Rest interval — small muted suffix so it's
                           visible at a glance for verifying edits and
                           spotting protocol drift, without crowding

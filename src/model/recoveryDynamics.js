@@ -1,3 +1,4 @@
+import { isValidFailureRep } from "./forceRecording.js";
 // ───────────────────────────────────────────────────────────────
 // RECOVERY DYNAMICS — between-rep capacity restoration
 // ───────────────────────────────────────────────────────────────
@@ -199,6 +200,7 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
   // per-session datapoint (avoids double-plotting Both-mode sessions).
   const bySession = new Map();
   for (const grp of groups.values()) {
+    if (!grp.reps.every(isValidFailureRep)) continue;
     if (grp.reps.length < GAP_TARGET_REP) continue;
     const sorted = [...grp.reps].sort((a, b) => (a.rep_num ?? 0) - (b.rep_num ?? 0));
     const rep1 = sorted[0];

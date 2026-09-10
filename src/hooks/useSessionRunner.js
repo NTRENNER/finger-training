@@ -288,7 +288,7 @@ export function useSessionRunner({
   }, [phase]);
 
   // ── Handle rep completion ─────────────────────────────────
-  const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null }) => {
+  const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null, failureValid = true, endReason = "muscular_failure", forceRecording = null }) => {
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
@@ -304,7 +304,7 @@ export function useSessionRunner({
     // user counted "1-2" after failure before tapping Done, so the raw
     // elapsed overshoots real failure by ~2s. Floored so a very short
     // hold can't record as zero/negative.
-    const adjTime = (manualOffset && !tindeqConnected)
+    const adjTime = (manualOffset && !tindeqConnected && failureValid)
       ? Math.max(MIN_HOLD_S, actualTime - MANUAL_OFFSET_S)
       : actualTime;
     const roundedActual = Math.round(adjTime * 10) / 10;
@@ -344,6 +344,9 @@ export function useSessionRunner({
       manual_load_kg:     (Number.isFinite(manualLoadKg) && manualLoadKg > 0)
                             ? Math.round(manualLoadKg * 1000) / 1000
                             : null,
+      failure_valid: failureValid,
+      end_reason: endReason,
+      force_recording: forceRecording,
       actual_time_s:   roundedActual,
       avg_force_kg:    (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
                          ? Math.round(avgForce * 10) / 10
@@ -395,7 +398,7 @@ export function useSessionRunner({
     // collapsed the June sessions (e.g. 2026-06-19: 70.5 lb prescribed,
     // 83 lb pulled, reps 2+ died at 15-30s).
     setLastRepResult({
-      actualTime: adjTime, avgForce, peakForce,
+      actualTime: adjTime, avgForce, peakForce, failureValid, endReason,
       targetTime: config.targetTime,
       prescribedWeight: roundedPrescribed,
     });

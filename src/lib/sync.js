@@ -280,6 +280,9 @@ export function repPayload(rep, userId) {
     // default from before manual-load entries existed and now muddies
     // the "did Tindeq capture this rep?" signal that downstream code
     // (and any future code) might reasonably want to check.
+    failure_valid: rep.failure_valid ?? null,
+    end_reason: rep.end_reason ?? null,
+    force_recording: rep.force_recording ?? null,
     peak_force_kg: rep.peak_force_kg ?? null,
     set_num: rep.set_num, rep_num: rep.rep_num,
     rest_s: rep.rest_s, session_id: rep.session_id,
@@ -613,6 +616,9 @@ export async function fetchReps() {
     // the manual_load_kg pattern a few lines up so the round-trip
     // preserves the distinction.
     avg_force_kg:  r.avg_force_kg  != null ? Number(r.avg_force_kg)  : null,
+    failure_valid: r.failure_valid ?? null,
+    end_reason: r.end_reason ?? null,
+    force_recording: r.force_recording ?? null,
     peak_force_kg: r.peak_force_kg != null ? Number(r.peak_force_kg) : null,
     set_num: Number(r.set_num) || 1,
     rep_num: Number(r.rep_num) || 1,

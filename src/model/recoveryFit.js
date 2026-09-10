@@ -1,3 +1,4 @@
+import { isValidFailureRep } from "./forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // PERSONAL RECOVERY TAU FIT
 // ─────────────────────────────────────────────────────────────
@@ -131,6 +132,7 @@ function setsForGrip(history, grip) {
   }
   const sets = [];
   for (const reps of groups.values()) {
+    if (!reps.every(isValidFailureRep)) continue;
     reps.sort((a, b) => (a.rep_num || 0) - (b.rep_num || 0));
     if (reps.length < MIN_REPS_PER_SET) continue;
     const times = reps.map(r => r.actual_time_s);

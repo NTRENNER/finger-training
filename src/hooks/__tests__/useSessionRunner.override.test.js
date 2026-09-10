@@ -62,3 +62,17 @@ test("a boundary probe starts with its exact planned load", () => {
   }));
   expect(hook.result.current.refWeights.L).toBeCloseTo(1.4, 5);
 });
+
+test("interrupted measurement and validity survive recording without the failure timing offset", () => {
+  const { hook, addReps } = setup();
+  act(() => hook.result.current.startSession(cfg));
+  act(() => hook.result.current.chooseOffset(true));
+  const forceRecording = { version: 1, method: 'time_weighted', duration_s: 12, observed_time_s: 12 };
+  act(() => hook.result.current.handleRepDone({ actualTime: 12, avgForce: 17.5,
+    failureValid: false, endReason: 'interrupted', forceRecording }));
+  const rep = addReps.mock.calls[0][0][0];
+  expect(rep).toMatchObject({ actual_time_s: 12, avg_force_kg: 17.5,
+    failure_valid: false, end_reason: 'interrupted', force_recording: forceRecording });
+  expect(hook.result.current.lastRepResult.failureValid).toBe(false);
+  expect(hook.result.current.phase).toBe('resting');
+});

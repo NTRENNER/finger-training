@@ -1,3 +1,4 @@
+import { recordForce } from "../model/forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // TINDEQ PROGRESSOR BLE HOOK
 // ─────────────────────────────────────────────────────────────
@@ -235,7 +236,7 @@ export function useTindeq() {
   const peakRef             = useRef(0);
   const sumRef              = useRef(0);   // running sum for live avg display
   const countRef            = useRef(0);   // sample count for live avg display
-  const samplesRef          = useRef([]);  // raw {kg, ts} buffer for plateau-trim at rep end
+  const samplesRef          = useRef([]);  // raw {kg, ts} buffer for full-effort integration
   const belowSinceRef       = useRef(null);
   const measuringRef        = useRef(false);
   const autoFailCallbackRef = useRef(null); // set by ActiveSessionView
@@ -245,10 +246,12 @@ export function useTindeq() {
   const adOnStartRef    = useRef(null);   // () => void — called when pull begins
   const adOnEndRef      = useRef(null);   // ({actualTime, avgForce}) => void — called when rep ends
   const adActiveRef     = useRef(false);  // true while a rep is in progress
-  const adStartTimeRef  = useRef(null);   // Date.now() when pull began
+  const adStartTimeRef  = useRef(null);   // device milliseconds when pull began
   const adSumRef        = useRef(0);      // running sum for live avg display
   const adCountRef      = useRef(0);      // sample count for live avg display
-  const adSamplesRef    = useRef([]);     // raw {kg, ts} buffer for plateau-trim at rep end
+  const adSamplesRef    = useRef([]);     // raw {kg, ts} buffer for full-effort integration
+  const deviceClockRef = useRef({ raw: null, elapsed: 0 });
+  const lastPacketAtRef = useRef(null);
   const adBelowRef      = useRef(null);   // timestamp when force first dipped below end-threshold
   // Set true by endRepAndRequireRelease() — used by the adaptive
   // warmup when it auto-ends a hang at target time while the user is
@@ -261,22 +264,8 @@ export function useTindeq() {
   const AD_END_MS    = 500;  // ms below end-threshold before rep is confirmed done
   const AD_MIN_MS    = 1500; // minimum rep duration — filters noise
 
-  // ── Manual auto-fail thresholds ──
-  // The auto-fail rule used to be a pure 0.95 × target percentage. At
-  // light loads that's a brutally tight absolute window — a 13 lb
-  // target gives only 0.3 kg of slack, so a normal breath or a grip
-  // micro-adjustment can trigger fail. The hybrid floor below picks
-  // whichever is MORE forgiving (lower threshold) at each load:
-  //   - At 30 kg (66 lbs) target: 0.95 × 30 = 28.5 kg; 30 − 2 = 28.0 kg.
-  //     Absolute floor wins; 2 kg slack.
-  //   - At 50 kg target: 0.95 × 50 = 47.5 kg; 50 − 2 = 48.0 kg.
-  //     Percentage wins; 2.5 kg slack.
-  // Crossover is at AUTOFAIL_PCT × target == target − AUTOFAIL_ABS_SAG_KG
-  // → target == AUTOFAIL_ABS_SAG_KG / (1 − AUTOFAIL_PCT) = 2 / 0.05 = 40 kg.
-  // Below 40 kg the absolute floor governs; above it the percentage does.
-  const AUTOFAIL_PCT        = 0.95;
-  const AUTOFAIL_ABS_SAG_KG = 2.0;
-  const AUTOFAIL_MS         = 1500;
+  // Force below the release threshold ends the rep. Falling below the
+  // prescribed load alone must not truncate a weaker continued pull.
 
   // Stable setter — lets views register/clear the callback without prop drilling
   const setAutoFailCallback = useCallback((fn) => {
@@ -286,61 +275,43 @@ export function useTindeq() {
   // ── Packet handler — defined once, reused across reconnects ──
   //
   // AVERAGE = PLATEAU-TRIMMED MEAN (May 2026)
-  // The persisted avg_force_kg is computed at rep end via
-  // computePlateauAvg() — see the helper above for the algorithm.
-  // The running sum/count maintained here is for LIVE display only
-  // (the gauge while the user is mid-pull); the final value is
-  // re-derived from the raw sample buffer once the rep ends so it's
-  // independent of whether a target was set.
-  //
-  // The running display still uses the 0.85×target gate so the live
-  // gauge doesn't dive during the ramp-up — it's purely cosmetic
-  // feedback, not what gets saved.
+  // Use device time for every sample. The display includes all work;
+  // the saved measurement integrates the same complete effort interval.
   const handlePacket = useCallback((evt) => {
-    parseTindeqPacket(evt.target.value, ({ kg }) => {
+    lastPacketAtRef.current = Date.now();
+    parseTindeqPacket(evt.target.value, ({ kg, ts }) => {
+      const clock = deviceClockRef.current;
+      const delta = clock.raw === null ? 0 : (ts - clock.raw + 4294967296) % 4294967296;
+      clock.elapsed += delta / 1000;
+      clock.raw = ts;
+      const now = clock.elapsed;
+      if (adActiveRef.current && delta > 1000000) {
+        const stats = recordForce(adSamplesRef.current);
+        adActiveRef.current = false;
+        adAwaitReleaseRef.current = true;
+        adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
+        adSamplesRef.current = [];
+        return;
+      }
       latestKgRef.current = kg;
       if (kg > peakRef.current) peakRef.current = kg;
       scheduleUiFlush();  // state mirror updates at most once per frame
 
-      // Stable-hold threshold for the LIVE display only. When a target
-      // is set, count samples ≥ 85% of target. Otherwise include any
-      // positive sample. The persisted average is plateau-trimmed at
-      // rep end; this just keeps the gauge from jittering during ramp-up.
-      const tgtForAvg = targetKgRef.current;
-      const stableThreshold = (tgtForAvg && tgtForAvg > 0) ? 0.85 * tgtForAvg : 0;
-      const isStableSample = stableThreshold > 0 ? kg >= stableThreshold : kg > 0;
-
       if (measuringRef.current) {
-        // Buffer raw sample for plateau trimming at rep end.
-        samplesRef.current.push({ kg, ts: Date.now() });
-        if (isStableSample) {
-          sumRef.current   += kg;
-          countRef.current += 1;   // avg state mirror updated by flushUi
-        }
+        // Keep the full force trace, including below-target work.
+        samplesRef.current.push({ kg, ts: now });
+        sumRef.current += kg;
+        countRef.current += 1;
       }
 
       if (measuringRef.current) {
-        const tgt = targetKgRef.current;
-        if (tgt != null && tgt > 0) {
-          // Hybrid threshold — see AUTOFAIL_* constants above for the
-          // rationale. min() picks the lower (more forgiving) of the
-          // 95% rule and the 2 kg absolute floor, so light-target reps
-          // get human-scale slack instead of fractional-kg precision.
-          const threshold = Math.min(tgt * AUTOFAIL_PCT, tgt - AUTOFAIL_ABS_SAG_KG);
-          if (kg < threshold) {
-            if (belowSinceRef.current === null) belowSinceRef.current = Date.now();
-            else if (Date.now() - belowSinceRef.current > AUTOFAIL_MS) {
-              belowSinceRef.current = null;
-              autoFailCallbackRef.current?.();
-            }
-          } else {
-            belowSinceRef.current = null;
-          }
-        }
+        if (kg < AD_END_KG) {
+          if (belowSinceRef.current === null) belowSinceRef.current = now;
+          else if (now - belowSinceRef.current >= AD_END_MS) autoFailCallbackRef.current?.();
+        } else belowSinceRef.current = null;
       }
 
       if (adOnStartRef.current || adOnEndRef.current) {
-        const now = Date.now();
         if (!adActiveRef.current) {
           // "Await release" guard. Set by endRepAndRequireRelease()
           // — the warmup uses it when it auto-ends a hang at target
@@ -354,10 +325,7 @@ export function useTindeq() {
           } else if (kg >= AD_START_KG) {
             adActiveRef.current    = true;
             adStartTimeRef.current = now;
-            // Reset live-display accumulators and the raw sample buffer
-            // for plateau-trim at rep end. The first sample at
-            // AD_START_KG (4 kg) is in ramp-up, but it goes into the
-            // buffer — the plateau trim will exclude it.
+            // Start the force and time interval at the same sample.
             adSumRef.current       = 0;
             adCountRef.current     = 0;
             adSamplesRef.current   = [{ kg, ts: now }];
@@ -367,25 +335,18 @@ export function useTindeq() {
             adOnStartRef.current?.();
           }
         } else {
-          // Always buffer the raw sample; the plateau trim picks the
-          // window at rep end. The live-display accumulator still uses
-          // the stable-sample gate so the gauge doesn't dip during the
-          // initial ramp-up.
+          // Include weaker work and transient fluctuations.
           adSamplesRef.current.push({ kg, ts: now });
-          if (isStableSample) {
-            adSumRef.current  += kg;
-            adCountRef.current += 1;  // avg state mirror updated by flushUi
-          }
+          adSumRef.current += kg;
+          adCountRef.current += 1;
           if (kg < AD_END_KG) {
             if (adBelowRef.current === null) adBelowRef.current = now;
             else if (now - adBelowRef.current >= AD_END_MS) {
               const actualTime = (adBelowRef.current - adStartTimeRef.current) / 1000;
               if (actualTime * 1000 >= AD_MIN_MS) {
-                // Plateau-trimmed average from the raw buffer (see
-                // computePlateauAvg above). Falls back to peak when the
-                // window collapses (sub-plateau attempt) so we never
-                // persist a 0.
-                const avg = computePlateauAvg(adSamplesRef.current);
+                // Exclude release confirmation time from both force and duration.
+                const stats = recordForce(adSamplesRef.current, adBelowRef.current);
+                const avg = stats.avgForce;
                 // Read peak BEFORE clearing — peakRef gets reset
                 // on the next rep's start.
                 const peakF = peakRef.current;
@@ -396,7 +357,7 @@ export function useTindeq() {
                 adCountRef.current     = 0;
                 adSamplesRef.current   = [];
                 adBelowRef.current     = null;
-                cb?.({ actualTime, avgForce: avg, peakForce: peakF });
+                cb?.({ ...stats, actualTime, avgForce: avg, peakForce: peakF });
               } else {
                 adActiveRef.current    = false;
                 adStartTimeRef.current = null;
@@ -413,6 +374,19 @@ export function useTindeq() {
       }
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!adActiveRef.current || lastPacketAtRef.current == null
+          || Date.now() - lastPacketAtRef.current <= 1500) return;
+      const stats = recordForce(adSamplesRef.current);
+      adActiveRef.current = false;
+      adAwaitReleaseRef.current = true;
+      adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
+      adSamplesRef.current = [];
+    }, 250);
+    return () => clearInterval(timer);
+  }, []);
 
   // ── GATT setup — called on initial connect and every reconnect ──
   const setupGatt = useCallback(async (device) => {
@@ -459,6 +433,13 @@ export function useTindeq() {
       // Aggressive retry loops can poison the adapter state on Android —
       // if this one try fails, surface a clean error and let the user reconnect.
       const onDisconnected = async () => {
+        if (adActiveRef.current) {
+          const stats = recordForce(adSamplesRef.current);
+          adActiveRef.current = false;
+          adAwaitReleaseRef.current = true;
+          adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
+          adSamplesRef.current = [];
+        }
         setConnected(false);
         if (reconnectingRef.current) return;
         reconnectingRef.current = true;
@@ -530,25 +511,23 @@ export function useTindeq() {
     if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_START);
   }, []);
 
-  // Returns { avgForce, peakForce } so callers don't have to read
-  // tindeq.avgForce out of stale React state. The avg is computed
-  // from the buffered raw samples (plateau-trimmed) — see
-  // computePlateauAvg above.
+  // Return force, matched device duration, and measurement validity together.
   const stopMeasuring = useCallback(async () => {
     measuringRef.current = false;
-    if (ctrlRef.current) await ctrlRef.current.writeValue(CMD_STOP);
-    const avg = computePlateauAvg(samplesRef.current);
+    const stats = recordForce(samplesRef.current, belowSinceRef.current ?? undefined);
+    if (ctrlRef.current) { try { await ctrlRef.current.writeValue(CMD_STOP); } catch {} }
+    const avg = stats.avgForce;
     const peakF = peakRef.current;
     samplesRef.current = [];
     // Final avg is authoritative: kill any queued frame flush and
     // retire the live accumulators so no later flush recomputes a
     // running avg over this rep's samples and overwrites the
-    // plateau-trimmed value.
+    // measured value.
     cancelUiFlush();
     sumRef.current = 0;
     countRef.current = 0;
     setAvgForce(avg);
-    return { avgForce: avg, peakForce: peakF };
+    return { ...stats, avgForce: avg, peakForce: peakF };
   }, [cancelUiFlush]);
 
   const resetPeak = useCallback(() => {
@@ -588,11 +567,8 @@ export function useTindeq() {
   // rep-end callback so the caller can record the rep if it wants
   // (the warmup doesn't, but the contract stays consistent).
   const endRepAndRequireRelease = useCallback(() => {
-    const now = Date.now();
-    const actualTime = adStartTimeRef.current
-      ? (now - adStartTimeRef.current) / 1000
-      : 0;
-    const avg = computePlateauAvg(adSamplesRef.current);
+    const stats = recordForce(adSamplesRef.current);
+    const { actualTime, avgForce: avg } = stats;
     const peakF = peakRef.current;
     adActiveRef.current     = false;
     adStartTimeRef.current  = null;
@@ -601,7 +577,7 @@ export function useTindeq() {
     adSamplesRef.current    = [];
     adBelowRef.current      = null;
     adAwaitReleaseRef.current = true;
-    return { actualTime, avgForce: avg, peakForce: peakF };
+    return { ...stats, actualTime, avgForce: avg, peakForce: peakF };
   }, []);
 
   const stopAutoDetect = useCallback(async () => {

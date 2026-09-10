@@ -296,7 +296,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   const autoFailedRef = useRef(false);
 
   // End rep — called by manual tap (failed=false) or auto-failure (failed=true).
-  const endRep = useCallback(async () => {
+  const endRep = useCallback(async (interrupted = false) => {
     if (!startTimeRef.current) return;
     const failed = autoFailedRef.current;
     autoFailedRef.current = false;
@@ -304,14 +304,13 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     const actualTime = (Date.now() - startTimeRef.current) / 1000;
     startTimeRef.current = null;
     setRepPhase("ready");
-    // stopMeasuring returns the rep's plateau-trimmed avg and peak
-    // directly — no reliance on stale React state. Falls back to
-    // tindeq.peak / tindeq.avgForce when BLE was disconnected and
-    // there are no samples to trim (manual / no-Tindeq sessions).
-    let avgForce = tindeq.avgForce;
-    let peakForce = tindeq.peak;
+    // Use the completed measurement; manual reps must not reuse stale BLE stats.
+    let avgForce = null;
+    let peakForce = null;
+    let measurement = {};
     if (tindeq.connected) {
       const stats = await tindeq.stopMeasuring();
+      measurement = stats;
       avgForce = stats.avgForce;
       peakForce = stats.peakForce;
     }
@@ -320,7 +319,10 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     // without it the rep persists load=0 and every downstream fit reads
     // zero (the elcerritotom bug, July 2026). Tindeq reps still prefer the
     // measured avg_force_kg via effectiveLoad, so this is a no-op there.
-    onRepDone({ actualTime, avgForce, peakForce, failed, manualLoadKg: manualKgRef.current });
+    onRepDone({ actualTime, avgForce, peakForce, failed, ...measurement,
+      failureValid: interrupted === true ? false : (measurement.failureValid ?? true),
+      endReason: interrupted === true ? "interrupted" : (measurement.endReason ?? "muscular_failure"),
+      manualLoadKg: manualKgRef.current });
   }, [tindeq, onRepDone]);
 
   // Wire auto-failure → endRep for the duration of an active rep only.
@@ -374,6 +376,8 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       </div>
 
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
+      <p>Target time guides the prescribed load. Continue until muscular failure.</p>
+
 
       {/* Phase cards (countdown / timer / ready) render FIRST so the
           timer never scrolls below the fold mid-rep — the live charts
@@ -401,7 +405,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
             <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />
           ) : (
             <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
-              No Tindeq — tap Done when you let go.
+              No Tindeq — tap Done at muscular failure.
             </div>
           )}
         </Card>
@@ -457,14 +461,16 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         )}
         {repPhase === "active" && (
           <Btn
-            onClick={endRep}
+            onClick={() => endRep()}
             style={{ flex: 1, padding: "18px 0", fontSize: 18, borderRadius: 12 }}
             color={C.red}
           >
-            ✕ Done
+            Done — muscular failure
           </Btn>
         )}
       </div>
+
+      {repPhase === "active" && <Btn onClick={() => endRep(true)}>Rep interrupted</Btn>}
 
       {/* Live rep-curve preview — forecasted vs. actual so far, with
           last-session overlay and asymptotic floor. Re-seeds from rep
@@ -607,6 +613,10 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
       {lastRep && (
         <Card>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Last rep result</div>
+          <p>{lastRep.failureValid === false
+            ? "Interrupted or incomplete measurement — activity saved; excluded from failure learning."
+            : "Muscular failure recorded — valid failure data."}</p>
+          <p>{lastRep.avgForce > 0 ? `${fmtW(lastRep.avgForce, unit)} ${unit} time-weighted average over ${lastRep.actualTime.toFixed(1)}s.` : "Manually timed effort."}</p>
           <div style={{ display: "flex", gap: 32 }}>
             <div>
               <Label>Time</Label>
@@ -829,7 +839,10 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
             <tbody>
               {sReps.map(r => (
                 <tr key={r.rep_num} style={{ borderTop: `1px solid ${C.border}` }}>
-                  <td style={{ padding: "6px 0" }}>{r.rep_num}</td>
+                  <td style={{ padding: "6px 0" }}>{r.rep_num}
+                    <div style={{ fontSize: 11 }}>{r.failure_valid === false
+                      ? "Interrupted · excluded from failure learning" : "Valid failure data"}</div>
+                  </td>
                   <td style={{ textAlign: "right" }}>{fmtW(prescribedLoad(r), unit)} {unit}</td>
                   <td style={{ textAlign: "right", color: r.actual_time_s >= config.targetTime ? C.green : C.red }}>
                     {fmtTime(r.actual_time_s)}
@@ -905,14 +918,14 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   // until handleRepStart runs.
   const repEndedRef = useRef(true);
 
-  const handleRepEnd = useCallback(({ actualTime, avgForce, peakForce }) => {
+  const handleRepEnd = useCallback((stats) => {
     if (repEndedRef.current) return;  // already ended — ignore until next rep arms
     repEndedRef.current = true;
     clearInterval(timerRef.current);
     setRepActive(false);
     setElapsed(0);
     startTimeRef.current = null;
-    onRepDone({ actualTime, avgForce, peakForce, failed: false });
+    onRepDone({ ...stats, failed: false });
   }, [onRepDone]);
 
   const handleRepStart = useCallback(() => {
@@ -948,6 +961,10 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
       </div>
 
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
+      <p>Target time guides the prescribed load. Continue until muscular failure.</p>
+      {repActive && <Btn onClick={() => handleRepEnd({
+        ...tindeq.endRepAndRequireRelease(), failureValid: false, endReason: "interrupted",
+      })}>Rep interrupted</Btn>}
 
       {/* Status card first — the big hold timer must never scroll
           below the fold mid-rep. Live charts moved below the force
@@ -955,7 +972,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
       <Card style={{ textAlign: "center", padding: "32px 16px", marginTop: 12 }}>
         {repActive ? (
           <>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Holding — release when done</div>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Continue until muscular failure</div>
             <div style={{
               fontSize: 96, fontWeight: 900, lineHeight: 1,
               color: targetReached ? C.green : C.blue,
@@ -965,7 +982,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
               target {config.targetTime}s
-              {targetReached && <span style={{ color: C.green, marginLeft: 8 }}>✓ target reached</span>}
+              {targetReached && <span style={{ color: C.green, marginLeft: 8 }}>Target reached — keep pulling to failure</span>}
             </div>
           </>
         ) : (
@@ -1018,6 +1035,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
           />
         </Card>
       )}
+
 
       {/* Live rep-curve preview (same component as the manual flow) —
           below the timer + gauge so the clock stays on-screen. */}

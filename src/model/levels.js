@@ -1,3 +1,4 @@
+import { isValidFailureRep } from "./forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // LEVELING / GAMIFICATION MODEL  (curve-trust rewrite, May 2026)
 // ─────────────────────────────────────────────────────────────
@@ -41,7 +42,7 @@ export const LEVEL_STEP = 1.05;
 // Returns [{ key, date, reps[] }] sorted ascending by date.
 export function groupSessions(history, hand, grip, zone) {
   if (!zone) return [];
-  const matches = history.filter(r =>
+  const matches = history.filter(r => isValidFailureRep(r) &&
     r.hand === hand &&
     (!grip || r.grip === grip) &&
     r.actual_time_s > 0 &&

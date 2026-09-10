@@ -25,7 +25,7 @@ import { clamp } from "../../util.js";
 // Big seconds counter + target line + progress bar. Used during
 // active reps (count up to target) and warm-up hangs (same shape,
 // shorter targets). Color flips green when the user has held past
-// target so the release cue is obvious without reading the number.
+// target to mark the prescription target; this is not a release instruction.
 //
 // Props:
 //   seconds        — elapsed seconds (number)
@@ -59,7 +59,7 @@ function BigTimer({ seconds, targetSeconds, running }) {
 //
 // Props:
 //   force      — live current force kg (number)
-//   avg        — running plateau-averaged force kg (number)
+//   avg        — running average force kg (number)
 //   peak       — running peak force kg (number)
 //   targetKg   — prescribed target load kg (number | null)
 //   maxDisplay — bar's full-scale kg (default 50 — reasonable for

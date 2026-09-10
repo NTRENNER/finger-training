@@ -56,7 +56,7 @@ export function buildZoneSessionHistory(history, {
     if (!(targetS > 0) || zoneOf(targetS) !== zoneKey) continue;
 
     const openers = reps.filter(isOpenerRep);
-    const comparisonReps = openers.length > 0 ? openers : reps.slice(0, 1);
+    const comparisonReps = openers.length > 0 ? openers : reps.filter(r => r.failure_valid !== false).slice(0, 1);
     const openingActualS = mean(numeric(comparisonReps.map(rep => rep.actual_time_s)));
     const openingLoadKg = mean(numeric(comparisonReps.map(effectiveLoad)));
     if (!(openingActualS > 0) || !(openingLoadKg > 0)) continue;

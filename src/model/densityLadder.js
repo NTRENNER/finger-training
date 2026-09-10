@@ -1,3 +1,4 @@
+import { isValidFailureRep } from "./forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // DENSITY LADDER — rep-count progression at constant load
 // ─────────────────────────────────────────────────────────────
@@ -168,7 +169,7 @@ function latestSessionInZone(history, grip, zoneKey) {
       best = { reps, date, started };
     }
   }
-  return best;
+  return best?.reps.every(isValidFailureRep) ? best : null;
 }
 
 // Compute the ladder prescription for (grip, zoneKey) from history.
