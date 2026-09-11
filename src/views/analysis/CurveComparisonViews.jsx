@@ -1,7 +1,7 @@
 import React from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from "recharts";
 import { C } from "../../ui/theme.js";
-import { toDisp, fromDisp, fmt1 } from "../../ui/format.js";
+import { toDisp, fmt1 } from "../../ui/format.js";
 import { ZONE6, ZONE_REF_T } from "../../model/zones.js";
 import { zoneReference, defaultComparisonLoad, holdTimeAtForce, holdTimeSeries, forceComparison, forceHistorySeries } from "../../model/curveComparison.js";
 
@@ -10,7 +10,7 @@ const signed = value => `${value >= 0 ? "+" : ""}${fmt1(value)}`;
 
 export function ComparisonModeSelector({ mode, onChange }) {
   return <div role="group" aria-label="Curve improvement view" style={{ display: "flex", gap: 6, margin: "12px 0", flexWrap: "wrap" }}>
-    {[["percent", "%"], ["weight", "Weight"], ["time", "Hold time"]].map(([key, label]) =>
+    {[["percent", "%"], ["weight", "Weight"], ["time", "Time"]].map(([key, label]) =>
       <button type="button" key={key} aria-pressed={mode === key} onClick={() => onChange(key)}
         style={{ ...controlStyle, minWidth: 72, fontWeight: 700, background: mode === key ? C.purple : C.bg, color: mode === key ? "#fff" : C.text }}>{label}</button>)}
   </div>;
@@ -26,11 +26,10 @@ export function WeightTile({ comparison, unit, baselineDate, color = C.text }) {
   </>;
 }
 
-export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange, weights, onWeightChange }) {
+export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange }) {
   const comparisons = ZONE6.map(domain => {
     const reference = zoneReference(overlay, domain.key, date);
-    const defaultLoad = defaultComparisonLoad(overlay, domain.key, reference, reps);
-    const load = Object.prototype.hasOwnProperty.call(weights, domain.key) ? weights[domain.key] : defaultLoad;
+    const load = defaultComparisonLoad(overlay, domain.key, reference, reps);
     const before = reference ? holdTimeAtForce(reference.amps, load, reference.maxHold) : null;
     const now = holdTimeAtForce(overlay?.ampsByDate?.get(date), load, overlay?.maxHoldByDate?.get(date));
     return { ...domain, reference, load, before, now, available: before != null && now != null };
@@ -73,14 +72,8 @@ export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange, we
         </button>
       ))}
     </div>
-    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end", marginBottom: 14 }}>
-      <div style={{ fontSize: 16, fontWeight: 700, color: selected.color, paddingBottom: 10 }}>{selected.label}</div>
-      <label style={{ display: "grid", gap: 5, fontSize: 13 }}>Fixed weight ({unit})
-        <input key={`${zone}-${unit}`} aria-label={`Fixed weight (${unit})`} type="number" min="0.1" step="0.1"
-          value={load == null ? "" : Number(toDisp(load, unit).toFixed(1))}
-          onChange={e => onWeightChange(zone, e.target.value === "" ? null : fromDisp(Number(e.target.value), unit))}
-          style={{ ...controlStyle, width: 125 }} />
-      </label>
+    <div style={{ fontSize: 16, fontWeight: 700, color: selected.color, marginBottom: 14 }}>
+      {selected.label}{load > 0 ? ` · comparing at ${fmt1(toDisp(load, unit))} ${unit}` : ""}
     </div>
     <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5, marginBottom: 12 }}>
       Compare estimated hold time at one fixed weight. New workouts do not change this weight.
@@ -90,7 +83,7 @@ export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange, we
       <div style={{ fontSize: 16, color: C.text }}>{fmt1(before)} → {fmt1(now)} seconds at {fmt1(toDisp(load, unit))} {unit}</div>
       <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Estimated · {reference.date} → {date}</div>
     </div> : <p role="status" style={{ fontSize: 14, color: C.muted, lineHeight: 1.5 }}>
-      {!reference ? "No baseline yet for this domain." : "Not enough supported hold-time data at this weight to compare both dates. Choose a weight covered by your recorded pulls."}
+      {!reference ? "No baseline yet for this domain." : "Not enough supported hold-time data at this weight to compare both dates. The baseline weight stays fixed as more training data becomes available."}
     </p>}
     {rows.some(row => row.seconds != null || row.measured != null) && <ResponsiveContainer width="100%" height={210}>
       <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 10, left: 0 }}>

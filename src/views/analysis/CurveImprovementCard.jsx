@@ -373,7 +373,6 @@ function GripBlock({
 }) {
   const [timeZone, setTimeZone] = useState("power");
   const [weightZone, setWeightZone] = useState("power");
-  const [weights, setWeights] = useState({});
   const dates = overlay.dates;
   const last = Math.max(0, dates.length - 1);
   const idx = nowIdx == null ? last : Math.max(0, Math.min(last, nowIdx));
@@ -422,8 +421,7 @@ function GripBlock({
       {mode === "weight" && !hasWeightComparison && <p style={{ fontSize: 14, color: C.muted }}>Weight comparisons need a baseline and a current curve for this selection.</p>}
       {mode === "weight" && hasWeightComparison && <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>Estimated weight change at each domain’s fixed duration.</div>}
       {mode === "time" ? <HoldTimeView overlay={overlay} date={nowDate} unit={unit} reps={reps}
-        zone={timeZone} onZoneChange={setTimeZone} weights={weights}
-        onWeightChange={(zone, load) => setWeights(previous => ({ ...previous, [zone]: load }))} />
+        zone={timeZone} onZoneChange={setTimeZone} />
         : mode === "weight" ? <WeightHistoryView overlay={overlay} date={nowDate} unit={unit} reps={reps} zone={weightZone}
           onShowSessions={onZoneSelect ? () => onZoneSelect(grip, weightZone, staticImprovement ? null : nowDate) : null} />
         : !staticImprovement && <OverlayChart
