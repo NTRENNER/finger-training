@@ -4,12 +4,10 @@ import { MeasuredProgressSection } from "./cards/MeasuredProgressCard.jsx";
 // ──────────────────────────────────────────────────────────────
 // The "Analysis" tab. Top-to-bottom render order:
 //
-//   1. Recovery Status — glanceable readiness / deload pressure.
-//   2. Whole-Curve Capacity — 28-day change plus % vs baseline.
-//   3. Force-Duration chart — the fitted curve and measured reps.
-//   4. Curve Improvement — zone-bucketed gain vs baseline.
-//   5. Peak Force — direct short-duration max trend.
-//   6. Curve Coverage — only when sampled data needs attention.
+//   1. Recorded pulls and current curve — always visible.
+//   2. Curve Improvement — domain progress vs baseline.
+//   3. Overall curve summary — optional whole-curve trajectory.
+//   4. Curve Coverage — only when sampled data needs attention.
 //
 // State comes in via props: history, freshMap (built in
 // useRepHistory), activities, bodyWeight. threeExpPriors are
@@ -41,11 +39,9 @@ import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.js";
 import { CardBoundary } from "../ui/ErrorBoundary.jsx";
 import { bwOnDate, toDisp, forceOverBW } from "../ui/format.js";
-import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY, LS_WORKOUT_LOG_KEY } from "../lib/storage.js";
+import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
 import { useLSValue } from "../hooks/useLSValue.js";
-import { today } from "../util.js";
 import { STRENGTH_MAX } from "../model/zones.js";
-import { deloadStatus, recoveryStatusDates } from "../model/deload.js";
 import {
   predForceThreeExp,
   buildThreeExpPriors,
@@ -70,11 +66,9 @@ import {
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
 import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
-import { DeloadGauge } from "./cards/DeloadGauge.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
-import { PeakForceCard } from "./analysis/PeakForceCard.jsx";
 import { AnalysisScopeToolbar } from "./analysis/AnalysisScopeToolbar.jsx";
 import { useCapacityHistoryByGrip } from "../hooks/useCapacityHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
@@ -116,23 +110,6 @@ export function AnalysisView({
   // path. Used by the gap-narrowing tracker and prescription-potential
   // calculation too. Could be lifted to App if it becomes hot.
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
-
-  // Recovery-readiness history for the DeloadGauge. The model already
-  // evaluates leak-free at an arbitrary date, so scrubbing recomputes the
-  // real historical status with only data available at that checkpoint.
-  const todayStr = today();
-  const recoveryTimelineDates = useMemo(
-    () => recoveryStatusDates(history, { today: todayStr }),
-    [history, todayStr]
-  );
-  const [selectedRecoveryDate, setSelectedRecoveryDate] = useState(null);
-  const recoveryAsOfDate = selectedRecoveryDate && recoveryTimelineDates.includes(selectedRecoveryDate)
-    ? selectedRecoveryDate
-    : todayStr;
-  const deloadStatusResult = useMemo(
-    () => deloadStatus(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: recoveryAsOfDate }),
-    [history, recoveryAsOfDate]
-  );
 
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const handleDotClick = (data) => {
@@ -676,18 +653,8 @@ export function AnalysisView({
 
       <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Force-Duration Analysis</h2>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-        Track recovery and capacity across your force-duration curve. Measured gaps guide coverage; they do not guarantee faster adaptation.
+        Explore your recorded pulls and progress across your force-duration curve. Measured gaps guide coverage; they do not guarantee faster adaptation.
       </p>
-
-      <CardBoundary name="Recovery status">
-        <DeloadGauge
-          status={deloadStatusResult}
-          timelineDates={recoveryTimelineDates}
-          asOfDate={recoveryAsOfDate}
-          currentDate={todayStr}
-          onAsOfDateChange={date => setSelectedRecoveryDate(date === todayStr ? null : date)}
-        />
-      </CardBoundary>
 
       {/* Bodyweight logging lives on the Setup tab now (next to the
           climb logger). Analysis stays focused on viewing — the only
@@ -708,37 +675,34 @@ export function AnalysisView({
 
 
       {reps.length > 0 && (<>
-        {/* Curve Improvement is the main progress view; supporting charts live inside it. */}
+        <CardBoundary name="Force-Duration chart">
+          <ForceDurationCard
+            unit={unit}
+            bodyWeight={bodyWeight}
+            bwLog={bwLog}
+            useRel={useRel}
+            normalizeOn={normalizationActive}
+            handView={handView}
+            fdBasis={fdBasis}
+            onFdBasisChange={setFdBasis}
+            fdSplitData={fdSplitData}
+            threeExpCurveDataRel={threeExpCurveDataRel}
+            threeExpRef180={threeExpRef180}
+            curveColor={curveColor}
+            dotsRel={dotsRel}
+            maxDur={maxDur}
+            maxForceRel={maxForceRel}
+            handAsymmetry={handView === "pooled"
+              ? handAsymmetry.filter(item => !selGrip || item.grip === selGrip)
+              : []}
+            history={history}
+            freshMap={fdFreshMap}
+            threeExpPriors={threeExpPriors}
+            handleDotClick={handleDotClick}
+          />
+        </CardBoundary>
         <CardBoundary name="Curve Improvement">
         <CurveImprovementCard
-          recordedCurve={
-            <CardBoundary name="Force-Duration chart">
-              <ForceDurationCard
-                unit={unit}
-                bodyWeight={bodyWeight}
-                bwLog={bwLog}
-                useRel={useRel}
-                normalizeOn={normalizationActive}
-                handView={handView}
-                fdBasis={fdBasis}
-                onFdBasisChange={setFdBasis}
-                fdSplitData={fdSplitData}
-                threeExpCurveDataRel={threeExpCurveDataRel}
-                threeExpRef180={threeExpRef180}
-                curveColor={curveColor}
-                dotsRel={dotsRel}
-                maxDur={maxDur}
-                maxForceRel={maxForceRel}
-                handAsymmetry={handView === "pooled"
-                  ? handAsymmetry.filter(item => !selGrip || item.grip === selGrip)
-                  : []}
-                history={history}
-                freshMap={fdFreshMap}
-                threeExpPriors={threeExpPriors}
-                handleDotClick={handleDotClick}
-              />
-            </CardBoundary>
-          }
           measuredProgress={
             <CardBoundary name="Measured progress">
               <MeasuredProgressSection
@@ -771,24 +735,6 @@ export function AnalysisView({
           perHandGripImprovementFresh={perHandGripImprovementFresh}
         />
         </CardBoundary>
-
-        <details style={{ marginBottom: 16 }}>
-          <summary style={{ cursor: "pointer", fontSize: 14, color: C.muted, padding: "10px 0" }}>Peak force records</summary>
-          <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-            Best recorded momentary force and its history. Max in Curve Improvement estimates force sustained for 5 seconds.
-          </p>
-          <CardBoundary name="Peak Force trend">
-            <PeakForceCard
-              history={history}
-              unit={unit}
-              grip={selGrip}
-              handView={handView}
-              normalizeOn={normalizationActive}
-              bodyWeight={bodyWeight}
-              bwLog={bwLog}
-            />
-          </CardBoundary>
-        </details>
 
         <details style={{ marginBottom: 16 }}>
           <summary style={{ cursor: "pointer", fontSize: 14, color: C.muted, padding: "10px 0" }}>Overall curve summary</summary>

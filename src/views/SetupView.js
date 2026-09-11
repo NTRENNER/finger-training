@@ -63,6 +63,8 @@ import { buildThreeExpPriors } from "../model/threeExp.js";
 import { computeDeload, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.js";
 import { TendonCard } from "./cards/TendonCard.jsx";
+import { RecoveryStatusCard } from "./cards/RecoveryStatusCard.jsx";
+import { CardBoundary } from "../ui/ErrorBoundary.jsx";
 import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 
 // ────────────────────────────────────────────────────────────────
@@ -244,6 +246,10 @@ export function SetupView({
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
+
+      <CardBoundary name="Recovery status">
+        <RecoveryStatusCard history={history} />
+      </CardBoundary>
 
       <DeloadBanner
         deload={deloadState}

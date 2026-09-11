@@ -13,3 +13,7 @@ Hold-time inversion is bounded from the curve's five-second reference minimum th
 The standalone force-duration display and measured-session summaries are now expandable details inside Curve Improvement. Peak force records, including best recorded peaks and their trends, are collapsed by default under an expandable details row. The explanation distinguishes momentary peaks from the Max domain’s estimated five-second hold. Whole-Curve Capacity remains an optional overall summary. All historical data and session-history links remain available.
 
 Validation covers analytical inverse solutions, all six reference durations, unchanged and declining curves, unsupported loads, later baselines, interruptions, hand/date scoping, kg/lbs conversion, bodyweight changes, and fixed-weight stability. The card was also inspected in a browser with synthetic data at desktop and phone widths. This is not a physical sensor validation or a comparison against the user's live database.
+
+## Analysis layout
+
+Recorded pulls and current curve is the first chart and is always visible, followed by Curve Improvement. The peak-force history card is removed from Analysis. Overall curve summary remains optional: it combines the six domains into a balanced capacity trend, with recent change and climbing context. Recovery status now appears before the training plan on Fingers, retaining its historical date control.

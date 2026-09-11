@@ -487,7 +487,7 @@ export function CurveImprovementCard({
   // tiles' supported zones are built from; used so the per-zone fill
   // shares the same basis (July 2026).
   perHandGripEstimates = {},
-  recordedCurve = null, measuredProgress = null,
+  measuredProgress = null,
 }) {
   const [comparisonMode, setComparisonMode] = useState("percent");
   // Load and time comparisons always hold physical weight fixed.
@@ -600,7 +600,6 @@ export function CurveImprovementCard({
   ) : null;
 
   const supportingDetails = <>
-    {recordedCurve && <details style={{ marginTop: 16 }}><summary style={{ cursor: "pointer", fontSize: 14, color: C.text, padding: "8px 0" }}>Recorded pulls and current curve</summary>{recordedCurve}</details>}
     {measuredProgress && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontSize: 14, color: C.text, padding: "8px 0" }}>Measured session comparisons</summary>{measuredProgress}</details>}
   </>;
 

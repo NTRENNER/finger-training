@@ -209,7 +209,7 @@ export function ForceDurationCard({
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Force vs. Duration</div>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Recorded pulls and current curve</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {onFdBasisChange && <BasisPills value={fdBasis} onChange={onFdBasisChange} />}
         </div>
