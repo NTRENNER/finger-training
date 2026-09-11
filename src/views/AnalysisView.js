@@ -1,4 +1,4 @@
-import { MeasuredProgressCard } from "./cards/MeasuredProgressCard.jsx";
+import { MeasuredProgressSection } from "./cards/MeasuredProgressCard.jsx";
 // ──────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
 // ──────────────────────────────────────────────────────────────
@@ -706,82 +706,49 @@ export function AnalysisView({
         attentionCounts={coverageAttentionCounts}
       />
 
-      {(selGrip ? [selGrip] : grips).map(g => (handView === "pooled" ? ["L", "R"] : [handView]).map(h =>
-        <CardBoundary key={`progress-${g}-${h}`} name="Measured progress">
-          <MeasuredProgressCard history={history} grip={g} hand={h} unit={unit} />
-        </CardBoundary>
-      ))}
 
       {reps.length > 0 && (<>
-        <CardBoundary name="Whole-Curve Capacity">
-          <CapacityTrajectoryCard
-            capacityHistoryByGrip={capacityHistoryByGrip}
-            normalizeOn={normalizationActive}
-            activities={activities}
-            handView={handView}
-          />
-        </CardBoundary>
-
-        {/* ── Force-Duration scatter ──
-            Display mode (Absolute vs × BW) is driven by the global
-            normalize toggle in the page header — the per-card pill that
-            used to live here was retired so all four metric surfaces
-            switch in lockstep. Card body extracted to ForceDurationCard
-            (May 2026 BACKLOG #156 fourth pass); AnalysisView wires the
-            data props in. */}
-        <CardBoundary name="Force-Duration chart">
-        <ForceDurationCard
-          unit={unit}
-          bodyWeight={bodyWeight}
-          bwLog={bwLog}
-          useRel={useRel}
-          normalizeOn={normalizationActive}
-          handView={handView}
-          fdBasis={fdBasis}
-          onFdBasisChange={setFdBasis}
-          fdSplitData={fdSplitData}
-          threeExpCurveDataRel={threeExpCurveDataRel}
-          threeExpRef180={threeExpRef180}
-          curveColor={curveColor}
-          dotsRel={dotsRel}
-          maxDur={maxDur}
-          maxForceRel={maxForceRel}
-          handAsymmetry={handView === "pooled"
-            ? handAsymmetry.filter(item => !selGrip || item.grip === selGrip)
-            : []}
-          history={history}
-          freshMap={fdFreshMap}
-          threeExpPriors={threeExpPriors}
-          handleDotClick={handleDotClick}
-        />
-        </CardBoundary>
-        {/* (Inline F-D card render block was here — ~280 lines covering
-            the title + legend + ComposedChart + per-grip split-mode
-            curves/dots + zone labels + Hand Asymmetry rows. Now in
-            src/views/analysis/ForceDurationCard.jsx.) */}
-
-        {/* (PrescribedLoadCard removed from Analysis — was redundant
-            with the SessionPlanCard on Setup which renders the same
-            six-zone tile grid plus the recommendation. Analysis keeps
-            the F-D chart for the visual prescription story; the
-            tabular per-zone view lives on Setup where it informs the
-            actual session pick.) */}
-
-        {/* ── Curve Improvement summary ──
-            (Was "Endurance Improvement" — renamed because the headline
-            isn't endurance, it's the average of three F-D curve point
-            improvements at ZONE_REF_T's power/strength/endurance times
-            — currently 7s / 45s / 120s. The blue Endurance cell is the
-            one true endurance signal; Power and Strength are the other
-            two reference points on the same curve.)
-            Rendered under the F-D chart as the per-zone summary of
-            where gains are coming from.
-            Card extracted to CurveImprovementCard (May 2026 BACKLOG
-            #156 fifth pass). The three branch modes (perGripMode,
-            selGrip-with-baseline, pooled fallback) and their early-days
-            placeholders all live in the component now. */}
+        {/* Curve Improvement is the main progress view; supporting charts live inside it. */}
         <CardBoundary name="Curve Improvement">
         <CurveImprovementCard
+          recordedCurve={
+            <CardBoundary name="Force-Duration chart">
+              <ForceDurationCard
+                unit={unit}
+                bodyWeight={bodyWeight}
+                bwLog={bwLog}
+                useRel={useRel}
+                normalizeOn={normalizationActive}
+                handView={handView}
+                fdBasis={fdBasis}
+                onFdBasisChange={setFdBasis}
+                fdSplitData={fdSplitData}
+                threeExpCurveDataRel={threeExpCurveDataRel}
+                threeExpRef180={threeExpRef180}
+                curveColor={curveColor}
+                dotsRel={dotsRel}
+                maxDur={maxDur}
+                maxForceRel={maxForceRel}
+                handAsymmetry={handView === "pooled"
+                  ? handAsymmetry.filter(item => !selGrip || item.grip === selGrip)
+                  : []}
+                history={history}
+                freshMap={fdFreshMap}
+                threeExpPriors={threeExpPriors}
+                handleDotClick={handleDotClick}
+              />
+            </CardBoundary>
+          }
+          measuredProgress={
+            <CardBoundary name="Measured progress">
+              <MeasuredProgressSection
+                history={history}
+                grips={selGrip ? [selGrip] : grips}
+                hands={handView === "pooled" ? ["L", "R"] : [handView]}
+                unit={unit}
+              />
+            </CardBoundary>
+          }
           improvement={improvement}
           gripImprovement={gripImprovement}
           grip3xEstimates={grip3xEstimates}
@@ -821,23 +788,17 @@ export function AnalysisView({
         />
         </CardBoundary>
 
-        {/* (Endurance Ceiling / Sustained-vs-max card retired July
-            2026, per Nathan — second retirement of this idea. v1
-            (F180/F5, May 2026) was invariant to proportional gains;
-            v2 (modeled F(240s) ÷ measured peak, June 2026) had a
-            self-referential numerator — the fit's extrapolated tail
-            inherits amplitude from max gains; v3 (measured ≥120s
-            holds ÷ measured peak) was honest but sparse, and its two
-            halves already live on the F-D chart / Capacity trajectory
-            (sustained) and the Peak Force card (max). Verdict: the
-            ratio never earned a card of its own.) */}
-
-
-        {/* (Force Curves — vs baseline overlay merged INTO
-            CurveImprovementCard, May 2026: each grip block now carries
-            its own baseline-vs-now curve + Now slider, and the slider
-            drives the zone tiles too. The standalone card and its
-            Pooled/Per-hand + grip pills were removed.) */}
+        <details style={{ marginBottom: 16 }}>
+          <summary style={{ cursor: "pointer", fontSize: 14, color: C.muted, padding: "10px 0" }}>Overall curve summary</summary>
+          <CardBoundary name="Whole-Curve Capacity">
+            <CapacityTrajectoryCard
+            capacityHistoryByGrip={capacityHistoryByGrip}
+            normalizeOn={normalizationActive}
+            activities={activities}
+            handView={handView}
+          />
+          </CardBoundary>
+        </details>
 
       </>)}
 

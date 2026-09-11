@@ -49,16 +49,19 @@ import {
   GRIP_BASELINE_DURATION_THRESHOLD,
 } from "../../model/baselines.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
-import { effectiveLoad } from "../../model/load.js";
+import { forceComparison, comparisonReps } from "../../model/curveComparison.js";
+import { ComparisonModeSelector, WeightTile, HoldTimeView } from "./CurveComparisonViews.jsx";
+import { effectiveLoad, freshFitReps } from "../../model/load.js";
 import { ZoneSessionHistoryModal } from "./ZoneSessionHistoryModal.jsx";
 
 const scaleAmps = (amps, bw) =>
   Array.isArray(amps) && bw > 0 ? amps.map(value => value / bw) : amps;
 
 function latestDateForKey(history, key) {
+  if (!key) return null;
   const [grip, hand] = key.split("|");
   let latest = null;
-  for (const rep of history || []) {
+  for (const rep of freshFitReps(history)) {
     if (rep?.grip !== grip || (hand && rep?.hand !== hand) || !rep?.date) continue;
     if (!(effectiveLoad(rep) > 0) || !(rep.actual_time_s > 0)) continue;
     if (latest == null || rep.date > latest) latest = rep.date;
@@ -149,39 +152,29 @@ function BaselineProgressRow({ grip, history, hand = null, divider = false }) {
 // One-line explainer under the header.
 function BasisNote() {
   return (
-    <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.4 }}>
-      What your reps actually showed — sessions trained deep in fatigue count at the loads you actually held, so hard training weeks can dip.
+    <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+      Estimated from your recorded force and duration. Compare the same grip, hand, and setup; open a zone to see its sessions.
     </div>
   );
 }
 
-// Static per-grip block: header (grip + since date) + tiles. The
-// fallback shape for grips without an interactive overlay.
-function StaticGripTiles({
-  grip,
-  imp,
-  divider,
-  onZoneSelect = null,
-  selectedZoneKey = null,
-}) {
-  return (
-    <div style={{
-      paddingBottom: divider ? 14 : 0,
-      borderBottom: divider ? `1px solid ${C.border}` : "none",
-      marginBottom: divider ? 14 : 0,
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: GRIP_COLORS[grip] || C.blue }}>{grip}</div>
-        <div style={{ fontSize: 11, color: C.muted }}>since {imp.baselineDate}</div>
-      </div>
-      <ImprovementRow
-        label={null}
-        imp={imp}
-        onZoneSelect={onZoneSelect ? zoneKey => onZoneSelect(grip, zoneKey, null) : null}
-        selectedZoneKey={selectedZoneKey}
-      />
-    </div>
-  );
+function staticOverlay(baseline, amps, history, grip, hand = null) {
+  const reps = freshFitReps(history).filter(rep => rep.grip === grip && (!hand || rep.hand === hand));
+  const date = latestDateForKey(history, hand ? `${grip}|${hand}` : grip) || baseline?.date;
+  return {
+    baselineAmps: baseline?.amps,
+    baselineDate: baseline?.date,
+    baselineMaxHoldS: baseline?.maxHoldS,
+    dates: date ? [date] : [],
+    ampsByDate: new Map([[date, amps]]),
+    maxHoldByDate: new Map([[date, Math.max(baseline?.maxHoldS || 0, ...reps.map(r => Number(r.actual_time_s)))]]),
+  };
+}
+
+function StaticGripTiles({ grip, imp, divider, onZoneSelect, selectedZoneKey, overlay, mode, unit, reps }) {
+  return <GripBlock grip={grip} overlay={overlay} staticImprovement={imp}
+    divider={divider} onZoneSelect={onZoneSelect} selectedZoneKey={selectedZoneKey}
+    mode={mode} unit={unit} reps={reps} />;
 }
 
 // Total Δ% + the six zone tiles. Shared by every render path.
@@ -190,6 +183,7 @@ function ImprovementRow({
   imp,
   onZoneSelect = null,
   selectedZoneKey = null,
+  mode = "percent", comparisons = {}, unit = "lbs", baselineDate = null,
 }) {
   return (
     <div style={{ marginBottom: 10 }}>
@@ -197,26 +191,26 @@ function ImprovementRow({
         {label && (
           <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{label}</div>
         )}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginLeft: "auto" }}>
+        {mode === "percent" && <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginLeft: "auto" }}>
           <div style={{ fontSize: 26, fontWeight: 900, color: (imp.total ?? 0) >= 0 ? C.green : C.red, lineHeight: 1 }}>
             {imp.total == null ? "—" : `${imp.total >= 0 ? "+" : ""}${imp.total}%`}
           </div>
           <div style={{ fontSize: 11, color: C.muted }}>total</div>
-        </div>
+        </div>}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+      <div style={{ display: "grid", gridTemplateColumns: mode === "weight" ? "repeat(auto-fit, minmax(max(130px, calc((100% - 12px) / 3)), 1fr))" : "repeat(3, minmax(0, 1fr))", gap: 6 }}>
         {ZONE6.map(z => {
           const val = imp[z.key];
           // val === null → this zone's reference duration is past what the
           // baseline actually measured (extrapolated), so there's no honest
           // starting point to compare against. Show it as "new", muted, and
           // it's already excluded from the total.
-          const unbaselined = val == null;
+          const unbaselined = mode === "weight" ? !comparisons[z.key] : val == null;
           const selected = selectedZoneKey === z.key;
           const content = (
             <>
-              <div style={{ fontSize: 9, color: C.muted, marginBottom: 3 }}>{z.short}</div>
-              {unbaselined ? (
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 3 }}>{z.short}</div>
+              {mode === "weight" ? <WeightTile comparison={comparisons[z.key]} unit={unit} baselineDate={baselineDate} /> : unbaselined ? (
                 <div style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>new</div>
               ) : (
                 <div style={{ fontSize: 16, fontWeight: 800, color: val >= 0 ? z.color : C.red }}>
@@ -311,7 +305,7 @@ function OverlayChart({
   nowDate,
 }) {
   const tMin = 5;
-  const tMax = Math.max(180, maxDur || 0);
+  const tMax = Math.max(...Object.values(ZONE_REF_T), maxDur || 0);
   const displayForce = force => normalizeOn ? force : toDisp(force, unit);
   const displayUnit = normalizeOn ? "× BW" : unit;
   const axisStep = normalizeOn ? 0.1 : 10;
@@ -341,7 +335,7 @@ function OverlayChart({
         <YAxis
           domain={yDomain}
           tick={{ fill: C.muted, fontSize: 11 }}
-          width={44}
+          width={64}
           unit={normalizeOn ? "" : ` ${unit}`}
         />
         <Tooltip
@@ -375,7 +369,10 @@ function GripBlock({
   divider,
   onZoneSelect = null,
   selectedZoneKey = null,
+  mode = "percent", reps = [], staticImprovement = null,
 }) {
+  const [timeZone, setTimeZone] = useState("power");
+  const [weights, setWeights] = useState({});
   const dates = overlay.dates;
   const last = Math.max(0, dates.length - 1);
   const idx = nowIdx == null ? last : Math.max(0, Math.min(last, nowIdx));
@@ -387,11 +384,13 @@ function GripBlock({
   // each such zone is measured from the first date its data reached that
   // duration, not the pooled baseline (which never got there).
   const zoneRef = perZoneBaselineAmps(
-    overlay.dates, overlay.ampsByDate, overlay.maxHoldByDate, overlay.baselineMaxHoldS ?? null,
+    overlay.dates.filter(date => date <= nowDate), overlay.ampsByDate, overlay.maxHoldByDate, overlay.baselineMaxHoldS ?? null,
   );
-  const imp = nowAmps
+  const imp = staticImprovement || (nowAmps
     ? improvementForAmps(nowAmps, overlay.baselineAmps, overlay.baselineMaxHoldS ?? null, zoneRef)
-    : null;
+    : null);
+  const comparisons = Object.fromEntries(ZONE6.map(z => [z.key, forceComparison(overlay, z.key, nowDate)]));
+  const hasWeightComparison = Object.values(comparisons).some(Boolean);
 
   // Every drawable curve for this grip — for the fixed y-axis.
   const candidateAmps = [overlay.baselineAmps, ...overlay.ampsByDate.values()].filter(Boolean);
@@ -404,21 +403,27 @@ function GripBlock({
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color }}>{grip}</div>
-        <div style={{ fontSize: 11, color: C.muted }}>since {overlay.baselineDate}</div>
+        <div style={{ fontSize: 11, color: C.muted }}>{overlay.baselineDate || staticImprovement?.baselineDate ? `since ${overlay.baselineDate || staticImprovement.baselineDate}` : ""}</div>
       </div>
 
-      {imp && (
+      {mode !== "time" && imp && (mode !== "weight" || hasWeightComparison) && (
         <ImprovementRow
           label={null}
           imp={imp}
+          mode={mode} comparisons={comparisons} unit={unit} baselineDate={overlay.baselineDate}
           onZoneSelect={onZoneSelect
-            ? zoneKey => onZoneSelect(grip, zoneKey, nowDate)
+            ? zoneKey => onZoneSelect(grip, zoneKey, staticImprovement ? null : nowDate)
             : null}
           selectedZoneKey={selectedZoneKey}
         />
       )}
 
-      <OverlayChart
+      {mode === "weight" && !hasWeightComparison && <p style={{ fontSize: 14, color: C.muted }}>Weight comparisons need a baseline and a current curve for this selection.</p>}
+      {mode === "weight" && hasWeightComparison && <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>Estimated weight change at each domain’s fixed duration.</div>}
+      {mode === "time" ? <HoldTimeView overlay={overlay} date={nowDate} unit={unit} reps={reps}
+        zone={timeZone} onZoneChange={setTimeZone} weights={weights}
+        onWeightChange={(zone, load) => setWeights(previous => ({ ...previous, [zone]: load }))} />
+        : !staticImprovement && <OverlayChart
         baselineAmps={overlay.baselineAmps}
         nowAmps={nowAmps}
         candidateAmps={candidateAmps}
@@ -428,31 +433,31 @@ function GripBlock({
         color={color}
         baselineDate={overlay.baselineDate}
         nowDate={nowDate}
-      />
+      />}
 
       {/* Now slider — scrub the comparison date; tiles + curve follow.
           BELOW the chart (June 2026): the scrubbing thumb sits under
           the user's finger, and with the slider above, that hand
           covered exactly the curve they were trying to watch move. */}
-      <div style={{ margin: "8px 0 0" }}>
+      {!staticImprovement && <div style={{ margin: "8px 0 0" }}>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color, marginBottom: 4 }}>
           <span>Now: <b>{nowDate}</b></span>
           <span style={{ color: C.muted }}>{idx + 1} of {dates.length} session{dates.length === 1 ? "" : "s"} since baseline</span>
         </div>
-        <input type="range" min={0} max={last} step={1} value={idx}
+        <input aria-label={`${grip} comparison date`} type="range" min={0} max={last} step={1} value={idx}
           onChange={(e) => onScrub(grip, parseInt(e.target.value, 10))}
           style={{ width: "100%", accentColor: color, cursor: "pointer" }}
         />
-      </div>
+      </div>}
     </div>
   );
 }
 
 export function CurveImprovementCard({
   improvement,
-  gripImprovement,
-  grip3xEstimates,
-  gripBaselines,
+  gripImprovement = {},
+  grip3xEstimates = {},
+  gripBaselines = {},
   global3xBaseline,
   selGrip,
   grips = [],
@@ -462,7 +467,7 @@ export function CurveImprovementCard({
   historyOverlay = {},
   maxDur = 180,
   unit = "lbs",
-  normalizeOn = false,
+  normalizeOn: normalizePreference = false,
   bodyWeight = null,
   bwLog = [],
   // Hand selector (June 2026): "pooled" | "L" | "R". In L/R mode a
@@ -481,7 +486,11 @@ export function CurveImprovementCard({
   // tiles' supported zones are built from; used so the per-zone fill
   // shares the same basis (July 2026).
   perHandGripEstimates = {},
+  recordedCurve = null, measuredProgress = null,
 }) {
+  const [comparisonMode, setComparisonMode] = useState("percent");
+  // Load and time comparisons always hold physical weight fixed.
+  const normalizeOn = normalizePreference && comparisonMode === "percent";
   // Per-grip "Now" slider index. null → latest date for that grip.
   const [nowIdxByGrip, setNowIdxByGrip] = useState({});
   const [zoneDetail, setZoneDetail] = useState(null);
@@ -576,6 +585,7 @@ export function CurveImprovementCard({
     || Object.keys(grip3xEstimates)[0]
     || (history || []).find(rep => rep?.grip)?.grip
     || null;
+  const displayGrip = selGrip || (!perGripMode && overlayGrips.has(fallbackGrip) ? fallbackGrip : null);
   const zoneHistoryModal = zoneDetail ? (
     <ZoneSessionHistoryModal
       history={history}
@@ -587,6 +597,11 @@ export function CurveImprovementCard({
       onClose={() => setZoneDetail(null)}
     />
   ) : null;
+
+  const supportingDetails = <>
+    {recordedCurve && <details style={{ marginTop: 16 }}><summary style={{ cursor: "pointer", fontSize: 14, color: C.text, padding: "8px 0" }}>Recorded pulls and current curve</summary>{recordedCurve}</details>}
+    {measuredProgress && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontSize: 14, color: C.text, padding: "8px 0" }}>Measured session comparisons</summary>{measuredProgress}</details>}
+  </>;
 
   // ── Per-hand mode: interactive blocks where the hand has an overlay,
   // static tiles vs frozen per-hand baselines otherwise ──
@@ -630,7 +645,8 @@ export function CurveImprovementCard({
           Per-hand fits vs that hand's frozen baseline — half the data
           of the pooled view, so expect noisier numbers.
         </div>
-        <BasisNote />
+        <ComparisonModeSelector mode={comparisonMode} onChange={setComparisonMode} />
+        {comparisonMode !== "time" && <BasisNote />}
         {entries.length > 0 ? entries.map(([grip, imp, ph], i, arr) => {
           const divider = i < arr.length - 1;
           const selectedZoneKey = zoneDetail?.grip === grip ? zoneDetail.zoneKey : null;
@@ -639,7 +655,8 @@ export function CurveImprovementCard({
             // pooled sliders for the same grip don't share an index
             // (their date lists differ in length).
             return (
-              <GripBlock key={grip} grip={grip} overlay={ph}
+              <GripBlock key={`${grip}|${handView}`} grip={grip} overlay={ph}
+                mode={comparisonMode} reps={comparisonReps(history, grip, handView)}
                 unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
                 nowIdx={nowIdxByGrip[`${grip}|${handView}`]}
                 onScrub={(g, idx) => scrub(`${g}|${handView}`, idx)}
@@ -650,7 +667,9 @@ export function CurveImprovementCard({
             );
           }
           return (
-            <StaticGripTiles key={grip} grip={grip} imp={imp}
+            <StaticGripTiles key={`${grip}|${handView}`} grip={grip} imp={imp}
+              mode={comparisonMode} unit={unit} reps={comparisonReps(history, grip, handView)}
+              overlay={staticOverlay(perHandGripBaselines[`${grip}|${handView}`], perHandGripEstimates[`${grip}|${handView}`], history, grip, handView)}
               divider={divider}
               onZoneSelect={openZoneDetail}
               selectedZoneKey={selectedZoneKey}
@@ -663,6 +682,7 @@ export function CurveImprovementCard({
             ≥{GRIP_BASELINE_DURATION_THRESHOLD} durations of its own before its frame freezes.
           </div>
         )}
+        {supportingDetails}
       </Card>
     );
   }
@@ -678,7 +698,8 @@ export function CurveImprovementCard({
           )}
         </div>
       </div>
-      <BasisNote />
+      <ComparisonModeSelector mode={comparisonMode} onChange={setComparisonMode} />
+      {comparisonMode !== "time" && <BasisNote />}
 
       {perGripMode ? (
         gripImpEntries.length > 0 || pendingGrips.length > 0 ? (
@@ -688,6 +709,7 @@ export function CurveImprovementCard({
               if (overlayGrips.has(grip)) {
                 return (
                   <GripBlock key={grip} grip={grip} overlay={scaledData.historyOverlay[grip]}
+                    mode={comparisonMode} reps={comparisonReps(history, grip)}
                     unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
                     nowIdx={nowIdxByGrip[grip]} onScrub={scrub} divider={divider}
                     onZoneSelect={openZoneDetail}
@@ -699,6 +721,8 @@ export function CurveImprovementCard({
               return (
                 <StaticGripTiles
                   key={grip}
+                  mode={comparisonMode} unit={unit} reps={comparisonReps(history, grip)}
+                  overlay={staticOverlay(gripBaselines[grip], grip3xEstimates[grip], history, grip)}
                   grip={grip}
                   imp={imp}
                   divider={divider}
@@ -721,19 +745,20 @@ export function CurveImprovementCard({
             Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the three-exp fit can't separate the fast / medium / slow components cleanly enough for the per-zone Δ% to be meaningful.
           </div>
         )
-      ) : selGrip ? (
-        overlayGrips.has(selGrip) ? (
-          <GripBlock grip={selGrip} overlay={scaledData.historyOverlay[selGrip]}
+      ) : displayGrip ? (
+        overlayGrips.has(displayGrip) ? (
+          <GripBlock key={displayGrip} grip={displayGrip} overlay={scaledData.historyOverlay[displayGrip]}
+            mode={comparisonMode} reps={comparisonReps(history, displayGrip)}
             unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
-            nowIdx={nowIdxByGrip[selGrip]} onScrub={scrub} divider={false}
+            nowIdx={nowIdxByGrip[displayGrip]} onScrub={scrub} divider={false}
             onZoneSelect={openZoneDetail}
-            selectedZoneKey={zoneDetail?.grip === selGrip ? zoneDetail.zoneKey : null}
+            selectedZoneKey={zoneDetail?.grip === displayGrip ? zoneDetail.zoneKey : null}
           />
         ) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
             Need ≥{GRIP_BASELINE_REP_THRESHOLD} fresh reps across
-            ≥{GRIP_BASELINE_DURATION_THRESHOLD} target durations on <b>{selGrip}</b> for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
-            <BaselineProgressRow grip={selGrip} history={history} divider />
+            ≥{GRIP_BASELINE_DURATION_THRESHOLD} target durations on <b>{displayGrip}</b> for a fair apples-to-apples comparison. Pooled global baseline isn't shown here — it mixes muscle groups (FDP pinch vs FDS crush) and would produce misleading Δ%.
+            <BaselineProgressRow grip={displayGrip} history={history} divider />
           </div>
         )
       ) : scaledData.improvement ? (
@@ -744,16 +769,17 @@ export function CurveImprovementCard({
               since {global3xBaseline.date}
             </div>
           )}
-          <ImprovementRow
-            label={null}
+          <StaticGripTiles
+            grip={fallbackGrip}
+            mode={comparisonMode} unit={unit} reps={comparisonReps(history, fallbackGrip)}
+            overlay={staticOverlay(global3xBaseline, grip3xEstimates[fallbackGrip], history, fallbackGrip)}
             imp={gateGlobalImprovement(scaledData.improvement, global3xBaseline?.maxHoldS ?? null)}
-            onZoneSelect={fallbackGrip
-              ? zoneKey => openZoneDetail(fallbackGrip, zoneKey, null)
-              : null}
+            onZoneSelect={fallbackGrip ? openZoneDetail : null}
             selectedZoneKey={zoneDetail?.grip === fallbackGrip ? zoneDetail.zoneKey : null}
           />
         </>
       ) : null}
+      {supportingDetails}
     </Card>
   );
 }

@@ -1,0 +1,15 @@
+# Curve Improvement views
+
+Curve Improvement remains the main finger progress card. Percentage is the default, with the existing six zones and overall percentage retained.
+
+- **Weight** evaluates baseline and selected-date curves at each existing zone reference duration. Each tile shows the load difference, baseline → current load, and fixed duration. Loads are in the user's kg/lbs unit; there is no misleading total load summed across domains. Phone layouts use two columns and wider layouts use three.
+- **Hold time** evaluates both curves at one fixed physical load and plots the estimated duration over session dates. The initial load comes from a measured baseline-date pull near the domain's duration (within half to twice its reference duration), when available and supported. Otherwise it uses the baseline curve's load at that duration. New workouts do not move this reference. Custom weights are retained per domain while the card stays mounted, across view switches and date scrubbing; they are not stored as a training prescription.
+- Percentage follows the page's absolute/bodyweight choice. Weight and Hold time use absolute physical load so changing bodyweight cannot change the benchmark. Unit conversion changes presentation, not the stored comparison weight.
+
+The new view does not change prescriptions, zone definitions, recording, or failure rules. Overshoots remain eligible evidence under the existing curve-fit rules. Recorded dots use valid measured opening pulls at the exact comparison load (within numerical tolerance of 0.000001 kg); prescribed-only values and interrupted efforts cannot become measured dots. Each date's dot is its longest matching recorded hold; the expanded list retains all matching observations and hand labels. Curve estimates still use other eligible loads and durations through the existing fits.
+
+Hold-time inversion is bounded from the curve's five-second reference minimum through the longest supporting hold for that date. Loads outside that supported range produce an unavailable estimate, not zero, a capped time, or an extrapolated gain. Recorded dots remain available even when an estimate is unavailable. Gaps stay gaps. Later-supported domains use their own baseline and cannot borrow a baseline after the selected comparison date.
+
+The standalone force-duration display and measured-session summaries are now expandable details inside Curve Improvement. Whole-Curve Capacity is an optional overall summary below the separate measured-peak chart. All historical data and session-history links remain available.
+
+Validation covers analytical inverse solutions, all six reference durations, unchanged and declining curves, unsupported loads, later baselines, interruptions, hand/date scoping, kg/lbs conversion, bodyweight changes, and fixed-weight stability. The card was also inspected in a browser with synthetic data at desktop and phone widths. This is not a physical sensor validation or a comparison against the user's live database.
