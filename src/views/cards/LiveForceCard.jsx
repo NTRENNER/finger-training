@@ -86,8 +86,16 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
         {fmtW(force, unit)}
       </div>
       <div style={{ textAlign: "center", fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 10 }}>
-        live {unit}{targetKg != null ? ` · target ${fmtW(targetKg, unit)} ${unit}` : ""}
+        Live force · {unit}
       </div>
+      {targetKg != null && (
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>Target weight</div>
+          <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1, color: C.blue, fontVariantNumeric: "tabular-nums" }}>
+            {fmtW(targetKg, unit)} {unit}
+          </div>
+        </div>
+      )}
       {/* Avg / Max running stats — explicit labels because the big
           number above is "live current force." Same color hierarchy
           as the bar marker below (avg green, peak orange). */}

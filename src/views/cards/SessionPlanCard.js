@@ -619,7 +619,7 @@ export function SessionPlanCard({
                 )}
               </div>
             </div>
-            <div style={{ marginTop: 10, fontSize: 12 }}><b>{purpose.label}:</b> {purpose.text}</div>
+            <div style={{ marginTop: 12, fontSize: 16, lineHeight: 1.5, color: C.text, textAlign: "left" }}><b>{purpose.label}:</b> {purpose.text}</div>
             <div style={{ marginTop: 10, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
               <span style={{ color: recCfg.color, fontWeight: 700 }}>Why: </span>
               {whyText}
