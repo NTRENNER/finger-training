@@ -1,4 +1,4 @@
-import { forceComparison, zoneReference, holdTimeAtForce, defaultComparisonLoad, comparisonReps, holdTimeSeries } from "../curveComparison.js";
+import { forceComparison, forceHistorySeries, zoneReference, holdTimeAtForce, defaultComparisonLoad, comparisonReps, holdTimeSeries } from "../curveComparison.js";
 import { predForceThreeExp, THREE_EXP_TAUS } from "../threeExp.js";
 
 const before = [0, 0, 50];
@@ -91,4 +91,19 @@ test("a baseline after the selected date is unavailable", () => {
 test.each([5, 30, 70, 115, 160, 220])("inverts a mixed curve at %s seconds", seconds => {
   const amps = [12, 20, 30];
   expect(holdTimeAtForce(amps, predForceThreeExp(amps, seconds), 240)).toBeCloseTo(seconds, 8);
+});
+
+
+test("weight history stays at the chosen duration and stops at the comparison date", () => {
+  const rows = forceHistorySeries(overlay, "power", "2026-02-01");
+  expect(rows.map(row => row.date)).toEqual(["2026-01-01", "2026-02-01"]);
+  expect(rows[0].force).toBeCloseTo(predForceThreeExp(before, 30), 8);
+  expect(rows[1].force).toBeCloseTo(predForceThreeExp(after, 30), 8);
+});
+
+test("weight history starts at a late domain baseline rather than inventing earlier points", () => {
+  const sparse = { ...overlay, baselineMaxHoldS: 30,
+    maxHoldByDate: new Map([["2026-01-01", 30], ["2026-02-01", 80], ["2026-03-01", 240]]) };
+  expect(forceHistorySeries(sparse, "endurance", "2026-02-01")).toEqual([]);
+  expect(forceHistorySeries(sparse, "endurance", "2026-03-01")).toHaveLength(1);
 });

@@ -50,7 +50,7 @@ import {
 } from "../../model/baselines.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
 import { forceComparison, comparisonReps } from "../../model/curveComparison.js";
-import { ComparisonModeSelector, WeightTile, HoldTimeView } from "./CurveComparisonViews.jsx";
+import { ComparisonModeSelector, WeightTile, HoldTimeView, WeightHistoryView } from "./CurveComparisonViews.jsx";
 import { effectiveLoad, freshFitReps } from "../../model/load.js";
 import { ZoneSessionHistoryModal } from "./ZoneSessionHistoryModal.jsx";
 
@@ -153,7 +153,7 @@ function BaselineProgressRow({ grip, history, hand = null, divider = false }) {
 function BasisNote() {
   return (
     <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-      Estimated from your recorded force and duration. Compare the same grip, hand, and setup; open a zone to see its sessions.
+      Estimated from your recorded force and duration. Compare the same grip, hand, and setup; select a zone to explore its progress and sessions.
     </div>
   );
 }
@@ -210,7 +210,7 @@ function ImprovementRow({
           const content = (
             <>
               <div style={{ fontSize: 12, color: C.muted, marginBottom: 3 }}>{z.short}</div>
-              {mode === "weight" ? <WeightTile comparison={comparisons[z.key]} unit={unit} baselineDate={baselineDate} /> : unbaselined ? (
+              {mode === "weight" ? <WeightTile comparison={comparisons[z.key]} unit={unit} baselineDate={baselineDate} color={z.color} /> : unbaselined ? (
                 <div style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>new</div>
               ) : (
                 <div style={{ fontSize: 16, fontWeight: 800, color: val >= 0 ? z.color : C.red }}>
@@ -232,14 +232,14 @@ function ImprovementRow({
           };
           const title = unbaselined
             ? "No baseline data — this zone wasn't trained when your baseline was set"
-            : `${z.label} session history`;
+            : mode === "weight" ? `${z.label} weight progress` : `${z.label} session history`;
 
           return onZoneSelect ? (
             <button
               key={z.key}
               type="button"
               onClick={() => onZoneSelect(z.key)}
-              aria-label={`${z.label} session history`}
+              aria-label={mode === "weight" ? `${z.label} weight progress` : `${z.label} session history`}
               aria-pressed={selected}
               title={title}
               style={{
@@ -372,6 +372,7 @@ function GripBlock({
   mode = "percent", reps = [], staticImprovement = null,
 }) {
   const [timeZone, setTimeZone] = useState("power");
+  const [weightZone, setWeightZone] = useState("power");
   const [weights, setWeights] = useState({});
   const dates = overlay.dates;
   const last = Math.max(0, dates.length - 1);
@@ -411,10 +412,10 @@ function GripBlock({
           label={null}
           imp={imp}
           mode={mode} comparisons={comparisons} unit={unit} baselineDate={overlay.baselineDate}
-          onZoneSelect={onZoneSelect
+          onZoneSelect={mode === "weight" ? setWeightZone : onZoneSelect
             ? zoneKey => onZoneSelect(grip, zoneKey, staticImprovement ? null : nowDate)
             : null}
-          selectedZoneKey={selectedZoneKey}
+          selectedZoneKey={mode === "weight" ? weightZone : selectedZoneKey}
         />
       )}
 
@@ -423,6 +424,8 @@ function GripBlock({
       {mode === "time" ? <HoldTimeView overlay={overlay} date={nowDate} unit={unit} reps={reps}
         zone={timeZone} onZoneChange={setTimeZone} weights={weights}
         onWeightChange={(zone, load) => setWeights(previous => ({ ...previous, [zone]: load }))} />
+        : mode === "weight" ? <WeightHistoryView overlay={overlay} date={nowDate} unit={unit} reps={reps} zone={weightZone}
+          onShowSessions={onZoneSelect ? () => onZoneSelect(grip, weightZone, staticImprovement ? null : nowDate) : null} />
         : !staticImprovement && <OverlayChart
         baselineAmps={overlay.baselineAmps}
         nowAmps={nowAmps}

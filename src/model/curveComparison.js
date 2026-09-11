@@ -83,3 +83,20 @@ export function holdTimeSeries(overlay, reference, force, throughDate) {
   }
   return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
+
+
+// Track force at one fixed duration, using the same baseline as its tile.
+export function forceHistorySeries(overlay, zone, throughDate) {
+  const reference = zoneReference(overlay, zone, throughDate);
+  if (!reference) return [];
+  const duration = ZONE_REF_T[zone];
+  const rows = new Map([[reference.date, {
+    date: reference.date, force: predForceThreeExp(reference.amps, duration),
+  }]]);
+  for (const date of overlay.dates || []) {
+    if (date < reference.date || date > throughDate || date === reference.date) continue;
+    const amps = overlay.ampsByDate?.get(date);
+    rows.set(date, { date, force: validAmps(amps) ? predForceThreeExp(amps, duration) : null });
+  }
+  return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date));
+}

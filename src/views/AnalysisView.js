@@ -772,21 +772,23 @@ export function AnalysisView({
         />
         </CardBoundary>
 
-        {/* Peak force — direct max-strength measurement over time, from
-            short near-max reps. Complements the curve (sustained force)
-            and the whole-curve capacity trajectory with the one
-            thing they underrepresent: instantaneous max recruitment. */}
-        <CardBoundary name="Peak Force trend">
-        <PeakForceCard
-          history={history}
-          unit={unit}
-          grip={selGrip}
-          handView={handView}
-          normalizeOn={normalizationActive}
-          bodyWeight={bodyWeight}
-          bwLog={bwLog}
-        />
-        </CardBoundary>
+        <details style={{ marginBottom: 16 }}>
+          <summary style={{ cursor: "pointer", fontSize: 14, color: C.muted, padding: "10px 0" }}>Peak force records</summary>
+          <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+            Best recorded momentary force and its history. Max in Curve Improvement estimates force sustained for 5 seconds.
+          </p>
+          <CardBoundary name="Peak Force trend">
+            <PeakForceCard
+              history={history}
+              unit={unit}
+              grip={selGrip}
+              handView={handView}
+              normalizeOn={normalizationActive}
+              bodyWeight={bodyWeight}
+              bwLog={bwLog}
+            />
+          </CardBoundary>
+        </details>
 
         <details style={{ marginBottom: 16 }}>
           <summary style={{ cursor: "pointer", fontSize: 14, color: C.muted, padding: "10px 0" }}>Overall curve summary</summary>

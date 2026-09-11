@@ -26,7 +26,7 @@ test("percentage stays default; weight shows pounds or kilograms at the same dom
   expect(screen.getByRole("button", { name: "%", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getAllByText("+20%")).toHaveLength(7);
   choose("Weight");
-  const tile = screen.getByRole("button", { name: "Power session history" });
+  const tile = screen.getByRole("button", { name: "Power weight progress" });
   expect(tile).toHaveTextContent("+9.4 kg");
   expect(tile).toHaveTextContent("47.0 → 56.4 kg");
   expect(tile).toHaveTextContent("at 30s");
@@ -34,6 +34,7 @@ test("percentage stays default; weight shows pounds or kilograms at the same dom
   view.rerender(<CurveImprovementCard {...props} unit="lbs" />);
   expect(tile).toHaveTextContent("+20.7 lbs");
   fireEvent.click(tile);
+  fireEvent.click(screen.getByRole("button", { name: "View Power sessions" }));
   expect(screen.getByRole("dialog")).toHaveTextContent("Power history");
 });
 
@@ -58,7 +59,7 @@ test("bodyweight scaling never changes the fixed physical load", () => {
     bwLog={[{ date: baseline.date, kg: 50 }, { date: "2026-07-01", kg: 60 }]} />);
   expect(screen.getAllByText("+0%")).toHaveLength(7);
   choose("Weight");
-  expect(screen.getByRole("button", { name: "Power session history" })).toHaveTextContent("+9.4 kg");
+  expect(screen.getByRole("button", { name: "Power weight progress" })).toHaveTextContent("+9.4 kg");
   choose("Hold time");
   expect(screen.getByRole("spinbutton")).toHaveValue(45);
   expect(screen.getByLabelText("Hold time comparison")).toHaveTextContent("50.6 → 138.1");
@@ -92,8 +93,50 @@ test("hold-time evidence respects hand and selected date, excluding interruption
 test("hold-time weights are independent for each domain", () => {
   render(<CurveImprovementCard {...props} />); choose("Hold time");
   fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "42" } });
-  fireEvent.change(screen.getByRole("combobox"), { target: { value: "strength" } });
+  fireEvent.click(screen.getByRole("button", { name: "Strength hold time" }));
   fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "36" } });
-  fireEvent.change(screen.getByRole("combobox"), { target: { value: "power" } });
+  fireEvent.click(screen.getByRole("button", { name: "Power hold time" }));
   expect(screen.getByRole("spinbutton")).toHaveValue(42);
+});
+
+
+test("six hold-time boxes replace the dropdown and update the selected comparison", () => {
+  render(<CurveImprovementCard {...props} />); choose("Hold time");
+  const boxes = within(screen.getByRole("group", { name: "Hold time domains" }));
+  expect(boxes.getAllByRole("button")).toHaveLength(6);
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  const power = boxes.getByRole("button", { name: "Power hold time" });
+  expect(power).toHaveAttribute("aria-pressed", "true");
+  expect(power).toHaveTextContent("+87.5s");
+  expect(power).toHaveTextContent("at 45.0 kg");
+  const previous = screen.getByLabelText("Hold time comparison").textContent;
+  const strength = boxes.getByRole("button", { name: "Strength hold time" });
+  fireEvent.click(strength);
+  expect(strength).toHaveAttribute("aria-pressed", "true");
+  expect(power).toHaveAttribute("aria-pressed", "false");
+  expect(screen.getByLabelText("Hold time comparison").textContent).not.toBe(previous);
+});
+
+test("unsupported hold-time boxes remain selectable and show a dash instead of a gain", () => {
+  render(<CurveImprovementCard {...props} />); choose("Hold time");
+  const endurance = screen.getByRole("button", { name: "Endurance hold time" });
+  expect(endurance).toHaveTextContent("—");
+  fireEvent.click(endurance);
+  expect(endurance).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("status")).toHaveTextContent("Not enough supported hold-time data");
+  expect(screen.queryByLabelText("Hold time comparison")).not.toBeInTheDocument();
+});
+
+
+test("weight tiles select a dated weight chart without opening a modal", () => {
+  render(<CurveImprovementCard {...props} />); choose("Weight");
+  const strength = screen.getByRole("button", { name: "Strength weight progress" });
+  fireEvent.click(strength);
+  expect(strength).toHaveAttribute("aria-pressed", "true");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Strength weight over time")).toBeInTheDocument();
+  expect(screen.getByLabelText("Weight progress comparison")).toHaveTextContent("at 115 seconds");
+  fireEvent.change(screen.getByRole("slider"), { target: { value: "0" } });
+  expect(screen.getByLabelText("Weight progress comparison")).toHaveTextContent("+0.0 kg");
+  expect(screen.getByLabelText("Weight progress comparison")).toHaveTextContent("2026-06-01 → 2026-06-01");
 });
