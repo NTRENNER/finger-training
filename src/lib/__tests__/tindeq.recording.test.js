@@ -1,7 +1,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { useTindeq, TINDEQ_NOTIFY } from '../tindeq.js';
 
-async function setup(targetKg = null) {
+async function setup(targetKg = null, options) {
   const listeners = {};
   const deviceListeners = {};
   const data = { addEventListener: (key, cb) => { listeners[key] = cb; }, removeEventListener: jest.fn(), startNotifications: async () => {}, stopNotifications: async () => {} };
@@ -14,7 +14,7 @@ async function setup(targetKg = null) {
   await act(async () => { await hook.result.current.connect(); });
   hook.result.current.targetKgRef.current = targetKg;
   const onStart = jest.fn(), onEnd = jest.fn();
-  await act(async () => { await hook.result.current.startAutoDetect(onStart, onEnd); });
+  await act(async () => { await hook.result.current.startAutoDetect(onStart, onEnd, options); });
   const packet = samples => {
     const value = new DataView(new ArrayBuffer(2 + samples.length * 8));
     value.setUint8(0, 1); value.setUint8(1, samples.length * 8);
@@ -99,4 +99,37 @@ test('batched timestamps align rep start and end with wall time', async () => {
   const arrival = Date.now();
   packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 0], [2500, 0]]);
   expect(onEnd.mock.calls[0][0]).toMatchObject({startedAtMs: arrival - 2500, endedAtMs: arrival - 500});
+});
+
+
+test('timed warmups tolerate target crossings until the timer ends the rep', async () => {
+  const { hook, packet, onStart, onEnd } = await setup(25, { endOnTargetDrop: false });
+  for (let ms = 0; ms <= 10000; ms += 100) {
+    packet([[ms, ms < 1000 ? 20 : ms % 300 === 0 ? 24 : 27]]);
+  }
+  expect(onStart).toHaveBeenCalledTimes(1);
+  expect(onEnd).not.toHaveBeenCalled();
+  act(() => { hook.result.current.endRepAndRequireRelease(); });
+  packet([[10100, 26], [10200, 26]]);
+  expect(onStart).toHaveBeenCalledTimes(1);
+  packet([[10300, 0], [10400, 26]]);
+  expect(onStart).toHaveBeenCalledTimes(2);
+});
+
+test('timed warmups still end on an actual early release', async () => {
+  const { packet, onEnd } = await setup(25, { endOnTargetDrop: false });
+  for (let ms = 0; ms <= 3500; ms += 100) packet([[ms, ms < 3000 ? 26 : 0]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0].actualTime).toBe(3);
+});
+
+test('training restores target-drop detection after leaving a timed warmup', async () => {
+  const { hook, packet, onStart, onEnd } = await setup(25, { endOnTargetDrop: false });
+  await act(async () => {
+    await hook.result.current.stopAutoDetect();
+    await hook.result.current.startAutoDetect(onStart, onEnd);
+  });
+  packet([[0, 26], [500, 26], [1000, 24]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0].endReason).toBe('target_force_failure');
 });

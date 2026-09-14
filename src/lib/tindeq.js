@@ -244,6 +244,7 @@ export function useTindeq() {
   const targetKgRef         = useRef(null); // set by ActiveSessionView each rep
 
   // ── Auto-detect mode (spring-strap / no-hands-needed workflow) ───────────
+  const adEndOnTargetDropRef = useRef(true); // timed warmups opt out of failure detection
   const adOnStartRef    = useRef(null);   // () => void — called when pull begins
   const adOnEndRef      = useRef(null);   // ({actualTime, avgForce}) => void — called when rep ends
   const adActiveRef     = useRef(false);  // true while a rep is in progress
@@ -337,8 +338,9 @@ export function useTindeq() {
             if (kg < AD_END_KG) adAwaitReleaseRef.current = false;
             // Either way, skip the AD_START_KG check this packet.
           } else if (kg >= AD_START_KG) {
-            targetDetectorRef.current = createTargetFailureDetector(targetKgRef.current);
-            targetDetectorRef.current({ kg, ts: now });
+            targetDetectorRef.current = adEndOnTargetDropRef.current
+              ? createTargetFailureDetector(targetKgRef.current) : null;
+            targetDetectorRef.current?.({ kg, ts: now });
             adActiveRef.current    = true;
             adStartTimeRef.current = now;
             // Start the force and time interval at the same sample.
@@ -583,7 +585,9 @@ export function useTindeq() {
   // Start auto-detect mode: Tindeq streams continuously, reps are detected by
   // force threshold crossings. onRepStart fires when a pull begins; onRepEnd
   // fires with { actualTime, avgForce } when the force drops back to baseline.
-  const startAutoDetect = useCallback(async (onRepStart, onRepEnd) => {
+  const startAutoDetect = useCallback(async (onRepStart, onRepEnd, { endOnTargetDrop = true } = {}) => {
+    adEndOnTargetDropRef.current = endOnTargetDrop;
+    targetDetectorRef.current = null;
     adActiveRef.current    = false;
     adStartTimeRef.current = null;
     adSumRef.current       = 0;

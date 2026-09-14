@@ -211,11 +211,13 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
     if (!tindeq?.connected || !inHangPhase) return;
     // targetKgRef is a plain ref on the tindeq hook — updating it
     // doesn't restart the stream. Reassign on each effect run so the
-    // auto-fail / live-display logic sees the current step's target.
+    // recording logic sees the current step's target. Timed warmups
+    // explicitly opt out of the training-only target-drop failure rule.
     tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
     tindeq.startAutoDetect(
       () => onRepStartRef.current?.(),
       () => onRepEndRef.current?.(),
+      { endOnTargetDrop: false },
     );
     return () => {
       tindeq.stopAutoDetect();
