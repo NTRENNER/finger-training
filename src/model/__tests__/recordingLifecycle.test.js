@@ -78,24 +78,40 @@ test('absent and explicitly null rest use the same estimated fallback',()=>{
  expect(a.get(repKey(absent[2]))).toMatchObject({capacityEligible:true,confidence:'estimated_rest'});
  expect(a.get(repKey(absent[2])).availFrac).toBeLessThan(1);
 });
-test('new capacity intervals do not silently mix with earlier full-interval baselines',()=>{
+// The requirement is that the two recording bases are never COMPARED as if
+// they described the same interval. Reconciling them satisfies that. Dropping
+// one generation also satisfied it, but cost a grip its whole baseline, curve
+// and capacity floor on the strength of a single session — see
+// basisNormalization.test.js for the regression that motivated the change.
+test('earlier and new capacity intervals are reconciled into one series, not segregated',()=>{
  const old=sequence()[0];
- const recent={...old,id:'new',session_id:'new',date:'2026-09-15',force_recording:{basis:'target_acquired',capacity_eligible:true}};
- expect(comparableCapacityHistory([old,recent])).toEqual([recent]);
- expect(freshFitReps([old,recent])).toEqual([recent]);
- expect(buildThreeExpPriors([old,recent],{upTo:'2026-08-21'})).toEqual(buildThreeExpPriors([old]));
- expect(prescription([old,recent],'L','Crusher',30,{referenceDate:'2026-08-21'}))
-  .toEqual(prescription([old],'L','Crusher',30,{referenceDate:'2026-08-21'}));
+ const recent={...old,id:'new',session_id:'new',date:'2026-09-15',actual_time_s:old.actual_time_s-1.4,
+  force_recording:{basis:'target_acquired',capacity_eligible:true,acquisition_s:1.4,duration_s:old.actual_time_s-1.4}};
+ const out=comparableCapacityHistory([old,recent]);
+ expect(out.map(r=>r.id)).toEqual([old.id,'new']);
+ expect(out[1].actual_time_s).toBeCloseTo(old.actual_time_s,5);          // back on the earlier interval
+ expect(out[1].force_recording.duration_s).toBe(old.actual_time_s-1.4);  // native record kept
+ expect(out[0]).toBe(old);                                               // earlier rows untouched
+ expect(freshFitReps([old,recent]).map(r=>r.id)).toContain(old.id);
 });
 
-
-test('old pinned baselines are not reused for the new measurement basis; old dots remain available',()=>{
+test('a new-basis rep that cannot be placed on the earlier interval is the only thing dropped',()=>{
  const old=sequence()[0];
- const recent={...old,id:'new',session_id:'new',date:'2026-09-15',force_recording:{basis:'target_acquired',capacity_eligible:true}};
+ const noOffset={...old,id:'new',session_id:'new',date:'2026-09-15',
+  force_recording:{basis:'target_acquired',capacity_eligible:true}};
+ expect(comparableCapacityHistory([old,noOffset]).map(r=>r.id)).toEqual([old.id]);
+});
+
+test('pinned baselines survive the measurement-basis change; old dots remain available',()=>{
+ const old=sequence()[0];
+ const recent={...old,id:'new',session_id:'new',date:'2026-09-15',actual_time_s:old.actual_time_s-1.4,
+  force_recording:{basis:'target_acquired',capacity_eligible:true,acquisition_s:1.4}};
  const history=[old,recent]; const pin={date:old.date,amps:[10,10,10],maxHoldS:40};
  const {result}=renderHook(()=>useGripFits({history,grips:['Crusher'],threeExpPriors:buildThreeExpPriors(history),
   pinnedGripBaselines:{Crusher:pin},pinnedPerHandBaselines:{'Crusher|L':pin}}));
- expect(result.current.gripBaselines.Crusher).toBeUndefined();
- expect(result.current.perHandGripBaselines['Crusher|L']).toBeUndefined();
- expect(freshFitReps(history,{preserveAllBases:true})).toEqual(history);
+ expect(result.current.gripBaselines.Crusher).toBeTruthy();
+ expect(result.current.gripBaselines.Crusher.date).toBe(pin.date);
+ // Every recorded pull is still present; preserveAllBases now governs whether
+ // an unconvertible row is kept, not whether the shared interval is applied.
+ expect(freshFitReps(history,{preserveAllBases:true}).map(r=>r.id)).toEqual(history.map(r=>r.id));
 });
