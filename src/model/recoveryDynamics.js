@@ -140,6 +140,7 @@ export function buildRecoveryBundle({ reps, restSeconds, physModel }) {
     : null;
   return {
     observed, predicted, eligibility: evidence.status, reason: evidence.reason,
+    confidence: evidence.confidence, evidenceWeight: evidence.weight,
     gapAtTarget,
     observedAtTarget: obsAtTarget,
   };
@@ -231,8 +232,9 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
     }
 
     const entry = bySession.get(grp.sessKey) || {
-      date: grp.date, session_id: grp.sessKey, session_started_at: grp.reps.map(r => r.session_started_at || r.created_at || "").filter(Boolean).sort()[0] || "", observedVals: [], gapVals: [],
+      date: grp.date, session_id: grp.sessKey, session_started_at: grp.reps.map(r => r.session_started_at || r.created_at || "").filter(Boolean).sort()[0] || "", observedVals: [], gapVals: [], evidenceWeight: 1,
     };
+    entry.evidenceWeight = Math.min(entry.evidenceWeight, evidence.weight);
     entry.observedVals.push(observed);
     if (gap != null && Number.isFinite(gap)) entry.gapVals.push(gap);
     entry.date = grp.date; // last write wins; dates should match within sessKey
@@ -243,8 +245,9 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
   // Aggregate per-session: mean of L/R values, sorted by date ASC.
   const mean = (vals) => vals.reduce((s, v) => s + v, 0) / vals.length;
   return [...bySession.values()]
-    .map(({ date, session_id, session_started_at, observedVals, gapVals }) => ({
-      date, session_id, session_started_at,
+    .map(({ date, session_id, session_started_at, observedVals, gapVals, evidenceWeight }) => ({
+      date, session_id, session_started_at, evidenceWeight,
+      confidence: evidenceWeight < 1 ? "historical_estimate" : "measured",
       observedAtTarget: observedVals.length > 0 ? mean(observedVals) : null,
       gapAtTarget: gapVals.length > 0 ? mean(gapVals) : null,
     }))

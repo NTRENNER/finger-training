@@ -71,7 +71,7 @@ function totalSSE(sets, tauR) {
     const pred = predictDecay(s.times[0], s.times.length, s.rest, tauR);
     for (let i = 1; i < s.times.length; i++) {
       const d = pred[i] - s.times[i];
-      sse += d * d;
+      sse += (s.weight ?? 1) * d * d;
     }
   }
   return sse;
@@ -134,7 +134,7 @@ function setsForGrip(history, grip) {
   for (const reps of groups.values()) {
     const evidence = recoveryEvidence(reps);
     if (evidence.reps.length < MIN_REPS_PER_SET) continue;
-    sets.push({ times: evidence.reps.map(r => r.actual_time_s), rest: evidence.rests });
+    sets.push({ times: evidence.reps.map(r => r.actual_time_s), rest: evidence.rests, weight: evidence.weight });
   }
   return sets;
 }
@@ -149,13 +149,15 @@ export function computePersonalRecoveryTausForGrip(history, grip) {
   const sets = setsForGrip(history, grip);
   if (sets.length === 0) return null;
   const fitted = fitCore(sets);
-  const n = sets.length;
+  const n = sets.reduce((sum, set) => sum + set.weight, 0);
   const w = PRIOR_WEIGHT;
   return {
     fast:   (w * POP_TAU_R.fast   + n * fitted.fast)   / (w + n),
     medium: (w * POP_TAU_R.medium + n * fitted.medium) / (w + n),
     slow:   POP_TAU_R.slow,  // always population — not enough signal in short sets
-    nSets:  n,                 // expose for "calibrated" indicators / debug
+    effectiveSets: n,
+    estimatedSets: sets.filter(set => set.weight < 1).length,
+    nSets:  sets.length,                 // expose for "calibrated" indicators / debug
   };
 }
 

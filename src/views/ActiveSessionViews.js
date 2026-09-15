@@ -106,6 +106,8 @@ function LiveRecoveryCard({ history, config, activeHand, sessionReps, embedded =
   if (bundle.observed.length === 0) return null;
   const classification = classifyRecovery(bundle.observedAtTarget);
   const inner = (
+    <>
+    {bundle.confidence === "historical_estimate" && <p>Historical estimate using planned rest.</p>}
     <RecoveryChart
       observed={bundle.observed}
       predicted={bundle.predicted}
@@ -116,6 +118,7 @@ function LiveRecoveryCard({ history, config, activeHand, sessionReps, embedded =
       height={140}
       showLegend={false}
     />
+    </>
   );
   return embedded ? inner : <Card style={{ marginBottom: 12 }}>{inner}</Card>;
 }

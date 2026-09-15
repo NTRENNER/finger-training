@@ -31,6 +31,7 @@ export function DeloadGauge({
 }) {
   if (!status) return null;
   const { level, pressure, label, haveSignal, deload } = status;
+  const usesHistoricalEstimates = Object.values(deload?.signals?.gripGaps || {}).some(g => g.confidence === "historical_estimate");
   const color = LEVEL_COLOR[level] || C.muted;
   const markerPct = Math.max(1, Math.min(99, (haveSignal ? pressure : 0) * 100));
   const matchedIndex = timelineDates.indexOf(asOfDate);
@@ -49,6 +50,7 @@ export function DeloadGauge({
         marginBottom: 4,
       }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>Recovery status</div>
+        {usesHistoricalEstimates && <div style={{ fontSize: 12, color: C.muted }}>Includes historical estimates using planned rest.</div>}
         <div style={{ fontSize: 12.5, fontWeight: 700, color }}>{label}</div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>

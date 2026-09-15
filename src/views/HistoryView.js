@@ -1002,6 +1002,7 @@ export function HistoryView({
                           return (
                             <div style={{ marginTop: 12 }}>
                               {recBundle.eligibility === "partial" && <p>Recovery comparison uses the valid opening reps only.</p>}
+                              {recBundle.confidence === "historical_estimate" && <p>Historical estimate using planned rest.</p>}
                               <RecoveryChart
                                 observed={recBundle.observed}
                                 predicted={recBundle.predicted}

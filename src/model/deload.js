@@ -149,7 +149,8 @@ export function recentGapHeldOut(history, grip, today, n) {
   if (scored.length < n) return null;
   const last = scored.slice(-n);
   const mean = last.reduce((s, r) => s + r.gapAtTarget, 0) / last.length;
-  return { mean, n: last.length, lastDate: last[last.length - 1].date };
+  return { mean, n: last.length, lastDate: last[last.length - 1].date,
+    confidence: last.some(r => r.confidence === "historical_estimate") ? "historical_estimate" : "measured" };
 }
 
 // Main entry. Returns:
