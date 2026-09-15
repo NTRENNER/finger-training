@@ -48,3 +48,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .vercel
+
+# replay harness: your own training export and its snapshot.
+# Real rep history — never commit it to a public repo.
+/scripts/data
+/scripts/.replay-snapshot.json
