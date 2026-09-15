@@ -29,3 +29,10 @@ If sensor duration is unavailable, finalization preserves wall-clock elapsed act
 The original force-recording migration was applied on September 10, 2026. This follow-up also requires `supabase/migrations/20260911_rep_timing_and_evidence.sql` before its client deployment. It adds timing/provenance fields and extends the existing server learner guard. The follow-up migration was applied and verified on September 10, 2026; this release includes the matching client.
 
 Tests cover steady pulls, normal fluctuations, opening overshoot, gradual decline, sustained target loss, brief dips, abrupt release, batched timestamps, rollover, interruptions, real rest, recovery comparability, and cloud round-trip. Production and offline-shell builds pass. Physical Tindeq validation remains outstanding. Protocol, ladder constants, and zone names remain unchanged.
+
+
+### Historical capacity floor calibration
+
+Three independent, comparable lower opening efforts within 30 days establish a decline. The first floor reduction is limited to 25%; each additional qualifying session can permit one more reduction, bounded by 25% and the load demonstrated by that comparison. A stronger comparable performance resets confirmation. Replaying unchanged or duplicated history cannot create another reduction. The confirmation window is evaluated at the evidence session date, so established reductions survive that window aging out; the existing 90-day historical-best eligibility remains in effect.
+
+An explicitly valid muscular failure shorter than the requested duration can weaken the floor when its prescribed load matches the replayed floor (within 0.11 kg for storage rounding), the target was acquired, and measured average force remains between 93% and 105% of that load. This uses the recorded prescription to reconstruct floor matching because historical rows do not store whether the floor raised the recommendation. Such a miss does not establish capacity at the requested duration. Interrupted, unacquired, substantially overshot, different-setup, and later-set efforts do not qualify.

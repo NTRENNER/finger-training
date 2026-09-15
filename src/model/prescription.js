@@ -575,12 +575,12 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
     if ((Number(r.set_num) || 1) !== 1) continue;                 // only the session opener
     if (isSeedArtifactRep(r)) continue;                           // skip seeded/backfilled twins (avg==peak)
     if (!isMeasuredLoadRep(r)) continue;                          // measured (Tindeq) reps only — a spring/manual load was never a *sustained force* (July 2026)
-    if (!(Number(r.actual_time_s) >= targetDuration)) continue;   // proves capacity at this T-or-shorter
+    if (!(Number(r.actual_time_s) > 0)) continue;
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
     const load = sane(effectiveLoad(r));
     if (load != null) candidates.push({ ...r, load });
-    if (load != null && (best == null || load > best)) best = load;
+    if (load != null && Number(r.actual_time_s) >= targetDuration && (best == null || load > best)) best = load;
   }
   // Keep an old best through isolated bad days. Three newer independent
   // opening efforts at comparable duration can recalibrate the working floor.
@@ -591,28 +591,45 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
     if (!prior || compareOpeningRep(r, prior) < 0) sessions.set(key, r);
   }
   const ordered = [...sessions.values()].sort(compareSessionOrder);
-  const bestRep = [...ordered].reverse().find(r => r.load === best);
+  const bestRep = [...ordered].reverse().find(r => r.load === best && Number(r.actual_time_s) >= targetDuration);
   if (bestRep) {
-    const recentCutoff = ymdLocal(new Date(refMs - 30 * 86400 * 1000));
+    // Replay evidence since the best, including reductions established more
+    // than 30 days ago. The initial confirmation window is evaluated at each
+    // session, not at today's date, so earned reductions do not expire.
     const recent = ordered.filter(r => compareSessionOrder(r, bestRep) > 0
-      && r.date >= recentCutoff
       && (r.setup_id ?? null) === (bestRep.setup_id ?? null));
     let workingFloor = best;
     let lower = [];
-    // Replay independent sessions, never recommendation calls. Each reduction
-    // consumes three new comparisons so unchanged history cannot ratchet down.
+    let declineEstablished = false;
     for (const r of recent) {
-      if (r.load >= workingFloor * 0.9) {
+      const duration = Number(r.actual_time_s);
+      const fullHold = duration >= targetDuration;
+      if (fullHold && r.load >= workingFloor * 0.9) {
         workingFloor = Math.max(workingFloor, r.load);
         lower = [];
+        declineEstablished = false;
         continue;
       }
-      // Candidates already prove targetDuration or longer. Longer endurance
-      // work is not a comparable failure at this requested duration.
-      if (r.actual_time_s > targetDuration * 1.25) continue;
-      lower.push(r.load);
-      if (lower.length === CAPACITY_FLOOR_REVISION_SESSIONS) {
-        workingFloor = Math.max(workingFloor * (1 - CAPACITY_FLOOR_MAX_REVISION_DROP), ...lower);
+      const comparableLower = fullHold && duration <= targetDuration * 1.25;
+      const prescribed = Number(r.prescribed_load_kg);
+      // Historical rows do not store capacityFloored. Reconstruct whether the
+      // prescribed load matched the replayed floor (allow storage rounding).
+      // A heavier overshoot, non-acquired target, or interruption cannot prove
+      // that this floor was too high. Short failures weaken only the constraint;
+      // they never establish demonstrated capacity at the requested duration.
+      const shortMiss = !fullHold && r.failure_valid === true
+        && r.end_reason === "muscular_failure"
+        && Number(r.target_duration) === targetDuration
+        && Math.abs(prescribed - workingFloor) <= 0.11
+        && Number(r.peak_force_kg) >= prescribed
+        && r.load >= prescribed * 0.93 && r.load <= prescribed * 1.05;
+      if (!comparableLower && !shortMiss) continue;
+      const windowStart = new Date(r.date + "T00:00:00").getTime() - 30 * 86400000;
+      lower = lower.filter(e => new Date(e.date + "T00:00:00").getTime() >= windowStart);
+      lower.push({ date: r.date, load: comparableLower ? r.load : 0 });
+      if (declineEstablished || lower.length >= CAPACITY_FLOOR_REVISION_SESSIONS) {
+        workingFloor = Math.max(workingFloor * (1 - CAPACITY_FLOOR_MAX_REVISION_DROP), ...lower.map(e => e.load));
+        declineEstablished = true;
         lower = [];
       }
     }
