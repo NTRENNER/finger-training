@@ -135,10 +135,54 @@ export function isNominalPrescriptionRep(rep) {
     && Number(rep.rep_num ?? 1) === 1 && Number(rep.set_num ?? 1) === 1;
 }
 
-// A new interval basis starts a separate capacity series for that grip. Raw
-// history remains intact for the recorded-pull dots and activity log.
-export function comparableCapacityHistory(history) {
-  const changed = new Set((history || []).filter(r => isCapacityEvidenceRep(r)
-    && r.force_recording?.basis === 'target_acquired').map(r => r.grip));
-  return (history || []).filter(r => !changed.has(r.grip) || r.force_recording?.basis === 'target_acquired');
+// Express a target-acquired rep on the earlier recording interval.
+//
+// Pre-basis rows timed the whole pull, from the 4 kg start threshold to
+// release. A v3 row times only the at-or-above-target interval, and stores
+// the difference as `acquisition_s` — so adding it back reproduces the
+// earlier interval exactly. The force axis needs no adjustment: both bases
+// average the working phase, and the recorded values agree.
+//
+// The conversion only runs this direction. Pre-basis rows never recorded
+// their acquisition time, so they cannot be moved onto the newer interval;
+// the newer rows move instead, which is also the cheaper side — a grip
+// typically has hundreds of pre-basis rows and a handful of v3 ones.
+export function legacyIntervalRep(rep) {
+  const acquisition = Number(rep?.force_recording?.acquisition_s);
+  if (rep?.force_recording?.basis !== 'target_acquired') return rep;
+  if (!Number.isFinite(acquisition) || acquisition < 0) return null;
+  if (!(Number(rep.actual_time_s) > 0)) return rep;
+  return { ...rep, actual_time_s: Number(rep.actual_time_s) + acquisition,
+    force_recording: { ...rep.force_recording, interval_basis_applied: 'legacy_elapsed' } };
+}
+
+// One comparable capacity series per grip.
+//
+// A grip recorded entirely on one basis keeps its native intervals. A grip
+// that spans the change has its v3 rows converted to the earlier interval
+// (see above) rather than having either generation discarded — dropping the
+// pre-basis rows costs a grip its baseline, its curve and the capacity floor
+// that bounds how fast a prescription may fall, all on the strength of one
+// session. A v3 row that cannot be converted (no `acquisition_s`) is the only
+// thing excluded, and only from a grip that spans the change.
+// `dropUnconvertible: false` keeps such a row at its native interval — for
+// display surfaces that show every recorded pull rather than a fitted series.
+export function comparableCapacityHistory(history, { dropUnconvertible = true } = {}) {
+  const rows = history || [];
+  const acquired = new Set(), earlier = new Set();
+  for (const r of rows) {
+    if (!isCapacityEvidenceRep(r)) continue;
+    if (r.force_recording?.basis === 'target_acquired') acquired.add(r.grip);
+    else earlier.add(r.grip);
+  }
+  const spans = new Set([...acquired].filter(g => earlier.has(g)));
+  if (spans.size === 0) return rows;
+  const out = [];
+  for (const r of rows) {
+    if (!spans.has(r.grip)) { out.push(r); continue; }
+    const converted = legacyIntervalRep(r);
+    if (converted) out.push(converted);
+    else if (!dropUnconvertible) out.push(r);
+  }
+  return out;
 }
