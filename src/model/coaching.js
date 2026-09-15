@@ -1,6 +1,7 @@
+import { nominalPrescription } from "./prescription.js";
 import { effectiveSessionCount } from "./sessionConfidence.js";
 import { compareSessionOrder } from "./sessionOrder.js";
-import { isCapacityEvidenceRep } from "./forceRecording.js";
+import { isCapacityEvidenceRep, isNominalPrescriptionRep } from "./forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // COACHING RECOMMENDATION ENGINE  (continuous coverage + model-gap)
 // ─────────────────────────────────────────────────────────────
@@ -584,6 +585,21 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // getZoneStaleness for its zone-balance framing; here we want the
   // grip-scoped view so the engine recommends what THIS grip needs.
   const gripHistory = history.filter(r => isCapacityEvidenceRep(r) && r?.grip === grip);
+  if (gripHistory.length === 0) {
+    const todayDate = today instanceof Date ? ymdLocal(today) : (today || ymdLocal());
+    const manual = history.filter(r => isNominalPrescriptionRep(r) && r.grip === grip && r.date <= todayDate)
+      .sort(compareSessionOrder).at(-1);
+    if (!manual) return null;
+    const T = Number(manual.target_duration) || Number(manual.actual_time_s);
+    const loadByHand = {};
+    for (const hand of ['L','R']) {
+      const p = nominalPrescription(history.filter(r => r.date <= todayDate), hand, grip, T);
+      if (p) loadByHand[hand] = p.value;
+    }
+    return {T, hand:manual.hand, zone:zoneOf(T), loadKg:loadByHand[manual.hand], loadByHand,
+      source:'manual-load-estimate', evidenceLabel:'Estimated from your recorded manual load',
+      confidence:0.25, effN:0, overloadFactor:1, coldStart:false};
+  }
   const stalenessMap = getZoneStaleness(gripHistory, today);
 
   // Cold start uses the exact fresh, de-duplicated fit basis. Later

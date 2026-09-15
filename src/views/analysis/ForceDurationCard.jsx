@@ -1,3 +1,4 @@
+import { isCapacityEvidenceRep, comparableCapacityHistory } from "../../model/forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // ForceDurationCard — the F-D scatter + 3-exp curve + asymmetry rows
 // ─────────────────────────────────────────────────────────────
@@ -46,7 +47,7 @@ import {
 } from "../../model/threeExp.js";
 import { fitAmpsForPts } from "../../model/baselines.js";
 import { effectiveLoad, freshFitReps } from "../../model/load.js";
-import { freshLoadFor } from "../../model/prescription.js";
+import { freshLoadFor, buildFreshLoadMap, repKey } from "../../model/prescription.js";
 
 // Match AnalysisView's chart-min duration (5s — same lower bound as
 // the curve-sample grid in threeExpCurveData). Lives here as a local
@@ -149,10 +150,12 @@ export function ForceDurationCard({
     if (!fdSplitData || !threeExpPriors?.get) return null;
     const tMax = Math.max(maxDur, F_D_T_MIN + 10);
     const out = [];
+    const fitMap = freshMap || buildFreshLoadMap(history);
     for (const grip of Object.keys(fdSplitData)) {
       const color = GRIP_COLORS[grip] || C.blue;
       // Engine-basis curve fit: all reps, fresh-equivalent loads.
-      const fitReps = (history || []).filter(r =>
+      const fitReps = comparableCapacityHistory(history).filter(r =>
+        isCapacityEvidenceRep(r) && fitMap.get(repKey(r))?.capacityEligible !== false &&
         r.grip === grip
         && (handView === "pooled" || r.hand === handView)
         && r.actual_time_s > 0 && effectiveLoad(r) > 0
@@ -183,7 +186,7 @@ export function ForceDurationCard({
       // Dots: observed FRESH first reps only (matches the single-grip
       // scatter) — the within-set fatigue cloud lives in the
       // click-through session detail, not the main scatter.
-      const dots = freshFitReps(history).filter(r =>
+      const dots = freshFitReps(history, { preserveAllBases: true }).filter(r =>
         r.grip === grip
         && (handView === "pooled" || r.hand === handView)
         && r.actual_time_s > 0

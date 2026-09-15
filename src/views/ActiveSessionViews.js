@@ -1,3 +1,4 @@
+import { finalizeDeviceActivity } from "../model/forceRecording.js";
 import { evidenceLabel } from "../model/forceRecording.js";
 // ──────────────────────────────────────────────────────────────
 // ACTIVE-SESSION VIEWS
@@ -269,8 +270,10 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     );
   }, [config.hand, session.refWeights]);
 
+  const usedDeviceRef = useRef(false);
   // Actually start recording the rep
   const startRep = useCallback(async () => {
+    usedDeviceRef.current = tindeq.connected;
     setElapsed(0);
     startTimeRef.current = Date.now();
     setRepPhase("active");
@@ -315,9 +318,9 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     let avgForce = null;
     let peakForce = null;
     let measurement = {};
-    if (tindeq.connected) {
+    if (usedDeviceRef.current) {
       const stats = await tindeq.stopMeasuring();
-      measurement = stats;
+      measurement = finalizeDeviceActivity(stats, startedAtMs, endedAtMs, !tindeq.connected);
       avgForce = stats.avgForce;
       peakForce = stats.peakForce;
     }
@@ -626,7 +629,7 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
           {lastRep.forceRecording?.plateau?.duration_s > 0 && <p>
             Strong phase: {fmtW(lastRep.forceRecording.plateau.avg_force_kg, unit)} {unit} for {lastRep.forceRecording.plateau.duration_s.toFixed(1)}s.
           </p>}
-          <p>{lastRep.avgForce > 0 ? `${fmtW(lastRep.avgForce, unit)} ${unit} time-weighted average over ${lastRep.actualTime.toFixed(1)}s.` : "Manually timed effort."}</p>
+          <p>{lastRep.forceRecording?.duration_basis === "elapsed_activity_estimate" ? "Elapsed activity time estimated; no measured hold duration available." : lastRep.avgForce > 0 ? `${fmtW(lastRep.avgForce, unit)} ${unit} time-weighted average over ${lastRep.actualTime.toFixed(1)}s.` : "Manually timed effort."}</p>
           <div style={{ display: "flex", gap: 32 }}>
             <div>
               <Label>Time</Label>
@@ -933,8 +936,9 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
     clearInterval(timerRef.current);
     setRepActive(false);
     setElapsed(0);
+    const completed = finalizeDeviceActivity(stats, startTimeRef.current ?? Date.now(), Date.now());
     startTimeRef.current = null;
-    onRepDone({ ...stats, failed: false });
+    onRepDone({ ...completed, failed: false });
   }, [onRepDone]);
 
   const handleRepStart = useCallback(() => {

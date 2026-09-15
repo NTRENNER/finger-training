@@ -1,3 +1,4 @@
+import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/forceRecording.js";
 import { MeasuredProgressSection } from "./cards/MeasuredProgressCard.jsx";
 // ──────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
@@ -52,7 +53,7 @@ import {
 } from "../model/baselines.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle } from "../model/repCurveData.js";
-import { prescription, prescribedLoad, effectiveLoad, freshLoadFor } from "../model/prescription.js";
+import { prescription, prescribedLoad, effectiveLoad, freshLoadFor, buildFreshLoadMap, repKey } from "../model/prescription.js";
 import { freshFitReps } from "../model/load.js";
 import { buildForceDurationGripScope } from "../model/analysisScope.js";
 import {
@@ -247,14 +248,16 @@ export function AnalysisView({
   // visual distinction was retired when we switched the F-D chart to
   // hand-based coloring (commit pending) — `successes` is gone, all
   // reps flow through `failures` as (T, F) data points.
-  const failures = reps;
+  const capacityFitMap = useMemo(() => freshMap || buildFreshLoadMap(history), [freshMap, history]);
+  const failures = useMemo(() => comparableCapacityHistory(reps).filter(r =>
+    isCapacityEvidenceRep(r) && capacityFitMap.get(repKey(r))?.capacityEligible !== false), [reps, capacityFitMap]);
 
   // Chart-facing reps: FRESH first reps only (rep_num === 1 + dedup), so
   // the F-D scatter AND its fitted curve show fresh force-duration
   // capacity — matching Curve Improvement / overlay / Capacity. The
   // within-set fatigue cloud (later reps) is still reachable by clicking
   // any dot, which opens the full per-session breakdown.
-  const freshFailures = useMemo(() => freshFitReps(failures), [failures]);
+  const freshFailures = useMemo(() => freshFitReps(reps, { preserveAllBases: true }), [reps]);
 
   // Hand-scoped variant for the F-D chart (fit + dots). Pooled mode is
   // untouched; in L/R mode the chart shows that hand's reps and a
@@ -660,6 +663,8 @@ export function AnalysisView({
           climb logger). Analysis stays focused on viewing — the only
           BW-related control here is the Absolute / × BW units toggle
           inside the filter card below. */}
+
+      {history.some(r => r.force_recording?.basis === "target_acquired") && <p style={{color:C.muted}}>Capacity timing now starts when target force is reached. Progress for updated grips uses the new measurement basis and builds a separate baseline; earlier workout dots remain visible.</p>}
 
       <AnalysisScopeToolbar
         grips={grips}

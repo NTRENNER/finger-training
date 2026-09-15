@@ -4,7 +4,7 @@
 // rep silently fell back to the prescribed weight. The override is now
 // persisted in a module-scoped store keyed by sessionId.
 import React from "react";
-import { render, fireEvent, screen, cleanup } from "@testing-library/react";
+import { render, fireEvent, screen, cleanup, act } from "@testing-library/react";
 import { ActiveSessionView } from "../ActiveSessionViews.js";
 
 // Keep the render light: the live charts are irrelevant to this test.
@@ -75,4 +75,25 @@ test("L and R hold independent overrides within a session", () => {
 test("override clears when a new session starts (different sessionId)", () => {
   render(<ActiveSessionView {...props({ ...baseSession("s2"), currentRep: 0 })} />);
   expect(screen.getByPlaceholderText(/Override/i).value).toBe(""); // fresh session
+});
+
+
+test('a sensor-started rep with an empty buffer retains elapsed activity after disconnect', async()=>{
+ jest.useFakeTimers(); jest.setSystemTime(100000);
+ try {
+  const tindeq=fakeTindeq(); tindeq.connected=true;
+  tindeq.stopMeasuring=jest.fn(async()=>({actualTime:0,avgForce:null,peakForce:null,
+    failureValid:false,endReason:'equipment_interruption',forceRecording:{observed_time_s:0}}));
+  const onRepDone=jest.fn(); const session=baseSession('dropout');
+  let view;
+  await act(async()=>{view=render(<ActiveSessionView {...props(session)} tindeq={tindeq} autoStart onRepDone={onRepDone}/>);});
+  act(()=>jest.advanceTimersByTime(45000));
+  tindeq.connected=false;
+  view.rerender(<ActiveSessionView {...props(session)} tindeq={tindeq} autoStart onRepDone={onRepDone}/>);
+  await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Done — muscular failure'})));
+  expect(tindeq.stopMeasuring).toHaveBeenCalledTimes(1);
+  expect(onRepDone).toHaveBeenCalledTimes(1);
+  expect(onRepDone.mock.calls[0][0]).toMatchObject({actualTime:45,failureValid:false,endReason:'equipment_interruption',
+    forceRecording:{duration_basis:'elapsed_activity_estimate',capacity_eligible:false}});
+ } finally {jest.useRealTimers();}
 });

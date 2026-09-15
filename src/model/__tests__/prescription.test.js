@@ -522,9 +522,9 @@ describe("prescription (unified)", () => {
     expect(down.value).toBeCloseTo(16, 1);
   });
 
-  test("historical fallback: no prior, no anchor, but matching reps exist", () => {
-    // No prior, no rep 1 (rep_num=2 throughout). historical takes over
-    // from estimateRefWeight.
+  test("late reps without an opener cannot provide fresh historical capacity", () => {
+    // No opener and duplicate rep slots: fatigue cannot be reconstructed.
+    // Do not label raw late-rep force as fresh historical capacity.
     const history = [
       { hand: "L", grip: "Crusher", target_duration: 45, rep_num: 2,
         actual_time_s: 45, avg_force_kg: 20, failed: true,
@@ -534,9 +534,7 @@ describe("prescription (unified)", () => {
         date: today, session_id: "s1" },
     ];
     const out = prescription(history, "L", "Crusher", 45);
-    expect(out).not.toBeNull();
-    expect(out.source).toBe("historical");
-    expect(out.value).toBeGreaterThan(0);
+    expect(out).toBeNull();
   });
 
   test("respects EMPIRICAL_LOOKBACK_DAYS — old rep doesn't anchor", () => {

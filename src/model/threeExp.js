@@ -344,7 +344,7 @@ export function buildThreeExpPriors(history, { upTo = null } = {}) {
   // Fresh + de-duped, so the prior matches the baseline/estimate/overlay
   // fits — otherwise a contaminated all-reps prior drags the small,
   // heavily-shrunk baseline window down and inflates improvement %.
-  for (const r of freshFitReps(history)) {
+  for (const r of freshFitReps(upTo ? history.filter(r => r.date && r.date <= upTo) : history)) {
     if (!r.grip) continue;
     if (upTo && r.date && r.date > upTo) continue;   // leak-free cutoff
     const F = effectiveLoad(r);

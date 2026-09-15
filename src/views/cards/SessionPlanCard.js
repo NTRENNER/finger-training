@@ -479,6 +479,7 @@ export function SessionPlanCard({
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${activeColor}66` }}>
 
+      {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
       {/* Header */}
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>

@@ -80,9 +80,65 @@ export function isCapacityEvidenceRep(rep) {
 }
 
 export function evidenceLabel(rep) {
+  if (rep?.force_recording?.duration_basis === "elapsed_activity_estimate") return "Interrupted — elapsed activity time is estimated";
   if (!isValidFailureRep(rep)) return "Interrupted — activity only";
   if (rep.force_recording?.capacity_eligible === false) return "Incomplete failure evidence — activity only";
   if (!isCapacityEvidenceRep(rep)) return "Load is an estimate — activity only";
   if (!rep.load_provenance) return "Legacy evidence — measurement uncertainty";
   return "Valid failure evidence";
+}
+
+
+// Capacity force and duration share one acquisition-to-end interval. The
+// original integral remains activity metadata, including ramp-up work.
+export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, targetKg = null) {
+  const activity = recordForce(samples, endTs, targetKg);
+  if (!(targetKg > 0)) return activity;
+  const first = samples.findIndex(s => s.ts <= endTs && s.kg >= targetKg);
+  if (first < 0) return activity;
+  const capacity = recordForce(samples.slice(first), endTs, targetKg);
+  return { ...capacity, peakForce: activity.peakForce,
+    failureValid: capacity.failureValid && activity.failureValid,
+    endReason: activity.failureValid ? capacity.endReason : activity.endReason,
+    forceRecording: { ...capacity.forceRecording, version: 3, basis: 'target_acquired',
+      capacity_eligible: capacity.failureValid && activity.failureValid,
+      activity: { duration_s: activity.actualTime, avg_force_kg: activity.avgForce,
+        impulse_kg_s: activity.forceRecording.impulse_kg_s,
+        started_at_ms: activity.startedAtMs, ended_at_ms: activity.endedAtMs,
+        signal_quality: activity.forceRecording.signal_quality },
+      acquisition_s: (samples[first].ts - samples[0].ts) / 1000 } };
+}
+
+// Sensor duration wins when available. An empty stream is elapsed activity,
+// never a zero-second failure or a fabricated measured force-time point.
+export function finalizeDeviceActivity(stats, startedAtMs, endedAtMs, interrupted = false) {
+  const measured = Number.isFinite(stats?.actualTime) && stats.actualTime > 0;
+  const elapsed = Math.max(0, (endedAtMs - startedAtMs) / 1000);
+  const invalid = interrupted || !measured || stats?.failureValid === false;
+  return { ...stats,
+    actualTime: measured ? stats.actualTime : elapsed,
+    startedAtMs: measured && Number.isFinite(stats.startedAtMs) ? stats.startedAtMs : startedAtMs,
+    endedAtMs: measured && Number.isFinite(stats.endedAtMs) ? stats.endedAtMs : endedAtMs,
+    failureValid: !invalid,
+    endReason: interrupted || !measured ? 'equipment_interruption' : stats.endReason,
+    forceRecording: { ...stats?.forceRecording,
+      ...(!measured ? { capacity_eligible:false, duration_basis:'elapsed_activity_estimate',
+        elapsed_activity_s:elapsed, observed_time_s:stats?.forceRecording?.observed_time_s ?? 0 } : {}),
+      ...(invalid ? {capacity_eligible:false} : {}) } };
+}
+
+export function isNominalPrescriptionRep(rep) {
+  return rep?.load_provenance === 'nominal_setting' && rep.failure_valid !== false
+    && !['interrupted','equipment_interruption','target_not_reached'].includes(rep.end_reason)
+    && Number.isFinite(Number(rep.manual_load_kg)) && Number(rep.manual_load_kg) > 0
+    && Number(rep.manual_load_kg) < 200 && rep.actual_time_s > 0
+    && Number(rep.rep_num ?? 1) === 1 && Number(rep.set_num ?? 1) === 1;
+}
+
+// A new interval basis starts a separate capacity series for that grip. Raw
+// history remains intact for the recorded-pull dots and activity log.
+export function comparableCapacityHistory(history) {
+  const changed = new Set((history || []).filter(r => isCapacityEvidenceRep(r)
+    && r.force_recording?.basis === 'target_acquired').map(r => r.grip));
+  return (history || []).filter(r => !changed.has(r.grip) || r.force_recording?.basis === 'target_acquired');
 }

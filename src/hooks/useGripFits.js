@@ -1,3 +1,4 @@
+import { isCapacityEvidenceRep } from "../model/forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // useGripFits — per-grip + per-(grip, hand) three-exp derivations
 // ─────────────────────────────────────────────────────────────
@@ -96,6 +97,7 @@ export function useGripFits({
     const out = { ...candidateGripBaselines };
     if (pinnedGripBaselines && typeof pinnedGripBaselines === "object") {
       for (const [grip, pinned] of Object.entries(pinnedGripBaselines)) {
+        if (history.some(r => r.grip === grip && isCapacityEvidenceRep(r) && r.force_recording?.basis === "target_acquired")) continue;
         if (pinned && Array.isArray(pinned.amps) && pinned.amps.length === 3 && pinned.date) {
           // Durable baseline: the pin locks WHICH window is the baseline
           // (its start date), but the amps are always RE-FIT under the
@@ -156,6 +158,7 @@ export function useGripFits({
     const out = { ...candidatePerHandBaselines };
     if (pinnedPerHandBaselines && typeof pinnedPerHandBaselines === "object") {
       for (const [key, pinned] of Object.entries(pinnedPerHandBaselines)) {
+        if (history.some(r => r.grip === key.split("|")[0] && isCapacityEvidenceRep(r) && r.force_recording?.basis === "target_acquired")) continue;
         if (pinned && Array.isArray(pinned.amps) && pinned.amps.length === 3 && pinned.date) {
           const [g, hand] = key.split("|");
           const refit = refitPinnedBaseline(history, g, pinned.date, threeExpPriors, { hand });

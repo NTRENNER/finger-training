@@ -146,3 +146,18 @@ test("clicking the starred zone tile selects its displayed reference time", asyn
     expect(onApplyPlan.mock.calls.at(-1)[0].targetTime).toBe(displayedTime)
   );
 });
+
+
+test('three manual sessions show an estimated 12kg plan rather than an empty state', async()=>{
+ const history=['2026-08-01','2026-08-03','2026-08-05'].flatMap(date=>['L','R'].map(hand=>({
+  id:date+hand,session_id:date,date,grip:'Prime',hand,set_num:1,rep_num:1,
+  target_duration:160,actual_time_s:160,manual_load_kg:12,avg_force_kg:null,
+  load_provenance:'nominal_setting',failure_valid:true,rest_s:20,
+ })));
+ const onApplyPlan=renderCard(history);
+ expect(screen.getByText(/Estimated from your recorded manual load/)).toBeInTheDocument();
+ expect(screen.queryByText(/Need at least 2 reps/)).not.toBeInTheDocument();
+ await waitFor(()=>expect(onApplyPlan).toHaveBeenCalled());
+ expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({targetTime:160});
+ expect(document.body).toHaveTextContent('12');
+});

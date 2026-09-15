@@ -313,8 +313,9 @@ export function useSessionRunner({
     const adjustedEnd = measuredTiming ? endedAtMs - (actualTime - adjTime) * 1000 : null;
     const previousRep = [...sessionReps].reverse().find(r => r.hand === effectiveHand);
     const previousEnd = previousRep?.rep_timing?.ended_at_ms;
+    const activityStart = forceRecording?.activity?.started_at_ms ?? startedAtMs;
     const restBefore = measuredTiming && currentRep > 0 && Number.isFinite(previousEnd)
-      && startedAtMs >= previousEnd ? (startedAtMs - previousEnd) / 1000 : null;
+      && activityStart >= previousEnd ? (activityStart - previousEnd) / 1000 : null;
     const provenance = loadProvenance || (avgForce > 0 ? "measured_force"
       : manualLoadKg > 0 ? "nominal_setting" : "prescription_only");
     const derivedFailed = failed || isShortfall(roundedActual, config.targetTime);
@@ -353,9 +354,10 @@ export function useSessionRunner({
       manual_load_kg:     (Number.isFinite(manualLoadKg) && manualLoadKg > 0)
                             ? Math.round(manualLoadKg * 1000) / 1000
                             : null,
-      rep_timing: { version: 1, started_at_ms: measuredTiming ? startedAtMs : null,
+      rep_timing: { version: 1, started_at_ms: measuredTiming ? activityStart : null,
         ended_at_ms: adjustedEnd, rest_before_s: restBefore,
-        source: measuredTiming ? (forceRecording ? "device_aligned" : "manual_tap") : "unknown" },
+        source: forceRecording?.duration_basis === "elapsed_activity_estimate" ? "elapsed_activity_estimate"
+          : measuredTiming ? (forceRecording ? "device_aligned" : "manual_tap") : "unknown" },
       load_provenance: provenance,
       failure_valid: failureValid,
       end_reason: endReason,

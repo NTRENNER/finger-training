@@ -25,7 +25,7 @@
 // guards every downstream consumer (fits, ladder, peak, prescription)
 // from garbage. Was 500 until June 2026, which let a 284 kg glitch
 // slip through; the strongest real pull on record is ~77 kg.
-import { isCapacityEvidenceRep } from "./forceRecording.js";
+import { isCapacityEvidenceRep, comparableCapacityHistory } from "./forceRecording.js";
 
 export const SANE_MAX_KG = 200;
 
@@ -97,10 +97,10 @@ export function loadedWeight(r) {
 // AND the Force Curves overlay (useHistoryOverlay) — so they all fit the
 // same data and can't disagree. (The coaching engine uses freshMap-
 // adjusted loads, a different but compatible de-fatigue.)
-export function freshFitReps(history) {
+export function freshFitReps(history, { preserveAllBases = false } = {}) {
   const seen = new Set();
   const out = [];
-  for (const r of history || []) {
+  for (const r of (preserveAllBases ? (history || []) : comparableCapacityHistory(history))) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;
     // Seed-artifact guard (July 2026, see isSeedArtifactRep below): an

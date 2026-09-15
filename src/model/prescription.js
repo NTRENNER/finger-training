@@ -1,5 +1,5 @@
 import { compareSessionOrder, compareOpeningRep } from "./sessionOrder.js";
-import { isCapacityEvidenceRep } from "./forceRecording.js";
+import { isCapacityEvidenceRep, isNominalPrescriptionRep, comparableCapacityHistory } from "./forceRecording.js";
 // ───────────────────────────────────────────────────────────────
 // PRESCRIPTION LAYER
 // ───────────────────────────────────────────────────────────────
@@ -206,20 +206,34 @@ export function buildFreshLoadMap(history, opts = {}) {
     let F = 0;
     let prevSetNum = null;
     let prevRest = 0;
+    let prevRepNum = 0;
     let sequenceValid = true;
+    let restEstimated = false;
 
     for (const r of sorted) {
       const setNum = r.set_num || 1;
       if (prevSetNum !== null && setNum !== prevSetNum) {
         F = 0;
         sequenceValid = true;
+        restEstimated = false;
+        prevRepNum = 0;
       } else if (prevSetNum !== null) {
         const actualRest = r.rep_timing?.rest_before_s;
-        if (r.rep_timing && (!Number.isFinite(actualRest) || actualRest < 0)) sequenceValid = false;
+        if (actualRest != null && (!Number.isFinite(actualRest) || actualRest < 0)) sequenceValid = false;
+        if (actualRest == null) {
+          restEstimated = true;
+          if (!Number.isFinite(prevRest) || prevRest < 0) sequenceValid = false;
+        }
         F = fatigueAfterRest(F, Number.isFinite(actualRest) && actualRest >= 0 ? actualRest : prevRest, gripFatParamsFor(r.grip));
       }
 
-      if (!isCapacityEvidenceRep(r)) sequenceValid = false;
+      const repNum = r.rep_num == null ? prevRepNum + 1 : Number(r.rep_num);
+      if (repNum !== prevRepNum + 1) sequenceValid = false;
+      prevRepNum = repNum;
+      const activity = r.force_recording?.activity;
+      const trustworthyWork = isCapacityEvidenceRep(r) || (r.force_recording?.signal_quality === 'complete'
+        && r.end_reason !== 'equipment_interruption' && effectiveLoad(r) > 0 && r.actual_time_s > 0);
+      if (!trustworthyWork) sequenceValid = false;
       const af = sequenceValid ? availFrac(F) : 1;
       const load = effectiveLoad(r);
       // Within-set fatigue compensation (existing path): divide by
@@ -254,14 +268,15 @@ export function buildFreshLoadMap(history, opts = {}) {
       const cappedFresh = load > 0
         ? Math.min(fresh, load * MAX_FRESH_INFLATION, SANE_MAX_KG)
         : fresh;
-      if (isCapacityEvidenceRep(r)) out.set(repKey(r), { fresh: cappedFresh, availFrac: af, load });
+      if (isCapacityEvidenceRep(r)) out.set(repKey(r), { fresh: cappedFresh, availFrac: af, load, capacityEligible: sequenceValid,
+        confidence: sequenceValid ? (restEstimated ? "estimated_rest" : "measured") : "unknown_fatigue" });
 
       const sMax = sMaxByKey.get(`${r.hand}|${r.grip}`) || 20;
-      const dose = fatigueDose(load, r.actual_time_s || 0, sMax, doseK);
+      const dose = fatigueDose(activity?.avg_force_kg ?? load, activity?.duration_s ?? (r.actual_time_s || 0), sMax, doseK);
       F = Math.min(F + dose, 0.95);
 
       prevSetNum = setNum;
-      prevRest = r.rest_s || 0;
+      prevRest = r.rest_s;
     }
   }
 
@@ -688,8 +703,9 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // recentBestPeakKg already guarded this; the anchor and fit did not,
   // so an untruncated caller would have anchored an old session's
   // reconstruction on reps from its own future.
+  const capacityHistory = comparableCapacityHistory(history.filter(r => !referenceDate || (r.date && r.date < referenceDate)));
   const sessionRep1 = new Map();
-  for (const r of history) {
+  for (const r of capacityHistory) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (r.hand !== hand || r.grip !== grip) continue;
     if ((r.rep_num || 1) !== 1) continue;
@@ -765,12 +781,14 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // All three live in loadBounds() (shared with the density-ladder pin).
   const {
     peakCapKg, peakCapStale, floorKg, endCeilKg, capValue, wasEnduranceCeiled,
-  } = loadBounds(history, hand, grip, targetDuration, { referenceDate, enduranceCeiling });
+  } = loadBounds(capacityHistory, hand, grip, targetDuration, { referenceDate, enduranceCeiling });
 
   // Try the three-exp curve fit. Requires a per-grip prior to anchor
   // the shrinkage; without one, small-N fits collapse onto degenerate
   // mixes and we fall through to the cold-start paths.
-  const points = history.filter(r => isCapacityEvidenceRep(r) &&
+  const fitMap = freshMap || buildFreshLoadMap(history);
+  const points = capacityHistory.filter(r => isCapacityEvidenceRep(r)
+    && fitMap.get(repKey(r))?.capacityEligible !== false &&
     r.hand === hand && r.grip === grip
     && r.actual_time_s > 0 && effectiveLoad(r) > 0
     && !isSeedArtifactRep(r)      // seeded twins would distort the fit
@@ -787,7 +805,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   const hasPrior = prior && (prior[0] + prior[1] + prior[2]) > 0;
 
   if (hasPrior && points.length >= 1) {
-    const fmap = freshMap || buildFreshLoadMap(history);
+    const fmap = fitMap;
     const tePts = points.map(r => ({ T: r.actual_time_s, F: freshLoadFor(r, fmap) }));
     const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(points.length, 1);
     const amps = fitThreeExpAmps(tePts, { prior, lambda });
@@ -912,7 +930,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // Last resort: historical weighted-recent average near targetDuration.
   // No anchor, no curve fit — just give the user something reasonable
   // based on what they've done historically near this T.
-  const hist = estimateRefWeight(history, hand, grip, targetDuration);
+  const hist = estimateRefWeight(points.filter(r => Number(r.rep_num ?? 1) === 1), hand, grip, targetDuration);
   if (hist != null && hist > 0) {
     const hv = Math.round(hist * 10) / 10;
     const value = capValue(hv);
@@ -933,7 +951,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
     };
   }
 
-  return null;
+  return nominalPrescription(history, hand, grip, targetDuration, { referenceDate });
 }
 
 // suggestWeight is a simple display helper used by the in-workout view —
@@ -945,3 +963,17 @@ export function suggestWeight(refWeight, fatigue) {
 
 // Re-export clamp for callers that imported it via this module historically.
 export { clamp };
+
+
+export function nominalPrescription(history, hand, grip, targetDuration, {referenceDate = null} = {}) {
+  if (!(targetDuration > 0)) return null;
+  const rows = (history || []).filter(r => isNominalPrescriptionRep(r) && r.hand === hand && r.grip === grip
+    && r.date && (!referenceDate || r.date < referenceDate)).sort(compareSessionOrder);
+  const row = rows.at(-1);
+  if (!row) return null;
+  const scale = Math.min(2.5, Math.max(0.4, row.actual_time_s / targetDuration));
+  const value = Math.round(Number(row.manual_load_kg) * scale * 10) / 10;
+  return {value, potential:null, scale, anchor:{T:row.actual_time_s,F:Number(row.manual_load_kg),date:row.date},
+    source:'manual-load-estimate', reliability:'estimated', evidenceWeight:0.5,
+    evidenceLabel:'Estimated from your recorded manual load', capacityFloorKg:null};
+}

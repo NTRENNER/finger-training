@@ -143,3 +143,29 @@ test('live reps use the tolerance and confirm with sensor time in delayed batche
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:2, avgForce:24.75,
     forceRecording:{failure_policy:{version:4,below_target_fraction:0.93,confirmation_ms:600}}});
 });
+
+
+test('sensor recording pairs post-acquisition force and duration and preserves ramp activity', async () => {
+  const {packet,onEnd}=await setup(30);
+  packet([[0,4],[400,17],[800,30]]);
+  for(let ms=1300;ms<=7300;ms+=500) packet([[ms,30]]);
+  packet([[7800,0],[8300,0],[8400,0]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:7,avgForce:30,
+    forceRecording:{basis:'target_acquired',acquisition_s:0.8,activity:{duration_s:7.8}}});
+});
+test('manually started sensor measurements remain interrupted after a disconnect', async () => {
+  const {hook,packet,deviceListeners}=await setup(25);
+  const onFailure=jest.fn();
+  await act(async()=>{
+    await hook.result.current.stopAutoDetect();
+    hook.result.current.setAutoFailCallback(onFailure);
+    await hook.result.current.startMeasuring();
+  });
+  packet([[0,25],[500,25],[1000,25]]);
+  act(()=>deviceListeners.gattserverdisconnected());
+  let stats;
+  await act(async()=>{stats=await hook.result.current.stopMeasuring();});
+  expect(onFailure).toHaveBeenCalledTimes(1);
+  expect(stats).toMatchObject({actualTime:1,failureValid:false,endReason:'equipment_interruption'});
+});

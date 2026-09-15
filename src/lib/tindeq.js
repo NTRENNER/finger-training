@@ -1,5 +1,5 @@
 import { createTargetFailureDetector, TARGET_FAILURE_POLICY } from "../model/targetFailure.js";
-import { recordForce } from "../model/forceRecording.js";
+import { recordCapacityForce as recordForce } from "../model/forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // TINDEQ PROGRESSOR BLE HOOK
 // ─────────────────────────────────────────────────────────────
@@ -240,6 +240,7 @@ export function useTindeq() {
   const samplesRef          = useRef([]);  // raw {kg, ts} buffer for full-effort integration
   const belowSinceRef       = useRef(null);
   const measuringRef        = useRef(false);
+  const measurementInterruptedRef = useRef(false);
   const autoFailCallbackRef = useRef(null); // set by ActiveSessionView
   const targetKgRef         = useRef(null); // set by ActiveSessionView each rep
 
@@ -294,8 +295,12 @@ export function useTindeq() {
       clock.elapsed += delta / 1000;
       clock.raw = ts;
       const now = clock.elapsed;
+      if (measuringRef.current && samplesRef.current.length && delta > 1000000) {
+        measurementInterruptedRef.current = true;
+        autoFailCallbackRef.current?.();
+      }
       if (adActiveRef.current && delta > 1000000) {
-        const stats = recordForce(adSamplesRef.current);
+        const stats = recordForce(adSamplesRef.current, undefined, targetKgRef.current);
         adActiveRef.current = false;
         adAwaitReleaseRef.current = true;
         adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
@@ -391,7 +396,7 @@ export function useTindeq() {
                 adCountRef.current     = 0;
                 adSamplesRef.current   = [];
                 adBelowRef.current     = null;
-                cb?.({ ...stats, actualTime, avgForce: avg, peakForce: peakF });
+                cb?.({ ...stats, avgForce: avg, peakForce: peakF });
               } else {
                 adActiveRef.current    = false;
                 adStartTimeRef.current = null;
@@ -411,9 +416,13 @@ export function useTindeq() {
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (measuringRef.current && lastPacketAtRef.current != null && Date.now() - lastPacketAtRef.current > 1500) {
+        measurementInterruptedRef.current = true;
+        autoFailCallbackRef.current?.();
+      }
       if (!adActiveRef.current || lastPacketAtRef.current == null
           || Date.now() - lastPacketAtRef.current <= 1500) return;
-      const stats = recordForce(adSamplesRef.current);
+      const stats = recordForce(adSamplesRef.current, undefined, targetKgRef.current);
       adActiveRef.current = false;
       adAwaitReleaseRef.current = true;
       adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
@@ -467,8 +476,12 @@ export function useTindeq() {
       // Aggressive retry loops can poison the adapter state on Android —
       // if this one try fails, surface a clean error and let the user reconnect.
       const onDisconnected = async () => {
+        if (measuringRef.current) {
+          measurementInterruptedRef.current = true;
+          autoFailCallbackRef.current?.();
+        }
         if (adActiveRef.current) {
-          const stats = recordForce(adSamplesRef.current);
+          const stats = recordForce(adSamplesRef.current, undefined, targetKgRef.current);
           adActiveRef.current = false;
           adAwaitReleaseRef.current = true;
           adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
@@ -534,6 +547,8 @@ export function useTindeq() {
   }, []);
 
   const startMeasuring = useCallback(async () => {
+    measurementInterruptedRef.current = false;
+    lastPacketAtRef.current = Date.now();
     manualTargetDetectorRef.current = createTargetFailureDetector(targetKgRef.current);
     manualTargetResultRef.current = null;
     peakRef.current      = 0;  setPeak(0);
@@ -557,6 +572,11 @@ export function useTindeq() {
       stats.failureValid = stats.failureValid && targetFailure.targetAcquired;
       stats.endReason = targetFailure.targetAcquired ? "target_force_failure" : "target_not_reached";
       stats.forceRecording.failure_policy = TARGET_FAILURE_POLICY;
+    }
+    if (measurementInterruptedRef.current) {
+      stats.failureValid = false;
+      stats.endReason = "equipment_interruption";
+      stats.forceRecording.capacity_eligible = false;
     }
     if (ctrlRef.current) { try { await ctrlRef.current.writeValue(CMD_STOP); } catch {} }
     const avg = stats.avgForce;
@@ -612,7 +632,7 @@ export function useTindeq() {
   // rep-end callback so the caller can record the rep if it wants
   // (the warmup doesn't, but the contract stays consistent).
   const endRepAndRequireRelease = useCallback(() => {
-    const stats = recordForce(adSamplesRef.current);
+    const stats = recordForce(adSamplesRef.current, undefined, targetKgRef.current);
     const { actualTime, avgForce: avg } = stats;
     const peakF = peakRef.current;
     adActiveRef.current     = false;
