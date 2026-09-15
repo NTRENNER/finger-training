@@ -127,3 +127,15 @@ test("weight tiles select a dated weight chart without opening a modal", () => {
   expect(screen.getByLabelText("Weight progress comparison")).toHaveTextContent("+0.0 kg");
   expect(screen.getByLabelText("Weight progress comparison")).toHaveTextContent("2026-06-01 → 2026-06-01");
 });
+
+test('a replacement baseline does not erase the historical Micro curve', () => {
+  const old=Array.from({length:6},(_,i)=>({id:String(i),session_id:String(i),date:`2026-07-${10+i}`,grip:'Micro',hand:'L',rep_num:1,set_num:1,avg_force_kg:30-i,peak_force_kg:32-i,actual_time_s:10+i*20}));
+  const newer={...old[0],id:'new',session_id:'new',date:'2026-09-15',force_recording:{basis:'target_acquired'}};
+  const view=render(<CurveImprovementCard grips={['Micro']} selGrip="Micro" history={[...old,newer]} unit="kg"/>);
+  expect(screen.getByRole('region',{name:'Micro historical curve'})).toHaveTextContent('1 new session');
+  expect(screen.getByText(/90% session-bootstrap interval/)).toBeInTheDocument();
+  view.rerender(<CurveImprovementCard grips={['Micro']} selGrip="Micro" history={[...old,newer]} unit="kg" handView="L"/>);
+  expect(screen.getByRole('region',{name:'Micro historical curve'})).toBeInTheDocument();
+  view.rerender(<CurveImprovementCard grips={['Micro']} selGrip="Micro" history={[...old,newer]} unit="kg" handView="R"/>);
+  expect(screen.queryByRole('region',{name:'Micro historical curve'})).not.toBeInTheDocument();
+});

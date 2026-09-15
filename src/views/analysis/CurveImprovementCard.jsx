@@ -30,6 +30,7 @@
 //   • pooled fallback — static total + tiles (no overlay/slider).
 
 import React, { useMemo, useState } from "react";
+import { HistoricalCurveReference } from "./HistoricalCurveReference.jsx";
 import {
   ResponsiveContainer, LineChart, Line,
   XAxis, YAxis, Tooltip, CartesianGrid,
@@ -600,6 +601,11 @@ export function CurveImprovementCard({
   ) : null;
 
   const supportingDetails = <>
+    {scopedGripNames.filter(grip => selGrip ? grip === selGrip : true).filter(grip =>
+      handView === 'pooled'
+        ? !overlayGrips.has(grip) && !impMap[grip]
+        : !scaledData.perHandGripImprovement[`${grip}|${handView}`]
+    ).map(grip => <HistoricalCurveReference key={grip} history={history} grip={grip} hand={handView} unit={unit}/>)}
     {measuredProgress && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontSize: 14, color: C.text, padding: "8px 0" }}>Measured session comparisons</summary>{measuredProgress}</details>}
   </>;
 
