@@ -97,10 +97,17 @@ export function loadedWeight(r) {
 // AND the Force Curves overlay (useHistoryOverlay) — so they all fit the
 // same data and can't disagree. (The coaching engine uses freshMap-
 // adjusted loads, a different but compatible de-fatigue.)
+// Reps always come back on ONE comparable interval (see
+// comparableCapacityHistory): a grip spanning the recording-basis change has
+// its target-acquired rows expressed on the earlier whole-pull interval, so
+// dots and fitted curves share a time axis wherever this is the source.
+// `preserveAllBases` keeps a target-acquired rep that carries no
+// `acquisition_s` — it cannot be placed on the shared interval, so a fitted
+// series drops it while a display of every recorded pull keeps it.
 export function freshFitReps(history, { preserveAllBases = false } = {}) {
   const seen = new Set();
   const out = [];
-  for (const r of (preserveAllBases ? (history || []) : comparableCapacityHistory(history))) {
+  for (const r of comparableCapacityHistory(history, { dropUnconvertible: !preserveAllBases })) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;
     // Seed-artifact guard (July 2026, see isSeedArtifactRep below): an
