@@ -3,7 +3,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { C } from "../../ui/theme.js";
 import { toDisp, fmt1 } from "../../ui/format.js";
 import { ZONE6, ZONE_REF_T } from "../../model/zones.js";
-import { zoneReference, defaultComparisonLoad, holdTimeAtForce, holdTimeSeries, forceComparison, forceHistorySeries } from "../../model/curveComparison.js";
+import { zoneReference, progressHoldTime, defaultComparisonLoad, holdTimeAtForce, holdTimeSeries, forceComparison, forceHistorySeries } from "../../model/curveComparison.js";
 
 const controlStyle = { background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 10px", font: "inherit", fontSize: 14, minHeight: 42 };
 const signed = value => `${value >= 0 ? "+" : ""}${fmt1(value)}`;
@@ -31,7 +31,7 @@ export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange }) 
     const reference = zoneReference(overlay, domain.key, date);
     const load = defaultComparisonLoad(overlay, domain.key, reference, reps);
     const before = reference ? holdTimeAtForce(reference.amps, load, reference.maxHold) : null;
-    const now = holdTimeAtForce(overlay?.ampsByDate?.get(date), load, overlay?.maxHoldByDate?.get(date));
+    const now = progressHoldTime(overlay,date,load);
     return { ...domain, reference, load, before, now, available: before != null && now != null };
   });
   const selected = comparisons.find(domain => domain.key === zone) || comparisons[0];
@@ -82,6 +82,7 @@ export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange }) 
       <div style={{ fontSize: 30, fontWeight: 800, color: now < before ? C.red : selected.color }}>{signed(now - before)}s</div>
       <div style={{ fontSize: 16, color: C.text }}>{fmt1(before)} → {fmt1(now)} seconds at {fmt1(toDisp(load, unit))} {unit}</div>
       <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Estimated · {reference.date} → {date}</div>
+      {overlay.continuityByDate?.get(date)?.evidenceDates?.[selected.key] && <div style={{fontSize:12,color:C.muted}}>Evidence through {overlay.continuityByDate.get(date).evidenceDates[selected.key]}</div>}
     </div> : <p role="status" style={{ fontSize: 14, color: C.muted, lineHeight: 1.5 }}>
       {!reference ? "No baseline yet for this domain." : "Not enough supported hold-time data at this weight to compare both dates. The baseline weight stays fixed as more training data becomes available."}
     </p>}

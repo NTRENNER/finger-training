@@ -27,13 +27,32 @@ export function zoneReference(overlay, zone, throughDate) {
   return null;
 }
 
+export function progressForce(overlay,date,t) {
+  const points=overlay?.progressPointsByDate?.get(date);
+  if(!points?.length || overlay?.continuityByDate?.get(date)?.linked===false) return predForceThreeExp(overlay?.ampsByDate?.get(date),t);
+  if(t<=points[0].t) return points[0].f;
+  for(let i=1;i<points.length;i++) if(t<=points[i].t) {
+    const a=points[i-1], b=points[i]; return a.f+(b.f-a.f)*(t-a.t)/(b.t-a.t);
+  }
+  return points.at(-1).f;
+}
+
+export function progressHoldTime(overlay,date,force) {
+  const max=overlay?.maxHoldByDate?.get(date);
+  if(!overlay?.progressPointsByDate?.has(date) || overlay?.continuityByDate?.get(date)?.linked===false) return holdTimeAtForce(overlay?.ampsByDate?.get(date),force,max);
+  if(!(force>0) || !(max>=5) || force>progressForce(overlay,date,5) || force<progressForce(overlay,date,max)) return null;
+  let lo=5,hi=max;
+  for(let i=0;i<60;i++) {const mid=(lo+hi)/2; if(progressForce(overlay,date,mid)>force) lo=mid; else hi=mid;}
+  return (lo+hi)/2;
+}
+
 export function forceComparison(overlay, zone, date) {
   const reference = zoneReference(overlay, zone, date);
   const currentAmps = overlay?.ampsByDate?.get(date);
   if (!reference || !validAmps(currentAmps)) return null;
   const duration = ZONE_REF_T[zone];
   const before = predForceThreeExp(reference.amps, duration);
-  const now = predForceThreeExp(currentAmps, duration);
+  const now = progressForce(overlay,date,duration);
   return { before, now, delta: now - before, percent: (now / before - 1) * 100, duration, baselineDate: reference.date };
 }
 
@@ -79,7 +98,7 @@ export function holdTimeSeries(overlay, reference, force, throughDate) {
   rows.set(reference.date, { date: reference.date, seconds: holdTimeAtForce(reference.amps, force, reference.maxHold) });
   for (const date of overlay.dates || []) {
     if (date < reference.date || date > throughDate || date === reference.date) continue;
-    rows.set(date, { date, seconds: holdTimeAtForce(overlay.ampsByDate.get(date), force, overlay.maxHoldByDate?.get(date)) });
+    rows.set(date, { date, seconds: progressHoldTime(overlay,date,force) });
   }
   return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -96,7 +115,7 @@ export function forceHistorySeries(overlay, zone, throughDate) {
   for (const date of overlay.dates || []) {
     if (date < reference.date || date > throughDate || date === reference.date) continue;
     const amps = overlay.ampsByDate?.get(date);
-    rows.set(date, { date, force: validAmps(amps) ? predForceThreeExp(amps, duration) : null });
+    rows.set(date, { date, force: validAmps(amps) ? progressForce(overlay,date,duration) : null });
   }
   return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date));
 }

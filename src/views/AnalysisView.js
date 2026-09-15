@@ -73,7 +73,7 @@ import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
 import { AnalysisScopeToolbar } from "./analysis/AnalysisScopeToolbar.jsx";
 import { useCapacityHistoryByGrip } from "../hooks/useCapacityHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
-import { useHistoryOverlay } from "../hooks/useHistoryOverlay.js";
+import { useContinuousProgress } from "../hooks/useContinuousProgress.js";
 export function AnalysisView({
   history, unit = "lbs", bodyWeight = null,
   activities = [],
@@ -558,9 +558,7 @@ export function AnalysisView({
 
   // Force Curves History overlay (cumulative per-grip / per-hand fits
   // by date). See src/hooks/useHistoryOverlay.js for the per-memo notes.
-  const { historyOverlay } = useHistoryOverlay({
-    history, grips, gripBaselines, perHandGripBaselines, threeExpPriors,
-  });
+  const continuousProgress = useContinuousProgress({history,grips,pinnedGripBaselines,pinnedPerHandBaselines});
 
   const coverageAttentionByGrip = useMemo(
     () => curveCoverageAttentionByGrip(history, { handView }),
@@ -664,7 +662,7 @@ export function AnalysisView({
           BW-related control here is the Absolute / × BW units toggle
           inside the filter card below. */}
 
-      {history.some(r => r.force_recording?.basis === "target_acquired") && <p style={{color:C.muted}}>Capacity timing now starts when target force is reached. Progress for updated grips uses the new measurement basis and builds a separate baseline; earlier workout dots remain visible.</p>}
+
 
       <AnalysisScopeToolbar
         grips={grips}
@@ -726,7 +724,7 @@ export function AnalysisView({
           selGrip={selGrip}
           grips={scopedGrips}
           history={history}
-          historyOverlay={historyOverlay}
+          historyOverlay={continuousProgress.historyOverlay}
           maxDur={maxDur}
           unit={unit}
           normalizeOn={normalizationActive}
@@ -736,6 +734,8 @@ export function AnalysisView({
           perHandGripImprovement={perHandGripImprovement}
           perHandGripBaselines={perHandGripBaselines}
           perHandGripEstimates={perHandGripEstimates}
+          {...continuousProgress}
+          comparisonHistory={continuousProgress.displayHistory}
           gripImprovementFresh={gripImprovementFresh}
           perHandGripImprovementFresh={perHandGripImprovementFresh}
         />

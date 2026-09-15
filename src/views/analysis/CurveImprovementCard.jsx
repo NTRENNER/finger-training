@@ -30,7 +30,6 @@
 //   • pooled fallback — static total + tiles (no overlay/slider).
 
 import React, { useMemo, useState } from "react";
-import { HistoricalCurveReference } from "./HistoricalCurveReference.jsx";
 import {
   ResponsiveContainer, LineChart, Line,
   XAxis, YAxis, Tooltip, CartesianGrid,
@@ -50,7 +49,7 @@ import {
   GRIP_BASELINE_DURATION_THRESHOLD,
 } from "../../model/baselines.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
-import { forceComparison, comparisonReps } from "../../model/curveComparison.js";
+import { forceComparison, comparisonReps, progressForce } from "../../model/curveComparison.js";
 import { ComparisonModeSelector, WeightTile, HoldTimeView, WeightHistoryView } from "./CurveComparisonViews.jsx";
 import { effectiveLoad, freshFitReps } from "../../model/load.js";
 import { ZoneSessionHistoryModal } from "./ZoneSessionHistoryModal.jsx";
@@ -95,6 +94,8 @@ function normalizeHistoryOverlay(historyOverlay, bwForDate) {
       return {
         ...branch,
         baselineAmps: scaleAmps(branch.baselineAmps, bwForDate(branch.baselineDate)),
+        progressPointsByDate: branch.progressPointsByDate && new Map([...branch.progressPointsByDate].map(([date,points])=>
+          [date,points.map(p=>({...p,f:p.f/bwForDate(date)}))])),
         ampsByDate: new Map(
           [...(branch.ampsByDate || new Map()).entries()].map(([date, amps]) => [
             date,
@@ -184,7 +185,7 @@ function ImprovementRow({
   imp,
   onZoneSelect = null,
   selectedZoneKey = null,
-  mode = "percent", comparisons = {}, unit = "lbs", baselineDate = null,
+  mode = "percent", comparisons = {}, unit = "lbs", baselineDate = null, evidenceDates = null,
 }) {
   return (
     <div style={{ marginBottom: 10 }}>
@@ -218,6 +219,7 @@ function ImprovementRow({
                   {val >= 0 ? "+" : ""}{val}%
                 </div>
               )}
+              {evidenceDates?.[z.key] && <div style={{fontSize:11,color:C.muted,marginTop:3}}>Evidence through {evidenceDates[z.key]}</div>}
             </>
           );
           const style = {
@@ -304,6 +306,7 @@ function OverlayChart({
   color,
   baselineDate,
   nowDate,
+  overlay,
 }) {
   const tMin = 5;
   const tMax = Math.max(...Object.values(ZONE_REF_T), maxDur || 0);
@@ -316,14 +319,14 @@ function OverlayChart({
     samples.push({
       x: t,
       past: baselineAmps ? displayForce(Math.max(predForceThreeExp(baselineAmps, t), 0)) : null,
-      now:  nowAmps      ? displayForce(Math.max(predForceThreeExp(nowAmps, t), 0))      : null,
+      now:  nowAmps      ? displayForce(Math.max((overlay ? progressForce(overlay,nowDate,t) : predForceThreeExp(nowAmps,t)), 0))      : null,
     });
   }
   const yPeak = candidateAmps.reduce(
     (m, a) => Math.max(m, displayForce(Math.max(predForceThreeExp(a, tMin), 0))),
     normalizeOn ? 0.1 : 1
   );
-  const yDomain = [0, Math.ceil(yPeak * 1.1 / axisStep) * axisStep];
+  const yDomain = [0, Math.ceil(Math.max(yPeak,...samples.map(p=>p.now || 0)) * 1.1 / axisStep) * axisStep];
 
   return (
     <ResponsiveContainer width="100%" height={200}>
@@ -387,10 +390,18 @@ function GripBlock({
   const zoneRef = perZoneBaselineAmps(
     overlay.dates.filter(date => date <= nowDate), overlay.ampsByDate, overlay.maxHoldByDate, overlay.baselineMaxHoldS ?? null,
   );
-  const imp = staticImprovement || (nowAmps
+  let imp = staticImprovement || (nowAmps
     ? improvementForAmps(nowAmps, overlay.baselineAmps, overlay.baselineMaxHoldS ?? null, zoneRef)
     : null);
   const comparisons = Object.fromEntries(ZONE6.map(z => [z.key, forceComparison(overlay, z.key, nowDate)]));
+  if(overlay.progressPointsByDate?.has(nowDate)) {
+    imp={...imp};
+    for(const z of ZONE6) imp[z.key]=comparisons[z.key] ? Math.round(comparisons[z.key].percent) : null;
+    const supported=ZONE6.filter(z=>overlay.baselineMaxHoldS==null || overlay.baselineMaxHoldS>=ZONE_REF_T[z.key]*SUPPORT_MIN_HOLD_FRAC)
+      .map(z=>comparisons[z.key]).filter(Boolean);
+    imp.total=supported.length ? Math.round((Math.exp(supported.reduce((sum,c)=>sum+Math.log(c.now/c.before),0)/supported.length)-1)*100) : null;
+  }
+  const transition=overlay.continuityByDate?.get(nowDate);
   const hasWeightComparison = Object.values(comparisons).some(Boolean);
 
   // Every drawable curve for this grip — for the fixed y-axis.
@@ -407,11 +418,15 @@ function GripBlock({
         <div style={{ fontSize: 11, color: C.muted }}>{overlay.baselineDate || staticImprovement?.baselineDate ? `since ${overlay.baselineDate || staticImprovement.baselineDate}` : ""}</div>
       </div>
 
+      {transition && <p style={{fontSize:13,color:C.muted}}>
+        Estimated across recording methods · {transition.newSessions} new session{transition.newSessions===1?'':'s'}.
+        {transition.linked ? ' Updated where comparable new-method evidence supports change; other domains retain their prior estimate.' : ` Progress through ${transition.historicalDate} retained while new-method comparisons develop.`}
+      </p>}
       {mode !== "time" && imp && (mode !== "weight" || hasWeightComparison) && (
         <ImprovementRow
           label={null}
           imp={imp}
-          mode={mode} comparisons={comparisons} unit={unit} baselineDate={overlay.baselineDate}
+          mode={mode} comparisons={comparisons} unit={unit} baselineDate={overlay.baselineDate} evidenceDates={transition?.evidenceDates}
           onZoneSelect={mode === "weight" ? setWeightZone : onZoneSelect
             ? zoneKey => onZoneSelect(grip, zoneKey, staticImprovement ? null : nowDate)
             : null}
@@ -426,6 +441,7 @@ function GripBlock({
         : mode === "weight" ? <WeightHistoryView overlay={overlay} date={nowDate} unit={unit} reps={reps} zone={weightZone}
           onShowSessions={onZoneSelect ? () => onZoneSelect(grip, weightZone, staticImprovement ? null : nowDate) : null} />
         : !staticImprovement && <OverlayChart
+        overlay={overlay}
         baselineAmps={overlay.baselineAmps}
         nowAmps={nowAmps}
         candidateAmps={candidateAmps}
@@ -489,6 +505,7 @@ export function CurveImprovementCard({
   // shares the same basis (July 2026).
   perHandGripEstimates = {},
   measuredProgress = null,
+  comparisonHistory = history,
 }) {
   const [comparisonMode, setComparisonMode] = useState("percent");
   // Load and time comparisons always hold physical weight fixed.
@@ -601,11 +618,6 @@ export function CurveImprovementCard({
   ) : null;
 
   const supportingDetails = <>
-    {scopedGripNames.filter(grip => selGrip ? grip === selGrip : true).filter(grip =>
-      handView === 'pooled'
-        ? !overlayGrips.has(grip) && !impMap[grip]
-        : !scaledData.perHandGripImprovement[`${grip}|${handView}`]
-    ).map(grip => <HistoricalCurveReference key={grip} history={history} grip={grip} hand={handView} unit={unit}/>)}
     {measuredProgress && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontSize: 14, color: C.text, padding: "8px 0" }}>Measured session comparisons</summary>{measuredProgress}</details>}
   </>;
 
@@ -662,7 +674,7 @@ export function CurveImprovementCard({
             // (their date lists differ in length).
             return (
               <GripBlock key={`${grip}|${handView}`} grip={grip} overlay={ph}
-                mode={comparisonMode} reps={comparisonReps(history, grip, handView)}
+                mode={comparisonMode} reps={comparisonReps(comparisonHistory, grip, handView)}
                 unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
                 nowIdx={nowIdxByGrip[`${grip}|${handView}`]}
                 onScrub={(g, idx) => scrub(`${g}|${handView}`, idx)}
@@ -674,7 +686,7 @@ export function CurveImprovementCard({
           }
           return (
             <StaticGripTiles key={`${grip}|${handView}`} grip={grip} imp={imp}
-              mode={comparisonMode} unit={unit} reps={comparisonReps(history, grip, handView)}
+              mode={comparisonMode} unit={unit} reps={comparisonReps(comparisonHistory, grip, handView)}
               overlay={staticOverlay(perHandGripBaselines[`${grip}|${handView}`], perHandGripEstimates[`${grip}|${handView}`], history, grip, handView)}
               divider={divider}
               onZoneSelect={openZoneDetail}
@@ -715,7 +727,7 @@ export function CurveImprovementCard({
               if (overlayGrips.has(grip)) {
                 return (
                   <GripBlock key={grip} grip={grip} overlay={scaledData.historyOverlay[grip]}
-                    mode={comparisonMode} reps={comparisonReps(history, grip)}
+                    mode={comparisonMode} reps={comparisonReps(comparisonHistory, grip)}
                     unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
                     nowIdx={nowIdxByGrip[grip]} onScrub={scrub} divider={divider}
                     onZoneSelect={openZoneDetail}
@@ -727,7 +739,7 @@ export function CurveImprovementCard({
               return (
                 <StaticGripTiles
                   key={grip}
-                  mode={comparisonMode} unit={unit} reps={comparisonReps(history, grip)}
+                  mode={comparisonMode} unit={unit} reps={comparisonReps(comparisonHistory, grip)}
                   overlay={staticOverlay(gripBaselines[grip], grip3xEstimates[grip], history, grip)}
                   grip={grip}
                   imp={imp}
@@ -754,7 +766,7 @@ export function CurveImprovementCard({
       ) : displayGrip ? (
         overlayGrips.has(displayGrip) ? (
           <GripBlock key={displayGrip} grip={displayGrip} overlay={scaledData.historyOverlay[displayGrip]}
-            mode={comparisonMode} reps={comparisonReps(history, displayGrip)}
+            mode={comparisonMode} reps={comparisonReps(comparisonHistory, displayGrip)}
             unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
             nowIdx={nowIdxByGrip[displayGrip]} onScrub={scrub} divider={false}
             onZoneSelect={openZoneDetail}
@@ -777,7 +789,7 @@ export function CurveImprovementCard({
           )}
           <StaticGripTiles
             grip={fallbackGrip}
-            mode={comparisonMode} unit={unit} reps={comparisonReps(history, fallbackGrip)}
+            mode={comparisonMode} unit={unit} reps={comparisonReps(comparisonHistory, fallbackGrip)}
             overlay={staticOverlay(global3xBaseline, grip3xEstimates[fallbackGrip], history, fallbackGrip)}
             imp={gateGlobalImprovement(scaledData.improvement, global3xBaseline?.maxHoldS ?? null)}
             onZoneSelect={fallbackGrip ? openZoneDetail : null}
