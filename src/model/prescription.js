@@ -542,6 +542,8 @@ export function bestAvailablePeakMeasurement(history, hand, grip, referenceDate 
 // Only valid measured opening efforts qualify; retrospective calls exclude
 // the evaluation date and all future records.
 export const CAPACITY_FLOOR_LOOKBACK_DAYS = 90;
+export const CAPACITY_FLOOR_MAX_REVISION_DROP = 0.25;
+export const CAPACITY_FLOOR_REVISION_SESSIONS = 3;
 
 export function demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate = null) {
   if (!history || !(targetDuration > 0)) return null;
@@ -578,12 +580,28 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
   if (bestRep) {
     const recentCutoff = ymdLocal(new Date(refMs - 30 * 86400 * 1000));
     const recent = ordered.filter(r => compareSessionOrder(r, bestRep) > 0
-      && r.date >= recentCutoff && r.actual_time_s <= bestRep.actual_time_s * 1.25
-      && r.actual_time_s >= bestRep.actual_time_s * 0.8
-      && (r.setup_id ?? null) === (bestRep.setup_id ?? null)).slice(-3);
-    if (recent.length === 3 && recent.every(r => r.load < best * 0.9)) {
-      return Math.max(...recent.map(r => r.load));
+      && r.date >= recentCutoff
+      && (r.setup_id ?? null) === (bestRep.setup_id ?? null));
+    let workingFloor = best;
+    let lower = [];
+    // Replay independent sessions, never recommendation calls. Each reduction
+    // consumes three new comparisons so unchanged history cannot ratchet down.
+    for (const r of recent) {
+      if (r.load >= workingFloor * 0.9) {
+        workingFloor = Math.max(workingFloor, r.load);
+        lower = [];
+        continue;
+      }
+      // Candidates already prove targetDuration or longer. Longer endurance
+      // work is not a comparable failure at this requested duration.
+      if (r.actual_time_s > targetDuration * 1.25) continue;
+      lower.push(r.load);
+      if (lower.length === CAPACITY_FLOOR_REVISION_SESSIONS) {
+        workingFloor = Math.max(workingFloor * (1 - CAPACITY_FLOOR_MAX_REVISION_DROP), ...lower);
+        lower = [];
+      }
     }
+    return workingFloor;
   }
   return best;
 }
