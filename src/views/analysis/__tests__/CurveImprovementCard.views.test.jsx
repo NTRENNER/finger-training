@@ -139,3 +139,18 @@ test('a replacement baseline does not erase the historical Micro curve', () => {
   view.rerender(<CurveImprovementCard grips={['Micro']} selGrip="Micro" history={[...old,newer]} unit="kg" handView="R"/>);
   expect(screen.queryByRole('region',{name:'Micro historical curve'})).not.toBeInTheDocument();
 });
+
+test('historical slider restores an earlier evidence view and remains available before the first fit',()=>{
+ const old=Array.from({length:6},(_,i)=>({id:String(i),session_id:String(i),date:`2020-07-${10+i}`,grip:'Micro',hand:'L',rep_num:1,set_num:1,avg_force_kg:30-i,peak_force_kg:32-i,actual_time_s:10+i*20}));
+ render(<CurveImprovementCard grips={['Micro']} selGrip="Micro" history={old} unit="kg"/>);
+ const slider=screen.getByRole('slider',{name:'Micro historical curve date'});
+ expect(screen.getByText(/Stale at this date/)).toBeInTheDocument();
+ fireEvent.change(slider,{target:{value:'4'}});
+ expect(screen.getByText(/5 independent sessions/)).toBeInTheDocument();
+ expect(screen.queryByText(/Stale at this date/)).not.toBeInTheDocument();
+ fireEvent.change(slider,{target:{value:'0'}});
+ expect(screen.getByText(/Not enough evidence to fit a curve at this date/)).toBeInTheDocument();
+ expect(slider).toBeInTheDocument();
+ fireEvent.change(slider,{target:{value:slider.max}});
+ expect(screen.getByText(/6 independent sessions/)).toBeInTheDocument();
+});

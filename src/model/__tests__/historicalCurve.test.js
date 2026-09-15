@@ -24,3 +24,11 @@ test('scope and interruption exclusions are retained',()=>{
  expect(historicalCurve(rows,'Crusher')).toBeNull();
  expect(historicalCurve(rows.map(r=>({...r,failure_valid:false})),'Micro')).toBeNull();
 });
+test('scrubbing excludes later sessions from the curve, band and recency',()=>{
+ const atDate=historicalCurve(rows,'Micro','L','2026-07-14');
+ expect(atDate.sessions).toBe(5);
+ expect(atDate.age).toBe(0);
+ expect(atDate.points).toEqual(historicalCurve(rows.slice(0,5),'Micro','L','2026-07-14').points);
+ expect(historicalCurve(rows,'Micro','L','2026-07-13').hasBand).toBe(false);
+ expect(historicalCurve(rows,'Micro','L','2026-07-10')).toBeNull();
+});

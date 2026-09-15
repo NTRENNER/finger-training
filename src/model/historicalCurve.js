@@ -6,7 +6,7 @@ import { predForceThreeExp } from './threeExp.js';
 // acquisition-timed measurements with the earlier recording basis.
 export function historicalCurve(history, grip, hand='pooled', today=new Date().toISOString().slice(0,10)) {
   const rows=freshFitReps(history || [], {preserveAllBases:true}).filter(r=>
-    r.grip===grip && (hand==='pooled' || r.hand===hand) && effectiveLoad(r)>0 && r.actual_time_s>0);
+    r.date && r.date<=today && r.grip===grip && (hand==='pooled' || r.hand===hand) && effectiveLoad(r)>0 && r.actual_time_s>0);
   const current=rows.filter(r=>r.force_recording?.basis==='target_acquired');
   const old=rows.filter(r=>r.force_recording?.basis!=='target_acquired');
   const pool=old.length ? old : current;
