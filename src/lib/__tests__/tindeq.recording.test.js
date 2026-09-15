@@ -88,11 +88,10 @@ test('sustained target loss ends once while still pulling and requires release',
   packet([[6100, 0], [6200, 25]]);
   expect(onStart).toHaveBeenCalledTimes(2);
 });
-test('a drop below target finishes a live rep', async () => {
+test('a brief dip below target does not finish a live rep', async () => {
   const { packet, onEnd } = await setup(25);
   for (let ms = 0; ms <= 4000; ms += 100) packet([[ms, ms >= 2000 && ms < 2200 ? 20 : 25]]);
-  expect(onEnd).toHaveBeenCalledTimes(1);
-  expect(onEnd.mock.calls[0][0].actualTime).toBe(2);
+  expect(onEnd).not.toHaveBeenCalled();
 });
 test('batched timestamps align rep start and end with wall time', async () => {
   const { packet, onEnd } = await setup();
@@ -129,7 +128,7 @@ test('training restores target-drop detection after leaving a timed warmup', asy
     await hook.result.current.stopAutoDetect();
     await hook.result.current.startAutoDetect(onStart, onEnd);
   });
-  packet([[0, 26], [500, 26], [1000, 24]]);
+  packet([[0, 26], [500, 26], [1000, 24], [1300, 24]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0].endReason).toBe('target_force_failure');
 });
