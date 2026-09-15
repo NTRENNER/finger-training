@@ -128,7 +128,18 @@ test('training restores target-drop detection after leaving a timed warmup', asy
     await hook.result.current.stopAutoDetect();
     await hook.result.current.startAutoDetect(onStart, onEnd);
   });
-  packet([[0, 26], [500, 26], [1000, 24], [1300, 24]]);
+  packet([[0, 26], [500, 26], [1000, 22], [1500, 22], [1600, 22]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0].endReason).toBe('target_force_failure');
+});
+
+
+test('live reps use the tolerance and confirm with sensor time in delayed batches', async () => {
+  const { packet, onEnd } = await setup(25);
+  packet([[0, 27], [500, 24], [1000, 24], [1500, 24], [2000, 22], [2500, 22]]);
+  expect(onEnd).not.toHaveBeenCalled();
+  packet([[2600, 22]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:2, avgForce:24.75,
+    forceRecording:{failure_policy:{version:4,below_target_fraction:0.93,confirmation_ms:600}}});
 });

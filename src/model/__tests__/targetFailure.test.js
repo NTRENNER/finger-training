@@ -14,8 +14,8 @@ test('initial ramp and overshooting do not end a rep', () => {
   expect(end(samples)).toBeNull();
   expect(recordForce(samples, 30000, 25).forceRecording.capacity_eligible).toBe(true);
 });
-test('a confirmed drop ends at its onset without a lower force allowance', () => {
-  const result = end(trace(10, t => t < 5 ? 55 : 54.9), 55);
+test('a confirmed drop below the tolerance ends at its onset', () => {
+  const result = end(trace(10, t => t < 5 ? 55 : 51), 55);
   expect(result).toEqual({endTs:5000, targetAcquired:true});
 });
 test('an attempt never reaching target does not arm failure detection', () => {
@@ -45,20 +45,28 @@ test('30 kg for 10 seconds then 10 kg for 50 preserves activity and its own stro
 
 
 test('a brief dip after overshooting does not finish the rep', () => {
-  expect(end(trace(10, t => t < 2 ? 35 : t < 2.2 ? 24.8 : 25))).toBeNull();
+  expect(end(trace(10, t => t < 2 ? 35 : t < 2.2 ? 22 : 25))).toBeNull();
 });
 test('separate brief dips do not accumulate confirmation time', () => {
-  expect(end(trace(10, t => Math.round(t * 100) % 40 < 20 ? 27 : 24.9))).toBeNull();
+  expect(end(trace(10, t => Math.round(t * 100) % 40 < 20 ? 27 : 22))).toBeNull();
 });
-test('confirmation requires 300 ms and recovery exactly to target resets it', () => {
+test('confirmation requires 600 ms and recovery exactly to the tolerance resets it', () => {
   const detector = createTargetFailureDetector(25);
-  for (const sample of [{ts:0,kg:30},{ts:100,kg:24},{ts:399,kg:24},{ts:400,kg:25},
-    {ts:500,kg:24},{ts:799,kg:24}]) expect(detector(sample)).toBeNull();
-  expect(detector({ts:800,kg:24})).toEqual({endTs:500,targetAcquired:true});
+  for (const sample of [{ts:0,kg:30},{ts:100,kg:22},{ts:699,kg:22},{ts:700,kg:23.25},
+    {ts:800,kg:22},{ts:1399,kg:22}]) expect(detector(sample)).toBeNull();
+  expect(detector({ts:1400,kg:22})).toEqual({endTs:800,targetAcquired:true});
 });
 test('abrupt release is confirmed and duration excludes the delay', () => {
   const samples = trace(6, t => t < 5 ? 30 : 0);
   const result = end(samples);
   expect(result.endTs).toBe(5000);
   expect(recordForce(samples, result.endTs, 25)).toMatchObject({actualTime:5,avgForce:30});
+});
+
+
+test('sustained force within the 7 percent tolerance does not end the rep', () => {
+  expect(end(trace(10, t => t < 1 ? 55 : 52), 55)).toBeNull();
+});
+test('the tolerance band does not arm a rep that never reaches its target', () => {
+  expect(end(trace(10, t => t < 1 ? 24 : 22))).toBeNull();
 });

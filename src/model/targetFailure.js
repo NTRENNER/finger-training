@@ -1,18 +1,19 @@
-// The prescribed force is the failure boundary. Acquire it before detecting
-// a drop so the initial ramp does not end the rep.
+// Acquire the prescribed force before detecting failure. Allow small dips
+// within the policy tolerance; confirm continuous drops below that boundary.
 export const TARGET_FAILURE_POLICY = Object.freeze({
-  version: 3, below_target_fraction: 1, confirmation_ms: 300,
+  version: 4, below_target_fraction: 0.93, confirmation_ms: 600,
 });
 
 export function createTargetFailureDetector(targetKg) {
   const target = Number(targetKg);
+  const failureBoundary = target * TARGET_FAILURE_POLICY.below_target_fraction;
   let acquired = false, belowSince = null, result = null;
   return ({ ts, kg }) => {
     if (!(target > 0) || !Number.isFinite(target)) return null;
     if (result) return result;
     if (!Number.isFinite(ts) || !Number.isFinite(kg)) return null;
-    if (kg >= target) {
-      acquired = true;
+    if (kg >= target) acquired = true;
+    if (kg >= failureBoundary) {
       belowSince = null;
     } else if (acquired) {
       if (belowSince === null) belowSince = ts;
