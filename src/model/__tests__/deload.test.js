@@ -8,7 +8,7 @@ import { measuredRecoveryFields } from "../../testHelpers/recovery.js";
 import {
   computeDeload, liftingVolumeByDate,
   fingerSessionsThisWeek, deloadPlan, buildDeloadGuidance,
-  deloadStatus, recoveryStatusDates,
+  deloadStatus, recoveryStatusDates, recentGapHeldOut,
   DELOAD_STALE_DAYS,
 } from "../deload.js";
 
@@ -243,9 +243,34 @@ test('stale healthy grip cannot veto current declines', () => {
  expect(computeDeload([...current,...stale],[],{today:TODAY}).severity).toBe('mild');
  expect(computeDeload([...current,...stale],[],{today:TODAY}).signals.gripGaps.Prime).toBeUndefined();
 });
-test('one current session cannot revive an old recovery window', () => {
- const h = [...sess('Micro','L','2026-01-01',30,28), ...sess('Micro','L',TODAY,30,10)];
- expect(deloadStatus(h,[],{today:TODAY}).level).toBe('unknown');
+test.each(['2026-05-07', '2026-05-05', '2026-04-29', '2026-01-01'])(
+  'a grip trained today stays current regardless of prior session date %s', prior => {
+    const h = [prior, TODAY].flatMap(d => sess('Crusher', 'L', d, 30, 10));
+    expect(recentGapHeldOut(h, 'Crusher', TODAY, 2)).toMatchObject({n:2, lastDate:TODAY});
+  }
+);
+test('yesterday remains recent even when the prior session was weeks earlier', () => {
+  const h = ['2026-04-30', '2026-05-19'].flatMap(d => sess('Crusher', 'L', d, 30, 10));
+  expect(recentGapHeldOut(h, 'Crusher', TODAY, 2)).toMatchObject({lastDate:'2026-05-19'});
+});
+test.each([['2026-05-06', true], ['2026-05-05', false]])(
+  'latest qualifying session %s controls the 14-day boundary', (last, current) => {
+    const h = ['2026-04-01', last].flatMap(d => sess('Crusher', 'L', d, 30, 10));
+    expect(Boolean(recentGapHeldOut(h, 'Crusher', TODAY, 2))).toBe(current);
+  }
+);
+test('a future session cannot make old evidence current', () => {
+  const h = ['2026-04-01', '2026-04-22', '2026-05-21'].flatMap(d => sess('Crusher', 'L', d, 30, 10));
+  expect(recentGapHeldOut(h, 'Crusher', TODAY, 2)).toBeNull();
+});
+test('less-frequent declining grips still contribute to systemic concern and a strong deload', () => {
+  const h = [...fatiguedRecent('Micro'),
+    ...['2026-04-08', '2026-04-29', TODAY].flatMap(d => sess('Crusher', 'L', d, 30, 10))];
+  const result = computeDeload(h, liftSpike, {today:TODAY});
+  expect(result).toMatchObject({deload:true, severity:'strong', state:'systemic_concern'});
+  expect(result.signals.crossGripDown).toBe(true);
+  expect(result.signals.gripGaps.Crusher.lastDate).toBe(TODAY);
+  expect(deloadStatus(h, liftSpike, {today:TODAY}).level).toBe('red');
 });
 test('one trained grip has a useful local concern without a systemic claim', () => {
  const r=deloadStatus(fatiguedRecent('Micro'),[],{today:TODAY});

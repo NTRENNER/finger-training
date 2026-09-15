@@ -138,7 +138,8 @@ export function recentGapHeldOut(history, grip, today, n) {
   const sessions = buildRecoveryTrend(history, grip, { physModel: null })
     .filter(r => r.date && r.date <= today);
   if (sessions.length < n) return null;
-  if (daysBetween(sessions[sessions.length - n].date, today) > DELOAD_STALE_DAYS) return null;
+  // Recency belongs to the latest qualifying session, not the window span.
+  if (daysBetween(sessions[sessions.length - 1].date, today) > DELOAD_STALE_DAYS) return null;
   const recent = sessions.slice(-n);
   const cutoff = recent[0].date;                    // earliest of the window
   const baseline = history.filter(r => r.grip === grip && r.date && r.date < cutoff);
