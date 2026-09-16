@@ -1,7 +1,7 @@
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-exp F-D / curve-trust prescription · Tindeq Progressor BLE
 import React, {
-  useCallback, useEffect, useState,
+  useCallback, useState,
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
@@ -50,7 +50,6 @@ import {
   pushRep, fetchReps, enqueueReps, flushQueue, LS_QUEUE_KEY,
   fetchRepTombstoneIds, fetchRepSlotTombstoneKeys, fetchSessionTombstoneIds,
   fetchWorkoutSessions, deleteWorkoutSession,
-  fetchUserSettings,
 } from "./lib/sync.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
@@ -209,12 +208,9 @@ export default function App() {
 
   // ── User settings (see src/hooks/useUserSettings.js) ─────
   // Owns unit, bodyWeight + bwLog reconcile, trip, climbingFocus,
-  // pyramid pin maps, and the per-grip fatigue β model. Extracted
-  // from App.js in late May 2026 (BACKLOG #154) — same shape as the
-  // useRepHistory and useAuth extractions: local-first + cloud
-  // reconcile on sign-in. setFatigueModel is exposed (vs a save
-  // wrapper) because the post-session refresh below applies a
-  // server-trigger update that doesn't need a client push.
+  // and the pyramid pin maps. Extracted from App.js in late May 2026
+  // (BACKLOG #154) — same shape as the useRepHistory and useAuth
+  // extractions: local-first + cloud reconcile on sign-in.
   const {
     unit, saveUnit,
     bodyWeight, saveBW,
@@ -223,7 +219,6 @@ export default function App() {
     pyramidProjectMap, savePyramidProjectMap,
     pinnedGripBaselines, savePinnedGripBaselines,
     pinnedPerHandBaselines, savePinnedPerHandBaselines,
-    fatigueModel, setFatigueModel,
     settingsSynced,
   } = useUserSettings({ user, syncSignal });
 
@@ -261,10 +256,10 @@ export default function App() {
 
   // ── Rep history + freshMap + cloud reconcile + CRUD ──────
   // (see src/hooks/useRepHistory.js)
-  // dailyState + fatigueModel feed the freshMap's external-fatigue
-  // compensation path. Both are nullable; when either is missing the
-  // path no-ops and freshMap behaves like the original within-set
-  // fatigue-only version.
+  // dailyState feeds the freshMap's external-fatigue compensation
+  // path. It's nullable; when it's missing the path no-ops and
+  // freshMap behaves like the original within-set fatigue-only
+  // version.
   const {
     history,
     historySynced,
@@ -272,7 +267,7 @@ export default function App() {
     addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
     replaceHistory,
     handleWorkoutSessionSaved,
-  } = useRepHistory({ user, fatigueModel, dailyState, syncSignal });
+  } = useRepHistory({ user, dailyState, syncSignal });
 
   // Gate for useGripFits' pin-on-first-seed write (threaded through
   // AnalysisContainer → AnalysisView). Both cloud reconciles must land
@@ -283,11 +278,6 @@ export default function App() {
   // first pin sticks). Both flags are true when signed out — local-
   // only users pin immediately, as before.
   const baselinePinReady = settingsSynced && historySynced;
-
-  // Per-grip fatigue β model (replaces perceivedFatigueLearning's
-  // (fatigueModel + setFatigueModel come from useUserSettings above —
-  // it's part of the same user_settings cloud row as climbingFocus
-  // and the pyramid pin maps.)
 
   // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
@@ -321,30 +311,14 @@ export default function App() {
     handleRestDone, handleAbort,
   } = useSessionRunner({
     history, freshMap, threeExpPriors, addReps,
-    fatigueModel,
     tindeqConnected: tindeq.connected,
     onSessionStart: () => setTab(0),
   });
 
-  // Close the closed-loop learner: when a session finishes (phase →
-  // "done"), the server-side update_fatigue_beta_from_rep_trg has by
-  // then updated user_settings.fatigue_model. Re-fetch so the next
-  // session this app instance prescribes uses the new β instead of
-  // the pre-session value cached in React state. 1.5s delay gives the
-  // trigger time to commit and Supabase replication time to propagate.
-  // Without this, the new β wouldn't be visible until the user signs
-  // back in or reloads — fine across days, but breaks the loop if you
-  // stack two finger sessions in the same browser tab.
-  useEffect(() => {
-    if (phase !== "done" || !user) return;
-    const t = setTimeout(async () => {
-      const cloud = await fetchUserSettings();
-      if (cloud && cloud.fatigue_model && typeof cloud.fatigue_model === "object") {
-        setFatigueModel(cloud.fatigue_model);
-      }
-    }, 1500);
-    return () => clearTimeout(t);
-  }, [phase, user, setFatigueModel]);
+  // A post-session effect used to re-fetch user_settings here, to pick
+  // up the β the server trigger had just written. Learner and trigger
+  // are gone (September 2026); the cookedness rate is a constant, so
+  // there is nothing to refresh.
 
   // ── Manual cloud pull ─────────────────────────────────────
   // User-triggered refresh. Flushes any queued local reps first, then
@@ -643,7 +617,6 @@ export default function App() {
               onStart={startSession}
               history={history}
               freshMap={freshMap}
-              fatigueModel={fatigueModel}
               unit={unit}
               onBwSave={saveBW}
               activities={activities}
@@ -753,7 +726,6 @@ export default function App() {
           pinnedPerHandBaselines={pinnedPerHandBaselines}
           onSavePinnedPerHandBaselines={savePinnedPerHandBaselines}
           baselinePinReady={baselinePinReady}
-          fatigueModel={fatigueModel}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
@@ -831,7 +803,6 @@ export default function App() {
           onPullFromCloud={pullFromCloud}
           pullStatus={pullStatus}
           lastPulledAt={lastPulledAt}
-          fatigueModel={fatigueModel}
         />
       )}
     </div>

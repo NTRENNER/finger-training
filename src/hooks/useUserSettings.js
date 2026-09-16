@@ -19,10 +19,7 @@
 // Hook contract: pass the current `user` (from useAuth). The hook
 // fires its cloud reconciles when `user` flips null → signed-in and
 // silently no-ops otherwise. Returns a flat object of getter/setter
-// pairs the parent threads into views. `setFatigueModel` is exposed
-// (not just a saveFatigueModel) because the post-session refresh in
-// App.js needs to apply a server-trigger update without going through
-// the cloud-push path.
+// pairs the parent threads into views.
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -41,7 +38,6 @@ import {
   pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates, removeBWTombstones,
   fetchUserSettings, enqueueUserSettingsPatch, flushUserSettingsPatch,
 } from "../lib/sync.js";
-import { defaultFatigueModel } from "../model/fatigueBeta.js";
 
 // Pinned-baseline schema version. Bump to invalidate stale pins so they
 // re-seed from the current (fixed) baseline computation.
@@ -355,17 +351,9 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     if (user) flushUserSettingsPatch();
   }, [user]);
 
-  // ── Fatigue β model (per-grip) ───────────────────────────
-  // Stored in user_settings.settings.fatigue_model so it persists
-  // across devices. Updated server-side by the
-  // update_fatigue_beta_from_rep_trg trigger on every rep-1 insert;
-  // the client re-fetches user_settings on sign-in to pick up changes.
-  // See src/model/fatigueBeta.js for the math.
-  //
-  // setFatigueModel is exposed so App.js's post-session refresh
-  // (after the server trigger fires) can apply the new value without
-  // going through a cloud round-trip from this hook's perspective.
-  const [fatigueModel, setFatigueModel] = useState(() => defaultFatigueModel());
+  // The per-grip fatigue β model lived here until September 2026,
+  // synced through this same user_settings row. Learner, server
+  // trigger and stored betas are all gone — see cookedScaling.js.
 
   // True once the user_settings cloud reconcile below has landed (or
   // immediately when signed out — local is the authority then).
@@ -484,17 +472,6 @@ export function useUserSettings({ user, syncSignal = 0 }) {
           enqueueUserSettingsPatch({ pinned_perhand_baselines: merged });
         }
       }
-      // Pull fatigue_model so the client uses the same β the server
-      // trigger is updating. Falls back to local defaults if cloud
-      // has no value yet (first-run before any rep-1 insert).
-      const fatigue = hasPending("fatigue_model")
-        && pending.fatigue_model
-        && typeof pending.fatigue_model === "object"
-        ? pending.fatigue_model
-        : cloud.fatigue_model;
-      if (fatigue && typeof fatigue === "object") {
-        setFatigueModel(fatigue);
-      }
       // Reconcile landed — pinned baselines (and everything else) now
       // reflect the cloud. Safe to let the auto-pin effect write.
       setSettingsSynced(true);
@@ -518,7 +495,6 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     pyramidProjectMap, savePyramidProjectMap,
     pinnedGripBaselines, savePinnedGripBaselines,
     pinnedPerHandBaselines, savePinnedPerHandBaselines,
-    fatigueModel, setFatigueModel,
     settingsSynced,
   };
 }

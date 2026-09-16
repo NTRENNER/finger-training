@@ -17,7 +17,7 @@ jest.mock("../../../model/prescription.js", () => ({
 jest.mock("../../../model/coaching.js", () => ({
   coachingRecommendationContinuous: () => ({ zone: "endurance" }),
 }));
-jest.mock("../../../model/fatigueBeta.js", () => ({
+jest.mock("../../../model/cookedScaling.js", () => ({
   capacityMultiplier: () => 1,
 }));
 

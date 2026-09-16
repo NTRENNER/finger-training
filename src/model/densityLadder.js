@@ -52,7 +52,7 @@ import { isCapacityEvidenceRep } from "./forceRecording.js";
 
 import { zoneOf } from "./zones.js";
 import { prescribedLoad, effectiveLoad } from "./load.js";
-import { capacityMultiplier } from "./fatigueBeta.js";
+import { capacityMultiplier } from "./cookedScaling.js";
 // Engine bounds + shortfall test (July 2026 — see the RE-PIN GUARD
 // comment below). prescription.js does not import this module, so the
 // dependency is acyclic.
@@ -192,7 +192,7 @@ function latestSessionInZone(history, grip, zoneKey) {
 //     },
 //   }
 export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
-  const { fatigueModel = null, expectedHands = null } = opts;
+  const { expectedHands = null } = opts;
   if (!grip || !zoneKey) return null;
   const sess = latestSessionInZone(history, grip, zoneKey);
   if (!sess) return null;
@@ -318,7 +318,7 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       .sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1))[0];
     const recorded = effectiveLoad(rep1) || prescribedLoad(rep1);
     if (!(recorded > 0)) continue;
-    const thenMult = capacityMultiplier(fatigueModel, grip, rep1.session_cooked ?? 0);
+    const thenMult = capacityMultiplier(rep1.session_cooked ?? 0);
     previousLoadByHand[h] = round1(thenMult > 0 ? recorded / thenMult : recorded);
     if (isShortfall(freshRep1.actual_time_s, T)) {
       droppedByHand[h] = round1(Number(freshRep1.actual_time_s) || 0);

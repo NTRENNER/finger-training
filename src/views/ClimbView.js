@@ -91,6 +91,9 @@ function RecentClimbRow({ climb: c, showTopBorder }) {
           {relativeDate(c.date)}
           {" · "}
           {c.ascent ? ascentMeta(c.ascent).label : describeClimb(c)}
+          {Number.isFinite(c.attempts) && c.attempts > 1
+            ? ` · ${c.attempts} tries`
+            : ""}
           {Number.isFinite(c.rpe) ? ` · RPE ${c.rpe}` : ""}
         </div>
         {locationParts.length > 0 && (

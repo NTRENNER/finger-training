@@ -13,7 +13,7 @@ import {
   LADDER_FIRST_REP_TARGET_FRAC, LADDER_GATE_FRAC,
   LADDER_LOAD_STEP_FRAC, LADDER_RECALIBRATION_STEP_FRAC,
 } from "../densityLadder.js";
-import { capacityMultiplier } from "../fatigueBeta.js";
+import { capacityMultiplier } from "../cookedScaling.js";
 import { enduranceCeilingKg } from "../enduranceTail.js";
 
 // Build one session's reps: `times[hand]` is the per-rep hold times in
@@ -214,27 +214,21 @@ describe("computeDensityLadder", () => {
 
   test("cooked sessions pin the FRESH-EQUIVALENT load (no compounding scale-down)", () => {
     // Fixed manual scaling (July 2026): a session recorded at cooked 5
-    // ran at fresh × capacityMultiplier(·, ·, 5). The ladder must
+    // ran at fresh × capacityMultiplier(5). The ladder must
     // divide that back out, or consecutive cooked sessions would
     // ratchet the pin downward (each pin inheriting the previous
     // discount, then getting discounted again). Assert against
     // capacityMultiplier itself so the test tracks the fixed rate.
-    const fatigueModel = { Crusher: { beta: 0.02 } }; // beta is ignored by the multiplier
-    const mult = capacityMultiplier(fatigueModel, "Crusher", 5);
+    const mult = capacityMultiplier(5);
     const fresh = 60;
     const recorded = fresh * mult;
     const hist = session({
       id: "s1", date: "2026-06-01", T: 40, loadKg: recorded,
       times: { L: [40, 24, 16, 12] }, cooked: 5,
     });
-    const out = computeDensityLadder(hist, "Crusher", "power", { fatigueModel });
+    const out = computeDensityLadder(hist, "Crusher", "power");
     expect(out.loadByHand.L).toBeCloseTo(fresh, 0);   // de-cooked back to fresh-equivalent
-    // Model-less call: the multiplier is model-independent now, so the
-    // round-trip must be identical with no fatigueModel at all.
-    const raw = computeDensityLadder(hist, "Crusher", "power");
-    expect(raw.loadByHand.L).toBeCloseTo(
-      recorded / capacityMultiplier(null, "Crusher", 5), 0
-    );
+    expect(out.loadByHand.L).toBeCloseTo(recorded / capacityMultiplier(5), 0);
   });
 
   test("a one-hand manual override pins THAT hand's actual load, not the suggestion", () => {

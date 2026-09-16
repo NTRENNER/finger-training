@@ -49,7 +49,7 @@ import {
   THREE_EXP_LAMBDA_DEFAULT,
   fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
-import { capacityMultiplier } from "./fatigueBeta.js";
+import { capacityMultiplier } from "./cookedScaling.js";
 import { zoneOf } from "./zones.js";
 // Max/power-protocol gate shared with the Peak Force card — both
 // surfaces must agree on what counts as a "max attempt" peak.
@@ -152,16 +152,13 @@ export function buildFreshLoadMap(history, opts = {}) {
     // logged via the daily cookedness slider, including retroactive
     // edits from the AnalysisView session-detail modal). Plain
     // object: { "YYYY-MM-DD": 0..10 }.
-    // When combined with the per-grip β fatigueModel below,
-    // capacityMultiplier(model, grip, cooked) = exp(-β·cooked)
-    // returns the scale-down factor that was applied (or should
-    // have been applied) on that date — buildFreshLoadMap divides
-    // each rep's load by it to recover the "fresh-equivalent"
-    // load the curve fit should see. Without this, a cooked
-    // session looks like a real capacity drop and skews the next
-    // prescription downward.
+    // capacityMultiplier(cooked) returns the scale-down factor that
+    // was applied (or should have been applied) on that date —
+    // buildFreshLoadMap divides each rep's load by it to recover the
+    // "fresh-equivalent" load the curve fit should see. Without this,
+    // a cooked session looks like a real capacity drop and skews the
+    // next prescription downward.
     cookedByDate = null,
-    fatigueModel = null,
   } = opts;
   const out = new Map();
   if (!history || history.length === 0) return out;
@@ -251,16 +248,19 @@ export function buildFreshLoadMap(history, opts = {}) {
       //   2. Day-level (cookedByDate[r.date]) — the broad-strokes
       //      day default the slider sets.
       //   3. Null/zero — no compensation applied.
-      // Both paths still need fatigueModel; without it, capacityMultiplier
-      // returns 1.0 and the path is a no-op.
-      if (fatigueModel) {
+      // This used to be gated behind a `fatigueModel` argument, back
+      // when the multiplier read a learned per-grip β out of it. The
+      // rate is now fixed and published (cookedScaling.js), so the
+      // de-cook applies whenever a cookedness is recorded — which is
+      // the correct mirror of what prescription actually did that day.
+      {
         let cooked = null;
         if (r?.session_cooked != null) cooked = Number(r.session_cooked);
         else if (cookedByDate && r?.date && cookedByDate[r.date] != null) {
           cooked = Number(cookedByDate[r.date]);
         }
         if (cooked != null && cooked > 0) {
-          const mult = capacityMultiplier(fatigueModel, r.grip, cooked);
+          const mult = capacityMultiplier(cooked);
           if (mult > 0) fresh = fresh / mult;
         }
       }

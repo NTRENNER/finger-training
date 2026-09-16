@@ -91,7 +91,6 @@ function addRepTombstones(ids) {
 
 export function useRepHistory({
   user,
-  fatigueModel = null,
   dailyState = null,
   syncSignal = 0,
 }) {
@@ -185,14 +184,13 @@ export function useRepHistory({
       doseK: k,
       personalTausByGrip: personalRecoveryTaus,
       // Cookedness compensation: divides each rep's load by
-      // capacityMultiplier(model, grip, cookedOnDate) so a cooked
+      // capacityMultiplier(cookedOnDate) so a cooked
       // session looks like its fresh-equivalent to the curve fit.
       // Retroactive edits via AnalysisView's session-detail modal
       // flow into here within one render cycle.
       cookedByDate: dailyState,
-      fatigueModel: fatigueModel,
     });
-  }, [freshMapFp, personalRecoveryTaus, dailyStateFp, fatigueModel]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [freshMapFp, personalRecoveryTaus, dailyStateFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const threeExpPriors = useMemo(
     () => buildThreeExpPriors(history),

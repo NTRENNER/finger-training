@@ -22,7 +22,7 @@ import { fmtW } from "../../ui/format.js";
 import { ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
 import { coachingRecommendationContinuous } from "../../model/coaching.js";
-import { capacityMultiplier } from "../../model/fatigueBeta.js";
+import { capacityMultiplier } from "../../model/cookedScaling.js";
 
 export function PrescribedLoadCard({
   history, grip, freshMap, threeExpPriors, activities = [], unit, GOAL_CONFIG,
@@ -32,9 +32,7 @@ export function PrescribedLoadCard({
   // nothing is upserted to daily_state from this card.
   cooked: cookedProp,
   onCookedChange,
-  // Per-grip β model from user_settings.settings.fatigue_model.
   // Drives the displayed load scale-down via exp(-β_grip · cooked).
-  fatigueModel = null,
 }) {
   // "How cooked today?" slider. 0 = fresh (multiplier = 1); 10 = wrecked.
   // In Analysis mode the slider is for retrospective what-if, so we keep
@@ -61,7 +59,7 @@ export function PrescribedLoadCard({
     if (!grip) return null;
     // Per-grip multiplier — same value applies to every tile because
     // β is per-grip in this model. exp(-β·cooked); 1.0 at cooked=0.
-    const fatigueMod = capacityMultiplier(fatigueModel, grip, cooked);
+    const fatigueMod = capacityMultiplier(cooked);
     return ZONE_KEYS.map(key => {
       const cfg = GOAL_CONFIG[key];
       if (!cfg) return null;
@@ -97,7 +95,7 @@ export function PrescribedLoadCard({
           .reduce((m, v) => Math.min(m, v), Infinity),
       };
     }).filter(Boolean);
-  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, fatigueModel, cooked]);
+  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, cooked]);
 
   if (!grip) return null;
   if (!rows || rows.every(r => r.L == null && r.R == null)) return null;
@@ -131,7 +129,7 @@ export function PrescribedLoadCard({
               // True applied multiplier (fixed manual scaling) — not
               // the β-derived discount the disabled learner would have
               // applied. Keeps this card honest alongside SessionPlanCard.
-              const pct = Math.round((1 - capacityMultiplier(fatigueModel, grip, cooked)) * 100);
+              const pct = Math.round((1 - capacityMultiplier(cooked)) * 100);
               if (pct < 1) return null;
               return (
                 <span style={{ marginLeft: 6, color: C.purple, fontStyle: "italic" }}>

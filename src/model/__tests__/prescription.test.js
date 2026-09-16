@@ -15,7 +15,7 @@ import {
   demonstratedCapacityKg,
 } from "../prescription.js";
 import { buildThreeExpPriors } from "../threeExp.js";
-import { capacityMultiplier } from "../fatigueBeta.js";
+import { capacityMultiplier } from "../cookedScaling.js";
 
 // ─────────────────────────────────────────────────────────────
 // effectiveLoad / loadedWeight / repKey
@@ -209,12 +209,11 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
         avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
         date: "2026-05-02" },
     ];
-    const fatigueModel = { Crusher: { beta: 0.5 } }; // beta must NOT drive the rate
     const cookedByDate = { "2026-05-02": 10 };
-    const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
+    const map = buildFreshLoadMap(history, { cookedByDate });
     expect(map.get("id:fresh").fresh).toBeCloseTo(25, 4);
     expect(map.get("id:cooked").fresh)
-      .toBeCloseTo(25 / capacityMultiplier(fatigueModel, "Crusher", 10), 4); // 25/0.75
+      .toBeCloseTo(25 / capacityMultiplier(10), 4); // 25/0.75
     // The old runaway (exp(-0.5*10) -> 148x) is structurally impossible:
     expect(map.get("id:cooked").fresh).toBeLessThanOrEqual(25 * 3); // MAX_FRESH_INFLATION
   });
@@ -230,15 +229,14 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
         avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
         date: "2026-05-02", session_cooked: null },
     ];
-    const fatigueModel = { Crusher: { beta: 0.5 } };
     const cookedByDate = { "2026-05-02": 8 };
-    const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
+    const map = buildFreshLoadMap(history, { cookedByDate });
     // morning: per-session override (cooked 2) wins over the day value.
     expect(map.get("id:morning").fresh)
-      .toBeCloseTo(25 / capacityMultiplier(fatigueModel, "Crusher", 2), 4);
+      .toBeCloseTo(25 / capacityMultiplier(2), 4);
     // evening: session_cooked null falls back to the day value (cooked 8).
     expect(map.get("id:evening").fresh)
-      .toBeCloseTo(25 / capacityMultiplier(fatigueModel, "Crusher", 8), 4);
+      .toBeCloseTo(25 / capacityMultiplier(8), 4);
   });
 
   test("session_cooked: 0 explicitly suppresses day-level compensation", () => {
@@ -253,27 +251,28 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
         date: "2026-05-02",
         session_cooked: 0 },
     ];
-    const fatigueModel = { Crusher: { beta: 0.03 } };
     const cookedByDate = { "2026-05-02": 8 };
-    const map = buildFreshLoadMap(history, { cookedByDate, fatigueModel });
+    const map = buildFreshLoadMap(history, { cookedByDate });
     // cooked=0 → multiplier=1.0 → fresh = load unchanged
     expect(map.get("id:fresh").fresh).toBeCloseTo(25, 4);
   });
 
-  test("cookedByDate without fatigueModel is a no-op", () => {
-    // Both opts are required for compensation to fire — passing one
-    // without the other should leave fresh = load (within-set
-    // fatigue still applies as normal).
+  test("a recorded cookedness always de-cooks — there is no second switch", () => {
+    // Compensation used to require a `fatigueModel` argument as well,
+    // left over from when the multiplier read a learned β out of it.
+    // The rate is now a published constant, so the de-cook must mirror
+    // the prescription unconditionally: if a cookedness was recorded,
+    // the load it produced was scaled, and the fit has to undo it.
     const history = [
       { id: "r1", hand: "L", grip: "Crusher",
         session_id: "s1", set_num: 1, rep_num: 1,
         avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
         date: "2026-05-02" },
     ];
-    const cookedByDate = { "2026-05-02": 7 };
-    // No fatigueModel arg → compensation skipped.
-    const map = buildFreshLoadMap(history, { cookedByDate });
-    expect(map.get("id:r1").fresh).toBeCloseTo(25, 4);
+    const map = buildFreshLoadMap(history, { cookedByDate: { "2026-05-02": 7 } });
+    expect(map.get("id:r1").fresh).toBeCloseTo(25 / capacityMultiplier(7), 4);
+    // And with no cookedness recorded at all, nothing moves.
+    expect(buildFreshLoadMap(history).get("id:r1").fresh).toBeCloseTo(25, 4);
   });
 });
 

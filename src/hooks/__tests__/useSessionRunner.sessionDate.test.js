@@ -10,7 +10,7 @@ function setup() {
   const addReps = jest.fn();
   const hook = renderHook(() => useSessionRunner({
     history: [], freshMap: null, threeExpPriors: null,
-    addReps, fatigueModel: null, tindeqConnected: false,
+    addReps, tindeqConnected: false,
     onSessionStart: () => {},
   }));
   return { hook, addReps };
