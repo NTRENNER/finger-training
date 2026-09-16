@@ -222,7 +222,7 @@ export default function App() {
     settingsSynced,
   } = useUserSettings({ user, syncSignal });
 
-  // ── Activities (climbing log + 1RM) ─────────────────────
+  // ── Activities (climbing log + 1RM) ──────────────────────
   // (see src/hooks/useActivities.js)
   const {
     activities, addActivity, deleteActivity, updateActivity,
@@ -232,7 +232,7 @@ export default function App() {
   // their cloud reconcile all moved to useUserSettings — see hook
   // call above.)
 
-  // ── Session notes ──────────────────────────────────────
+  // ── Session notes ─────────────────────────────────────────
   const [notes, setNotes] = useState(() => loadLS(LS_NOTES_KEY) || {});
   const handleNoteChange = useCallback((sessKey, text) => {
     setNotes(prev => {
@@ -279,7 +279,7 @@ export default function App() {
   // only users pin immediately, as before.
   const baselinePinReady = settingsSynced && historySynced;
 
-  // ── Tab ─────────────────────────────────────────────
+  // ── Tab ───────────────────────────────────────────────────
   const [tab, setTab] = useState(0);
 
   // (activities + addActivity + deleteActivity + updateActivity all
@@ -293,10 +293,10 @@ export default function App() {
 
 
 
-  // ── Tindeq ──────────────────────────────────────────
+  // ── Tindeq ────────────────────────────────────────────────
   const tindeq = useTindeq();
 
-  // ── In-workout state machine ───────────────────────────
+  // ── In-workout state machine ──────────────────────────────
   // (see src/hooks/useSessionRunner.js)
   const {
     config, setConfig,
@@ -320,7 +320,7 @@ export default function App() {
   // are gone (September 2026); the cookedness rate is a constant, so
   // there is nothing to refresh.
 
-  // ── Manual cloud pull ─────────────────────────────────
+  // ── Manual cloud pull ─────────────────────────────────────
   // User-triggered refresh. Flushes any queued local reps first, then
   // refetches reps + workout_sessions from Supabase and merges into state.
   // Without this, devices only fetch once at auth; a workout pushed from
@@ -457,7 +457,7 @@ export default function App() {
 
   // OTP send/verify/cancel + signOut are owned by useAuth() above.
 
-  // ── Render ──────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────
   return (
     <div style={base}>
       {/* Top nav — horizontally scrollable. Even with the 5-tab row

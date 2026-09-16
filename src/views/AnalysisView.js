@@ -93,9 +93,7 @@ export function AnalysisView({
   // Gate for the pin-on-first-seed write — false until both cloud
   // reconciles (user_settings + reps) have landed. See App.js.
   baselinePinReady = true,
-  // Per-grip fatigue β model (user_settings.fatigue_model) — feeds the
   // Curve Improvement card's Fresh-eq basis via useGripFits.
-  fatigueModel = null,
 }) {
   // Grip filter — null/"" means "Both grips pooled" (default view).
   // The hand-filter sibling state (selHand) was retired with the L/R/Both
@@ -333,7 +331,6 @@ export function AnalysisView({
     handAsymmetry,
   } = useGripFits({
     history, threeExpPriors, grips,
-    fatigueModel,
     pinnedGripBaselines, onSavePinnedGripBaselines,
     pinnedPerHandBaselines, onSavePinnedPerHandBaselines,
     allowAutoPin: baselinePinReady,

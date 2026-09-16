@@ -3,7 +3,7 @@
 // ───────────────────────────────────────────────────────
 // Strength / power / mobility training that supports climbing,
 // not the climbing itself. The finger-training side of the app
-// (β learner, three-exp curve, cookedness slider) is finger-
+// (three-exp curve, cookedness slider) is finger-
 // specific; this module handles everything else.
 //
 // Design constraints (user-specified, May 2026):
