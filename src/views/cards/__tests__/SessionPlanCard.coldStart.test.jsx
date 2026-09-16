@@ -40,7 +40,6 @@ function renderCard(history) {
       onApplyPlan={onApplyPlan}
       cooked={0}
       onCookedChange={jest.fn()}
-      fatigueModel={null}
     />
   );
   return onApplyPlan;

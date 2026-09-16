@@ -1,12 +1,13 @@
-// Tests for src/model/climbingFatigue.js — session fatigue derivation
-// from per-climb RPEs.
+// Tests for src/model/climbingFatigue.js — session fatigue derived
+// from logged climbs.
 
 import {
   computeSessionFatigue,
+  sessionFatigueDetail,
   suggestCookedFromClimbs,
   mostRecentClimbDate,
-  fatigueToModifier,
-  BOARD_WALL_FACTOR, BOARD_WALL_KEYS,
+  attemptsOf,
+  BOARD_WALL_FACTOR, BOARD_WALL_KEYS, MAX_ATTEMPTS_PER_CLIMB,
 } from "../climbingFatigue.js";
 
 describe("computeSessionFatigue", () => {
@@ -32,8 +33,9 @@ describe("computeSessionFatigue", () => {
     const acts = Array.from({ length: 8 }, () => ({
       type: "climbing", date: "2026-05-10", rpe: 7,
     }));
-    const f = computeSessionFatigue(acts, "2026-05-10");
-    expect(f).toBeGreaterThanOrEqual(9);
+    // 8 under the old clamp; the ceiling is now reserved for days
+    // carrying several times this much work.
+    expect(computeSessionFatigue(acts, "2026-05-10")).toBe(8);
   });
 
   test("volume session beats single max effort in fatigue", () => {
@@ -65,20 +67,124 @@ describe("computeSessionFatigue", () => {
       { type: "climbing", date: "2026-05-10", rpe: 7 },
       { type: "rest",     date: "2026-05-10", rpe: 10 },
     ];
-    // Just the climbing rpe 7 → low session fatigue
     const f = computeSessionFatigue(acts, "2026-05-10");
     expect(f).toBeLessThanOrEqual(5);
   });
 
-  test("uses explicit session_rpe override if present (Phase B)", () => {
+  test("uses explicit session_rpe override if present", () => {
     const acts = [
-      // Per-climb RPEs would derive a high score, but session_rpe override
-      // says 4 — that's what we use.
       { type: "climbing", date: "2026-05-10", rpe: 9, session_rpe: 4 },
       { type: "climbing", date: "2026-05-10", rpe: 9, session_rpe: 4 },
       { type: "climbing", date: "2026-05-10", rpe: 9, session_rpe: 4 },
     ];
     expect(computeSessionFatigue(acts, "2026-05-10")).toBe(4);
+  });
+});
+
+// ── The September 2026 rewrite ───────────────────────────────
+// Two defects, tested separately because either alone flattens the
+// scale: the score saturated, and volume counted rows rather than
+// efforts. See the header comment in climbingFatigue.js.
+
+describe("the score never saturates", () => {
+  const day = (n, rpe) => Array.from({ length: n }, () => ({
+    type: "climbing", date: "2026-05-10", rpe,
+  }));
+  const exact = acts => sessionFatigueDetail(acts, "2026-05-10").scoreExact;
+
+  test("more work always scores strictly higher, well past the old clamp", () => {
+    // Under `clamp(1, 10, round(Σ·0.12 + max·0.4))` every one of these
+    // was exactly 10 — 72% of real logged days landed here, which made
+    // the number nearly constant on the days it was consulted.
+    const ladder = [10, 15, 20, 30, 45].map(n => exact(day(n, 8)));
+    for (let i = 1; i < ladder.length; i++) {
+      expect(ladder[i]).toBeGreaterThan(ladder[i - 1]);
+    }
+    // A 45-climb day and a 15-climb day are no longer the same number.
+    expect(exact(day(45, 8)) - exact(day(15, 8))).toBeGreaterThan(0.2);
+  });
+
+  test("it approaches the ceiling without exceeding it", () => {
+    // The curve is asymptotic, so even the largest day in five months
+    // of real logging (45 climbs) is still strictly under the ceiling
+    // and still has room above it. Past roughly 60 hard climbs the
+    // remaining gap falls below float precision and the exact score
+    // reaches 10; that is a limit of the representation, not of the
+    // ordering, which holds everywhere the gap is representable.
+    const biggestReal = sessionFatigueDetail(day(45, 10), "2026-05-10");
+    expect(biggestReal.scoreExact).toBeLessThan(10);
+    expect(biggestReal.score).toBe(10);
+    expect(sessionFatigueDetail(day(200, 10), "2026-05-10").scoreExact)
+      .toBeLessThanOrEqual(10);
+  });
+});
+
+describe("attempts count as work", () => {
+  const climb = (rpe, attempts, over = {}) => ({
+    type: "climbing", date: "2026-05-10", rpe, attempts, ...over,
+  });
+
+  test("attemptsOf defaults to 1 and rejects nonsense", () => {
+    expect(attemptsOf({})).toBe(1);                       // pre-migration row
+    expect(attemptsOf({ attempts: null })).toBe(1);
+    expect(attemptsOf({ attempts: 0 })).toBe(1);
+    expect(attemptsOf({ attempts: -4 })).toBe(1);
+    expect(attemptsOf({ attempts: "seven" })).toBe(1);
+    expect(attemptsOf({ attempts: 8 })).toBe(8);
+    expect(attemptsOf({ attempts: 3.6 })).toBe(4);        // rounded
+    expect(attemptsOf({ attempts: 10000 })).toBe(MAX_ATTEMPTS_PER_CLIMB);
+  });
+
+  test("one row with eight attempts equals eight rows of one", () => {
+    const asOneRow = [climb(8, 8)];
+    const asEightRows = Array.from({ length: 8 }, () => climb(8, 1));
+    expect(sessionFatigueDetail(asOneRow, "2026-05-10").scoreExact)
+      .toBeCloseTo(sessionFatigueDetail(asEightRows, "2026-05-10").scoreExact, 10);
+  });
+
+  test("peak intensity is per-attempt, not multiplied by the count", () => {
+    // Eight burns on one problem is more VOLUME than one burn, but it
+    // is not a harder single effort — the peak term must not inflate.
+    expect(sessionFatigueDetail([climb(8, 8)], "2026-05-10").peak).toBe(8);
+    expect(sessionFatigueDetail([climb(8, 8)], "2026-05-10").volume).toBe(64);
+  });
+
+  test("nAttempts is reported alongside nClimbs", () => {
+    const d = sessionFatigueDetail([climb(8, 8), climb(5, 1), climb(5, 1)], "2026-05-10");
+    expect(d.nClimbs).toBe(3);
+    expect(d.nAttempts).toBe(10);
+  });
+
+  test("regression: a projecting session no longer scores below a moderate day", () => {
+    // Nathan's case — eight burns on a V7, sent on the eighth, plus two
+    // warm-ups. Logged honestly it is THREE rows, so the row-counting
+    // formula scored it 6, below a ten-climb moderate day at 8: the
+    // scale was ordered backwards exactly where it mattered most,
+    // because the hardest sessions have the fewest rows per unit work.
+    const projecting = [climb(8, 8), climb(5, 1), climb(5, 1)];
+    const moderate = Array.from({ length: 10 }, () => climb(5, 1, { rpe: 5 }))
+      .concat([climb(6, 1)]);
+
+    expect(computeSessionFatigue(projecting, "2026-05-10"))
+      .toBeGreaterThan(computeSessionFatigue(moderate, "2026-05-10"));
+
+    // And the inversion is exactly what the attempts column fixes: drop
+    // the count and the same session falls back below the moderate day.
+    const unattributed = projecting.map(({ attempts, ...c }) => c);
+    expect(computeSessionFatigue(unattributed, "2026-05-10"))
+      .toBeLessThan(computeSessionFatigue(moderate, "2026-05-10"));
+  });
+
+  test("history without the column keeps the meaning it always had", () => {
+    // Every pre-migration row meant one attempt, which is what the old
+    // formula assumed, so no backfill is needed and none is implied.
+    const legacy = [
+      { type: "climbing", date: "2026-05-10", rpe: 7 },
+      { type: "climbing", date: "2026-05-10", rpe: 5 },
+    ];
+    const explicit = legacy.map(c => ({ ...c, attempts: 1 }));
+    expect(sessionFatigueDetail(legacy, "2026-05-10").scoreExact)
+      .toBeCloseTo(sessionFatigueDetail(explicit, "2026-05-10").scoreExact, 10);
   });
 });
 
@@ -109,39 +215,6 @@ describe("mostRecentClimbDate", () => {
   });
 });
 
-describe("fatigueToModifier", () => {
-  test("returns 1.0 with null fatigue", () => {
-    expect(fatigueToModifier("power", null, 12)).toBe(1.0);
-  });
-
-  test("returns 1.0 outside 48h window", () => {
-    expect(fatigueToModifier("power", 10, 60)).toBe(1.0);
-    expect(fatigueToModifier("power", 10, -1)).toBe(1.0);
-  });
-
-  test("higher fatigue → smaller modifier (more suppression)", () => {
-    const low  = fatigueToModifier("power", 3, 12);
-    const high = fatigueToModifier("power", 10, 12);
-    expect(high).toBeLessThan(low);
-  });
-
-  test("modifier decays as hours-ago grows", () => {
-    const fresh = fatigueToModifier("power", 10, 0);
-    const stale = fatigueToModifier("power", 10, 36);
-    expect(stale).toBeGreaterThan(fresh);
-  });
-
-  test("power suppresses harder than endurance at same fatigue", () => {
-    const powerMod = fatigueToModifier("power", 9, 6);
-    const endMod   = fatigueToModifier("endurance", 9, 6);
-    expect(powerMod).toBeLessThan(endMod);
-  });
-
-  test("at 48h, modifier returns to 1.0", () => {
-    expect(fatigueToModifier("power", 10, 48)).toBe(1.0);
-  });
-});
-
 describe("board-wall tax", () => {
   const climb = (wall, rpe) => ({ type: "climbing", date: "2026-06-10", wall, rpe });
 
@@ -160,8 +233,6 @@ describe("board-wall tax", () => {
   });
 
   test("regression: short-but-fierce board session no longer reads as mild", () => {
-    // Three hard MoonBoard problems — the kind of brief savaging that
-    // was scoring like a casual gym hour (June 2026).
     const fierce = [climb("moonboard", 8), climb("moonboard", 9), climb("moonboard", 8)];
     expect(computeSessionFatigue(fierce, "2026-06-10")).toBeGreaterThanOrEqual(8);
   });
@@ -176,6 +247,11 @@ describe("board-wall tax", () => {
       .toBe(computeSessionFatigue(commercial, "2026-06-10"));
   });
 
+  test("the tax applies per attempt", () => {
+    const one = sessionFatigueDetail([{ ...climb("moonboard", 8), attempts: 4 }], "2026-06-10");
+    expect(one.volume).toBeCloseTo(4 * 8 * BOARD_WALL_FACTOR, 10);
+  });
+
   test("explicit session_rpe override is NOT board-taxed", () => {
     const acts = [{ ...climb("moonboard", 9), session_rpe: 6 }];
     expect(computeSessionFatigue(acts, "2026-06-10")).toBe(6);
@@ -183,7 +259,7 @@ describe("board-wall tax", () => {
 });
 
 describe("suggestCookedFromClimbs", () => {
-  const climb = (date, rpe) => ({ type: "climbing", date, rpe });
+  const climb = (date, rpe, over = {}) => ({ type: "climbing", date, rpe, ...over });
 
   test("null with no signal (no climbs today or yesterday)", () => {
     expect(suggestCookedFromClimbs([], "2026-06-08")).toBeNull();
@@ -193,7 +269,6 @@ describe("suggestCookedFromClimbs", () => {
   });
 
   test("same-day climbs drive the suggestion (today's session fatigue)", () => {
-    // 4 × RPE 8 → sessionFatigue 7 (sum 32×0.12 + 8×0.4 ≈ 7).
     const acts = Array.from({ length: 4 }, () => climb("2026-06-08", 8));
     const out = suggestCookedFromClimbs(acts, "2026-06-08");
     expect(out).not.toBeNull();
@@ -201,6 +276,7 @@ describe("suggestCookedFromClimbs", () => {
     expect(out.todayFatigue).toBe(7);
     expect(out.yesterdayFatigue).toBeNull();
     expect(out.nClimbsToday).toBe(4);
+    expect(out.nAttemptsToday).toBe(4);
   });
 
   test("yesterday-only carries over at a decayed weight", () => {
@@ -216,20 +292,24 @@ describe("suggestCookedFromClimbs", () => {
 
   test("today + yesterday stack and clamp at 10", () => {
     const acts = [
-      ...Array.from({ length: 8 }, () => climb("2026-06-08", 7)),  // today: fatigue 10
-      ...Array.from({ length: 4 }, () => climb("2026-06-07", 8)),  // yesterday: fatigue 7
+      ...Array.from({ length: 8 }, () => climb("2026-06-08", 7)),  // today: 8
+      ...Array.from({ length: 4 }, () => climb("2026-06-07", 8)),  // yesterday: 7
     ];
-    const out = suggestCookedFromClimbs(acts, "2026-06-08");
-    expect(out.cooked).toBe(10);  // 10 + 2.8 clamped
+    expect(suggestCookedFromClimbs(acts, "2026-06-08").cooked).toBe(10);
+  });
+
+  test("attempts reach the suggestion", () => {
+    const light = [climb("2026-06-08", 8, { attempts: 1 })];
+    const projecting = [climb("2026-06-08", 8, { attempts: 8 })];
+    expect(suggestCookedFromClimbs(projecting, "2026-06-08").cooked)
+      .toBeGreaterThan(suggestCookedFromClimbs(light, "2026-06-08").cooked);
+    expect(suggestCookedFromClimbs(projecting, "2026-06-08").nAttemptsToday).toBe(8);
   });
 
   test("regression: the 2026-06-05 inversion — hard same-day bouldering must not suggest 0", () => {
-    // Shaped like the real June 5 log: a dozen problems, RPEs 2–8,
-    // V8 attempts at RPE 8. The user logged cooked = 0 that day.
     const rpes = [7, 3, 7, 2, 8, 5, 8, 5, 8, 6, 7, 7];
     const acts = rpes.map(r => climb("2026-06-05", r));
-    const out = suggestCookedFromClimbs(acts, "2026-06-05");
-    expect(out.cooked).toBeGreaterThanOrEqual(5);
+    expect(suggestCookedFromClimbs(acts, "2026-06-05").cooked).toBeGreaterThanOrEqual(5);
   });
 
   test("non-climbing activities are ignored", () => {

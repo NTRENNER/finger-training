@@ -40,7 +40,6 @@ const run = (pinned, hist = history) =>
   renderHook(() =>
     useGripFits({
       history: hist, threeExpPriors: priors, grips,
-      fatigueModel: null,
       pinnedGripBaselines: pinned, onSavePinnedGripBaselines: () => {},
       pinnedPerHandBaselines: null, onSavePinnedPerHandBaselines: () => {},
       allowAutoPin: false,   // don't let auto-pin mutate; test the merge path
