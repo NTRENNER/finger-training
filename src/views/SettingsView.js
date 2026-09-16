@@ -26,6 +26,9 @@ import { Card, Btn, PageFrame, Sect } from "../ui/components.js";
 import { KG_TO_LBS, fmt0, toDisp, fromDisp } from "../ui/format.js";
 import { tripCountdown } from "../lib/trip.js";
 import { longBuildLabel } from "../lib/buildInfo.js";
+import {
+  capacityMultiplier, COOKED_SCALE_PER_POINT, COOKED_SCALE_FLOOR,
+} from "../model/cookedScaling.js";
 
 export function SettingsView({
   user, loginEmail, setLoginEmail,
@@ -42,11 +45,6 @@ export function SettingsView({
   // the climbing style the user is training for.
   climbingFocus = "balanced", onClimbingFocusChange = () => {},
   onPullFromCloud = () => {}, pullStatus = "idle", lastPulledAt = null,
-  // Per-grip fatigue β state — read-only inspector. Sourced from
-  // user_settings.settings.fatigue_model in App.js, updated server-side
-  // by the trigger update_fatigue_beta_from_rep_trg on every rep-1
-  // insert. See src/model/fatigueBeta.js for the math.
-  fatigueModel = null,
 }) {
   const [showSQL, setShowSQL] = useState(false);
   const sql = `-- Run this once in your Supabase SQL editor (fresh install):
@@ -330,103 +328,56 @@ CREATE POLICY "auth_all" ON reps
         </Sect>
       </Card>
 
-      {/* ── Fatigue Model inspector ─────────────────────────────
-          Read-only view of the per-grip β learner state. β controls
-          how aggressively the engine scales down prescribed loads in
-          response to the cookedness slider:
-            multiplier(grip, cooked) = exp(-β_grip · cooked)
-          n_obs is the count of rep-1 observations the server-side
-          trigger has folded in; last_update is the last rep-1 push
-          that actually moved β. Useful as a sanity check (β = 0.05
-          is the cold-start prior, so a number close to that with
-          n_obs = 0 means the learner hasn't observed anything yet)
-          and for debugging weird load suggestions. */}
+      {/* ── Cookedness scaling ──────────────────────────────────
+          Read-only statement of exactly what the cookedness slider
+          does to a prescription. This card used to inspect a per-grip
+          β learner; that learner was deleted in September 2026 (see
+          src/model/cookedScaling.js). The rate below is a published
+          constant, which is the whole point — there is nothing to
+          inspect, and nothing that can drift. */}
       <Card>
-        <Sect title="Fatigue Model (β per grip)">
-          {(() => {
-            if (!fatigueModel || typeof fatigueModel !== "object") {
-              return (
-                <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
-                  No fatigue model loaded yet. Sign in and complete a
-                  finger session — the server-side trigger writes the
-                  initial state on the first rep-1 insert.
-                </div>
-              );
-            }
-            const meta = ["eta", "lambda"];
-            const grips = Object.entries(fatigueModel)
-              .filter(([k, v]) => !meta.includes(k) && v && typeof v === "object" && "beta" in v);
-            if (grips.length === 0) {
-              return (
-                <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
-                  Fatigue model exists but has no per-grip rows yet. Run
-                  a finger session at any cookedness &gt; 0 to start
-                  populating the learner.
-                </div>
-              );
-            }
-            // Cookedness sweep for a quick "what does β = X mean in
-            // practice" sanity column. exp(-β · 5) is the multiplier
-            // at the middle of the slider.
-            const sample = (b) => `${Math.round(Math.exp(-b * 5) * 100)}%`;
-            return (
-              <div>
-                <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-                  Capacity multiplier at "cooked = 5" shown for context
-                  — that's what gets multiplied against your fresh
-                  prescription when the slider sits mid-range. Higher
-                  β = steeper scale-down per cookedness point.
-                </div>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ color: C.muted, textAlign: "left" }}>
-                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>Grip</th>
-                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>β</th>
-                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>@c=5</th>
-                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>n_obs</th>
-                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>last update</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {grips.map(([grip, g]) => {
-                      const b = Number(g.beta);
-                      const last = g.last_update
-                        ? new Date(g.last_update).toISOString().slice(0, 10)
-                        : "—";
-                      return (
-                        <tr key={grip} style={{ borderTop: `1px solid ${C.border}` }}>
-                          <td style={{ padding: "6px", fontWeight: 600, color: "#fff" }}>{grip}</td>
-                          <td style={{ padding: "6px", fontFamily: "monospace" }}>
-                            {Number.isFinite(b) ? b.toFixed(4) : "—"}
-                          </td>
-                          <td style={{ padding: "6px", fontFamily: "monospace", color: C.muted }}>
-                            {Number.isFinite(b) ? sample(b) : "—"}
-                          </td>
-                          <td style={{ padding: "6px", fontFamily: "monospace", color: C.muted }}>
-                            {Number(g.n_obs) || 0}
-                          </td>
-                          <td style={{ padding: "6px", fontFamily: "monospace", color: C.muted, fontSize: 11 }}>
-                            {last}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <div style={{ fontSize: 10, color: C.muted, marginTop: 10, fontStyle: "italic", lineHeight: 1.5 }}>
-                  Cold-start β = 0.05 (multiplier ≈ 78% at c=5). Updates
-                  via SGD: <code>β ← β − η·e·c − λ·(β − β_prior)</code>
-                  where e = ln(actual/target) on rep 1.{" "}
-                  {fatigueModel.eta != null && (
-                    <>η = {Number(fatigueModel.eta).toFixed(3)}, </>
-                  )}
-                  {fatigueModel.lambda != null && (
-                    <>λ = {Number(fatigueModel.lambda).toFixed(3)}.</>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
+        <Sect title="Cookedness scaling">
+          <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+            <p style={{ marginTop: 0 }}>
+              The cookedness slider is a manual override. Every point
+              you dial in reduces the prescribed load by{" "}
+              <b style={{ color: "#fff" }}>
+                {(COOKED_SCALE_PER_POINT * 100).toFixed(1)}%
+              </b>
+              , floored at{" "}
+              <b style={{ color: "#fff" }}>
+                −{Math.round((1 - COOKED_SCALE_FLOOR) * 100)}%
+              </b>{" "}
+              so a slider pinned at 10 can never take you below{" "}
+              {Math.round(COOKED_SCALE_FLOOR * 100)}% of fresh capacity.
+            </p>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, margin: "10px 0" }}>
+              <thead>
+                <tr style={{ color: C.muted, textAlign: "left" }}>
+                  <th style={{ padding: "4px 6px", fontWeight: 600 }}>Cooked</th>
+                  {[0, 2, 5, 8, 10].map(c => (
+                    <th key={c} style={{ padding: "4px 6px", fontWeight: 600, fontFamily: "monospace" }}>{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderTop: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "6px", fontWeight: 600, color: "#fff" }}>Load</td>
+                  {[0, 2, 5, 8, 10].map(c => (
+                    <td key={c} style={{ padding: "6px", fontFamily: "monospace" }}>
+                      {Math.round(capacityMultiplier(c) * 100)}%
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+            <p style={{ marginBottom: 0, fontSize: 12, fontStyle: "italic" }}>
+              The app never fills this in for you. A number you did not
+              enter is not a report of how you feel, so an untouched
+              slider records nothing at all — the climb log can suggest
+              a value next to it, but only a tap applies it.
+            </p>
+          </div>
         </Sect>
       </Card>
 

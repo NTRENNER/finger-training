@@ -185,7 +185,6 @@ export function SetupView({
   // Per-grip β fatigue model from user_settings. Passed through to
   // SessionPlanCard so the slider's scale-down preview matches what
   // the runner will actually prescribe.
-  fatigueModel = null,
   unit = "lbs",
   onBwSave = () => {},
   // activities is still consumed (SessionPlanCard reads today's climb
@@ -311,7 +310,6 @@ export function SetupView({
         onApplyPlan={(plan) => setConfig(c => ({ ...c, ...plan }))}
         cooked={config.cooked}
         onCookedChange={(v) => setConfig(c => ({ ...c, cooked: v }))}
-        fatigueModel={fatigueModel}
         climbingFocus={climbingFocus}
         onNavigateToSettings={onNavigateToSettings}
       />
