@@ -81,7 +81,7 @@ export function useSessionRunner({
   tindeqConnected,
   onSessionStart,
 }) {
-  // ── Session config (see comment at top) ──────────────────────
+  // ── Session config (see comment at top) ─────────────────────
   // Multi-set fields (numSets, setRestTime) removed — every session
   // is single-set under the curve-trust model.
   const [rawConfig, setConfig] = useState(() => ({
@@ -115,7 +115,7 @@ export function useSessionRunner({
   // No derived fields anymore — config is rawConfig.
   const config = rawConfig;
 
-  // ── Phase machine + per-rep counters ────────────────────────
+  // ── Phase machine + per-rep counters ──────────────────────
   // (currentSet removed — single-set model. Rep records still write
   // set_num: 1 as a constant for backward compat with the existing
   // Supabase schema; the column is otherwise unused going forward.)
@@ -155,7 +155,7 @@ export function useSessionRunner({
   // were the only consumer. Per-grip baseline data is still available
   // through model/levels.js for any future runtime feature that needs it.)
 
-  // ── Start session ─────────────────────────────────────
+  // ── Start session ──────────────────────────────────────
   // refWeights drives the in-workout "Rep 1 suggested weight" display
   // and the weight that gets recorded against each rep. Same prescription
   // chain as the Setup card's "Train at" cell — single unified call to
@@ -284,7 +284,7 @@ export function useSessionRunner({
     }
   }, [phase]);
 
-  // ── Handle rep completion ────────────────────────────────
+  // ── Handle rep completion ─────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null, failureValid = true, endReason = "muscular_failure", forceRecording = null, startedAtMs = null, endedAtMs = null, loadProvenance = null }) => {
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
