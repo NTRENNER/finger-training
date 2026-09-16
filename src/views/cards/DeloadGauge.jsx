@@ -66,6 +66,7 @@ export function DeloadGauge({
           <span style={{ fontSize: 13, fontWeight: 600, flex: "0 0 auto" }}>Recovery</span>
           <span style={{ fontSize: 12, color, flex: 1, minWidth: 0 }}>{label}</span>
           <span style={{ fontSize: 11, color: C.muted, flex: "0 0 auto" }}>details</span>
+          <span aria-hidden style={{ fontSize: 10, color: C.muted, flex: "0 0 auto" }}>▾</span>
         </button>
       </Card>
     );
@@ -73,25 +74,32 @@ export function DeloadGauge({
 
   return (
     <Card style={{ marginBottom: 16 }}>
-      <div style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "baseline",
-        flexWrap: "wrap",
-        gap: 6,
-        marginBottom: 4,
-      }}>
+      {/* The whole header row is the collapse control. A muted "hide"
+          tucked beside the title tested as invisible — the first person
+          to use it reported there was no way to close the card at all.
+          An affordance nobody finds is not an affordance. */}
+      <div
+        {...(onToggleExpanded ? {
+          role: "button", tabIndex: 0, "aria-expanded": true,
+          onClick: () => onToggleExpanded(),
+          onKeyDown: e => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleExpanded(); }
+          },
+        } : {})}
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          flexWrap: "wrap",
+          gap: 6,
+          marginBottom: 4,
+          cursor: onToggleExpanded ? "pointer" : "default",
+        }}
+      >
         <div style={{ fontSize: 14, fontWeight: 700 }}>
           Recovery status
           {onToggleExpanded && (
-            <button
-              onClick={() => onToggleExpanded()}
-              aria-expanded
-              style={{
-                background: "none", border: "none", color: C.muted, cursor: "pointer",
-                fontSize: 11, fontWeight: 600, padding: "0 0 0 8px",
-              }}
-            >hide</button>
+            <span aria-hidden style={{ fontSize: 10, color: C.muted, marginLeft: 6 }}>▴</span>
           )}
         </div>
         {usesHistoricalEstimates && <div style={{ fontSize: 12, color: C.muted }}>Includes historical estimates using planned rest.</div>}
