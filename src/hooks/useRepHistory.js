@@ -91,7 +91,6 @@ function addRepTombstones(ids) {
 
 export function useRepHistory({
   user,
-  fatigueModel = null,
   dailyState = null,
   syncSignal = 0,
 }) {
@@ -185,14 +184,13 @@ export function useRepHistory({
       doseK: k,
       personalTausByGrip: personalRecoveryTaus,
       // Cookedness compensation: divides each rep's load by
-      // capacityMultiplier(model, grip, cookedOnDate) so a cooked
+      // capacityMultiplier(cookedOnDate) so a cooked
       // session looks like its fresh-equivalent to the curve fit.
       // Retroactive edits via AnalysisView's session-detail modal
       // flow into here within one render cycle.
       cookedByDate: dailyState,
-      fatigueModel: fatigueModel,
     });
-  }, [freshMapFp, personalRecoveryTaus, dailyStateFp, fatigueModel]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [freshMapFp, personalRecoveryTaus, dailyStateFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const threeExpPriors = useMemo(
     () => buildThreeExpPriors(history),
@@ -427,7 +425,7 @@ export function useRepHistory({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, syncSignal]);
 
-  // ── Workout-session sync ────────────────────────────────────
+  // ── Workout-session sync ─────────────────────────────────
   // Lives here (rather than in a separate hook) because it shares
   // the same auth-driven sync lifecycle as the rep reconcile. Same
   // pattern: on sign-in, fetch the cloud's workout_sessions, merge
@@ -559,7 +557,7 @@ export function useRepHistory({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, syncSignal]);
 
-  // ── CRUD ────────────────────────────────────────────────────
+  // ── CRUD ────────────────────────────────────────────────
   // Each mutation updates local state immediately, then mirrors
   // to Supabase if signed in. addReps queues failures for retry;
   // the others log warnings since failed deletes/updates are
