@@ -174,7 +174,7 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
   // Recovery — the marquee honesty signal.
   let recovery = { level: "green", label: null, guidanceAction: null };
   try {
-    const ds = deloadStatus(history, workoutSessions, { today: refDate });
+    const ds = deloadStatus(history, workoutSessions, { today: refDate, activities });
     let guidanceAction = null;
     if (ds.deload && ds.deload.deload) {
       const g = buildDeloadGuidance(ds.deload.severity, history, { today: refDate });

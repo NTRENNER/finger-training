@@ -9,7 +9,9 @@ import {
   computeDeload, liftingVolumeByDate,
   fingerSessionsThisWeek, deloadPlan, buildDeloadGuidance,
   deloadStatus, recoveryStatusDates, recentGapHeldOut,
-  DELOAD_STALE_DAYS,
+  gripIsDown, gripPressure, climbingLoadByDate,
+  DELOAD_STALE_DAYS, DELOAD_GAP_TRIGGER, DELOAD_GAP_TRIGGER_SD,
+  DELOAD_BASELINE_MIN_SESSIONS, DELOAD_BASELINE_MIN_SD,
 } from "../deload.js";
 
 // ── Session builder ──────────────────────────────────
@@ -276,4 +278,151 @@ test('one trained grip has a useful local concern without a systemic claim', () 
  const r=deloadStatus(fatiguedRecent('Micro'),[],{today:TODAY});
  expect(r.state).toBe('local_concern'); expect(r.level).toBe('yellow');
  expect(r.deload.deload).toBe(false);
+});
+
+// ─────────────────────────────────────────────────────────────
+// SELF-REFERENCED TRIGGER (September 2026)
+// ─────────────────────────────────────────────────────────────
+// The gate used to compare each grip's recent recovery gap to an absolute
+// -0.15. On the real history that sat ~2 sd below every grip's own median,
+// so the deload recommendation could not fire and never did. It now reads
+// each grip against its own out-of-sample baseline. See the long comment
+// on DELOAD_GAP_TRIGGER_SD.
+describe("gripIsDown / gripPressure: judged against the grip's own normal", () => {
+  const withBaseline = (mean, median, sd) => ({ mean, baseline: { median, sd, n: 10 }, z: (mean - median) / sd });
+
+  test("a grip well above the old absolute threshold is still DOWN if it is down for itself", () => {
+    // mean +0.05 — nowhere near -0.15 — but this grip normally runs +0.35
+    // with a spread of 0.15, so this is two sd below its own typical.
+    const g = withBaseline(0.05, 0.35, 0.15);
+    expect(g.mean).toBeGreaterThan(-DELOAD_GAP_TRIGGER);   // old gate: not down
+    expect(gripIsDown(g)).toBe(true);                       // new gate: down
+    expect(gripPressure(g)).toBe(1);
+  });
+
+  test("a grip below the old absolute threshold is NOT down if that is normal for it", () => {
+    // This grip habitually reads negative; -0.20 is its median.
+    const g = withBaseline(-0.20, -0.20, 0.10);
+    expect(g.mean).toBeLessThan(-DELOAD_GAP_TRIGGER);       // old gate: down
+    expect(gripIsDown(g)).toBe(false);                      // new gate: unremarkable
+    expect(gripPressure(g)).toBe(0);
+  });
+
+  test("pressure is the fraction of the runway to the trigger, clamped", () => {
+    expect(gripPressure(withBaseline(0.2, 0.2, 0.2))).toBeCloseTo(0, 6);
+    expect(gripPressure(withBaseline(0.1, 0.2, 0.2))).toBeCloseTo(0.5, 6);
+    expect(gripPressure(withBaseline(-0.2, 0.2, 0.2))).toBe(1);   // 2 sd down, clamped
+    expect(gripPressure(withBaseline(0.6, 0.2, 0.2))).toBe(0);    // better than normal
+  });
+
+  test("without a baseline it falls back to the absolute threshold, not to 'fine'", () => {
+    const thin = { mean: -0.30, baseline: null, z: null };
+    expect(gripIsDown(thin)).toBe(true);
+    expect(gripIsDown({ mean: 0.05, baseline: null, z: null })).toBe(false);
+    expect(gripPressure(thin)).toBe(1);
+    expect(gripIsDown(null)).toBe(false);
+    expect(gripPressure(null)).toBe(0);
+  });
+});
+
+describe("climbing load feeds severity, never the gate", () => {
+  const climbs = (dates, rpe = 8, attempts = 1) => dates.map((date, i) => ({
+    id: `c${i}`, type: "climbing", date, rpe, attempts,
+  }));
+  // Dense recent climbing against a quiet earlier month → acute ≫ chronic.
+  const spikeDays = ["2026-05-14", "2026-05-15", "2026-05-16", "2026-05-17",
+    "2026-05-18", "2026-05-19", "2026-05-20"];
+
+  test("climbingLoadByDate scores each day and counts attempts", () => {
+    const one = climbingLoadByDate(climbs(["2026-05-20"]));
+    const eight = climbingLoadByDate(climbs(["2026-05-20"], 8, 8));
+    expect(one["2026-05-20"]).toBeGreaterThan(0);
+    expect(eight["2026-05-20"]).toBeGreaterThan(one["2026-05-20"]);
+    expect(climbingLoadByDate(null)).toEqual({});
+    expect(climbingLoadByDate([{ type: "rest", date: "2026-05-20" }])).toEqual({});
+  });
+
+  test("a climbing spike escalates a mild deload to strong", () => {
+    const hist = [...fatiguedRecent("Crusher"), ...fatiguedRecent("Micro")];
+    const mild = computeDeload(hist, [], { today: TODAY });
+    expect(mild).toMatchObject({ deload: true, severity: "mild" });
+
+    const strong = computeDeload(hist, [], { today: TODAY, activities: climbs(spikeDays) });
+    expect(strong.signals.climbing.spike).toBe(true);
+    expect(strong.severity).toBe("strong");
+    expect(strong.why).toMatch(/climbing/i);
+  });
+
+  test("a climbing spike alone cannot recommend a deload", () => {
+    // Recovery is fine on both grips; only the outside load is elevated.
+    const hist = [...fine("Crusher"), ...fine("Micro")];
+    const r = computeDeload(hist, [], { today: TODAY, activities: climbs(spikeDays) });
+    expect(r.signals.climbing.spike).toBe(true);
+    expect(r.deload).toBe(false);
+    expect(r.severity).toBe("none");
+  });
+
+  test("no climb log at all leaves the verdict unchanged", () => {
+    const hist = [...fatiguedRecent("Crusher"), ...fatiguedRecent("Micro")];
+    const without = computeDeload(hist, [], { today: TODAY });
+    const withEmpty = computeDeload(hist, [], { today: TODAY, activities: [] });
+    expect(withEmpty.severity).toBe(without.severity);
+    expect(withEmpty.signals.climbing.spike).toBe(false);
+  });
+});
+
+describe("the self-referenced baseline", () => {
+  // A long, steady history so the grip has enough pre-window sessions to
+  // be judged against itself at all.
+  // Deterministic session-to-session variation: a real athlete's recovery
+  // scatters, and a baseline needs a spread to mean anything. A perfectly
+  // uniform history has none, which the DELOAD_BASELINE_MIN_SD floor
+  // handles but which makes a poor fixture for the baseline itself.
+  const many = (grip, n) => Array.from({ length: n }, (_, i) => {
+    const d = new Date(Date.UTC(2026, 0, 5) + i * 4 * 86400000).toISOString().slice(0, 10);
+    return sess(grip, "L", d, 30, 26 + (i % 5));
+  }).flat();
+
+  test("a short history has no baseline, and says so rather than guessing", () => {
+    const rg = recentGapHeldOut(many("Crusher", 6), "Crusher", "2026-01-25", 2);
+    expect(rg).toBeTruthy();
+    expect(rg.baseline).toBeNull();
+    expect(rg.z).toBeNull();
+  });
+
+  test("a long history earns a baseline drawn from BEFORE the judged window", () => {
+    const hist = many("Crusher", 30);
+    const last = hist[hist.length - 1].date;
+    const rg = recentGapHeldOut(hist, "Crusher", last, 2);
+    expect(rg.baseline).toMatchObject({ n: expect.any(Number) });
+    expect(rg.baseline.n).toBeGreaterThanOrEqual(DELOAD_BASELINE_MIN_SESSIONS);
+    // Split-half: the baseline is scored on roughly the newer half of the
+    // pre-window sessions, never on the window itself.
+    expect(rg.baseline.n).toBeLessThan(30 - 2);
+    expect(rg.baseline.sd).toBeGreaterThan(0);
+    expect(rg.z).toBeCloseTo((rg.mean - rg.baseline.median) / rg.baseline.sd, 9);
+  });
+
+  test("a steady athlete sits near their own median, not near zero", () => {
+    // The point of the rewrite: what matters is distance from this
+    // athlete's normal, wherever that happens to sit.
+    const hist = many("Crusher", 30);
+    const last = hist[hist.length - 1].date;
+    const rg = recentGapHeldOut(hist, "Crusher", last, 2);
+    expect(Math.abs(rg.z)).toBeLessThan(DELOAD_GAP_TRIGGER_SD);
+    expect(gripIsDown(rg)).toBe(false);
+  });
+});
+
+test("a degenerate baseline cannot manufacture an alarm", () => {
+  // Every session identical → zero spread. Without the floor, any
+  // deviation at all would read as an enormous z.
+  const flat = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(Date.UTC(2026, 0, 5) + i * 4 * 86400000).toISOString().slice(0, 10);
+    return sess("Crusher", "L", d, 30, 28);
+  }).flat();
+  const rg = recentGapHeldOut(flat, "Crusher", flat[flat.length - 1].date, 2);
+  expect(rg).toBeTruthy();
+  if (rg.baseline) expect(rg.baseline.sd).toBeGreaterThanOrEqual(DELOAD_BASELINE_MIN_SD);
+  expect(gripIsDown(rg)).toBe(false);
 });

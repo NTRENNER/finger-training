@@ -207,16 +207,17 @@ export function SetupView({
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
 
   // ── Deload detection + weekly plan ──
-  // Cross-grip recovery decline (personal taus) + lifting-volume
-  // context. The lifting log lives in localStorage in exactly the
-  // shape computeDeload expects. Evaluated as of the real current date
+  // Cross-grip recovery decline (personal taus), with lifting and
+  // climbing volume as severity context. The lifting log lives in
+  // localStorage in exactly the shape computeDeload expects, and the
+  // climb log arrives as a prop. Evaluated as of the real current date
   // so the staleness guard works. Detect/explain/propose only — the
   // accepted "deload week" is a volume-cap reminder, not a silent load
   // scale-down.
   const todayStr = today();
   const deloadState = useMemo(
-    () => computeDeload(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: todayStr }),
-    [history, todayStr]
+    () => computeDeload(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: todayStr, activities }),
+    [history, todayStr, activities]
   );
 
   // Accepted deload-week state (device-local). Active for DELOAD_WEEK_DAYS.
@@ -247,7 +248,7 @@ export function SetupView({
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
 
       <CardBoundary name="Recovery status">
-        <RecoveryStatusCard history={history} />
+        <RecoveryStatusCard history={history} activities={activities} />
       </CardBoundary>
 
       <DeloadBanner

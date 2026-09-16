@@ -6,6 +6,7 @@
 import { buildRecoveryTrend } from "./recoveryDynamics.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
+import { sessionFatigueDetail } from "./climbingFatigue.js";
 
 // Sustained: cross-grip recovery must be down over at least this many
 // of each grip's most-recent finger sessions. 2 keeps a single rough
@@ -26,6 +27,71 @@ export const DELOAD_MIN_SESSIONS = 2;
 // scripts/recovery-validation.md; re-derive with recoveryModel.validation.
 export const DELOAD_GAP_TRIGGER = 0.15;
 
+// ── Why the trigger above is no longer the primary gate ──────
+// (September 2026.) DELOAD_GAP_TRIGGER is an ABSOLUTE threshold against
+// zero, and zero is not where this statistic lives. Replaying the whole
+// real history — 51 checkpoints across five months — the per-grip mean
+// gap sits at a median of +0.187 (Crusher) and +0.157 (Micro), because
+// the recovery model under-predicts this athlete. Against their own
+// spread that puts -0.15 at 1.85 sd (Crusher) and 2.02 sd (Micro) below
+// typical, and the cross-grip gate then demands BOTH grips be there at
+// once — on the order of a 0.07% event per checkpoint.
+//
+// It behaved exactly as that arithmetic predicts: 48 of 51 checkpoints
+// green, 3 yellow on a single grip, and the deload recommendation never
+// fired once. That is not five months without fatigue; it is a detector
+// whose operating point sits two standard deviations outside its own
+// data. The bias was even documented in the comment above — "centered
+// POSITIVE at +0.09 / +0.14" — and the absolute threshold was kept anyway.
+//
+// So the gate now reads each grip against ITS OWN distribution of this
+// statistic. "Recovery is softening" means softer than normal for you,
+// which is what the card claimed all along.
+//
+// What that changed on the real history, replayed: yellow 3 → 5, and the
+// gauge acquired a working range — pressure now spans 0 to 0.64 with a
+// median of 0.02, where before it was pinned at 0 because the average gap
+// was positive at nearly every checkpoint. Two of the yellows are genuine
+// CROSS-GRIP softening (2026-06-05 at 0.64, 2026-07-11 at 0.51), which the
+// absolute gauge had no way to express at all.
+//
+// Red still never fires: both grips a full sd below their own medians at
+// once did not happen in five months. The threshold is deliberately NOT
+// tuned down to manufacture a firing — after recentering, "it did not
+// happen" is a finding about the training, where before it was an artifact
+// of an operating point two sd outside the data.
+//
+// The best evidence that this reads something real is 2026-06-05. Recovery
+// was down on both grips (-0.62, -0.67 sd), climbing acute:chronic hit
+// 1.77×, and the log shows 19 climbs that day — and the athlete rated
+// themselves cooked = 0. Three measurements agreeing against one
+// self-report is the case for keeping this detector and not asking people
+// how they feel.
+//
+// An earlier pass at this claimed the gate fires on 2026-07-06 and 07-11.
+// It does not: that estimate z-scored each window against the FULL history
+// including its own future. With honest out-of-sample baselines those days
+// are -0.44 and -0.66 sd, well short. Lookahead flatters a detector, which
+// is why the baseline below is split-half rather than global.
+//
+// DELOAD_GAP_TRIGGER survives only as the fallback for a grip with too
+// little history to have a baseline yet — 13 of 51 checkpoints here, all
+// early.
+export const DELOAD_GAP_TRIGGER_SD = 1.0;
+
+// Sessions of out-of-sample baseline needed before a grip can be judged
+// against itself; below this the absolute fallback applies. The split
+// that produces them needs twice this many pre-window sessions.
+export const DELOAD_BASELINE_MIN_SESSIONS = 6;
+
+// Floor on the baseline spread. Dividing by a near-zero sd would turn an
+// unremarkable wobble into a 6-sigma alarm, which is how a metronomically
+// consistent athlete — or a synthetic fixture — gets told to deload for
+// nothing. Real per-grip baselines here run 0.17-0.30, so this only binds
+// on a degenerate one, and when it binds it makes the gate HARDER to trip,
+// never easier.
+export const DELOAD_BASELINE_MIN_SD = 0.05;
+
 // Detraining guard: if the most recent finger session on/before the
 // evaluation date is older than this, return no-deload (rested).
 export const DELOAD_STALE_DAYS = 14;
@@ -37,6 +103,27 @@ export const DELOAD_ACUTE_DAYS = 9;
 export const DELOAD_CHRONIC_DAYS = 28;
 export const DELOAD_LIFT_SPIKE_RATIO = 1.5;
 export const DELOAD_LIFT_MIN_ACUTE_SETS = 12;
+
+// Climbing spike, on the same acute/chronic windows. Climbing is the
+// largest systemic load in this athlete's week and the detector could not
+// see any of it: it read finger sessions and lifting only. Across the real
+// history the recovery statistic correlates with climbing load in the
+// preceding three days at rho = -0.33 (n = 51, p < 0.05, correct sign —
+// more climbing, slower between-rep recovery), which is the best evidence
+// available that this gauge is reading systemic fatigue at all.
+//
+// It is a SEVERITY MODIFIER, never a gate, exactly like lifting. The
+// decision to deload stays with the measured recovery, because that is the
+// thing actually observed on the athlete rather than inferred about them.
+// Climbing load says how hard to take the finding, not whether to have it.
+//
+// The ratio reuses the lifting threshold; on real climbing history the
+// acute:chronic ratio is 1.05 at the median and 1.99 at p90, so 1.5 marks
+// roughly the top eighth of days. The floor keeps a quiet fortnight from
+// spiking off one session. Load is the session-fatigue score, so attempts
+// and board tax carry through (see climbingFatigue.js).
+export const DELOAD_CLIMB_SPIKE_RATIO = DELOAD_LIFT_SPIKE_RATIO;
+export const DELOAD_CLIMB_MIN_ACUTE_LOAD = 20;
 
 const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 
@@ -124,6 +211,35 @@ function liftingSpike(volByDate, today) {
   return { acuteSets: acute, chronicSets: chronic, ratio, spike };
 }
 
+// Daily climbing load from the activity log: the session-fatigue score for
+// each date that has one. Returns { "YYYY-MM-DD": 0..10 }.
+export function climbingLoadByDate(activities) {
+  const byDate = {};
+  if (!Array.isArray(activities)) return byDate;
+  for (const d of new Set(activities.filter(a => a?.type === "climbing" && a.date).map(a => a.date))) {
+    const detail = sessionFatigueDetail(activities, d);
+    if (detail && Number.isFinite(detail.scoreExact)) byDate[d] = detail.scoreExact;
+  }
+  return byDate;
+}
+
+// Acute-vs-chronic climbing-load spike as of `today`. Same shape as
+// liftingSpike so the two read identically at the call site.
+function climbingSpike(loadByDate, today) {
+  let acute = 0, chronic = 0;
+  for (const [d, load] of Object.entries(loadByDate)) {
+    const ago = daysBetween(d, today);
+    if (ago < 0) continue;                       // after the eval date — ignore
+    if (ago < DELOAD_ACUTE_DAYS) acute += load;
+    if (ago < DELOAD_CHRONIC_DAYS) chronic += load;
+  }
+  const acuteRate = acute / DELOAD_ACUTE_DAYS;
+  const chronicRate = chronic / DELOAD_CHRONIC_DAYS;
+  const ratio = chronicRate > 0 ? acuteRate / chronicRate : 0;
+  const spike = acute >= DELOAD_CLIMB_MIN_ACUTE_LOAD && ratio >= DELOAD_CLIMB_SPIKE_RATIO;
+  return { acuteLoad: Math.round(acute * 10) / 10, chronicLoad: Math.round(chronic * 10) / 10, ratio, spike };
+}
+
 // Mean recovery gap for a grip over its last `n` finger sessions
 // on/before `today`, scored HELD-OUT: personal recovery taus are fit
 // ONLY on that grip's sessions BEFORE this recent window, then the recent
@@ -149,15 +265,71 @@ export function recentGapHeldOut(history, grip, today, n) {
   if (scored.length < n) return null;
   const last = scored.slice(-n);
   const mean = last.reduce((s, r) => s + r.gapAtTarget, 0) / last.length;
+
+  // The athlete's own baseline for this statistic, so "recovery is down"
+  // can mean down FOR THEM. See DELOAD_GAP_TRIGGER_SD for why an absolute
+  // threshold could not work here.
+  //
+  // The baseline must be scored the same way the window is — out of
+  // sample — or the comparison is between two different things. Reusing
+  // `scored` for it would not do: those earlier sessions are IN sample for
+  // the tau fit above, and on this user's real history that shifts the
+  // Crusher baseline median by 0.062 (0.25 sd) relative to forward-chained
+  // scoring, in the direction that makes the window look healthier than it
+  // is. Micro shifts by 0.001, so the bias is per-grip and cannot be
+  // constant-corrected. Instead the pre-window sessions are split: taus fit
+  // on the older half, the newer half scored out-of-sample against them.
+  const preWindow = sessions.slice(0, -n);
+  let baselineStats = null;
+  if (preWindow.length >= 2 * DELOAD_BASELINE_MIN_SESSIONS) {
+    const split = preWindow[Math.floor(preWindow.length / 2)].date;
+    const older = history.filter(r => r.grip === grip && r.date && r.date < split);
+    const basePhys = physModelFromTaus(computePersonalRecoveryTausForGrip(older, grip));
+    const vals = buildRecoveryTrend(history, grip, { physModel: basePhys })
+      .filter(r => r.date && r.date >= split && r.date < cutoff && Number.isFinite(r.gapAtTarget))
+      .map(r => r.gapAtTarget);
+    if (vals.length >= DELOAD_BASELINE_MIN_SESSIONS) {
+      const sorted = [...vals].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const mu = vals.reduce((s, v) => s + v, 0) / vals.length;
+      const sd = Math.sqrt(vals.reduce((s, v) => s + (v - mu) ** 2, 0) / (vals.length - 1));
+      if (sd > 0) baselineStats = { median, sd: Math.max(sd, DELOAD_BASELINE_MIN_SD), n: vals.length };
+    }
+  }
+
   return { mean, n: last.length, lastDate: last[last.length - 1].date,
-    confidence: last.some(r => r.confidence === "historical_estimate") ? "historical_estimate" : "measured" };
+    confidence: last.some(r => r.confidence === "historical_estimate") ? "historical_estimate" : "measured",
+    baseline: baselineStats,
+    // Standard deviations below the athlete's own typical value. Null when
+    // the baseline is too thin, and callers then fall back to the absolute
+    // threshold rather than guessing.
+    z: baselineStats ? (mean - baselineStats.median) / baselineStats.sd : null };
+}
+
+// Is this grip's recent recovery below its own normal? Prefers the
+// self-referenced z-score; falls back to the absolute threshold only when
+// the grip has too little history to have a baseline.
+export function gripIsDown(gap) {
+  if (!gap) return false;
+  return gap.z != null ? gap.z <= -DELOAD_GAP_TRIGGER_SD : gap.mean < -DELOAD_GAP_TRIGGER;
+}
+
+// How far along the runway to a deload this grip sits, 0..1, with 1.0 at
+// the trigger. Same preference order as gripIsDown, so the gauge and the
+// gate can never disagree about which grips are down.
+export function gripPressure(gap) {
+  if (!gap) return 0;
+  const raw = gap.z != null
+    ? -gap.z / DELOAD_GAP_TRIGGER_SD
+    : -gap.mean / DELOAD_PRESSURE_SCALE;
+  return Math.max(0, Math.min(1, raw));
 }
 
 // Main entry. Returns:
 //   { deload: bool, severity: "none"|"mild"|"strong", signals, why }
 // `signals` exposes the raw inputs so the UI can show its work.
 export function computeDeload(history, workoutSessions = [], opts = {}) {
-  const { today = null, minSessions = DELOAD_MIN_SESSIONS } = opts;
+  const { today = null, minSessions = DELOAD_MIN_SESSIONS, activities = null } = opts;
   const none = (why, signals = {}, state = "insufficient") => ({ deload: false, severity: "none", state, signals, why });
 
   if (!Array.isArray(history) || history.length === 0) return none("No training history.");
@@ -181,31 +353,43 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   }
   const measured = Object.keys(gripGaps);
   const lifting = liftingSpike(liftingVolumeByDate(workoutSessions), ref);
-  const signals = { today: ref, gripGaps, lifting };
+  const climbing = climbingSpike(climbingLoadByDate(activities), ref);
+  const signals = { today: ref, gripGaps, lifting, climbing };
 
   if (measured.length === 0) {
     return none("Not enough current recovery data yet.", signals);
   }
 
-  // Cross-grip gate: EVERY measured grip's recent mean gap below the band.
-  const downGrips = measured.filter(g => gripGaps[g].mean < -DELOAD_GAP_TRIGGER);
+  // Cross-grip gate: EVERY measured grip's recent recovery below ITS OWN
+  // typical value. A grip without enough baseline yet falls back to the
+  // absolute threshold rather than being assumed healthy.
+  const downGrips = measured.filter(g => gripIsDown(gripGaps[g]));
   signals.downGrips = downGrips;
   signals.crossGripDown = measured.length >= 2 && downGrips.length === measured.length;
 
   if (!signals.crossGripDown) {
     const why = downGrips.length > 0
-      ? `Only ${downGrips.join(", ")} recovery is down — a grip-specific concern. Consider an easier session for that grip; systemic recovery is not established.`
-      : "Observed recovery is within the model range for the currently measured grips.";
+      ? `Only ${downGrips.join(", ")} recovery is below its own normal — a grip-specific concern. Consider an easier session for that grip; systemic recovery is not established.`
+      : "Observed recovery is within your normal range for the currently measured grips.";
     return none(why, signals, downGrips.length > 0 ? "local_concern" : "normal");
   }
 
-  const severity = lifting.spike ? "strong" : "mild";
+  // Either outside load escalates. The recovery finding is the same
+  // either way; a spike says the cause is probably still in front of you.
+  const severity = (lifting.spike || climbing.spike) ? "strong" : "mild";
+  // Report how far below normal each grip is, in its own terms. The raw
+  // gap was never interpretable on its own — that was the whole problem.
   const gapStr = measured
-    .map(g => `${g} ${gripGaps[g].mean >= 0 ? "+" : ""}${gripGaps[g].mean.toFixed(2)}`)
+    .map(g => gripGaps[g].z != null
+      ? `${g} ${Math.abs(gripGaps[g].z).toFixed(1)} sd below normal`
+      : `${g} ${gripGaps[g].mean >= 0 ? "+" : ""}${gripGaps[g].mean.toFixed(2)}`)
     .join(", ");
-  const why = lifting.spike
-    ? `Current grips' between-rep recovery is below your model over the last ${minSessions} sessions (${gapStr}), and lifting volume is ${lifting.ratio.toFixed(1)}× your 4-week average. Signs of accumulating systemic fatigue — consider an easier finger session and trimming your next lifting workout.`
-    : `Current grips' between-rep recovery is below your model over the last ${minSessions} sessions (${gapStr}). An early fatigue signal — consider a lighter finger session.`;
+  const loadParts = [];
+  if (lifting.spike) loadParts.push(`lifting volume is ${lifting.ratio.toFixed(1)}× your 4-week average`);
+  if (climbing.spike) loadParts.push(`climbing load is ${climbing.ratio.toFixed(1)}× your 4-week average`);
+  const why = loadParts.length > 0
+    ? `Between-rep recovery is below your own normal on every measured grip over the last ${minSessions} sessions (${gapStr}), and ${loadParts.join(", and ")}. Signs of accumulating systemic fatigue — consider an easier finger session and trimming the load that spiked.`
+    : `Between-rep recovery is below your own normal on every measured grip over the last ${minSessions} sessions (${gapStr}). An early fatigue signal — consider a lighter finger session.`;
 
   return { deload: true, severity, state: "systemic_concern", signals, why };
 }
@@ -239,13 +423,16 @@ export const DELOAD_YELLOW_AT = 0.5;
 export function deloadStatus(history, workoutSessions = [], opts = {}) {
   const res = computeDeload(history, workoutSessions, opts);
   const gaps = res.signals && res.signals.gripGaps ? res.signals.gripGaps : {};
-  const means = Object.values(gaps).map(g => g.mean).filter(Number.isFinite);
-  const haveSignal = means.length >= 1;
+  const entries = Object.values(gaps).filter(g => Number.isFinite(g.mean));
+  const haveSignal = entries.length >= 1;
+  const means = entries.map(g => g.mean);
   const avgGap = haveSignal ? means.reduce((s, v) => s + v, 0) / means.length : 0;
 
-  // Pressure rises as average cross-grip recovery degrades below zero.
+  // Pressure is averaged over each grip's OWN runway rather than over the
+  // raw gaps. Averaging the gaps first assumed the grips shared a scale
+  // and a centre, and they do not: their baselines differ in both.
   const pressure = haveSignal
-    ? Math.max(0, Math.min(1, -avgGap / DELOAD_PRESSURE_SCALE))
+    ? entries.reduce((s, g) => s + gripPressure(g), 0) / entries.length
     : 0;
 
   // Level: red only at the full strong-deload condition; yellow on a
