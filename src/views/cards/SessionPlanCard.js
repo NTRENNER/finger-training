@@ -47,6 +47,7 @@ import { trainingPurpose } from "../../model/trainingPurpose.js";
 // per-grip cookedness math through cookedScaling.capacityMultiplier.
 
 import React, { useEffect, useMemo, useState } from "react";
+import "./SessionPlanCard.css";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { fmtW } from "../../ui/format.js";
@@ -469,7 +470,7 @@ export function SessionPlanCard({
 
   // ── Render ─────────────────────────────────────────────────
   return (
-    <Card style={{ marginBottom: 16, border: `1px solid ${activeColor}66` }}>
+    <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
 
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
       {/* Header */}
@@ -501,20 +502,8 @@ export function SessionPlanCard({
               🧗 {FOCUS_LABEL[climbingFocus] ?? climbingFocus} focus
             </button>
           )}
-          <div style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
-            padding: "2px 8px", borderRadius: 10,
-            background: activeColor + "22", color: activeColor,
-          }}>
-            {activeEmoji} {activeLabel}
-          </div>
         </div>
       </div>
-
-      <details style={{fontSize:12,color:C.muted,marginBottom:12}}>
-        <summary style={{cursor:"pointer"}}>Recent session performance</summary>
-        {sessionContext.map(item=><p key={item.hand}><b>{item.hand === "L" ? "Left" : "Right"}:</b> {item.text}</p>)}
-      </details>
 
       {/* Recommended Session. When following the recommendation and a
           density ladder is active, show the resolved NEXT-workout T/load
@@ -558,6 +547,7 @@ export function SessionPlanCard({
         return (
           <button
             aria-label="Use recommended session"
+            aria-pressed={recActive}
             onClick={() => {
               setPeakTestSelected(false);
               setOverrideZone(null);
@@ -565,20 +555,14 @@ export function SessionPlanCard({
             style={{
               display: "block", width: "100%", textAlign: "left",
               cursor: "pointer", font: "inherit",
-              marginBottom: 12, padding: "12px 14px", borderRadius: 10,
-              background: recActive ? recCfg.color + "22" : C.bg,
-              border: recActive
-                ? `2px solid ${recCfg.color}`
-                : `1px solid ${recCfg.color}66`,
-              opacity: recActive ? 1 : 0.7,
-              // Compensate the 2px active border so the card height
-              // doesn't jump when toggling override on/off.
-              margin: recActive ? "0 0 12px 0" : "1px 1px 13px 1px",
+              padding: "8px 0 0", marginBottom: 16,
+              background: "transparent", border: "none", color: C.text,
+              borderRadius: 4,
             }}
           >
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: recCfg.color, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                ★ Recommended
+                {recActive ? "★ Recommended" : "↩ Use recommended session"}
               </div>
               <div style={{ fontSize: 10, fontWeight: 700, color: recCfg.color }}>
                 {recCfg.emoji} {recCfg.label}
@@ -586,13 +570,13 @@ export function SessionPlanCard({
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
               <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: recCfg.color, lineHeight: 1 }}>
+                <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>
+                <div style={{ fontSize: 36, fontWeight: 800, color: recCfg.color, lineHeight: 1 }}>
                   {recT}<span style={{ fontSize: 13, color: C.muted, marginLeft: 2 }}>s</span>
                 </div>
               </div>
               <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
                   Load
                   {recScalePct > 0 && (
                     <span style={{ marginLeft: 6, color: C.orange, fontWeight: 700 }}>
@@ -600,11 +584,11 @@ export function SessionPlanCard({
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+                <div style={{ fontSize: 36, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
                   {fmtW(recLoadKg, unit)}<span style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>{unit}</span>
                 </div>
                 {(recL != null || recR != null) && (
-                  <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
                     {recL != null && <>L {fmtW(recL, unit)}</>}
                     {recL != null && recR != null && " · "}
                     {recR != null && <>R {fmtW(recR, unit)}</>}
@@ -637,16 +621,39 @@ export function SessionPlanCard({
         );
       })()}
 
-      {/* "How cooked today?" slider — 0–10 pre-workout state, defaults
-          to 0 (fresh, multiplier = 1, no scale-down). Higher values apply
-          exp(-β_grip · cooked) to the prescribed load. Optional: leave it
-          at fresh on a normal day; raise it only when you're not. */}
+      {isOverridden && <div style={{ fontSize: 12, fontWeight: 700, color: activeColor, marginBottom: 8 }}>{activeEmoji} {activeLabel} · Selected session</div>}
+
+      {/* Hangs / Rest / Time strip */}
       <div style={{
-        display: "flex", alignItems: "center", gap: 12,
-        padding: "10px 12px", marginBottom: 12,
-        borderRadius: 8,
-        background: C.bg,
-        border: `1px solid ${C.border}`,
+        display: "flex", gap: 6, marginBottom: 14,
+        padding: "12px 0", alignItems: "center",
+        borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
+      }}>
+        {[
+          { label: peakTestSelected ? "Pulls" : "Hangs", value: reps },
+          { label: "Rest",  value: `${rest}s` },
+          { label: "Time",  value: timeStr },
+        ].map(({ label, value }, i, arr) => (
+          <React.Fragment key={label}>
+            <div style={{ textAlign: "center", flex: 1 }}>
+              <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: activeColor }}>{value}</div>
+            </div>
+            {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
+          </React.Fragment>
+        ))}
+      </div>
+
+      <details style={{fontSize:12,color:C.muted,marginBottom:12}}>
+        <summary style={{cursor:"pointer"}}>Recent session performance</summary>
+        {sessionContext.map(item=><p key={item.hand}><b>{item.hand === "L" ? "Left" : "Right"}:</b> {item.text}</p>)}
+      </details>
+
+      {/* Optional self-reported load adjustment. Spacing groups the
+          controls without another card inside the session plan. */}
+      <div style={{
+        display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12,
+        padding: "12px 0", marginBottom: 12,
       }}>
         <div style={{ flex: "0 0 auto" }}>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>
@@ -682,7 +689,7 @@ export function SessionPlanCard({
             onCookedChange?.(Number(e.target.value));
           }}
           style={{
-            flex: 1,
+            flex: "1 1 140px", minWidth: 0,
             accentColor: C.orange,
           }}
           aria-label="Cookedness (0 fresh, 10 wrecked)"
@@ -750,26 +757,6 @@ export function SessionPlanCard({
       )}
 
 
-      {/* Hangs / Rest / Time strip */}
-      <div style={{
-        display: "flex", gap: 6, marginBottom: 12,
-        background: C.bg, borderRadius: 10, padding: "10px 14px", alignItems: "center",
-      }}>
-        {[
-          { label: peakTestSelected ? "Pulls" : "Hangs", value: reps },
-          { label: "Rest",  value: `${rest}s` },
-          { label: "Time",  value: timeStr },
-        ].map(({ label, value }, i, arr) => (
-          <React.Fragment key={label}>
-            <div style={{ textAlign: "center", flex: 1 }}>
-              <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: activeColor }}>{value}</div>
-            </div>
-            {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
-          </React.Fragment>
-        ))}
-      </div>
-
       {/* (Hangs + Rest sliders removed June 2026 — protocol-driven;
           see the comment at the reps/rest derivation above.) */}
 
@@ -782,7 +769,8 @@ export function SessionPlanCard({
           down so the user sees the trade-off across the full curve.
           Peak test spans both columns because it is a protocol choice,
           not another modeled force-duration point. */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
+      <div className="session-choice-grid">
         {rows.map(r => {
           // Tile is "active" only when it's the user's override pick.
           // When no override is in effect, the Recommended button above
@@ -803,6 +791,7 @@ export function SessionPlanCard({
               key={r.key}
               disabled={deferred}
               aria-label={`Train ${r.label} at ${r.T} seconds`}
+              aria-pressed={isActive}
               onClick={() => {
                 if (!deferred) {
                   setPeakTestSelected(false);
@@ -811,8 +800,8 @@ export function SessionPlanCard({
               }}
               title={deferred ? `Complete the ${r.deferredReason.replace("after ", "")} first` : undefined}
               style={{
-                textAlign: "left", cursor: deferred ? "default" : "pointer", font: "inherit",
-                padding: "10px 12px", borderRadius: 8,
+                textAlign: "left", cursor: deferred ? "default" : "pointer", font: "inherit", minWidth: 0,
+                padding: "var(--session-choice-padding, 10px 12px)", borderRadius: 8,
                 background: isActive ? r.color + "22" : C.bg,
                 border: isActive
                   ? `2px solid ${r.color}`
@@ -822,38 +811,38 @@ export function SessionPlanCard({
                 margin: isActive ? 0 : 1,
               }}
             >
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: r.color }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+                <div style={{ fontSize: "var(--session-choice-label-size, 11px)", fontWeight: 700, color: r.color }}>
                   {r.emoji} {r.label}
                   {isRec && (
-                    <span style={{ marginLeft: 4, fontSize: 9, color: C.muted, fontWeight: 500 }}>★</span>
+                    <span style={{ marginLeft: 4, fontSize: "var(--session-choice-meta-size, 9px)", color: C.muted, fontWeight: 500 }}>★</span>
                   )}
                 </div>
-                <div style={{ fontSize: 10, color: C.muted }}>
+                <div style={{ fontSize: "var(--session-choice-meta-size, 10px)", color: C.muted }}>
                   {scalePct > 0 && <span style={{ marginRight: 6, color: C.orange }}>−{scalePct}%</span>}
                   {r.T}s
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>L</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+                  <div style={{ fontSize: "var(--session-choice-meta-size, 9px)", color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>L</div>
+                  <div style={{ fontSize: "var(--session-choice-value-size, 18px)", fontWeight: 800, color: C.blue, lineHeight: 1 }}>
                     {r.L != null ? fmtW(r.L, unit) : "—"}
                   </div>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>R</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: C.blue, lineHeight: 1 }}>
+                  <div style={{ fontSize: "var(--session-choice-meta-size, 9px)", color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>R</div>
+                  <div style={{ fontSize: "var(--session-choice-value-size, 18px)", fontWeight: 800, color: C.blue, lineHeight: 1 }}>
                     {r.R != null ? fmtW(r.R, unit) : "—"}
                   </div>
                 </div>
               </div>
               {deferred ? (
-                <div style={{ fontSize: 9, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
+                <div style={{ fontSize: "var(--session-choice-meta-size, 9px)", color: C.muted, marginTop: 4, fontStyle: "italic" }}>
                   {r.deferredReason}
                 </div>
               ) : r.reliability === "extrapolation" && (
-                <div style={{ fontSize: 9, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
+                <div style={{ fontSize: "var(--session-choice-meta-size, 9px)", color: C.muted, marginTop: 4, fontStyle: "italic" }}>
                   extrapolating
                 </div>
               )}
@@ -862,6 +851,7 @@ export function SessionPlanCard({
         })}
         <button
           aria-label="Run peak test"
+          aria-pressed={peakTestSelected}
           onClick={() => {
             setOverrideZone(null);
             setPeakTestSelected(true);
@@ -875,18 +865,16 @@ export function SessionPlanCard({
             textAlign: "left",
             cursor: "pointer",
             font: "inherit",
-            padding: "12px 14px",
-            borderRadius: 8,
-            background: peakTestSelected ? C.blue + "22" : C.bg,
-            border: peakTestSelected
-              ? `2px solid ${C.blue}`
-              : `1px solid ${C.border}`,
-            margin: peakTestSelected ? 0 : 1,
+            padding: "14px 0 0",
+            borderRadius: 0,
+            background: "transparent",
+            border: "none", borderTop: `1px solid ${peakTestSelected ? C.blue : C.border}`,
+            marginTop: 8,
           }}
         >
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: C.blue, marginBottom: 3 }}>
-              🎯 Peak Test
+              {peakTestSelected ? "✓ Peak Test selected" : "🎯 Peak Test"}
               {maxTest?.recommended && (
                 <span style={{ marginLeft: 7, fontSize: 9, color: C.orange, textTransform: "uppercase" }}>
                   due

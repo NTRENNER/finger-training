@@ -5,7 +5,7 @@ import React, {
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
-import { Card, Btn } from "./ui/components.js";
+import { Btn } from "./ui/components.js";
 import { fmtW } from "./ui/format.js";
 
 // Top-level views extracted from this file. See src/views/.
@@ -573,16 +573,15 @@ export default function App() {
       {tab === 0 && (() => {
         if (phase === "idle") {
           const tindeqConnectCard = (
-            <div style={{ marginBottom: 12 }}>
-              <Card>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ padding: "0 2px 14px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>Tindeq Progressor</div>
                     <div style={{ fontSize: 12, color: C.muted }}>
-                      {tindeq.connected ? "Connected ✓" : tindeq.reconnecting ? "Reconnecting…" : tindeq.bleError || "Not connected"}
+                      {tindeq.connected ? "Connected ✓" : tindeq.reconnecting ? "Reconnecting…" : "Not connected"}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {tindeq.connected && (
                       <Btn small onClick={tindeq.tare} color={C.muted}>Tare</Btn>
                     )}
@@ -607,7 +606,6 @@ export default function App() {
                 {tindeq.bleError && (
                   <div style={{ marginTop: 8, fontSize: 12, color: C.red }}>{tindeq.bleError}</div>
                 )}
-              </Card>
             </div>
           );
           return (

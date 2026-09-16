@@ -52,7 +52,7 @@
 import React, { useMemo, useState } from "react";
 
 import { C } from "../ui/theme.js";
-import { Card, Btn, PageFrame } from "../ui/components.js";
+import { Btn, PageFrame } from "../ui/components.js";
 import { fmt0, toDisp, fromDisp } from "../ui/format.js";
 
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_WORKOUT_LOG_KEY, LS_DELOAD_WEEK_KEY } from "../lib/storage.js";
@@ -268,7 +268,7 @@ export function SetupView({
           heading doubles as the call-to-action: it reads "Select a grip
           to start" (blue) until a grip is picked, then reverts to the
           neutral "Grip Type" label. */}
-      <Card>
+      <section aria-label="Grip selection" style={{ marginBottom: 20 }}>
         <div style={{
           fontSize: 14, fontWeight: 700, marginBottom: 12,
           color: config.grip ? C.text : C.blue,
@@ -281,12 +281,13 @@ export function SetupView({
               <button
                 key={g}
                 onClick={() => handleGrip(g)}
+                aria-pressed={config.grip === g}
                 style={{
                   padding: "6px 14px", borderRadius: 20, fontSize: 13,
                   cursor: "pointer", fontWeight: 500,
                   background: config.grip === g ? C.blue : C.border,
                   color: config.grip === g ? "#fff" : C.muted,
-                  border: "none",
+                  border: "none", minHeight: 44,
                 }}
               >
                 {g}
@@ -294,7 +295,7 @@ export function SetupView({
             ))}
           </div>
         </div>
-      </Card>
+      </section>
 
       {/* Single unified session-pick surface — RPE slider on top, six
           clickable zone tiles, session details below. Replaces the
@@ -324,7 +325,8 @@ export function SetupView({
           the F-D chart and Prescribed Load card instead of bloating
           the Setup flow. */}
 
-      {/* Tindeq Connect slot — rendered just above the Start button */}
+      {/* Connection and start form one action area. */}
+      <section aria-label="Start your session">
       {connectSlot}
 
       {/* Start gating: a grip must be picked. Cookedness defaults to 0
@@ -337,6 +339,7 @@ export function SetupView({
       >
         Start Session →
       </Btn>
+      </section>
 
       {/* Abrahangs-inspired low-intensity finger loading — a submaximal
           adjunct, cloud-synced and kept entirely separate from the
