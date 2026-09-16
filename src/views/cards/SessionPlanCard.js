@@ -88,6 +88,8 @@ const FOCUS_LABEL = {
 export function SessionPlanCard({
   history, grip, freshMap, threeExpPriors, activities = [],
   GOAL_CONFIG, unit, hand = "Both",
+  // Setup supplies the shared heading and device picker, including empty states.
+  plannerHeader = null,
   // onApplyPlan flows the active session config (zone, T, reps, rest)
   // back up so the workout runner uses it. Auto-fires whenever any of
   // those change.
@@ -341,8 +343,8 @@ export function SessionPlanCard({
   // ── Empty / loading states ───────────────────────────────────
   if (!grip) {
     return (
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Session Plan</div>
+      <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
+        {plannerHeader || <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Session Plan</div>}
         <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
           Pick a grip above to see your continuous prescription.
         </div>
@@ -351,8 +353,8 @@ export function SessionPlanCard({
   }
   if (!rec || !rows) {
     return (
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Session Plan</div>
+      <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
+        {plannerHeader || <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Session Plan</div>}
         <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
           Need at least 2 reps on this grip to fit a curve. Run a probe
           session at any duration to get started.
@@ -471,13 +473,14 @@ export function SessionPlanCard({
   // ── Render ─────────────────────────────────────────────────
   return (
     <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
+      {plannerHeader}
 
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>
+      {/* Standalone title or optional training-focus control. */}
+      {(!plannerHeader || (climbingFocus && climbingFocus !== "balanced")) && <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
+        {!plannerHeader && <div style={{ fontSize: 14, fontWeight: 700 }}>
           Session Plan · {grip}
-        </div>
+        </div>}
         <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
           {/* Climbing-focus pill — only renders when focus is non-default.
               Passive context indicator (not an action): tells the user the
@@ -503,7 +506,7 @@ export function SessionPlanCard({
             </button>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Recommended Session. When following the recommendation and a
           density ladder is active, show the resolved NEXT-workout T/load

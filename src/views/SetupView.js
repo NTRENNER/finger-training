@@ -242,10 +242,40 @@ export function SetupView({
     setDeloadWeek(null);
   };
 
+  const plannerHeader = (
+      <section aria-label="Grip selection" style={{ marginBottom: 24 }}>
+        <h2 style={{ margin: "0 0 20px", fontSize: 26, fontWeight: 750 }}>Session Planner</h2>
+        <div style={{
+          fontSize: 14, fontWeight: 700, marginBottom: 12,
+          color: config.grip ? C.text : C.blue,
+        }}>
+          Select device
+        </div>
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            {GRIP_PRESETS.map(g => (
+              <button
+                key={g}
+                onClick={() => handleGrip(g)}
+                aria-pressed={config.grip === g}
+                style={{
+                  padding: "12px 4px", borderRadius: 12, fontSize: 16, minWidth: 0,
+                  cursor: "pointer", fontWeight: 650,
+                  background: config.grip === g ? C.blue : C.border,
+                  color: config.grip === g ? "#fff" : C.text,
+                  border: "none", minHeight: 52,
+                }}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+  );
+
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
-      <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
-
       {/* The recovery gauge itself moved to Analysis → Fingers in
           September 2026. It is a diagnostic, not a pre-session decision:
           it does not change a single prescribed load, and it read green
@@ -264,39 +294,6 @@ export function SetupView({
         onEndWeek={endDeloadWeek}
       />
 
-      {/* Grip Type — still per-grip, the curve is grip-scoped. The
-          heading doubles as the call-to-action: it reads "Select a grip
-          to start" (blue) until a grip is picked, then reverts to the
-          neutral "Grip Type" label. */}
-      <section aria-label="Grip selection" style={{ marginBottom: 20 }}>
-        <div style={{
-          fontSize: 14, fontWeight: 700, marginBottom: 12,
-          color: config.grip ? C.text : C.blue,
-        }}>
-          {config.grip ? "Grip Type" : "Select a grip to start"}
-        </div>
-        <div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-            {GRIP_PRESETS.map(g => (
-              <button
-                key={g}
-                onClick={() => handleGrip(g)}
-                aria-pressed={config.grip === g}
-                style={{
-                  padding: "6px 14px", borderRadius: 20, fontSize: 13,
-                  cursor: "pointer", fontWeight: 500,
-                  background: config.grip === g ? C.blue : C.border,
-                  color: config.grip === g ? "#fff" : C.muted,
-                  border: "none", minHeight: 44,
-                }}
-              >
-                {g}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Single unified session-pick surface — RPE slider on top, six
           clickable zone tiles, session details below. Replaces the
           previously-separate ContinuousPickCard + PrescribedLoadCard
@@ -305,6 +302,7 @@ export function SetupView({
           consolidated path so the slider, the recommended pick, and the
           per-zone tiles all live in one box and stay in sync. */}
       <SessionPlanCard
+        plannerHeader={plannerHeader}
         history={history}
         grip={config.grip}
         hand={config.hand}
