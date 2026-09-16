@@ -826,7 +826,9 @@ export function SessionPlanCard({
                 </div>
                 <div style={{ fontSize: "var(--session-choice-meta-size, 10px)", color: C.muted }}>
                   {scalePct > 0 && <span style={{ marginRight: 6, color: C.orange }}>−{scalePct}%</span>}
-                  {r.T}s
+                  <span style={{ fontSize: "var(--session-choice-duration-size, 18px)", fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                    {r.T}s
+                  </span>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
