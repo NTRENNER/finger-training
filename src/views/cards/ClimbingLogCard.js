@@ -2,8 +2,8 @@
 // CLIMBING LOG CARD — single-card climb logger
 // ─────────────────────────────────────────────────────────────
 // One climbing entry's worth of data: discipline + venue + grade +
-// ascent style + wall (boulder-only) + RPE, plus an optional name
-// (any climb) and outdoor-only location (cliff / area). Collapses to a one-row
+// ascent style + wall (boulder-only) + attempts + RPE, plus an optional
+// name (any climb) and outdoor-only location (cliff / area). Collapses to a one-row
 // tappable button when not in use; expands inline with the full
 // form on tap. Saves via the onLog callback handed in by the
 // caller; doesn't touch storage or sync itself.
@@ -28,6 +28,7 @@ import {
   gradesFor, defaultGradeFor,
 } from "../../lib/climbing-grades.js";
 import { newClimbingPrForEntry } from "../../model/climbingPrBadges.js";
+import { MAX_ATTEMPTS_PER_CLIMB } from "../../model/climbingFatigue.js";
 
 // Per-RPE descriptive label rendered under the slider. Calibrated
 // for PER-CLIMB effort (not session intensity) — the question is
@@ -57,6 +58,14 @@ export function ClimbingLogCard({ activities = [], onLog }) {
   const [ascent, setAscent]         = useState("flash");
   const [wall, setWall]             = useState("commercial");
   const [rpe, setRpe]               = useState(7);
+  // How many times this climb was tried (September 2026). One row per
+  // PROBLEM, not per burn: "V7, eight attempts, sent" is one entry.
+  // Before this existed, logging a projecting session honestly meant
+  // eight near-identical rows, so nobody did it, and session fatigue —
+  // which counted rows — scored the hardest days of the year below a
+  // casual lap day. Resets to 1 after each save; it's per-climb data,
+  // not a session default.
+  const [attempts, setAttempts]     = useState(1);
   const [logged, setLogged]         = useState(false);
   const [prAward, setPrAward]       = useState(null);
   // Outdoor-only metadata. Free text, all optional. Cleared after
@@ -99,6 +108,9 @@ export function ClimbingLogCard({ activities = [], onLog }) {
       discipline, venue, grade, ascent, rpe,
     };
     if (showWall) entry.wall = wall;
+    // Only write a non-default attempt count. Null means one, so a
+    // one-and-done climb stays the same shape it has always been.
+    if (attempts > 1) entry.attempts = attempts;
     // Optional name — available for any climb (a meaningful gym project
     // deserves a name as much as an outdoor route). Stored as route_name
     // so it surfaces as the bold title in History.
@@ -128,7 +140,7 @@ export function ClimbingLogCard({ activities = [], onLog }) {
     // Discipline / venue / wall / RPE persist (they're closer to
     // user-session defaults than per-climb data).
     setRouteName(""); setCrag(""); setArea("");
-    setStars(0); setNotes("");
+    setStars(0); setNotes(""); setAttempts(1);
     setTimeout(() => {
       setLogged(false);
       setPrAward(null);
@@ -344,6 +356,68 @@ export function ClimbingLogCard({ activities = [], onLog }) {
             <div style={{ fontSize: 10, color: ascent === key ? "#fff" : C.muted, opacity: 0.85 }}>{desc}</div>
           </button>
         ))}
+      </div>
+
+      {/* Attempts — how many times you pulled on before walking away
+          or sending. The whole point of the field is that a projecting
+          session is ONE climb and a lot of work; without it, the log
+          can't tell eight burns on a V7 from a one-move flash. Quick
+          chips cover the common counts; the stepper handles the rest. */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+          Attempts
+        </div>
+        <div style={{ fontSize: 11, color: C.muted }}>
+          {attempts === 1
+            ? "one and done"
+            : ascent === "attempt"
+              ? `${attempts} burns, no send`
+              : `sent on try ${attempts}`}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, alignItems: "center" }}>
+        <button
+          type="button"
+          onClick={() => setAttempts(a => Math.max(1, a - 1))}
+          disabled={attempts <= 1}
+          aria-label="One fewer attempt"
+          style={{
+            width: 36, height: 36, borderRadius: 8, cursor: attempts <= 1 ? "default" : "pointer",
+            background: C.bg, color: attempts <= 1 ? C.border : C.text,
+            border: `1px solid ${C.border}`, fontSize: 18, fontWeight: 700, lineHeight: 1,
+          }}
+        >−</button>
+        <div style={{
+          minWidth: 44, textAlign: "center", fontSize: 20, fontWeight: 800,
+          color: attempts > 1 ? C.orange : C.text,
+        }}>{attempts}</div>
+        <button
+          type="button"
+          onClick={() => setAttempts(a => Math.min(MAX_ATTEMPTS_PER_CLIMB, a + 1))}
+          disabled={attempts >= MAX_ATTEMPTS_PER_CLIMB}
+          aria-label="One more attempt"
+          style={{
+            width: 36, height: 36, borderRadius: 8, cursor: "pointer",
+            background: C.bg, color: C.text,
+            border: `1px solid ${C.border}`, fontSize: 18, fontWeight: 700, lineHeight: 1,
+          }}
+        >+</button>
+        <div style={{ display: "flex", gap: 4, flex: 1, justifyContent: "flex-end", flexWrap: "wrap" }}>
+          {[1, 3, 5, 10].map(n => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setAttempts(n)}
+              style={{
+                padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                background: attempts === n ? C.purple : C.bg,
+                color: attempts === n ? "#fff" : C.muted,
+                border: `1px solid ${attempts === n ? C.purple : C.border}`,
+                fontSize: 12, fontWeight: 600,
+              }}
+            >{n}</button>
+          ))}
+        </div>
       </div>
 
       {/* RPE — per-climb effort (not session-wide). The label

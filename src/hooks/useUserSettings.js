@@ -88,14 +88,14 @@ function confirmBWPushed(date, kg) {
 }
 
 export function useUserSettings({ user, syncSignal = 0 }) {
-  // ── Unit preference ────────────────────────────────────
+  // ── Unit preference ───────────────────────────────────────
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
   const saveUnit = useCallback((u) => {
     setUnit(u);
     saveLS("unit_pref", u);
   }, []);
 
-  // ── Body weight ─────────────────────────────────────────
+  // ── Body weight ───────────────────────────────────────────
   // Two storage keys: LS_BW_KEY is the scalar current weight that
   // every consumer reads, LS_BW_LOG_KEY is the per-date history that
   // the trends + per-session-date normalization paths consume. saveBW
@@ -141,7 +141,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     }
   }, []);
 
-  // ── BW cloud reconcile ─────────────────────────────────
+  // ── BW cloud reconcile ───────────────────────────────────
   // Runs when `user` flips from null → signed-in. Mirrors the
   // useRepHistory reconcile pattern: fetch cloud log, union with
   // local log on date-key, save the merged set back to LS, and
@@ -252,7 +252,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     return () => { cancelled = true; };
   }, [user, syncSignal]);
 
-  // ── Trip (user-editable target trip) ─────────────────────
+  // ── Trip (user-editable target trip) ──────────────────────
   const [trip, setTrip] = useState(() => {
     const stored = loadLS(LS_TRIP_KEY);
     return (stored && typeof stored === "object" && stored.date) ? stored : DEFAULT_TRIP;
@@ -313,7 +313,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     if (user) flushUserSettingsPatch();
   }, [user]);
 
-  // ── Pinned per-grip baselines ──────────────────────────
+  // ── Pinned per-grip baselines ─────────────────────────────
   // The frozen { [grip]: { date, amps } } map that anchors Curve
   // Improvement. Once a grip's baseline is seeded (≥5 failures × ≥3
   // distinct durations), it gets written here and never re-derived
@@ -335,7 +335,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     if (user) flushUserSettingsPatch();
   }, [user]);
 
-  // ── Pinned per-(grip, hand) baselines ────────────────────
+  // ── Pinned per-(grip, hand) baselines ─────────────────────
   // Same freeze contract as the pooled map, keyed `${grip}|${hand}`
   // (June 2026, added with the analysis hand selector). Same schema
   // versioning, same cloud-wins reconcile, synced under
