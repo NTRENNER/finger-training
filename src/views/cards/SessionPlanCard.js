@@ -561,9 +561,11 @@ export function SessionPlanCard({
             style={{
               display: "block", width: "100%", textAlign: "left",
               cursor: "pointer", font: "inherit",
-              padding: "8px 0 0", marginBottom: 16,
-              background: "transparent", border: "none", color: C.text,
-              borderRadius: 4,
+              padding: 16, marginBottom: 16, boxSizing: "border-box",
+              background: C.bg, color: C.text,
+              border: `1px solid ${recActive ? recCfg.color : C.border}`,
+              boxShadow: recActive ? `inset 0 0 0 1px ${recCfg.color}` : "none",
+              borderRadius: 8,
             }}
           >
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
