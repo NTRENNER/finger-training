@@ -326,7 +326,15 @@ if (mode === "snapshot") {
   console.log(`snapshot written to ${SNAP}\n`);
 } else if (mode === "check") {
   if (!existsSync(SNAP)) { console.error("No snapshot yet — run: npm run replay -- --snapshot"); process.exit(2); }
-  const changes = diff(JSON.parse(readFileSync(SNAP, "utf8")), current);
+  // Metadata about the RUN, not about training. `asOf` and
+  // `windowsAnchoredAt` describe which export was replayed and where its
+  // date-relative windows were anchored; reporting those as "training
+  // decisions changed" is the same crying-wolf failure the anchoring was
+  // added to stop, one level up.
+  const RUN_METADATA = new Set(["asOf", "windowsAnchoredAt"]);
+  const strip = r => Object.fromEntries(
+    Object.entries(r).filter(([k]) => !RUN_METADATA.has(k)));
+  const changes = diff(strip(JSON.parse(readFileSync(SNAP, "utf8"))), strip(current));
   if (changes.length === 0) { console.log("\nreplay --check: no change to any training decision.\n"); process.exit(0); }
   console.log(`\nreplay --check: ${changes.length} training decision${changes.length === 1 ? "" : "s"} changed\n`);
   for (const c of changes) console.log(`  ${c.path}\n      ${JSON.stringify(c.before)}  →  ${JSON.stringify(c.after)}`);
