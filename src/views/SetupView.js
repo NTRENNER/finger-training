@@ -60,11 +60,9 @@ import { useLSValue } from "../hooks/useLSValue.js";
 import { today } from "../util.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
-import { computeDeload, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
+import { deloadStatus, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.js";
 import { TendonCard } from "./cards/TendonCard.jsx";
-import { RecoveryStatusCard } from "./cards/RecoveryStatusCard.jsx";
-import { CardBoundary } from "../ui/ErrorBoundary.jsx";
 import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 
 // ────────────────────────────────────────────────────────────────
@@ -215,10 +213,11 @@ export function SetupView({
   // accepted "deload week" is a volume-cap reminder, not a silent load
   // scale-down.
   const todayStr = today();
-  const deloadState = useMemo(
-    () => computeDeload(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: todayStr, activities }),
+  const recoveryStatus = useMemo(
+    () => deloadStatus(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: todayStr, activities }),
     [history, todayStr, activities]
   );
+  const deloadState = recoveryStatus.deload;
 
   // Accepted deload-week state (device-local). Active for DELOAD_WEEK_DAYS.
   const [deloadWeek, setDeloadWeek] = useState(() => loadLS(LS_DELOAD_WEEK_KEY) || null);
@@ -247,12 +246,17 @@ export function SetupView({
     <PageFrame style={{ padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Session Setup</h2>
 
-      <CardBoundary name="Recovery status">
-        <RecoveryStatusCard history={history} activities={activities} />
-      </CardBoundary>
-
+      {/* The recovery gauge itself moved to Analysis → Fingers in
+          September 2026. It is a diagnostic, not a pre-session decision:
+          it does not change a single prescribed load, and it read green
+          for five months straight, so on the first screen of the app it
+          was mostly furniture for a new user. What stays here is the
+          escalation path — the banner below, which surfaces only when
+          there is actually something to act on before you pull. */}
       <DeloadBanner
         deload={deloadState}
+        softening={recoveryStatus.level === "yellow"}
+        softeningWhy={deloadState?.why || null}
         guidance={guidance}
         weekActive={weekActive}
         dayOfWeek={weekDay}

@@ -50,6 +50,11 @@ export function DeloadBanner({
   dayOfWeek = 1,
   onStartWeek,
   onEndWeek,
+  // Recovery is below this athlete's own normal, but not on every grip —
+  // short of the cross-grip bar a deload needs. Worth one line before a
+  // session, not a card: the gauge that explains it lives in Analysis.
+  softening = false,
+  softeningWhy = null,
 }) {
   const [dismissed, setDismissed] = useState(false);
 
@@ -64,6 +69,24 @@ export function DeloadBanner({
         <div style={{ fontSize: 12.5, color: C.text, lineHeight: 1.5 }}>{guidance.action}</div>
         <div style={{ marginTop: 8 }}>
           <button onClick={onEndWeek} style={linkBtn}>End deload week</button>
+        </div>
+      </Wrap>
+    );
+  }
+
+  // SOFTENING — short of a deload, but not nothing. Deliberately the
+  // quietest thing this component can render: no buttons, no dismiss, one
+  // line. It only appears once a grip has enough history to be judged
+  // against itself, so a new user will not see it.
+  if ((!deload || !deload.deload) && softening && !dismissed) {
+    return (
+      <Wrap accent={C.yellow}>
+        <div style={{ fontSize: 11.5, color: C.text, lineHeight: 1.5 }}>
+          <b style={{ color: C.yellow, letterSpacing: 0.4 }}>RECOVERY SOFTENING</b>
+          {" — "}
+          {softeningWhy || "below your own normal on a measured grip."}
+          {" "}
+          <span style={{ color: C.muted }}>Details in Analysis → Fingers.</span>
         </div>
       </Wrap>
     );

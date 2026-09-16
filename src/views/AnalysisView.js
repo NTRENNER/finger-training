@@ -67,6 +67,7 @@ import {
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
 import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
+import { RecoveryStatusCard } from "./cards/RecoveryStatusCard.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
@@ -653,6 +654,15 @@ export function AnalysisView({
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
         Explore your recorded pulls and progress across your force-duration curve. Measured gaps guide coverage; they do not guarantee faster adaptation.
       </p>
+
+      {/* Recovery status — moved here from Session Setup (September 2026).
+          It is read from between-rep recovery across grips, which makes it
+          a finger diagnostic, and it belongs with the other diagnostics
+          rather than on the first screen of the app. Opens by default
+          here: arriving on this tab is already the decision to look. */}
+      <CardBoundary name="Recovery status">
+        <RecoveryStatusCard history={history} activities={activities} defaultExpanded />
+      </CardBoundary>
 
       {/* Bodyweight logging lives on the Setup tab now (next to the
           climb logger). Analysis stays focused on viewing — the only

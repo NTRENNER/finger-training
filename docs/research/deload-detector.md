@@ -44,4 +44,10 @@ The decision stays with the measured recovery. Load history says how hard to tak
 
 ## The card
 
-A gauge that reads green for five months does not deserve the top of the Session Setup tab and a full-width gradient bar. It collapses to a single line carrying the state and its colour, and opens itself on yellow or red, on a tap, or while the history scrubber is in use. Prominence should track information content.
+A gauge that reads green for five months does not deserve the top of the Session Setup tab and a full-width gradient bar. Prominence should track information content.
+
+It collapses to a single line carrying the state and its colour, and opens on yellow or red, on a tap, or while the history scrubber is in use. The first cut put the reopen affordance on the collapsed row but the close affordance in a muted eleven-pixel word beside the title; the first person to use it reported there was no way to close the card. The whole header row is the control now, with a chevron and keyboard access, and collapsing also returns the scrubber to "Now" — otherwise an active scrub holds the card open and the toggle looks broken.
+
+The card itself has moved to Analysis → Fingers. It is read from between-rep recovery across grips, which makes it a finger diagnostic, and it belongs with the other diagnostics rather than on the first screen of the app — where, for someone with no history yet, it is furniture. It opens by default there, since arriving on that tab is already the decision to look.
+
+Nothing actionable was lost by moving it. The deload banner already lived on Session Setup and renders only when the detector actually fires, so the gauge was redundant exactly when it mattered. The banner now also carries a single quiet line for the softening state, which is short of the cross-grip bar a deload needs but is still worth knowing before a session; it appears only once a grip has enough history to be judged against itself, so a new user will not see it.
