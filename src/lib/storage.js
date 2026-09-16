@@ -393,6 +393,7 @@ export const LS_HISTORY_KEY = "ft_v3";
 
 // Body-weight log: [{ date: "YYYY-MM-DD", kg: number }]
 export const LS_BW_LOG_KEY = "ft_bw_log";
+export const LS_BW_REMINDER_DISMISSED_KEY = "ft_bw_reminder_dismissed";
 
 // Strength-workout log: [{ id, date, workout, exercises: { [id]: { sets: [...] } } }]
 //

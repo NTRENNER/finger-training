@@ -740,6 +740,7 @@ export default function App() {
           history={history}
           freshMap={freshMap}
           threeExpPriors={threeExpPriors}
+          onBwSave={saveBW}
           onDownload={() => downloadCSV(history)}
           unit={unit}
           bodyWeight={bodyWeight}

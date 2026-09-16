@@ -33,6 +33,7 @@ import {
   migrateLegacyPyramidPins,
 } from "../lib/storage.js";
 import { today } from "../util.js";
+import { validWeightDate } from "../lib/bodyWeight.js";
 import { DEFAULT_TRIP } from "../lib/trip.js";
 import {
   pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates, removeBWTombstones,
@@ -114,31 +115,38 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     if (kg != null) saveLS(LS_BW_KEY, kg);  // hydrate so subsequent loads are O(1)
     return kg;
   });
-  const saveBW = useCallback((kg) => {
-    setBodyWeight(kg);
-    saveLS(LS_BW_KEY, kg);
-    if (kg != null) {
-      const log = loadLS(LS_BW_LOG_KEY) || [];
-      const d = today();
-      // Replace existing entry for today if present, otherwise append
-      const updated = log.filter(e => e.date !== d);
-      saveLS(LS_BW_LOG_KEY, [...updated, { date: d, kg }].sort((a, b) => a.date < b.date ? -1 : 1));
-      // Best-effort cloud push. Failures are logged but otherwise
-      // silent — the local write is already durable, the date stays
-      // dirty, and the next sign-in reconcile retries the backfill.
-      markDirty(LS_BW_DIRTY_KEY, d);
-      // Un-tombstone FIRST: if this date was previously deleted, its
-      // bw_tombstone both shadows the re-log at every future reconcile
-      // and makes the server's reject trigger refuse the insert. A
-      // re-log is strictly newer intent than the old delete, so the
-      // tombstone must die before the push. On failure (offline) the
-      // date stays dirty and the reconcile's re-log path retries both.
-      (async () => {
-        await removeBWTombstones([d]);
-        const ok = await pushBW(d, kg);
-        if (ok) confirmBWPushed(d, kg);
-      })();
+  const saveBW = useCallback((kg, date = today()) => {
+    if (kg == null) {
+      setBodyWeight(null);
+      saveLS(LS_BW_KEY, null);
+      return true;
     }
+    if (!Number.isFinite(kg) || kg <= 0 || !validWeightDate(date)) return false;
+    const log = loadLS(LS_BW_LOG_KEY) || [];
+    const d = date;
+    // One entry per local date; backdated entries must not replace current BW.
+    const updated = log.filter(e => e.date !== d);
+    const next = [...updated, { date: d, kg }].sort((a, b) => a.date.localeCompare(b.date));
+    saveLS(LS_BW_LOG_KEY, next);
+    const latest = next.at(-1);
+    setBodyWeight(latest.kg);
+    saveLS(LS_BW_KEY, latest.kg);
+    // Best-effort cloud push. Failures are logged but otherwise
+    // silent — the local write is already durable, the date stays
+    // dirty, and the next sign-in reconcile retries the backfill.
+    markDirty(LS_BW_DIRTY_KEY, d);
+    // Un-tombstone FIRST: if this date was previously deleted, its
+    // bw_tombstone both shadows the re-log at every future reconcile
+    // and makes the server's reject trigger refuse the insert. A
+    // re-log is strictly newer intent than the old delete, so the
+    // tombstone must die before the push. On failure (offline) the
+    // date stays dirty and the reconcile's re-log path retries both.
+    (async () => {
+      await removeBWTombstones([d]);
+      const ok = await pushBW(d, kg);
+      if (ok) confirmBWPushed(d, kg);
+    })();
+    return true;
   }, []);
 
   // ── BW cloud reconcile ───────────────────────────────────

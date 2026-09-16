@@ -45,6 +45,7 @@ import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics
 import { deleteBW } from "../lib/sync.js";
 import { BadgeCollection } from "./cards/BadgeCollection.jsx";
 import { ClimbingPrBadgeCollection } from "./cards/ClimbingPrBadgeCollection.jsx";
+import { BodyWeightEntry } from "./BodyWeightEntry.jsx";
 import { TendonHistoryList } from "./TendonHistoryList.jsx";
 
 // Default hand for the "+ Add rep" picker. Resolution order:
@@ -79,6 +80,7 @@ export function HistoryView({
   freshMap = null,
   threeExpPriors = null,
   onDownload, unit = "lbs", bodyWeight = null,
+  onBwSave,
   onDeleteSession, onUpdateSession,
   onDeleteRep, onUpdateRep, onAddRep,
   notes = {}, onNoteChange,
@@ -328,6 +330,7 @@ export function HistoryView({
   // (and every other subscriber: BwPrompt, the analysis views) — no
   // shadow React state to keep in sync, and BW entries logged from
   // other tabs or merged by the cloud reconcile appear immediately.
+  const [weightEditor, setWeightEditor] = useState(null);
   const bwRaw = useLSValue(LS_BW_LOG_KEY);
   const bwLog = useMemo(() => bwRaw || [], [bwRaw]);
 
@@ -622,7 +625,7 @@ export function HistoryView({
       )}
       {domain === "weight" && (
         <Card>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 10 }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Body weight log</div>
               <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
@@ -630,10 +633,20 @@ export function HistoryView({
                 {bwMedian != null && ` · median ${fmt1(toDisp(bwMedian, unit))} ${unit}`}
               </div>
             </div>
+            <Btn onClick={() => setWeightEditor({})}>Log weight</Btn>
           </div>
+          {weightEditor && (
+            <BodyWeightEntry
+              unit={unit}
+              entry={weightEditor.entry}
+              latest={bwLogSorted[0]}
+              onSave={onBwSave}
+              onClose={() => setWeightEditor(null)}
+            />
+          )}
           {bwLogSorted.length === 0 ? (
             <div style={{ color: C.muted, fontSize: 12, padding: "16px 0", textAlign: "center" }}>
-              No body weight entries yet. Log one from the Setup tab's BW prompt.
+              No body weight entries yet. Use Log weight to add your first entry.
             </div>
           ) : (
             <div style={{
@@ -650,7 +663,7 @@ export function HistoryView({
                     background: isAnomaly ? "#3f1a1a" : C.bg,
                     border: `1px solid ${isAnomaly ? C.red : C.border}`,
                   }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 10, minWidth: 0 }}>
                       <span style={{ fontSize: 13, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
                         {entry.date}
                       </span>
@@ -663,15 +676,23 @@ export function HistoryView({
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={() => handleDeleteBW(entry.date)}
-                      title="Delete this BW entry (local + cloud)"
-                      style={{
-                        background: "none", border: "none",
-                        color: isAnomaly ? C.red : C.muted,
-                        fontSize: 15, cursor: "pointer", padding: "0 4px", lineHeight: 1,
-                      }}
-                    >🗑</button>
+                    <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+                      <button
+                        onClick={() => setWeightEditor({ entry })}
+                        aria-label={`Edit weight for ${entry.date}`}
+                        style={{ background: "none", border: "none", color: C.blue, padding: "12px 8px", cursor: "pointer", fontSize: 14 }}
+                      >Edit</button>
+                      <button
+                        aria-label={`Delete weight for ${entry.date}`}
+                        onClick={() => handleDeleteBW(entry.date)}
+                        title="Delete this BW entry (local + cloud)"
+                        style={{
+                          background: "none", border: "none",
+                          color: isAnomaly ? C.red : C.muted,
+                          fontSize: 15, cursor: "pointer", padding: "0 4px", lineHeight: 1,
+                        }}
+                      >🗑</button>
+                    </div>
                   </div>
                 );
               })}

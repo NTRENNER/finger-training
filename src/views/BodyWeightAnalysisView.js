@@ -10,7 +10,7 @@
 //      a 7-day rolling average overlay so the eye reads the trend
 //      through the daily noise (water weight, sodium, time of day).
 //
-// Logging happens on the Setup tab (BwPrompt next to ClimbingLogCard).
+// Logging and corrections are available in History → Weight.
 // This view is descriptive only — no input surface.
 
 import React, { useMemo, useState } from "react";
@@ -127,16 +127,15 @@ export function BodyWeightAnalysisView({ unit = "lbs" }) {
     };
   }, [bwLog]);
 
-  // Empty state — no entries yet. Point the user back to Setup where
-  // logging happens.
+  // Empty state — point to the always-available weight history logger.
   if (!headline) {
     return (
       <div style={{ padding: "16px 20px" }}>
         <Sect title="Bodyweight">
           <Card>
             <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.6 }}>
-              No bodyweight entries yet. Log one on the Fingers tab next to the
-              climb logger; it'll sync to the cloud and start charting here.
+              No bodyweight entries yet. Use Log weight in History → Weight
+              to add an entry and start charting here.
             </div>
           </Card>
         </Sect>

@@ -76,7 +76,7 @@ import {
   weeklyStretchCoverage,
 } from "../model/stretching.js";
 
-import { BwPrompt } from "./SetupView.js";
+import { BwPrompt } from "./BodyWeightEntry.jsx";
 
 import { WORKOUT_COLORS } from "./workout/workoutConstants.js";
 import { WTypeBadge } from "./workout/WTypeBadge.js";
