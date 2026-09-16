@@ -28,6 +28,11 @@ export function DeloadGauge({
   asOfDate = null,
   currentDate = null,
   onAsOfDateChange = null,
+  // Collapsed by default when the news is "nothing to report" — see
+  // RecoveryStatusCard. Undefined keeps the always-open behaviour for
+  // any other caller.
+  expanded = true,
+  onToggleExpanded = null,
 }) {
   if (!status) return null;
   const { level, pressure, label, haveSignal, deload } = status;
@@ -39,6 +44,33 @@ export function DeloadGauge({
   const hasTimeline = timelineDates.length > 1 && onAsOfDateChange;
   const isHistorical = asOfDate && currentDate && asOfDate !== currentDate;
 
+  // Collapsed: one line that still carries the state and its colour, with
+  // a short bar so the reading is visible at a glance. Everything that
+  // explains the reading waits behind a tap.
+  if (!expanded) {
+    return (
+      <Card style={{ marginBottom: 16, padding: 0 }}>
+        <button
+          onClick={() => onToggleExpanded?.()}
+          aria-expanded={false}
+          style={{
+            width: "100%", padding: "12px 16px", background: "none", border: "none",
+            cursor: onToggleExpanded ? "pointer" : "default", color: C.text,
+            display: "flex", alignItems: "center", gap: 10, textAlign: "left",
+          }}
+        >
+          <span style={{
+            width: 8, height: 8, borderRadius: 4, flex: "0 0 auto",
+            background: color, opacity: haveSignal ? 1 : 0.5,
+          }} />
+          <span style={{ fontSize: 13, fontWeight: 600, flex: "0 0 auto" }}>Recovery</span>
+          <span style={{ fontSize: 12, color, flex: 1, minWidth: 0 }}>{label}</span>
+          <span style={{ fontSize: 11, color: C.muted, flex: "0 0 auto" }}>details</span>
+        </button>
+      </Card>
+    );
+  }
+
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{
@@ -49,7 +81,19 @@ export function DeloadGauge({
         gap: 6,
         marginBottom: 4,
       }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Recovery status</div>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>
+          Recovery status
+          {onToggleExpanded && (
+            <button
+              onClick={() => onToggleExpanded()}
+              aria-expanded
+              style={{
+                background: "none", border: "none", color: C.muted, cursor: "pointer",
+                fontSize: 11, fontWeight: 600, padding: "0 0 0 8px",
+              }}
+            >hide</button>
+          )}
+        </div>
         {usesHistoricalEstimates && <div style={{ fontSize: 12, color: C.muted }}>Includes historical estimates using planned rest.</div>}
         <div style={{ fontSize: 12.5, fontWeight: 700, color }}>{label}</div>
       </div>
