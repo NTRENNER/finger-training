@@ -44,9 +44,9 @@ import { trainingPurpose } from "../../model/trainingPurpose.js";
 // PrescribedLoadCard still exists in src/views/cards/ — Analysis renders
 // it standalone for retrospective what-if exploration, where the slider
 // is purely local (no workout to drive). Both components share the same
-// per-grip cookedness math through fatigueBeta.capacityMultiplier.
+// per-grip cookedness math through cookedScaling.capacityMultiplier.
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { fmtW } from "../../ui/format.js";
@@ -66,7 +66,7 @@ import {
 } from "../../model/peakForce.js";
 import { ymdLocal } from "../../util.js";
 import { decisiveWhy } from "../../model/coachNotes.js";
-import { capacityMultiplier } from "../../model/fatigueBeta.js";
+import { capacityMultiplier } from "../../model/cookedScaling.js";
 import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import {
   computeDensityLadder, resolveDensityLadderLoads,
@@ -97,10 +97,6 @@ export function SessionPlanCard({
   // and the Start button stays disabled.
   cooked,
   onCookedChange,
-  // Per-grip β model from user_settings.settings.fatigue_model. Used
-  // to compute the load scale-down: prescribedLoad = freshLoad ×
-  // exp(-β_grip · cooked). Replaces the old per-zone applyPersonalGain.
-  fatigueModel = null,
   // Cloud-synced climbing-focus bias ("balanced" | "bouldering" |
   // "power_endurance" | "endurance"). Threaded to the engine to
   // apply per-zone multipliers that nudge close calls toward the
@@ -147,23 +143,23 @@ export function SessionPlanCard({
 
   // ── Climb-derived cookedness suggestion ──────────────────────
   // Derived from today's (+ decayed yesterday's) logged climbs — see
-  // suggestCookedFromClimbs. Pre-fills the slider ONCE per mount when
-  // the user hasn't touched it (cooked still at the 0 default / null);
-  // any manual slider interaction pins their value for the rest of
-  // the session setup. The provenance note below the slider keeps the
-  // suggestion visible even after an override, with a one-tap apply.
+  // suggestCookedFromClimbs. It is OFFERED next to the slider with a
+  // one-tap apply, and never written on the user's behalf.
+  //
+  // Until September 2026 this pre-filled the slider on mount, and that
+  // fill was saved to reps.session_cooked exactly as though the athlete
+  // had reported it. Two things were wrong with that. The narrow one:
+  // the suggestion was badly calibrated — it saturated at 10 on 72% of
+  // climbing days and, because it counted logged ROWS, scored a
+  // projecting session (eight burns, one row) BELOW a lap day. The
+  // broad one survives any recalibration: a number the app inferred is
+  // not a self-report, and storing it as one destroys the only field
+  // that could ever tell us what the athlete actually felt. The slider
+  // now starts where the user left it and stays there until touched.
   const cookedSuggestion = useMemo(
     () => suggestCookedFromClimbs(activities, today()),
     [activities]
   );
-  const cookedTouchedRef = useRef(false);
-  useEffect(() => {
-    if (cookedTouchedRef.current) return;
-    if (!cookedSuggestion || !(cookedSuggestion.cooked > 0)) return;
-    if (cooked != null && cooked !== 0) return;  // user/day value already set
-    onCookedChange?.(cookedSuggestion.cooked);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cookedSuggestion]);
 
   // ── Active zone — defaults to recommended, user can override via tiles ──
   // Stored as the zone key (e.g. "power") or null = "follow recommendation"
@@ -196,24 +192,20 @@ export function SessionPlanCard({
   );
   const ladder = useMemo(
     () => (grip && activeZone && !peakTestSelected && !isZoneOverridden && !rec?.boundaryProbe)
-      ? computeDensityLadder(history, grip, activeZone, {
-          fatigueModel,
-          expectedHands,
-        })
+      ? computeDensityLadder(history, grip, activeZone, { expectedHands })
       : null,
     [
-      history, grip, activeZone, fatigueModel, expectedHands, rec,
+      history, grip, activeZone, expectedHands, rec,
       peakTestSelected, isZoneOverridden,
     ]
   );
 
-  // ── Per-zone tiles (with per-grip cookedness scale-down) ─────────
-  // Every tile gets the same multiplier because β is per-grip. If
-  // zone-specific suppression becomes important again, swap in a
-  // (grip, zone) β table here — the rest of the wiring stays.
+  // ── Per-zone tiles (with cookedness scale-down) ─────────────────
+  // Every tile gets the same multiplier: the rate is a single published
+  // constant, not a per-grip or per-zone table (see cookedScaling.js).
   const rows = useMemo(() => {
     if (!grip) return null;
-    const fatigueMod = capacityMultiplier(fatigueModel, grip, cooked);
+    const fatigueMod = capacityMultiplier(cooked);
     return ZONE_KEYS.map(key => {
       const cfg = GOAL_CONFIG[key];
       if (!cfg) return null;
@@ -249,7 +241,7 @@ export function SessionPlanCard({
           : "well-supported",
       };
     }).filter(Boolean);
-  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, fatigueModel, cooked, rec]);
+  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, cooked, rec]);
 
   // ── Active row — drives the bottom session-details panel ──────────────
   const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
@@ -380,7 +372,7 @@ export function SessionPlanCard({
   const ladderText = (() => {
     if (!ladder) return null;
     const lb = ladder.basis;
-    const lMult = capacityMultiplier(fatigueModel, grip, cooked);
+    const lMult = capacityMultiplier(cooked);
     const loadStr = ["L", "R"]
       .filter(h => ladderPlanLoadByHand?.[h] != null)
       .map(h => `${h} ${fmtW(ladderPlanLoadByHand[h] * lMult, unit)}`)
@@ -536,7 +528,7 @@ export function SessionPlanCard({
         // and the runner use. Multiplied through rec.loadKg and the
         // per-hand values so the Recommended card stays in sync with
         // the rest of the screen as the slider moves.
-        const recMult = capacityMultiplier(fatigueModel, grip, cooked);
+        const recMult = capacityMultiplier(cooked);
         // When the density ladder is active for the recommended zone
         // (i.e. NOT overridden), the session runs the ladder's pinned
         // T + load (see activeT / ladderLoadByHand). The headline must
@@ -661,16 +653,18 @@ export function SessionPlanCard({
             How cooked today?
           </div>
           <div style={{ fontSize: 10, color: C.muted }}>
-            {cooked === 0
-              ? "fresh — no scale-down"
-              : `cooked ${cooked}/10`}
+            {cooked == null
+              ? "not stated — no scale-down"
+              : cooked === 0
+                ? "fresh — no scale-down"
+                : `cooked ${cooked}/10`}
             {cooked > 0 && grip && (() => {
               // Report the multiplier ACTUALLY applied (fixed manual
-              // scaling — see fatigueBeta.capacityMultiplier). The old
+              // scaling — see cookedScaling.capacityMultiplier). The old
               // label computed exp(-β·cooked) directly and advertised
               // a discount that was never applied while scaling was
               // disabled (July 2026).
-              const mult = capacityMultiplier(fatigueModel, grip, cooked);
+              const mult = capacityMultiplier(cooked);
               const pct = Math.round((1 - mult) * 100);
               if (pct < 1) return null;
               return (
@@ -685,7 +679,6 @@ export function SessionPlanCard({
           type="range" min={0} max={10} step={1}
           value={cooked ?? 0}
           onChange={e => {
-            cookedTouchedRef.current = true;  // manual edit pins the value
             onCookedChange?.(Number(e.target.value));
           }}
           style={{
@@ -694,25 +687,24 @@ export function SessionPlanCard({
           }}
           aria-label="Cookedness (0 fresh, 10 wrecked)"
         />
-        {cooked > 0 && (
+        {cooked != null && (
           <button
-            onClick={() => {
-              cookedTouchedRef.current = true;
-              onCookedChange?.(0);
-            }}
+            onClick={() => onCookedChange?.(null)}
             style={{
               flex: "0 0 auto", fontSize: 10, padding: "2px 8px",
               borderRadius: 4, border: `1px solid ${C.border}`,
               background: "transparent", color: C.muted, cursor: "pointer",
             }}
-          >fresh</button>
+            title="Clear — record no opinion for this session"
+          >clear</button>
         )}
       </div>
 
-      {/* Provenance note for the climb-derived suggestion. Shown
-          whenever there's climb-log signal for today/yesterday so the
-          user can see WHY the slider pre-filled — and re-apply with
-          one tap after overriding. */}
+      {/* The climb log's suggestion. Offered, never applied on its
+          own — tapping "apply" is what makes it the user's answer.
+          Shown whenever there's climb-log signal for today or
+          yesterday, including after the user has set their own value,
+          so the two numbers can be compared. */}
       {cookedSuggestion && cookedSuggestion.cooked > 0 && (
         <div style={{
           fontSize: 10, color: C.muted, margin: "-6px 2px 12px",
@@ -722,14 +714,13 @@ export function SessionPlanCard({
           {" — "}
           {cookedSuggestion.todayFatigue != null
             ? `${cookedSuggestion.nClimbsToday} climb${cookedSuggestion.nClimbsToday === 1 ? "" : "s"} logged today`
+              + (cookedSuggestion.nAttemptsToday > cookedSuggestion.nClimbsToday
+                  ? ` over ${cookedSuggestion.nAttemptsToday} attempts` : "")
             : "no climbs today"}
           {cookedSuggestion.yesterdayFatigue != null && " + yesterday's session"}
           {cooked !== cookedSuggestion.cooked && (
             <button
-              onClick={() => {
-                cookedTouchedRef.current = true;
-                onCookedChange?.(cookedSuggestion.cooked);
-              }}
+              onClick={() => onCookedChange?.(cookedSuggestion.cooked)}
               style={{
                 background: "none", border: "none", color: C.orange,
                 fontSize: 10, cursor: "pointer", padding: 0, marginLeft: 6,
