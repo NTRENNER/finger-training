@@ -19,10 +19,7 @@
 // Hook contract: pass the current `user` (from useAuth). The hook
 // fires its cloud reconciles when `user` flips null → signed-in and
 // silently no-ops otherwise. Returns a flat object of getter/setter
-// pairs the parent threads into views. `setFatigueModel` is exposed
-// (not just a saveFatigueModel) because the post-session refresh in
-// App.js needs to apply a server-trigger update without going through
-// the cloud-push path.
+// pairs the parent threads into views.
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -41,7 +38,6 @@ import {
   pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates, removeBWTombstones,
   fetchUserSettings, enqueueUserSettingsPatch, flushUserSettingsPatch,
 } from "../lib/sync.js";
-import { defaultFatigueModel } from "../model/fatigueBeta.js";
 
 // Pinned-baseline schema version. Bump to invalidate stale pins so they
 // re-seed from the current (fixed) baseline computation.
@@ -92,14 +88,14 @@ function confirmBWPushed(date, kg) {
 }
 
 export function useUserSettings({ user, syncSignal = 0 }) {
-  // ── Unit preference ───────────────────────────────────────
+  // ── Unit preference ────────────────────────────────────
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
   const saveUnit = useCallback((u) => {
     setUnit(u);
     saveLS("unit_pref", u);
   }, []);
 
-  // ── Body weight ───────────────────────────────────────────
+  // ── Body weight ─────────────────────────────────────────
   // Two storage keys: LS_BW_KEY is the scalar current weight that
   // every consumer reads, LS_BW_LOG_KEY is the per-date history that
   // the trends + per-session-date normalization paths consume. saveBW
@@ -145,7 +141,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     }
   }, []);
 
-  // ── BW cloud reconcile ───────────────────────────────────
+  // ── BW cloud reconcile ─────────────────────────────────
   // Runs when `user` flips from null → signed-in. Mirrors the
   // useRepHistory reconcile pattern: fetch cloud log, union with
   // local log on date-key, save the merged set back to LS, and
@@ -256,7 +252,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     return () => { cancelled = true; };
   }, [user, syncSignal]);
 
-  // ── Trip (user-editable target trip) ──────────────────────
+  // ── Trip (user-editable target trip) ─────────────────────
   const [trip, setTrip] = useState(() => {
     const stored = loadLS(LS_TRIP_KEY);
     return (stored && typeof stored === "object" && stored.date) ? stored : DEFAULT_TRIP;
@@ -317,7 +313,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     if (user) flushUserSettingsPatch();
   }, [user]);
 
-  // ── Pinned per-grip baselines ─────────────────────────────
+  // ── Pinned per-grip baselines ──────────────────────────
   // The frozen { [grip]: { date, amps } } map that anchors Curve
   // Improvement. Once a grip's baseline is seeded (≥5 failures × ≥3
   // distinct durations), it gets written here and never re-derived
@@ -339,7 +335,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     if (user) flushUserSettingsPatch();
   }, [user]);
 
-  // ── Pinned per-(grip, hand) baselines ─────────────────────
+  // ── Pinned per-(grip, hand) baselines ────────────────────
   // Same freeze contract as the pooled map, keyed `${grip}|${hand}`
   // (June 2026, added with the analysis hand selector). Same schema
   // versioning, same cloud-wins reconcile, synced under
@@ -355,17 +351,9 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     if (user) flushUserSettingsPatch();
   }, [user]);
 
-  // ── Fatigue β model (per-grip) ───────────────────────────
-  // Stored in user_settings.settings.fatigue_model so it persists
-  // across devices. Updated server-side by the
-  // update_fatigue_beta_from_rep_trg trigger on every rep-1 insert;
-  // the client re-fetches user_settings on sign-in to pick up changes.
-  // See src/model/fatigueBeta.js for the math.
-  //
-  // setFatigueModel is exposed so App.js's post-session refresh
-  // (after the server trigger fires) can apply the new value without
-  // going through a cloud round-trip from this hook's perspective.
-  const [fatigueModel, setFatigueModel] = useState(() => defaultFatigueModel());
+  // The per-grip fatigue β model lived here until September 2026,
+  // synced through this same user_settings row. Learner, server
+  // trigger and stored betas are all gone — see cookedScaling.js.
 
   // True once the user_settings cloud reconcile below has landed (or
   // immediately when signed out — local is the authority then).
@@ -484,17 +472,6 @@ export function useUserSettings({ user, syncSignal = 0 }) {
           enqueueUserSettingsPatch({ pinned_perhand_baselines: merged });
         }
       }
-      // Pull fatigue_model so the client uses the same β the server
-      // trigger is updating. Falls back to local defaults if cloud
-      // has no value yet (first-run before any rep-1 insert).
-      const fatigue = hasPending("fatigue_model")
-        && pending.fatigue_model
-        && typeof pending.fatigue_model === "object"
-        ? pending.fatigue_model
-        : cloud.fatigue_model;
-      if (fatigue && typeof fatigue === "object") {
-        setFatigueModel(fatigue);
-      }
       // Reconcile landed — pinned baselines (and everything else) now
       // reflect the cloud. Safe to let the auto-pin effect write.
       setSettingsSynced(true);
@@ -518,7 +495,6 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     pyramidProjectMap, savePyramidProjectMap,
     pinnedGripBaselines, savePinnedGripBaselines,
     pinnedPerHandBaselines, savePinnedPerHandBaselines,
-    fatigueModel, setFatigueModel,
     settingsSynced,
   };
 }
