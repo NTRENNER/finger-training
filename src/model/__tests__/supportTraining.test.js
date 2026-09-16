@@ -195,13 +195,13 @@ describe("recommendNextWorkout: A→B→C round-robin", () => {
   test("empty history starts the cycle at A", () => {
     const rec = recommendNextWorkout([], { refDate: REF_DATE });
     expect(rec.primary.id).toBe("A");
-    expect(rec.reason).toMatch(/No A\/B\/C on record/);
+    expect(rec.reason).toMatch(/Start with Workout A/);
   });
 
   test("after A → recommends B", () => {
     const rec = recommendNextWorkout([sess("A", 2)], { refDate: REF_DATE });
     expect(rec.primary.id).toBe("B");
-    expect(rec.reason).toMatch(/Last support workout was A/);
+    expect(rec.reason).toMatch(/You last completed Workout A/);
   });
 
   test("after B → recommends C", () => {

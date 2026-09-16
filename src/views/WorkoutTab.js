@@ -65,7 +65,7 @@ import {
 import { today, nowISO } from "../util.js";
 import { useLSValue } from "../hooks/useLSValue.js";
 import { recommendSet, recommendSetCount } from "../model/workout-progression.js";
-import { shortBuildLabel } from "../lib/buildInfo.js";
+import "./workout/WorkoutPlanner.css";
 
 import {
   workouts as SUPPORT_WORKOUTS,
@@ -543,15 +543,6 @@ export function WorkoutTab({
 
   return (
     <PageFrame style={{ padding: "16px 16px 80px", position: "relative" }}>
-      {/* Build version stamp — auto-bumped per commit via the
-          build script (see src/lib/buildInfo.js). Confirms which
-          bundle a device is running without opening DevTools. */}
-      <div style={{
-        position: "absolute", top: 6, right: 8,
-        fontSize: 9, color: C.muted, opacity: 0.5,
-        fontFamily: "monospace", pointerEvents: "none",
-      }}>{shortBuildLabel()}</div>
-
       {sessionActive && activeWorkout ? (
         // ── Active session view ───────────────────────────
         <>
@@ -720,108 +711,111 @@ export function WorkoutTab({
               {` · skip Workout A this week — take a rest day or keep the session light. Cut volume, not the loads you do hit.`}
             </div>
           )}
-          <RecommendationCard
-            recommendation={recommendation}
-            onPickWorkout={(id) => setPickedId(id)}
-            pickedId={pickedId || recommendation?.primary?.id}
-          />
-
-          <WorkoutPicker
-            pickedId={pickedId || recommendation?.primary?.id}
-            onPick={(id) => setPickedId(id)}
-          />
-
-          {/* StretchPill sits below the picker, intentionally on its
-              own row at full width — width is the visual cue that this
-              is a flexible habit, not another picker option competing
-              with A/B/C for today's slot. Tap = select STRETCH so the
-              card below renders the stretch exercises; the marker log
-              lives on the green button inside that card. */}
-          <StretchPill
-            done={stretchState.done}
-            daysSince={stretchState.daysSince}
-            selected={activeId === "STRETCH"}
-            onSelect={() => setPickedId("STRETCH")}
-          />
-
-          {activeWorkout && activeId === "STRETCH" && (
-            <StretchSessionBuilder
-              preferences={stretchPreferences}
-              coverage={stretchCoverage}
-              completedSession={stretchState.todaySession}
-              onPreferencesChange={updateStretchPreferences}
-              onLog={toggleTodaysStretch}
-              onRemove={() => toggleTodaysStretch()}
+          <Card style={{ padding: "20px 18px" }}>
+            <h2 style={{ margin: "0 0 20px", fontSize: 26, fontWeight: 750 }}>Choose a Workout</h2>
+            <RecommendationCard
+              recommendation={recommendation}
+              onPickWorkout={(id) => setPickedId(id)}
+              pickedId={pickedId || recommendation?.primary?.id}
             />
-          )}
 
-          {activeWorkout && activeId !== "STRETCH" && (
-            <Card>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>
-                  {activeWorkout.name.replace(/^Workout [A-D] — /, "")}
+            <div style={{ margin: "20px 0 10px", color: C.muted, fontSize: 14 }}>Choose a different workout</div>
+            <WorkoutPicker
+              recommendedId={recommendation?.primary?.id}
+              pickedId={pickedId || recommendation?.primary?.id}
+              onPick={(id) => setPickedId(id)}
+            />
+
+            {/* StretchPill sits below the picker, intentionally on its
+                own row at full width — width is the visual cue that this
+                is a flexible habit, not another picker option competing
+                with A/B/C for today's slot. Tap = select STRETCH so the
+                card below renders the stretch exercises; the marker log
+                lives on the green button inside that card. */}
+            <StretchPill
+              done={stretchState.done}
+              daysSince={stretchState.daysSince}
+              selected={activeId === "STRETCH"}
+              onSelect={() => setPickedId("STRETCH")}
+            />
+
+            {activeWorkout && activeId === "STRETCH" && (
+              <StretchSessionBuilder
+                embedded
+                preferences={stretchPreferences}
+                coverage={stretchCoverage}
+                completedSession={stretchState.todaySession}
+                onPreferencesChange={updateStretchPreferences}
+                onLog={toggleTodaysStretch}
+                onRemove={() => toggleTodaysStretch()}
+              />
+            )}
+
+            {activeWorkout && activeId !== "STRETCH" && (
+              <section aria-label="Selected workout plan" style={{ marginTop: 24, paddingTop: 20, borderTop: `1px solid ${C.border}` }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>
+                    {activeWorkout.shortName} · {activeWorkout.name.replace(/^Workout [A-D] — /, "")}
+                  </div>
+                  {trip?.date && <div style={{ fontSize: 12, color: C.muted }}>
+                    {countdownLabel}{wtr != null ? ` · ${wtr}w to trip` : ""}
+                  </div>}
                 </div>
-                <div style={{ fontSize: 11, color: C.muted }}>
-                  {countdownLabel}{wtr != null ? ` · ${wtr}w to trip` : ""}
+                <div style={{ fontSize: 15, color: C.muted, marginBottom: 16, lineHeight: 1.5 }}>
+                  {activeWorkout.purpose}
                 </div>
-              </div>
-              <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-                {activeWorkout.purpose}
-              </div>
-              {activeWorkout.exercises.length === 0 ? (
-                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginBottom: 12 }}>
-                  {activeId === "REST"
-                    ? "Rest is what absorbs the training. Save the marker so the recommender knows you took the day."
-                    : "Climbing has no logged exercises here — log climbs in the climbing log instead. Save the marker if you want it to count toward recommender staleness."}
-                </div>
-              ) : (
-                <div style={{ marginBottom: 12 }}>
-                  {activeWorkout.exercises.map((ex, i) => (
-                    <div key={ex.id} style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      padding: "6px 0",
-                      borderBottom: i < activeWorkout.exercises.length - 1 ? `1px solid ${C.border}` : "none",
-                    }}>
-                      <WTypeBadge type={ex.type} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                          <div style={{ fontSize: 13, color: C.text }}>{ex.name}</div>
-                          {ex.videoUrl && <VideoLink href={ex.videoUrl} />}
-                        </div>
-                        <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>
-                          {ex.prescription}{ex.loggable ? "" : " · done/notes"}
+                {activeWorkout.exercises.length === 0 ? (
+                  <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginBottom: 12 }}>
+                    {activeId === "REST"
+                      ? "Rest is what absorbs the training. Save the marker so the recommender knows you took the day."
+                      : "Climbing has no logged exercises here — log climbs in the climbing log instead. Save the marker if you want it to count toward recommender staleness."}
+                  </div>
+                ) : (
+                  <div style={{ marginBottom: 12 }}>
+                    {activeWorkout.exercises.map((ex, i) => (
+                      <div key={ex.id} style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "12px 0",
+                        borderBottom: i < activeWorkout.exercises.length - 1 ? `1px solid ${C.border}` : "none",
+                      }}>
+                        <WTypeBadge type={ex.type} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                            <div style={{ fontSize: 16, fontWeight: 600, color: C.text }}>{ex.name}</div>
+                            {ex.videoUrl && <VideoLink href={ex.videoUrl} />}
+                          </div>
+                          <div style={{ fontSize: 14, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                            {ex.prescription}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {activeWorkout.coachingNotes && activeWorkout.coachingNotes.length > 0 && (
-                <div style={{
-                  background: C.bg, borderRadius: 8, padding: "8px 10px",
-                  marginBottom: 12, border: `1px solid ${C.border}`,
-                  fontSize: 11, color: C.muted, lineHeight: 1.6,
-                }}>
-                  {activeWorkout.coachingNotes.map((n, i) => (
-                    <div key={i}>· {n}</div>
-                  ))}
-                </div>
-              )}
-              <button
-                onClick={startSession}
-                style={{
-                  width: "100%", padding: "12px",
-                  background: WORKOUT_COLORS[activeId] || C.blue,
-                  color: "#000", border: "none", borderRadius: 8,
-                  fontSize: 15, fontWeight: 700, cursor: "pointer",
-                }}
-              >
-                {activeWorkout.exercises.length === 0
-                  ? `Log ${activeWorkout.shortName} marker`
-                  : `Start ${activeWorkout.shortName}`}
-              </button>
-            </Card>
-          )}
+                    ))}
+                  </div>
+                )}
+                {activeWorkout.coachingNotes && activeWorkout.coachingNotes.length > 0 && (
+                  <details style={{ margin: "16px 0", color: C.muted, fontSize: 14, lineHeight: 1.6 }}>
+                    <summary style={{ cursor: "pointer", padding: "8px 0", color: C.text }}>Workout tips</summary>
+                    {activeWorkout.coachingNotes.map((n, i) => (
+                      <div key={i}>· {n}</div>
+                    ))}
+                  </details>
+                )}
+                <button
+                  onClick={startSession}
+                  style={{
+                    width: "100%", padding: "16px", marginTop: 8,
+                    background: WORKOUT_COLORS[activeId] || C.blue,
+                    color: "#000", border: "none", borderRadius: 12,
+                    fontSize: 17, fontWeight: 700, cursor: "pointer",
+                  }}
+                >
+                  {activeWorkout.exercises.length === 0
+                    ? `Log ${activeWorkout.shortName} marker`
+                    : `Start Workout ${activeWorkout.shortName} →`}
+                </button>
+              </section>
+            )}
+          </Card>
 
           <BwPrompt unit={unit} onSave={onBwSave} />
         </>

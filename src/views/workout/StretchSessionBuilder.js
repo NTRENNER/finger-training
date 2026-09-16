@@ -11,6 +11,8 @@ import {
 } from "../../model/stretching.js";
 import { VideoLink } from "./VideoLink.js";
 
+const embeddedStyle = { padding: "20px 0 0", margin: "24px 0 0", border: "none", borderTop: `1px solid ${C.border}`, borderRadius: 0, background: "transparent" };
+
 const CATEGORY_COLORS = {
   hipRotation: C.purple,
   hamstrings: C.orange,
@@ -73,7 +75,7 @@ function equipmentLabel(exercise) {
   return labels.length > 0 ? labels.join(" + ") : "No equipment";
 }
 
-function CompletedMobility({ session, onRemove }) {
+function CompletedMobility({ session, onRemove, embedded = false }) {
   const items = Object.entries(session?.exercises || {})
     .map(([id, data]) => ({
       exercise: STRETCH_EXERCISE_MAP[id],
@@ -84,7 +86,7 @@ function CompletedMobility({ session, onRemove }) {
   const total = items.reduce((sum, item) => sum + item.minutes, 0);
 
   return (
-    <Card style={{ borderColor: `${C.green}88` }}>
+    <Card style={embedded ? embeddedStyle : { borderColor: `${C.green}88` }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700 }}>Climbing Mobility</div>
@@ -154,6 +156,7 @@ export function StretchSessionBuilder({
   onPreferencesChange,
   onLog,
   onRemove,
+  embedded = false,
 }) {
   const [selectedByCategory, setSelectedByCategory] = useState({});
   const [openCategory, setOpenCategory] = useState(null);
@@ -163,7 +166,7 @@ export function StretchSessionBuilder({
   );
 
   if (completedSession) {
-    return <CompletedMobility session={completedSession} onRemove={onRemove} />;
+    return <CompletedMobility session={completedSession} onRemove={onRemove} embedded={embedded} />;
   }
 
   const updatePreferences = patch => {
@@ -184,7 +187,7 @@ export function StretchSessionBuilder({
   };
 
   return (
-    <Card style={{ borderColor: `${C.purple}66` }}>
+    <Card style={embedded ? embeddedStyle : { borderColor: `${C.purple}66` }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700 }}>Climbing Mobility</div>

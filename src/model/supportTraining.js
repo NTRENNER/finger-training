@@ -1064,7 +1064,7 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
   if (!latest) {
     return {
       primary: workouts.A,
-      reason: "No A/B/C on record yet. Start the rotation with A.",
+      reason: "Start with Workout A. We’ll guide you through A, B, and C.",
       alternatives: [workouts.B, workouts.C],
     };
   }
@@ -1074,7 +1074,7 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
 
   return {
     primary: workouts[nextKey],
-    reason: `Last support workout was ${lastKey} — next in the rotation is ${nextKey}.`,
+    reason: `You last completed Workout ${lastKey}. Workout ${nextKey} is next.`,
     alternatives: ROTATION
       .filter(k => k !== nextKey)
       .map(k => workouts[k]),

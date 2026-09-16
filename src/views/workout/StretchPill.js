@@ -67,9 +67,12 @@ export function StretchPill({ done, daysSince, selected = false, onSelect }) {
   return (
     <button
       onClick={onSelect}
+      aria-pressed={selected}
       style={{
         width: "100%",
-        padding: "10px 14px",
+        padding: "14px 16px",
+        minHeight: 64,
+        gap: 12,
         marginBottom: 12,
         background: pillBg,
         // Thicker border + outline when selected so the pill reads as
@@ -86,10 +89,10 @@ export function StretchPill({ done, daysSince, selected = false, onSelect }) {
       title={selected ? "Selected — log via the button below" : "Tap to view today's stretches"}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: textColor, letterSpacing: 0.3 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: textColor, letterSpacing: 0.3 }}>
           Climbing Mobility
         </div>
-        <div style={{ fontSize: 11, color: textColor, opacity: 0.85 }}>
+        <div style={{ fontSize: 13, color: textColor, opacity: 0.85 }}>
           {subtitle}
         </div>
       </div>
