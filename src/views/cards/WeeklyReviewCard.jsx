@@ -63,8 +63,8 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
   const range = review.range;
   return (
     <Card style={{ margin: "12px 16px 0" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: C.muted }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: C.muted }}>
           Weekly check-in{range ? ` · ${fmt(range.weekStart)} – ${fmt(range.weekEnd)}` : ""}
         </div>
         {review.sections && (
@@ -72,8 +72,8 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
             onClick={() => setExpanded(v => !v)}
             aria-expanded={expanded}
             style={{
-              background: "none", border: "none", cursor: "pointer", padding: 0,
-              fontSize: 11, fontWeight: 700, color: C.blue,
+              background: "none", border: "none", cursor: "pointer", minHeight: 44, padding: "8px 0",
+              fontSize: 14, fontWeight: 700, color: C.blue,
             }}
           >
             {expanded ? "− compact" : "Full check-in ▾"}

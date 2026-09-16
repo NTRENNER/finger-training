@@ -581,10 +581,10 @@ export function ClimbingAnalysisView({
         <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 14, fontWeight: 700 }}>Grade pyramid</div>
-            <div style={{ display: "flex", gap: 4 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {WINDOWS.map(w => (
                 <button key={w.key} onClick={() => setPyramidWindow(w.key)} style={{
-                  padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
                   background: pyramidWindow === w.key ? C.purple : C.border,
                   color:      pyramidWindow === w.key ? "#fff" : C.muted,
                 }}>{w.label}</button>
@@ -595,7 +595,7 @@ export function ClimbingAnalysisView({
           <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
             {CLIMB_DISCIPLINES.map(d => (
               <button key={d.key} onClick={() => setPyramidDiscipline(d.key)} style={{
-                padding: "4px 10px", borderRadius: 12, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
+                minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
                 background: pyramidDiscipline === d.key ? DISCIPLINE_COLORS[d.key] : C.border,
                 color:      pyramidDiscipline === d.key ? "#fff" : C.muted,
               }}>{d.emoji} {d.label}</button>
@@ -611,7 +611,7 @@ export function ClimbingAnalysisView({
               const active = pyramidVenue === v.key;
               return (
                 <button key={v.key} onClick={() => setPyramidVenue(v.key)} style={{
-                  padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
                   background: active ? C.purple : C.border,
                   color:      active ? "#fff" : C.muted,
                 }}>{v.emoji ? `${v.emoji} ` : ""}{v.label}</button>
@@ -630,7 +630,7 @@ export function ClimbingAnalysisView({
                 const active = pyramidWall === w.key;
                 return (
                   <button key={w.key} onClick={() => setPyramidWall(w.key)} style={{
-                    padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                    minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
                     background: active ? C.purple : C.border,
                     color:      active ? "#fff" : C.muted,
                   }}>{w.emoji ? `${w.emoji} ` : ""}{w.label}</button>
@@ -692,10 +692,10 @@ export function ClimbingAnalysisView({
         <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 14, fontWeight: 700 }}>Max sends</div>
-            <div style={{ display: "flex", gap: 4 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {WINDOWS.map(w => (
                 <button key={w.key} onClick={() => setMaxWindow(w.key)} style={{
-                  padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
                   background: maxWindow === w.key ? C.purple : C.border,
                   color:      maxWindow === w.key ? "#fff" : C.muted,
                 }}>{w.label}</button>
@@ -710,7 +710,7 @@ export function ClimbingAnalysisView({
           <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
             {CLIMB_DISCIPLINES.map(d => (
               <button key={d.key} onClick={() => setMaxDiscipline(d.key)} style={{
-                padding: "4px 10px", borderRadius: 12, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
+                minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
                 background: maxDiscipline === d.key ? DISCIPLINE_COLORS[d.key] : C.border,
                 color:      maxDiscipline === d.key ? "#fff" : C.muted,
               }}>{d.emoji} {d.label}</button>
@@ -723,7 +723,7 @@ export function ClimbingAnalysisView({
               const active = maxVenue === v.key;
               return (
                 <button key={v.key} onClick={() => setMaxVenue(v.key)} style={{
-                  padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
                   background: active ? C.purple : C.border,
                   color:      active ? "#fff" : C.muted,
                 }}>{v.emoji ? `${v.emoji} ` : ""}{v.label}</button>
@@ -738,7 +738,7 @@ export function ClimbingAnalysisView({
                 const active = maxWall === w.key;
                 return (
                   <button key={w.key} onClick={() => setMaxWall(w.key)} style={{
-                    padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                    minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
                     background: active ? C.purple : C.border,
                     color:      active ? "#fff" : C.muted,
                   }}>{w.emoji ? `${w.emoji} ` : ""}{w.label}</button>

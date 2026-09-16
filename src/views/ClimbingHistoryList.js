@@ -327,9 +327,10 @@ function FilterPills({
     return (
       <button
         key={`${key}-${value}`}
+        aria-pressed={active}
         onClick={() => onPick(key, value)}
         style={{
-          padding: "4px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer",
+          minWidth: 0, minHeight: 44, padding: "8px", borderRadius: 10, fontSize: 14, cursor: "pointer",
           border: "none", fontWeight: 600,
           background: active ? C.purple : C.border,
           color:      active ? "#fff" : C.muted,
@@ -344,7 +345,7 @@ function FilterPills({
   const gradeRangeVisible = filters.discipline !== "all";
   const gradeList = filters.discipline === "boulder" ? V_GRADES : YDS_GRADES;
   const selectStyle = {
-    padding: "3px 6px", borderRadius: 6, fontSize: 11,
+    minHeight: 44, padding: "8px 10px", borderRadius: 8, fontSize: 16,
     background: C.bg, color: C.text, border: `1px solid ${C.border}`,
     cursor: "pointer",
   };
@@ -358,25 +359,19 @@ function FilterPills({
 
   return (
     <Card style={{ marginBottom: 12 }}>
-      {/* Filter pills row (additive). Named is a pure filter — tapping
-          it just toggles 'only show climbs with a route_name'. */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-        {pill("Named", "named", true)}
-        <span style={{ width: 6 }} />
-        {/* Discipline pills — driven by CLIMB_DISCIPLINES so every
-            logged discipline (boulder / top rope / lead) gets a filter.
-            Previously hardcoded to Boulder/Lead, which silently dropped
-            Top rope from the filter row even though it's loggable. */}
+      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Filter climbs</div>
+      <div role="group" aria-label="Climbing discipline" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
         {CLIMB_DISCIPLINES.map(d => pill(d.label, "discipline", d.key))}
-        <span style={{ width: 6 }} />
-        {pill("Indoor",  "venue", "indoor")}
+      </div>
+      <div role="group" aria-label="Climbing venue" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 6 }}>
+        {pill("Indoor", "venue", "indoor")}
         {pill("Outdoor", "venue", "outdoor")}
         {wallVisible && <>
-          <span style={{ width: 6 }} />
           {pill("MoonBoard", "wall", "moonboard")}
-          {pill("Kilter",    "wall", "kilter")}
+          {pill("Kilter", "wall", "kilter")}
         </>}
       </div>
+      <div style={{ marginTop: 6 }}>{pill("Named climbs", "named", true)}</div>
 
       {/* Sort selector — independent from the filters above. Default
           is Date; tap Name or Grade to switch grouping. Tapping the
@@ -384,7 +379,7 @@ function FilterPills({
           'Named filter + Grade grouping' or any other pair. */}
       <div style={{
         display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center",
-        marginTop: 8, fontSize: 11, color: C.muted,
+        marginTop: 12, fontSize: 13, color: C.muted,
       }}>
         <span>Sort:</span>
         {pill("Date",  "groupBy", "date")}
@@ -395,10 +390,11 @@ function FilterPills({
       {gradeRangeVisible && (
         <div style={{
           display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center",
-          marginTop: 8, fontSize: 11, color: C.muted,
+          marginTop: 12, fontSize: 13, color: C.muted,
         }}>
           <span>Grades:</span>
           <select
+            aria-label="Minimum grade"
             value={filters.gradeMin || ""}
             onChange={(e) => onSetGradeMin(e.target.value)}
             style={selectStyle}
@@ -409,6 +405,7 @@ function FilterPills({
           </select>
           <span>to</span>
           <select
+            aria-label="Maximum grade"
             value={filters.gradeMax || ""}
             onChange={(e) => onSetGradeMax(e.target.value)}
             style={selectStyle}

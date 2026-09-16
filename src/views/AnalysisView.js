@@ -650,9 +650,9 @@ export function AnalysisView({
         </div>
       )}
 
-      <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Force-Duration Analysis</h2>
+      <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Finger progress</h2>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-        Explore your recorded pulls and progress across your force-duration curve. Measured gaps guide coverage; they do not guarantee faster adaptation.
+        See your recorded pulls and how your strength and endurance have changed.
       </p>
 
       {/* Recovery status — moved here from Session Setup (September 2026).

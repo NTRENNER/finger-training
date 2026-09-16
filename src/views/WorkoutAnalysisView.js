@@ -438,7 +438,7 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
         <div style={{ display: "flex", gap: 4, marginBottom: 12, justifyContent: "flex-end" }}>
           {[{ key: false, label: "Absolute" }, { key: true, label: "× BW" }].map(opt => (
             <button key={String(opt.key)} onClick={() => normalizeOn !== opt.key && toggleNormalize()} style={{
-              padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none", fontWeight: 600,
+              minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
               background: normalizeOn === opt.key ? C.purple : C.border,
               color:      normalizeOn === opt.key ? "#fff"   : C.muted,
             }}>{opt.label}</button>

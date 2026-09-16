@@ -4,28 +4,29 @@ import { Card } from "../../ui/components.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 
 const pillStyle = (active, color) => ({
-  minHeight: 30,
-  padding: "4px 12px",
-  borderRadius: 20,
+  minHeight: 44,
+  padding: "10px 12px",
+  borderRadius: 10,
   border: "none",
   background: active ? color : C.border,
   color: active ? "#fff" : C.muted,
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: 14,
   fontWeight: 600,
   fontFamily: "inherit",
   whiteSpace: "nowrap",
+  flex: "1 1 auto",
 });
 
 function ScopeRow({ label, children }) {
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: "48px minmax(0, 1fr)",
+      gridTemplateColumns: "minmax(0, 1fr)",
       alignItems: "center",
       gap: 8,
     }}>
-      <div style={{ color: C.muted, fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>
+      <div style={{ color: C.muted, fontSize: 12, fontWeight: 700, textTransform: "uppercase" }}>
         {label}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>

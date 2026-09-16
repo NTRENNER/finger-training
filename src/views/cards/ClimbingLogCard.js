@@ -3,9 +3,8 @@
 // ─────────────────────────────────────────────────────────────
 // One climbing entry's worth of data: discipline + venue + grade +
 // ascent style + wall (boulder-only) + attempts + RPE, plus an optional
-// name (any climb) and outdoor-only location (cliff / area). Collapses to a one-row
-// tappable button when not in use; expands inline with the full
-// form on tap. Saves via the onLog callback handed in by the
+// name (any climb) and outdoor-only location (cliff / area). The form
+// stays open for quick entry throughout a climbing session. Saves via the onLog callback handed in by the
 // caller; doesn't touch storage or sync itself.
 //
 // Lives in src/views/cards/ rather than next to SetupView because
@@ -51,7 +50,6 @@ const RPE_DESCRIPTIONS = {
 };
 
 export function ClimbingLogCard({ activities = [], onLog }) {
-  const [open, setOpen]             = useState(false);
   const [discipline, setDiscipline] = useState("boulder");
   const [venue, setVenue]           = useState("indoor");
   const [grade, setGrade]           = useState(defaultGradeFor("boulder"));
@@ -135,7 +133,6 @@ export function ClimbingLogCard({ activities = [], onLog }) {
     onLog(entry);
     setPrAward(award);
     setLogged(true);
-    setOpen(false);
     // Reset all the per-climb fields so the next log starts clean.
     // Discipline / venue / wall / RPE persist (they're closer to
     // user-session defaults than per-climb data).
@@ -147,64 +144,21 @@ export function ClimbingLogCard({ activities = [], onLog }) {
     }, 2500);
   };
 
-  // Collapsed state — single-row tappable button.
-  if (!open) {
-    return (
-      <Card style={{
-        marginBottom: 16,
-        padding: 0,
-        background: logged ? `${C.green}1a` : C.card,
-        border: `1px solid ${logged ? C.green : C.border}`,
-        transition: "all 0.2s",
-      }}>
-        <button
-          onClick={() => setOpen(true)}
-          style={{
-            width: "100%", padding: "12px 16px", background: "none", border: "none",
-            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between",
-            color: C.text, fontSize: 13, fontWeight: 600,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-            <span style={{ fontSize: 16 }}>{prAward ? "🏆" : "🧗"}</span>
-            <span style={{ minWidth: 0, textAlign: "left" }}>
-              <span style={{ display: "block" }}>
-                {prAward ? `${prAward.grade} ${prAward.shortLabel} PR!` : logged ? "Logged ✓" : "Log a climb"}
-              </span>
-              {prAward && (
-                <span style={{ display: "block", color: C.green, fontSize: 10, fontWeight: 600, marginTop: 2 }}>
-                  {prAward.previousGrade
-                    ? `Badge upgraded · ${prAward.previousGrade} → ${prAward.grade}`
-                    : "Badge earned"}
-                </span>
-              )}
-            </span>
-          </div>
-          <div style={{ fontSize: 11, color: C.muted, fontWeight: 400 }}>
-            {todayClimbing.length > 0
-              ? `${todayClimbing.length} logged today · tap to add another`
-              : "discipline · grade · style · effort"}
-          </div>
-        </button>
-      </Card>
-    );
-  }
-
   // Expanded form
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>🧗 Log Climb</div>
-        <button
-          onClick={() => setOpen(false)}
-          style={{
-            background: "none", border: "none", color: C.muted,
-            cursor: "pointer", fontSize: 12, padding: 0,
-          }}
-        >
-          Cancel
-        </button>
+        <div style={{ fontSize: 12, color: C.muted }}>{todayClimbing.length} logged today</div>
       </div>
+      {logged && (
+        <div role="status" style={{ marginBottom: 16, padding: "10px 12px", borderRadius: 8, background: `${C.green}1a`, color: C.green }}>
+          <strong>{prAward ? `${prAward.grade} ${prAward.shortLabel} PR!` : "Logged ✓"}</strong>
+          {prAward && <div style={{ marginTop: 4, fontSize: 12 }}>
+            {prAward.previousGrade ? `Badge upgraded · ${prAward.previousGrade} → ${prAward.grade}` : "Badge earned"}
+          </div>}
+        </div>
+      )}
 
       {/* Discipline */}
       <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>

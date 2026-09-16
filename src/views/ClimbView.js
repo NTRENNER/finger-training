@@ -79,7 +79,7 @@ function RecentClimbRow({ climb: c, showTopBorder }) {
     }}>
       <div style={{ fontSize: 18 }}>{disc.emoji}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>
+        <div style={{ fontSize: 15, fontWeight: 600 }}>
           {c.grade || "—"}{" "}
           <span style={{ color: C.muted, fontWeight: 400 }}>
             {disc.label}
@@ -87,7 +87,7 @@ function RecentClimbRow({ climb: c, showTopBorder }) {
             {wall ? ` · ${wall.label}` : ""}
           </span>
         </div>
-        <div style={{ fontSize: 11, color: isSend ? C.green : C.muted }}>
+        <div style={{ fontSize: 13, color: isSend ? C.green : C.muted }}>
           {relativeDate(c.date)}
           {" · "}
           {c.ascent ? ascentMeta(c.ascent).label : describeClimb(c)}
@@ -98,7 +98,7 @@ function RecentClimbRow({ climb: c, showTopBorder }) {
         </div>
         {locationParts.length > 0 && (
           <div style={{
-            fontSize: 11, color: C.text, marginTop: 2,
+            fontSize: 13, color: C.text, marginTop: 2,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
             {c.route_name && <b>{c.route_name}</b>}
@@ -176,7 +176,7 @@ export function ClimbView({
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
-      <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700 }}>Climb</h2>
+      <h2 style={{ margin: "0 0 20px", fontSize: 26, fontWeight: 700 }}>Climbing</h2>
 
       {deloadActive && (
         <div style={{
@@ -192,29 +192,27 @@ export function ClimbView({
       {/* Adaptive Warm-up entry point — warm up your fingers before
           climbing. Force-curve-derived hangs + cross-loaded pullups. */}
       <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Adaptive Warm-up</div>
-            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.4 }}>
-              Force-curve-derived hangs + cross-loaded pullups. Same feel every session, never near failure.
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
+          <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>Adaptive Warm-up</div>
+            <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.5 }}>
+              Prepare for climbing with easy hangs and pull-ups tailored to your training.
             </div>
           </div>
           <button
             onClick={() => setWarmupActive(true)}
             style={{
               background: C.purple, color: "#fff", border: "none", borderRadius: 8,
-              padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              flex: "1 1 150px", minHeight: 48, padding: "12px 18px", fontSize: 16, fontWeight: 700, cursor: "pointer",
               whiteSpace: "nowrap",
             }}
           >
-            Generate
+            Plan warm-up
           </button>
         </div>
       </Card>
 
-      {/* Logger — same single-card component used elsewhere. Tapping
-          expands the form inline; saves go through onLogActivity which
-          mirrors to LS + cloud. */}
+      {/* Keep the logger open so every climb can be entered immediately. */}
       <ClimbingLogCard activities={activities} onLog={onLogActivity} />
 
       {/* Recent climbs digest. Empty state prompts the user to log;
@@ -225,15 +223,15 @@ export function ClimbView({
           display: "flex", justifyContent: "space-between",
           alignItems: "baseline", marginBottom: 10,
         }}>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>Recent Climbs</div>
-          <div style={{ fontSize: 11, color: C.muted }}>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>Recent Climbs</div>
+          <div style={{ fontSize: 13, color: C.muted }}>
             {climbs.length} total
           </div>
         </div>
 
         {recent.length === 0 ? (
           <div style={{ fontSize: 12, color: C.muted, padding: "4px 0" }}>
-            No climbs logged yet. Tap <b style={{ color: C.text }}>Log a climb</b> above to start.
+            Your climbs will appear here as you log them above.
           </div>
         ) : (
           <>
@@ -248,10 +246,10 @@ export function ClimbView({
               <button
                 onClick={onNavigateToHistory}
                 style={{
-                  marginTop: 10, width: "100%", padding: "8px 12px",
+                  marginTop: 10, width: "100%", minHeight: 48, padding: "12px 16px",
                   borderRadius: 8, background: "none",
                   border: `1px solid ${C.border}`,
-                  color: C.muted, fontSize: 12, fontWeight: 600,
+                  color: C.text, fontSize: 15, fontWeight: 600,
                   cursor: "pointer",
                 }}
               >

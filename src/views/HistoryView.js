@@ -20,6 +20,7 @@ import { evidenceLabel } from "../model/forceRecording.js";
 // so this view doesn't reach into the parent's state directly.
 
 import React, { useMemo, useRef, useState } from "react";
+import { SectionSelector } from "../ui/SectionSelector.jsx";
 import { C } from "../ui/theme.js";
 import { Card, Btn, PageFrame } from "../ui/components.js";
 import {
@@ -465,22 +466,21 @@ export function HistoryView({
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h2 style={{ margin: 0, fontSize: 22 }}>History</h2>
-        <div style={{ display: "flex", gap: 8 }}>
-          {/* + Session is fingers-only: workouts are added from the
-              Workout tab, climbs from the climbing logger on Fingers. */}
-          {domain === "fingers" && <Btn small onClick={() => { setAddingSession(s => !s); setNewSessDate(ymdLocal()); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
-          {/* CSV download is shown on every tab in the same spot, with
-              the same visual treatment — picks the right exporter by
-              active domain so user behavior is consistent across tabs. */}
-          <Btn small onClick={() => {
-            if (domain === "workout")  onDownloadWorkoutCSV(loadLS(LS_WORKOUT_LOG_KEY) || []);
-            else if (domain === "climbing") onDownloadClimbingCSV();
-            else onDownload();
-          }} color={C.muted}>↓ CSV</Btn>
-        </div>
-      </div>
+      <Card style={{ padding: "20px 18px" }}>
+        <h2 style={{ margin: "0 0 20px", fontSize: 26 }}>History</h2>
+        <SectionSelector label="History category" value={domain} onChange={switchDomain}
+          options={[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["climbing", "🧗 Climbing"], ["weight", "⚖️ Weight"], ["tendon", "🩹 Tendon"]]} />
+        {["fingers", "workout", "climbing"].includes(domain) && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
+            {domain === "fingers" && <Btn style={{ flex: 1, minHeight: 44 }} onClick={() => { setAddingSession(s => !s); setNewSessDate(ymdLocal()); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
+            <Btn style={{ flex: 1, minHeight: 44, background: C.bg, border: `1px solid ${C.border}`, color: C.text }} onClick={() => {
+              if (domain === "workout") onDownloadWorkoutCSV(loadLS(LS_WORKOUT_LOG_KEY) || []);
+              else if (domain === "climbing") onDownloadClimbingCSV();
+              else onDownload();
+            }}>Export CSV</Btn>
+          </div>
+        )}
+      </Card>
 
       {/* Domain-specific achievements share one stable slot above the
           all-activity calendar, so switching domains doesn't move the
@@ -496,7 +496,7 @@ export function HistoryView({
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
             <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Date</span>
             <input type="date" value={newSessDate} onChange={e => setNewSessDate(e.target.value)}
-              style={{ flex: 1, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 13 }} />
+              style={{ flex: 1, minWidth: 0, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 13 }} />
           </div>
           {/* Grip */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
@@ -517,7 +517,7 @@ export function HistoryView({
           {/* Zone */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
             <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Zone</span>
-            <div style={{ display: "flex", gap: 4 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, minWidth: 0 }}>
               {TARGET_OPTIONS.map(o => (
                 <button key={o.seconds} onClick={() => setNewSessTarget(o.seconds)} style={{
                   padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
@@ -553,10 +553,10 @@ export function HistoryView({
           <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 12 }}>
             <input type="number" value={newRepLoad} onChange={e => setNewRepLoad(e.target.value)}
               placeholder={`Load (${unit})`}
-              style={{ flex: 1, background: C.border, border: "none", borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13 }} />
+              style={{ flex: 1, minWidth: 0, background: C.border, border: "none", borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13 }} />
             <input type="number" value={newRepTime} onChange={e => setNewRepTime(e.target.value)}
               placeholder="Time (s)"
-              style={{ flex: 1, background: C.border, border: "none", borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13 }} />
+              style={{ flex: 1, minWidth: 0, background: C.border, border: "none", borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13 }} />
             <button onClick={() => {
               if (!newRepLoad || !newRepTime) return;
               // Alternate L/R default: first rep L, then flip from last rep's hand
@@ -584,27 +584,13 @@ export function HistoryView({
         </Card>
       )}
 
-      {/* Year-at-a-glance activity heatmap. Sits above the domain
-          toggle because it's the "everything I did this year"
-          surface — independent of which domain is selected below. */}
+      {/* All-activity calendar stays visible across categories. */}
       <CalendarHeatmap
         history={history}
         activities={activities}
         wLog={wLogForCalendar}
       />
 
-      {/* Domain toggle */}
-      <div style={{ display: "flex", background: C.border, borderRadius: 24, padding: 3, marginBottom: 20, gap: 2 }}>
-        {[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["climbing", "🧗 Climbing"], ["weight", "⚖️ Weight"], ["tendon", "🩹 Tendon"]].map(([key, label]) => (
-          <button key={key} onClick={() => switchDomain(key)} style={{
-            flex: 1, padding: "8px 0", borderRadius: 20, border: "none", cursor: "pointer",
-            fontWeight: 700, fontSize: 13,
-            background: domain === key ? C.blue : "transparent",
-            color: domain === key ? "#fff" : C.muted,
-            transition: "background 0.15s",
-          }}>{label}</button>
-        ))}
-      </div>
 
       {domain === "workout"  && (
         <WorkoutHistoryView
@@ -704,29 +690,35 @@ export function HistoryView({
 
       {domain === "fingers" && <>
 
-      {/* Filters */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+      <div role="group" aria-label="Filter finger sessions" style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Filter sessions</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {grips.map(g => (
-          <button key={g} onClick={() => setGrip(grip === g ? "" : g)} style={{
-            padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+          <button key={g} aria-pressed={grip === g} onClick={() => setGrip(grip === g ? "" : g)} style={{
+            minHeight: 44, padding: "10px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer",
             background: grip === g ? C.orange : C.border,
             color: grip === g ? "#fff" : C.muted, border: "none",
           }}>{g}</button>
         ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
         {["L","R"].map(h => (
-          <button key={h} onClick={() => setHand(hand === h ? "" : h)} style={{
-            padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+          <button key={h} aria-pressed={hand === h} onClick={() => setHand(hand === h ? "" : h)} style={{
+            minHeight: 44, padding: "10px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer",
             background: hand === h ? C.purple : C.border,
             color: hand === h ? "#fff" : C.muted, border: "none",
           }}>{h === "L" ? "Left" : "Right"}</button>
         ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
         {TARGET_OPTIONS.map(o => (
-          <button key={o.seconds} onClick={() => setTarget(target === o.seconds ? 0 : o.seconds)} style={{
-            padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+          <button key={o.seconds} aria-pressed={target === o.seconds} onClick={() => setTarget(target === o.seconds ? 0 : o.seconds)} style={{
+            minHeight: 44, padding: "10px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer",
             background: target === o.seconds ? C.blue : C.border,
             color: target === o.seconds ? "#fff" : C.muted, border: "none",
           }}>{o.label}</button>
         ))}
+      </div>
       </div>
 
       {grouped.length === 0 && (

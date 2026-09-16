@@ -324,7 +324,7 @@ export function WorkoutHistoryView({
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 8 }}>
         {bodyWeight != null && (
           <button onClick={() => setRelMode(r => !r)} style={{
-            padding: "5px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", border: "none",
+            minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none",
             background: relMode ? C.purple : C.border,
             color: relMode ? "#fff" : C.muted, fontWeight: relMode ? 700 : 400,
           }}>% BW</button>
@@ -335,14 +335,14 @@ export function WorkoutHistoryView({
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         {measurableExIds.map(id => (
           <button key={id} onClick={() => setFilterEx(filterEx === id ? "" : id)} style={{
-            padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+            minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer",
             background: filterEx === id ? C.orange : C.border,
             color: filterEx === id ? "#fff" : C.muted, border: "none",
           }}>{exNames[id] || id}</button>
         ))}
         {[30, 60, 90].map(days => (
           <button key={days} onClick={() => setFilterDays(filterDays === days ? 0 : days)} style={{
-            padding: "4px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+            minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer",
             background: filterDays === days ? C.blue : C.border,
             color: filterDays === days ? "#fff" : C.muted, border: "none",
           }}>{days}d</button>

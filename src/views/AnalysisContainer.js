@@ -27,14 +27,15 @@
 // source of truth for hook state.
 
 import React, { useState } from "react";
-import { C } from "../ui/theme.js";
-import { PageFrame } from "../ui/components.js";
+import { Card, PageFrame } from "../ui/components.js";
 import { loadLS, saveLS, LS_ANALYSIS_SUBTAB_KEY } from "../lib/storage.js";
 import { AnalysisView } from "./AnalysisView.js";
 import { WorkoutAnalysisView } from "./WorkoutAnalysisView.js";
 import { ClimbingAnalysisView } from "./ClimbingAnalysisView.js";
 import { BodyWeightAnalysisView } from "./BodyWeightAnalysisView.js";
 import { WeeklyReviewCard } from "./cards/WeeklyReviewCard.jsx";
+
+import { SectionSelector } from "../ui/SectionSelector.jsx";
 
 const VALID_SUBS = new Set(["fingers", "lifts", "climbing", "weight"]);
 
@@ -72,39 +73,14 @@ export function AnalysisContainer(props) {
     saveLS(LS_ANALYSIS_SUBTAB_KEY, key);
   };
 
-  // Pill bar — same visual weight as the workout-picker pills in
-  // WorkoutTab, so the two "pick what you're looking at" UIs read
-  // as a consistent pattern across the app.
-  const pill = (label, key) => {
-    const active = sub === key;
-    return (
-      <button
-        key={key}
-        onClick={() => pickSub(key)}
-        style={{
-          flex: 1, padding: "12px 4px", borderRadius: 10, cursor: "pointer",
-          background: active ? C.blue : C.border,
-          color:      active ? "#000" : C.muted,
-          fontWeight: 700, fontSize: 15,
-          border: "2px solid transparent",
-          transition: "all 0.15s",
-          minWidth: 0,  // lets text truncate cleanly on narrow screens
-        }}
-      >
-        {label}
-      </button>
-    );
-  };
-
   return (
     <PageFrame data-testid="analysis-content">
+      <Card style={{ margin: "20px 16px 16px", padding: "20px 18px" }}>
+        <h2 style={{ margin: "0 0 20px", fontSize: 26 }}>Analysis</h2>
+        <SectionSelector label="Analysis category" value={sub} onChange={pickSub}
+          options={[["fingers", "Fingers"], ["lifts", "Lifts"], ["climbing", "Climbs"], ["weight", "Weight"]]} />
+      </Card>
       <WeeklyReviewCard history={history} activities={activities} />
-      <div style={{ display: "flex", gap: 6, padding: "12px 16px 0" }}>
-        {pill("Fingers", "fingers")}
-        {pill("Lifts", "lifts")}
-        {pill("Climbs", "climbing")}
-        {pill("Weight", "weight")}
-      </div>
 
       {sub === "fingers" && (
         <AnalysisView

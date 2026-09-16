@@ -180,10 +180,10 @@ export function BodyWeightAnalysisView({ unit = "lbs" }) {
         <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 14, fontWeight: 700 }}>Weight over time</div>
-            <div style={{ display: "flex", gap: 4 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {WINDOWS.map(w => (
                 <button key={w.key} onClick={() => setWindowKey(w.key)} style={{
-                  padding: "3px 9px", borderRadius: 12, fontSize: 11, cursor: "pointer", border: "none", fontWeight: 600,
+                  minHeight: 44, padding: "8px 12px", borderRadius: 10, fontSize: 14, cursor: "pointer", border: "none", fontWeight: 600,
                   background: windowKey === w.key ? C.purple : C.border,
                   color:      windowKey === w.key ? "#fff" : C.muted,
                 }}>{w.label}</button>
