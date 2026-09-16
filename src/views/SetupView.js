@@ -244,13 +244,7 @@ export function SetupView({
 
   const plannerHeader = (
       <section aria-label="Grip selection" style={{ marginBottom: 24 }}>
-        <h2 style={{ margin: "0 0 20px", fontSize: 26, fontWeight: 750 }}>Session Planner</h2>
-        <div style={{
-          fontSize: 14, fontWeight: 700, marginBottom: 12,
-          color: config.grip ? C.text : C.blue,
-        }}>
-          Select device
-        </div>
+        <h2 style={{ margin: "0 0 20px", fontSize: 26, fontWeight: 750 }}>Select a Device to Begin</h2>
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
             {GRIP_PRESETS.map(g => (
@@ -272,6 +266,19 @@ export function SetupView({
           </div>
         </div>
       </section>
+  );
+
+  const plannerFooter = (
+    <section aria-label="Start your session" style={{ marginTop: 24, paddingTop: 20, borderTop: `1px solid ${C.border}` }}>
+      {connectSlot}
+      <Btn
+        onClick={onStart}
+        disabled={!config.grip}
+        style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12 }}
+      >
+        Start Session →
+      </Btn>
+    </section>
   );
 
   return (
@@ -303,6 +310,7 @@ export function SetupView({
           per-zone tiles all live in one box and stay in sync. */}
       <SessionPlanCard
         plannerHeader={plannerHeader}
+        plannerFooter={plannerFooter}
         history={history}
         grip={config.grip}
         hand={config.hand}
@@ -317,27 +325,6 @@ export function SetupView({
         climbingFocus={climbingFocus}
         onNavigateToSettings={onNavigateToSettings}
       />
-
-      {/* Curve Coverage moved to Analysis tab — it's a per-zone
-          reference view, not a session-prep input, so it lives with
-          the F-D chart and Prescribed Load card instead of bloating
-          the Setup flow. */}
-
-      {/* Connection and start form one action area. */}
-      <section aria-label="Start your session">
-      {connectSlot}
-
-      {/* Start gating: a grip must be picked. Cookedness defaults to 0
-          (fresh); the user only adjusts it on days they're not fresh,
-          so it's no longer a precondition for starting. */}
-      <Btn
-        onClick={onStart}
-        disabled={!config.grip}
-        style={{ width: "100%", padding: "16px 0", fontSize: 17, borderRadius: 12 }}
-      >
-        Start Session →
-      </Btn>
-      </section>
 
       {/* Abrahangs-inspired low-intensity finger loading — a submaximal
           adjunct, cloud-synced and kept entirely separate from the

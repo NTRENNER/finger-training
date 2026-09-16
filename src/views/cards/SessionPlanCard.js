@@ -90,6 +90,7 @@ export function SessionPlanCard({
   GOAL_CONFIG, unit, hand = "Both",
   // Setup supplies the shared heading and device picker, including empty states.
   plannerHeader = null,
+  plannerFooter = null,
   // onApplyPlan flows the active session config (zone, T, reps, rest)
   // back up so the workout runner uses it. Auto-fires whenever any of
   // those change.
@@ -348,6 +349,7 @@ export function SessionPlanCard({
         <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
           Pick a grip above to see your continuous prescription.
         </div>
+        {plannerFooter}
       </Card>
     );
   }
@@ -359,6 +361,7 @@ export function SessionPlanCard({
           Need at least 2 reps on this grip to fit a curve. Run a probe
           session at any duration to get started.
         </div>
+        {plannerFooter}
       </Card>
     );
   }
@@ -868,15 +871,15 @@ export function SessionPlanCard({
             textAlign: "left",
             cursor: "pointer",
             font: "inherit",
-            padding: "14px 0 0",
-            borderRadius: 0,
-            background: "transparent",
-            border: "none", borderTop: `1px solid ${peakTestSelected ? C.blue : C.border}`,
-            marginTop: 8,
+            padding: "var(--session-choice-padding, 12px 14px)",
+            borderRadius: 8,
+            background: peakTestSelected ? C.blue + "22" : C.bg,
+            border: peakTestSelected ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
+            margin: peakTestSelected ? 0 : 1,
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: C.blue, marginBottom: 3 }}>
+            <div style={{ fontSize: "var(--session-choice-label-size, 12px)", fontWeight: 700, color: C.blue, marginBottom: 3 }}>
               {peakTestSelected ? "✓ Peak Test selected" : "🎯 Peak Test"}
               {maxTest?.recommended && (
                 <span style={{ marginLeft: 7, fontSize: 9, color: C.orange, textTransform: "uppercase" }}>
@@ -902,6 +905,7 @@ export function SessionPlanCard({
           </div>
         </button>
       </div>
+      {plannerFooter}
     </Card>
   );
 }
