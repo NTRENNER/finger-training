@@ -33,10 +33,9 @@
 //     ADD COLUMN IF NOT EXISTS perceived_rpe integer;
 //
 // `perceived_rpe` was the per-rep stamp for the legacy per-zone gain
-// learner. The new per-grip β learner reads cookedness from the
-// daily_state table (joined by date) inside the server-side trigger
-// update_fatigue_beta_from_rep_trg. Column preserved on `reps` for
-// historical reads; always null on new writes.
+// learner. Column preserved on `reps` for historical reads; always
+// null on new writes. Cookedness now lives in reps.session_cooked and
+// daily_state.cooked, both written only by the user.
 //
 // `was_recommended` carries the WorkoutTab rotation signal across
 // devices. WorkoutTab derives "next workout" from the synced log,
@@ -79,7 +78,7 @@
 //     type        text NOT NULL,
 //     date        text NOT NULL,
 //     discipline  text, venue text, grade text, ascent text,
-//     wall        text, rpe integer,
+//     wall        text, rpe integer, attempts integer,
 //     created_at  timestamptz DEFAULT now()
 //   );
 //   ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
@@ -291,11 +290,9 @@ export function repPayload(rep, userId) {
     failed: rep.failed ?? false,
     session_started_at: rep.session_started_at ?? null,
     // perceived_rpe was the per-rep stamp for the old per-zone
-    // shrinkage learner (perceivedFatigueLearning, removed). The new
-    // per-grip β learner reads cookedness from daily_state via the
-    // server-side trigger, not from this column. Preserved here for
-    // back-compat with historical reads and to avoid dropping the
-    // column from the table — always null on new writes.
+    // shrinkage learner (perceivedFatigueLearning, removed). Preserved
+    // here for back-compat with historical reads and to avoid dropping
+    // the column from the table — always null on new writes.
     perceived_rpe: rep.perceived_rpe ?? null,
     // Per-session cookedness override (migration: reps_add_session_cooked,
     // late May 2026). Same value across every rep in the session — stamped
@@ -640,17 +637,17 @@ export async function fetchReps() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// DAILY STATE (cooked scalar — drives the per-grip β learner)
+// DAILY STATE (the user's stated cookedness, per date)
 // ─────────────────────────────────────────────────────────────
 // One row per date, holding the user's pre-workout "How cooked
 // today?" scalar (0 = fresh, 10 = wrecked). Written by SessionPlanCard
 // before the user accepts a prescription, so it can't be biased by
 // session outcome.
 //
-// The Postgres trigger update_fatigue_beta_from_rep_trg joins this
-// table on NEW.date when rep 1 of a session arrives, then steps
-// user_settings.settings.fatigue_model[grip].beta. Without a row in
-// daily_state for the session's date, the learner sits this rep out.
+// Read by the curve fit to de-cook a session's loads back to their
+// fresh equivalent. A Postgres trigger used to join this table on rep
+// insert to train a per-grip fatigue β; that learner was retired in
+// September 2026 (see supabase/migrations/20260916_*).
 
 export async function pushDailyState(date, cooked) {
   if (!date || cooked == null) return false;
@@ -672,8 +669,8 @@ export async function pushDailyState(date, cooked) {
 // Delete a date's daily_state row. The clear path's cloud half:
 // saveCooked(date, null) means "no opinion logged" — before this
 // helper existed, a clear only removed the LS entry, so the cloud
-// row survived and the next sign-in reconcile (or the server-side
-// β trigger joining on date) kept seeing the stale cooked value.
+// row survived and the next sign-in reconcile kept seeing the stale
+// cooked value.
 // RLS scopes the delete to the signed-in user; .eq("date") picks
 // the row. Missing row deletes are no-ops (still `ok`), so retrying
 // is harmless.
@@ -758,8 +755,8 @@ export async function fetchUserSettings() {
 // PREFER pushUserSettingsPatch below. This whole-object upsert is a
 // lost-update hazard: it overwrites the entire settings JSONB, erasing
 // anything written between the caller's fetch and this push — including
-// the update_fatigue_beta_from_rep trigger's β updates and pins seeded
-// on other devices. Kept only for full-object migrations/repairs.
+// pins seeded on other devices. Kept only for full-object
+// migrations/repairs.
 export async function pushUserSettings(settings) {
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -1004,6 +1001,11 @@ export async function pushActivity(act) {
       area:       act.area       ?? null,
       rpe:         Number.isFinite(act.rpe) ? act.rpe : null,
       session_rpe: Number.isFinite(act.session_rpe) ? act.session_rpe : null,
+      // Attempts on this climb (September 2026). Null means one — the
+      // shape every pre-migration row already has — so a single-try
+      // climb writes nothing and a cleared edit clears the column.
+      attempts: Number.isFinite(act.attempts) && act.attempts >= 2 && act.attempts <= 99
+        ? Math.round(act.attempts) : null,
       // 1–5 star rating for climb quality (optional). Migration:
       // activities_add_stars_and_notes (May 2026). Null clears the
       // column on edit; sane-bounded server-side via CHECK constraint.
@@ -1102,6 +1104,7 @@ export async function fetchActivities() {
       if (a.area       != null) out.area       = a.area;
       if (a.rpe         != null) out.rpe         = a.rpe;
       if (a.session_rpe != null) out.session_rpe = a.session_rpe;
+      if (a.attempts    != null) out.attempts    = a.attempts;
       // stars/notes were pushed by pushActivity but never mapped back
       // here — so on another device they vanished, and a subsequent
       // updateActivity push (which normalizes missing → null) cleared
