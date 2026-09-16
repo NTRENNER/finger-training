@@ -61,7 +61,7 @@ import {
   prescription,
   suggestWeight,
 } from "../model/prescription.js";
-import { capacityMultiplier } from "../model/fatigueBeta.js";
+import { capacityMultiplier } from "../model/cookedScaling.js";
 import { pushDailyState } from "../lib/sync.js";
 
 // Manual-timing offset (June 2026): non-Tindeq users tap Done a beat
@@ -78,15 +78,10 @@ export function useSessionRunner({
   freshMap,
   threeExpPriors,
   addReps,
-  // Per-grip β model loaded from user_settings.settings.fatigue_model.
-  // capacityMultiplier(fatigueModel, grip, cooked) returns the load
-  // scale-down factor exp(-β·c). Updated server-side by the
-  // update_fatigue_beta_from_rep_trg trigger after rep-1 inserts.
-  fatigueModel = null,
   tindeqConnected,
   onSessionStart,
 }) {
-  // ── Session config (see comment at top) ─────────────────────
+  // ── Session config (see comment at top) ──────────────────────
   // Multi-set fields (numSets, setRestTime) removed — every session
   // is single-set under the curve-trust model.
   const [rawConfig, setConfig] = useState(() => ({
@@ -96,12 +91,16 @@ export function useSessionRunner({
     repsPerSet: 5,
     targetTime: 45,
     restTime:   20,
-    // Pre-workout cookedness scalar (0–10). Defaults to 0 (fresh, no
-    // scale-down); the user only raises it on days they're not fresh.
-    // Set by the SessionPlanCard slider. startSession upserts this into
-    // daily_state by today's date so the server-side β trigger can read
-    // it when reps land.
-    cooked: 0,
+    // Pre-workout cookedness scalar (0–10), or null for "not stated".
+    // Set by the SessionPlanCard slider, and ONLY by the user touching
+    // it. The default is null rather than 0 because 0 is a claim —
+    // "I was fresh" — and until September 2026 every untouched session
+    // filed that claim on the athlete's behalf, alongside a climb-log
+    // suggestion that auto-filled the slider and was saved as a
+    // self-report. Both are gone. Null scales nothing (capacityMultiplier
+    // returns 1.0) and lets the curve fit fall back to the day-level
+    // daily_state entry, which the user did enter.
+    cooked: null,
     // Density-ladder pinned loads ({ L?, R? } fresh-equivalent kg, or
     // null when the ladder isn't active). Set by SessionPlanCard's
     // onApplyPlan; startSession prefers these over re-prescribing so
@@ -116,7 +115,7 @@ export function useSessionRunner({
   // No derived fields anymore — config is rawConfig.
   const config = rawConfig;
 
-  // ── Phase machine + per-rep counters ──────────────────────
+  // ── Phase machine + per-rep counters ────────────────────────
   // (currentSet removed — single-set model. Rep records still write
   // set_num: 1 as a constant for backward compat with the existing
   // Supabase schema; the column is otherwise unused going forward.)
@@ -156,7 +155,7 @@ export function useSessionRunner({
   // were the only consumer. Per-grip baseline data is still available
   // through model/levels.js for any future runtime feature that needs it.)
 
-  // ── Start session ──────────────────────────────────────
+  // ── Start session ─────────────────────────────────────
   // refWeights drives the in-workout "Rep 1 suggested weight" display
   // and the weight that gets recorded against each rep. Same prescription
   // chain as the Setup card's "Train at" cell — single unified call to
@@ -175,11 +174,9 @@ export function useSessionRunner({
     if (override && override.grip) setConfig(override);
     const sid = uid();
     const rw = {};
-    // Per-grip capacity multiplier: exp(-β·cooked). 1.0 when cooked
-    // is null/0. Replaces the old per-zone applyPersonalGain path —
-    // same multiplicative role on load, but the learner is per-grip
-    // and lives in user_settings.settings.fatigue_model.
-    const fatigueMod = capacityMultiplier(fatigueModel, cfg.grip, cfg.cooked);
+    // Cookedness scale-down at the published fixed rate. 1.0 when
+    // cooked is null/0 — see model/cookedScaling.js.
+    const fatigueMod = capacityMultiplier(cfg.cooked);
     ["L", "R"].forEach(h => {
       // Density-ladder pin (see model/densityLadder.js + SessionPlanCard):
       // for repeat (grip, zone) sessions the plan carries the previous
@@ -201,9 +198,9 @@ export function useSessionRunner({
     // daily_state and stamped on every rep so the whole session stays
     // on the day it began even if it runs past local midnight.
     const startedDay = today();
-    // Persist today's cookedness so the server-side β trigger can
-    // join it onto rep-1 inserts. Fire-and-forget; failure here
-    // doesn't block the session, just costs a learning update.
+    // Persist a STATED cookedness as the day's value, so later
+    // sessions and retroactive curve fits see it. Skipped entirely
+    // when the user didn't state one. Fire-and-forget.
     if (cfg.cooked != null) {
       pushDailyState(startedDay, cfg.cooked);
     }
@@ -225,7 +222,7 @@ export function useSessionRunner({
     // flow (auto-detect handles timing precisely).
     setPhase(tindeqConnected ? "rep_ready" : "offset_prompt");
     onSessionStart?.();
-  }, [history, config, freshMap, threeExpPriors, fatigueModel, onSessionStart, tindeqConnected]);
+  }, [history, config, freshMap, threeExpPriors, onSessionStart, tindeqConnected]);
 
   // Resolve the offset_prompt phase: store the per-session choice and
   // enter the rep flow.
@@ -287,7 +284,7 @@ export function useSessionRunner({
     }
   }, [phase]);
 
-  // ── Handle rep completion ─────────────────────────────────
+  // ── Handle rep completion ────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null, failureValid = true, endReason = "muscular_failure", forceRecording = null, startedAtMs = null, endedAtMs = null, loadProvenance = null }) => {
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
@@ -391,17 +388,17 @@ export function useSessionRunner({
       failed:             derivedFailed,
       session_started_at: sessionStartedAt || null,
       // perceived_rpe was the per-rep learning signal for the old
-      // per-zone shrinkage model. The new per-grip β model reads
-      // cookedness from daily_state via the server trigger instead.
-      // Always null on new writes — column preserved for back-compat
-      // with historical rows and the History view's rep editor.
+      // per-zone shrinkage model. Always null on new writes — column
+      // preserved for back-compat with historical rows and the
+      // History view's rep editor.
       perceived_rpe:      null,
       // Per-session cookedness — stamped on every rep in the session
       // (same value across rep 1..N) so the curve fit can apply
       // per-rep compensation without a separate join. Reads from the
-      // pre-session slider via config.cooked. Null when the user left
-      // the slider at "no opinion" — the fit then falls back to
-      // daily_state.cooked for the rep's date.
+      // pre-session slider via config.cooked. Null when the user never
+      // touched the slider — the fit then falls back to
+      // daily_state.cooked for the rep's date. An untouched slider is
+      // NOT recorded as a cooked-0 self-report.
       session_cooked:     (config.cooked != null && Number.isFinite(Number(config.cooked)))
                             ? Number(config.cooked)
                             : null,

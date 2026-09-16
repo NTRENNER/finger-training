@@ -43,11 +43,9 @@ import { refitPinnedBaseline } from "../model/refitBaseline.js";
 
 export function useGripFits({
   history, threeExpPriors, grips,
-  // Optional: per-grip fatigue β model (user_settings.fatigue_model).
   // Only used by the fresh-equivalent improvement maps below — the
   // raw fits never touch it. Null → DEFAULT_BETA fallbacks inside
   // capacityMultiplier, so the fresh-eq path still works cold-start.
-  fatigueModel = null,
   // Optional: { [grip]: { date, amps } } from useUserSettings. When
   // present, takes precedence over the freshly-computed baseline so
   // the comparison frame doesn't slide backward if older reps land
@@ -220,12 +218,12 @@ export function useGripFits({
   // SAME frozen/pinned maps as the raw comparison — only the "now"
   // side changes basis.
   const grip3xEstimatesFresh = useMemo(
-    () => buildGripEstimates(history, threeExpPriors, { freshEq: true, fatigueModel }),
-    [history, threeExpPriors, fatigueModel]
+    () => buildGripEstimates(history, threeExpPriors, { freshEq: true }),
+    [history, threeExpPriors]
   );
   const perHandGripEstimatesFresh = useMemo(
-    () => buildPerHandGripEstimates(history, threeExpPriors, { freshEq: true, fatigueModel }),
-    [history, threeExpPriors, fatigueModel]
+    () => buildPerHandGripEstimates(history, threeExpPriors, { freshEq: true }),
+    [history, threeExpPriors]
   );
   const gripImprovementFresh = useMemo(
     () => buildGripImprovement(gripBaselines, grip3xEstimatesFresh),
