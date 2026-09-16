@@ -3,8 +3,8 @@
 // ─────────────────────────────────────────────────────────────
 // Daily "cookedness" is the user's pre-session subjective fatigue
 // load (0 = fresh, 10 = wrecked). Captured at session start by the
-// Setup tab's cookedness slider and pushed to Supabase's daily_state
-// table for the server-side β-learner trigger to consume.
+// Setup tab's cookedness slider — and only when the user actually
+// sets it — then pushed to Supabase's daily_state table.
 //
 // This hook adds an OFFLINE cache + RETROACTIVE editing path:
 //
@@ -164,17 +164,13 @@ export function useDailyState({ user, syncSignal = 0 }) {
       return next;
     });
     if (cooked != null) {
-      // The server trigger that updates β on rep insert doesn't
-      // re-run for past reps when daily_state changes, so a
-      // retroactive edit only flows into the curve fit via the
-      // local freshMap rebuild — not into β. Acceptable trade-off
-      // for MVP; the curve correction is the main vehicle of value.
+      // A retroactive edit flows into the curve fit via the local
+      // freshMap rebuild on the next render tick.
       pushDailyState(date, cooked).then(ok => { if (ok) confirmPushed(date, cooked); });
     } else {
       // Cloud half of the clear. Before deleteDailyState existed the
       // cloud row survived a clear forever and the stale cooked value
-      // resurrected on the next reconcile (and kept feeding the
-      // server-side β trigger's date join).
+      // resurrected on the next reconcile.
       deleteDailyState(date).then(ok => { if (ok) confirmPushed(date, null); });
     }
   }, []);
