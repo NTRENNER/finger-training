@@ -13,84 +13,17 @@ import { sessionFatigueDetail } from "./climbingFatigue.js";
 // day from firing while still catching a real run.
 export const DELOAD_MIN_SESSIONS = 2;
 
-// Per-grip trigger for the cross-grip deload gate, on the SAME statistic
-// the gate reads: the mean of each grip's last DELOAD_MIN_SESSIONS
-// HELD-OUT recovery gaps. Deliberately its OWN constant — NOT the chart /
-// coaching band GAP_NOISE_BAND. That band is calibrated to the 3-session
-// SMOOTHED gap; this gate reads a 2-session mean, a wider, noisier
-// statistic (forward-chained holdout on ~5mo real data: std ≈ 0.15 Micro
-// / 0.26 Crusher, centered POSITIVE at +0.09 / +0.14 — the model slightly
-// under-predicts this user's recovery). A grip mean below -0.15 is
-// ~1–1.5σ under the user's own baseline on THIS statistic — a beyond-noise
-// systemic dip, not scatter. It equals the display band numerically on
-// this data by coincidence, not construction. See
-// scripts/recovery-validation.md; re-derive with recoveryModel.validation.
+// Provisional absolute recovery-gap threshold until there is enough
+// held-out history to estimate the athlete's usual two-session average.
 export const DELOAD_GAP_TRIGGER = 0.15;
-
-// ── Why the trigger above is no longer the primary gate ──────
-// (September 2026.) DELOAD_GAP_TRIGGER is an ABSOLUTE threshold against
-// zero, and zero is not where this statistic lives. Replaying the whole
-// real history — 51 checkpoints across five months — the per-grip mean
-// gap sits at a median of +0.187 (Crusher) and +0.157 (Micro), because
-// the recovery model under-predicts this athlete. Against their own
-// spread that puts -0.15 at 1.85 sd (Crusher) and 2.02 sd (Micro) below
-// typical, and the cross-grip gate then demands BOTH grips be there at
-// once — on the order of a 0.07% event per checkpoint.
-//
-// It behaved exactly as that arithmetic predicts: 48 of 51 checkpoints
-// green, 3 yellow on a single grip, and the deload recommendation never
-// fired once. That is not five months without fatigue; it is a detector
-// whose operating point sits two standard deviations outside its own
-// data. The bias was even documented in the comment above — "centered
-// POSITIVE at +0.09 / +0.14" — and the absolute threshold was kept anyway.
-//
-// So the gate now reads each grip against ITS OWN distribution of this
-// statistic. "Recovery is softening" means softer than normal for you,
-// which is what the card claimed all along.
-//
-// What that changed on the real history, replayed: yellow 3 → 5, and the
-// gauge acquired a working range — pressure now spans 0 to 0.64 with a
-// median of 0.02, where before it was pinned at 0 because the average gap
-// was positive at nearly every checkpoint. Two of the yellows are genuine
-// CROSS-GRIP softening (2026-06-05 at 0.64, 2026-07-11 at 0.51), which the
-// absolute gauge had no way to express at all.
-//
-// Red still never fires: both grips a full sd below their own medians at
-// once did not happen in five months. The threshold is deliberately NOT
-// tuned down to manufacture a firing — after recentering, "it did not
-// happen" is a finding about the training, where before it was an artifact
-// of an operating point two sd outside the data.
-//
-// The best evidence that this reads something real is 2026-06-05. Recovery
-// was down on both grips (-0.62, -0.67 sd), climbing acute:chronic hit
-// 1.77×, and the log shows 19 climbs that day — and the athlete rated
-// themselves cooked = 0. Three measurements agreeing against one
-// self-report is the case for keeping this detector and not asking people
-// how they feel.
-//
-// An earlier pass at this claimed the gate fires on 2026-07-06 and 07-11.
-// It does not: that estimate z-scored each window against the FULL history
-// including its own future. With honest out-of-sample baselines those days
-// are -0.44 and -0.66 sd, well short. Lookahead flatters a detector, which
-// is why the baseline below is split-half rather than global.
-//
-// DELOAD_GAP_TRIGGER survives only as the fallback for a grip with too
-// little history to have a baseline yet — 13 of 51 checkpoints here, all
-// early.
 export const DELOAD_GAP_TRIGGER_SD = 1.0;
-
-// Sessions of out-of-sample baseline needed before a grip can be judged
-// against itself; below this the absolute fallback applies. The split
-// that produces them needs twice this many pre-window sessions.
-export const DELOAD_BASELINE_MIN_SESSIONS = 6;
-
-// Floor on the baseline spread. Dividing by a near-zero sd would turn an
-// unremarkable wobble into a 6-sigma alarm, which is how a metronomically
-// consistent athlete — or a synthetic fixture — gets told to deload for
-// nothing. Real per-grip baselines here run 0.17-0.30, so this only binds
-// on a degenerate one, and when it binds it makes the gate HARDER to trip,
-// never easier.
+export const DELOAD_BASELINE_MIN_SESSIONS = 6; // independent dates per half
+export const DELOAD_BASELINE_FULL_DAYS = 12;
 export const DELOAD_BASELINE_MIN_SD = 0.05;
+// Require at least a 0.10 drop in the observed/predicted recovery ratio.
+// This conservative guard prevents a nearly constant baseline turning
+// tiny changes into alarms. It is a policy floor, not a measured SD.
+export const DELOAD_MIN_MEANINGFUL_GAP = 0.10;
 
 // Detraining guard: if the most recent finger session on/before the
 // evaluation date is older than this, return no-deload (rested).
@@ -216,8 +149,14 @@ function liftingSpike(volByDate, today) {
 export function climbingLoadByDate(activities) {
   const byDate = {};
   if (!Array.isArray(activities)) return byDate;
-  for (const d of new Set(activities.filter(a => a?.type === "climbing" && a.date).map(a => a.date))) {
-    const detail = sessionFatigueDetail(activities, d);
+  const groups = new Map();
+  for (const activity of activities) {
+    if (activity?.type !== "climbing" || !activity.date) continue;
+    if (!groups.has(activity.date)) groups.set(activity.date, []);
+    groups.get(activity.date).push(activity);
+  }
+  for (const [d, rows] of groups) {
+    const detail = sessionFatigueDetail(rows, d);
     if (detail && Number.isFinite(detail.scoreExact)) byDate[d] = detail.scoreExact;
   }
   return byDate;
@@ -266,63 +205,55 @@ export function recentGapHeldOut(history, grip, today, n) {
   const last = scored.slice(-n);
   const mean = last.reduce((s, r) => s + r.gapAtTarget, 0) / last.length;
 
-  // The athlete's own baseline for this statistic, so "recovery is down"
-  // can mean down FOR THEM. See DELOAD_GAP_TRIGGER_SD for why an absolute
-  // threshold could not work here.
-  //
-  // The baseline must be scored the same way the window is — out of
-  // sample — or the comparison is between two different things. Reusing
-  // `scored` for it would not do: those earlier sessions are IN sample for
-  // the tau fit above, and on this user's real history that shifts the
-  // Crusher baseline median by 0.062 (0.25 sd) relative to forward-chained
-  // scoring, in the direction that makes the window look healthier than it
-  // is. Micro shifts by 0.001, so the bias is per-grip and cannot be
-  // constant-corrected. Instead the pre-window sessions are split: taus fit
-  // on the older half, the newer half scored out-of-sample against them.
-  const preWindow = sessions.slice(0, -n);
+  // Split complete dates, never individual sessions sharing a date. The
+  // actual halves must each have enough independent training days.
+  const dates = [...new Set(sessions.filter(r => r.date < cutoff).map(r => r.date))];
   let baselineStats = null;
-  if (preWindow.length >= 2 * DELOAD_BASELINE_MIN_SESSIONS) {
-    const split = preWindow[Math.floor(preWindow.length / 2)].date;
+  if (dates.length >= 2 * DELOAD_BASELINE_MIN_SESSIONS) {
+    const split = dates[Math.floor(dates.length / 2)];
     const older = history.filter(r => r.grip === grip && r.date && r.date < split);
     const basePhys = physModelFromTaus(computePersonalRecoveryTausForGrip(older, grip));
-    const vals = buildRecoveryTrend(history, grip, { physModel: basePhys })
-      .filter(r => r.date && r.date >= split && r.date < cutoff && Number.isFinite(r.gapAtTarget))
-      .map(r => r.gapAtTarget);
-    if (vals.length >= DELOAD_BASELINE_MIN_SESSIONS) {
-      const sorted = [...vals].sort((a, b) => a - b);
-      const median = sorted[Math.floor(sorted.length / 2)];
-      const mu = vals.reduce((s, v) => s + v, 0) / vals.length;
-      const sd = Math.sqrt(vals.reduce((s, v) => s + (v - mu) ** 2, 0) / (vals.length - 1));
-      if (sd > 0) baselineStats = { median, sd: Math.max(sd, DELOAD_BASELINE_MIN_SD), n: vals.length };
+    const evaluation = buildRecoveryTrend(history, grip, { physModel: basePhys })
+      .filter(r => r.date && r.date >= split && r.date < cutoff && Number.isFinite(r.gapAtTarget));
+    const independentDates = new Set(evaluation.map(r => r.date)).size;
+    const vals = evaluation.map(r => r.gapAtTarget);
+    const windows = vals.slice(n - 1).map((_, i) =>
+      vals.slice(i, i + n).reduce((sum, v) => sum + v, 0) / n);
+    if (independentDates >= DELOAD_BASELINE_MIN_SESSIONS && windows.length >= 2) {
+      const mu = windows.reduce((sum, v) => sum + v, 0) / windows.length;
+      const rawSd = Math.sqrt(windows.reduce((sum, v) => sum + (v - mu) ** 2, 0) / (windows.length - 1));
+      baselineStats = { mean: mu, sd: Math.max(rawSd, DELOAD_BASELINE_MIN_SD), rawSd,
+        n: windows.length, sessionCount: vals.length, independentDates, windowSize: n, splitDate: split,
+        // Overlapping windows are not independent observations. Readiness
+        // to personalize depends on distinct training dates instead.
+        weight: Math.min(1, (independentDates - DELOAD_BASELINE_MIN_SESSIONS)
+          / (DELOAD_BASELINE_FULL_DAYS - DELOAD_BASELINE_MIN_SESSIONS)) };
     }
   }
-
+  const weight = baselineStats?.weight ?? 0;
+  const personalDistance = baselineStats
+    ? Math.max(DELOAD_MIN_MEANINGFUL_GAP, baselineStats.sd * DELOAD_GAP_TRIGGER_SD) : DELOAD_GAP_TRIGGER;
+  const center = weight * (baselineStats?.mean ?? 0);
+  const distance = (1 - weight) * DELOAD_GAP_TRIGGER + weight * personalDistance;
   return { mean, n: last.length, lastDate: last[last.length - 1].date,
     confidence: last.some(r => r.confidence === "historical_estimate") ? "historical_estimate" : "measured",
-    baseline: baselineStats,
-    // Standard deviations below the athlete's own typical value. Null when
-    // the baseline is too thin, and callers then fall back to the absolute
-    // threshold rather than guessing.
-    z: baselineStats ? (mean - baselineStats.median) / baselineStats.sd : null };
+    baseline: baselineStats, center, distance, threshold: center - distance,
+    assessment: weight >= 1 ? "personalized" : "provisional",
+    // With zero spread there is no statistical z-score; the policy guard
+    // still supplies a stable threshold and shared gauge/decision scale.
+    z: baselineStats?.rawSd > 0 ? (mean - baselineStats.mean) / baselineStats.sd : null };
 }
 
-// Is this grip's recent recovery below its own normal? Prefers the
-// self-referenced z-score; falls back to the absolute threshold only when
-// the grip has too little history to have a baseline.
-export function gripIsDown(gap) {
-  if (!gap) return false;
-  return gap.z != null ? gap.z <= -DELOAD_GAP_TRIGGER_SD : gap.mean < -DELOAD_GAP_TRIGGER;
-}
-
-// How far along the runway to a deload this grip sits, 0..1, with 1.0 at
-// the trigger. Same preference order as gripIsDown, so the gauge and the
-// gate can never disagree about which grips are down.
+// Both displays and decisions use the same runway, including equality.
 export function gripPressure(gap) {
   if (!gap) return 0;
-  const raw = gap.z != null
-    ? -gap.z / DELOAD_GAP_TRIGGER_SD
-    : -gap.mean / DELOAD_PRESSURE_SCALE;
-  return Math.max(0, Math.min(1, raw));
+  const raw = Number.isFinite(gap.center) && gap.distance > 0
+    ? (gap.center - gap.mean) / gap.distance
+    : gap.z != null ? -gap.z / DELOAD_GAP_TRIGGER_SD : -gap.mean / DELOAD_GAP_TRIGGER;
+  return raw >= 1 - 1e-12 ? 1 : Math.max(0, Math.min(1, raw));
+}
+export function gripIsDown(gap) {
+  return !!gap && gripPressure(gap) === 1;
 }
 
 // Main entry. Returns:
@@ -380,9 +311,9 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   // Report how far below normal each grip is, in its own terms. The raw
   // gap was never interpretable on its own — that was the whole problem.
   const gapStr = measured
-    .map(g => gripGaps[g].z != null
-      ? `${g} ${Math.abs(gripGaps[g].z).toFixed(1)} sd below normal`
-      : `${g} ${gripGaps[g].mean >= 0 ? "+" : ""}${gripGaps[g].mean.toFixed(2)}`)
+    .map(g => gripGaps[g].assessment === "provisional"
+      ? `${g}: provisional recovery signal`
+      : `${g}: recovery below usual range`)
     .join(", ");
   const loadParts = [];
   if (lifting.spike) loadParts.push(`lifting volume is ${lifting.ratio.toFixed(1)}× your 4-week average`);
@@ -408,12 +339,9 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
 // hard cross-grip deload so a deload never appears out of nowhere.
 // Pressure is scaled so 1.0 lands exactly at the deload line
 // (avgGap = -DELOAD_GAP_TRIGGER); yellow lights partway down that runway.
-// avgGap normally sits POSITIVE here (the model slightly under-predicts
-// this user's recovery), so the gauge is green unless cross-grip recovery
-// genuinely drifts negative.
-export const DELOAD_PRESSURE_SCALE = DELOAD_GAP_TRIGGER;   // full pressure at the deload line
-// green → yellow at/above this pressure. 0.5 ⇒ avgGap ≈ -0.075, about
-// halfway to the deload line — an intentional heads-up, not the decision.
+// Compatibility export for callers displaying the provisional threshold.
+export const DELOAD_PRESSURE_SCALE = DELOAD_GAP_TRIGGER;
+// Yellow is an early heads-up halfway along the current blended runway.
 export const DELOAD_YELLOW_AT = 0.5;
 
 // Returns:

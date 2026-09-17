@@ -37,6 +37,7 @@ export function DeloadGauge({
   if (!status) return null;
   const { level, pressure, label, haveSignal, deload } = status;
   const usesHistoricalEstimates = Object.values(deload?.signals?.gripGaps || {}).some(g => g.confidence === "historical_estimate");
+  const provisional = Object.values(deload?.signals?.gripGaps || {}).some(g => g.assessment === "provisional");
   const color = LEVEL_COLOR[level] || C.muted;
   const markerPct = Math.max(1, Math.min(99, (haveSignal ? pressure : 0) * 100));
   const matchedIndex = timelineDates.indexOf(asOfDate);
@@ -112,6 +113,9 @@ export function DeloadGauge({
         to move — it won't react to a single rough session.
       </div>
 
+      {haveSignal && provisional && <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>
+        Provisional assessment. More training days will make this comparison more personal.
+      </div>}
       {/* Traffic-light track with a pointer at the current pressure. */}
       <div style={{ position: "relative", paddingTop: 9 }}>
         <div style={{

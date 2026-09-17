@@ -1288,8 +1288,16 @@ export function HistoryView({
                 session_cooked column on this session's reps only
                 (multi-session days where the cookedness changed
                 between sessions: morning fresh, midday climb, evening
-                cooked). Either path triggers a freshMap rebuild so
-                the curve fit absorbs the correction immediately. */}
+                cooked). Ratings update the diary. Recorded session adjustments stay fixed;
+                only legacy explicit session ratings supply an estimated adjustment. */}
+            {!sess.reps?.[0]?.session_adjustment && sess.reps?.[0]?.session_cooked == null && cookedOnDate(sess.date) > 0 && (
+              <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>
+                No session load adjustment was recorded. The day rating is not used to adjust this session’s capacity.
+              </div>
+            )}
+            {sess.reps?.[0]?.session_adjustment && <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>
+              Ratings can be corrected here. The load adjustment recorded at session start stays unchanged.
+            </div>}
             <CookednessSlider
               date={sess.date}
               dayValue={cookedOnDate(sess.date)}

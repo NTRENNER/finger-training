@@ -76,3 +76,14 @@ test("interrupted measurement and validity survive recording without the failure
   expect(hook.result.current.lastRepResult.failureValid).toBe(false);
   expect(hook.result.current.phase).toBe('resting');
 });
+
+
+test.each([[null,1],[0,1],[10,0.75]])("freezes the applied adjustment for rating %s", (cooked,multiplier) => {
+  const {hook,addReps}=setup();
+  act(()=>hook.result.current.startSession({...cfg,cooked,plannedLoadByHand:{L:20}}));
+  expect(hook.result.current.refWeights.L).toBe(20*multiplier);
+  act(()=>hook.result.current.setConfig(c=>({...c,cooked:5})));
+  act(()=>hook.result.current.handleRepDone({actualTime:30,avgForce:20*multiplier}));
+  expect(addReps.mock.calls[0][0][0]).toMatchObject({session_cooked:cooked,
+    session_adjustment:{version:1,reported_cooked:cooked,applied_multiplier:multiplier}});
+});

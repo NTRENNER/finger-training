@@ -41,11 +41,6 @@ import { trainingPurpose } from "../../model/trainingPurpose.js";
 // the tiles and the details simultaneously, and clicking a tile drives
 // what the workout runner gets via onApplyPlan({goal, targetTime, ...}).
 //
-// PrescribedLoadCard still exists in src/views/cards/ — Analysis renders
-// it standalone for retrospective what-if exploration, where the slider
-// is purely local (no workout to drive). Both components share the same
-// per-grip cookedness math through cookedScaling.capacityMultiplier.
-
 import React, { useEffect, useMemo, useState } from "react";
 import "./SessionPlanCard.css";
 import { C } from "../../ui/theme.js";
@@ -97,8 +92,8 @@ export function SessionPlanCard({
   onApplyPlan,
   // "How cooked today?" slider state (0 = fresh → 10 = wrecked). Owned
   // by SetupView; flows through to useSessionRunner which upserts it to
-  // daily_state on session start. Mandatory: null means "not yet picked"
-  // and the Start button stays disabled.
+  // daily_state on session start. Optional: null means "not stated"
+  // and no automatic load reduction is applied.
   cooked,
   onCookedChange,
   // Cloud-synced climbing-focus bias ("balanced" | "bouldering" |
@@ -237,7 +232,10 @@ export function SessionPlanCard({
             : (pR?.value != null ? pR.value * fatigueMod : null),
         fatigueMod,
         deferredReason,
-        // Reliability dimming — same logic as PrescribedLoadCard.
+        // Preserve the explanation when the model applies a load floor.
+        extrapFloored: Boolean(pL?.extrapFloored || pR?.extrapFloored),
+        extrapolationBoundaryS: Math.max(pL?.extrapolationBoundaryS || 0, pR?.extrapolationBoundaryS || 0),
+        // Reliability dimming for extrapolated estimates.
         reliability:
           !pL && !pR ? null
           : pL?.reliability === "extrapolation" || pR?.reliability === "extrapolation" ? "extrapolation"
@@ -853,7 +851,7 @@ export function SessionPlanCard({
                 </div>
               ) : r.reliability === "extrapolation" && (
                 <div style={{ fontSize: "var(--session-choice-meta-size, 9px)", color: C.muted, marginTop: 4, fontStyle: "italic" }}>
-                  extrapolating
+                  {r.extrapFloored ? `Load floor · unsupported beyond ${r.extrapolationBoundaryS}s` : "extrapolating"}
                 </div>
               )}
             </button>

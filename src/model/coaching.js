@@ -818,7 +818,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // picks and meaningful signals still dominate, but within a
       // never zone the canonical refT wins. Keeps the engine's
       // never-zone pick consistent with the refTimes the rest of
-      // the app already surfaces (PrescribedLoadCard, TARGET_OPTIONS).
+      // the app already surfaces (SessionPlanCard, TARGET_OPTIONS).
       let effectiveScore = score;
       if (zoneStatus === "never") {
         const refT = ZONE_REF_T[zoneKey];

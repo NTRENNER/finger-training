@@ -4,7 +4,7 @@
 // knows a long-hold number is a sane floor, not a literal curve read.
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { PrescribedLoadCard } from "../PrescribedLoadCard.js";
+import { SessionPlanCard } from "../SessionPlanCard.js";
 
 // Force a floored, extrapolating prescription for every zone/hand.
 jest.mock("../../../model/prescription.js", () => ({
@@ -32,7 +32,7 @@ const GOAL_CONFIG = {
 
 test("surfaces the anti-collapse floor caption when a zone is floored", () => {
   render(
-    <PrescribedLoadCard
+    <SessionPlanCard
       history={[{ grip: "Micro", hand: "L", actual_time_s: 30 }]}
       grip="Micro"
       unit="lbs"

@@ -21,3 +21,11 @@ test('cloud round-trip leaves historical validity unspecified', async () => {
   expect(restored.failure_valid).toBeNull();
   expect(restored.force_recording).toBeNull();
 });
+
+
+test("cloud round-trip preserves an untouched session's adjustment separately from its rating", async () => {
+ const session_adjustment={version:1,reported_cooked:null,applied_multiplier:1};
+ const payload=repPayload({session_cooked:null,session_adjustment},"user");
+ mockOrder.mockResolvedValue({data:[payload],error:null});
+ expect((await fetchReps())[0]).toMatchObject({session_cooked:null,session_adjustment});
+});

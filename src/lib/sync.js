@@ -280,6 +280,7 @@ export function repPayload(rep, userId) {
     // the "did Tindeq capture this rep?" signal that downstream code
     // (and any future code) might reasonably want to check.
     rep_timing: rep.rep_timing ?? null,
+    session_adjustment: rep.session_adjustment ?? null,
     load_provenance: rep.load_provenance ?? null,
     failure_valid: rep.failure_valid ?? null,
     end_reason: rep.end_reason ?? null,
@@ -616,6 +617,7 @@ export async function fetchReps() {
     // preserves the distinction.
     avg_force_kg:  r.avg_force_kg  != null ? Number(r.avg_force_kg)  : null,
     rep_timing: r.rep_timing ?? null,
+    session_adjustment: r.session_adjustment ?? null,
     load_provenance: r.load_provenance ?? null,
     failure_valid: r.failure_valid ?? null,
     end_reason: r.end_reason ?? null,

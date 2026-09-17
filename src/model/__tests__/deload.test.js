@@ -400,16 +400,16 @@ describe("the self-referenced baseline", () => {
     // pre-window sessions, never on the window itself.
     expect(rg.baseline.n).toBeLessThan(30 - 2);
     expect(rg.baseline.sd).toBeGreaterThan(0);
-    expect(rg.z).toBeCloseTo((rg.mean - rg.baseline.median) / rg.baseline.sd, 9);
+    expect(rg.z).toBeCloseTo((rg.mean - rg.baseline.mean) / rg.baseline.sd, 9);
   });
 
-  test("a steady athlete sits near their own median, not near zero", () => {
+  test("a steady athlete with better recent recovery does not trigger a deload", () => {
     // The point of the rewrite: what matters is distance from this
     // athlete's normal, wherever that happens to sit.
     const hist = many("Crusher", 30);
     const last = hist[hist.length - 1].date;
     const rg = recentGapHeldOut(hist, "Crusher", last, 2);
-    expect(Math.abs(rg.z)).toBeLessThan(DELOAD_GAP_TRIGGER_SD);
+    expect(rg.z).toBeGreaterThan(0);
     expect(gripIsDown(rg)).toBe(false);
   });
 });

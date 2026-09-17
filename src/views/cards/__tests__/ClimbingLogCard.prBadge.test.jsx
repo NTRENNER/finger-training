@@ -46,3 +46,18 @@ test("logs consecutive climbs without reopening and clears the prior climb's nam
   expect(onLog).toHaveBeenCalledTimes(2);
   expect(onLog.mock.calls[1][0]).not.toHaveProperty("route_name");
 });
+
+
+test("multiple attempts switch a first-try send to Send and preserve non-send styles", () => {
+ const onLog=jest.fn(); render(<ClimbingLogCard onLog={onLog}/>);
+ fireEvent.click(screen.getByRole("button",{name:"10",exact:true}));
+ expect(screen.getByText(/Changed to Send/)).toBeVisible();
+ expect(screen.getByRole("button",{name:/Flash 1st/})).toBeDisabled();
+ expect(screen.getByRole("button",{name:/Onsight 1st/})).toBeDisabled();
+ fireEvent.click(screen.getByRole("button",{name:/^log climb$/i}));
+ expect(onLog.mock.calls[0][0]).toMatchObject({attempts:10,ascent:"redpoint"});
+ fireEvent.click(screen.getByRole("button",{name:/Attempt Worked/}));
+ fireEvent.click(screen.getByRole("button",{name:"3",exact:true}));
+ fireEvent.click(screen.getByRole("button",{name:/^log climb$/i}));
+ expect(onLog.mock.calls[1][0]).toMatchObject({attempts:3,ascent:"attempt"});
+});

@@ -80,16 +80,31 @@ export function capacityMultiplier(cooked) {
   return Math.max(COOKED_SCALE_FLOOR, 1 - COOKED_SCALE_PER_POINT * clamped);
 }
 
-// ── On provenance ────────────────────────────────────────────
-// There is deliberately no `cooked_source` column. Every path that can
-// now write reps.session_cooked or daily_state.cooked is the user's own
-// input, so the field needs no qualifier: a value means they said it,
-// and null means they didn't. The provenance problem was never a
-// missing label — it was the app writing inferences into a field
-// reserved for self-reports, and that is fixed at the source.
-//
-// Rows written before September 2026 are NOT clean: an untouched
-// slider stored 0, and a climb-derived suggestion auto-filled and
-// stored whatever it computed. Neither is distinguishable after the
-// fact from a real report, so treat pre-September cookedness as
-// unreliable rather than trying to repair it.
+// New sessions freeze both the stated rating and the multiplier used at start.
+// A later diary edit must not rewrite the adjustment actually prescribed.
+export function sessionAdjustment(cooked) {
+  const reported = cooked == null || !Number.isFinite(Number(cooked))
+    ? null : Math.max(COOKED_MIN, Math.min(COOKED_MAX, Number(cooked)));
+  return { version: 1, reported_cooked: reported, applied_multiplier: capacityMultiplier(reported) };
+}
+
+export function recordedAdjustment(rep, cookedByDate = null) {
+  const snapshot = rep?.session_adjustment;
+  if (snapshot != null) {
+    const mult = snapshot.applied_multiplier;
+    if (snapshot.version === 1 && typeof mult === "number" && Number.isFinite(mult)
+        && mult >= COOKED_SCALE_FLOOR && mult <= 1) {
+      return { multiplier: mult, basis: "recorded_session_adjustment" };
+    }
+    // Corrupt or future metadata must not reopen the day-level fallback.
+    return { multiplier: 1, basis: "unknown_session_adjustment" };
+  }
+  // Older explicit session values retain the historical estimate. They are
+  // not proof of what the old client applied (some old sliders auto-filled).
+  if (rep?.session_cooked != null && Number.isFinite(Number(rep.session_cooked))) {
+    return { multiplier: capacityMultiplier(rep.session_cooked), basis: "legacy_session_estimate" };
+  }
+  // A diary rating cannot tell us whether THIS session was adjusted.
+  return { multiplier: 1, basis: cookedByDate?.[rep?.date] != null
+    ? "unknown_legacy_adjustment" : "unrecorded_adjustment" };
+}

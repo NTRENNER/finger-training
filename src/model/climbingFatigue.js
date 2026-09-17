@@ -128,14 +128,14 @@ function weightedEffortsForDate(activities, dateStr) {
 export function sessionFatigueDetail(activities, dateStr) {
   if (!activities || !dateStr) return null;
 
-  for (const a of activities) {
-    if (a?.type !== "climbing") continue;
-    if (a.date !== dateStr) continue;
+  const climbs = activities.filter(a => a?.type === "climbing" && a.date === dateStr);
+  const counts = { nClimbs: climbs.length, nAttempts: climbs.reduce((sum, a) => sum + attemptsOf(a), 0) };
+  for (const a of climbs) {
     const sr = Number(a.session_rpe);
     if (Number.isFinite(sr) && sr >= 1 && sr <= 10) {
       const score = Math.max(1, Math.min(10, Math.round(sr)));
       return { score, scoreExact: score, volume: null, peak: null, raw: null,
-        nClimbs: null, nAttempts: null, source: "session_rpe" };
+        ...counts, source: "session_rpe" };
     }
   }
 
@@ -153,8 +153,7 @@ export function sessionFatigueDetail(activities, dateStr) {
     volume,
     peak,
     raw,
-    nClimbs: efforts.length,
-    nAttempts: efforts.reduce((acc, e) => acc + e.attempts, 0),
+    ...counts,
     source: "derived",
   };
 }

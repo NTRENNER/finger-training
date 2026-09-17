@@ -61,7 +61,7 @@ import {
   prescription,
   suggestWeight,
 } from "../model/prescription.js";
-import { capacityMultiplier } from "../model/cookedScaling.js";
+import { sessionAdjustment } from "../model/cookedScaling.js";
 import { pushDailyState } from "../lib/sync.js";
 
 // Manual-timing offset (June 2026): non-Tindeq users tap Done a beat
@@ -98,8 +98,7 @@ export function useSessionRunner({
     // filed that claim on the athlete's behalf, alongside a climb-log
     // suggestion that auto-filled the slider and was saved as a
     // self-report. Both are gone. Null scales nothing (capacityMultiplier
-    // returns 1.0) and lets the curve fit fall back to the day-level
-    // daily_state entry, which the user did enter.
+    // returns 1.0). The applied adjustment is saved on this session.
     cooked: null,
     // Density-ladder pinned loads ({ L?, R? } fresh-equivalent kg, or
     // null when the ladder isn't active). Set by SessionPlanCard's
@@ -133,6 +132,7 @@ export function useSessionRunner({
   // essentially never fire. Snapshot at startSession instead. A ref,
   // not state: it must not retrigger effects and is only read once.
   const preSessionHistoryRef = useRef(null);
+  const sessionAdjustmentRef = useRef(null);
   const [sessionStartedAt, setSessionStartedAt] = useState("");
   // Session-anchored local date (YYYY-MM-DD), captured once at
   // startSession. Every rep in the session is stamped with THIS,
@@ -176,7 +176,9 @@ export function useSessionRunner({
     const rw = {};
     // Cookedness scale-down at the published fixed rate. 1.0 when
     // cooked is null/0 — see model/cookedScaling.js.
-    const fatigueMod = capacityMultiplier(cfg.cooked);
+    const adjustment = sessionAdjustment(cfg.cooked);
+    sessionAdjustmentRef.current = adjustment;
+    const fatigueMod = adjustment.applied_multiplier;
     ["L", "R"].forEach(h => {
       // Density-ladder pin (see model/densityLadder.js + SessionPlanCard):
       // for repeat (grip, zone) sessions the plan carries the previous
@@ -392,16 +394,10 @@ export function useSessionRunner({
       // preserved for back-compat with historical rows and the
       // History view's rep editor.
       perceived_rpe:      null,
-      // Per-session cookedness — stamped on every rep in the session
-      // (same value across rep 1..N) so the curve fit can apply
-      // per-rep compensation without a separate join. Reads from the
-      // pre-session slider via config.cooked. Null when the user never
-      // touched the slider — the fit then falls back to
-      // daily_state.cooked for the rep's date. An untouched slider is
-      // NOT recorded as a cooked-0 self-report.
-      session_cooked:     (config.cooked != null && Number.isFinite(Number(config.cooked)))
-                            ? Number(config.cooked)
-                            : null,
+      // Preserve what was reported and applied when this session began.
+      session_cooked: sessionAdjustmentRef.current?.reported_cooked ?? null,
+      session_adjustment: sessionAdjustmentRef.current,
+
     };
 
     // prescribedWeight rides along for the RestView's over-pull check

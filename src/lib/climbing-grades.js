@@ -41,6 +41,11 @@ export const ASCENT_STYLES = [
   { key: "attempt",  label: "Attempt",          desc: "Worked but didn't send"    },
 ];
 
+// Flash and onsight describe a first-try send; subsequent attempts are Send.
+export const isFirstTryAscent = ascent => ascent === "flash" || ascent === "onsight";
+export const ascentForAttempts = (ascent, attempts) =>
+  Number(attempts) > 1 && isFirstTryAscent(ascent) ? "redpoint" : ascent;
+
 const CLIMBING_PR_ASCENTS = new Set(["onsight", "flash", "redpoint"]);
 
 // A climbing PR is a new clean-send grade. Repeats still count toward

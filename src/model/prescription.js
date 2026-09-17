@@ -49,7 +49,7 @@ import {
   THREE_EXP_LAMBDA_DEFAULT,
   fitThreeExpAmps, predForceThreeExp,
 } from "./threeExp.js";
-import { capacityMultiplier } from "./cookedScaling.js";
+import { recordedAdjustment } from "./cookedScaling.js";
 import { zoneOf } from "./zones.js";
 // Max/power-protocol gate shared with the Peak Force card — both
 // surfaces must agree on what counts as a "max attempt" peak.
@@ -113,13 +113,10 @@ export function isShortfall(actualTime, targetDuration) {
 
 // sMax per (hand, grip) = max observed effective load × 1.2 (matches
 // the sMaxL / sMaxR computation used at runtime).
-// Cap on how much within-set fatigue + cookedness de-cook can inflate a
-// single rep's fresh-equivalent load. Without it, a maximally-cooked
-// session (cooked=10 -> capacityMultiplier ~= exp(-5)) compounded with a
-// fatigued late-set rep (availFrac floors at 0.05) produced ~20,000 kg
-// fresh-equivalents that blew the F-D curve fit / chart axis up to
-// ~44,000 lb (July 2026). A rep is never worth more than
-// MAX_FRESH_INFLATION x its measured load, nor above SANE_MAX_KG.
+// Bound the combined within-set and session-level correction. The current
+// cookedness scaler alone is capped at 1/0.75 = 1.33x; a fatigued late rep
+// also divides by available capacity. Neither may produce an implausible
+// fresh load above 3x measured load or SANE_MAX_KG.
 const MAX_FRESH_INFLATION = 3;
 
 export function buildSMaxIndex(history) {
@@ -147,17 +144,8 @@ export function buildFreshLoadMap(history, opts = {}) {
     // per-rep based on the rep's grip. Falls back to fatParams when a grip
     // isn't in the map (cold start, sparse data). Engine-only personalization.
     personalTausByGrip = null,
-    // Per-date cookedness map for EXTERNAL fatigue compensation
-    // (climbing volume / sleep deficit / general systemic load
-    // logged via the daily cookedness slider, including retroactive
-    // edits from the AnalysisView session-detail modal). Plain
-    // object: { "YYYY-MM-DD": 0..10 }.
-    // capacityMultiplier(cooked) returns the scale-down factor that
-    // was applied (or should have been applied) on that date —
-    // buildFreshLoadMap divides each rep's load by it to recover the
-    // "fresh-equivalent" load the curve fit should see. Without this,
-    // a cooked session looks like a real capacity drop and skews the
-    // next prescription downward.
+    // Day ratings only identify ambiguous legacy adjustments for diagnostics.
+    // They never establish which multiplier a particular session used.
     cookedByDate = null,
   } = opts;
   const out = new Map();
@@ -237,38 +225,13 @@ export function buildFreshLoadMap(history, opts = {}) {
       // availFrac to recover the fresh-equivalent load given how
       // fatigued the user was at this point in the set.
       let fresh = af > 0 && load > 0 ? load / af : load;
-      // External cookedness compensation: divide by the capacity
-      // multiplier that was active for this rep. Resolution order:
-      //   1. Per-session override (r.session_cooked) — set on every
-      //      rep at session save time from the pre-session slider,
-      //      or via the History "override for this session" action.
-      //      Wins because the user explicitly tagged THIS session's
-      //      systemic state (e.g. "I was cooked by the evening hang
-      //      even though the morning was fine").
-      //   2. Day-level (cookedByDate[r.date]) — the broad-strokes
-      //      day default the slider sets.
-      //   3. Null/zero — no compensation applied.
-      // This used to be gated behind a `fatigueModel` argument, back
-      // when the multiplier read a learned per-grip β out of it. The
-      // rate is now fixed and published (cookedScaling.js), so the
-      // de-cook applies whenever a cookedness is recorded — which is
-      // the correct mirror of what prescription actually did that day.
-      {
-        let cooked = null;
-        if (r?.session_cooked != null) cooked = Number(r.session_cooked);
-        else if (cookedByDate && r?.date && cookedByDate[r.date] != null) {
-          cooked = Number(cookedByDate[r.date]);
-        }
-        if (cooked != null && cooked > 0) {
-          const mult = capacityMultiplier(cooked);
-          if (mult > 0) fresh = fresh / mult;
-        }
-      }
+      const adjustment = recordedAdjustment(r, cookedByDate);
+      fresh /= adjustment.multiplier;
       // Bound the fresh-equivalent load (see MAX_FRESH_INFLATION).
       const cappedFresh = load > 0
         ? Math.min(fresh, load * MAX_FRESH_INFLATION, SANE_MAX_KG)
         : fresh;
-      if (isCapacityEvidenceRep(r)) out.set(repKey(r), { fresh: cappedFresh, availFrac: af, load, capacityEligible: sequenceValid,
+      if (isCapacityEvidenceRep(r)) out.set(repKey(r), { fresh: cappedFresh, availFrac: af, load, capacityEligible: sequenceValid, adjustmentBasis: adjustment.basis,
         confidence: sequenceValid ? (restEstimated ? "estimated_rest" : "measured") : "unknown_fatigue" });
 
       const sMax = sMaxByKey.get(`${r.hand}|${r.grip}`) || 20;

@@ -147,7 +147,7 @@ export function useRepHistory({
       r.weight_kg,
       r.failed ? 1 : 0,
       r.failure_valid, r.load_provenance,
-      JSON.stringify(r.force_recording), JSON.stringify(r.rep_timing),
+      JSON.stringify(r.force_recording), JSON.stringify(r.rep_timing), JSON.stringify(r.session_adjustment),
       r.rep_num,
       r.rest_s,
       // Per-session cookedness override — when this changes (the
@@ -183,11 +183,8 @@ export function useRepHistory({
     return buildFreshLoadMap(history, {
       doseK: k,
       personalTausByGrip: personalRecoveryTaus,
-      // Cookedness compensation: divides each rep's load by
-      // capacityMultiplier(cookedOnDate) so a cooked
-      // session looks like its fresh-equivalent to the curve fit.
-      // Retroactive edits via AnalysisView's session-detail modal
-      // flow into here within one render cycle.
+      // Resolve recorded session adjustments; day ratings label uncertain
+      // legacy rows but do not inflate their capacity.
       cookedByDate: dailyState,
     });
   }, [freshMapFp, personalRecoveryTaus, dailyStateFp]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -24,7 +24,7 @@ import { Card, Btn } from "../../ui/components.js";
 import { today } from "../../util.js";
 import {
   CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS, VENUES,
-  gradesFor, defaultGradeFor,
+  gradesFor, defaultGradeFor, isFirstTryAscent, ascentForAttempts,
 } from "../../lib/climbing-grades.js";
 import { newClimbingPrForEntry } from "../../model/climbingPrBadges.js";
 import { MAX_ATTEMPTS_PER_CLIMB } from "../../model/climbingFatigue.js";
@@ -64,6 +64,14 @@ export function ClimbingLogCard({ activities = [], onLog }) {
   // casual lap day. Resets to 1 after each save; it's per-climb data,
   // not a session default.
   const [attempts, setAttempts]     = useState(1);
+  const [attemptNotice, setAttemptNotice] = useState(false);
+  const changeAttempts = value => {
+    const next = Math.max(1, Math.min(MAX_ATTEMPTS_PER_CLIMB, Math.round(Number(value)) || 1));
+    const corrected = ascentForAttempts(ascent, next);
+    setAttemptNotice(corrected !== ascent);
+    setAscent(corrected);
+    setAttempts(next);
+  };
   const [logged, setLogged]         = useState(false);
   const [prAward, setPrAward]       = useState(null);
   // Outdoor-only metadata. Free text, all optional. Cleared after
@@ -103,7 +111,7 @@ export function ClimbingLogCard({ activities = [], onLog }) {
   const handleSave = () => {
     const entry = {
       date: today(), type: "climbing",
-      discipline, venue, grade, ascent, rpe,
+      discipline, venue, grade, ascent: ascentForAttempts(ascent, attempts), rpe,
     };
     if (showWall) entry.wall = wall;
     // Only write a non-default attempt count. Null means one, so a
@@ -137,7 +145,7 @@ export function ClimbingLogCard({ activities = [], onLog }) {
     // Discipline / venue / wall / RPE persist (they're closer to
     // user-session defaults than per-climb data).
     setRouteName(""); setCrag(""); setArea("");
-    setStars(0); setNotes(""); setAttempts(1);
+    setStars(0); setNotes(""); setAttempts(1); setAttemptNotice(false);
     setTimeout(() => {
       setLogged(false);
       setPrAward(null);
@@ -297,8 +305,10 @@ export function ClimbingLogCard({ activities = [], onLog }) {
         {ASCENT_STYLES.map(({ key, label, desc }) => (
           <button
             key={key}
-            onClick={() => setAscent(key)}
+            onClick={() => { setAscent(key); setAttemptNotice(false); }}
+            disabled={attempts > 1 && isFirstTryAscent(key)}
             style={{
+              opacity: attempts > 1 && isFirstTryAscent(key) ? 0.45 : 1,
               flex: "1 1 40%", padding: "8px 6px", borderRadius: 8, cursor: "pointer",
               background: ascent === key ? C.purple : C.bg,
               color: ascent === key ? "#fff" : C.muted,
@@ -312,6 +322,9 @@ export function ClimbingLogCard({ activities = [], onLog }) {
         ))}
       </div>
 
+      {attemptNotice && <div role="status" style={{ color: C.orange, fontSize: 13, marginBottom: 12 }}>
+        Changed to Send: Flash and Onsight require one attempt.
+      </div>}
       {/* Attempts — how many times you pulled on before walking away
           or sending. The whole point of the field is that a projecting
           session is ONE climb and a lot of work; without it, the log
@@ -332,7 +345,7 @@ export function ClimbingLogCard({ activities = [], onLog }) {
       <div style={{ display: "flex", gap: 6, marginBottom: 14, alignItems: "center" }}>
         <button
           type="button"
-          onClick={() => setAttempts(a => Math.max(1, a - 1))}
+          onClick={() => changeAttempts(attempts - 1)}
           disabled={attempts <= 1}
           aria-label="One fewer attempt"
           style={{
@@ -347,7 +360,7 @@ export function ClimbingLogCard({ activities = [], onLog }) {
         }}>{attempts}</div>
         <button
           type="button"
-          onClick={() => setAttempts(a => Math.min(MAX_ATTEMPTS_PER_CLIMB, a + 1))}
+          onClick={() => changeAttempts(attempts + 1)}
           disabled={attempts >= MAX_ATTEMPTS_PER_CLIMB}
           aria-label="One more attempt"
           style={{
@@ -361,7 +374,7 @@ export function ClimbingLogCard({ activities = [], onLog }) {
             <button
               key={n}
               type="button"
-              onClick={() => setAttempts(n)}
+              onClick={() => changeAttempts(n)}
               style={{
                 padding: "6px 10px", borderRadius: 8, cursor: "pointer",
                 background: attempts === n ? C.purple : C.bg,

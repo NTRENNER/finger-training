@@ -139,7 +139,7 @@ const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 // no consumer rendered them. The continuous engine derives reps/rest
 // from T_star directly, so the protocol-description strings were dead
 // text. Reference times, labels, colors, and emojis are still consumed
-// across SetupView, AnalysisView's PrescribedLoadCard, and elsewhere.
+// across SetupView, SessionPlanCard, and elsewhere.
 const GOAL_CONFIG = {
   max_strength: {
     label: "Max Strength", emoji: "💥", color: "#c83838",

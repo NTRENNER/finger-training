@@ -194,9 +194,7 @@ export function SetupView({
       {/* Single unified session-pick surface — RPE slider on top, six
           clickable zone tiles, session details below. Replaces the
           previously-separate ContinuousPickCard + PrescribedLoadCard
-          renders. The PrescribedLoadCard component still exists for
-          Analysis (retrospective what-if), but Setup goes through this
-          consolidated path so the slider, the recommended pick, and the
+          renders. This consolidated path keeps the slider, recommended pick, and
           per-zone tiles all live in one box and stay in sync. */}
       <SessionPlanCard
         plannerHeader={plannerHeader}

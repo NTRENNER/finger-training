@@ -194,7 +194,7 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     expect(freshLoadFor({ avg_force_kg: 30 }, null)).toBe(30);
   });
 
-  test("cookedness de-cooks the fresh load at the FIXED manual rate (July 2026)", () => {
+  test("an explicit legacy session rating retains bounded compensation", () => {
     // Same rep on two different dates — one tagged cooked, one fresh.
     // Fixed manual scaling: the cooked rep's load divides by
     // capacityMultiplier (beta-independent), recovering the
@@ -205,7 +205,7 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
         avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
         date: "2026-05-01" },
       { id: "cooked", hand: "L", grip: "Crusher",
-        session_id: "s_cooked", set_num: 1, rep_num: 1,
+        session_id: "s_cooked", set_num: 1, rep_num: 1, session_cooked: 10,
         avg_force_kg: 25, actual_time_s: 30, rest_s: 0,
         date: "2026-05-02" },
     ];
@@ -218,7 +218,7 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     expect(map.get("id:cooked").fresh).toBeLessThanOrEqual(25 * 3); // MAX_FRESH_INFLATION
   });
 
-  test("session_cooked overrides day-level cooked; both use the fixed rate (July 2026)", () => {
+  test("only the explicit legacy session rating supplies compensation", () => {
     const history = [
       { id: "morning", hand: "L", grip: "Crusher",
         session_id: "s_morning", set_num: 1, rep_num: 1,
@@ -234,9 +234,9 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     // morning: per-session override (cooked 2) wins over the day value.
     expect(map.get("id:morning").fresh)
       .toBeCloseTo(25 / capacityMultiplier(2), 4);
-    // evening: session_cooked null falls back to the day value (cooked 8).
+    // Evening is ambiguous; the day rating cannot establish an adjustment.
     expect(map.get("id:evening").fresh)
-      .toBeCloseTo(25 / capacityMultiplier(8), 4);
+      .toBeCloseTo(25, 4);
   });
 
   test("session_cooked: 0 explicitly suppresses day-level compensation", () => {
@@ -257,12 +257,7 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     expect(map.get("id:fresh").fresh).toBeCloseTo(25, 4);
   });
 
-  test("a recorded cookedness always de-cooks — there is no second switch", () => {
-    // Compensation used to require a `fatigueModel` argument as well,
-    // left over from when the multiplier read a learned β out of it.
-    // The rate is now a published constant, so the de-cook must mirror
-    // the prescription unconditionally: if a cookedness was recorded,
-    // the load it produced was scaled, and the fit has to undo it.
+  test("a day-only rating is not evidence of a session load adjustment", () => {
     const history = [
       { id: "r1", hand: "L", grip: "Crusher",
         session_id: "s1", set_num: 1, rep_num: 1,
@@ -270,7 +265,8 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
         date: "2026-05-02" },
     ];
     const map = buildFreshLoadMap(history, { cookedByDate: { "2026-05-02": 7 } });
-    expect(map.get("id:r1").fresh).toBeCloseTo(25 / capacityMultiplier(7), 4);
+    expect(map.get("id:r1").fresh).toBeCloseTo(25, 4);
+    expect(map.get("id:r1").adjustmentBasis).toBe("unknown_legacy_adjustment");
     // And with no cookedness recorded at all, nothing moves.
     expect(buildFreshLoadMap(history).get("id:r1").fresh).toBeCloseTo(25, 4);
   });

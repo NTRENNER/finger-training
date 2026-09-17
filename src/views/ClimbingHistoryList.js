@@ -42,8 +42,9 @@ import {
   V_GRADES, YDS_GRADES,
   disciplineMeta, ascentMeta, wallMeta, describeClimb,
   gradeRank,
-  gradesFor, defaultGradeFor,
+  gradesFor, defaultGradeFor, isFirstTryAscent, ascentForAttempts,
 } from "../lib/climbing-grades.js";
+import { attemptsOf, MAX_ATTEMPTS_PER_CLIMB } from "../model/climbingFatigue.js";
 import { loadLS, saveLS, LS_CLIMBING_HISTORY_FILTERS_KEY } from "../lib/storage.js";
 
 // Default filter state — nothing filtered, date grouping.
@@ -532,12 +533,21 @@ function ClimbRow({ climb: c, onEdit, onDelete, showDate = false, hideRouteName 
 // indoor + boulder combination is selected — switching a climb
 // from boulder to lead drops the now-meaningless wall annotation.
 function ClimbEditRow({ climb, onSave, onCancel }) {
+  const [attempts, setAttempts] = useState(attemptsOf(climb));
+  const [attemptNotice, setAttemptNotice] = useState(ascentForAttempts(climb.ascent, attemptsOf(climb)) !== climb.ascent);
+  const changeAttempts = value => {
+    const next = Math.max(1, Math.min(MAX_ATTEMPTS_PER_CLIMB, Math.round(Number(value)) || 1));
+    const corrected = ascentForAttempts(ascent, next);
+    setAttemptNotice(corrected !== ascent);
+    setAscent(corrected);
+    setAttempts(next);
+  };
   const [date,       setDate]       = useState(climb.date || "");
   const [discipline, setDiscipline] = useState(climb.discipline || "boulder");
   const [venue,      setVenue]      = useState(climb.venue || "indoor");
   const [wall,       setWall]       = useState(climb.wall || "commercial");
   const [grade,      setGrade]      = useState(climb.grade || defaultGradeFor(climb.discipline || "boulder"));
-  const [ascent,     setAscent]     = useState(climb.ascent || "flash");
+  const [ascent,     setAscent]     = useState(ascentForAttempts(climb.ascent || "flash", attemptsOf(climb)));
   const [rpe,        setRpe]        = useState(Number.isFinite(climb.rpe) ? climb.rpe : 7);
   const [routeName,  setRouteName]  = useState(climb.route_name || "");
   const [crag,       setCrag]       = useState(climb.crag || "");
@@ -560,7 +570,7 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
   const showOutdoorMeta = venue === "outdoor";
 
   const save = () => {
-    const updates = { date, discipline, venue, grade, ascent, rpe };
+    const updates = { date, discipline, venue, grade, ascent: ascentForAttempts(ascent, attempts), rpe, attempts: attempts > 1 ? attempts : null };
     // Drop wall when the new combination doesn't allow it. Setting to
     // null tells pushActivity to clear the column on the upserted row.
     updates.wall = showWall ? wall : null;
@@ -586,10 +596,12 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
 
   // Compact pill renderer — same visual language as ClimbingLogCard
   // but smaller / tighter to fit inside a row.
-  const pill = (active, label, emoji, onClick) => (
-    <button
+  const pill = (active, label, emoji, onClick, disabled = false) => (
+    <button key={label}
       onClick={onClick}
+      disabled={disabled}
       style={{
+        opacity: disabled ? 0.45 : 1,
         flex: "1 1 30%", padding: "6px 4px", borderRadius: 6, cursor: "pointer",
         background: active ? C.purple : C.bg,
         color:      active ? "#fff"   : C.muted,
@@ -695,10 +707,20 @@ function ClimbEditRow({ climb, onSave, onCancel }) {
       {sectionLabel("Ascent")}
       <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
         {ASCENT_STYLES.map(({ key, label }) =>
-          pill(ascent === key, label, null, () => setAscent(key))
+          pill(ascent === key, label, null, () => { setAscent(key); setAttemptNotice(false); }, attempts > 1 && isFirstTryAscent(key))
         )}
       </div>
 
+      {attemptNotice && <div role="status" style={{ color: C.orange, fontSize: 13, marginBottom: 10 }}>
+        Changed to Send: Flash and Onsight require one attempt.
+      </div>}
+      <label style={{ display: "block", fontSize: 13, marginBottom: 12 }}>
+        Attempts
+        <input type="number" min="1" max={MAX_ATTEMPTS_PER_CLIMB} step="1" value={attempts}
+          onChange={e => changeAttempts(e.target.value)}
+          style={{ display: "block", boxSizing: "border-box", width: "100%", minHeight: 44, marginTop: 6, padding: "8px 10px", fontSize: 16,
+            color: C.text, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8 }} />
+      </label>
       {/* RPE — per-climb effort, matching ClimbingLogCard's label
           so the create + edit flows agree on what this number means. */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
