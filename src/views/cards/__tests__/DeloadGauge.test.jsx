@@ -103,3 +103,25 @@ describe("collapsing", () => {
     expect(screen.queryByRole("button", { expanded: true })).not.toBeInTheDocument();
   });
 });
+
+
+test("dates each grip's evidence and identifies unassessed grips", () => {
+  const status = { ...greenStatus, level: "yellow", deload: { signals: {
+    today: "2026-09-17",
+    gripGaps: { Micro: { lastDate: "2026-09-16" }, Crusher: { lastDate: "2026-09-08" } },
+    unassessedGrips: ["Prime"],
+  } } };
+  const { rerender } = render(<DeloadGauge status={status} />);
+  const evidence = screen.getByText(/Latest assessed sessions:/);
+  expect(evidence).toHaveTextContent("Micro: Sep 16, 2026");
+  expect(evidence).toHaveTextContent("Crusher: Sep 8, 2026");
+  expect(evidence).toHaveTextContent("Prime: not enough recent recovery evidence.");
+  expect(evidence).toHaveTextContent("Older results do not confirm recovery today.");
+
+  const earlierStatus = { ...status, deload: { signals: { today: "2026-09-09",
+    gripGaps: { Crusher: { lastDate: "2026-09-08" } }, unassessedGrips: [],
+  } } };
+  rerender(<DeloadGauge status={earlierStatus} asOfDate="2026-09-09" currentDate="2026-09-17" />);
+  expect(screen.getByText(/Latest assessed sessions:/)).not.toHaveTextContent("Micro");
+  expect(screen.getByText(/Latest assessed sessions:/)).toHaveTextContent("Older results do not confirm recovery at this date.");
+});

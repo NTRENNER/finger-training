@@ -26,7 +26,7 @@ export const DELOAD_BASELINE_MIN_SD = 0.05;
 export const DELOAD_MIN_MEANINGFUL_GAP = 0.10;
 
 // Detraining guard: if the most recent finger session on/before the
-// evaluation date is older than this, return no-deload (rested).
+// evaluation date is older than this, current recovery is unknown.
 export const DELOAD_STALE_DAYS = 14;
 
 // Lifting acute-vs-chronic windows (days) + the completed-set rate
@@ -276,7 +276,7 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   }
 
   // Per-grip recent recovery gap with personal taus.
-  const grips = [...new Set(history.filter(r => r.grip).map(r => r.grip))];
+  const grips = [...new Set(history.filter(r => r.grip && r.date && r.date <= ref).map(r => r.grip))];
   const gripGaps = {};
   for (const g of grips) {
     const rg = recentGapHeldOut(history, g, ref, minSessions);
@@ -285,7 +285,8 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   const measured = Object.keys(gripGaps);
   const lifting = liftingSpike(liftingVolumeByDate(workoutSessions), ref);
   const climbing = climbingSpike(climbingLoadByDate(activities), ref);
-  const signals = { today: ref, gripGaps, lifting, climbing };
+  const unassessedGrips = grips.filter(g => !gripGaps[g]);
+  const signals = { today: ref, gripGaps, unassessedGrips, lifting, climbing };
 
   if (measured.length === 0) {
     return none("Not enough current recovery data yet.", signals);
@@ -300,7 +301,7 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
 
   if (!signals.crossGripDown) {
     const why = downGrips.length > 0
-      ? `Only ${downGrips.join(", ")} recovery is below its own normal — a grip-specific concern. Consider an easier session for that grip; systemic recovery is not established.`
+      ? `Recovery is below the expected range in ${downGrips.join(", ")}. Consider an easier session. We cannot tell yet whether this is limited to ${downGrips.length === 1 ? "that grip" : "those grips"} or reflects broader fatigue.`
       : "Observed recovery is within your normal range for the currently measured grips.";
     return none(why, signals, downGrips.length > 0 ? "local_concern" : "normal");
   }

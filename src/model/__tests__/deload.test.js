@@ -2,7 +2,7 @@ import { measuredRecoveryFields } from "../../testHelpers/recovery.js";
 // Tests for src/model/deload.js — cross-grip fatigue / deload detector.
 // Covers liftingVolumeByDate parsing and computeDeload's trigger logic:
 // fires only on sustained CROSS-GRIP recovery decline (single-grip dips
-// are treated as zone artifacts), severity boosted by a lifting-volume
+// do not establish whether fatigue is localized), severity boosted by a lifting-volume
 // spike, with a detraining guard and an insufficient-data guard.
 
 import {
@@ -93,12 +93,13 @@ describe("computeDeload", () => {
     expect(r.severity).toBe("none");
   });
 
-  test("single grip down → treated as artifact, no deload", () => {
+  test("single grip down → scope remains uncertain, no cross-grip deload", () => {
     const history = [...fatiguedRecent("Crusher"), ...fine("Micro")];
     const r = computeDeload(history, [], { today: TODAY });
     expect(r.deload).toBe(false);
     expect(r.signals.downGrips).toEqual(["Crusher"]);
-    expect(r.why).toMatch(/grip-specific|artifact/i);
+    expect(r.why).toMatch(/cannot tell yet whether this is limited/i);
+    expect(r.why).not.toMatch(/Only |grip-specific|artifact/i);
   });
 
   test("both grips down, no lifting spike → MILD deload", () => {
@@ -425,4 +426,30 @@ test("a degenerate baseline cannot manufacture an alarm", () => {
   expect(rg).toBeTruthy();
   if (rg.baseline) expect(rg.baseline.sd).toBeGreaterThanOrEqual(DELOAD_BASELINE_MIN_SD);
   expect(gripIsDown(rg)).toBe(false);
+});
+
+
+describe("recovery evidence scope", () => {
+  test.each([
+    ["older qualifying sessions", ["2026-05-08", "2026-05-11"], true],
+    ["stale sessions", ["2026-04-20", "2026-04-25"], false],
+    ["one recent session", [TODAY], false],
+    ["no sessions", [], false],
+  ])("Micro decline does not clear Crusher with %s", (_, dates, assessed) => {
+    const history = [...fatiguedRecent("Micro"),
+      ...dates.flatMap(d => sess("Crusher", "L", d, 30, 28))];
+    const status = deloadStatus(history, [], { today: TODAY });
+    expect(status.level).toBe("yellow");
+    expect(status.deload.signals.downGrips).toEqual(["Micro"]);
+    expect(status.deload.signals.gripGaps.Micro.lastDate).toBe(TODAY);
+    expect(Boolean(status.deload.signals.gripGaps.Crusher)).toBe(assessed);
+    expect(status.deload.signals.unassessedGrips).toEqual(!assessed && dates.length ? ["Crusher"] : []);
+    expect(status.deload.why).toContain("We cannot tell yet whether this is limited to that grip or reflects broader fatigue.");
+    expect(status.deload.why).not.toMatch(/Only |grip-specific/);
+  });
+
+  test("historical assessment does not list grips first trained later", () => {
+    const history = [...fatiguedRecent("Micro"), ...sess("Crusher", "L", "2026-06-01", 30, 28)];
+    expect(computeDeload(history, [], { today: TODAY }).signals.unassessedGrips).toEqual([]);
+  });
 });

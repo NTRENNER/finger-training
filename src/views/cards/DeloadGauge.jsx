@@ -36,6 +36,8 @@ export function DeloadGauge({
 }) {
   if (!status) return null;
   const { level, pressure, label, haveSignal, deload } = status;
+  const assessedGrips = Object.entries(deload?.signals?.gripGaps || {});
+  const unassessedGrips = deload?.signals?.unassessedGrips || [];
   const usesHistoricalEstimates = Object.values(deload?.signals?.gripGaps || {}).some(g => g.confidence === "historical_estimate");
   const provisional = Object.values(deload?.signals?.gripGaps || {}).some(g => g.assessment === "provisional");
   const color = LEVEL_COLOR[level] || C.muted;
@@ -107,8 +109,8 @@ export function DeloadGauge({
         <div style={{ fontSize: 12.5, fontWeight: 700, color }}>{label}</div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
-        How close you {isHistorical ? "were" : "are"} to needing a deload, read from your cross-grip
-        between-rep recovery. Gray = insufficient current evidence; green = observed recovery within range; yellow = recovery
+        How close you {isHistorical ? "were" : "are"} to needing a deload, based on the available
+        between-rep recovery evidence. Gray = insufficient current evidence; green = observed recovery within range; yellow = recovery
         softening, ease up soon; red = deload recommended. Intentionally slow
         to move — it won't react to a single rough session.
       </div>
@@ -156,6 +158,17 @@ export function DeloadGauge({
             onChange={event => onAsOfDateChange(timelineDates[Number(event.target.value)])}
             style={{ width: "100%", accentColor: color, cursor: "pointer" }}
           />
+        </div>
+      )}
+
+      {assessedGrips.length > 0 && (
+        <div style={{ fontSize: 12, color: C.muted, marginTop: 12, lineHeight: 1.5 }}>
+          Latest assessed sessions: {assessedGrips.map(([grip, gap]) =>
+            `${grip}: ${gap.lastDate ? formatDate(gap.lastDate) : "date unavailable"}`
+          ).join(" · ")}.
+          {unassessedGrips.length > 0 && <> {unassessedGrips.join(", ")}: not enough recent recovery evidence.</>}
+          {((unassessedGrips.length > 0) || assessedGrips.some(([, gap]) => gap.lastDate < (asOfDate || deload?.signals?.today || currentDate))) &&
+            <> Older results do not confirm recovery {isHistorical ? "at this date" : "today"}.</>}
         </div>
       )}
 
