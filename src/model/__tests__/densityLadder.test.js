@@ -419,7 +419,12 @@ describe("re-pin guard + engine bounds", () => {
       rep_num: 1, set_num: 1, failed: false, session_cooked: null,
     };
     const hist = [...measured, success];
-    const out = computeDensityLadder(hist, "Crusher", "endurance");
+    // This fixture exercises a recent success, not a success aging beyond
+    // the 90-day evidence window as the real calendar advances.
+    const clock = jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-06-21T12:00:00Z"));
+    let out;
+    try { out = computeDensityLadder(hist, "Crusher", "endurance"); }
+    finally { clock.mockRestore(); }
     expect(out).not.toBeNull();
     expect(out.loadByHand.L).toBeCloseTo(24, 1);
     expect(out.basis.boundedByHand.L).toBeUndefined();

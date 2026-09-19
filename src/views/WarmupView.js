@@ -14,7 +14,7 @@
 // Hang step lifecycle:
 //   - User pulls; force-threshold auto-detect (≥4 kg) triggers the
 //     hold timer.
-//   - BigTimer counts up; ForceGauge shows live force vs target.
+//   - The hold timer counts up; ForceGauge shows live force vs target.
 //   - At targetSec, the rep auto-advances (endRepAndRequireRelease
 //     blocks the next pull-detect until force drops, so the user's
 //     continued grip doesn't immediately retrigger).
@@ -50,17 +50,35 @@ import { fmtW } from "../ui/format.js";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { generateWarmupProtocol } from "../model/warmup.js";
 import { loadLS, saveLS, LS_WARMUP_MODE_KEY } from "../lib/storage.js";
-// Same big-timer + force-gauge primitives the finger-training active
-// rep uses. Sharing the components keeps the warmup hang visually
-// identical to a real rep: same font scale, same color thresholds,
-// same Avg/Max sub-row. Lives in cards/LiveForceCard.jsx.
-import { BigTimer, ForceGauge } from "./cards/LiveForceCard.jsx";
+// Shared live force display, with a consistent warm-up timer for holds and rest.
+import { ForceGauge } from "./cards/LiveForceCard.jsx";
 
 function fmtSec(s) {
   if (s == null || !isFinite(s)) return "0";
   const sec = Math.max(0, Math.round(s));
   if (sec < 60) return `${sec}`;
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
+
+// Keep stage identity and timer placement stable throughout the warm-up.
+function WarmupStage({ step, index, total, detail, children }) {
+  return <Card>
+    <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, marginBottom: 12, color: C.muted, fontSize: 13 }}>
+      <span>Warm-up · Step {index + 1} of {total}</span>
+      <span style={{ color: GRIP_COLORS[step?.grip] || C.muted }}>{detail || "Both hands"}</span>
+    </div>
+    <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>{step?.title}</div>
+    <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>{step?.intensityLabel}</div>
+    {children}
+  </Card>;
+}
+
+function WarmupTime({ seconds, label, target }) {
+  return <div style={{ textAlign: "center", padding: "16px 0" }}>
+    <div style={{ fontSize: 14, color: C.muted, marginBottom: 8 }}>{label}</div>
+    <div role="timer" aria-label={label} style={{ fontSize: "clamp(56px, 17vw, 88px)", fontWeight: 800, color: C.blue, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{fmtSec(seconds)}</div>
+    <div style={{ marginTop: 10, fontSize: 14, color: C.muted }}>{target ? `of ${target} seconds` : "remaining"}</div>
+  </div>;
 }
 
 export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", onClose }) {
@@ -85,6 +103,13 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
 
   // ── State machine ──
   const [phase, setPhase] = useState("preview"); // preview|needs-tindeq|swap-prompt|hang-armed|hang-active|rest|pullup|done
+  const phaseRef = useRef(phase);
+  const changePhase = (next) => {
+    // BLE callbacks may arrive together before React renders. Transition
+    // synchronously so a late release cannot complete the same rep twice.
+    phaseRef.current = next;
+    setPhase(next);
+  };
   const [stepIdx, setStepIdx] = useState(0);
   // Each warmup hang is a single two-handed pull (titles literally
   // say "Two-Handed Crusher" / "Two-Handed Micro"). An earlier version
@@ -124,9 +149,8 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   //
   // When auto-end fires while the user is still pulling, we also tell
   // the Tindeq to require a real release before re-arming pull-detect
-  // (see tindeq.endRepAndRequireRelease). Otherwise their continued
-  // grip on the L hand would immediately trigger an onRepStart for the
-  // R hand the moment we transition to hang-armed.
+  // (see tindeq.endRepAndRequireRelease). A continued pull must not
+  // trigger the next rep before the athlete has released.
   useEffect(() => {
     if (tickRef.current) clearInterval(tickRef.current);
     if (phase === "hang-active") {
@@ -140,6 +164,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
       startTimeRef.current = Date.now();
       setElapsed(0);
       tickRef.current = setInterval(() => {
+        if (phaseRef.current !== "hang-active") return;
         const ms = Date.now() - startTimeRef.current;
         const secs = Math.floor(ms / 1000);
         setElapsed(secs);
@@ -168,6 +193,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
         : (currentStep?.restAfterSec || 60);
       setRestRemaining(restSec);
       tickRef.current = setInterval(() => {
+        if (phaseRef.current !== "rest") return;
         const remaining = restSec - Math.floor((Date.now() - startedAt) / 1000);
         setRestRemaining(Math.max(0, remaining));
         if (remaining <= 0) {
@@ -182,58 +208,50 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, stepIdx, setIdx, borkRepIdx]);
 
-  // ── Tindeq auto-detect wiring ──
-  // The earlier version re-ran this effect on every phase change.
-  // That tore down (stopAutoDetect) and immediately re-armed
-  // (startAutoDetect) the BLE stream on every armed↔active flip,
-  // which on some clients raced the queued writeValue(CMD_STOP)
-  // and writeValue(CMD_START) calls — the Tindeq could end up
-  // stopped while the user was still pulling, freezing tindeq.force
-  // at the last sampled value. The finger-training side avoids this
-  // by registering autoDetect once on mount.
-  //
-  // Mirror that pattern here: register/unregister only when the user
-  // enters or leaves the hang lifecycle (boolean inHangPhase). The
-  // armed→active transition stays inside that lifecycle, so the BLE
-  // stream stays up continuously and force keeps updating.
-  //
-  // The auto-detect callbacks need to read fresh React state. We can't
-  // re-register them without restarting the stream, so we keep them
-  // in refs and have a stable wrapper dispatch to whatever ref is
-  // current. Refs are updated on every render — see the assignments
-  // below the effect.
+  // Keep notifications running through rest and gripper changes. Stopping
+  // after a timed hold hides the release from the sensor hook, leaving its
+  // release guard armed when the athlete starts the next rep.
   const onRepStartRef = useRef(null);
-  const onRepEndRef   = useRef(null);
-  onRepStartRef.current = () => setPhase("hang-active");
-  onRepEndRef.current   = () => handleHangComplete();
-  const inHangPhase = phase === "hang-armed" || phase === "hang-active";
+  const onRepEndRef = useRef(null);
+  onRepStartRef.current = () => {
+    if (phaseRef.current === "hang-armed") changePhase("hang-active");
+    else tindeq?.endRepAndRequireRelease?.(); // handling gear/rest is not a rep
+  };
+  onRepEndRef.current = (stats) => {
+    if (phaseRef.current !== "hang-active") return;
+    if (stats?.endReason === "equipment_interruption") {
+      changePhase("interrupted");
+      return;
+    }
+    handleHangComplete();
+  };
+  const inSensorPhase = ["hang-armed", "hang-active", "rest", "swap-prompt", "interrupted"].includes(phase)
+    && (currentStep?.type === "hang" || currentStep?.type === "bork");
   useEffect(() => {
-    if (!tindeq?.connected || !inHangPhase) return;
-    // targetKgRef is a plain ref on the tindeq hook — updating it
-    // doesn't restart the stream. Reassign on each effect run so the
-    // recording logic sees the current step's target. Timed warmups
-    // explicitly opt out of the training-only target-drop failure rule.
-    tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
-    tindeq.startAutoDetect(
+    if (!tindeq?.connected || !inSensorPhase) return;
+    let disposed = false;
+    Promise.resolve(tindeq.startAutoDetect(
       () => onRepStartRef.current?.(),
-      () => onRepEndRef.current?.(),
+      stats => onRepEndRef.current?.(stats),
       { endOnTargetDrop: false },
-    );
+    )).catch(() => { if (!disposed) changePhase("interrupted"); });
     return () => {
-      tindeq.stopAutoDetect();
+      disposed = true;
+      Promise.resolve(tindeq.stopAutoDetect()).catch(() => {});
       tindeq.targetKgRef.current = null;
     };
+    // The hook's methods are stable; changing phase/step must not restart BLE.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inHangPhase, stepIdx, tindeq?.connected]);
+  }, [inSensorPhase, tindeq?.connected]);
 
-  // Keep the target ref in sync when the step changes inside the
-  // hang lifecycle (the effect above only runs on lifecycle entry,
-  // not on intra-lifecycle transitions). Cheap ref write — no rerender.
   useEffect(() => {
-    if (tindeq && inHangPhase) {
-      tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
-    }
-  }, [tindeq, inHangPhase, currentStep]);
+    if (tindeq && inSensorPhase) tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
+  }, [tindeq, inSensorPhase, currentStep]);
+
+  useEffect(() => {
+    if (!tindeq?.connected && phaseRef.current === "hang-active") changePhase("interrupted");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tindeq?.connected]);
 
   if (!protocol.ok) {
     return (
@@ -259,7 +277,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   // one hold, advance to rest.
   function startProtocol() {
     if (!tindeq?.connected) {
-      setPhase("needs-tindeq");
+      changePhase("needs-tindeq");
       return;
     }
     setStepIdx(0);
@@ -271,7 +289,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   function enterStep(idx) {
     const step = steps[idx];
     if (!step) {
-      setPhase("done");
+      changePhase("done");
       return;
     }
     // Hang and BORK both arm the same way — autoDetect waits for a
@@ -286,13 +304,13 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
       const prevStep = steps[idx - 1];
       const prevGrip = prevStep && (prevStep.type === "hang" || prevStep.type === "bork") ? prevStep.grip : null;
       if (prevGrip && prevGrip !== step.grip) {
-        setPhase("swap-prompt");
+        changePhase("swap-prompt");
       } else {
-        setPhase("hang-armed");
+        changePhase("hang-armed");
       }
     } else if (step.type === "pullup") {
       setPullupReps(0);
-      setPhase("pullup");
+      changePhase("pullup");
     }
   }
 
@@ -304,34 +322,36 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   //                if last rep, go to after-step rest (or next step
   //                if this was the last step)
   function handleHangComplete() {
+    if (phaseRef.current !== "hang-active") return;
     setElapsed(0);
     const isBork = currentStep?.type === "bork";
     const isLastStep = stepIdx >= steps.length - 1;
     if (isBork && borkRepIdx + 1 < (currentStep?.reps || 0)) {
       // More BORK reps to do — between-rep rest. The rest-timer
       // effect reads borkRepIdx to pick restBetweenSec vs restAfterSec.
-      setPhase("rest");
+      changePhase("rest");
       return;
     }
     if (!isLastStep && currentStep?.restAfterSec > 0) {
-      setPhase("rest");
+      changePhase("rest");
     } else {
       advanceToNextStep();
     }
   }
 
   function advanceFromRest() {
+    if (phaseRef.current !== "rest") return;
     // BORK: if we just finished a between-rep rest, arm the next rep.
     if (currentStep?.type === "bork" && borkRepIdx + 1 < (currentStep?.reps || 0)) {
       setBorkRepIdx(i => i + 1);
-      setPhase("hang-armed");
+      changePhase("hang-armed");
       return;
     }
     // Multi-set pullup loop (unchanged).
     if (currentStep?.type === "pullup" && (currentStep.sets || 1) > setIdx + 1) {
       setSetIdx(s => s + 1);
       setPullupReps(0);
-      setPhase("pullup");
+      changePhase("pullup");
       return;
     }
     advanceToNextStep();
@@ -343,7 +363,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
     setPullupReps(0);
     setBorkRepIdx(0);
     if (next >= steps.length) {
-      setPhase("done");
+      changePhase("done");
       setStepIdx(next);
     } else {
       setStepIdx(next);
@@ -354,19 +374,20 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   function completePullupSet() {
     const nSets = currentStep.sets || 1;
     if (setIdx + 1 < nSets) {
-      setPhase("rest");
+      changePhase("rest");
     } else {
       advanceToNextStep();
     }
   }
 
   function skipStep() {
+    tindeq?.endRepAndRequireRelease?.();
     advanceToNextStep();
   }
 
   function confirmSwap() {
     // After swap-prompt, move on into the hang for the new grip.
-    setPhase("hang-armed");
+    changePhase("hang-armed");
   }
 
   // ── RENDER: PREVIEW ──
@@ -403,17 +424,17 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
           <div style={{ fontSize: 11, color: C.muted }}>BW {protocol.bodyWeightLbs} lbs</div>
         </div>
         <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-          Tindeq-driven. Perfusion holds anchored to F(60s)
+          Timed two-handed holds, progressing from lighter to heavier loads.
           {mode === "boulder"
-            ? ", plus a Micro MVC primer at the end (PAP for hard pulls)."
-            : ", longer Micro hold for endurance prep — no BORK."}
+            ? " Includes five short maximum-effort pulls on the Micro."
+            : " Includes a longer Micro hold to prepare for routes."}
           {" Connect the Crusher first; you'll be prompted to swap to the Micro mid-warmup."}
         </div>
         {/* Mode toggle: boulder (with BORK) or route (perfusion only).
             Persists to LS_WARMUP_MODE_KEY. */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {modePill("boulder", "🪨 Bouldering", "Perfusion + Micro BORK MVC potentiation primer (PAP for hard moves).")}
-          {modePill("route", "🧗 Routes", "Perfusion only, longer Micro hold for endurance prep.")}
+          {modePill("boulder", "🪨 Bouldering", "Progressive holds and five short maximum-effort pulls.")}
+          {modePill("route", "🧗 Routes", "Progressive holds and a longer Micro hold for routes.")}
         </div>
         <div style={{ marginBottom: 16 }}>
           {steps.map((s, i) => (
@@ -529,212 +550,101 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
         <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, marginBottom: 16 }}>
           The warm-up uses real-time force feedback to hit prescribed loads. Connect your Tindeq (with the Crusher gripper attached), then come back and tap Start.
         </div>
-        <Btn onClick={() => setPhase("preview")} small>Back to preview</Btn>
+        <Btn onClick={() => changePhase("preview")} small>Back to preview</Btn>
       </Card>
     );
   }
 
-  // ── RENDER: SWAP-PROMPT (between Crusher and Micro steps) ──
+  const stageDetail = currentStep?.type === "bork"
+    ? `${currentStep.grip} · Rep ${borkRepIdx + 1} of ${currentStep.reps}`
+    : currentStep?.type === "pullup" ? `Set ${setIdx + 1} of ${currentStep.sets || 1}`
+    : `${currentStep?.grip} · Both hands`;
+  const stage = children => <WarmupStage step={currentStep} index={stepIdx} total={steps.length} detail={stageDetail}>{children}</WarmupStage>;
+  const actions = (primary, skip = true) => <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 16 }}>
+    {primary}
+    {skip && <Btn onClick={skipStep} color={C.border}>Skip step</Btn>}
+    <Btn onClick={onClose} color={C.border}>End warm-up</Btn>
+  </div>;
+  const connectionNotice = !tindeq?.connected && <div role="status" style={{ color: C.yellow, marginBottom: 12 }}>
+    <p>{tindeq?.reconnecting ? "Reconnecting to Tindeq…" : "Connect the Tindeq to continue."}</p>
+    <Btn onClick={() => tindeq?.connect?.()} disabled={tindeq?.reconnecting}>Connect Tindeq</Btn>
+  </div>;
+
   if (phase === "swap-prompt") {
-    return (
-      <Card>
-        <div style={{ fontSize: 11, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
-          Step {stepIdx + 1} of {steps.length}
-        </div>
-        <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>
-          Swap to <span style={{ color: GRIP_COLORS[currentStep.grip] }}>{currentStep.grip}</span>
-        </div>
-        <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, marginBottom: 16 }}>
-          Detach the Tindeq from the Crusher and attach it to the Micro gripper. Tap Continue when ready.
-        </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <Btn onClick={confirmSwap} color={C.green}>Continue</Btn>
-          <Btn onClick={onClose} color={C.border} small>End</Btn>
-        </div>
-      </Card>
-    );
+    return stage(<>
+      <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Swap to {currentStep.grip}</div>
+      <p style={{ color: C.muted }}>Attach the Tindeq to the {currentStep.grip} gripper. Release the load, then tap Continue.</p>
+      {connectionNotice}
+      {actions(<Btn onClick={confirmSwap} color={C.green} disabled={!tindeq?.connected}>Continue</Btn>, false)}
+    </>);
   }
 
-  // ── RENDER: HANG / BORK (armed or active) ──
-  // Layout mirrors the finger-training active-rep card so the warmup
-  // hang feels identical to a real rep: BigTimer up top, ForceGauge
-  // below. Pre-pull (hang-armed) shows a callout instead of the
-  // timer/gauge — for hangs, the prescribed load; for BORK, a
-  // "Pull MAX" prompt with no target. Once the auto-detect catches
-  // the pull, hang-active replaces with the timer/gauge.
+  if (phase === "interrupted") {
+    return stage(<>
+      <div role="status" style={{ color: C.yellow, fontSize: 18, fontWeight: 700 }}>Warm-up paused</div>
+      <p style={{ color: C.muted }}>The sensor stopped sending force readings. This rep has not been counted. Release the load, check the connection, then retry when ready.</p>
+      {connectionNotice}
+      {actions(<Btn onClick={() => { setElapsed(0); changePhase("hang-armed"); }} disabled={!tindeq?.connected}>Retry rep</Btn>)}
+    </>);
+  }
+
   if (phase === "hang-armed" || phase === "hang-active") {
     const isBork = currentStep.type === "bork";
     const target = isBork ? currentStep.holdSec : currentStep.targetSec;
-    // BORK has no target load — force gauge runs without a target
-    // marker, the user just pulls max. The "expected MVC" reference
-    // appears on the pre-pull callout for context.
-    const targetKg = isBork ? null : currentStep.targetLoadKg;
-    const subtitleR = isBork
-      ? `Rep ${borkRepIdx + 1} of ${currentStep.reps}`
-      : "Both Hands";
-    return (
-      <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase" }}>
-            Step {stepIdx + 1} of {steps.length} · {currentStep.intensityLabel}
-          </div>
-          <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>
-            <span style={{ color: GRIP_COLORS[currentStep.grip] }}>{currentStep.grip}</span> · {subtitleR}
-          </div>
-        </div>
-        <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>{currentStep.title}</div>
-
-        {phase === "hang-armed" ? (
-          // Pre-pull callout. Hangs show a target load; BORK shows
-          // "Pull MAX" with the expected MVC ballpark as a hint.
-          <div style={{
-            background: C.bg, border: `1px solid ${C.border}`,
-            borderRadius: 12, padding: "20px 16px", marginBottom: 12,
-            textAlign: "center",
-          }}>
-            <div style={{ fontSize: 11, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
-              {isBork ? "Pull MAX" : "Pull to begin"}
-            </div>
-            <div style={{ fontSize: 44, fontWeight: 900, color: C.purple, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-              {isBork
-                ? "MVC"
-                : `${fmtW(currentStep.targetLoadKg, unit)} ${unit}`}
-            </div>
-            <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
-              {isBork
-                ? `hold ~${target}s as hard as possible`
-                : `hold for ${target}s`}
-              {isBork && currentStep.referenceMvcKg > 0 && (
-                <span> · ~{fmtW(currentStep.referenceMvcKg, unit)} {unit} reference</span>
-              )}
-            </div>
-            {/* Live force readout while armed but not yet pulling, so
-                the user can confirm the Tindeq is reading and tare if
-                needed. Number stays gray until the pull-detect fires. */}
-            {tindeq?.connected && (
-              <div style={{ marginTop: 14, fontSize: 12, color: C.muted }}>
-                Live: <b style={{
-                  color: C.text, fontVariantNumeric: "tabular-nums",
-                }}>{fmtW(tindeq.force, unit)} {unit}</b>
-              </div>
-            )}
-          </div>
-        ) : (
-          // Active hold — same primitives as finger training.
-          <>
-            <BigTimer
-              seconds={elapsed}
-              targetSeconds={target}
-              running={true}
-            />
-            {tindeq?.connected ? (
-              <ForceGauge
-                force={tindeq.force}
-                avg={tindeq.avgForce}
-                peak={tindeq.peak}
-                targetKg={targetKg}
-                unit={unit}
-              />
-            ) : (
-              <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
-                Tindeq disconnected — release when target hold time is reached.
-              </div>
-            )}
-          </>
-        )}
-
-        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-          <Btn onClick={skipStep} color={C.border} small>Skip step</Btn>
-          <div style={{ flex: 1 }} />
-          <Btn onClick={onClose} color={C.border} small>End</Btn>
-        </div>
-      </Card>
-    );
+    const active = phase === "hang-active";
+    return stage(<>
+      <div style={{ fontSize: 15, textAlign: "center", color: C.text }}>
+        {active ? "Hold until the timer finishes, then release." : "Pull to begin. The timer starts automatically."}
+      </div>
+      {isBork && <div style={{ fontSize: 20, fontWeight: 700, textAlign: "center", marginTop: 12, color: C.purple }}>Maximum effort · {target} seconds</div>}
+      <WarmupTime seconds={active ? elapsed : 0} label={active ? "Hold time" : "Ready"} target={target} />
+      {connectionNotice}
+      <ForceGauge
+        force={tindeq?.force || 0}
+        avg={active ? tindeq?.avgForce || 0 : 0}
+        peak={active ? tindeq?.peak || 0 : 0}
+        targetKg={isBork ? null : currentStep.targetLoadKg}
+        maxDisplay={Math.max(50, (currentStep.targetLoadKg || currentStep.referenceMvcKg || 0) * 1.25)}
+        numberSize="clamp(48px, 15vw, 88px)"
+        unit={unit}
+      />
+      {actions()}
+    </>);
   }
 
-  // ── RENDER: REST ──
   if (phase === "rest") {
-    const nextStep = steps[stepIdx + 1];
+    const isBorkBetweenReps = currentStep?.type === "bork" && borkRepIdx + 1 < currentStep.reps;
     const isMidPullupSet = currentStep?.type === "pullup" && (currentStep.sets || 1) > setIdx + 1;
-    return (
-      <Card>
-        <div style={{ fontSize: 11, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
-          Rest
-        </div>
-        <div style={{
-          background: C.bg, border: `1px solid ${C.border}`,
-          borderRadius: 12, padding: "20px 16px", marginBottom: 16,
-          textAlign: "center",
-        }}>
-          <div style={{ fontSize: 56, fontWeight: 900, color: C.blue, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-            {fmtSec(restRemaining)}
-          </div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>seconds remaining</div>
-        </div>
-        <div style={{ fontSize: 12, color: C.muted, marginBottom: 16, lineHeight: 1.5 }}>
-          {isMidPullupSet ? (
-            <>Next: <b style={{ color: C.text }}>set {setIdx + 2} of {currentStep.sets}</b>.</>
-          ) : nextStep ? (
-            <>Up next: <b style={{ color: C.text }}>{nextStep.title}</b> · {nextStep.intensityLabel}.</>
-          ) : (
-            <>Final step coming up.</>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <Btn onClick={advanceFromRest} color={C.blue}>Skip rest</Btn>
-          <div style={{ flex: 1 }} />
-          <Btn onClick={onClose} color={C.border} small>End</Btn>
-        </div>
-      </Card>
-    );
+    const nextStep = isBorkBetweenReps || isMidPullupSet ? currentStep : steps[stepIdx + 1];
+    return stage(<>
+      <div style={{ fontSize: 15, textAlign: "center" }}>Release and rest.</div>
+      <WarmupTime seconds={restRemaining} label="Rest" />
+      <div style={{ color: C.muted, lineHeight: 1.6, textAlign: "center" }}>
+        {isBorkBetweenReps ? <div>Up next: <b style={{ color: C.text }}>Rep {borkRepIdx + 2} of {currentStep.reps} · {currentStep.holdSec}s maximum effort</b></div>
+          : isMidPullupSet ? <div>Up next: <b style={{ color: C.text }}>Set {setIdx + 2} of {currentStep.sets} · {currentStep.targetReps} pullups</b></div>
+          : nextStep && <div>Up next: <b style={{ color: C.text }}>{nextStep.title}</b></div>}
+        {nextStep?.type === "hang" && <div style={{ fontSize: 22, fontWeight: 700, color: C.blue }}>{fmtW(nextStep.targetLoadKg, unit)} {unit} · {nextStep.targetSec}s</div>}
+      </div>
+      {connectionNotice}
+      {actions(<Btn onClick={advanceFromRest}>Skip rest</Btn>, false)}
+    </>);
   }
 
-  // ── RENDER: PULLUP ──
   if (phase === "pullup") {
     const setsTotal = currentStep.sets || 1;
-    return (
-      <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase" }}>
-            Step {stepIdx + 1} of {steps.length} · Set {setIdx + 1} of {setsTotal}
-          </div>
-          <div style={{ fontSize: 11, color: C.muted }}>BW {protocol.bodyWeightLbs} lbs</div>
+    return stage(<>
+      <p style={{ color: C.muted }}>{currentStep.description}</p>
+      <div style={{ textAlign: "center", padding: "16px 0" }}>
+        <div style={{ color: C.muted, fontSize: 14, marginBottom: 8 }}>Reps completed</div>
+        <div style={{ fontSize: "clamp(56px, 17vw, 88px)", fontWeight: 800, lineHeight: 1, color: pullupReps >= currentStep.targetReps ? C.green : C.blue }}>{pullupReps}</div>
+        <div style={{ color: C.muted, marginTop: 10 }}>of {currentStep.targetReps} reps</div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 16 }}>
+          <Btn onClick={() => setPullupReps(r => Math.max(0, r - 1))} color={C.border}>−</Btn>
+          <Btn onClick={() => setPullupReps(r => r + 1)} color={C.green}>+1 rep</Btn>
         </div>
-        <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>{currentStep.title}</div>
-        <div style={{ fontSize: 12, color: C.muted, marginBottom: 16, lineHeight: 1.5 }}>
-          {currentStep.description}
-        </div>
-        <div style={{
-          background: C.bg, border: `1px solid ${C.border}`,
-          borderRadius: 12, padding: "20px 16px", marginBottom: 16,
-          textAlign: "center",
-        }}>
-          <div style={{ fontSize: 11, color: C.muted, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>Reps</div>
-          <div style={{
-            fontSize: 64, fontWeight: 900,
-            color: pullupReps >= currentStep.targetReps ? C.green : C.purple,
-            lineHeight: 1, fontVariantNumeric: "tabular-nums",
-          }}>
-            {pullupReps}
-          </div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
-            target {currentStep.targetReps}
-          </div>
-          <div style={{ display: "flex", gap: 10, marginTop: 14, justifyContent: "center" }}>
-            <Btn onClick={() => setPullupReps(r => Math.max(0, r - 1))} color={C.border} small>−</Btn>
-            <Btn onClick={() => setPullupReps(r => r + 1)} color={C.green}>+1 rep</Btn>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <Btn onClick={completePullupSet} color={C.blue}>
-            {setIdx + 1 < setsTotal ? "Set done" : "Done"}
-          </Btn>
-          <Btn onClick={skipStep} color={C.border} small>Skip</Btn>
-          <div style={{ flex: 1 }} />
-          <Btn onClick={onClose} color={C.border} small>End</Btn>
-        </div>
-      </Card>
-    );
+      </div>
+      {actions(<Btn onClick={completePullupSet}>{setIdx + 1 < setsTotal ? "Set done" : "Done"}</Btn>)}
+    </>);
   }
 
   // ── RENDER: DONE ──

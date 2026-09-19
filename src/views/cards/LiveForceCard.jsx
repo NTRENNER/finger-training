@@ -66,7 +66,8 @@ function BigTimer({ seconds, targetSeconds, running }) {
 //                Tindeq output forces; bigger isolates the avg
 //                marker visually for typical training loads)
 //   unit       — "lbs" or "kg" — display only, kg is the wire format
-function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs" }) {
+//   numberSize — CSS font size for the live force; warm-ups scale for phones
+function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs", numberSize = 108 }) {
   const fPct    = clamp(force / maxDisplay, 0, 1);
   const avgPct  = clamp(avg   / maxDisplay, 0, 1);
   const tgtPct  = targetKg != null ? clamp(targetKg / maxDisplay, 0, 1) : null;
@@ -82,7 +83,7 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
   return (
     <div style={{ marginTop: 8 }}>
       {/* Large live-force number, same scale as BigTimer above. */}
-      <div style={{ textAlign: "center", fontSize: 108, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: numColor, lineHeight: 1 }}>
+      <div style={{ textAlign: "center", fontSize: numberSize, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: numColor, lineHeight: 1 }}>
         {fmtW(force, unit)}
       </div>
       <div style={{ textAlign: "center", fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 10 }}>
