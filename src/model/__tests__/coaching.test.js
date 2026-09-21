@@ -1,3 +1,4 @@
+import { ymdLocal } from "../../util.js";
 // Tests for src/model/coaching.js — continuous coaching engine.
 // Covers recencyPenalty and the coachingRecommendationContinuous
 // AUC-gain picker (including the confidence gate on adaptBoost).
@@ -127,7 +128,8 @@ describe("coachingRecommendationContinuous", () => {
     target_duration: T, actual_time_s: T,
     avg_force_kg: F,
     rep_num: 1,
-    date: new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10),
+    // Match the engine's local training date, including evenings after UTC midnight.
+    date: ymdLocal(new Date(Date.now() - daysAgo * 86400000)),
     session_id: `s-${daysAgo}-${T}`,
   });
 

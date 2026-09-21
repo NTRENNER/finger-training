@@ -1,3 +1,4 @@
+import { TindeqBattery, InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { finalizeDeviceActivity } from "../model/forceRecording.js";
 import { evidenceLabel } from "../model/forceRecording.js";
 // ──────────────────────────────────────────────────────────────
@@ -270,6 +271,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     );
   }, [config.hand, session.refWeights]);
 
+  const [startError, setStartError] = useState(null);
   const usedDeviceRef = useRef(false);
   // Actually start recording the rep
   const startRep = useCallback(async () => {
@@ -277,9 +279,17 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     setElapsed(0);
     startTimeRef.current = Date.now();
     setRepPhase("active");
+    setStartError(null);
     if (tindeq.connected) {
-      await tindeq.tare();
-      await tindeq.startMeasuring();
+      try {
+        if (await tindeq.tare() === false) throw new Error("Tare failed");
+        await tindeq.startMeasuring();
+      } catch {
+        startTimeRef.current = null;
+        setRepPhase("ready");
+        setStartError("Tindeq could not start. Reconnect and try this rep again.");
+        return;
+      }
     }
     timerRef.current = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
@@ -385,6 +395,8 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         <Btn small color={C.red} onClick={onAbort}>End Session</Btn>
       </div>
 
+      {startError && <p role="alert" style={{ color: C.red }}>{startError}</p>}
+      <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
 
@@ -625,6 +637,7 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Last rep result</div>
           <p>{evidenceLabel({ failure_valid: lastRep.failureValid,
             force_recording: lastRep.forceRecording, load_provenance: lastRep.loadProvenance })}.</p>
+          {lastRep.endReason === "equipment_interruption" && <InterruptedBatteryNote battery={lastRep.forceRecording?.battery} />}
           {lastRep.restBefore != null && <p>Actual rest before this rep: {lastRep.restBefore.toFixed(1)}s.</p>}
           {lastRep.forceRecording?.plateau?.duration_s > 0 && <p>
             Strong phase: {fmtW(lastRep.forceRecording.plateau.avg_force_kg, unit)} {unit} for {lastRep.forceRecording.plateau.duration_s.toFixed(1)}s.
@@ -854,6 +867,7 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
                 <tr key={r.rep_num} style={{ borderTop: `1px solid ${C.border}` }}>
                   <td style={{ padding: "6px 0" }}>{r.rep_num}
                     <div style={{ fontSize: 11 }}>{evidenceLabel(r)}</div>
+                    {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
                   </td>
                   <td style={{ textAlign: "right" }}>{fmtW(prescribedLoad(r), unit)} {unit}</td>
                   <td style={{ textAlign: "right", color: r.actual_time_s >= config.targetTime ? C.green : C.red }}>
@@ -918,6 +932,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
     return () => { tindeq.targetKgRef.current = null; };
   }, [tindeq, suggestedKg]);
 
+  const [startError, setStartError] = useState(null);
+  const [streamAttempt, setStreamAttempt] = useState(0);
   const [repActive, setRepActive] = useState(false);
   const [elapsed,   setElapsed]   = useState(0);
   const startTimeRef = useRef(null);
@@ -952,13 +968,19 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   }, []);
 
   useEffect(() => {
-    tindeq.startAutoDetect(handleRepStart, handleRepEnd);
+    if (!tindeq.connected) return;
+    let disposed = false;
+    setStartError(null);
+    Promise.resolve(tindeq.startAutoDetect(handleRepStart, handleRepEnd)).catch(() => {
+      if (!disposed) setStartError("Tindeq could not start. Release the handle and try again.");
+    });
     return () => {
-      tindeq.stopAutoDetect();
+      disposed = true;
+      Promise.resolve(tindeq.stopAutoDetect()).catch(() => {});
       clearInterval(timerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);  // mount/unmount only — handleRepStart/End are stable refs
+  }, [tindeq.connected, streamAttempt]); // re-arm after reconnect or an explicit retry
 
   const targetReached = elapsed >= config.targetTime;
 
@@ -973,9 +995,14 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
         <Btn small color={C.red} onClick={onAbort}>End Session</Btn>
       </div>
 
+      <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
       {suggestedKg > 0 && <p>The rep ends when force drops below {fmtW(suggestedKg, unit)} {unit}. Overshooting is recorded at the force you actually pull.</p>}
+      {startError && <div role="alert" style={{ color: C.red }}>
+        <p>{startError}</p>
+        <Btn onClick={() => setStreamAttempt(attempt => attempt + 1)}>Retry Tindeq</Btn>
+      </div>}
       {repActive && <Btn onClick={() => handleRepEnd({
         ...tindeq.endRepAndRequireRelease(), failureValid: false, endReason: "interrupted",
       })}>Rep interrupted</Btn>}

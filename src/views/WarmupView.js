@@ -1,3 +1,4 @@
+import { TindeqBattery } from "./cards/TindeqBattery.jsx";
 // ─────────────────────────────────────────────────────────────
 // ADAPTIVE WARM-UP VIEW (Tindeq-driven)
 // ─────────────────────────────────────────────────────────────
@@ -521,6 +522,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
               </Btn>
             </div>
           </div>
+          <TindeqBattery battery={tindeq?.battery} connected={tindeqConnected} />
           {tindeqConnected && (
             <div style={{ marginTop: 6, fontSize: 11, color: C.muted }}>
               Live force: <b style={{ color: C.blue }}>{fmtW(tindeq.force, unit)} {unit}</b> · tap Tare to zero before starting.
@@ -559,7 +561,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
     ? `${currentStep.grip} · Rep ${borkRepIdx + 1} of ${currentStep.reps}`
     : currentStep?.type === "pullup" ? `Set ${setIdx + 1} of ${currentStep.sets || 1}`
     : `${currentStep?.grip} · Both hands`;
-  const stage = children => <WarmupStage step={currentStep} index={stepIdx} total={steps.length} detail={stageDetail}>{children}</WarmupStage>;
+  const stage = children => <WarmupStage step={currentStep} index={stepIdx} total={steps.length} detail={stageDetail}><TindeqBattery battery={tindeq?.battery} connected={tindeq?.connected} warningOnly />{children}</WarmupStage>;
   const actions = (primary, skip = true) => <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 16 }}>
     {primary}
     {skip && <Btn onClick={skipStep} color={C.border}>Skip step</Btn>}

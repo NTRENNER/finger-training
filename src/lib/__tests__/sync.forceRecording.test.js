@@ -29,3 +29,14 @@ test("cloud round-trip preserves an untouched session's adjustment separately fr
  mockOrder.mockResolvedValue({data:[payload],error:null});
  expect((await fetchReps())[0]).toMatchObject({session_cooked:null,session_adjustment});
 });
+
+
+test("interrupted rep round-trip preserves the battery reading and warning timestamps", async () => {
+  const battery = { status: "available", voltage_mv: 2750, voltage_read_at_ms: 100000,
+    low_battery_warning: true, low_battery_warning_at_ms: 112000 };
+  const rep = { id: "battery-interruption", failure_valid: false, end_reason: "equipment_interruption",
+    force_recording: { version: 3, capacity_eligible: false, battery } };
+  const payload = repPayload(rep, "user");
+  mockOrder.mockResolvedValue({ data: [payload], error: null });
+  expect((await fetchReps())[0]).toMatchObject(rep);
+});

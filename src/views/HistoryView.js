@@ -1,3 +1,4 @@
+import { InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { evidenceLabel } from "../model/forceRecording.js";
 // ──────────────────────────────────────────────────────────────
 // HISTORY VIEW
@@ -1069,6 +1070,7 @@ export function HistoryView({
                       <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
                       <span> · {evidenceLabel(r)}</span>
                       {r.force_recording?.version >= 1 && <span> · Time-weighted average</span>}
+                      {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
                       <div>{r.rep_timing?.rest_before_s != null
                         ? `Actual rest before rep: ${r.rep_timing.rest_before_s.toFixed(1)}s`
                         : "Actual rest not recorded"} · Planned rest: {r.rest_s ?? 20}s</div>

@@ -1,7 +1,7 @@
 import React from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { WarmupView } from "../WarmupView.js";
-import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP } from "../../lib/tindeq.js";
+import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP, CMD_BATTERY } from "../../lib/tindeq.js";
 import { generateWarmupProtocol } from "../../model/warmup.js";
 
 jest.mock("../../model/warmup.js", () => ({ generateWarmupProtocol: jest.fn() }));
@@ -43,13 +43,13 @@ async function setup() {
   } };
   Object.defineProperty(navigator, "bluetooth", { configurable: true, value: { requestDevice: async () => device } });
   const onClose = jest.fn();
-  function Harness() {
+  function Harness({ visible = true }) {
     hook = useTindeq();
-    return <WarmupView history={[]} wLog={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} />;
+    return visible && <WarmupView history={[]} wLog={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} />;
   }
   const view = render(<Harness />);
   await act(async () => { await hook.connect(); });
-  fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start", exact: true })); });
   const send = kg => {
     if (!streaming) return;
     const value = new DataView(new ArrayBuffer(10));
@@ -64,7 +64,7 @@ async function setup() {
     }
   };
   const rest = () => { hold(0, 2000); };
-  return { ...view, send, hold, rest, commands, onClose };
+  return { ...view, hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, rest, commands, onClose };
 }
 
 test("first timed hold, rest release, and the next pull use one uninterrupted sensor stream", async () => {
@@ -74,7 +74,7 @@ test("first timed hold, rest release, and the next pull use one uninterrupted se
   // Overshooting and dipping below target are both valid during a timed warm-up.
   hold(28, 1000); hold(12, 1000);
   expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
-  expect(commands).toEqual([CMD_START[0]]);
+  expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0]]);
   rest();
   expect(screen.getByText("Warm-up · Step 2 of 6")).toBeInTheDocument();
   expect(screen.getByText("25.0 kg")).toBeInTheDocument();
@@ -82,7 +82,7 @@ test("first timed hold, rest release, and the next pull use one uninterrupted se
   // No extra zero sample after rest: release was already observed during rest.
   hold(30, 1000);
   expect(screen.getByRole("timer", { name: "Hold time" })).toHaveTextContent("1");
-  expect(commands).toEqual([CMD_START[0]]);
+  expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0]]);
 });
 
 test("complete sequence retains stage layout, shows every primer rep, then both pullup sets", async () => {
@@ -110,7 +110,7 @@ test("complete sequence retains stage layout, shows every primer rep, then both 
     } else expect(screen.getByText("Pullup Finisher")).toBeInTheDocument();
     rest();
   }
-  expect(commands).toEqual([CMD_START[0], CMD_STOP[0]]);
+  await waitFor(() => expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0], CMD_STOP[0]]));
   expect(screen.getByText("Set 1 of 2")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "+1 rep" }));
   fireEvent.click(screen.getByRole("button", { name: "Set done" }));
@@ -144,14 +144,14 @@ test("missing sensor samples pause the same rep rather than count a completed wa
   expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
 });
 
-test("skipping an active hold still requires release and unmount stops notifications", async () => {
-  const { hold, send, commands, unmount } = await setup();
+test("skipping an active hold still requires release and leaving warm-up stops the stream", async () => {
+  const { hold, send, commands, hideWarmup } = await setup();
   hold(25, 500);
   fireEvent.click(screen.getByRole("button", { name: "Skip step" }));
   hold(25, 500);
   expect(screen.getByRole("timer", { name: "Ready" })).toBeInTheDocument();
   send(0); hold(25, 2000);
   expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
-  unmount();
-  expect(commands).toEqual([CMD_START[0], CMD_STOP[0]]);
+  hideWarmup();
+  await waitFor(() => expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0], CMD_STOP[0]]));
 });
