@@ -1,9 +1,9 @@
 // ─────────────────────────────────────────────────────────────
 // COOKEDNESS LOAD SCALING
 // ─────────────────────────────────────────────────────────────
-// The cookedness slider is an explicit user override: "I am beat up
-// today, back the loads off." This module is the one place that turns
-// that 0-10 self-report into a load multiplier.
+// The cookedness slider records how the athlete feels. A separate explicit
+// choice applies a load reduction; keeping the recommended load is the default.
+// This module defines that reduction and resolves the saved session choice.
 //
 // It is a fixed, transparent, published rate. There is no learner.
 //
@@ -49,10 +49,8 @@
 // disturbance is open-loop control; measuring the output is not, and
 // this app has the sensor.
 //
-// So the slider stays, because a person who knows they are wrecked
-// should be able to say so and be listened to. It scales loads at a
-// rate the UI states outright, and it is never inferred on the user's
-// behalf.
+// The rating is never inferred on the user's behalf. When the athlete opts
+// into a reduction, the UI states its rate and the session saves that choice.
 
 export const COOKED_MIN = 0;
 export const COOKED_MAX = 10;
@@ -82,10 +80,11 @@ export function capacityMultiplier(cooked) {
 
 // New sessions freeze both the stated rating and the multiplier used at start.
 // A later diary edit must not rewrite the adjustment actually prescribed.
-export function sessionAdjustment(cooked) {
+export function sessionAdjustment(cooked, adjustLoad = false) {
   const reported = cooked == null || !Number.isFinite(Number(cooked))
     ? null : Math.max(COOKED_MIN, Math.min(COOKED_MAX, Number(cooked)));
-  return { version: 1, reported_cooked: reported, applied_multiplier: capacityMultiplier(reported) };
+  return { version: 1, reported_cooked: reported, load_choice: adjustLoad ? "adjust" : "keep",
+    applied_multiplier: adjustLoad ? capacityMultiplier(reported) : 1 };
 }
 
 export function recordedAdjustment(rep, cookedByDate = null) {
@@ -94,7 +93,8 @@ export function recordedAdjustment(rep, cookedByDate = null) {
     const mult = snapshot.applied_multiplier;
     if (snapshot.version === 1 && typeof mult === "number" && Number.isFinite(mult)
         && mult >= COOKED_SCALE_FLOOR && mult <= 1) {
-      return { multiplier: mult, basis: "recorded_session_adjustment" };
+      return { multiplier: mult, basis: ["legacy_session_estimate", "unrecorded_adjustment"].includes(snapshot.source)
+        ? snapshot.source : "recorded_session_adjustment" };
     }
     // Corrupt or future metadata must not reopen the day-level fallback.
     return { multiplier: 1, basis: "unknown_session_adjustment" };
@@ -107,4 +107,20 @@ export function recordedAdjustment(rep, cookedByDate = null) {
   // A diary rating cannot tell us whether THIS session was adjusted.
   return { multiplier: 1, basis: cookedByDate?.[rep?.date] != null
     ? "unknown_legacy_adjustment" : "unrecorded_adjustment" };
+}
+
+// Before changing a historical rating, preserve the interpretation already in
+// use. Older rows have no snapshot; label that preserved value as an estimate,
+// never as proof that the original client actually adjusted the load.
+export function sessionRatingUpdates(rep, cooked) {
+  const prior = recordedAdjustment(rep);
+  return {
+    session_cooked: cooked == null ? null : Number(cooked),
+    session_adjustment: rep.session_adjustment ?? {
+      version: 1,
+      reported_cooked: rep.session_cooked ?? null,
+      applied_multiplier: prior.multiplier,
+      source: prior.basis,
+    },
+  };
 }

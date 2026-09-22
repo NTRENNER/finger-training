@@ -98,8 +98,8 @@ export function CookednessSlider({
         </span>
       </div>
       <div style={{ fontSize: 10, color: C.muted, marginTop: 6, lineHeight: 1.4, fontStyle: "italic" }}>
-        Higher = more cooked. The curve fit treats this session's reps as
-        their fresh-equivalent so future fresh prescriptions don't drift down.
+        Higher = more cooked. Changing this rating records how you felt;
+        it does not change your recorded loads or future recommendations.
       </div>
     </div>
   );

@@ -100,6 +100,7 @@ export function useSessionRunner({
     // self-report. Both are gone. Null scales nothing (capacityMultiplier
     // returns 1.0). The applied adjustment is saved on this session.
     cooked: null,
+    adjustLoadForFatigue: false,
     // Density-ladder pinned loads ({ L?, R? } fresh-equivalent kg, or
     // null when the ladder isn't active). Set by SessionPlanCard's
     // onApplyPlan; startSession prefers these over re-prescribing so
@@ -176,7 +177,7 @@ export function useSessionRunner({
     const rw = {};
     // Cookedness scale-down at the published fixed rate. 1.0 when
     // cooked is null/0 — see model/cookedScaling.js.
-    const adjustment = sessionAdjustment(cfg.cooked);
+    const adjustment = sessionAdjustment(cfg.cooked, cfg.adjustLoadForFatigue === true);
     sessionAdjustmentRef.current = adjustment;
     const fatigueMod = adjustment.applied_multiplier;
     ["L", "R"].forEach(h => {

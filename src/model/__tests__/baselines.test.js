@@ -309,3 +309,18 @@ describe("buildGripBaselines maxHoldS + gated improvement integration", () => {
     expect(typeof imp.Crusher.total).toBe("number");
   });
 });
+
+
+test("a high fatigue rating with keep-load does not inflate either progress curve", () => {
+  const history=[
+    {target_duration:10,actual_time_s:10,avg_force_kg:50},
+    {target_duration:45,actual_time_s:45,avg_force_kg:30},
+    {target_duration:120,actual_time_s:120,avg_force_kg:22},
+  ].map((rep,i)=>({...rep,id:`choice${i}`,session_id:`choice${i}`,date:`2026-09-${18+i}`,
+    grip:"Crusher",hand:"L",set_num:1,rep_num:1,session_cooked:10,
+    session_adjustment:{version:1,reported_cooked:10,load_choice:"keep",applied_multiplier:1}}));
+  const raw=buildGripEstimates(history,null);
+  expect(raw.Crusher).toBeDefined();
+  expect(buildGripEstimates(history,null,{freshEq:true})).toEqual(raw);
+  expect(buildPerHandGripEstimates(history,null,{freshEq:true})).toEqual(buildPerHandGripEstimates(history,null));
+});

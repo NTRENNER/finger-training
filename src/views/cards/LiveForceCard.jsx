@@ -100,9 +100,14 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
       {/* Avg / Max running stats — explicit labels because the big
           number above is "live current force." Same color hierarchy
           as the bar marker below (avg green, peak orange). */}
-      <div style={{ display: "flex", justifyContent: "space-around", fontSize: 12, color: C.muted, marginBottom: 6 }}>
-        <span>Avg: <b style={{ color: C.green, fontVariantNumeric: "tabular-nums" }}>{fmtW(avg, unit)}</b></span>
-        <span>Max: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(peak, unit)}</b></span>
+      <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", flexWrap: "wrap", gap: 16, color: C.muted, margin: "12px 0" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>Average weight</div>
+          <div style={{ fontSize: "clamp(32px, 9vw, 44px)", fontWeight: 800, lineHeight: 1.1, color: C.green, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+            {fmtW(avg, unit)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
+          </div>
+        </div>
+        <span style={{ fontSize: 12 }}>Max: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(peak, unit)}</b></span>
       </div>
       {/* Bar — live force as colored fill, avg as a green tick, target
           as a faint white marker. */}

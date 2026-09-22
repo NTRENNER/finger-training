@@ -209,6 +209,8 @@ export function SetupView({
         unit={unit}
         onApplyPlan={(plan) => setConfig(c => ({ ...c, ...plan }))}
         cooked={config.cooked}
+        adjustLoadForFatigue={config.adjustLoadForFatigue === true}
+        onAdjustLoadChange={(v) => setConfig(c => ({ ...c, adjustLoadForFatigue: v }))}
         onCookedChange={(v) => setConfig(c => ({ ...c, cooked: v }))}
         climbingFocus={climbingFocus}
         onNavigateToSettings={onNavigateToSettings}

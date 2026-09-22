@@ -96,6 +96,8 @@ export function SessionPlanCard({
   // and no automatic load reduction is applied.
   cooked,
   onCookedChange,
+  adjustLoadForFatigue = false,
+  onAdjustLoadChange,
   // Cloud-synced climbing-focus bias ("balanced" | "bouldering" |
   // "power_endurance" | "endurance"). Threaded to the engine to
   // apply per-zone multipliers that nudge close calls toward the
@@ -107,6 +109,7 @@ export function SessionPlanCard({
   // when climbingFocus is non-default ("balanced" stays hidden).
   onNavigateToSettings,
 }) {
+  const loadMultiplier = adjustLoadForFatigue ? capacityMultiplier(cooked) : 1;
   // ── Recommendation from the continuous engine ──────────────
   // coachingRecommendationContinuous ignores perceivedFatigue +
   // personalGains opts ("intentionally not consumed" — see
@@ -204,7 +207,7 @@ export function SessionPlanCard({
   // constant, not a per-grip or per-zone table (see cookedScaling.js).
   const rows = useMemo(() => {
     if (!grip) return null;
-    const fatigueMod = capacityMultiplier(cooked);
+    const fatigueMod = loadMultiplier;
     return ZONE_KEYS.map(key => {
       const cfg = GOAL_CONFIG[key];
       if (!cfg) return null;
@@ -243,7 +246,7 @@ export function SessionPlanCard({
           : "well-supported",
       };
     }).filter(Boolean);
-  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, cooked, rec]);
+  }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, loadMultiplier, rec]);
 
   // ── Active row — drives the bottom session-details panel ──────────────
   const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
@@ -376,7 +379,7 @@ export function SessionPlanCard({
   const ladderText = (() => {
     if (!ladder) return null;
     const lb = ladder.basis;
-    const lMult = capacityMultiplier(cooked);
+    const lMult = loadMultiplier;
     const loadStr = ["L", "R"]
       .filter(h => ladderPlanLoadByHand?.[h] != null)
       .map(h => `${h} ${fmtW(ladderPlanLoadByHand[h] * lMult, unit)}`)
@@ -521,7 +524,7 @@ export function SessionPlanCard({
         // and the runner use. Multiplied through rec.loadKg and the
         // per-hand values so the Recommended card stays in sync with
         // the rest of the screen as the slider moves.
-        const recMult = capacityMultiplier(cooked);
+        const recMult = loadMultiplier;
         // When the density ladder is active for the recommended zone
         // (i.e. NOT overridden), the session runs the ladder's pinned
         // T + load (see activeT / ladderLoadByHand). The headline must
@@ -667,9 +670,9 @@ export function SessionPlanCard({
           </div>
           <div style={{ fontSize: 10, color: C.muted }}>
             {cooked == null
-              ? "not stated — no scale-down"
+              ? "not stated"
               : cooked === 0
-                ? "fresh — no scale-down"
+                ? "fresh"
                 : `cooked ${cooked}/10`}
             {cooked > 0 && grip && (() => {
               // Report the multiplier ACTUALLY applied (fixed manual
@@ -677,12 +680,12 @@ export function SessionPlanCard({
               // label computed exp(-β·cooked) directly and advertised
               // a discount that was never applied while scaling was
               // disabled (July 2026).
-              const mult = capacityMultiplier(cooked);
+              const mult = loadMultiplier;
               const pct = Math.round((1 - mult) * 100);
               if (pct < 1) return null;
               return (
                 <span style={{ marginLeft: 6, color: C.purple, fontStyle: "italic" }}>
-                  · {pct}% scale-down
+                  · load reduced {pct}%
                 </span>
               );
             })()}
@@ -712,6 +715,28 @@ export function SessionPlanCard({
           >clear</button>
         )}
       </div>
+
+      {cooked > 0 && (
+        <div role="group" aria-label="Adjust load for fatigue" style={{ marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+            {[{ adjust: false, label: "Keep recommended load" }, { adjust: true, label: "Adjust load accordingly" }].map(option => (
+              <button key={option.label} type="button" aria-pressed={adjustLoadForFatigue === option.adjust}
+                onClick={() => onAdjustLoadChange?.(option.adjust)}
+                style={{ minHeight: 48, padding: "10px 12px", borderRadius: 10, fontSize: 14, fontWeight: 600,
+                  cursor: "pointer", color: C.text,
+                  background: adjustLoadForFatigue === option.adjust ? C.blue + "25" : C.bg,
+                  border: `2px solid ${adjustLoadForFatigue === option.adjust ? C.blue : C.border}` }}>
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, color: C.muted, fontSize: 12, lineHeight: 1.5 }}>
+            {adjustLoadForFatigue
+              ? `Fatigue recorded. Today's load is reduced by ${Math.round((1 - loadMultiplier) * 100)}%.`
+              : "Fatigue recorded. Your recommended load stays the same."}
+          </div>
+        </div>
+      )}
 
       {/* The climb log's suggestion. Offered, never applied on its
           own — tapping "apply" is what makes it the user's answer.

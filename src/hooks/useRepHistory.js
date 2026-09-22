@@ -44,6 +44,7 @@ import {
   enqueueRepUpdate, applyPendingUpdates, flushUpdateQueue,
   LS_QUEUE_KEY,
 } from "../lib/sync.js";
+import { sessionRatingUpdates } from "../model/cookedScaling.js";
 import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
 import { computePersonalRecoveryTaus } from "../model/recoveryFit.js";
 import { buildFreshLoadMap, fitDoseK } from "../model/prescription.js";
@@ -601,16 +602,23 @@ export function useRepHistory({
     if (user) await flushUpdateQueue();
   }, [user]);
 
-  // Per-session cookedness override (null clears). Updates every rep
-  // in the session via updateSession's bulk path. Stays separate
-  // from updateSession because consumers that don't care about
-  // cookedness shouldn't have to construct an `{ session_cooked }`
-  // object — and because the LS write also needs to refresh the
-  // freshMap (handled implicitly by setHistory triggering the memo).
+  // Retrospective ratings are diary edits, not new load adjustments. Preserve
+  // each rep's existing interpretation (including legacy estimates) atomically.
   const updateSessionCooked = useCallback(async (sessionKey, cooked) => {
-    const v = cooked == null ? null : Number(cooked);
-    await updateSession(sessionKey, { session_cooked: v });
-  }, [updateSession]);
+    const updatesByKey = new Map(history
+      .filter(r => (r.session_id || r.date) === sessionKey)
+      .map(r => [repMatchKey(r), { rep: r, updates: sessionRatingUpdates(r, cooked) }]));
+    // Queue each rep's snapshot with its rating so offline replay cannot apply
+    // a new rating without preserving the old load interpretation alongside it.
+    for (const { rep, updates } of updatesByKey.values()) {
+      if (rep.id) enqueueRepUpdate({ kind: "rep", id: rep.id, updates });
+    }
+    setHistory(h => h.map(r => {
+      const edit = updatesByKey.get(repMatchKey(r));
+      return edit ? { ...r, ...edit.updates } : r;
+    }));
+    if (user) await flushUpdateQueue();
+  }, [history, user]);
 
   const deleteRep = useCallback(async (rep) => {
     const k = repMatchKey(rep);

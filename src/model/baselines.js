@@ -28,7 +28,7 @@ import {
 } from "./threeExp.js";
 import { ZONE_KEYS, ZONE_REF_T } from "./zones.js";
 import { effectiveLoad, freshFitReps } from "./load.js";
-import { capacityMultiplier } from "./cookedScaling.js";
+import { recordedAdjustment } from "./cookedScaling.js";
 
 // Per-zone reference times pulled into a single lookup, indexed by
 // zone key. Keeps the improvement loop tight.
@@ -312,14 +312,11 @@ export function buildPerHandGripBaselines(history, threeExpPriors) {
   return out;
 }
 
-// Fresh-equivalent load for a rep: divide out the cooked-day capacity
-// scale-down so the point reflects what the user could have held FRESH.
-// session_cooked is the 0–10 fatigue the session was prescribed under;
-// capacityMultiplier returns a factor ≤ 1 (and exactly 1 for cooked
-// null/0), so this only ever scales loads UP, and is a no-op for
-// fresh sessions. Used by the freshEq option below.
+// Resolve the saved adjustment, independently of later fatigue diary edits.
+// Keeping the recommended load has a multiplier of 1 even at a high rating.
+// Legacy sessions retain their prior estimated adjustment.
 function freshEqLoad(r) {
-  return effectiveLoad(r) / capacityMultiplier(r.session_cooked ?? 0);
+  return effectiveLoad(r) / recordedAdjustment(r).multiplier;
 }
 
 // Per-grip CURRENT fits — the "now" side of the per-grip improvement

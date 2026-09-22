@@ -1298,7 +1298,7 @@ export function HistoryView({
               </div>
             )}
             {sess.reps?.[0]?.session_adjustment && <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>
-              Ratings can be corrected here. The load adjustment recorded at session start stays unchanged.
+              Ratings can be corrected here without changing how this workout informs future loads.
             </div>}
             <CookednessSlider
               date={sess.date}

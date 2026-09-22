@@ -80,10 +80,22 @@ test("interrupted measurement and validity survive recording without the failure
 
 test.each([[null,1],[0,1],[10,0.75]])("freezes the applied adjustment for rating %s", (cooked,multiplier) => {
   const {hook,addReps}=setup();
-  act(()=>hook.result.current.startSession({...cfg,cooked,plannedLoadByHand:{L:20}}));
+  act(()=>hook.result.current.startSession({...cfg,cooked,adjustLoadForFatigue:true,plannedLoadByHand:{L:20}}));
   expect(hook.result.current.refWeights.L).toBe(20*multiplier);
   act(()=>hook.result.current.setConfig(c=>({...c,cooked:5})));
   act(()=>hook.result.current.handleRepDone({actualTime:30,avgForce:20*multiplier}));
   expect(addReps.mock.calls[0][0][0]).toMatchObject({session_cooked:cooked,
     session_adjustment:{version:1,reported_cooked:cooked,applied_multiplier:multiplier}});
+});
+
+
+test.each([false, true])("fatigue choice %s is frozen with the actual session load", adjust => {
+  const {hook,addReps}=setup();
+  act(()=>hook.result.current.startSession({...cfg,cooked:8,adjustLoadForFatigue:adjust,plannedLoadByHand:{L:20}}));
+  expect(hook.result.current.refWeights.L).toBe(adjust ? 16 : 20);
+  act(()=>hook.result.current.setConfig(c=>({...c,cooked:1,adjustLoadForFatigue:!adjust})));
+  act(()=>hook.result.current.handleRepDone({actualTime:45,avgForce:20}));
+  expect(addReps.mock.calls[0][0][0]).toMatchObject({session_cooked:8,
+    prescribed_load_kg:adjust ? 16 : 20,
+    session_adjustment:{version:1,reported_cooked:8,load_choice:adjust ? "adjust" : "keep",applied_multiplier:adjust ? 0.8 : 1}});
 });
