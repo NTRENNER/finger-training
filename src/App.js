@@ -302,14 +302,14 @@ export default function App() {
   const {
     config, setConfig,
     phase, setPhase,
-    currentRep,
+    currentSet, currentRep,
     sessionId, refWeights,
     sessionReps, lastRepResult,
     leveledUp, newLevel,
     activeHand,
     nextWeight,
     startSession, chooseOffset, handleRepDone,
-    handleRestDone, handleAbort,
+    handleRestDone, handleNextSet, handleAbort,
   } = useSessionRunner({
     history, freshMap, threeExpPriors, addReps,
     tindeqConnected: tindeq.connected,
@@ -640,8 +640,8 @@ export default function App() {
           if (tindeq.connected && phase === "rep_ready") {
             return (
               <AutoRepSessionView
-                key={`auto-${activeHand}-${currentRep}`}
-                session={{ config, currentRep, sessionId, refWeights, activeHand, sessionReps }}
+                key={`auto-${currentSet}-${activeHand}-${currentRep}`}
+                session={{ config, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
                 onRepDone={handleRepDone}
                 onAbort={handleAbort}
                 tindeq={tindeq}
@@ -652,8 +652,8 @@ export default function App() {
           }
           return (
             <ActiveSessionView
-              key={`${activeHand}-${currentRep}-${phase}`}
-              session={{ config, currentRep, sessionId, refWeights, activeHand, sessionReps }}
+              key={`${currentSet}-${activeHand}-${currentRep}-${phase}`}
+              session={{ config, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
               onRepDone={handleRepDone}
               onAbort={handleAbort}
               tindeq={tindeq}
@@ -689,6 +689,9 @@ export default function App() {
               config={config}
               leveledUp={leveledUp}
               newLevel={newLevel}
+              currentSet={currentSet}
+              onAddSet={handleNextSet}
+              history={history}
               onDone={() => setPhase("idle")}
               unit={unit}
             />

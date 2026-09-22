@@ -1,7 +1,7 @@
 // Acquire the prescribed force before detecting failure. Allow small dips
 // within the policy tolerance; confirm continuous drops below that boundary.
 export const TARGET_FAILURE_POLICY = Object.freeze({
-  version: 4, below_target_fraction: 0.93, confirmation_ms: 600,
+  version: 5, below_target_fraction: 0.93, confirmation_ms: 1000,
 });
 
 export function createTargetFailureDetector(targetKg) {

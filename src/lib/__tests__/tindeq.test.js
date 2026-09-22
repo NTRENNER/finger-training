@@ -3,7 +3,11 @@
 // computePlateauAvg() is the new persisted-average path and is
 // worth pinning down with concrete sample sequences.
 
-import { computePlateauAvg } from "../tindeq.js";
+import { AUTO_RELEASE_CONFIRM_MS, computePlateauAvg } from "../tindeq.js";
+
+test("requires a full second below the release threshold", () => {
+  expect(AUTO_RELEASE_CONFIRM_MS).toBe(1000);
+});
 
 // Build a sample series: ramp-up → plateau → release-tail.
 // Each sample is 10 ms apart so 1000 ms = 100 samples.

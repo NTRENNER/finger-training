@@ -62,6 +62,7 @@ import {
   suggestWeight,
 } from "../model/prescription.js";
 import { sessionAdjustment } from "../model/cookedScaling.js";
+import { MAX_OPTIONAL_SETS } from "../model/setRecommendation.js";
 import { pushDailyState } from "../lib/sync.js";
 
 // Manual-timing offset (June 2026): non-Tindeq users tap Done a beat
@@ -120,6 +121,7 @@ export function useSessionRunner({
   // set_num: 1 as a constant for backward compat with the existing
   // Supabase schema; the column is otherwise unused going forward.)
   const [phase,       setPhase]       = useState("idle");
+  const [currentSet,  setCurrentSet]  = useState(1);
   const [currentRep,  setCurrentRep]  = useState(0);
   const [sessionReps, setSessionReps] = useState([]);
   const [sessionId,        setSessionId]        = useState("");
@@ -215,6 +217,7 @@ export function useSessionRunner({
     setSessionDate(startedDay);
     setRefWeights(rw);
     setSessionReps([]);
+    setCurrentSet(1);
     setCurrentRep(0);
     setLeveledUp(false);
     setLastRepResult(null);
@@ -374,7 +377,7 @@ export function useSessionRunner({
       peak_force_kg:   (isFinite(peakForce) && peakForce > 0 && peakForce < 500)
                          ? Math.round(peakForce * 10) / 10
                          : null,
-      set_num:         1,
+      set_num:         currentSet,
       rep_num:         currentRep + 1,
       rest_s:             config.restTime,
       session_id:         sessionId,
@@ -444,7 +447,7 @@ export function useSessionRunner({
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected]);
+  }, [config, currentSet, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected]);
 
   const handleRestDone = useCallback(() => {
     repDoneLockRef.current = false;   // next rep armed — accept its completion
@@ -454,7 +457,19 @@ export function useSessionRunner({
     setPhase(tindeqConnected ? "rep_ready" : "rep_active");
   }, [tindeqConnected]);
 
-  // handleNextSet removed (curve-trust commit C — single-set only).
+  // One set is the complete recommendation. Extra sets are voluntary,
+  // launched from the completed-set summary, and deliberately have no
+  // mandatory between-set timer.
+  const handleNextSet = useCallback(() => {
+    if (phase !== "done" || currentSet >= MAX_OPTIONAL_SETS) return;
+    setCurrentSet(s => s + 1);
+    setCurrentRep(0);
+    setActiveHand(config.hand === "Both" ? "L" : config.hand);
+    setLastRepResult(null);
+    setLeveledUp(false);
+    repDoneLockRef.current = false;
+    setPhase(tindeqConnected ? "rep_ready" : "rep_active");
+  }, [phase, currentSet, config.hand, tindeqConnected]);
 
   const handleAbort = useCallback(() => {
     if (sessionReps.length > 0) finishSession(sessionReps);
@@ -472,6 +487,7 @@ export function useSessionRunner({
   return {
     config, setConfig,
     phase, setPhase,
+    currentSet,
     currentRep,
     sessionId, sessionStartedAt, refWeights,
     sessionReps, lastRepResult,
@@ -479,6 +495,6 @@ export function useSessionRunner({
     activeHand,
     nextWeight,
     startSession, chooseOffset, handleRepDone,
-    handleRestDone, handleAbort,
+    handleRestDone, handleNextSet, handleAbort,
   };
 }

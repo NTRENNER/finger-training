@@ -27,14 +27,14 @@ beforeEach(() => jest.useFakeTimers());
 afterEach(() => { jest.useRealTimers(); delete navigator.bluetooth; });
 test('batched samples use device time, not packet arrival time, and save once', async () => {
   const { packet, onStart, onEnd } = await setup();
-  for (let ms = 0; ms <= 3500; ms += 100) packet([[ms, ms < 1000 ? 30 : ms < 3000 ? 15 : 0]]);
+  for (let ms = 0; ms <= 4000; ms += 100) packet([[ms, ms < 1000 ? 30 : ms < 3000 ? 15 : 0]]);
   expect(onStart).toHaveBeenCalledTimes(1);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime: 3, avgForce: 20, failureValid: true});
 });
 test('multiple samples in one packet retain their individual time intervals', async () => {
   const { packet, onEnd } = await setup();
-  packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 0], [2500, 0]]);
+  packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 0], [2500, 0], [3000, 0]]);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime: 2, avgForce: 20});
 });
 test('silent equipment interruption saves only observed duration', async () => {
@@ -62,6 +62,14 @@ test('explicit stop requires release before another rep can start', async () => 
   packet([[800, 0], [900, 20]]);
   expect(onStart).toHaveBeenCalledTimes(2);
 });
+test('a sub-second release dip does not end the rep', async () => {
+  const { packet, onEnd } = await setup();
+  packet([[0, 20], [500, 20], [1000, 0], [1500, 0], [1600, 20]]);
+  expect(onEnd).not.toHaveBeenCalled();
+  packet([[2000, 0], [3000, 0]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime: 2, failureValid: true});
+});
 test('a gap in device samples stops the effort before the missing interval', async () => {
   const { packet, onEnd } = await setup();
   packet([[0, 20], [500, 20]]);
@@ -71,7 +79,7 @@ test('a gap in device samples stops the effort before the missing interval', asy
 test('device timestamp rollover preserves duration', async () => {
   const { packet, onEnd } = await setup();
   const base = 4294900;
-  packet([[base, 20], [base + 500, 20], [base + 1000, 20], [base + 1500, 20], [base + 2000, 0], [base + 2500, 0]]);
+  packet([[base, 20], [base + 500, 20], [base + 1000, 20], [base + 1500, 20], [base + 2000, 0], [base + 2500, 0], [base + 3000, 0]]);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime: 2, avgForce: 20, failureValid: true});
 });
 
@@ -96,8 +104,8 @@ test('a brief dip below target does not finish a live rep', async () => {
 test('batched timestamps align rep start and end with wall time', async () => {
   const { packet, onEnd } = await setup();
   const arrival = Date.now();
-  packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 0], [2500, 0]]);
-  expect(onEnd.mock.calls[0][0]).toMatchObject({startedAtMs: arrival - 2500, endedAtMs: arrival - 500});
+  packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 0], [2500, 0], [3000, 0]]);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({startedAtMs: arrival - 3000, endedAtMs: arrival - 1000});
 });
 
 
@@ -117,7 +125,7 @@ test('timed warmups tolerate target crossings until the timer ends the rep', asy
 
 test('timed warmups still end on an actual early release', async () => {
   const { packet, onEnd } = await setup(25, { endOnTargetDrop: false });
-  for (let ms = 0; ms <= 3500; ms += 100) packet([[ms, ms < 3000 ? 26 : 0]]);
+  for (let ms = 0; ms <= 4000; ms += 100) packet([[ms, ms < 3000 ? 26 : 0]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0].actualTime).toBe(3);
 });
@@ -128,7 +136,7 @@ test('training restores target-drop detection after leaving a timed warmup', asy
     await hook.result.current.stopAutoDetect();
     await hook.result.current.startAutoDetect(onStart, onEnd);
   });
-  packet([[0, 26], [500, 26], [1000, 22], [1500, 22], [1600, 22]]);
+  packet([[0, 26], [500, 26], [1000, 22], [1500, 22], [2000, 22]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0].endReason).toBe('target_force_failure');
 });
@@ -138,10 +146,10 @@ test('live reps use the tolerance and confirm with sensor time in delayed batche
   const { packet, onEnd } = await setup(25);
   packet([[0, 27], [500, 24], [1000, 24], [1500, 24], [2000, 22], [2500, 22]]);
   expect(onEnd).not.toHaveBeenCalled();
-  packet([[2600, 22]]);
+  packet([[3000, 22]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:2, avgForce:24.75,
-    forceRecording:{failure_policy:{version:4,below_target_fraction:0.93,confirmation_ms:600}}});
+    forceRecording:{failure_policy:{version:5,below_target_fraction:0.93,confirmation_ms:1000}}});
 });
 
 
@@ -149,7 +157,7 @@ test('sensor recording pairs post-acquisition force and duration and preserves r
   const {packet,onEnd}=await setup(30);
   packet([[0,4],[400,17],[800,30]]);
   for(let ms=1300;ms<=7300;ms+=500) packet([[ms,30]]);
-  packet([[7800,0],[8300,0],[8400,0]]);
+  packet([[7800,0],[8300,0],[8400,0],[8800,0]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:7,avgForce:30,
     forceRecording:{basis:'target_acquired',acquisition_s:0.8,activity:{duration_s:7.8}}});

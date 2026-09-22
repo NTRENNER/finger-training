@@ -50,11 +50,11 @@ test('a brief dip after overshooting does not finish the rep', () => {
 test('separate brief dips do not accumulate confirmation time', () => {
   expect(end(trace(10, t => Math.round(t * 100) % 40 < 20 ? 27 : 22))).toBeNull();
 });
-test('confirmation requires 600 ms and recovery exactly to the tolerance resets it', () => {
+test('confirmation requires 1000 ms and recovery exactly to the tolerance resets it', () => {
   const detector = createTargetFailureDetector(25);
-  for (const sample of [{ts:0,kg:30},{ts:100,kg:22},{ts:699,kg:22},{ts:700,kg:23.25},
-    {ts:800,kg:22},{ts:1399,kg:22}]) expect(detector(sample)).toBeNull();
-  expect(detector({ts:1400,kg:22})).toEqual({endTs:800,targetAcquired:true});
+  for (const sample of [{ts:0,kg:30},{ts:100,kg:22},{ts:1099,kg:22},{ts:1100,kg:23.25},
+    {ts:1200,kg:22},{ts:2199,kg:22}]) expect(detector(sample)).toBeNull();
+  expect(detector({ts:2200,kg:22})).toEqual({endTs:1200,targetAcquired:true});
 });
 test('abrupt release is confirmed and duration excludes the delay', () => {
   const samples = trace(6, t => t < 5 ? 30 : 0);

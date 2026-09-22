@@ -99,3 +99,17 @@ test.each([false, true])("fatigue choice %s is frozen with the actual session lo
     prescribed_load_kg:adjust ? 16 : 20,
     session_adjustment:{version:1,reported_cooked:8,load_choice:adjust ? "adjust" : "keep",applied_multiplier:adjust ? 0.8 : 1}});
 });
+
+test("a completed recommendation can add optional sets up to five", () => {
+  const { hook, addReps } = setup();
+  act(() => hook.result.current.startSession({ ...cfg, repsPerSet: 1 }));
+  for (let setNum = 1; setNum <= 5; setNum++) {
+    act(() => hook.result.current.handleRepDone({ actualTime: 45, avgForce: 20, peakForce: 22 }));
+    expect(addReps.mock.calls[setNum - 1][0][0].set_num).toBe(setNum);
+    expect(hook.result.current.phase).toBe("done");
+    if (setNum < 5) act(() => hook.result.current.handleNextSet());
+  }
+  act(() => hook.result.current.handleNextSet());
+  expect(hook.result.current.currentSet).toBe(5);
+  expect(hook.result.current.phase).toBe("done");
+});

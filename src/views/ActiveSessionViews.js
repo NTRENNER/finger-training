@@ -38,6 +38,7 @@ import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
 import { sessionOverpull } from "../model/overpull.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
+import { MAX_OPTIONAL_SETS, recommendAnotherSet } from "../model/setRecommendation.js";
 
 // Small wrapper used by both ActiveSessionView and AutoRepSessionView
 // (and SessionSummaryView) to render the live forecasted-vs-actual
@@ -45,12 +46,14 @@ import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 // otherwise from the configured target_duration so the user sees the
 // engine's prediction before they've moved.
 function LiveRepCurveCard({
-  history, config, activeHand, sessionReps, refWeights,
+  history, config, currentSet = 1, activeHand, sessionReps, refWeights,
   unit = "lbs", embedded = false,
 }) {
   const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
   const bundle = useMemo(() => {
-    const sameHandReps = (sessionReps || []).filter(r => r.hand === handForLookup);
+    const sameHandReps = (sessionReps || []).filter(r =>
+      r.hand === handForLookup && (r.set_num ?? 1) === currentSet
+    );
     const rep1 = sameHandReps[0];
     const firstRepTime = rep1?.actual_time_s > 0 ? rep1.actual_time_s : config.targetTime;
     return buildRepCurveBundle({
@@ -63,7 +66,7 @@ function LiveRepCurveCard({
       targetDuration: config.targetTime,
       beforeDate: undefined, // live session — match any prior date
     });
-  }, [history, config, handForLookup, sessionReps]);
+  }, [history, config, currentSet, handForLookup, sessionReps]);
   const targetWeightKg = suggestWeight(refWeights?.[handForLookup] ?? null, 0) || null;
   const inner = (
     <RepCurveChart
@@ -88,11 +91,11 @@ function LiveRepCurveCard({
 // questions on the same data: LiveRepCurveCard shows hold-time
 // trajectory; LiveRecoveryCard shows what fraction of rep-1 time
 // remains at the same load.
-function LiveRecoveryCard({ history, config, activeHand, sessionReps, embedded = false }) {
+function LiveRecoveryCard({ history, config, currentSet = 1, activeHand, sessionReps, embedded = false }) {
   const bundle = useMemo(() => {
     const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
     const sameHandReps = (sessionReps || [])
-      .filter(r => r.hand === handForLookup);
+      .filter(r => r.hand === handForLookup && (r.set_num ?? 1) === currentSet);
     // Rep 2 is the first inter-rep recovery measurement. Until
     // that's in the books there's no recovery to show.
     if (sameHandReps.length < 2) return null;
@@ -102,7 +105,7 @@ function LiveRecoveryCard({ history, config, activeHand, sessionReps, embedded =
       restSeconds: config.restTime ?? 20,
       physModel,
     });
-  }, [history, config, activeHand, sessionReps]);
+  }, [history, config, currentSet, activeHand, sessionReps]);
   if (!bundle) return null;
   if (bundle.eligibility === "descriptive_only") return <p>Activity recorded. Recovery comparison needs measured rest and comparable force.</p>;
   if (bundle.observed.length === 0) return null;
@@ -217,7 +220,7 @@ export function ManualOffsetPrompt({ onChoose }) {
 let _overrideBySession = { sessionId: null, byHand: {} };
 
 export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, unit = "lbs", history = [] }) {
-  const { config, currentRep, activeHand, sessionReps = [] } = session;
+  const { config, currentSet = 1, currentRep, activeHand, sessionReps = [] } = session;
 
   // repPhase: 'ready' (show Start button, first rep only)
   //           'countdown' (3-2-1)
@@ -504,6 +507,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         <LiveRepCurveCard
           history={history}
           config={config}
+          currentSet={currentSet}
           activeHand={activeHand}
           sessionReps={sessionReps}
           refWeights={session.refWeights}
@@ -513,6 +517,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         <LiveRecoveryCard
           history={history}
           config={config}
+          currentSet={currentSet}
           activeHand={activeHand}
           sessionReps={sessionReps}
         />
@@ -753,11 +758,14 @@ export function SwitchHandsView({ onReady }) {
 // single switch.)
 // (BetweenSetsView removed — single-set under curve-trust commit C.)
 
-export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, unit = "lbs" }) {
+export function SessionSummaryView({
+  reps, config, leveledUp, newLevel, currentSet = 1, onAddSet, onDone,
+  history = [], unit = "lbs",
+}) {
   const sets = useMemo(() => {
     const groups = {};
     for (const r of reps) {
-      const k = r.set_num;
+      const k = r.set_num ?? 1;
       if (!groups[k]) groups[k] = [];
       groups[k].push(r);
     }
@@ -781,6 +789,9 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
     (r.peak_force_kg > 0 && r.peak_force_kg < 500 && r.peak_force_kg > m) ? r.peak_force_kg : m,
     0);
   const hasPeak    = sessionPeak > 0;
+  const setSuggestion = useMemo(() => recommendAnotherSet({
+    history, sessionReps: reps, config, setNum: currentSet,
+  }), [history, reps, config, currentSet]);
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
@@ -799,7 +810,9 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
         </Card>
       )}
 
-      <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Session Complete</h2>
+      <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>
+        {currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`}
+      </h2>
 
       {(() => {
         const op = sessionOverpull(reps);
@@ -890,6 +903,24 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
         </Card>
       ))}
 
+      {currentSet < MAX_OPTIONAL_SETS && onAddSet && (
+        <>
+          {setSuggestion?.recommend && (
+            <div style={{
+              marginBottom: 10, padding: "10px 12px", borderRadius: 10,
+              background: C.green + "18", border: `1px solid ${C.green}55`,
+              color: C.text, fontSize: 13, lineHeight: 1.45,
+            }}>
+              <strong style={{ color: C.green }}>Good set.</strong>{" "}
+              {setSuggestion.text}
+            </div>
+          )}
+          <Btn onClick={onAddSet} style={{ width: "100%", marginBottom: 12, padding: "14px 0" }}>
+            + Add another set ({currentSet + 1} of {MAX_OPTIONAL_SETS})
+          </Btn>
+        </>
+      )}
+
       <div style={{ display: "flex", gap: 12 }}>
         <Btn onClick={() => downloadCSV(reps)} color={C.muted} style={{ flex: 1 }}>
           ↓ Export CSV
@@ -909,7 +940,7 @@ export function SessionSummaryView({ reps, config, leveledUp, newLevel, onDone, 
 // ──────────────────────────────────────────────────────────────
 
 export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs", history = [] }) {
-  const { config, currentRep, activeHand, refWeights, sessionReps = [] } = session;
+  const { config, currentSet = 1, currentRep, activeHand, refWeights, sessionReps = [] } = session;
   const handLabel = config.hand === "Both"
     ? (activeHand === "L" ? "Left Hand" : "Right Hand")
     : config.hand === "L" ? "Left Hand" : "Right Hand";
@@ -1084,6 +1115,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
         <LiveRepCurveCard
           history={history}
           config={config}
+          currentSet={currentSet}
           activeHand={activeHand}
           sessionReps={sessionReps}
           refWeights={refWeights}
@@ -1093,6 +1125,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
         <LiveRecoveryCard
           history={history}
           config={config}
+          currentSet={currentSet}
           activeHand={activeHand}
           sessionReps={sessionReps}
         />

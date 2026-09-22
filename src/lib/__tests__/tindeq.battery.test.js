@@ -87,7 +87,7 @@ test("a low battery warning does not end a valid rep or add any measurement comm
   packet([[0, 20], [500, 20], [1000, 20]]);
   emit([4, 0]);
   expect(end).not.toHaveBeenCalled();
-  packet([[1500, 20], [2000, 0], [2500, 0]]);
+  packet([[1500, 20], [2000, 0], [2500, 0], [3000, 0]]);
   expect(end).toHaveBeenCalledTimes(1);
   expect(end.mock.calls[0][0]).toMatchObject({ actualTime: 2, avgForce: 20, failureValid: true,
     forceRecording: { battery: { voltage_mv: 2800, low_battery_warning: true } } });

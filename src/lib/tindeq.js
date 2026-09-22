@@ -133,6 +133,7 @@ export function parseTindeqPacket(dataView, onSample) {
 const PLATEAU_THRESHOLD_FRAC = 0.80; // fraction of rep-peak considered "on the plateau"
 const PLATEAU_LEAD_IN_MS     = 500;  // skip the first 0.5s after entering the plateau
 const PLATEAU_TAIL_MS        = 200;  // drop the last 0.2s before the final plateau-edge sample
+export const AUTO_RELEASE_CONFIRM_MS = 1000;
 
 // Raw mean of all positive samples — fallback (b) in the chain above.
 // Used when the plateau trim collapses to an empty window (short or
@@ -306,7 +307,9 @@ export function useTindeq() {
   const adAwaitReleaseRef = useRef(false);
   const AD_START_KG  = 4;    // force must exceed this to begin auto-rep
   const AD_END_KG    = 3;    // force must drop below this to end auto-rep
-  const AD_END_MS    = 500;  // ms below end-threshold before rep is confirmed done
+  // A full second prevents a brief unload or sensor wobble from ending a
+  // valid rep while still excluding the confirmation tail from its result.
+  const AD_END_MS    = AUTO_RELEASE_CONFIRM_MS;
   const AD_MIN_MS    = 1500; // minimum rep duration — filters noise
 
   // Force below the release threshold ends the rep. Falling below the

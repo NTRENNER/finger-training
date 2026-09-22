@@ -64,7 +64,7 @@ import { enduranceCeilingKg } from "./enduranceTail.js";
 // (prescription.js imports threeExp.js). effectiveLoad + loadedWeight
 // are used internally below; all four are re-exported just after so
 // existing call sites that import them from prescription.js keep working.
-import { sane, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep, isMeasuredLoadRep } from "./load.js";
+import { sane, prescribedLoad, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep, isMeasuredLoadRep } from "./load.js";
 
 // ───────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
@@ -519,16 +519,71 @@ export function bestAvailablePeakMeasurement(history, hand, grip, referenceDate 
 // durations can revise the working floor. Best-ever records are unchanged.
 // Only valid measured opening efforts qualify; retrospective calls exclude
 // the evaluation date and all future records.
-export const CAPACITY_FLOOR_LOOKBACK_DAYS = 90;
+export const CAPACITY_FLOOR_FULL_CONFIDENCE_DAYS = 90;
+export const CAPACITY_FLOOR_DECAY_HALF_LIFE_DAYS = 180;
+export const CAPACITY_TRANSFER_HALF_LIFE_DAYS = 45;
+export const CAPACITY_TRANSFER_LOG_BANDWIDTH = 0.70;
+export const CAPACITY_TRANSFER_MAX_RESTORE = 0.50;
+export const CAPACITY_TRANSFER_TARGET_TOL = 0.95;
+export const CAPACITY_TRANSFER_LOAD_TOL = 0.95;
+// Backward-compatible name: this is now the full-confidence window, not
+// a hard expiration date.
+export const CAPACITY_FLOOR_LOOKBACK_DAYS = CAPACITY_FLOOR_FULL_CONFIDENCE_DAYS;
 export const CAPACITY_FLOOR_MAX_REVISION_DROP = 0.25;
 export const CAPACITY_FLOOR_REVISION_SESSIONS = 3;
 
-export function demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate = null) {
+const DAY_MS = 86400 * 1000;
+const ymdDay = (value) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value || "");
+  return m ? Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / DAY_MS) : null;
+};
+const evidenceAgeDays = (date, refDay) => {
+  const day = ymdDay(date);
+  return day == null || refDay == null ? null : Math.max(0, refDay - day);
+};
+const directCapacityConfidence = (ageDays) => {
+  if (ageDays == null) return 0;
+  if (ageDays <= CAPACITY_FLOOR_FULL_CONFIDENCE_DAYS) return 1;
+  return Math.pow(0.5,
+    (ageDays - CAPACITY_FLOOR_FULL_CONFIDENCE_DAYS) / CAPACITY_FLOOR_DECAY_HALF_LIFE_DAYS);
+};
+
+// Hitting a nearby duration argues against wholesale detraining, but does
+// not prove the stale domain. It can restore at most half of the confidence
+// lost by old direct evidence, with transfer falling on a log-duration scale.
+export function neighboringCapacityConfidence(history, hand, grip, targetDuration, referenceDate = null) {
+  if (!history || !(targetDuration > 0)) return 0;
+  const refDay = ymdDay(referenceDate || ymdLocal());
+  let best = 0;
+  for (const r of history) {
+    if (!isCapacityEvidenceRep(r) || r.hand !== hand || r.grip !== grip) continue;
+    if (!(r.rep_num == null || r.rep_num === 1) || (Number(r.set_num) || 1) !== 1) continue;
+    if (!isMeasuredLoadRep(r) || isSeedArtifactRep(r)) continue;
+    if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
+    const intended = Number(r.target_duration);
+    const actual = Number(r.actual_time_s);
+    if (!(intended > 0) || !(actual >= intended * CAPACITY_TRANSFER_TARGET_TOL)) continue;
+    const prescribed = prescribedLoad(r);
+    const measured = sane(effectiveLoad(r));
+    if (!(prescribed > 0) || !(measured >= prescribed * CAPACITY_TRANSFER_LOAD_TOL)) continue;
+    const age = evidenceAgeDays(r.date, refDay);
+    if (age == null) continue;
+    const recency = Math.pow(0.5, age / CAPACITY_TRANSFER_HALF_LIFE_DAYS);
+    const similarity = Math.exp(
+      -Math.abs(Math.log(intended / targetDuration)) / CAPACITY_TRANSFER_LOG_BANDWIDTH
+    );
+    best = Math.max(best, recency * similarity * Math.min(1, actual / intended));
+  }
+  return Math.min(1, best);
+}
+
+export function demonstratedCapacityKg(
+  history, hand, grip, targetDuration, referenceDate = null, baselineKg = null
+) {
   if (!history || !(targetDuration > 0)) return null;
-  const refMs = referenceDate
-    ? new Date(`${referenceDate}T00:00:00`).getTime()
-    : Date.now();
-  const cutoff = ymdLocal(new Date(refMs - CAPACITY_FLOOR_LOOKBACK_DAYS * 86400 * 1000));
+  const refDay = ymdDay(referenceDate || ymdLocal());
+  const transfer = neighboringCapacityConfidence(history, hand, grip, targetDuration, referenceDate);
+  const baseline = sane(baselineKg) ?? 0;
   const candidates = [];
   let best = null;
   for (const r of history) {
@@ -539,11 +594,18 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
     if (isSeedArtifactRep(r)) continue;                           // skip seeded/backfilled twins (avg==peak)
     if (!isMeasuredLoadRep(r)) continue;                          // measured (Tindeq) reps only — a spring/manual load was never a *sustained force* (July 2026)
     if (!(Number(r.actual_time_s) > 0)) continue;
-    if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
     const load = sane(effectiveLoad(r));
-    if (load != null) candidates.push({ ...r, load });
-    if (load != null && Number(r.actual_time_s) >= targetDuration && (best == null || load > best)) best = load;
+    const age = evidenceAgeDays(r.date, refDay);
+    if (load == null || age == null) continue;
+    const direct = directCapacityConfidence(age);
+    const confidence = Math.min(1,
+      direct + (1 - direct) * transfer * CAPACITY_TRANSFER_MAX_RESTORE);
+    const floorLoad = load > baseline
+      ? baseline + confidence * (load - baseline)
+      : load;
+    candidates.push({ ...r, load, floorLoad });
+    if (Number(r.actual_time_s) >= targetDuration && (best == null || floorLoad > best)) best = floorLoad;
   }
   // Keep an old best through isolated bad days. Three newer independent
   // opening efforts at comparable duration can recalibrate the working floor.
@@ -554,7 +616,7 @@ export function demonstratedCapacityKg(history, hand, grip, targetDuration, refe
     if (!prior || compareOpeningRep(r, prior) < 0) sessions.set(key, r);
   }
   const ordered = [...sessions.values()].sort(compareSessionOrder);
-  const bestRep = [...ordered].reverse().find(r => r.load === best && Number(r.actual_time_s) >= targetDuration);
+  const bestRep = [...ordered].reverse().find(r => r.floorLoad === best && Number(r.actual_time_s) >= targetDuration);
   if (bestRep) {
     // Replay evidence since the best, including reductions established more
     // than 30 days ago. The initial confirmation window is evaluated at each
@@ -621,7 +683,6 @@ export function loadBounds(history, hand, grip, targetDuration, opts = {}) {
     ? Math.round(bestPeakKg * PEAK_CAP_FRACTION * 10) / 10
     : null;
   const peakCapStale = peakMeasurement?.stale === true;
-  const floorKg = demonstratedCapacityKg(history, hand, grip, targetDuration, referenceDate);
   // Endurance ceiling scope: only within the data-supported range (see
   // the block comment at the prescription() call site below).
   let longestMeasuredHoldT = 0;
@@ -637,6 +698,9 @@ export function loadBounds(history, hand, grip, targetDuration, opts = {}) {
       && targetDuration <= longestMeasuredHoldT * EXTRAP_FLOOR_MULT)
     ? enduranceCeilingKg(history, hand, grip, targetDuration, referenceDate)
     : null;
+  const floorKg = demonstratedCapacityKg(
+    history, hand, grip, targetDuration, referenceDate, endCeilKg
+  );
   const capBase = (v) => capLoad(floorKg != null ? Math.max(v, floorKg) : v, peakCapKg);
   const capValue = (v) => {
     const base = capBase(v);
