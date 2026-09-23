@@ -38,7 +38,7 @@ import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
 import { sessionOverpull } from "../model/overpull.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
-import { MAX_OPTIONAL_SETS, recommendAnotherSet } from "../model/setRecommendation.js";
+import { MAX_OPTIONAL_SETS, recommendAnotherSet, isSetComplete } from "../model/setRecommendation.js";
 
 // Small wrapper used by both ActiveSessionView and AutoRepSessionView
 // (and SessionSummaryView) to render the live forecasted-vs-actual
@@ -789,6 +789,7 @@ export function SessionSummaryView({
     (r.peak_force_kg > 0 && r.peak_force_kg < 500 && r.peak_force_kg > m) ? r.peak_force_kg : m,
     0);
   const hasPeak    = sessionPeak > 0;
+  const setComplete = isSetComplete({ sessionReps: reps, config, setNum: currentSet });
   const setSuggestion = useMemo(() => recommendAnotherSet({
     history, sessionReps: reps, config, setNum: currentSet,
   }), [history, reps, config, currentSet]);
@@ -811,7 +812,7 @@ export function SessionSummaryView({
       )}
 
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>
-        {currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`}
+        {setComplete ? (currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
       </h2>
 
       {(() => {

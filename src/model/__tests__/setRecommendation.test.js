@@ -1,123 +1,117 @@
-import {
-  ADD_SET_CONFORMANCE_MIN,
-  ADD_SET_LATER_OPENER_RETENTION_MIN,
-  assessAdditionalSetNeed,
-  recommendAnotherSet,
-} from "../setRecommendation.js";
+import { assessAdditionalSetNeed, recommendAnotherSet, isSetComplete } from "../setRecommendation.js";
+import { computeDensityLadder } from "../densityLadder.js";
+import { zoneOf } from "../zones.js";
 
-const config = { grip: "Micro", hand: "L", targetTime: 40, restTime: 20 };
-const reps = (times, extras = {}) => times.map((t, i) => ({
-  id: `r${i + 1}`, session_id: "current", set_num: 1, rep_num: i + 1,
+const config = { grip: "Micro", hand: "L", targetTime: 40, restTime: 20, repsPerSet: 4 };
+const times = [40, 35, 30, 9]; // Last rep misses the ladder gate, while overall decay remains strong.
+const reps = (values = times, extras = {}) => values.map((t, i) => ({
+  id: `r${i + 1}`, session_id: "current", date: "2026-09-20", set_num: 1, rep_num: i + 1,
   hand: "L", grip: "Micro", target_duration: 40, actual_time_s: t,
-  avg_force_kg: 20, failure_valid: true, rest_s: 20, ...extras,
+  avg_force_kg: 20, peak_force_kg: 22, failure_valid: true, rest_s: 20, ...extras,
 }));
-
-// This used to pass with an empty history, because rare exposure was
-// itself a reason to suggest volume. It no longer is (September 2026), so
-// the happy path now needs a plateau as well as good within-set decay. The
-// conformance gate is what this test is really protecting; the plateau
-// history is scaffolding to get past `need`.
-const plateauHistory = [12, 16].flatMap((day, i) => reps([40], {
-  session_id: `plateau-${i}`, date: `2026-09-${day}`, avg_force_kg: 20,
+const plateauHistory = [12, 16].flatMap(day => reps(times, {
+  session_id: `plateau-${day}`, date: `2026-09-${day}`,
 }));
+const recommend = (sessionReps = reps(), history = plateauHistory, options = {}) =>
+  recommendAnotherSet({ history, sessionReps, config, setNum: 1, ...options });
 
-test("gently recommends another set when actual decay tracks the model", () => {
-  const out = recommendAnotherSet({
-    history: plateauHistory,
-    sessionReps: reps([40, 40, 40, 40], { date: "2026-09-20" }),
-    config, setNum: 1,
-  });
-  expect(out?.recommend).toBe(true);
-  expect(out.conformance).toBeGreaterThanOrEqual(ADD_SET_CONFORMANCE_MIN);
+test("a recent, valid plateau on a repeating rung can justify optional volume", () => {
+  expect(recommend()).toMatchObject({ recommend: true, basis: "plateau", recentSessions: 2 });
 });
 
-test("good within-set decay alone is not enough without a reason to add volume", () => {
-  // Same conforming set, no plateau behind it.
-  expect(recommendAnotherSet({
-    history: [], sessionReps: reps([40, 40, 40, 40], { date: "2026-09-20" }),
-    config, setNum: 1,
-  })).toBeNull();
-});
-
-test("does not recommend more volume after a collapsed set", () => {
-  expect(recommendAnotherSet({
-    history: [], sessionReps: reps([40, 2, 2, 2]), config, setNum: 1,
-  })).toBeNull();
-});
-
-test("does not recommend another set when the opener missed its target", () => {
-  expect(recommendAnotherSet({
-    history: [], sessionReps: reps([30, 30, 30]), config, setNum: 1,
-  })).toBeNull();
-});
-
-test("requires both hands to support more work in Both mode", () => {
-  const left = reps([40, 40, 40], { hand: "L" });
-  const right = reps([40, 2, 2], { hand: "R" }).map((r, i) => ({ ...r, id: `rr${i}` }));
-  expect(recommendAnotherSet({
-    history: [], sessionReps: [...left, ...right],
-    config: { ...config, hand: "Both" }, setNum: 1,
-  })).toBeNull();
-});
-
-test("does not suggest volume when recent exposure is already high and loads are not plateaued", () => {
-  const history = [1, 2, 3].flatMap((n) => reps([40], {
-    session_id: `old-${n}`, date: `2026-09-${10 + n}`,
-    avg_force_kg: 16 + n * 2,
+test.each([4, 5, 6])("the %s-rep rung keeps its earned next step without an extra-set suggestion", count => {
+  const current = reps(Array(count).fill(40));
+  const history = [12, 16].flatMap(day => reps(Array(count).fill(40), {
+    session_id: `prior-${day}`, date: `2026-09-${day}`,
   }));
-  const current = reps([40, 40, 40], { date: "2026-09-20" });
-  expect(assessAdditionalSetNeed({ history, sessionReps: current, config })).toBeNull();
-  expect(recommendAnotherSet({ history, sessionReps: current, config, setNum: 1 })).toBeNull();
+  const ladder = computeDensityLadder([...history, ...current], "Micro", zoneOf(40), { expectedHands: ["L"] });
+  expect(ladder.decision).toBe(count === 6 ? "step_load" : "advance");
+  expect(ladder.reps).toBe(count === 6 ? 4 : count + 1);
+  expect(ladder.loadByHand.L).toBe(count === 6 ? 21 : 20);
+  expect(recommend(current, history, { config: { ...config, repsPerSet: count } })).toBeNull();
 });
 
-test("a stable successful load plateau can justify another set", () => {
-  const history = [12, 16].flatMap((day, i) => reps([40], {
-    session_id: `old-${i}`, date: `2026-09-${day}`, avg_force_kg: 20,
+test("increasing from four to five to six reps is progress even at the same load", () => {
+  const history = [4, 5].flatMap((count, i) => reps([...Array(count - 1).fill(40), 9], {
+    session_id: `prior-${i}`, date: `2026-09-${12 + i * 4}`,
   }));
-  const current = reps([40, 40, 40], { date: "2026-09-20", avg_force_kg: 20 });
-  const out = recommendAnotherSet({ history, sessionReps: current, config, setNum: 1 });
-  expect(out?.basis).toBe("plateau");
+  expect(recommend(reps([40, 40, 40, 40, 40, 9]), history,
+    { config: { ...config, repsPerSet: 6 } })).toBeNull();
 });
 
-test("later sets are judged against the fresh opener rather than the original target", () => {
-  const first = reps([40, 40, 40]);
-  const second = reps([30, 30, 30], { set_num: 2 }).map((r, i) => ({ ...r, id: `s2-${i}` }));
-  const out = recommendAnotherSet({
-    history: [], sessionReps: [...first, ...second], config, setNum: 2,
-  });
-  expect(out?.basis).toBe("set_tolerance");
-  expect(out.openerRetention).toBeGreaterThanOrEqual(ADD_SET_LATER_OPENER_RETENTION_MIN);
+test.each([0, 1, 3])("longer holds on rep index %s are progress at a fixed load", index => {
+  const currentTimes = [...times]; currentTimes[index] *= 1.1;
+  expect(recommend(reps(currentTimes))).toBeNull();
 });
 
-test("a deeply degraded later set stops automatic set suggestions", () => {
-  const first = reps([40, 40, 40]);
-  const second = reps([20, 20, 20], { set_num: 2 }).map((r, i) => ({ ...r, id: `s2-${i}` }));
-  expect(recommendAnotherSet({
-    history: [], sessionReps: [...first, ...second], config, setNum: 2,
-  })).toBeNull();
+test.each([
+  { failure_valid: false },
+  { force_recording: { capacity_eligible: false } },
+  { load_provenance: "nominal_setting", avg_force_kg: null, manual_load_kg: 20 },
+  { end_reason: "equipment_interruption", failure_valid: false },
+])("invalid history cannot establish a plateau: %j", changes => {
+  expect(recommend(reps(), plateauHistory.map(r => ({ ...r, ...changes })))).toBeNull();
 });
 
-// September 2026, per Nathan: rare exposure used to justify a suggestion on
-// its own. It no longer does. Training a domain seldom is the state in which
-// the app knows least about what the athlete tolerates there, and a longer
-// session is the wrong answer to needing more sessions.
-test("a rarely-trained domain is not offered extra volume on that basis alone", () => {
-  const current = reps([40, 40, 40], { date: "2026-09-20", avg_force_kg: 20 });
-  // No prior work in this grip + zone at all — maximum "need" under the old
-  // low-exposure rule, and a strong, conforming first set.
-  expect(assessAdditionalSetNeed({ history: [], sessionReps: current, config })).toBeNull();
-  expect(recommendAnotherSet({ history: [], sessionReps: current, config, setNum: 1 })).toBeNull();
-
-  // One session in the window is still not a reason.
-  const onePrior = reps([40], { session_id: "old-1", date: "2026-09-18", avg_force_kg: 20 });
-  expect(assessAdditionalSetNeed({ history: onePrior, sessionReps: current, config })).toBeNull();
+test("old history does not establish a current plateau", () => {
+  const old = plateauHistory.map(r => ({ ...r, date: r.date.replace("09", "01") }));
+  expect(recommend(reps(), old)).toBeNull();
 });
 
-test("a plateau still justifies one, so the suggestion is not simply dead", () => {
-  const history = [12, 16].flatMap((day, i) => reps([40], {
-    session_id: `old-${i}`, date: `2026-09-${day}`, avg_force_kg: 20,
-  }));
-  const current = reps([40, 40, 40], { date: "2026-09-20", avg_force_kg: 20 });
-  const need = assessAdditionalSetNeed({ history, sessionReps: current, config });
-  expect(need).toMatchObject({ needed: true, basis: "plateau" });
+test.each([{ actual_time_s: 20 }, { failure_valid: false }])("an intervening unsuccessful opener is not skipped: %j", change => {
+  const interrupted = reps(times, { date: "2026-09-18", session_id: "intervening" });
+  Object.assign(interrupted[0], change);
+  expect(recommend(reps(), [...plateauHistory, ...interrupted])).toBeNull();
+});
+
+test("a new setup or changed rest cannot establish a plateau", () => {
+  expect(recommend(reps(times, { setup_id: "new" }))).toBeNull();
+  expect(recommend(reps(times, { rest_s: 60 }))).toBeNull();
+});
+
+test("rare exposure, increasing load, opener failure and collapse do not suggest volume", () => {
+  expect(recommend(reps(), [])).toBeNull();
+  expect(recommend(reps(times, { avg_force_kg: 22 }))).toBeNull();
+  expect(recommend(reps([30, 30, 20, 9]))).toBeNull();
+  expect(recommend(reps([40, 2, 2, 2]))).toBeNull();
+});
+
+test("three reps from a prescribed six is incomplete and cannot suggest another set", () => {
+  const partial = reps([40, 40, 40]);
+  const six = { ...config, repsPerSet: 6 };
+  expect(isSetComplete({ sessionReps: partial, config: six })).toBe(false);
+  expect(recommend(partial, plateauHistory, { config: six })).toBeNull();
+});
+
+test("completion requires each prescribed rep for each expected hand", () => {
+  const both = { ...config, hand: "Both" };
+  const left = reps(); const right = reps(times, { hand: "R" });
+  expect(isSetComplete({ sessionReps: [...left, ...right], config: both })).toBe(true);
+  expect(isSetComplete({ sessionReps: [...left, ...right.slice(0, 3)], config: both })).toBe(false);
+  expect(isSetComplete({ sessionReps: [...left.slice(0, 3), left[2]], config })).toBe(false);
+  expect(recommend([...left, ...right.slice(0, 3)], plateauHistory, { config: both })).toBeNull();
+});
+
+test("both hands must support the plateau", () => {
+  const rightHistory = plateauHistory.map(r => ({ ...r, hand: "R" }));
+  const both = { ...config, hand: "Both" };
+  expect(recommend([...reps(), ...reps(times, { hand: "R" })], [...plateauHistory, ...rightHistory],
+    { config: both })?.recommend).toBe(true);
+  expect(recommend([...reps(), ...reps([44, 35, 30, 9], { hand: "R" })], [...plateauHistory, ...rightHistory],
+    { config: both })).toBeNull();
+});
+
+test("later complete sets retain their tolerance check without changing the first-set ladder", () => {
+  const fresh = reps([40, 40, 40, 40]);
+  const optional = reps([30, 30, 30, 30], { set_num: 2 });
+  expect(recommend([...fresh, ...optional], [], { setNum: 2 })?.basis).toBe("set_tolerance");
+  expect(recommend([...fresh, ...optional.slice(0, 3)], [], { setNum: 2 })).toBeNull();
+  expect(recommend([...fresh, ...reps([20, 20, 20, 20], { set_num: 2 })], [], { setNum: 2 })).toBeNull();
+  const firstLadder = computeDensityLadder(fresh, "Micro", zoneOf(40));
+  expect(computeDensityLadder([...fresh, ...optional], "Micro", zoneOf(40))).toEqual(firstLadder);
+});
+
+test("the plateau assessment is stable under history ordering", () => {
+  const args = { history: plateauHistory, sessionReps: reps(), config };
+  expect(assessAdditionalSetNeed(args)).toEqual(assessAdditionalSetNeed({ ...args, history: [...plateauHistory].reverse() }));
 });

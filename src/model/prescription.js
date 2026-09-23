@@ -607,8 +607,10 @@ export function demonstratedCapacityKg(
     for (const r of recent) {
       const duration = Number(r.actual_time_s);
       const fullHold = duration >= targetDuration;
-      if (fullHold && r.load >= workingFloor * 0.9) {
-        workingFloor = Math.max(workingFloor, r.load);
+      // Replayed holds have the same age discount as the selected best.
+      // Raw force here would restore a stale record to full authority.
+      if (fullHold && r.floorLoad >= workingFloor * 0.9) {
+        workingFloor = Math.max(workingFloor, r.floorLoad);
         lower = [];
         declineEstablished = false;
         continue;
@@ -629,7 +631,7 @@ export function demonstratedCapacityKg(
       if (!comparableLower && !shortMiss) continue;
       const windowStart = new Date(r.date + "T00:00:00").getTime() - 30 * 86400000;
       lower = lower.filter(e => new Date(e.date + "T00:00:00").getTime() >= windowStart);
-      lower.push({ date: r.date, load: comparableLower ? r.load : 0 });
+      lower.push({ date: r.date, load: comparableLower ? r.floorLoad : 0 });
       if (declineEstablished || lower.length >= CAPACITY_FLOOR_REVISION_SESSIONS) {
         workingFloor = Math.max(workingFloor * (1 - CAPACITY_FLOOR_MAX_REVISION_DROP), ...lower.map(e => e.load));
         declineEstablished = true;

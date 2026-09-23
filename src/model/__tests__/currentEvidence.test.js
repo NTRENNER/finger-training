@@ -123,3 +123,22 @@ test('six lower sessions reach observed load and eight cannot push beneath it',(
  expect(floor([best,...rows])).toBe(10);
  expect(prescription([best,...rows],'L','Micro',160,{referenceDate:'2026-09-10'}).value).toBe(10);
 });
+
+
+test('replaying another stale hold cannot restore its untapered force', () => {
+ const h=[rep('2026-07-05',40),rep('2026-07-10',33)];
+ const value=demonstratedCapacityKg(h,'L','Micro',160,'2026-09-23');
+ expect(value).toBeCloseTo(29.62963,5);
+ expect(demonstratedCapacityKg([...h].reverse(),'L','Micro',160,'2026-09-23')).toBe(value);
+});
+test('multiple stale holds taper without a jump when their ranking changes', () => {
+ const h=[rep('2026-07-05',40),rep('2026-07-10',33)];
+ let previous=40;
+ for(let i=0;i<100;i++) {
+  const date=new Date(Date.UTC(2026,8,1+i)).toISOString().slice(0,10);
+  const value=demonstratedCapacityKg(h,'L','Micro',160,date) ?? 0;
+  expect(value).toBeLessThanOrEqual(previous+1e-9);
+  expect(previous-value).toBeLessThan(1.1);
+  previous=value;
+ }
+});

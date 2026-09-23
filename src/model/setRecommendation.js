@@ -5,6 +5,7 @@ import { isCapacityEvidenceRep } from "./forceRecording.js";
 import { isShortfall } from "./prescription.js";
 import { buildForecastSeries, buildPhysModel } from "./repCurveData.js";
 import { effectiveLoad, isFirstSetRep } from "./load.js";
+import { computeDensityLadder, LADDER_MIN_REPS } from "./densityLadder.js";
 import { zoneOf } from "./zones.js";
 import { today } from "../util.js";
 
@@ -15,6 +16,7 @@ export const ADD_SET_RECENT_DAYS = 30;
 export const ADD_SET_LATER_OPENER_RETENTION_MIN = 0.70;
 export const ADD_SET_PLATEAU_SESSIONS = 3;
 export const ADD_SET_PLATEAU_LOAD_RANGE = 0.03;
+export const ADD_SET_PLATEAU_TIME_RANGE = 0.03;
 
 const mean = xs => xs.reduce((sum, x) => sum + x, 0) / xs.length;
 const DAY_MS = 86400 * 1000;
@@ -39,22 +41,10 @@ function openingReps(rows, { grip, zone, targetTime, hand }) {
   return [...bySession.values()].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 }
 
-// "Need" stays domain-specific: success elsewhere never substitutes for
-// evidence in this grip + zone. A suggestion is justified by exactly one
-// thing — three comparable successful openers that have held the SAME load,
-// a plateau. Progress has stalled at a weight the athlete clearly tolerates,
-// so more volume is a reasonable next lever.
-//
-// LOW EXPOSURE IS NOT A REASON (September 2026, per Nathan). An earlier
-// version also suggested a set when the domain had been trained at most
-// once in 30 days. That is backwards: rare exposure is precisely the state
-// in which the app knows LEAST about what this athlete tolerates here, and
-// volume is the wrong thing to add on the least evidence. A domain that is
-// undertrained needs more sessions, which the zone-coverage and staleness
-// surfaces already argue for — not a longer one.
-//
-// `recentSessions` is still reported for diagnostics (it explains why a
-// suggestion did or did not appear) but nothing decides on it.
+// Optional volume comes after the existing 4–6 ladder. Stable force alone
+// is not a plateau: more reps or longer holds at that force are progress.
+// Use consecutive comparable sessions, including unsuccessful attempts, so
+// filtering away an interruption or a shortfall cannot manufacture a plateau.
 export function assessAdditionalSetNeed({ history = [], sessionReps = [], config }) {
   if (!config?.grip || !(config.targetTime > 0)) return null;
   const zone = zoneOf(config.targetTime);
@@ -64,28 +54,66 @@ export function assessAdditionalSetNeed({ history = [], sessionReps = [], config
   // session-date anchoring already fixed elsewhere.
   const currentDay = dayNumber(sessionReps.find(r => r.date)?.date) ?? dayNumber(today());
   const sessionIds = new Set(sessionReps.map(sessionKey).filter(Boolean));
-  const eligible = history.filter(r => !sessionIds.has(sessionKey(r))
-    && isFirstSetRep(r) && r.grip === config.grip && zoneOf(r.target_duration) === zone);
-  const recentSessions = new Set(eligible.filter(r => {
+  const isRecent = r => {
     const d = dayNumber(r.date);
     return d != null && currentDay != null && currentDay - d >= 0
       && currentDay - d <= ADD_SET_RECENT_DAYS;
-  }).map(sessionKey).filter(Boolean)).size;
-
+  };
+  const eligible = history.filter(r => !sessionIds.has(sessionKey(r))
+    && isFirstSetRep(r) && r.grip === config.grip
+    && zoneOf(r.target_duration) === zone && isRecent(r));
+  const recentSessions = new Set(eligible.filter(isCapacityEvidenceRep).map(sessionKey).filter(Boolean)).size;
+  const rows = [...eligible, ...sessionReps.filter(isRecent)];
   const expectedHands = config.hand === "Both" ? ["L", "R"] : [config.hand];
+  // The next session still adds rep 5, then rep 6, then increases load.
+  // Optional-set advice must never compete with those earned steps.
+  const ladder = computeDensityLadder(rows, config.grip, zone, { expectedHands });
+  if (ladder?.decision !== "repeat") return null;
   let plateau = true;
   for (const hand of expectedHands) {
-    const openers = openingReps([...eligible, ...sessionReps], {
+    const openers = openingReps(rows, {
       grip: config.grip, zone, targetTime: config.targetTime, hand,
-    }).filter(r => !isShortfall(Number(r.actual_time_s), Number(r.target_duration)))
-      .slice(-ADD_SET_PLATEAU_SESSIONS);
+    }).slice(-ADD_SET_PLATEAU_SESSIONS);
     if (openers.length < ADD_SET_PLATEAU_SESSIONS) { plateau = false; break; }
-    const loads = openers.map(effectiveLoad).filter(v => v > 0);
-    if (loads.length !== openers.length) { plateau = false; break; }
-    const lo = Math.min(...loads), hi = Math.max(...loads);
-    if (!(lo > 0) || (hi - lo) / lo > ADD_SET_PLATEAU_LOAD_RANGE) { plateau = false; break; }
+    const sets = openers.map(opener => rows.filter(r => sessionKey(r) === sessionKey(opener)
+      && r.hand === hand && isFirstSetRep(r))
+      .sort((a, b) => Number(a.rep_num) - Number(b.rep_num)));
+    const count = sets[0].length;
+    if (count < LADDER_MIN_REPS || sets.some(set => set.length !== count
+      || set.some((r, i) => Number(r.rep_num) !== i + 1 || !isCapacityEvidenceRep(r)))
+      || openers.some(r => isShortfall(Number(r.actual_time_s), Number(r.target_duration)))) {
+      plateau = false; break;
+    }
+    // Setup, rest and intended duration must match; otherwise the sessions
+    // ask different questions even when the opening load is the same.
+    if (openers.some(r => (r.setup_id ?? null) !== (openers[0].setup_id ?? null)
+      || Number(r.target_duration) !== Number(openers[0].target_duration))
+      || sets.some(set => set.some((r, i) => i > 0
+        && Number(r.rest_s) !== Number(sets[0][i].rest_s)))) {
+      plateau = false; break;
+    }
+    const stable = (values, tolerance) => values.every(v => Number.isFinite(v) && v > 0)
+      && (Math.max(...values) - Math.min(...values)) / Math.min(...values) <= tolerance;
+    if (!stable(openers.map(effectiveLoad), ADD_SET_PLATEAU_LOAD_RANGE)
+      || sets[0].some((_, i) => !stable(sets.map(set => Number(set[i].actual_time_s)), ADD_SET_PLATEAU_TIME_RANGE))) {
+      plateau = false; break;
+    }
   }
   return plateau ? { needed: true, basis: "plateau", recentSessions } : null;
+}
+
+// Completion describes recorded activity, independently of whether those
+// reps are suitable model evidence. Interrupted reps keep their own labels.
+export function isSetComplete({ sessionReps = [], config, setNum = 1 }) {
+  const count = Number(config?.repsPerSet);
+  if (!Number.isInteger(count) || count < 1) return false;
+  const hands = config.hand === "Both" ? ["L", "R"] : [config.hand];
+  return hands.every(hand => {
+    const numbers = new Set(sessionReps.filter(r => Number(r.set_num ?? 1) === setNum
+      && (r.hand === hand || (r.hand === "B" && hands.length === 1)))
+      .map(r => Number(r.rep_num)));
+    return Array.from({ length: count }, (_, i) => i + 1).every(n => numbers.has(n));
+  });
 }
 
 // The weakest hand gates Both-mode, so a strong side never hides a side that
@@ -94,6 +122,7 @@ export function assessAdditionalSetNeed({ history = [], sessionReps = [], config
 export function recommendAnotherSet({ history = [], sessionReps = [], config, setNum = 1 }) {
   if (!config?.grip || !(config.targetTime > 0)) return null;
   const expectedHands = config.hand === "Both" ? ["L", "R"] : [config.hand];
+  if (!isSetComplete({ sessionReps, config, setNum }) || setNum >= MAX_OPTIONAL_SETS) return null;
   const thisSet = sessionReps.filter(r => (r.set_num ?? 1) === setNum);
   const sessionIds = new Set(sessionReps.map(r => r.session_id).filter(Boolean));
   const priorHistory = history.filter(r => !sessionIds.has(r.session_id));
@@ -145,7 +174,7 @@ export function recommendAnotherSet({ history = [], sessionReps = [], config, se
       conformance,
       basis: need.basis,
       recentSessions: need.recentSessions,
-      text: "Your first-set quality is strong and this load has leveled off. Another set may be a useful volume progression.",
+      text: "Your reps and hold times have stayed steady across recent sessions. If you feel ready, another set is optional.",
     };
   }
   return {

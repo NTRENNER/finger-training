@@ -42,7 +42,7 @@ test("fixed weight survives scrubbing, view changes, and added workouts", () => 
   const view = render(<CurveImprovementCard {...props} />);
   choose("Time");
   expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
-  expect(screen.getByLabelText("Hold time comparison")).toHaveTextContent("50.6 → 138.1 seconds at 45.0 kg");
+  expect(screen.getByLabelText("Hold time comparison")).toHaveTextContent("At 45.0 kg, your estimated hold time went from 50.6 seconds to 138.1 seconds.");
   fireEvent.change(screen.getByRole("slider"), { target: { value: "0" } });
   expect(screen.getByText("Power · comparing at 45.0 kg")).toBeInTheDocument();
   expect(screen.getByLabelText("Hold time comparison")).toHaveTextContent("+0.0s");
@@ -60,10 +60,10 @@ test("bodyweight scaling never changes the fixed physical load", () => {
   expect(screen.getByRole("button", { name: "Power weight progress" })).toHaveTextContent("+9.4 kg");
   choose("Time");
   expect(screen.getByText("Power · comparing at 45.0 kg")).toBeInTheDocument();
-  expect(screen.getByLabelText("Hold time comparison")).toHaveTextContent("50.6 → 138.1");
+  expect(screen.getByLabelText("Hold time comparison")).toHaveTextContent("50.6 seconds to 138.1 seconds");
   view.rerender(<CurveImprovementCard {...props} unit="lbs" normalizeOn bodyWeight={70} />);
   expect(screen.getByText("Power · comparing at 99.2 lbs")).toBeInTheDocument();
-  expect(screen.getByLabelText("Hold time comparison")).toHaveTextContent("50.6 → 138.1");
+  expect(screen.getByLabelText("Hold time comparison")).toHaveTextContent("50.6 seconds to 138.1 seconds");
 });
 
 test("hold-time evidence respects hand and selected date, excluding interruptions", () => {

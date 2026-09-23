@@ -39,3 +39,17 @@ test('final rep retains its interruption status in session summary', () => {
   render(<SessionSummaryView config={config} reps={[{rep_num: 1, set_num: 1, actual_time_s: 12, avg_force_kg: 18, failure_valid: false}]} onDone={() => {}} />);
   expect(screen.getByText(/Interrupted — activity only/)).toBeInTheDocument();
 });
+
+test('an aborted partial set is not described as complete', () => {
+  render(<SessionSummaryView config={{...config,repsPerSet:6}} reps={Array.from({length:3},(_,i)=>({
+    rep_num:i+1,set_num:1,hand:'L',actual_time_s:40,avg_force_kg:20,failure_valid:true
+  }))} onDone={() => {}} onAddSet={() => {}} />);
+  expect(screen.getByRole('heading', {name:'Session Ended Early'})).toBeInTheDocument();
+  expect(screen.queryByText('Recommended Set Complete')).not.toBeInTheDocument();
+});
+test('a fully recorded prescribed set is described as complete', () => {
+  render(<SessionSummaryView config={config} reps={Array.from({length:4},(_,i)=>({
+    rep_num:i+1,set_num:1,hand:'L',actual_time_s:40,avg_force_kg:20,failure_valid:true
+  }))} onDone={() => {}} />);
+  expect(screen.getByRole('heading', {name:'Recommended Set Complete'})).toBeInTheDocument();
+});

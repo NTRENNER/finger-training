@@ -80,7 +80,9 @@ export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange }) 
     </div>
     {available ? <div aria-label="Hold time comparison" style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 30, fontWeight: 800, color: now < before ? C.red : selected.color }}>{signed(now - before)}s</div>
-      <div style={{ fontSize: 16, color: C.text }}>{fmt1(before)} → {fmt1(now)} seconds at {fmt1(toDisp(load, unit))} {unit}</div>
+      <div style={{ fontSize: 18, color: C.text, lineHeight: 1.5 }}>
+        At <strong>{fmt1(toDisp(load, unit))} {unit}</strong>, your estimated hold time went from <strong>{fmt1(before)} seconds</strong> to <strong>{fmt1(now)} seconds</strong>.
+      </div>
       <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Estimated · {reference.date} → {date}</div>
       {overlay.continuityByDate?.get(date)?.evidenceDates?.[selected.key] && <div style={{fontSize:12,color:C.muted}}>Evidence through {overlay.continuityByDate.get(date).evidenceDates[selected.key]}</div>}
     </div> : <p role="status" style={{ fontSize: 14, color: C.muted, lineHeight: 1.5 }}>
