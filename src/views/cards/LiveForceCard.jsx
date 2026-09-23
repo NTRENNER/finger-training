@@ -31,9 +31,9 @@ import { clamp } from "../../util.js";
 //   seconds        — elapsed seconds (number)
 //   targetSeconds  — target hold duration (number)
 //   running        — when false the display reads as muted (paused)
-function BigTimer({ seconds, targetSeconds, running }) {
+function BigTimer({ seconds, targetSeconds, running, referenceOnly = false }) {
   const pct = targetSeconds ? Math.min(seconds / targetSeconds, 1) : 0;
-  const over = seconds >= targetSeconds;
+  const over = !referenceOnly && seconds >= targetSeconds;
   const color = running ? (over ? C.green : C.blue) : C.muted;
   return (
     <div style={{ textAlign: "center", padding: "24px 0" }}>
@@ -41,11 +41,11 @@ function BigTimer({ seconds, targetSeconds, running }) {
         {fmtTime(seconds)}
       </div>
       <div style={{ marginTop: 12, fontSize: 13, color: C.muted }}>
-        target: {fmtTime(targetSeconds)}
+        {referenceOnly ? 'fresh reference' : 'target'}: {fmtTime(targetSeconds)}
       </div>
-      <div style={{ marginTop: 10, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+      {!referenceOnly && <div style={{ marginTop: 10, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${pct * 100}%`, background: color, borderRadius: 3, transition: "width 0.2s" }} />
-      </div>
+      </div>}
     </div>
   );
 }

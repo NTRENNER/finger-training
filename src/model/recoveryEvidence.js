@@ -1,5 +1,6 @@
 import { isCapacityEvidenceRep, loadProvenance } from "./forceRecording.js";
 import { effectiveLoad } from "./load.js";
+import { isMixedDomainRep } from './mixedDomain.js';
 
 // Internal consistency policy. No new athlete-facing tuning controls.
 export const RECOVERY_LOAD_RATIO = 1.10;
@@ -16,6 +17,8 @@ export function recoveryEvidence(reps) {
   let estimated = false;
   let reason = null, minLoad = Infinity, maxLoad = 0;
   const opener = sorted[0];
+  if (sorted.some(isMixedDomainRep)) return { reps: [], rests: [], reason: 'mixed_load_protocol',
+    confidence: 'measured', weight: 0, eligible: false, status: 'descriptive_only' };
   for (let i = 0; i < sorted.length; i++) {
     const r = sorted[i];
     if (Number(r.rep_num) !== i + 1 || Number(sorted[i + 1]?.rep_num) === Number(r.rep_num)) { reason = "missing_or_duplicate_rep"; break; }

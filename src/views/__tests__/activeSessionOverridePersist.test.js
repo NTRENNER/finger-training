@@ -77,6 +77,16 @@ test("override clears when a new session starts (different sessionId)", () => {
   expect(screen.getByPlaceholderText(/Override/i).value).toBe(""); // fresh session
 });
 
+test("mixed-load beta does not carry a manual weight into the next domain", () => {
+  const first = baseSession("mixed-overrides");
+  first.config.mixedDomainPlan = { id: 'whole_curve_beta' };
+  const view = render(<ActiveSessionView {...props(first)} />);
+  fireEvent.change(screen.getByPlaceholderText(/Override/i), { target: { value: "70" } });
+  view.unmount();
+  render(<ActiveSessionView {...props({ ...first, currentRep: 1, refWeights: { L: 15, R: 15 } })} />);
+  expect(screen.getByPlaceholderText(/Override/i).value).toBe("");
+});
+
 
 test('a sensor-started rep with an empty buffer retains elapsed activity after disconnect', async()=>{
  jest.useFakeTimers(); jest.setSystemTime(100000);

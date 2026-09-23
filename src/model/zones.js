@@ -170,6 +170,9 @@ export function computeZoneCoverage(history, activities = []) {
   const sessions = {};
   for (const r of history) {
     if ((r.date ?? "") < cutoffStr) continue;
+    // A mixed-load beta session supplies one fresh domain, not five fresh tests.
+    if (r.force_recording?.session_protocol?.id === 'whole_curve_beta'
+        && (r.rep_num !== 1 || r.failure_valid === false)) continue;
     const sid = r.session_id || r.date;
     if (!sessions[sid]) sessions[sid] = { date: r.date, durations: [] };
     const d = r.target_duration || r.actual_time_s;

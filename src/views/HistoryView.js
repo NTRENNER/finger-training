@@ -1,5 +1,6 @@
 import { InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { evidenceLabel } from "../model/forceRecording.js";
+import { isMixedDomainRep, mixedDomainMetadata, MIXED_DOMAIN_LABELS } from '../model/mixedDomain.js';
 // ──────────────────────────────────────────────────────────────
 // HISTORY VIEW
 // ──────────────────────────────────────────────────────────────
@@ -196,7 +197,7 @@ export function HistoryView({
     if (editRepHand === "L" || editRepHand === "R") updates.hand = editRepHand;
     // Re-derive failed from the new time so edits keep the flag honest.
     const tgt = editingRep.rep.target_duration;
-    if (tgt > 0 && newTime > 0) updates.failed = isShortfall(newTime, tgt);
+    if (tgt > 0 && newTime > 0) updates.failed = isMixedDomainRep(editingRep.rep) ? false : isShortfall(newTime, tgt);
     // Rest_s edit — only write if user typed a non-empty value (so
     // the field can be left blank to leave the existing value intact).
     if (editRepRest.trim() !== "") {
@@ -427,6 +428,7 @@ export function HistoryView({
     for (const sess of (showAllSessions ? grouped : grouped.slice(0, SESSION_CAP))) {
       const cardKey = `${sess.reps[0]?.session_id || sess.date}|${sess.date}`;
       const validReps = sess.reps;
+      if (validReps.some(isMixedDomainRep)) continue;
       if (validReps.length < 2) continue;
       const hands = sess.hand === "B"
         ? ["L", "R"].filter(h => validReps.some(r => r.hand === h))
@@ -763,7 +765,7 @@ export function HistoryView({
                       "L + R" up here was just noise. */}
                   {sess.hand === "L" && "Left · "}
                   {sess.hand === "R" && "Right · "}
-                  {TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
+                  {sess.reps.some(isMixedDomainRep) ? 'Whole curve · Beta' : TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -889,7 +891,7 @@ export function HistoryView({
                   </div>
                 </div>
                 {/* Row 2: zone / target duration */}
-                <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+                {!sess.reps.some(isMixedDomainRep) && <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
                   {TARGET_OPTIONS.map(o => (
                     <button key={o.seconds} onClick={() => setEditTarget(o.seconds)} style={{
                       padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
@@ -897,7 +899,7 @@ export function HistoryView({
                       color: editTarget === o.seconds ? "#fff" : C.muted,
                     }}>{o.label}</button>
                   ))}
-                </div>
+                </div>}
                 {/* Row 3: save / cancel */}
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={() => {
@@ -908,6 +910,7 @@ export function HistoryView({
                     // the user taps Done without touching the picker,
                     // skip the hand field — leave per-rep hands intact.
                     const updates = { grip: editGrip, target_duration: editTarget };
+                    if (sess.reps.some(isMixedDomainRep)) delete updates.target_duration;
                     if (editHand === "L" || editHand === "R") updates.hand = editHand;
                     onUpdateSession(sessKey, updates);
                     setEditKey(null);
@@ -1042,7 +1045,8 @@ export function HistoryView({
               const sortedReps = sess.reps.slice().sort((a, b) => a.set_num - b.set_num || a.rep_num - b.rep_num);
               const renderChip = (r, j) => {
                 const isRepEditing = editingRep?.sessKey === cardKey && editingRep?.repIdx === j;
-                const passed = r.actual_time_s >= sess.target_duration;
+                const passed = r.actual_time_s >= r.target_duration;
+                const beta = isMixedDomainRep(r);
                 // Per-rep hand letter — same color scheme as the F-D
                 // chart's L/R dots (L=blue, R=orange). Always shown,
                 // including on single-hand sessions, so the hand is
@@ -1056,8 +1060,8 @@ export function HistoryView({
                       onClick={() => repEditMode === cardKey && !isRepEditing && openRepEdit(cardKey, j, r)}
                       style={{
                         padding: "4px 10px", borderRadius: 8, fontSize: 12,
-                        background: isRepEditing ? C.blue + "33" : passed ? "#1a2f1a" : "#2f1a1a",
-                        border: `1px solid ${isRepEditing ? C.blue : passed ? C.green : C.red}`,
+                        background: isRepEditing ? C.blue + "33" : beta ? C.bg : passed ? "#1a2f1a" : "#2f1a1a",
+                        border: `1px solid ${isRepEditing ? C.blue : beta ? C.border : passed ? C.green : C.red}`,
                         cursor: repEditMode === cardKey ? "pointer" : "default",
                         paddingRight: repEditMode === cardKey ? 22 : 10,
                       }}
@@ -1068,6 +1072,7 @@ export function HistoryView({
                         </span>
                       )}
                       <b>{fmtW(effectiveLoad(r), unit)}{unit}</b> · {fmtTime(r.actual_time_s)}
+                      {beta && <span> · {MIXED_DOMAIN_LABELS[mixedDomainMetadata(r).zone]}</span>}
                       <span> · {evidenceLabel(r)}</span>
                       {r.force_recording?.version >= 1 && <span> · Time-weighted average</span>}
                       {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
@@ -1146,7 +1151,7 @@ export function HistoryView({
             })()}
 
             {/* + Add rep button */}
-            {repEditMode === cardKey && !editingRep && addingRep !== cardKey && (
+            {repEditMode === cardKey && !editingRep && addingRep !== cardKey && !sess.reps.some(isMixedDomainRep) && (
               <button
                 onClick={() => openRepAdd(cardKey, sess)}
                 style={{

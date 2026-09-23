@@ -97,6 +97,7 @@ export function findPrevSessionReps(history, { grip, hand, beforeDate, targetDur
   // specifically — fall back to grip-only match.
   const byKey = new Map();
   for (const r of history) {
+    if (r.force_recording?.session_protocol?.id === 'whole_curve_beta') continue;
     if (r.grip !== grip) continue;
     if (hand && r.hand !== hand && r.hand !== "B") continue;
     if (zoneOf(r.target_duration) !== zone) continue;

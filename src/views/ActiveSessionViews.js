@@ -1,6 +1,7 @@
 import { TindeqBattery, InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { finalizeDeviceActivity } from "../model/forceRecording.js";
 import { evidenceLabel } from "../model/forceRecording.js";
+import { MIXED_DOMAIN_LABELS, isMixedDomainRep, mixedDomainMetadata } from '../model/mixedDomain.js';
 // ──────────────────────────────────────────────────────────────
 // ACTIVE-SESSION VIEWS
 // ──────────────────────────────────────────────────────────────
@@ -51,6 +52,7 @@ function LiveRepCurveCard({
 }) {
   const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
   const bundle = useMemo(() => {
+    if (config.mixedDomainPlan) return null;
     const sameHandReps = (sessionReps || []).filter(r =>
       r.hand === handForLookup && (r.set_num ?? 1) === currentSet
     );
@@ -68,6 +70,7 @@ function LiveRepCurveCard({
     });
   }, [history, config, currentSet, handForLookup, sessionReps]);
   const targetWeightKg = suggestWeight(refWeights?.[handForLookup] ?? null, 0) || null;
+  if (!bundle) return null;
   const inner = (
     <RepCurveChart
       forecasted={bundle.forecasted}
@@ -93,6 +96,7 @@ function LiveRepCurveCard({
 // remains at the same load.
 function LiveRecoveryCard({ history, config, currentSet = 1, activeHand, sessionReps, embedded = false }) {
   const bundle = useMemo(() => {
+    if (config.mixedDomainPlan) return null;
     const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
     const sameHandReps = (sessionReps || [])
       .filter(r => r.hand === handForLookup && (r.set_num ?? 1) === currentSet);
@@ -239,9 +243,11 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   // does all L reps then all R; single-hand sessions use just that hand).
   const sessionKey = session.sessionId;
   const overrideHand = config.hand === "Both" ? activeHand : config.hand;
+  // Mixed-load holds need their own override; ordinary sets retain one per hand.
+  const overrideKey = config.mixedDomainPlan ? `${overrideHand}:${currentRep}` : overrideHand;
   const [manualWeightStr, setManualWeightStrState] = useState(
     () => (_overrideBySession.sessionId === sessionKey
-      ? (_overrideBySession.byHand[overrideHand] ?? "")
+      ? (_overrideBySession.byHand[overrideKey] ?? "")
       : "")
   );
   const setManualWeightStr = useCallback((v) => {
@@ -250,10 +256,10 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       : {};
     _overrideBySession = {
       sessionId: sessionKey,
-      byHand: { ...byHand, [overrideHand]: v },
+      byHand: { ...byHand, [overrideKey]: v },
     };
     setManualWeightStrState(v);
-  }, [sessionKey, overrideHand]);
+  }, [sessionKey, overrideKey]);
   const startTimeRef = useRef(null);
   const timerRef     = useRef(null);
   // Latest manual weight override in kg. endRep (a stable useCallback) reads
@@ -261,7 +267,8 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   // manualKg (or need manualKg in its deps). Kept in sync every render below.
   const manualKgRef  = useRef(null);
 
-  // Suggested weight per hand — held CONSTANT within a set. We don't
+  // Suggested weight per hand — held constant in ordinary sets. The beta
+  // runner provides a new reference for each domain. We don't
   // fatigue-discount the displayed weight; the user holds the same load
   // each rep and we track how actual_time_s decays. See also AutoRepSessionView.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -401,6 +408,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       {startError && <p role="alert" style={{ color: C.red }}>{startError}</p>}
       <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
+      <MixedHoldInfo config={config} currentRep={currentRep} />
       <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
 
 
@@ -425,7 +433,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       {/* Timer (shown during active rep) */}
       {repPhase === "active" && (
         <Card>
-          <BigTimer seconds={elapsed} targetSeconds={config.targetTime} running={true} />
+          <BigTimer seconds={elapsed} targetSeconds={config.targetTime} running={true} referenceOnly={!!config.mixedDomainPlan} />
           {tindeq.connected ? (
             <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />
           ) : (
@@ -548,7 +556,7 @@ function playBeep(freq = 880, duration = 0.12, volume = 0.4) {
   } catch (e) { /* audio not available */ }
 }
 
-export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs" }) {
+export function RestView({ lastRep, nextWeight, nextDomain = null, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs" }) {
   // Wall-clock countdown, NOT tick-counted. The old version decremented
   // once per setInterval fire; background tabs / locked phones throttle
   // intervals to ≥1/min, so a 20s rest silently stretched to minutes —
@@ -625,7 +633,7 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
           ease off for the remaining reps. Threshold 110%: the same
           ~10% grid the ladder's steps use; ordinary Tindeq noise sits
           well inside it. */}
-      {lastRep && lastRep.prescribedWeight > 0 && lastRep.avgForce > lastRep.prescribedWeight * 1.1 && !isLastRepInSet && (
+      {!nextDomain && lastRep && lastRep.prescribedWeight > 0 && lastRep.avgForce > lastRep.prescribedWeight * 1.1 && !isLastRepInSet && (
         <Card style={{ borderColor: C.orange }}>
           <div style={{ fontSize: 13, color: C.orange, fontWeight: 700, marginBottom: 4 }}>
             Pulling {Math.round((lastRep.avgForce / lastRep.prescribedWeight - 1) * 100)}% over prescription
@@ -653,11 +661,11 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
               <Label>Time</Label>
               <span style={{
                 fontSize: 28, fontWeight: 700,
-                color: lastRep.actualTime >= lastRep.targetTime ? C.green : C.red,
+                color: nextDomain ? C.text : lastRep.actualTime >= lastRep.targetTime ? C.green : C.red,
               }}>
                 {Math.round(lastRep.actualTime)}s
               </span>
-              <div style={{ fontSize: 11, color: C.muted }}>target {lastRep.targetTime}s</div>
+              <div style={{ fontSize: 11, color: C.muted }}>{nextDomain ? 'fresh reference' : 'target'} {lastRep.targetTime}s</div>
             </div>
             {lastRep.avgForce > 0 && (
               <div>
@@ -682,6 +690,7 @@ export function RestView({ lastRep, nextWeight, restSeconds, onRestDone, repNum,
       {nextWeight != null && !isLastRepInSet && (
         <Card style={{ borderColor: C.blue }}>
           <Label>Next rep suggested weight</Label>
+          {nextDomain && <p><strong>{MIXED_DOMAIN_LABELS[nextDomain]}</strong> · Change to this load before pulling.</p>}
           <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
             {fmtW(nextWeight, unit)} {unit}
           </div>
@@ -812,8 +821,9 @@ export function SessionSummaryView({
       )}
 
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>
-        {setComplete ? (currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
+        {setComplete ? (config.mixedDomainPlan ? "Whole Curve Beta Complete" : currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
       </h2>
+      {config.mixedDomainPlan && <p>Whole curve · Beta. Opening holds can update the curve; later holds are recorded as fatigued work. Your regular rep progression is unchanged.</p>}
 
       {(() => {
         const op = sessionOverpull(reps);
@@ -878,13 +888,14 @@ export function SessionSummaryView({
             </thead>
             <tbody>
               {sReps.map(r => (
-                <tr key={r.rep_num} style={{ borderTop: `1px solid ${C.border}` }}>
-                  <td style={{ padding: "6px 0" }}>{r.rep_num}
+                <tr key={r.id || `${r.hand}-${r.rep_num}`} style={{ borderTop: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "6px 0" }}>{r.hand} {r.rep_num}
+                    {isMixedDomainRep(r) && <div>{MIXED_DOMAIN_LABELS[mixedDomainMetadata(r).zone]}</div>}
                     <div style={{ fontSize: 11 }}>{evidenceLabel(r)}</div>
                     {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
                   </td>
                   <td style={{ textAlign: "right" }}>{fmtW(prescribedLoad(r), unit)} {unit}</td>
-                  <td style={{ textAlign: "right", color: r.actual_time_s >= config.targetTime ? C.green : C.red }}>
+                  <td style={{ textAlign: "right", color: isMixedDomainRep(r) ? C.text : r.actual_time_s >= r.target_duration ? C.green : C.red }}>
                     {fmtTime(r.actual_time_s)}
                   </td>
                   {hasForce && (
@@ -904,7 +915,7 @@ export function SessionSummaryView({
         </Card>
       ))}
 
-      {currentSet < MAX_OPTIONAL_SETS && onAddSet && (
+      {!config.mixedDomainPlan && currentSet < MAX_OPTIONAL_SETS && onAddSet && (
         <>
           {setSuggestion?.recommend && (
             <div style={{
@@ -947,7 +958,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
     : config.hand === "L" ? "Left Hand" : "Right Hand";
 
   // Program-recommended target weight for the active hand.
-  // Held CONSTANT within a set — the user hangs the same load each rep and
+  // Held constant in ordinary sets; the beta runner changes it per domain.
+  // In ordinary sets the user hangs the same load each rep and
   // we record how actual_time_s changes. Those rep-time curves then feed
   // the next session's prescription via the three-exp curve fit. We
   // intentionally do NOT discount the suggested weight by within-set
@@ -1014,7 +1026,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tindeq.connected, streamAttempt]); // re-arm after reconnect or an explicit retry
 
-  const targetReached = elapsed >= config.targetTime;
+  const targetReached = !config.mixedDomainPlan && elapsed >= config.targetTime;
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
@@ -1029,6 +1041,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
 
       <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
+      <MixedHoldInfo config={config} currentRep={currentRep} />
       <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
       {suggestedKg > 0 && <p>The rep ends when force drops below {fmtW(suggestedKg, unit)} {unit}. Overshooting is recorded at the force you actually pull.</p>}
       {startError && <div role="alert" style={{ color: C.red }}>
@@ -1054,7 +1067,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
               {elapsed}s
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
-              target {config.targetTime}s
+              {config.mixedDomainPlan ? 'Fresh reference' : 'target'} {config.targetTime}s
               {targetReached && <span style={{ color: C.green, marginLeft: 8 }}>Target reached — keep pulling to failure</span>}
             </div>
           </>
@@ -1090,7 +1103,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
             <div style={{ fontSize: 40, marginBottom: 8 }}>⬇</div>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>Pull to begin rep {currentRep + 1}</div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
-              Target: <strong>{config.targetTime}s</strong> · Release when done
+              {config.mixedDomainPlan ? 'Fresh reference' : 'Target'}: <strong>{config.targetTime}s</strong> · Release when done
             </div>
           </>
         )}
@@ -1133,4 +1146,14 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
       </div>
     </PageFrame>
   );
+}
+
+function MixedHoldInfo({ config, currentRep }) {
+  if (!config.mixedDomainPlan) return null;
+  return <div style={{ marginTop: 12, fontSize: 18, lineHeight: 1.5 }}>
+    <strong>Whole curve · Beta · {MIXED_DOMAIN_LABELS[config.goal]}</strong>
+    <div style={{ fontSize: 14, color: C.muted }}>{currentRep === 0
+      ? 'Opening hold. Maintain the target force until failure.'
+      : 'Fatigued hold. A shorter time is expected; there is no time to beat.'}</div>
+  </div>;
 }

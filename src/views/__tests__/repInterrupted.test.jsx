@@ -30,6 +30,28 @@ test('manual interruption does not reuse stale sensor averages', () => {
   fireEvent.click(screen.getByRole('button', {name: 'Rep interrupted'}));
   expect(onRepDone).toHaveBeenCalledWith(expect.objectContaining({avgForce: null, peakForce: null, failureValid: false}));
 });
+
+test('beta sensor flow arms each domain load and does not finish at the reference time', () => {
+  let start;
+  const onRepDone = jest.fn();
+  const tindeq = { targetKgRef: {}, startAutoDetect: a => { start = a; },
+    stopAutoDetect: jest.fn(), connected: true, force: 25, avgForce: 25, peak: 26 };
+  const beta = { ...session, config: { ...config, goal: 'power', targetTime: 30,
+    mixedDomainPlan: { id: 'whole_curve_beta' } } };
+  const view = render(<AutoRepSessionView session={beta} onRepDone={onRepDone} onAbort={() => {}} tindeq={tindeq} />);
+  expect(tindeq.targetKgRef.current).toBe(20);
+  act(() => start());
+  act(() => jest.advanceTimersByTime(31000));
+  expect(onRepDone).not.toHaveBeenCalled();
+  expect(screen.queryByText(/Target reached/)).not.toBeInTheDocument();
+  view.unmount();
+  expect(tindeq.targetKgRef.current).toBeNull();
+  render(<AutoRepSessionView session={{ ...beta, currentRep: 1, refWeights: { L: 15 },
+    config: { ...beta.config, goal: 'power_strength', targetTime: 70 } }}
+    onRepDone={onRepDone} onAbort={() => {}} tindeq={tindeq} />);
+  expect(tindeq.targetKgRef.current).toBe(15);
+  expect(screen.getByText(/Fatigued hold/)).toBeInTheDocument();
+});
 test('rest explains force, time, and validity', () => {
   render(<RestView lastRep={{actualTime: 30, avgForce: 17.5, failureValid: false, targetTime: 40}} restSeconds={20} repNum={1} repsPerSet={4} unit="kg" onRestDone={() => {}} />);
   expect(screen.getByText(/17.5 kg time-weighted average over 30.0s/)).toBeInTheDocument();

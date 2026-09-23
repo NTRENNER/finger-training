@@ -300,7 +300,7 @@ export default function App() {
   // ── In-workout state machine ──────────────────────────────
   // (see src/hooks/useSessionRunner.js)
   const {
-    config, setConfig,
+    config, setConfig, activeRepConfig,
     phase, setPhase,
     currentSet, currentRep,
     sessionId, refWeights,
@@ -641,7 +641,7 @@ export default function App() {
             return (
               <AutoRepSessionView
                 key={`auto-${currentSet}-${activeHand}-${currentRep}`}
-                session={{ config, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
+                session={{ config: activeRepConfig, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
                 onRepDone={handleRepDone}
                 onAbort={handleAbort}
                 tindeq={tindeq}
@@ -653,7 +653,7 @@ export default function App() {
           return (
             <ActiveSessionView
               key={`${currentSet}-${activeHand}-${currentRep}-${phase}`}
-              session={{ config, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
+              session={{ config: activeRepConfig, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
               onRepDone={handleRepDone}
               onAbort={handleAbort}
               tindeq={tindeq}
@@ -673,6 +673,7 @@ export default function App() {
             <RestView
               lastRep={lastRepResult}
               nextWeight={nextWeight}
+              nextDomain={config.mixedDomainPlan ? activeRepConfig.goal : null}
               restSeconds={config.restTime}
               onRestDone={handleRestDone}
               repNum={currentRep}

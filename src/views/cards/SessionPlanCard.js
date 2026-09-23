@@ -70,6 +70,8 @@ import {
   LADDER_COLLAPSE_STEP_FRAC,
 } from "../../model/densityLadder.js";
 import { today } from "../../util.js";
+import { makeMixedDomainPlan, nextMixedDomainZone, MIXED_DOMAIN_REST_S } from '../../model/mixedDomain.js';
+import { MixedDomainPlan } from './MixedDomainPlan.jsx';
 
 // Display labels for the climbing-focus pill in the header. Kept here
 // (vs imported from coaching.js) because coaching.js exports the
@@ -167,6 +169,8 @@ export function SessionPlanCard({
   // Stored as the zone key (e.g. "power") or null = "follow recommendation"
   const [overrideZone, setOverrideZone] = useState(null);
   const [peakTestSelected, setPeakTestSelected] = useState(false);
+  const [mixedRequested, setMixedRequested] = useState(false);
+  const [mixedOpening, setMixedOpening] = useState(null);
   // Why-line Details expander (July 2026) — receipts and secondary
   // factors hide behind a tap so the headline stays one sentence.
   const [showDetails, setShowDetails] = useState(false);
@@ -179,6 +183,8 @@ export function SessionPlanCard({
   useEffect(() => {
     setOverrideZone(null);
     setPeakTestSelected(false);
+    setMixedRequested(false);
+    setMixedOpening(null);
   }, [grip]);
 
   // ── Density ladder for the active (grip, zone) ───────────────
@@ -247,6 +253,16 @@ export function SessionPlanCard({
       };
     }).filter(Boolean);
   }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, loadMultiplier, rec]);
+
+  const mixedPlan = useMemo(() => {
+    if (rec?.boundaryProbe) return null;
+    const opening = mixedOpening || nextMixedDomainZone(history, grip, expectedHands, recommendedZone);
+    // The runner applies the reported fatigue adjustment once at session start.
+    const freshRows = rows?.map(r => ({ ...r, L: r.L == null ? null : r.L / loadMultiplier,
+      R: r.R == null ? null : r.R / loadMultiplier }));
+    return makeMixedDomainPlan(freshRows, opening, expectedHands);
+  }, [rows, mixedOpening, history, grip, expectedHands, recommendedZone, loadMultiplier, rec]);
+  const mixedEnabled = mixedRequested && !!mixedPlan;
 
   // ── Active row — drives the bottom session-details panel ──────────────
   const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
@@ -322,8 +338,16 @@ export function SessionPlanCard({
   // weight, more reps" contract actually holds — re-prescribing from
   // the curve would drift the load between ladder rungs.
   useEffect(() => {
+    if (mixedEnabled) {
+      const first = mixedPlan.steps[0];
+      onApplyPlan?.({ goal: first.zone, targetTime: first.targetTime, repsPerSet: 5,
+        restTime: MIXED_DOMAIN_REST_S, ladderLoadByHand: null,
+        plannedLoadByHand: first.loadByHand, mixedDomainPlan: mixedPlan });
+      return;
+    }
     if (!activeZone || !activeT) return;
     onApplyPlan?.({
+      mixedDomainPlan: null,
       goal: activeZone,
       targetTime: activeT,
       repsPerSet: reps,
@@ -339,7 +363,7 @@ export function SessionPlanCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeZone, activeT, reps, rest, ladder, ladderPlanLoadByHand,
-    rec, isOverridden, peakTestSelected,
+    rec, isOverridden, peakTestSelected, mixedEnabled, mixedPlan,
   ]);
 
   // ── Empty / loading states ───────────────────────────────────
@@ -479,6 +503,16 @@ export function SessionPlanCard({
     <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
       {plannerHeader}
 
+      <label style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 52,
+        padding: '8px 0', marginBottom: 12, fontSize: 16, cursor: mixedPlan ? 'pointer' : 'default' }}>
+        <input type="checkbox" checked={mixedEnabled} disabled={!mixedPlan}
+          onChange={e => setMixedRequested(e.target.checked)} style={{ width: 24, height: 24 }} />
+        <strong>Whole curve · Beta</strong>
+      </label>
+      {!mixedPlan && <p style={{ color: C.muted }}>The beta needs a load estimate in all five domains for each selected hand. Complete the initial sessions first.</p>}
+      {mixedEnabled && <MixedDomainPlan plan={mixedPlan} hands={expectedHands} unit={unit}
+        multiplier={loadMultiplier} onOpeningChange={setMixedOpening} />}
+
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
       {/* Standalone title or optional training-focus control. */}
       {(!plannerHeader || (climbingFocus && climbingFocus !== "balanced")) && <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
@@ -518,7 +552,7 @@ export function SessionPlanCard({
           alternative tile is selected), retain the continuous engine's
           recommendation. The cookedness multiplier remains identical
           between display and runner. */}
-      {(() => {
+      {!mixedEnabled && (() => {
         const recCfg = GOAL_CONFIG[rec.zone] ?? { color: C.blue, label: rec.zone, emoji: "🎯" };
         // Per-grip cookedness multiplier — same factor the tiles below
         // and the runner use. Multiplied through rec.loadKg and the
@@ -630,10 +664,10 @@ export function SessionPlanCard({
         );
       })()}
 
-      {isOverridden && <div style={{ fontSize: 12, fontWeight: 700, color: activeColor, marginBottom: 8 }}>{activeEmoji} {activeLabel} · Selected session</div>}
+      {!mixedEnabled && isOverridden && <div style={{ fontSize: 12, fontWeight: 700, color: activeColor, marginBottom: 8 }}>{activeEmoji} {activeLabel} · Selected session</div>}
 
       {/* Hangs / Rest / Time strip */}
-      <div style={{
+      {!mixedEnabled && <div style={{
         display: "flex", gap: 6, marginBottom: 14,
         padding: "12px 0", alignItems: "center",
         borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
@@ -651,7 +685,7 @@ export function SessionPlanCard({
             {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
           </React.Fragment>
         ))}
-      </div>
+      </div>}
 
       <details style={{fontSize:12,color:C.muted,marginBottom:12}}>
         <summary style={{cursor:"pointer"}}>Recent session performance</summary>
@@ -771,7 +805,7 @@ export function SessionPlanCard({
 
       {/* Override indicator — shows up when the user has selected a tile
           other than the recommended one. Click to revert. */}
-      {isOverridden && (
+      {!mixedEnabled && isOverridden && (
         <div style={{ marginBottom: 10, fontSize: 11, color: C.muted, textAlign: "center" }}>
           overriding the recommendation ({rec.zone.replace(/_/g, " ")} →{" "}
           {peakTestSelected
@@ -800,7 +834,7 @@ export function SessionPlanCard({
           down so the user sees the trade-off across the full curve.
           Peak test spans both columns because it is a protocol choice,
           not another modeled force-duration point. */}
-      <div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
+      {!mixedEnabled && <><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
       <div className="session-choice-grid">
         {rows.map(r => {
           // Tile is "active" only when it's the user's override pick.
@@ -932,6 +966,7 @@ export function SessionPlanCard({
           </div>
         </button>
       </div>
+      </>}
       {plannerFooter}
     </Card>
   );

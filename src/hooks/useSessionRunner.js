@@ -64,6 +64,7 @@ import {
 import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS } from "../model/setRecommendation.js";
 import { pushDailyState } from "../lib/sync.js";
+import { MIXED_DOMAIN_ID, MIXED_DOMAIN_REST_S, mixedDomainSteps, validMixedDomainPlan } from '../model/mixedDomain.js';
 
 // Manual-timing offset (June 2026): non-Tindeq users tap Done a beat
 // after they actually fail. When they opt in at session start, they
@@ -111,6 +112,7 @@ export function useSessionRunner({
     // such as sparse-grip upper/lower boundary probes. Null during
     // ordinary curve-driven sessions.
     plannedLoadByHand: null,
+    mixedDomainPlan: null,
   }));
 
   // No derived fields anymore — config is rawConfig.
@@ -144,7 +146,7 @@ export function useSessionRunner({
   // later reps stamped with the next day and split across two
   // History entries (Nathan's 2026-07-12 Crusher session, July 2026).
   const [sessionDate, setSessionDate] = useState("");
-  const [refWeights,       setRefWeights]        = useState({});
+  const [baseRefWeights,   setRefWeights]        = useState({});
   const [lastRepResult, setLastRepResult] = useState(null);
   const [leveledUp,   setLeveledUp]   = useState(false);
   const [newLevel,    setNewLevel]    = useState(1);
@@ -153,6 +155,17 @@ export function useSessionRunner({
   // Chosen at session start via the offset_prompt phase; false until
   // chosen, and irrelevant when a Tindeq is driving the timing.
   const [manualOffset, setManualOffset] = useState(false);
+  const mixed = config.mixedDomainPlan?.id === MIXED_DOMAIN_ID;
+  const currentStep = mixedDomainSteps(config.mixedDomainPlan, activeHand)[currentRep];
+  const activeRepConfig = mixed && currentStep
+    ? { ...config, goal: currentStep.zone, targetTime: currentStep.targetTime, mixedDomainRep: currentRep + 1 }
+    : config;
+  const refWeights = useMemo(() => {
+    if (!mixed) return baseRefWeights;
+    const multiplier = sessionAdjustmentRef.current?.applied_multiplier ?? 1;
+    return Object.fromEntries(['L', 'R'].map(h => [h,
+      (mixedDomainSteps(config.mixedDomainPlan, h)[currentRep]?.loadByHand[h] ?? 0) * multiplier]));
+  }, [mixed, config.mixedDomainPlan, currentRep, baseRefWeights]);
 
   // (sMax memos retired with the runtime fatigue accumulator — they
   // were the only consumer. Per-grip baseline data is still available
@@ -173,8 +186,16 @@ export function useSessionRunner({
   // Anything without a .grip (e.g. a click event from onClick={onStart})
   // is ignored, so the plain Start button keeps working unchanged.
   const startSession = useCallback((override) => {
-    const cfg = (override && override.grip) ? override : config;
-    if (override && override.grip) setConfig(override);
+    let cfg = (override && override.grip) ? override : config;
+    if (cfg.mixedDomainPlan) {
+      const hands = cfg.hand === 'Both' ? ['L', 'R'] : [cfg.hand];
+      if (!validMixedDomainPlan(cfg.mixedDomainPlan, hands)) return;
+      const plan = JSON.parse(JSON.stringify(cfg.mixedDomainPlan));
+      cfg = { ...cfg, mixedDomainPlan: plan, goal: plan.steps[0].zone,
+        targetTime: plan.steps[0].targetTime, repsPerSet: 5, restTime: MIXED_DOMAIN_REST_S,
+        ladderLoadByHand: null, plannedLoadByHand: plan.steps[0].loadByHand };
+    }
+    if ((override && override.grip) || cfg.mixedDomainPlan) setConfig(cfg);
     const sid = uid();
     const rw = {};
     // Cookedness scale-down at the published fixed rate. 1.0 when
@@ -321,7 +342,15 @@ export function useSessionRunner({
       && activityStart >= previousEnd ? (activityStart - previousEnd) / 1000 : null;
     const provenance = loadProvenance || (avgForce > 0 ? "measured_force"
       : manualLoadKg > 0 ? "nominal_setting" : "prescription_only");
-    const derivedFailed = failed || isShortfall(roundedActual, config.targetTime);
+    const repTargetTime = currentStep?.targetTime ?? config.targetTime;
+    const derivedFailed = mixed && currentRep > 0 ? false : failed || isShortfall(roundedActual, repTargetTime);
+    const recordedForce = mixed ? { ...forceRecording,
+      session_protocol: { id: MIXED_DOMAIN_ID, version: 1, zone: currentStep.zone,
+        opening_zone: config.mixedDomainPlan.steps[0].zone, position: currentRep + 1,
+        role: currentRep === 0 ? 'opening_hold' : 'fatigued_hold',
+        duration_reference: 'fresh_load_reference' },
+      ...(currentRep > 0 ? { capacity_eligible: false } : {}),
+    } : forceRecording;
     const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {
       // Real UUID, not uid(): pushRep re-stamps non-UUID ids into the
@@ -332,7 +361,7 @@ export function useSessionRunner({
       date:            sessionDate || today(),
       grip:            config.grip,
       hand:            effectiveHand,
-      target_duration: config.targetTime,
+      target_duration: repTargetTime,
       // Prescribed (what the program suggested). Schema split in late
       // May 2026 — was `weight_kg`, which doubled as "what actually
       // happened" on reads. weight_kg is still set so legacy readers
@@ -364,7 +393,7 @@ export function useSessionRunner({
       load_provenance: provenance,
       failure_valid: failureValid,
       end_reason: endReason,
-      force_recording: forceRecording,
+      force_recording: recordedForce,
       actual_time_s:   roundedActual,
       avg_force_kg:    (isFinite(avgForce) && avgForce > 0 && avgForce < 500)
                          ? Math.round(avgForce * 10) / 10
@@ -411,8 +440,8 @@ export function useSessionRunner({
     // 83 lb pulled, reps 2+ died at 15-30s).
     setLastRepResult({
       actualTime: adjTime, avgForce, peakForce, failureValid, endReason,
-      forceRecording, restBefore, loadProvenance: provenance,
-      targetTime: config.targetTime,
+      forceRecording: recordedForce, restBefore, loadProvenance: provenance,
+      targetTime: repTargetTime,
       prescribedWeight: roundedPrescribed,
     });
     setSessionReps(reps => [...reps, repRecord]);
@@ -447,21 +476,21 @@ export function useSessionRunner({
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentSet, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected]);
+  }, [config, currentSet, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected, mixed, currentStep]);
 
   const handleRestDone = useCallback(() => {
     repDoneLockRef.current = false;   // next rep armed — accept its completion
     // When Tindeq is connected, go to rep_ready so AutoRepSessionView can arm
     // auto-detection and wait for the next pull. When not connected, auto-start
     // the countdown so the user doesn't need to tap Start Rep.
-    setPhase(tindeqConnected ? "rep_ready" : "rep_active");
-  }, [tindeqConnected]);
+    setPhase(tindeqConnected || mixed ? "rep_ready" : "rep_active");
+  }, [tindeqConnected, mixed]);
 
   // One set is the complete recommendation. Extra sets are voluntary,
   // launched from the completed-set summary, and deliberately have no
   // mandatory between-set timer.
   const handleNextSet = useCallback(() => {
-    if (phase !== "done" || currentSet >= MAX_OPTIONAL_SETS) return;
+    if (mixed || phase !== "done" || currentSet >= MAX_OPTIONAL_SETS) return;
     setCurrentSet(s => s + 1);
     setCurrentRep(0);
     setActiveHand(config.hand === "Both" ? "L" : config.hand);
@@ -469,14 +498,14 @@ export function useSessionRunner({
     setLeveledUp(false);
     repDoneLockRef.current = false;
     setPhase(tindeqConnected ? "rep_ready" : "rep_active");
-  }, [phase, currentSet, config.hand, tindeqConnected]);
+  }, [phase, currentSet, config.hand, tindeqConnected, mixed]);
 
   const handleAbort = useCallback(() => {
     if (sessionReps.length > 0) finishSession(sessionReps);
     else setPhase("idle");
   }, [sessionReps, finishSession]);
 
-  // Compute next rep suggestion for rest screen — same constant set weight.
+  // Normal sets retain their load; beta refWeights already points to the next hold.
   const nextWeight = useMemo(() => {
     if (phase !== "resting") return null;
     const hand = config.hand === "Both" ? activeHand : config.hand;
@@ -485,7 +514,7 @@ export function useSessionRunner({
   }, [phase, config.hand, refWeights, activeHand]);
 
   return {
-    config, setConfig,
+    config, setConfig, activeRepConfig,
     phase, setPhase,
     currentSet,
     currentRep,

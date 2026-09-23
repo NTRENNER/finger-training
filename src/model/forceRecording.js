@@ -1,4 +1,6 @@
 // Descriptive force variation; valid measured efforts remain curve evidence.
+import { isMixedDomainRep, mixedDomainMetadata } from './mixedDomain.js';
+
 export const FORCE_BAND_FRACTION = 0.15;
 
 export function recordForce(samples, endTs = samples?.at(-1)?.ts, targetKg = null) {
@@ -75,6 +77,7 @@ export function loadProvenance(rep) {
 
 export function isCapacityEvidenceRep(rep) {
   if (!isValidFailureRep(rep)) return false;
+  if (isMixedDomainRep(rep) && mixedDomainMetadata(rep).role !== 'opening_hold') return false;
   if (rep.force_recording?.capacity_eligible === false) return false;
   return !["nominal_setting", "prescription_only"].includes(loadProvenance(rep));
 }
@@ -82,10 +85,11 @@ export function isCapacityEvidenceRep(rep) {
 export function evidenceLabel(rep) {
   if (rep?.force_recording?.duration_basis === "elapsed_activity_estimate") return "Interrupted — elapsed activity time is estimated";
   if (!isValidFailureRep(rep)) return "Interrupted — activity only";
+  if (isMixedDomainRep(rep) && mixedDomainMetadata(rep).role === 'fatigued_hold') return "Beta · fatigued hold — recorded separately from fresh capacity";
   if (rep.force_recording?.capacity_eligible === false) return "Incomplete failure evidence — activity only";
   if (!isCapacityEvidenceRep(rep)) return "Load is an estimate — activity only";
   if (!rep.load_provenance) return "Legacy evidence — measurement uncertainty";
-  return "Valid failure evidence";
+  return isMixedDomainRep(rep) ? "Beta · opening hold — valid failure evidence" : "Valid failure evidence";
 }
 
 

@@ -2,6 +2,20 @@ const mockOrder = jest.fn();
 jest.mock('../supabase.js', () => ({supabase: {from: () => ({select: () => ({order: (...args) => mockOrder(...args)})})}}));
 import { repPayload, fetchReps } from '../sync.js';
 import { freshFitReps } from '../../model/load.js';
+import { recoveryEvidence } from '../../model/recoveryEvidence.js';
+
+test('beta protocol survives cloud serialization without making tired holds fresh capacity', async () => {
+  const rows = [1, 2].map(n => ({ id: `beta-${n}`, date: '2026-09-23', grip: 'Micro', hand: 'L',
+    session_id: 'beta', rep_num: n, set_num: 1, avg_force_kg: 20, peak_force_kg: 22,
+    actual_time_s: 30, failure_valid: true, load_provenance: 'measured_force',
+    force_recording: { version: 2, capacity_eligible: n === 1,
+      session_protocol: { id: 'whole_curve_beta', version: 1, role: n === 1 ? 'opening_hold' : 'fatigued_hold' } } }));
+  mockOrder.mockResolvedValue({ data: rows.map(r => repPayload(r, 'user')), error: null });
+  const restored = await fetchReps();
+  expect(restored.map(r => r.force_recording)).toEqual(rows.map(r => r.force_recording));
+  expect(freshFitReps(restored)).toHaveLength(1);
+  expect(recoveryEvidence(restored).eligible).toBe(false);
+});
 
 test('cloud round-trip retains interrupted activity and excludes it from fitting', async () => {
   const rep = {id: 'rep', date: '2026-09-10', grip: 'Micro', hand: 'L', rep_num: 1, set_num: 1,

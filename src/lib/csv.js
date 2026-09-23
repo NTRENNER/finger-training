@@ -31,9 +31,13 @@ export function toCSV(reps) {
   const cols = ["id","date","grip","hand","target_duration",
                 "prescribed_load_kg","manual_load_kg","weight_kg",
                 "actual_time_s","avg_force_kg","peak_force_kg",
-                "set_num","rep_num","rest_s","session_id","failed"];
+                "set_num","rep_num","rest_s","session_id","failed",
+                "load_provenance","failure_valid","end_reason","force_recording"];
   const esc  = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
-  return [cols.join(","), ...reps.map(r => cols.map(c => esc(r[c])).join(","))].join("\n");
+  // Keep beta protocol and evidence flags with the exported activity.
+  return [cols.join(","), ...reps.map(r => cols.map(c => esc(
+    c === 'force_recording' && r[c] != null ? JSON.stringify(r[c]) : r[c]
+  )).join(","))].join("\n");
 }
 
 export function downloadCSV(reps) {
