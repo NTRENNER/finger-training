@@ -74,23 +74,29 @@ export function loadedWeight(r) {
       ?? 0;
 }
 
+// Fresh-state modeling is deliberately isolated from optional volume.
+// Sets 2+ are useful evidence about how much work an athlete tolerates,
+// but their expected fatigue must never lower the next workout's set-1
+// prescription. Legacy rows without set_num remain first-set evidence.
+export function isFirstSetRep(r) {
+  return r?.set_num == null || Number(r.set_num) === 1;
+}
+
 // Reps suitable for CURVE FITTING — fresh + de-duplicated (May 2026).
 //
-//  - rep_num === 1 (or null for legacy/manual rows): only the fresh
-//    first rep of each set. Later within-set reps are fatigued and fail
+//  - rep_num === 1 and set_num === 1 (or null for legacy/manual rows):
+//    only the fresh first rep of the session. Later reps and optional
+//    sets are fatigued and fail
 //    at shorter durations; they drag the fitted curve — and especially a
 //    small BASELINE window — downward, inflating and de-symmetrizing the
 //    improvement %. Matches the coverage rep-1-only fix and the limiter.
 //  - content de-dup: some early sessions were double-logged (identical
 //    rows). Collapse exact-duplicate content (NOT by id — duplicates are
 //    distinct rows with the same content). The key includes set_num and
-//    manual_load_kg (July 2026): without them, two REAL rep-1s from
-//    different sets/sessions on the same day with equal target/actual
-//    and null avg_force_kg — typical manual-timer entries — collapsed
-//    to one point even when their manual loads differed, thinning
-//    exactly the small baseline windows this function protects. The
-//    double-logging bug produced fully identical rows, so the stricter
-//    key still catches those.
+//    manual_load_kg (July 2026), so same-day manual sessions with
+//    different actual loads remain distinct. Optional sets are filtered
+//    before this key is built; set_num remains for legacy/null identity
+//    safety. Fully identical double-logged rows still collapse.
 //
 // Lives in this leaf module so EVERY fit path can share it — the prior
 // (threeExp.buildThreeExpPriors), the baselines/estimates (baselines.js),
@@ -110,6 +116,7 @@ export function freshFitReps(history, { preserveAllBases = false } = {}) {
   for (const r of comparableCapacityHistory(history, { dropUnconvertible: !preserveAllBases })) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;
+    if (!isFirstSetRep(r)) continue;
     // Seed-artifact guard (July 2026, see isSeedArtifactRep below): an
     // avg==peak seeded/backfilled twin is not a real measurement, and
     // this function is the shared fit basis (priors, baselines, refit,
@@ -136,7 +143,10 @@ export function freshFitReps(history, { preserveAllBases = false } = {}) {
 export function isOpenerRep(r) {
   if (!isCapacityEvidenceRep(r)) return false;
   if (!(r.rep_num == null || Number(r.rep_num) === 1)) return false;
-  if (!(r.set_num == null || Number(r.set_num) === 1)) return false;
+  // Defers to isFirstSetRep rather than repeating the set test: two
+  // predicates that both mean "first set" are two places to change when
+  // the rule moves, and only one of them gets remembered.
+  if (!isFirstSetRep(r)) return false;
   return true;
 }
 

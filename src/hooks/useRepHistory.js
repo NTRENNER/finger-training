@@ -49,6 +49,7 @@ import { PHYS_MODEL_DEFAULT } from "../model/fatigue.js";
 import { computePersonalRecoveryTaus } from "../model/recoveryFit.js";
 import { buildFreshLoadMap, fitDoseK } from "../model/prescription.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
+import { isFirstSetRep } from "../model/load.js";
 
 // Rep-level identity: prefer Supabase's uuid; fall back to a
 // composite key for reps that pre-date the cloud roundtrip
@@ -125,8 +126,8 @@ export function useRepHistory({
   // (target_duration, actual_time_s, avg_force_kg, peak_force_kg,
   // prescribed_load_kg, manual_load_kg, weight_kg [legacy], failed,
   // rep_num, rest_s) plus filter/identity fields (id, date, hand,
-  // grip). set_num is not consumed by the fit code paths so it's
-  // omitted to keep the string smaller.
+  // grip). set_num is included because fresh-state fits deliberately
+  // consume set 1 only; moving a rep between sets must invalidate them.
   //
   // prescribed_load_kg + manual_load_kg added late May 2026 with the
   // weight_kg schema split — editing either now invalidates the fit
@@ -150,6 +151,7 @@ export function useRepHistory({
       r.failure_valid, r.load_provenance,
       JSON.stringify(r.force_recording), JSON.stringify(r.rep_timing), JSON.stringify(r.session_adjustment),
       r.rep_num,
+      r.set_num,
       r.rest_s,
       // Per-session cookedness override — when this changes (the
       // user edited the session's override slider) the freshMap
@@ -164,8 +166,13 @@ export function useRepHistory({
   // shrinkage toward the population prior. Engine-only personalization:
   // feeds buildFreshLoadMap, which feeds the F-D curve fit, which
   // feeds prescription. No user-facing surface.
+  const firstSetHistory = useMemo(
+    () => history.filter(isFirstSetRep),
+    [freshMapFp] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const personalRecoveryTaus = useMemo(
-    () => computePersonalRecoveryTaus(history),
+    () => computePersonalRecoveryTaus(firstSetHistory),
     [freshMapFp] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
@@ -180,8 +187,8 @@ export function useRepHistory({
   }, [dailyState]);
 
   const freshMap = useMemo(() => {
-    const k = fitDoseK(history) ?? PHYS_MODEL_DEFAULT.doseK;
-    return buildFreshLoadMap(history, {
+    const k = fitDoseK(firstSetHistory) ?? PHYS_MODEL_DEFAULT.doseK;
+    return buildFreshLoadMap(firstSetHistory, {
       doseK: k,
       personalTausByGrip: personalRecoveryTaus,
       // Resolve recorded session adjustments; day ratings label uncertain
@@ -191,7 +198,7 @@ export function useRepHistory({
   }, [freshMapFp, personalRecoveryTaus, dailyStateFp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const threeExpPriors = useMemo(
-    () => buildThreeExpPriors(history),
+    () => buildThreeExpPriors(firstSetHistory),
     [freshMapFp] // eslint-disable-line react-hooks/exhaustive-deps
   );
 

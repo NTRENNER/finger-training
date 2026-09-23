@@ -62,7 +62,7 @@ import {
   effectiveLoad, freshLoadFor, buildFreshLoadMap,
   prescription, bestAvailablePeakMeasurement,
 } from "./prescription.js";
-import { freshFitReps, isOpenerRep, isSeedArtifactRep } from "./load.js";
+import { freshFitReps, isFirstSetRep, isOpenerRep, isSeedArtifactRep } from "./load.js";
 import { TAIL_B_PRIOR } from "./enduranceTail.js";
 
 // Population mean of COACH_RECOVERY_TAU_DAYS — the normalizer for the
@@ -629,7 +629,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // argmax can favor the weaker hand (more pooled-AUC gain per session).
   const handFits = {};   // hand -> { amps, ratios, strength }
   for (const hand of ["L", "R"]) {
-    const handPts = (history || []).filter(r => isCapacityEvidenceRep(r) &&
+    const handPts = (history || []).filter(r => isFirstSetRep(r) && isCapacityEvidenceRep(r) &&
       r.hand === hand && r.grip === grip
       && r.actual_time_s > 0 && effectiveLoad(r) > 0
     );

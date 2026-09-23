@@ -54,12 +54,13 @@ describe("freshFitReps de-dup key (set_num + manual_load_kg)", () => {
     expect(out.length).toBe(2);
   });
 
-  test("rep-1s from different sets both survive", () => {
+  test("rep-1s from optional sets are excluded from fresh-state fits", () => {
     const out = freshFitReps([
       { ...base, set_num: 1, manual_load_kg: 20 },
       { ...base, set_num: 2, manual_load_kg: 20 },
     ]);
-    expect(out.length).toBe(2);
+    expect(out.length).toBe(1);
+    expect(out[0].set_num).toBe(1);
   });
 
   test("fully identical rows (the double-logging bug) still collapse", () => {

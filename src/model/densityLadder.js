@@ -51,7 +51,7 @@ import { isCapacityEvidenceRep } from "./forceRecording.js";
 // other load surface.
 
 import { zoneOf } from "./zones.js";
-import { prescribedLoad, effectiveLoad } from "./load.js";
+import { prescribedLoad, effectiveLoad, isFirstSetRep } from "./load.js";
 import { recordedAdjustment } from "./cookedScaling.js";
 // Engine bounds + shortfall test (July 2026 — see the RE-PIN GUARD
 // comment below). prescription.js does not import this module, so the
@@ -151,6 +151,10 @@ function latestSessionInZone(history, grip, zoneKey) {
   const groups = new Map();
   for (const r of history || []) {
     if (!r || r.grip !== grip) continue;
+    // The density ladder prescribes the next fresh set. Optional sets are
+    // volume-tolerance evidence only: they cannot invalidate, down-step, or
+    // otherwise change the next set-1 prescription.
+    if (!isFirstSetRep(r)) continue;
     if (!(r.actual_time_s > 0)) continue;
     if (!r.target_duration || zoneOf(r.target_duration) !== zoneKey) continue;
     const key = r.session_id || r.date || "unknown";
@@ -197,20 +201,17 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   const sess = latestSessionInZone(history, grip, zoneKey);
   if (!sess) return null;
 
-  // Per-hand rep sequences from the session's LAST set, sorted by rep
-  // number. set_num MUST be part of the grouping (July 2026 — same bug
+  // Per-hand rep sequences from the session's FIRST set, sorted by rep
+  // number. latestSessionInZone already excludes optional sets. set_num
+  // remains part of the grouping (July 2026 — same bug
   // class the recovery fit fixed): rep_num restarts per set, so pooling
   // all of a hand's reps made a 2×4 session read as prevReps = 8
   // (> LADDER_MAX_REPS) with an interleaved [r1,r1,r2,r2,…] order whose
   // “last rep” was an arbitrary tie-break — the gate could read the
-  // wrong rep and the ladder could emit a spurious +5% step_load. We
-  // ladder on the LAST set (max set_num; null → 1 for legacy rows):
-  // it sits under the most cumulative fatigue, so its final rep is the
-  // honest dose-absorbed readout the protocol gates on, and its rep
-  // count is the rung the user most recently performed. (Max per-set
-  // count was considered and rejected: gating on the last set's final
-  // rep while counting a different set's reps would let the gate and
-  // the rung disagree about which set they describe.)
+  // wrong rep and the ladder could emit a spurious +5% step_load. The
+  // gate, rung, pin, completeness check, and collapse check must all read
+  // the same fresh set. Sets 2-5 are interpreted only by the optional-set
+  // tolerance model; expected fatigue there cannot penalize set 1 next time.
   const byHandSet = {};
   for (const r of sess.reps) {
     const h = r.hand === "R" ? "R" : "L";
@@ -262,7 +263,15 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
     firstRepSecByHand[h] = Number(first.actual_time_s) || 0;
     lastRepSecByHand[h] = Number(last.actual_time_s) || 0;
   }
-  const presentCounts = Object.values(repCountByHand).filter(n => n > 0);
+  // Rung base = set 1's rep count. Adding an optional set must not cost a
+  // rep next session.
+  const firstSetCountByHand = {};
+  for (const h of requiredHands) {
+    const sets = byHandSet[h];
+    if (!sets || sets.size === 0) continue;
+    firstSetCountByHand[h] = (sets.get(Math.min(...sets.keys())) || []).length;
+  }
+  const presentCounts = Object.values(firstSetCountByHand).filter(n => n > 0);
   const prevReps = presentCounts.length > 0 ? Math.max(...presentCounts) : 0;
   const unevenRepCounts = new Set(presentCounts).size > 1;
   const incomplete = missingHands.length > 0 || unevenRepCounts;
@@ -305,21 +314,22 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   // The absorption readout is the FIRST set's rep 1 — the only truly
   // fresh rep. A later set's rep 1 runs under cumulative fatigue and
   // may fall short of T even when the load is right, so it must not
-  // trip the guard (the pin itself still reads the LAST set's rep 1,
-  // unchanged).
+  // trip the guard or any other next-session progression decision.
   const droppedByHand = {};
   const previousLoadByHand = {};
   for (const h of requiredHands) {
     const reps = byHand[h] || [];
     if (reps.length === 0) continue;
-    const rep1 = reps[0];
     const firstSetNum = Math.min(...byHandSet[h].keys());
     const freshRep1 = [...byHandSet[h].get(firstSetNum)]
       .sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1))[0];
-    const recorded = effectiveLoad(rep1) || prescribedLoad(rep1);
+    // Pin set 1's load. This used to read the LAST set's opener, which was
+    // the same rep whenever every set shared a prescribed load — and a
+    // different, lighter one the moment optional sets existed.
+    const recorded = effectiveLoad(freshRep1) || prescribedLoad(freshRep1);
     if (!(recorded > 0)) continue;
     // Rating edits and "keep recommended load" must not raise this pin.
-    const thenMult = recordedAdjustment(rep1).multiplier;
+    const thenMult = recordedAdjustment(freshRep1).multiplier;
     previousLoadByHand[h] = round1(thenMult > 0 ? recorded / thenMult : recorded);
     if (isShortfall(freshRep1.actual_time_s, T)) {
       droppedByHand[h] = round1(Number(freshRep1.actual_time_s) || 0);

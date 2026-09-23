@@ -64,7 +64,7 @@ import { enduranceCeilingKg } from "./enduranceTail.js";
 // (prescription.js imports threeExp.js). effectiveLoad + loadedWeight
 // are used internally below; all four are re-exported just after so
 // existing call sites that import them from prescription.js keep working.
-import { sane, prescribedLoad, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep, isMeasuredLoadRep } from "./load.js";
+import { sane, prescribedLoad, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep, isMeasuredLoadRep, isFirstSetRep } from "./load.js";
 
 // ───────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
@@ -464,6 +464,14 @@ export function capLoad(v, peakCapKg, absMax = SANE_MAX_KG) {
 // referenceDate mirrors prescription()'s retrospective semantics:
 // null = today. Returns null when no qualifying peak exists in the
 // window; prescription() then checks the historical measured fallback.
+// Peak caps bound a FRESH-capacity prescription, so a peak produced under
+// the accumulated fatigue of an optional set is not the demonstration they
+// are looking for. Note the direction of risk differs from the rest of the
+// optional-set isolation: a high optional-set peak would RAISE the cap, not
+// lower the prescription. Excluded anyway, so "what have you demonstrated
+// fresh" means one thing everywhere. The cost is that a deliberate max
+// attempt logged as an optional set no longer counts; peak protocols run as
+// set 1 (see PEAK_MAX_PROTOCOL_T) so that should stay rare.
 export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
   if (!history) return null;
   const refMs = referenceDate
@@ -473,6 +481,7 @@ export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
   let best = null;
   for (const r of history) {
     if (!isCapacityEvidenceRep(r)) continue;
+    if (!isFirstSetRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
@@ -495,6 +504,7 @@ export function historicalBestPeakKg(history, hand, grip, referenceDate = null) 
   let best = null;
   for (const r of history) {
     if (!isCapacityEvidenceRep(r)) continue;
+    if (!isFirstSetRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
     if (isSeedArtifactRep(r)) continue;
@@ -689,7 +699,7 @@ export function loadBounds(history, hand, grip, targetDuration, opts = {}) {
   for (const r of history || []) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
-    if (!(r.rep_num == null || r.rep_num === 1)) continue;
+    if (!(r.rep_num == null || r.rep_num === 1) || !isFirstSetRep(r)) continue;
     if (!isMeasuredLoadRep(r) || isSeedArtifactRep(r)) continue;
     if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
     if (r.actual_time_s > longestMeasuredHoldT) longestMeasuredHoldT = r.actual_time_s;
@@ -747,7 +757,12 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // recentBestPeakKg already guarded this; the anchor and fit did not,
   // so an untruncated caller would have anchored an old session's
   // reconstruction on reps from its own future.
-  const capacityHistory = comparableCapacityHistory(history.filter(r => !referenceDate || (r.date && r.date < referenceDate)));
+  // Optional sets describe volume tolerance, not fresh capacity. Keep every
+  // prescription input on set 1 so an intentionally fatigued set 2-5 can
+  // never pull down the next workout's opening load.
+  const capacityHistory = comparableCapacityHistory(history.filter(r =>
+    isFirstSetRep(r) && (!referenceDate || (r.date && r.date < referenceDate))
+  ));
   const sessionRep1 = new Map();
   for (const r of capacityHistory) {
     if (!isCapacityEvidenceRep(r)) continue;

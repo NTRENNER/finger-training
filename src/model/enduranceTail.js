@@ -36,7 +36,7 @@ import { isCapacityEvidenceRep } from "./forceRecording.js";
 // exponent is shrunk toward a population prior so a grip with few long
 // holds can't produce a wild slope.
 
-import { sane, effectiveLoad, isSeedArtifactRep, isMeasuredLoadRep } from "./load.js";
+import { sane, effectiveLoad, isSeedArtifactRep, isMeasuredLoadRep, isFirstSetRep } from "./load.js";
 import { STRENGTH_MAX } from "./zones.js";
 
 // Population exponent prior (median per-grip/hand b across the real
@@ -100,7 +100,11 @@ export function enduranceTailFit(history, hand, grip, referenceDate = null) {
   for (const r of history) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
-    if (!(r.rep_num == null || r.rep_num === 1)) continue;   // fresh efforts only
+    // Fresh efforts only — set 1, rep 1. An optional set's long hold is
+    // produced under accumulated fatigue; letting it into the tail fit
+    // dropped the 220 s ceiling 41% in testing, and the ceiling BOUNDS
+    // long prescriptions, so that lands straight on the athlete's load.
+    if (!(r.rep_num == null || r.rep_num === 1) || !isFirstSetRep(r)) continue;
     if (isSeedArtifactRep(r)) continue;
     if (!isMeasuredLoadRep(r)) continue;                     // a spring/manual load was never a sustained force
     if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
