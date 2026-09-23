@@ -848,8 +848,8 @@ describe("peak-force ceiling", () => {
 // ─────────────────────────────────────────────────────────────
 // Holding F kg for d seconds proves capacity >= F for any target <= d, so
 // prescription() floors its value at the best fresh sustained load over
-// holds of duration >= targetDuration. Old proof fades continuously toward
-// the model rather than disappearing at day 90. This fixes cases where
+// holds of duration >= targetDuration. Old proof smoothly loses its authority
+// as a hard floor from day 60 through day 120. This fixes cases where
 // the short-rep-dominated F-D fit sits below a real endurance hold and the
 // unfloored curve x anchor recommends LESS than the user just sustained.
 describe("demonstrated-capacity floor", () => {
@@ -872,42 +872,39 @@ describe("demonstrated-capacity floor", () => {
     expect(demonstratedCapacityKg(h, "R", "Micro", 160)).toBeNull();          // other hand
   });
 
-  test("ignores fatigued reps but fades old direct proof smoothly", () => {
+  test("ignores fatigued reps and fully expires old direct proof", () => {
     const h = [
       rep({ actual_time_s: 200, avg_force_kg: 9.0, rep_num: 3, session_id: "x" }),    // fatigued -> ignored
       rep({ actual_time_s: 200, avg_force_kg: 8.0, date: day(120), session_id: "y" }), // stale -> ignored
       rep({ actual_time_s: 200, avg_force_kg: 5.5, session_id: "z" }),                 // fresh, recent
     ];
-    const floor = demonstratedCapacityKg(h, "L", "Micro", 160);
-    expect(floor).toBeGreaterThan(5.5);
-    expect(floor).toBeLessThan(8);
+    expect(demonstratedCapacityKg(h, "L", "Micro", 160)).toBeCloseTo(5.5, 5);
   });
 
-  test("has no day-90 capacity cliff", () => {
-    const floor89 = demonstratedCapacityKg([
-      rep({ actual_time_s: 200, avg_force_kg: 8, date: day(89), session_id: "d89" }),
-    ], "L", "Micro", 160, null, 5.5);
-    const floor91 = demonstratedCapacityKg([
-      rep({ actual_time_s: 200, avg_force_kg: 8, date: day(91), session_id: "d91" }),
-    ], "L", "Micro", 160, null, 5.5);
-    expect(floor89).toBeCloseTo(8, 5);
-    expect(floor91).toBeGreaterThan(7.9);
-    expect(floor89 - floor91).toBeLessThan(0.02);
+  test("holds full authority for 60 days, then smoothly tapers to zero at day 120", () => {
+    const ref = "2026-09-23";
+    const ago = n => new Date(Date.parse(`${ref}T00:00:00Z`) - n * 86400 * 1000)
+      .toISOString().slice(0, 10);
+    const floorAt = n => demonstratedCapacityKg([
+      rep({ actual_time_s: 200, avg_force_kg: 8, date: ago(n), session_id: `d${n}` }),
+    ], "L", "Micro", 160, ref);
+    expect(floorAt(60)).toBeCloseTo(8, 5);
+    expect(floorAt(60) - floorAt(61)).toBeLessThan(0.01); // zero-slope start
+    expect(floorAt(75)).toBeCloseTo(6.75, 5);  // 84.375% authority
+    expect(floorAt(90)).toBeCloseTo(4, 5);     // 50% authority
+    expect(floorAt(102)).toBeCloseTo(1.728, 5); // 21.6% authority
+    expect(floorAt(119)).toBeLessThan(0.01);    // zero-slope finish
+    expect(floorAt(120)).toBeNull();
   });
 
-  test("nearby success slows stale-domain decay without fully restoring it", () => {
+  test("success at another duration cannot restore a stale-domain floor", () => {
     const oldProof = rep({ actual_time_s: 203, target_duration: 200,
-      avg_force_kg: 8, prescribed_load_kg: 8, date: day(270), session_id: "old" });
+      avg_force_kg: 8, prescribed_load_kg: 8, date: day(90), session_id: "old" });
     const nearby = rep({ actual_time_s: 160, target_duration: 160,
       avg_force_kg: 10, prescribed_load_kg: 10, date: day(5), session_id: "near" });
-    const distant = rep({ actual_time_s: 5, target_duration: 5,
-      avg_force_kg: 30, prescribed_load_kg: 30, date: day(5), session_id: "far" });
-    const unsupported = demonstratedCapacityKg([oldProof], "L", "Micro", 200, null, 5.5);
-    const nearSupported = demonstratedCapacityKg([oldProof, nearby], "L", "Micro", 200, null, 5.5);
-    const farSupported = demonstratedCapacityKg([oldProof, distant], "L", "Micro", 200, null, 5.5);
-    expect(nearSupported).toBeGreaterThan(unsupported);
-    expect(farSupported - unsupported).toBeLessThan(0.02);
-    expect(nearSupported).toBeLessThan(8);
+    const unsupported = demonstratedCapacityKg([oldProof], "L", "Micro", 200);
+    const nearSupported = demonstratedCapacityKg([oldProof, nearby], "L", "Micro", 200);
+    expect(nearSupported).toBeCloseTo(unsupported, 8);
   });
 
   test("prescription never falls below what was sustained for that hold length", () => {

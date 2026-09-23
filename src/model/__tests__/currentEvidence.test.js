@@ -2,7 +2,10 @@ import { demonstratedCapacityKg, prescription } from '../prescription.js';
 const rep = (date, load, extra={}) => ({id:date,session_id:date,date,grip:'Micro',hand:'L',
  rep_num:1,set_num:1,actual_time_s:160,avg_force_kg:load,peak_force_kg:load+1,
  target_duration:160,prescribed_load_kg:load,failure_valid:true,...extra});
-const best=rep('2026-07-10',30);
+// Keep this anchor inside the floor's full-confidence window. These tests
+// isolate revision policy; taper behavior has dedicated boundary coverage in
+// prescription.test.js.
+const best=rep('2026-07-12',30);
 const lower=['2026-09-01','2026-09-04','2026-09-08'].map(d=>rep(d,10));
 const floor=h=>demonstratedCapacityKg(h,'L','Micro',160,'2026-09-10');
 test('three recent lower opening efforts revise the working floor by at most 25 percent',()=>{
@@ -99,8 +102,8 @@ test.each([
  expect(floor([best,...lower.map(r=>miss(r.date,30,extra))])).toBe(30);
 });
 test('earned reductions survive the initial confirmation window aging out',()=>{
- const h=[rep('2026-07-10',30),...['2026-07-20','2026-07-24','2026-07-28'].map(d=>rep(d,10))];
- expect(demonstratedCapacityKg(h,'L','Micro',160,'2026-08-01')).toBe(22.5);
+ const h=[rep('2026-07-12',30),...['2026-07-22','2026-07-26','2026-07-30'].map(d=>rep(d,10))];
+ expect(demonstratedCapacityKg(h,'L','Micro',160,'2026-08-02')).toBe(22.5);
  expect(floor(h)).toBe(22.5);
  expect(floor([...h,rep('2026-09-09',10)])).toBe(16.875);
 });
