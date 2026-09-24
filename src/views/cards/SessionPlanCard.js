@@ -1,7 +1,4 @@
-import { DomainHistory } from './DomainHistory.jsx';
 import { startingHandForDay } from '../../model/handOrder.js';
-import { measuredProgress } from "../../model/measuredProgress.js";
-import { sessionPerformanceContext } from "../../model/sessionPerformanceContext.js";
 import { trainingPurpose } from "../../model/trainingPurpose.js";
 // ─────────────────────────────────────────────────────────────
 // SESSION PLAN CARD — single-box session picker for Setup
@@ -129,11 +126,6 @@ export function SessionPlanCard({
     [history, grip, freshMap, threeExpPriors, activities, cooked, climbingFocus]
   );
   const recommendedZone = rec?.zone;
-  const sessionContext = useMemo(() => {
-    if (!grip) return [];
-    const hands = hand === "Both" ? ["L", "R"] : [hand === "R" ? "R" : "L"];
-    return hands.map(h => ({hand:h,text:sessionPerformanceContext(measuredProgress(history,grip,h,ymdLocal()))}));
-  }, [history,grip,hand]);
 
   // ── Climb-derived cookedness suggestion ──────────────────────
   // Derived from today's (+ decayed yesterday's) logged climbs — see
@@ -692,11 +684,6 @@ export function SessionPlanCard({
         ))}
       </div>}
 
-      <details style={{fontSize:12,color:C.muted,marginBottom:12}}>
-        <summary style={{cursor:"pointer"}}>Recent session performance</summary>
-        {sessionContext.map(item=><p key={item.hand}><b>{item.hand === "L" ? "Left" : "Right"}:</b> {item.text}</p>)}
-      </details>
-
       {/* Optional self-reported load adjustment. Spacing groups the
           controls without another card inside the session plan. */}
       <div style={{
@@ -837,7 +824,7 @@ export function SessionPlanCard({
           Loads on every tile reflect the RPE slider's per-zone scale-
           down so the user sees the trade-off across the full curve.
           Peak measurements are available in warmup. */}
-      {!mixedEnabled && <><DomainHistory history={history} grip={grip} hands={expectedHands} /><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
+      {!mixedEnabled && <><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
       <div className="session-choice-grid">
         {rows.filter(r => TRAINING_ZONE_KEYS.includes(r.key)).map(r => {
           // Tile is "active" only when it's the user's override pick.
