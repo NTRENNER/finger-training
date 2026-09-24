@@ -499,7 +499,7 @@ export function SessionPlanCard({
         <strong>Whole curve · Beta</strong>
       </label>
       {!mixedPlan && <p style={{ color: C.muted }}>The beta needs a load estimate in all five domains for each selected hand. Complete the initial sessions first.</p>}
-      {mixedEnabled && <MixedDomainPlan plan={mixedPlan} hands={expectedHands} unit={unit}
+      {mixedEnabled && <MixedDomainPlan goalConfig={GOAL_CONFIG} plan={mixedPlan} hands={expectedHands} unit={unit}
         multiplier={loadMultiplier} onOpeningChange={setMixedOpening} />}
 
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
