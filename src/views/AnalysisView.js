@@ -1,4 +1,3 @@
-import { PredictionAccuracyCard } from './cards/PredictionAccuracyCard.jsx';
 import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/forceRecording.js";
 import { MeasuredProgressSection } from "./cards/MeasuredProgressCard.jsx";
 // ──────────────────────────────────────────────────────────────
@@ -762,10 +761,6 @@ export function AnalysisView({
         </details>
 
       </>)}
-
-      <CardBoundary name="Prediction accuracy">
-        <PredictionAccuracyCard history={history} unit={unit} />
-      </CardBoundary>
 
       {reps.length === 0 ? (
         <Card>

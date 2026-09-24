@@ -423,6 +423,19 @@ CREATE POLICY "auth_all" ON reps
       </Card>
 
       <Card>
+        <Sect title="Research">
+          <p style={{ margin: "0 0 12px", color: C.muted, fontSize: 14, lineHeight: 1.5 }}>
+            Review prediction accuracy and compare candidate models using your training history.
+          </p>
+          <a href="/research" target="_blank" rel="noopener noreferrer"
+            style={{ color: C.blue, fontWeight: 700, display: "inline-block", padding: "8px 0" }}>
+            Prediction research · Beta ↗
+          </a>
+          <div style={{ color: C.muted, fontSize: 12 }}>Opens in a new tab. Your workout recommendations stay unchanged.</div>
+        </Sect>
+      </Card>
+
+      <Card>
         <Sect title="About">
           <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
             <b>Force-Duration Model:</b> Three-timescale regression —

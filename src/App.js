@@ -1,3 +1,4 @@
+import { ResearchView } from "./views/ResearchView.jsx";
 import { PeakTestView } from './views/PeakTestView.jsx';
 import { TindeqBattery } from "./views/cards/TindeqBattery.jsx";
 // src/App.js  — Finger Training v3
@@ -195,6 +196,7 @@ const TABS = ["Fingers", "Workout", "Climb", "Analysis", "History"];
 // Its tab index sits just past the visible tabs so the existing
 // `tab === N` render switch keeps working without special-casing.
 const SETTINGS_TAB = 5;
+const RESEARCH_TAB = 6;
 
 export default function App() {
   const { isOnline, syncSignal, retrySync } = useConnectivity();
@@ -282,7 +284,8 @@ export default function App() {
   const baselinePinReady = settingsSynced && historySynced;
 
   // ── Tab ───────────────────────────────────────────────────
-  const [tab, setTab] = useState(0);
+  const researchMode = /^\/research\/?$/.test(window.location.pathname);
+  const [tab, setTab] = useState(() => researchMode ? RESEARCH_TAB : 0);
 
   // (activities + addActivity + deleteActivity + updateActivity all
   // come from useActivities — see hook call above. Hook owns the
@@ -492,7 +495,10 @@ export default function App() {
             flat top bar. Doubles as a logo-as-home affordance:
             tapping returns to the Fingers tab from anywhere. */}
         <button
-          onClick={() => setTab(0)}
+          onClick={() => {
+            if (researchMode) window.location.assign("/");
+            else setTab(0);
+          }}
           aria-label="Home (Fingers)"
           title="Home"
           style={{
@@ -503,7 +509,9 @@ export default function App() {
         >
           🧗
         </button>
-        {TABS.map((t, i) => (
+        {(researchMode ? ["Research"] : TABS).map((t, index) => {
+          const i = researchMode ? RESEARCH_TAB : index;
+          return (
           <button
             key={t}
             onClick={() => { setTab(i); if (i === 0 && phase !== "idle") {/* stay in session */} }}
@@ -520,7 +528,8 @@ export default function App() {
               <span style={{ marginLeft: 4, background: C.red, color: "#fff", borderRadius: 10, fontSize: 10, padding: "1px 5px" }}>●</span>
             )}
           </button>
-        ))}
+          );
+        })}
         {/* Right cluster: Tindeq status pill (when connected) + gear
             icon for Settings. marginLeft: auto on the wrapper pushes
             both to the far-right edge regardless of how many tabs
@@ -791,6 +800,10 @@ export default function App() {
           Analysis as Whole-Curve Capacity over time; body weight and
           lifts have their own homes too. Climbing trends were also
           dropped when the Climbing tab was retired.) */}
+      {researchMode && tab === RESEARCH_TAB && (
+        <ResearchView history={history} unit={unit} signedIn={!!user}
+          historySynced={historySynced} onOpenSettings={() => setTab(SETTINGS_TAB)} />
+      )}
       {tab === SETTINGS_TAB && (
         <SettingsView
           user={user}

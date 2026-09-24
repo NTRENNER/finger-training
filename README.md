@@ -96,3 +96,14 @@ Tindeq Progressor over BLE — packet format documented at the top of
 `src/lib/tindeq.js`. The hook supports both manual mode (button-tap
 per rep) and auto-detect (pull-start + release-end thresholds, for
 spring-strap / no-hands setups).
+
+## Prediction research
+
+The dedicated `/research` page hosts prediction accuracy, historical model
+comparisons, prospective checkpoints, and review downloads. Open it directly
+or from Settings → Prediction research · Beta (opens a separate tab).
+It uses the same device history and signed-in account as the training app.
+Prediction collection continues during ordinary workouts; research comparisons
+do not select loads or change the rep ladder. Normal Analysis shows training
+progress without the research card. Vercel rewrites `/research` (with or without
+a trailing slash) to the app shell; no separate deployment or database is needed.
