@@ -64,6 +64,7 @@ import {
 import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS } from "../model/setRecommendation.js";
 import { pushDailyState } from "../lib/sync.js";
+import { buildMixedLoadModel, prepareMixedPrediction, completeMixedPrediction } from '../model/mixedLoadPrediction.js';
 import { MIXED_DOMAIN_ID, MIXED_DOMAIN_REST_S, mixedDomainSteps, validMixedDomainPlan } from '../model/mixedDomain.js';
 
 // Manual-timing offset (June 2026): non-Tindeq users tap Done a beat
@@ -138,6 +139,7 @@ export function useSessionRunner({
   // not state: it must not retrigger effects and is only read once.
   const preSessionHistoryRef = useRef(null);
   const sessionAdjustmentRef = useRef(null);
+  const mixedModelsRef = useRef({});
   const [sessionStartedAt, setSessionStartedAt] = useState("");
   // Session-anchored local date (YYYY-MM-DD), captured once at
   // startSession. Every rep in the session is stamped with THIS,
@@ -166,6 +168,14 @@ export function useSessionRunner({
     return Object.fromEntries(['L', 'R'].map(h => [h,
       (mixedDomainSteps(config.mixedDomainPlan, h)[currentRep]?.loadByHand[h] ?? 0) * multiplier]));
   }, [mixed, config.mixedDomainPlan, currentRep, baseRefWeights]);
+
+  // Frozen before this hold: no current outcome or newly fitted history enters
+  // the forecast. It is saved for evaluation only; views never consume it.
+  const mixedPrefix = useMemo(() => sessionReps.filter(r => r.hand === activeHand), [sessionReps, activeHand]);
+  const mixedPrediction = useMemo(() => mixed
+    ? prepareMixedPrediction(mixedModelsRef.current[activeHand], mixedPrefix,
+      suggestWeight(refWeights[activeHand], 0), config.restTime)
+    : null, [mixed, activeHand, mixedPrefix, refWeights, config.restTime]);
 
   // (sMax memos retired with the runtime fatigue accumulator — they
   // were the only consumer. Per-grip baseline data is still available
@@ -224,6 +234,9 @@ export function useSessionRunner({
     // daily_state and stamped on every rep so the whole session stays
     // on the day it began even if it runs past local midnight.
     const startedDay = today();
+    mixedModelsRef.current = cfg.mixedDomainPlan ? Object.fromEntries(
+      (cfg.hand === 'Both' ? ['L', 'R'] : [cfg.hand]).map(h =>
+        [h, buildMixedLoadModel(history, cfg.grip, h, startedDay)])) : {};
     // Persist a STATED cookedness as the day's value, so later
     // sessions and retroactive curve fits see it. Skipped entirely
     // when the user didn't state one. Fire-and-forget.
@@ -433,6 +446,10 @@ export function useSessionRunner({
 
     };
 
+    if (mixedPrediction) {
+      recordedForce.mixed_load_prediction = completeMixedPrediction(mixedPrediction, mixedPrefix, repRecord);
+    }
+
     // prescribedWeight rides along for the RestView's over-pull check
     // (July 2026, per Nathan): with a spring/anchor setup the user
     // controls the pull, and pulling well over prescription is what
@@ -476,7 +493,7 @@ export function useSessionRunner({
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentSet, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected, mixed, currentStep]);
+  }, [config, currentSet, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected, mixed, currentStep, mixedPrediction, mixedPrefix]);
 
   const handleRestDone = useCallback(() => {
     repDoneLockRef.current = false;   // next rep armed — accept its completion

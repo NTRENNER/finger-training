@@ -22,7 +22,8 @@
     "replay": "node --no-warnings scripts/replay.mjs",
     "preview": "npx serve -s build -l 5000",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "evaluate:mixed": "node --no-warnings scripts/evaluate-mixed-load.mjs"
   },
   "eslintConfig": {
     "extends": [

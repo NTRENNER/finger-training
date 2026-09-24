@@ -2,6 +2,8 @@ import { act, renderHook } from '@testing-library/react';
 import { useSessionRunner } from '../useSessionRunner.js';
 import { makeMixedDomainPlan, MIXED_DOMAIN_ZONES, nextMixedDomainZone } from '../../model/mixedDomain.js';
 import { freshFitReps } from '../../model/load.js';
+import { predForceThreeExp } from '../../model/threeExp.js';
+import { summarizeMixedPredictions } from '../../model/mixedLoadPrediction.js';
 import { recoveryEvidence } from '../../model/recoveryEvidence.js';
 import { computeDensityLadder } from '../../model/densityLadder.js';
 import { findPrevSessionReps } from '../../model/repCurveData.js';
@@ -9,9 +11,9 @@ jest.mock('../../lib/sync.js', () => ({ pushDailyState: jest.fn() }));
 
 const rows = MIXED_DOMAIN_ZONES.map((key, i) => ({ key, L: 30 - i * 4, R: 35 - i * 4 }));
 const makePlan = () => makeMixedDomainPlan(rows, 'strength', ['L', 'R']);
-function setup({ connected = true, hand = 'Both', cooked = null, adjust = false } = {}) {
+function setup({ connected = true, hand = 'Both', cooked = null, adjust = false, history = [] } = {}) {
   const addReps = jest.fn();
-  const hook = renderHook(() => useSessionRunner({ history: [], addReps, tindeqConnected: connected }));
+  const hook = renderHook(() => useSessionRunner({ history, addReps, tindeqConnected: connected }));
   const plan = makePlan();
   act(() => hook.result.current.startSession({ grip: 'Micro', hand, cooked,
     adjustLoadForFatigue: adjust, mixedDomainPlan: plan }));
@@ -22,7 +24,7 @@ function complete(hook, overrides = {}) {
   const kg = hook.result.current.refWeights[hook.result.current.activeHand];
   act(() => hook.result.current.handleRepDone({ actualTime: 25, avgForce: kg,
     peakForce: kg + 1, failureValid: true, endReason: 'muscular_failure',
-    forceRecording: { version: 2, capacity_eligible: true, signal_quality: 'complete' },
+    forceRecording: { version: 2, capacity_eligible: true, signal_quality: 'complete', duration_s: 25, impulse_kg_s: kg * 25 },
     ...overrides }));
 }
 
@@ -115,4 +117,52 @@ test('malformed or missing-hand beta plans cannot start a workout', () => {
   delete plan.steps[3].loadByHand.R;
   act(() => hook.result.current.startSession({ grip: 'Micro', hand: 'Both', mixedDomainPlan: plan }));
   expect(hook.result.current.phase).toBe('idle');
+});
+
+
+test('shadow forecasts persist for both hands while live history changes and loads stay frozen', () => {
+  const history = ['L', 'R'].flatMap(hand => [10, 30, 70, 115, 160, 220].map((t, i) => ({
+    id: `old-${hand}-${i}`, session_id: `old-${i}`, date: `2026-09-${10 + i}`, grip: 'Micro', hand,
+    rep_num: 1, set_num: 1, actual_time_s: t, avg_force_kg: predForceThreeExp([18, 15, 25], t),
+    peak_force_kg: 60, load_provenance: 'measured_force', failure_valid: true,
+    force_recording: { version: 2, capacity_eligible: true },
+  })));
+  jest.useFakeTimers().setSystemTime(new Date('2026-09-23T12:00:00Z'));
+  try {
+    const { hook, addReps } = setup({ history });
+    let firstModel;
+    for (const hand of ['L', 'R']) {
+      for (let i = 0; i < 5; i++) {
+        complete(hook, { startedAtMs: i * 60000, endedAtMs: i * 60000 + 25000 });
+        const r = addReps.mock.calls.at(-1)[0][0];
+        const p = r.force_recording.mixed_load_prediction;
+        expect(p.model.status).toBe('ready');
+        expect(p.model.source_sessions).toBe(6);
+        expect(p.comparison.status).toBe('recorded');
+        expect(p.prior_rep_ids).toHaveLength(i);
+        if (i === 0) {
+          expect(p.prediction).toEqual(p.fresh_only);
+          if (hand === 'L') firstModel = p.model;
+        }
+        if (hand === 'L') expect(p.model).toEqual(firstModel);
+        // Simulate data changing during the workout. This must not refit it.
+        history.push({ ...history[0], id: `new-${hand}-${i}`, session_id: `new-${hand}-${i}`,
+          date: '2026-09-23', avg_force_kg: 100 });
+        hook.rerender();
+        if (i < 4) act(() => hook.result.current.handleRestDone());
+      }
+      if (hand === 'L') act(() => hook.result.current.setPhase('rep_ready'));
+    }
+    const saved = JSON.parse(JSON.stringify(addReps.mock.calls.flatMap(c => c[0])));
+    expect(saved.map(r => r.prescribed_load_kg)).toEqual([22,30,26,18,14,27,35,31,23,19]);
+    expect(summarizeMixedPredictions(saved).excluded.edited_since_prediction).toBeUndefined();
+    expect(saved.filter(r => r.force_recording.capacity_eligible)).toHaveLength(2);
+    // A new session gets a new snapshot and no previous hand's fatigue.
+    act(() => hook.result.current.startSession({ grip: 'Micro', hand: 'L', mixedDomainPlan: makePlan() }));
+    complete(hook);
+    const next = addReps.mock.calls.at(-1)[0][0].force_recording.mixed_load_prediction;
+    expect(next.prior_rep_ids).toEqual([]);
+    // Identical repeated rows are deduplicated by the shared fresh-history filter.
+    expect(next.model.source_sessions).toBe(7);
+  } finally { jest.useRealTimers(); }
 });
