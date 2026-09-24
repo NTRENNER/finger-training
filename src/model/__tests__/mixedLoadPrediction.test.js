@@ -27,6 +27,13 @@ const saved = (m, prefix, r, plannedLoad = r.avg_force_kg) => {
   return r;
 };
 
+test('target_force_failure from normal device recording remains valid beta evidence', () => {
+  const first = { ...rep(), end_reason: 'target_force_failure' };
+  const later = { ...rep(2, 20, 40), end_reason: 'target_force_failure' };
+  const result = completeMixedPrediction(prepareMixedPrediction(model(), [first], 20, 30), [first], later);
+  expect(result.comparison.status).toBe('recorded');
+});
+
 test('fresh holds reproduce the independent fresh curve, without the new session in its fit', () => {
   const m = model();
   expect(m).toMatchObject({ status: 'ready', source_sessions: 6, duration_basis: 'target_acquired' });

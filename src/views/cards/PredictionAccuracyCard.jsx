@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { HistoricalPredictionReview } from './HistoricalPredictionReview.jsx';
 import { Card, Btn } from '../../ui/components.js';
 import { C } from '../../ui/theme.js';
 import { REVIEW_DAYS, summarizePredictions } from '../../model/predictionTracking.js';
@@ -36,12 +37,14 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
   };
   return <Card>
     <h3 style={{ margin: '0 0 10px' }}>Prediction accuracy</h3>
+    <HistoricalPredictionReview history={history} unit={unit} />
+    <strong>New saved forecasts</strong>
     <div style={{ fontSize: 20, fontWeight: 700, color: report.days >= REVIEW_DAYS ? C.green : C.text }}>
       {report.days < REVIEW_DAYS ? `${report.days} of ${REVIEW_DAYS} training days` : 'Ready for a model review'}
     </div>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>
       {report.days < REVIEW_DAYS
-        ? 'During standard sessions, we save estimates before your holds and check them against your results. The first review is after 10 days with comparable opening holds.'
+        ? 'During standard sessions, we save estimates before your holds and check them against your results. The first new-data checkpoint is after 10 days with comparable opening holds.'
         : `${report.days} days with comparable opening holds. Review checkpoint ${report.checkpoints} reached; the next is in ${report.daysToNextCheckpoint} more training days.`}
     </p>
     <div style={{ color: C.muted, fontSize: 13 }}>All grips and both hands · Each day counts once · Recommendations stay unchanged</div>

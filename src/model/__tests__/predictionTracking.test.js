@@ -71,6 +71,15 @@ test('sustained overshoot scores conditional force but not the planned-load scen
   expect(out.plannedForce.current.observations).toBe(0);
 });
 
+test('target_force_failure from the device is valid evidence for opening and later holds', () => {
+  const { models } = setup();
+  const rows = recoveryRows('measured').map(r => ({ ...r, end_reason: 'target_force_failure' }));
+  const opener = record(models, rows[0]);
+  const later = record(models, rows[1], [opener]);
+  expect(summarizePredictions([opener, later])).toMatchObject({ days: 1,
+    recovery: { current: { observations: 1 } } });
+});
+
 test('target acquisition time is restored only with measured conversion metadata', () => {
   const { models } = setup();
   const raw = recoveryRows('measured')[0];

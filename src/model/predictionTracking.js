@@ -73,7 +73,7 @@ function timeAt(model, load) {
   return (lo + hi) / 2;
 }
 function validMeasured(r) {
-  return r.failure_valid === true && r.end_reason === 'muscular_failure'
+  return r.failure_valid === true && ['muscular_failure', 'target_force_failure'].includes(r.end_reason)
     && r.load_provenance === 'measured_force' && positive(r.avg_force_kg)
     && positive(r.actual_time_s) && r.force_recording?.signal_quality === 'complete'
     && r.force_recording?.capacity_eligible === true;

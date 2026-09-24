@@ -80,7 +80,7 @@ function usableActivity(rep) {
   const f = rep.force_recording;
   // capacity_eligible is deliberately false on beta holds 2–5. Check the
   // actual signal/ending instead, and never substitute prescribed load.
-  if (rep.failure_valid !== true || rep.end_reason !== 'muscular_failure') return null;
+  if (rep.failure_valid !== true || !['muscular_failure', 'target_force_failure'].includes(rep.end_reason)) return null;
   if (rep.load_provenance !== 'measured_force' || !validLoad(rep.avg_force_kg)
     || f?.signal_quality !== 'complete' || !finitePositive(rep.actual_time_s)) return null;
   const activity = f.activity || f;

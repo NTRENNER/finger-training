@@ -1,7 +1,7 @@
-// Offline only. Never imported by the app or used to tune live recommendations.
+// Read-only evaluator. Run offline or in an on-demand worker; never tunes recommendations.
 import { freshFitReps, isFirstSetRep, sane } from './load.js';
 import { isCapacityEvidenceRep, legacyIntervalRep, loadProvenance } from './forceRecording.js';
-import { buildFreshLoadMap, fitDoseK, prescription } from './prescription.js';
+import { buildFreshLoadMap, fitDoseK, prescription, repKey } from './prescription.js';
 import { buildThreeExpPriors, fitThreeExpAmps, predForceThreeExp, THREE_EXP_LAMBDA_DEFAULT } from './threeExp.js';
 import { computePersonalRecoveryTaus } from './recoveryFit.js';
 import { recoveryEvidence } from './recoveryEvidence.js';
@@ -116,7 +116,7 @@ export function evaluateForward(input, { minPriorDays = 5, diagnostics = false }
     const taus = computePersonalRecoveryTaus(prior);
     const priors = buildThreeExpPriors(prior);
     const fresh = freshFitReps(prior).filter(measuredOpener);
-    let freshMap;
+    let freshMap, candidateMap;
     for (const raw of freshFitReps(today.map(r => ({ ...r, evaluationOriginal: r })), { preserveAllBases: true })) {
       if (!measuredOpener(raw)) { count(forceExcluded, 'no_measured_failure_force'); continue; }
       const past = fresh.filter(r => r.hand === raw.hand && r.grip === raw.grip);
@@ -135,7 +135,16 @@ export function evaluateForward(input, { minPriorDays = 5, diagnostics = false }
       // within 10% of this duration and no more than 90 days old. No scaling.
       const comparable = past.filter(p => Math.max(p.actual_time_s, r.actual_time_s) / Math.min(p.actual_time_s, r.actual_time_s) <= 1.10
         && (Date.parse(date) - Date.parse(p.date)) / 86400000 <= 90).at(-1);
-      const rx = prescription(prior, r.hand, r.grip, r.actual_time_s, { freshMap, threeExpPriors: priors, referenceDate: date });
+      if (!candidateMap) {
+        const keys = new Set(freshFitReps(prior).map(repKey));
+        candidateMap = new Map([...freshMap].map(([key, value]) => [key,
+          { ...value, capacityEligible: value.capacityEligible !== false && keys.has(key) }]));
+      }
+      const opts = { freshMap, threeExpPriors: priors, referenceDate: date, captureCurve: true };
+      const rx = prescription(prior, r.hand, r.grip, r.actual_time_s, opts);
+      const candidate = prescription(prior, r.hand, r.grip, r.actual_time_s, { ...opts, freshMap: candidateMap });
+      const rawCurve = p => p?.curveSnapshot
+        ? predForceThreeExp(p.curveSnapshot.amps, r.actual_time_s) * p.curveSnapshot.scale : null;
       const trace = diagnostics ? tracePrescription(prior, r.hand, r.grip, r.actual_time_s,
         { freshMap, threeExpPriors: priors, referenceDate: date }, rx) : null;
       forceRows.push({ date, grip: r.grip, hand: r.hand, session: r.session_id, rep: r.rep_num,
@@ -145,7 +154,9 @@ export function evaluateForward(input, { minPriorDays = 5, diagnostics = false }
         evidence: `${loadProvenance(stored)}:${stored.force_recording?.basis || 'legacy_interval'}`,
         actual: r.avg_force_kg, duration: r.actual_time_s,
         predictions: { prescription: rx?.value ?? null, freshCurve: fitted ? predForceThreeExp(fitted, r.actual_time_s) : null,
-          recentComparable: comparable?.avg_force_kg ?? null, ...(trace?.predictions || {}) },
+          recentComparable: comparable?.avg_force_kg ?? null,
+          freshAnchored: candidate?.value ?? null, currentCapacity: rawCurve(rx), candidateCapacity: rawCurve(candidate),
+          ...(trace?.predictions || {}) },
         ...(trace ? { diagnostics: trace.details } : {}) });
     }
 
@@ -178,7 +189,7 @@ export function evaluateForward(input, { minPriorDays = 5, diagnostics = false }
       }
     }
   }
-  return { version: 2,
+  return { version: 3,
     method: { cutoff: 'strictly earlier calendar days', minPriorDays, weighting: 'equal training-day weight; hands and reps averaged within day',
       domains: 'byDomain groups by planned target; byObservedDurationDomain groups by scored hold duration (opener duration for recovery). Neither establishes a physiological stimulus.',
       force: 'Conditional force-at-observed-duration calibration in kg; not a pre-rep forecast or an exact replay of the ladder.',
@@ -186,7 +197,8 @@ export function evaluateForward(input, { minPriorDays = 5, diagnostics = false }
       caveat: 'One-user retrospective check. Historical edits and model development on this history prevent treating this as independent prospective validation.' },
     inventory: { inputRows: input.length, retainedRows: rows.length, trainingDays: dates.length, sessions: new Set(rows.map(r => r.session_id).filter(Boolean)).size,
       firstDate: dates[0] || null, lastDate: dates.at(-1) || null, excluded },
-    force: { excluded: forceExcluded, ...summarize(forceRows, 'prescription', ['freshCurve', 'recentComparable']),
+    force: { excluded: forceExcluded, ...summarize(forceRows, 'prescription', ['freshCurve', 'recentComparable', 'freshAnchored']),
+      capacityCurves: summarize(forceRows, 'currentCapacity', ['candidateCapacity']),
       ...(diagnostics ? { stages: summarize(forceRows.filter(r => r.diagnostics), 'prescription',
         ['freshCurve', 'rawCurve', 'fatigueCurve', 'anchoredCurve', 'extrapolatedCurve', 'sameDomainAnchor']) } : {}) },
     recovery: { excluded: recoveryExcluded,

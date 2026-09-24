@@ -24,7 +24,8 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "evaluate:mixed": "node --no-warnings scripts/evaluate-mixed-load.mjs",
-    "evaluate:forward": "node --no-warnings scripts/evaluate-forward.mjs"
+    "evaluate:forward": "node --no-warnings scripts/evaluate-forward.mjs",
+    "evaluate:history": "node --no-warnings scripts/evaluate-history.mjs"
   },
   "eslintConfig": {
     "extends": [

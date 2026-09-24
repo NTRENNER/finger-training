@@ -1,5 +1,46 @@
 # Forward evaluation of force and recovery estimates
 
+## Original targets plus model replay
+
+Run `npm run evaluate:history -- scripts/data/reps.json` for the combined report.
+In Analysis → Prediction accuracy, **Review earlier workouts** runs the same
+read-only analysis in a background worker. It is explicitly historical; its
+days do not fill the prospective ten-day checkpoint. Download the report for
+individual observations and evidence/source breakdowns. No database writes,
+new tables, automatic settings changes or retroactive forecast backfills occur.
+
+Recorded target attainment reads `prescribed_load_kg`, falling back to the
+legacy `weight_kg` only when necessary and reporting that source separately.
+Only measured first-set openers are considered; manual loads, interruptions,
+seed artifacts and special protocols are excluded. Historical targets under
+12 seconds are listed separately: they may have been brief timed peak tests,
+so release time cannot automatically be called time to failure. Both valid
+ending labels (`muscular_failure`, `target_force_failure`) are accepted.
+
+At measured force within ±10% of plan, report actual duration versus the stored
+target, with same-day means weighted equally. Counts below 80%, within 80–120%,
+and above 120% of target are descriptive thresholds, not detector settings or
+pass/fail rules. Different-force efforts retain separate counts, including
+holds above planned force that also reached target time. They are not scored
+as same-load duration errors. Stored intervals are not converted for this
+comparison: the stored target and actual time describe that workout's method.
+
+Older data may contain estimated loads, unknown endings, edits or historical
+backfills. The report separates those rows from explicitly measured failures.
+A prescription may also be a ladder pin or an intentionally reduced load, not
+an exact capacity estimate. Thus target attainment is not the predictive error
+of one historical model version and does not identify fatigue's cause.
+
+The replay now includes the fresh-opener candidate with the same anchor and
+bounds, alongside the earlier unanchored benchmark. `capacityCurves` compares
+the two anchored curves before prescription safeguards, matching the type of
+capacity check in the prospective card. Bounded recommendation values remain
+a separate comparison. Every fitted dependency still uses strictly earlier
+dates. Same observations, day weighting, and planned-versus-observed duration
+groupings apply. Never compare raw-curve error to bounded-prescription error
+as though they were the same score. A promising retrospective result requires
+independent future validation, especially for grips that regress.
+
 Run `npm run evaluate:forward -- scripts/data/reps.json`. Add `--details` for the
 individual scored observations. Input is an array of ordinary database rep rows,
 including nullable provenance, force-recording and timing metadata. Keep exports

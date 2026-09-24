@@ -1,5 +1,12 @@
 # Prospective prediction review
 
+Historical analysis is now available in the same card: choose **Review earlier
+workouts**. It runs in a worker on demand, without blocking training or changing
+records. History changes invalidate the displayed result. A separate download
+contains recorded target attainment and strictly-past model replays. These
+results do not count toward the new-forecast checkpoint or mix with its scores.
+See `docs/forward-evaluation.md` for eligibility and interpretation.
+
 Analysis → Fingers → Prediction accuracy collects evidence during normal
 single-domain sessions. No extra action during a hold is required. The card
 uses all grips/hands (explicitly labelled), independently of the chart filter.
