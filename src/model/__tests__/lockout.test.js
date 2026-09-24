@@ -164,3 +164,12 @@ describe("getRollingSessionPace", () => {
     expect(out.current).toBe(1);
   });
 });
+
+test('Max keeps its last observation but has no coverage deadline or score boost', () => {
+  const history = [{ date: '2026-01-01', actual_time_s: 5, rep_num: 1 }];
+  expect(getLastZoneTrainedDates(history).max_strength).toBe('2026-01-01');
+  expect(getZoneStaleness(history, '2026-09-24').max_strength).toBeUndefined();
+  for (const status of ['never', 'warning', 'stale']) {
+    expect(stalenessBoost('max_strength', { max_strength: { status, days: 300 } })).toBe(1);
+  }
+});

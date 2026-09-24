@@ -915,7 +915,7 @@ export function SessionSummaryView({
         </Card>
       ))}
 
-      {!config.mixedDomainPlan && currentSet < MAX_OPTIONAL_SETS && onAddSet && (
+      {!config.mixedDomainPlan && !config.peakTest && currentSet < MAX_OPTIONAL_SETS && onAddSet && (
         <>
           {setSuggestion?.recommend && (
             <div style={{

@@ -257,3 +257,8 @@ describe("maxTestStaleness", () => {
     expect(MAX_TEST_STALE_DAYS).toBe(28);
   });
 });
+
+test('interrupted Peak Test cannot reset its measurement reminder', () => {
+  const interrupted = { ...rep('Micro', '2026-09-24', 5, 30, 5), failure_valid: false };
+  expect(maxTestStaleness([interrupted], '2026-09-24').lastDate).toBeNull();
+});

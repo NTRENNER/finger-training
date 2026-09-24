@@ -52,7 +52,8 @@ import { isCapacityEvidenceRep, isNominalPrescriptionRep } from "./forceRecordin
 // materially, that's the regression test's job to catch.
 
 import { ymdLocal } from "../util.js";
-import { zoneOf, ZONE_REF_T } from "./zones.js";
+import { MAX_TEST_TARGET_S } from "./peakForce.js";
+import { zoneOf, ZONE_REF_T, MAX_STRENGTH_MAX } from "./zones.js";
 import { getZoneStaleness, stalenessBoost } from "./lockout.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmpsLOO,
@@ -264,7 +265,7 @@ export const OVERLOAD_ZERO_T   = 120;      // s — overload fades to 0 by here
 //      so the residual isn't artificially shrunk by the curve chasing
 //      its own data. r < 1 → you fall below (adaptation room HERE);
 //      r > 1 → you exceed (already strong, less room).
-//   3. Sweep T from 5 to 240 in 5s steps. At each T, smooth the per-rep
+//   3. Sweep routine T from 15 to 240 in 5s steps. At each T, smooth the per-rep
 //      ratios via a LOG-T Gaussian kernel (σ ≈ 0.35 in log-duration, so
 //      the neighborhood scales with T) to get a local "where on the
 //      curve do you fall vs the model" signal. (Was a fixed 30s linear
@@ -321,7 +322,7 @@ export const OVERLOAD_ZERO_T   = 120;      // s — overload fades to 0 by here
 // neighbors is unreliable evidence about what would happen at that T.
 // Genuine in-zone limiters (adaptBoost > 1) still push higher than
 // the 1.0 floor — see per-T loop for the implementation.
-const CONTINUOUS_T_MIN = 5;     // s — shortest meaningful hold
+const CONTINUOUS_T_MIN = 15;     // s — shortest meaningful hold
 const CONTINUOUS_T_MAX = 240;   // s — longest meaningful hold
 const CONTINUOUS_T_STEP = 5;    // s — sweep granularity
 // LOG-T kernel bandwidth (June 2026). The residual smoother now works in
@@ -389,7 +390,7 @@ export const FRESH_TEST_STALE_DAYS = 45;
 
 // ── Cold-start boundary seeding (July 2026) ───────────────────
 // A sparse grip should identify the curve before optimizing training:
-//   1. four short, heavy efforts anchor the upper end;
+//   1. three well-rested short efforts anchor the upper end;
 //   2. four deliberately conservative long holds anchor the lower end;
 //   3. the normal coverage engine fills the middle.
 //
@@ -407,7 +408,7 @@ export const COLD_START_MIN_REPS = 5;
 export const COLD_START_MIN_DURATIONS = 3;
 export const COLD_START_SHORT_ANCHOR_MAX_T = 10;
 export const COLD_START_LONG_ANCHOR_MIN_T = 140;
-export const COLD_START_SHORT_TARGET_T = 3;
+export const COLD_START_SHORT_TARGET_T = MAX_TEST_TARGET_S;
 export const COLD_START_LONG_TARGET_T = 220;
 export const COLD_START_BOUNDARY_REPS = 4;
 export const COLD_START_BOUNDARY_REST_S = 20;
@@ -424,7 +425,7 @@ export function coldStartSeedWeight(T) {
 }
 
 // Strongest valid sustained-force observation from a short max-intent
-// sequence. The upper probe is deliberately best-of-four: rep 1 can be
+// sequence. The upper probe is deliberately best-of-three: rep 1 can be
 // technically tentative, while later declines are recovery observations,
 // not evidence that the demonstrated ceiling was lower.
 function coldStartUpperAnchorRep(gripReps, hand) {
@@ -590,13 +591,14 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     const manual = history.filter(r => isNominalPrescriptionRep(r) && r.grip === grip && r.date <= todayDate)
       .sort(compareSessionOrder).at(-1);
     if (!manual) return null;
-    const T = Number(manual.target_duration) || Number(manual.actual_time_s);
+    const recordedT = Number(manual.target_duration) || Number(manual.actual_time_s);
+    const T = recordedT < MAX_STRENGTH_MAX ? MAX_TEST_TARGET_S : recordedT;
     const loadByHand = {};
     for (const hand of ['L','R']) {
       const p = nominalPrescription(history.filter(r => r.date <= todayDate), hand, grip, T);
       if (p) loadByHand[hand] = p.value;
     }
-    return {T, hand:manual.hand, zone:zoneOf(T), loadKg:loadByHand[manual.hand], loadByHand,
+    return {T, peakTest: T < MAX_STRENGTH_MAX, hand:manual.hand, zone:zoneOf(T), loadKg:loadByHand[manual.hand], loadByHand,
       source:'manual-load-estimate', evidenceLabel:'Estimated from your recorded manual load',
       confidence:0.25, effN:0, overloadFactor:1, coldStart:false};
   }
@@ -727,6 +729,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       let adaptBoost = Math.max(0.2, Math.min(3.0, 1 + room * 3 * confidence));
 
       const zoneKey = zoneOf(T);
+      if (T < MAX_STRENGTH_MAX) continue;
       const zoneStatus = stalenessMap[zoneKey]?.status ?? "ok";
       // Never-sampled zones: floor adaptBoost at 1.0 so the staleness
       // 3.0× exploration boost can actually win the recommendation. The
@@ -880,6 +883,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     best.staleStatus = stalenessMap[best.zone]?.status ?? "never";
     best.coverageSnap = false;
     best.boundaryProbe = true;
+    best.peakTest = true;
   } else if (coldStartStage === "lower") {
     best.T = COLD_START_LONG_TARGET_T;
     best.hand = missingLowerHand;
@@ -902,7 +906,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // margin, and because the curve is higher at the shorter hold it
   // naturally prescribes a HEAVIER load for a SHORTER target — the
   // overshoot-tolerant dose that actually clears the stale flag.
-  // Boundary probes carry an exact measurement duration (3s upper,
+  // Boundary probes carry an exact measurement duration (5s upper,
   // 220s lower). The generic zone-reference snap must not rewrite that
   // protocol merely because the new grip's zone is necessarily "never."
   if (

@@ -309,7 +309,7 @@ export function PeakForceCard({
         {view.mode === "split"
           ? " L solid · R dashed, per-hand PR lines. The standardized trend is pooled-mode only."
           : " The dotted line uses max-intent sessions only, so ordinary sub-max pulls cannot drag it down. It can fall, making it the standardized signal for breakouts and decline."}
-        {" "}Periodic 3 × 3s peak tests keep that comparison calibrated,
+        {" "}Periodic three-pull, roughly 5-second peak tests keep that comparison calibrated,
         but any workout can advance the PR.
         {Object.keys(view.standardizedPending).length > 0 && (
           <span style={{ fontStyle: "italic" }}>

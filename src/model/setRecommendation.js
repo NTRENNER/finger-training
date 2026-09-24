@@ -1,3 +1,4 @@
+import { isPeakTestRep } from './peakForce.js';
 // One set remains a complete workout. This helper only decides whether the
 // completed set supports a gentle suggestion that another set may be useful.
 
@@ -30,7 +31,7 @@ const sessionKey = r => r.session_id || r.date;
 function openingReps(rows, { grip, zone, targetTime, hand }) {
   const bySession = new Map();
   for (const r of rows) {
-    if (isMixedDomainRep(r)) continue;
+    if (isMixedDomainRep(r) || isPeakTestRep(r)) continue;
     if (!isFirstSetRep(r) || Number(r.rep_num ?? 1) !== 1) continue;
     if (r.grip !== grip || r.hand !== hand || zoneOf(r.target_duration) !== zone) continue;
     const target = Number(r.target_duration);
@@ -48,7 +49,7 @@ function openingReps(rows, { grip, zone, targetTime, hand }) {
 // Use consecutive comparable sessions, including unsuccessful attempts, so
 // filtering away an interruption or a shortfall cannot manufacture a plateau.
 export function assessAdditionalSetNeed({ history = [], sessionReps = [], config }) {
-  if (config?.mixedDomainPlan || sessionReps.some(isMixedDomainRep)) return null;
+  if (config?.mixedDomainPlan || config?.peakTest || sessionReps.some(r => isMixedDomainRep(r) || isPeakTestRep(r))) return null;
   if (!config?.grip || !(config.targetTime > 0)) return null;
   const zone = zoneOf(config.targetTime);
   // `today()` is the app's LOCAL date. new Date().toISOString() is UTC, so
@@ -63,7 +64,7 @@ export function assessAdditionalSetNeed({ history = [], sessionReps = [], config
       && currentDay - d <= ADD_SET_RECENT_DAYS;
   };
   const eligible = history.filter(r => !sessionIds.has(sessionKey(r))
-    && !isMixedDomainRep(r)
+    && !isMixedDomainRep(r) && !isPeakTestRep(r)
     && isFirstSetRep(r) && r.grip === config.grip
     && zoneOf(r.target_duration) === zone && isRecent(r));
   const recentSessions = new Set(eligible.filter(isCapacityEvidenceRep).map(sessionKey).filter(Boolean)).size;
@@ -124,7 +125,7 @@ export function isSetComplete({ sessionReps = [], config, setNum = 1 }) {
 // did not absorb the set well. The action remains available even when this
 // returns null; this function controls suggestion copy, not permission.
 export function recommendAnotherSet({ history = [], sessionReps = [], config, setNum = 1 }) {
-  if (config?.mixedDomainPlan || sessionReps.some(isMixedDomainRep)) return null;
+  if (config?.mixedDomainPlan || config?.peakTest || sessionReps.some(r => isMixedDomainRep(r) || isPeakTestRep(r))) return null;
   if (!config?.grip || !(config.targetTime > 0)) return null;
   const expectedHands = config.hand === "Both" ? ["L", "R"] : [config.hand];
   if (!isSetComplete({ sessionReps, config, setNum }) || setNum >= MAX_OPTIONAL_SETS) return null;

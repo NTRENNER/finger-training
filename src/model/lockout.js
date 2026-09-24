@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 // Tracks per-zone last-trained dates and computes staleness so the
 // app can nudge training balance — preventing climbers from skipping
-// painful zones (Crusher Endurance, Max Strength) for so long that
+// regular training zones for so long that
 // the curve develops persistent gaps.
 //
 // Design: SOFT lockout for v1. Stale zones get prioritized by the
@@ -13,12 +13,8 @@
 // avoiding zones despite the soft signal, hard lockout becomes a v2
 // option to consider.
 //
-// Per-zone detraining windows: shorter for short-T near-MVC zones
-// (Max Strength, Power) which decondition quickly; longer for long-T
-// sustained zones (Endurance, Strength/Endurance) which are more
-// stable. Calibrated against general resistance-training detraining
-// research, not climbing-specific (the literature there is sparse).
-// Tune as personal experience dictates.
+// These windows are scheduling defaults, not measured physiological deadlines.
+// Max has no coverage deadline: Peak Test handles the upper-curve measurement.
 //
 // Climbing sessions DO NOT currently reset zone freshness — only
 // finger-training reps do. v2 may add partial resets based on
@@ -26,7 +22,7 @@
 // → resets endurance). Today's quick-log captures discipline + RPE
 // as raw inputs for that future logic.
 
-import { ZONE_KEYS, zoneOf } from "./zones.js";
+import { ZONE_KEYS, TRAINING_ZONE_KEYS, zoneOf } from "./zones.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -54,14 +50,13 @@ function calendarDay(value) {
 // the score for that zone and the Setup banner surfaces it.
 //
 // Calibration:
-//   max_strength       — near-MVC, neural-dominated; 2 weeks
+//   Max is measured separately by Peak Test; no recurring coverage deadline.
 //   power              — short-T, fast-component-dominated; 3 weeks
 //   power_strength     — crossover; ~3.5 weeks
 //   strength           — mid-T; 1 month
 //   strength_endurance — crossover; ~1 month
 //   endurance          — long-T sustained; most stable
 export const LOCKOUT_WINDOW_DAYS = {
-  max_strength:        14,
   power:               21,
   power_strength:      25,
   strength:            30,
@@ -123,7 +118,7 @@ export function getZoneStaleness(history, today = new Date()) {
   const lastDates = getLastZoneTrainedDates(history);
   const todayDay = calendarDay(today);
   const out = {};
-  for (const k of ZONE_KEYS) {
+  for (const k of TRAINING_ZONE_KEYS) {
     const last = lastDates[k];
     if (!last) {
       out[k] = { lastDate: null, days: null, status: "never" };
@@ -168,6 +163,7 @@ export const STALE_BOOST_BASE = 2.0;
 export const STALE_BOOST_MAX  = 2.5;
 
 export function stalenessBoost(zoneKey, stalenessMap) {
+  if (!TRAINING_ZONE_KEYS.includes(zoneKey)) return 1.0;
   const s = stalenessMap?.[zoneKey];
   if (!s) return 1.0;
   switch (s.status) {

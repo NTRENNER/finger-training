@@ -55,15 +55,16 @@ test("upper-bound stage hides unsupported alternatives and sends the exact probe
 
   expect(screen.getAllByText("after upper anchor")).toHaveLength(5);
   expect(screen.getAllByRole("button").filter(button => button.disabled)).toHaveLength(5);
-  expect(document.body).toHaveTextContent("Hangs4");
-  expect(document.body).toHaveTextContent("Rest20s");
+  expect(document.body).toHaveTextContent("Pulls3");
+  expect(document.body).toHaveTextContent("Rest150s");
 
   await waitFor(() => expect(onApplyPlan).toHaveBeenCalled());
   expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({
     goal: "max_strength",
-    targetTime: 3,
-    repsPerSet: 4,
-    restTime: 20,
+    targetTime: 5,
+    peakTest: true,
+    repsPerSet: 3,
+    restTime: 150,
   });
   expect(onApplyPlan.mock.calls.at(-1)[0].plannedLoadByHand.L).toBeGreaterThan(0);
 });
@@ -75,7 +76,7 @@ test("lower-bound stage uses the four-rep recovery protocol and defers the middl
   ];
   const onApplyPlan = renderCard(history);
 
-  expect(screen.getAllByText("after lower anchor")).toHaveLength(5);
+  expect(screen.getAllByText("after lower anchor")).toHaveLength(4);
   expect(document.body).toHaveTextContent("Hangs4");
   expect(document.body).toHaveTextContent("Rest20s");
 
@@ -97,6 +98,8 @@ test("peak test is a full-width selectable plan that uses the normal apply path"
     rep("R", 5, 5, 8, 1),
   ];
   const onApplyPlan = renderCard(history);
+  expect(screen.queryByRole("button", { name: /Train Max Strength/ })).not.toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: /^Train / })).toHaveLength(5);
   const peakOption = screen.getByRole("button", { name: "Run peak test" });
 
   expect(peakOption).toHaveStyle({ gridColumn: "1 / -1" });
@@ -104,7 +107,8 @@ test("peak test is a full-width selectable plan that uses the normal apply path"
 
   await waitFor(() => expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({
     goal: "max_strength",
-    targetTime: 3,
+    targetTime: 5,
+    peakTest: true,
     repsPerSet: 3,
     restTime: 150,
     ladderLoadByHand: null,

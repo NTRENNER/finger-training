@@ -24,7 +24,7 @@ import { trainingPurpose } from "../../model/trainingPurpose.js";
 //   3. Override indicator + protocol controls — hangs/rest/time strip,
 //      hangs and rest sliders. Defaults track the active selection's
 //      T but stick once touched.
-//   4. Six zone tiles + a full-width peak test — alternatives. Tap any
+//   4. Five zone tiles + a full-width peak test — alternatives. Tap any
 //      to override the
 //      recommendation; the recommended button above dims and the
 //      tapped tile gets the bright highlight. Loads on every tile
@@ -46,7 +46,7 @@ import "./SessionPlanCard.css";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { fmtW } from "../../ui/format.js";
-import { ZONE_KEYS } from "../../model/zones.js";
+import { ZONE_KEYS, TRAINING_ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
 import {
   coachingRecommendationContinuous,
@@ -174,8 +174,9 @@ export function SessionPlanCard({
   // Why-line Details expander (July 2026) — receipts and secondary
   // factors hide behind a tap so the headline stays one sentence.
   const [showDetails, setShowDetails] = useState(false);
-  const activeZone = peakTestSelected ? "max_strength" : (overrideZone || recommendedZone);
   const isZoneOverridden = overrideZone != null;
+  const isPeakTest = peakTestSelected || (!isZoneOverridden && rec?.peakTest === true);
+  const activeZone = isPeakTest ? "max_strength" : (overrideZone || recommendedZone);
   const isOverridden = peakTestSelected || isZoneOverridden;
 
   // Reset the override when the grip changes — a Crusher pick shouldn't
@@ -199,12 +200,12 @@ export function SessionPlanCard({
     [hand]
   );
   const ladder = useMemo(
-    () => (grip && activeZone && !peakTestSelected && !isZoneOverridden && !rec?.boundaryProbe)
+    () => (grip && activeZone && !isPeakTest && !isZoneOverridden && !rec?.boundaryProbe)
       ? computeDensityLadder(history, grip, activeZone, { expectedHands })
       : null,
     [
       history, grip, activeZone, expectedHands, rec,
-      peakTestSelected, isZoneOverridden,
+      isPeakTest, isZoneOverridden,
     ]
   );
 
@@ -271,7 +272,7 @@ export function SessionPlanCard({
   // has overridden. The density ladder pins the PREVIOUS session's T
   // for repeat (grip, zone) combos — protocol comparability requires
   // holding T constant while reps climb, so the pin wins over both.
-  const curveT = peakTestSelected
+  const curveT = isPeakTest
     ? MAX_TEST_TARGET_S
     : isZoneOverridden
     ? activeRow?.T
@@ -302,9 +303,9 @@ export function SessionPlanCard({
   // (below) already make the active selection visually obvious.
   // activeT is still used by the protocol controls (hangs/rest defaults
   // + total-time math).
-  const activeColor = peakTestSelected ? C.blue : (activeRow?.color ?? C.blue);
-  const activeEmoji = peakTestSelected ? "🎯" : (activeRow?.emoji ?? "🎯");
-  const activeLabel = peakTestSelected ? "Peak Test" : (activeRow?.label ?? activeZone);
+  const activeColor = isPeakTest ? C.blue : (activeRow?.color ?? C.blue);
+  const activeEmoji = isPeakTest ? "🎯" : (activeRow?.emoji ?? "🎯");
+  const activeLabel = isPeakTest ? "Peak Test" : (activeRow?.label ?? activeZone);
 
   // ── Reps / Rest defaults from the active T ───────────────────
   // Ladder reps win for repeat (grip, zone) sessions; the T-derived
@@ -316,7 +317,7 @@ export function SessionPlanCard({
   // bump hazard; commitment to the protocol is the point of the
   // ladder. The Hangs/Rest/Time summary strip below still shows the
   // plan read-only.
-  const reps = peakTestSelected
+  const reps = isPeakTest
     ? MAX_TEST_ATTEMPTS
     : rec?.boundaryProbe
     ? COLD_START_BOUNDARY_REPS
@@ -325,7 +326,7 @@ export function SessionPlanCard({
     : activeT
       ? Math.max(4, Math.min(6, Math.round(6 - (activeT - 5) / 117.5)))
       : 5;
-  const rest = peakTestSelected
+  const rest = isPeakTest
     ? MAX_TEST_REST_S
     : rec?.boundaryProbe
       ? COLD_START_BOUNDARY_REST_S
@@ -342,28 +343,29 @@ export function SessionPlanCard({
       const first = mixedPlan.steps[0];
       onApplyPlan?.({ goal: first.zone, targetTime: first.targetTime, repsPerSet: 5,
         restTime: MIXED_DOMAIN_REST_S, ladderLoadByHand: null,
-        plannedLoadByHand: first.loadByHand, mixedDomainPlan: mixedPlan });
+        plannedLoadByHand: first.loadByHand, mixedDomainPlan: mixedPlan, peakTest: false });
       return;
     }
     if (!activeZone || !activeT) return;
     onApplyPlan?.({
       mixedDomainPlan: null,
+      peakTest: isPeakTest,
       goal: activeZone,
       targetTime: activeT,
       repsPerSet: reps,
       restTime: rest,
-      ladderLoadByHand: !peakTestSelected && ladder ? ladderPlanLoadByHand : null,
+      ladderLoadByHand: !isPeakTest && ladder ? ladderPlanLoadByHand : null,
       // Boundary probes must run at the exact load displayed above.
       // Otherwise startSession would call prescription() again and the
       // conservative lower-bound probe would silently revert to the old
       // sparse-curve extrapolation.
       plannedLoadByHand:
-        !peakTestSelected && rec?.boundaryProbe && !isOverridden ? rec.loadByHand : null,
+        rec?.boundaryProbe && !isOverridden ? rec.loadByHand : null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeZone, activeT, reps, rest, ladder, ladderPlanLoadByHand,
-    rec, isOverridden, peakTestSelected, mixedEnabled, mixedPlan,
+    rec, isOverridden, isPeakTest, mixedEnabled, mixedPlan,
   ]);
 
   // ── Empty / loading states ───────────────────────────────────
@@ -553,7 +555,7 @@ export function SessionPlanCard({
           recommendation. The cookedness multiplier remains identical
           between display and runner. */}
       {!mixedEnabled && (() => {
-        const recCfg = GOAL_CONFIG[rec.zone] ?? { color: C.blue, label: rec.zone, emoji: "🎯" };
+        const recCfg = rec.peakTest ? { color: C.blue, label: "Peak Test", emoji: "🎯" } : GOAL_CONFIG[rec.zone] ?? { color: C.blue, label: rec.zone, emoji: "🎯" };
         // Per-grip cookedness multiplier — same factor the tiles below
         // and the runner use. Multiplied through rec.loadKg and the
         // per-hand values so the Recommended card stays in sync with
@@ -673,7 +675,7 @@ export function SessionPlanCard({
         borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
       }}>
         {[
-          { label: peakTestSelected ? "Pulls" : "Hangs", value: reps },
+          { label: isPeakTest ? "Pulls" : "Hangs", value: reps },
           { label: "Rest",  value: `${rest}s` },
           { label: "Time",  value: timeStr },
         ].map(({ label, value }, i, arr) => (
@@ -808,7 +810,7 @@ export function SessionPlanCard({
       {!mixedEnabled && isOverridden && (
         <div style={{ marginBottom: 10, fontSize: 11, color: C.muted, textAlign: "center" }}>
           overriding the recommendation ({rec.zone.replace(/_/g, " ")} →{" "}
-          {peakTestSelected
+          {isPeakTest
             ? "peak test"
             : `${activeZone.replace(/_/g, " ")} ${activeT}s`}) ·{" "}
           <button
@@ -825,18 +827,18 @@ export function SessionPlanCard({
       {/* (Hangs + Rest sliders removed June 2026 — protocol-driven;
           see the comment at the reps/rest derivation above.) */}
 
-      {/* Six zone tiles + peak test — alternatives. Tap any tile to override the
+      {/* Five zone tiles + peak test — alternatives. Tap any tile to override the
           recommended pick for this session; the active session block
           above updates immediately to reflect the new target T and
           load. The recommended tile gets a ★ + double-strength border;
           the active (selected) tile gets the bright background tint.
           Loads on every tile reflect the RPE slider's per-zone scale-
           down so the user sees the trade-off across the full curve.
-          Peak test spans both columns because it is a protocol choice,
-          not another modeled force-duration point. */}
+          Peak Test spans both columns and provides the short-strength
+          check alongside the five routine training choices. */}
       {!mixedEnabled && <><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
       <div className="session-choice-grid">
-        {rows.map(r => {
+        {rows.filter(r => TRAINING_ZONE_KEYS.includes(r.key)).map(r => {
           // Tile is "active" only when it's the user's override pick.
           // When no override is in effect, the Recommended button above
           // is the active selection — even though that pick lives in
@@ -846,7 +848,7 @@ export function SessionPlanCard({
           // matching tile shows the zone's reference T (e.g. 70s with
           // T-anchored load). Highlighting both would imply they're
           // interchangeable, which they aren't.
-          const isActive = isZoneOverridden && !peakTestSelected && r.key === activeZone;
+          const isActive = isZoneOverridden && !isPeakTest && r.key === activeZone;
           const isRec = r.key === recommendedZone;
           const dim = r.reliability === "extrapolation";
           const deferred = Boolean(r.deferredReason);
@@ -918,7 +920,7 @@ export function SessionPlanCard({
         })}
         <button
           aria-label="Run peak test"
-          aria-pressed={peakTestSelected}
+          aria-pressed={isPeakTest}
           onClick={() => {
             setOverrideZone(null);
             setPeakTestSelected(true);
@@ -934,22 +936,25 @@ export function SessionPlanCard({
             font: "inherit",
             padding: "var(--session-choice-padding, 12px 14px)",
             borderRadius: 8,
-            background: peakTestSelected ? C.blue + "22" : C.bg,
-            border: peakTestSelected ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
-            margin: peakTestSelected ? 0 : 1,
+            background: isPeakTest ? C.blue + "22" : C.bg,
+            border: isPeakTest ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
+            margin: isPeakTest ? 0 : 1,
           }}
         >
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: "var(--session-choice-label-size, 12px)", fontWeight: 700, color: C.blue, marginBottom: 3 }}>
-              {peakTestSelected ? "✓ Peak Test selected" : "🎯 Peak Test"}
+              {isPeakTest ? "✓ Peak Test selected" : "🎯 Peak Test"}
               {maxTest?.recommended && (
                 <span style={{ marginLeft: 7, fontSize: 9, color: C.orange, textTransform: "uppercase" }}>
-                  due
+                  check-in
                 </span>
               )}
             </div>
             <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.4 }}>
-              {MAX_TEST_ATTEMPTS} × {MAX_TEST_TARGET_S}s max pulls per hand · {MAX_TEST_REST_S}s rest
+              {MAX_TEST_ATTEMPTS} pulls per hand · aim for about {MAX_TEST_TARGET_S}s at the selected load · {MAX_TEST_REST_S}s rest
+            </div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginTop: 4 }}>
+              Hold until force failure. Records your peak and the force you sustained.
             </div>
           </div>
           <div style={{

@@ -56,3 +56,15 @@ test("interrupted rep round-trip preserves the battery reading and warning times
   mockOrder.mockResolvedValue({ data: [payload], error: null });
   expect((await fetchReps())[0]).toMatchObject(rep);
 });
+
+test('Peak Test cloud round-trip preserves sustained duration separately from peak', async () => {
+  const rep = { id: 'peak-test', grip: 'Micro', hand: 'L', rep_num: 1, set_num: 1,
+    actual_time_s: 7.2, target_duration: 5, avg_force_kg: 20, peak_force_kg: 28,
+    failure_valid: true, load_provenance: 'measured_force',
+    force_recording: { version: 3, basis: 'target_acquired', capacity_eligible: true,
+      session_protocol: { id: 'peak_test', version: 1, position: 1, duration_reference: 'load_selection_until_failure' } } };
+  mockOrder.mockResolvedValue({ data: [repPayload(rep, 'user')], error: null });
+  const [restored] = await fetchReps();
+  expect(restored).toMatchObject(rep);
+  expect(freshFitReps([restored])[0]).toMatchObject({ actual_time_s: 7.2, avg_force_kg: 20 });
+});

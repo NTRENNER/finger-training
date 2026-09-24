@@ -1,3 +1,4 @@
+import { isPeakTestRep } from './peakForce.js';
 import { isCapacityEvidenceRep } from "./forceRecording.js";
 import { isMixedDomainRep } from './mixedDomain.js';
 // ─────────────────────────────────────────────────────────────
@@ -151,7 +152,7 @@ function sessionConformance(historyBefore, hand, grip, reps) {
 function latestSessionInZone(history, grip, zoneKey) {
   const groups = new Map();
   for (const r of history || []) {
-    if (!r || r.grip !== grip || isMixedDomainRep(r)) continue;
+    if (!r || r.grip !== grip || (isMixedDomainRep(r) || isPeakTestRep(r))) continue;
     // The density ladder prescribes the next fresh set. Optional sets are
     // volume-tolerance evidence only: they cannot invalidate, down-step, or
     // otherwise change the next set-1 prescription.

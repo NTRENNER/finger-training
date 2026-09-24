@@ -65,6 +65,7 @@ import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS } from "../model/setRecommendation.js";
 import { pushDailyState } from "../lib/sync.js";
 import { buildMixedLoadModel, prepareMixedPrediction, completeMixedPrediction } from '../model/mixedLoadPrediction.js';
+import { PEAK_TEST_ID, MAX_TEST_ATTEMPTS, MAX_TEST_REST_S, MAX_TEST_TARGET_S } from '../model/peakForce.js';
 import { MIXED_DOMAIN_ID, MIXED_DOMAIN_REST_S, mixedDomainSteps, validMixedDomainPlan } from '../model/mixedDomain.js';
 
 // Manual-timing offset (June 2026): non-Tindeq users tap Done a beat
@@ -114,6 +115,7 @@ export function useSessionRunner({
     // ordinary curve-driven sessions.
     plannedLoadByHand: null,
     mixedDomainPlan: null,
+    peakTest: false,
   }));
 
   // No derived fields anymore — config is rawConfig.
@@ -197,15 +199,19 @@ export function useSessionRunner({
   // is ignored, so the plain Start button keeps working unchanged.
   const startSession = useCallback((override) => {
     let cfg = (override && override.grip) ? override : config;
+    if (cfg.peakTest && !cfg.mixedDomainPlan) {
+      cfg = { ...cfg, goal: 'max_strength', targetTime: MAX_TEST_TARGET_S,
+        repsPerSet: MAX_TEST_ATTEMPTS, restTime: MAX_TEST_REST_S, ladderLoadByHand: null };
+    }
     if (cfg.mixedDomainPlan) {
       const hands = cfg.hand === 'Both' ? ['L', 'R'] : [cfg.hand];
       if (!validMixedDomainPlan(cfg.mixedDomainPlan, hands)) return;
       const plan = JSON.parse(JSON.stringify(cfg.mixedDomainPlan));
-      cfg = { ...cfg, mixedDomainPlan: plan, goal: plan.steps[0].zone,
+      cfg = { ...cfg, peakTest: false, mixedDomainPlan: plan, goal: plan.steps[0].zone,
         targetTime: plan.steps[0].targetTime, repsPerSet: 5, restTime: MIXED_DOMAIN_REST_S,
         ladderLoadByHand: null, plannedLoadByHand: plan.steps[0].loadByHand };
     }
-    if ((override && override.grip) || cfg.mixedDomainPlan) setConfig(cfg);
+    if ((override && override.grip) || cfg.mixedDomainPlan || cfg.peakTest) setConfig(cfg);
     const sid = uid();
     const rw = {};
     // Cookedness scale-down at the published fixed rate. 1.0 when
@@ -363,6 +369,9 @@ export function useSessionRunner({
         role: currentRep === 0 ? 'opening_hold' : 'fatigued_hold',
         duration_reference: 'fresh_load_reference' },
       ...(currentRep > 0 ? { capacity_eligible: false } : {}),
+    } : config.peakTest ? { ...forceRecording,
+      session_protocol: { id: PEAK_TEST_ID, version: 1, position: currentRep + 1,
+        duration_reference: 'load_selection_until_failure' },
     } : forceRecording;
     const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {
@@ -507,7 +516,7 @@ export function useSessionRunner({
   // launched from the completed-set summary, and deliberately have no
   // mandatory between-set timer.
   const handleNextSet = useCallback(() => {
-    if (mixed || phase !== "done" || currentSet >= MAX_OPTIONAL_SETS) return;
+    if (mixed || config.peakTest || phase !== "done" || currentSet >= MAX_OPTIONAL_SETS) return;
     setCurrentSet(s => s + 1);
     setCurrentRep(0);
     setActiveHand(config.hand === "Both" ? "L" : config.hand);
@@ -515,7 +524,7 @@ export function useSessionRunner({
     setLeveledUp(false);
     repDoneLockRef.current = false;
     setPhase(tindeqConnected ? "rep_ready" : "rep_active");
-  }, [phase, currentSet, config.hand, tindeqConnected, mixed]);
+  }, [phase, currentSet, config.hand, config.peakTest, tindeqConnected, mixed]);
 
   const handleAbort = useCallback(() => {
     if (sessionReps.length > 0) finishSession(sessionReps);

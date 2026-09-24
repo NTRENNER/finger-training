@@ -63,6 +63,10 @@ export const ZONE_KEYS = [
   "endurance",
 ];
 
+// Training rotation excludes Max; its measurements and historical domain stay
+// available in the six-domain analysis. Peak Test owns short-strength work.
+export const TRAINING_ZONE_KEYS = ZONE_KEYS.filter(key => key !== "max_strength");
+
 // Selectable target durations for the Setup form, History "add
 // session" picker, History rep editor, and the Trends "best load"
 // chart filter pills. Derived from ZONE_REF_T so the seconds field

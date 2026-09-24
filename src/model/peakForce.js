@@ -194,17 +194,12 @@ export function buildPeakForceTrend(history, {
 // ─────────────────────────────────────────────────────────────
 // PEAK TEST CADENCE — periodic max-strength test
 // ─────────────────────────────────────────────────────────────
-// A dedicated short maximal-pull test so the Peak Force card stays
-// populated on a cadence instead of only when a max/power block
-// happens to land. The top line is neuromuscular / instantaneous, so
-// the test is short and repeatable:
-//   MAX_TEST_TARGET_S — 3s target: long enough to ramp to true peak
-//     recruitment, short enough to avoid metabolic confound / fatigue.
-//   MAX_TEST_ATTEMPTS — best of 3 per hand (one pull is noisy; a
-//     ramp-up attempt can out-pull a cold first pull).
-// A 3s rep clears both PEAK_MAX_PROTOCOL_T (peak card) and the curve's
-// short-end fresh-test gate, so it needs no special protocol tagging.
-export const MAX_TEST_TARGET_S = 3;
+// Peak Test is the single short-strength protocol. Five seconds guides load
+// selection; sustain the selected force until failure, not a countdown.
+// Save measured average + actual duration separately from instantaneous peak.
+export const PEAK_TEST_ID = 'peak_test';
+export const isPeakTestRep = rep => rep?.force_recording?.session_protocol?.id === PEAK_TEST_ID;
+export const MAX_TEST_TARGET_S = 5;
 export const MAX_TEST_ATTEMPTS = 3;
 export const MAX_TEST_REST_S = 150;
 // Cadence. Peak is fairly flat month-to-month, so ~4 weeks between
@@ -230,7 +225,7 @@ export function maxTestStaleness(gripHistory, todayStr, {
 } = {}) {
   let lastDate = null;
   for (const r of gripHistory || []) {
-    if (!r || !r.date) continue;
+    if (!r || !r.date || !isValidFailureRep(r)) continue;
     if (isSeedArtifactRep(r)) continue;  // a fake peak must not silence the cadence
     const peak = Number(r.peak_force_kg);
     if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;

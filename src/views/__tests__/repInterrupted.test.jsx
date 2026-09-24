@@ -75,3 +75,25 @@ test('a fully recorded prescribed set is described as complete', () => {
   }))} onDone={() => {}} />);
   expect(screen.getByRole('heading', {name:'Recommended Set Complete'})).toBeInTheDocument();
 });
+
+test('Peak Test does not stop at five seconds or when force exceeds the selected load', () => {
+  let start, finish;
+  const onRepDone = jest.fn();
+  const tindeq = { targetKgRef: {}, connected: true, force: 28, avgForce: 24, peak: 28,
+    startAutoDetect: (a, b) => { start = a; finish = b; }, stopAutoDetect: jest.fn() };
+  render(<AutoRepSessionView session={{ ...session, config: { ...config, peakTest: true,
+    goal: 'max_strength', targetTime: 5, repsPerSet: 3, restTime: 150 } }}
+    onRepDone={onRepDone} onAbort={() => {}} tindeq={tindeq} />);
+  act(() => start());
+  act(() => jest.advanceTimersByTime(8000));
+  expect(onRepDone).not.toHaveBeenCalled();
+  act(() => finish({ actualTime: 8, avgForce: 24, peakForce: 28, failureValid: true, endReason: 'muscular_failure' }));
+  expect(onRepDone).toHaveBeenCalledWith(expect.objectContaining({ actualTime: 8, avgForce: 24, peakForce: 28 }));
+});
+
+test('Peak Test summary does not offer extra sets', () => {
+  render(<SessionSummaryView config={{ ...config, peakTest: true, repsPerSet: 3 }}
+    reps={[1,2,3].map(n => ({ rep_num: n, set_num: 1, hand: 'L', actual_time_s: 7, avg_force_kg: 20 }))}
+    onDone={() => {}} onAddSet={() => {}} />);
+  expect(screen.queryByRole('button', { name: /Add another set/ })).not.toBeInTheDocument();
+});

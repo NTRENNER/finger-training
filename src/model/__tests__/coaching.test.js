@@ -33,6 +33,7 @@ import {
 } from "../coaching.js";
 import { buildThreeExpPriors, predForceThreeExp } from "../threeExp.js";
 import { buildGripEstimates } from "../baselines.js";
+import { prescription } from "../prescription.js";
 import { ZONE_REF_T } from "../zones.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -671,7 +672,8 @@ describe("LOO de-biasing + weaker-hand boost (engine)", () => {
       }
     }
     const priors = buildThreeExpPriors(hist);
-    const rec = coachingRecommendationContinuous(hist, "Crusher", { threeExpPriors: priors, today });
+    // Isolate the weaker-hand tie-breaker from hand-specific residual fitting.
+    const rec = coachingRecommendationContinuous(hist, "Crusher", { threeExpPriors: priors, today, confidenceK: 1e9 });
     expect(rec.hand).toBe("L");
     expect(rec.handBoost).toBeGreaterThan(1);
   });
@@ -727,7 +729,10 @@ describe("coaching fit vs chart (buildGripEstimates) fit consistency", () => {
       const chartF = predForceThreeExp(chartAmps, T);
       const rec = coachingRecommendationContinuous(hist, "Crusher",
         { threeExpPriors: priors, today: new Date(), tMin: T, tMax: T, tStep: 1, overload: false });
-      const engineF = rec?.loadByHand?.L;
+      // Max remains a fitted measurement, but is no longer a routine pick.
+      const engineF = zk === 'max_strength'
+        ? prescription(hist, 'L', 'Crusher', T, { threeExpPriors: priors })?.value
+        : rec?.loadByHand?.L;
       expect(engineF).toBeTruthy();
       const relGap = Math.abs(engineF - chartF) / chartF;
       expect(relGap).toBeLessThan(0.05);
@@ -863,7 +868,7 @@ describe("cold-start seeding", () => {
   test("COLD_START_MIN_DURATIONS matches the baseline gate's duration requirement", () => {
     expect(COLD_START_MIN_REPS).toBe(5);
     expect(COLD_START_MIN_DURATIONS).toBe(3);
-    expect(COLD_START_SHORT_TARGET_T).toBe(3);
+    expect(COLD_START_SHORT_TARGET_T).toBe(5);
     expect(COLD_START_BOUNDARY_REPS).toBe(4);
     expect(COLD_START_BOUNDARY_REST_S).toBe(20);
   });
@@ -981,4 +986,23 @@ describe("cold-start seeding", () => {
     expect(rec.coldStartStage).toBeNull();
     expect(rec.boundaryProbe).not.toBe(true);
   });
+});
+
+test('established history stays in five routine domains even when Max is old or missing', () => {
+  const today = new Date('2026-09-24T12:00:00');
+  const rows = [30, 70, 115, 160, 220].flatMap((T, i) => ['L', 'R'].map(hand => ({
+    id: `${hand}-${i}`, session_id: `s-${i}`, date: '2026-09-20', hand, grip: 'Crusher',
+    rep_num: 1, set_num: 1, actual_time_s: T, target_duration: T,
+    avg_force_kg: 30 * Math.exp(-T / 30) + 20 * Math.exp(-T / 480),
+  })));
+  for (const history of [rows, [...rows, { ...rows[0], id: 'oldmax', session_id: 'oldmax',
+    date: '2026-04-01', actual_time_s: 5, target_duration: 5, avg_force_kg: 60 }]]) {
+    const rec = coachingRecommendationContinuous(history, 'Crusher', {
+      threeExpPriors: buildThreeExpPriors(history), today, tMin: 5,
+    });
+    expect(rec.coldStart).toBe(false);
+    expect(rec.zone).not.toBe('max_strength');
+    expect(rec.T).toBeGreaterThanOrEqual(12);
+    expect(rec.peakTest).not.toBe(true);
+  }
 });

@@ -487,8 +487,8 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
       focus.push({
         key: `peak|${g}`,
         text: mt.staleDays == null
-          ? `${g} — no measured max yet; the engine's ceilings are guesses until a 3×3s peak test sets the top line.`
-          : `${g} — its peak reading is ${mt.staleDays}d old; a 3×3s peak test refreshes the ceiling the engine caps loads with.`,
+          ? `${g} — no measured max yet; the engine's ceilings are guesses until a three-pull, roughly 5-second peak test sets the top line.`
+          : `${g} — its peak reading is ${mt.staleDays}d old; a three-pull, roughly 5-second peak test refreshes the ceiling the engine caps loads with.`,
       });
     }
   }

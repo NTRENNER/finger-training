@@ -236,7 +236,7 @@ export function decisiveWhy(rec, { ladderText = null } = {}) {
   if (ladderText) return ladderText;
   if (!rec) return null;
   if (rec.coldStartStage === "upper") {
-    return "new grip — four short max efforts establish the upper anchor and its recovery pattern";
+    return "new grip — three well-rested Peak Test pulls measure the top of your curve";
   }
   if (rec.coldStartStage === "lower") {
     return "upper anchor set — the first long hold establishes the lower bound; the next three measure short-rest recovery";

@@ -1,3 +1,4 @@
+import { isPeakTestRep } from '../model/peakForce.js';
 import { InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { evidenceLabel } from "../model/forceRecording.js";
 import { isMixedDomainRep, mixedDomainMetadata, MIXED_DOMAIN_LABELS } from '../model/mixedDomain.js';
@@ -765,7 +766,7 @@ export function HistoryView({
                       "L + R" up here was just noise. */}
                   {sess.hand === "L" && "Left · "}
                   {sess.hand === "R" && "Right · "}
-                  {sess.reps.some(isMixedDomainRep) ? 'Whole curve · Beta' : TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
+                  {sess.reps.some(isMixedDomainRep) ? 'Whole curve · Beta' : sess.reps.some(isPeakTestRep) ? 'Peak Test' : TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
