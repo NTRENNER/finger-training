@@ -894,6 +894,16 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
         const enduranceCeiled = wasEnduranceCeiled(flooredRaw);
         return {
           value,
+          // Optional immutable coefficients for prospective evaluation only.
+          // Exposes the actual fit, avoiding a second implementation of it.
+          ...(opts.captureCurve ? { curveSnapshot: {
+            amps: [...amps], scale,
+            duration_basis: points.every(r => r.force_recording?.basis === 'target_acquired'
+              && !r.force_recording?.interval_basis_applied) ? 'target_acquired' : 'legacy_elapsed',
+            source_days: new Set(points.map(r => r.date)).size,
+            min_duration_s: Math.min(...points.map(r => r.actual_time_s)),
+            max_duration_s: longestObservedT,
+          } } : {}),
           potential:   Math.round(potentialRaw * 10) / 10,
           scale,
           anchor,

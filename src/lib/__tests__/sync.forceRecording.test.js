@@ -5,6 +5,25 @@ jest.mock('../supabase.js', () => ({supabase: {from: () => ({select: () => ({ord
 import { repPayload, fetchReps } from '../sync.js';
 import { freshFitReps } from '../../model/load.js';
 import { recoveryEvidence } from '../../model/recoveryEvidence.js';
+import { buildPredictionModels, preparePrediction, completePrediction, summarizePredictions } from '../../model/predictionTracking.js';
+import { buildThreeExpPriors } from '../../model/threeExp.js';
+import { recoveryRows } from '../../testHelpers/recoveryRows.js';
+
+test('regular forecast and scores survive the actual rep cloud mapping', async () => {
+  const history = Array.from({ length: 6 }, (_, i) => recoveryRows('legacy', {
+    sessionId: `prior-${i}`, date: `2026-09-0${i + 1}`,
+  })).flat();
+  const models = buildPredictionModels(history, 'Crusher', 'L', 30, {
+    threeExpPriors: buildThreeExpPriors(history), referenceDate: '2026-09-20' });
+  const row = recoveryRows('measured', { date: '2026-09-20' })[0];
+  const p = preparePrediction(models, [], { loadKg: 30, target: 30, rest: 20, preparedAt: '2026-09-20T09:00:00Z' });
+  row.force_recording.prediction_check = completePrediction(p, [], row);
+  mockOrder.mockResolvedValue({ data: JSON.parse(JSON.stringify([repPayload(row, 'user')])), error: null });
+  const restored = await fetchReps();
+  expect(restored[0].force_recording.prediction_check).toEqual(row.force_recording.prediction_check);
+  expect(summarizePredictions(restored)).toEqual(summarizePredictions([row]));
+  expect(summarizePredictions(restored).days).toBe(1);
+});
 
 test('beta protocol survives cloud serialization without making tired holds fresh capacity', async () => {
   const rows = [1, 2].map(n => ({ id: `beta-${n}`, date: '2026-09-23', grip: 'Micro', hand: 'L',
