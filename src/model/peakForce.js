@@ -1,3 +1,4 @@
+import { PEAK_HOLD_S, PEAK_ROUNDS, PEAK_ROUND_REST_S, isValidPeakMeasurement } from './peakTest.js';
 // ─────────────────────────────────────────────────────────────
 // PEAK FORCE TREND — observed ceiling + standardized trajectory
 // ─────────────────────────────────────────────────────────────
@@ -54,7 +55,7 @@ export function buildPeakForceTrend(history, {
   const observedByGrip = {};
   const maxIntentByGrip = {};
   for (const r of history) {
-    if (!isValidFailureRep(r) || !r.grip || !r.date) continue;
+    if (!(isValidFailureRep(r) || isValidPeakMeasurement(r)) || !r.grip || !r.date) continue;
     // Seed-artifact guard: a seeded/backfilled twin mirrors its (often
     // inflated) load into peak_force_kg too — avg==peak is not a real
     // measurement, so it can't set a PR or a session best.
@@ -194,14 +195,13 @@ export function buildPeakForceTrend(history, {
 // ─────────────────────────────────────────────────────────────
 // PEAK TEST CADENCE — periodic max-strength test
 // ─────────────────────────────────────────────────────────────
-// Peak Test is the single short-strength protocol. Five seconds guides load
-// selection; sustain the selected force until failure, not a countdown.
-// Save measured average + actual duration separately from instantaneous peak.
+// Three brief maximal pulls per hand, alternating, with 60s between rounds.
+// Version 2 measures peak force only; version 1 sustained tests remain unchanged.
 export const PEAK_TEST_ID = 'peak_test';
 export const isPeakTestRep = rep => rep?.force_recording?.session_protocol?.id === PEAK_TEST_ID;
-export const MAX_TEST_TARGET_S = 5;
-export const MAX_TEST_ATTEMPTS = 3;
-export const MAX_TEST_REST_S = 150;
+export const MAX_TEST_TARGET_S = PEAK_HOLD_S;
+export const MAX_TEST_ATTEMPTS = PEAK_ROUNDS;
+export const MAX_TEST_REST_S = PEAK_ROUND_REST_S;
 // Cadence. Peak is fairly flat month-to-month, so ~4 weeks between
 // tests keeps the reading fresh without over-testing. This is a
 // MEASUREMENT-freshness window (when did we last read your max),
@@ -225,7 +225,7 @@ export function maxTestStaleness(gripHistory, todayStr, {
 } = {}) {
   let lastDate = null;
   for (const r of gripHistory || []) {
-    if (!r || !r.date || !isValidFailureRep(r)) continue;
+    if (!r || !r.date || !(isValidFailureRep(r) || isValidPeakMeasurement(r))) continue;
     if (isSeedArtifactRep(r)) continue;  // a fake peak must not silence the cadence
     const peak = Number(r.peak_force_kg);
     if (!(peak > 0 && peak < PEAK_MAX_KG)) continue;

@@ -1,3 +1,5 @@
+import { peakMeasurementRecord, isValidPeakMeasurement } from '../../model/peakTest.js';
+import { startingHandForDay } from '../../model/handOrder.js';
 const mockOrder = jest.fn();
 jest.mock('../supabase.js', () => ({supabase: {from: () => ({select: () => ({order: (...args) => mockOrder(...args)})})}}));
 import { repPayload, fetchReps } from '../sync.js';
@@ -67,4 +69,18 @@ test('Peak Test cloud round-trip preserves sustained duration separately from pe
   const [restored] = await fetchReps();
   expect(restored).toMatchObject(rep);
   expect(freshFitReps([restored])[0]).toMatchObject({ actual_time_s: 7.2, avg_force_kg: 20 });
+});
+
+
+test('peak-only measurements and the daily hand order survive cloud round-trip', async () => {
+  const rep = peakMeasurementRecord({ stats: { actualTime:3,avgForce:20,peakForce:28,failureValid:true },
+    hand:'R',round:0,grip:'Micro',sessionId:'peak-session',date:'2026-09-24',
+    firstHand:'R',source:'warmup',startedAt:'2026-09-24T12:00:00Z' });
+  mockOrder.mockResolvedValue({data:[repPayload(rep,'user')],error:null});
+  const restored=await fetchReps();
+  expect(isValidPeakMeasurement(restored[0])).toBe(true);
+  expect(freshFitReps(restored)).toEqual([]);
+  expect(recoveryEvidence(restored).eligible).toBe(false);
+  expect(startingHandForDay(restored,'2026-09-24')).toBe('R');
+  expect(startingHandForDay(restored,'2026-09-25')).toBe('L');
 });

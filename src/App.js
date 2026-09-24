@@ -1,3 +1,4 @@
+import { PeakTestView } from './views/PeakTestView.jsx';
 import { TindeqBattery } from "./views/cards/TindeqBattery.jsx";
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-exp F-D / curve-trust prescription · Tindeq Progressor BLE
@@ -6,7 +7,7 @@ import React, {
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
-import { Btn } from "./ui/components.js";
+import { Btn, PageFrame } from "./ui/components.js";
 import { fmtW } from "./ui/format.js";
 
 // Top-level views extracted from this file. See src/views/.
@@ -629,6 +630,12 @@ export default function App() {
           );
         }
 
+        if (config.peakTest && phase !== "idle") {
+          return <PageFrame style={{ padding: '20px 16px' }}><PeakTestView key={sessionId} grip={config.grip} hand={config.hand}
+            history={history} tindeq={tindeq} addReps={addReps} unit={unit}
+            onClose={() => setPhase("idle")} /></PageFrame>;
+        }
+
         if (phase === "offset_prompt") {
           return <ManualOffsetPrompt onChoose={chooseOffset} />;
         }
@@ -665,7 +672,7 @@ export default function App() {
         }
 
         if (phase === "switch_hands") {
-          return <SwitchHandsView onReady={() => setPhase("rep_ready")} />;
+          return <SwitchHandsView activeHand={activeHand} onReady={() => setPhase("rep_ready")} />;
         }
 
         if (phase === "resting") {
@@ -705,6 +712,7 @@ export default function App() {
       {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       {tab === 2 && (
         <ClimbView
+          addReps={addReps}
           activities={activities}
           onLogActivity={addActivity}
           onNavigateToHistory={() => setTab(4)}

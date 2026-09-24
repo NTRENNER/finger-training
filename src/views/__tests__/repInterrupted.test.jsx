@@ -76,12 +76,12 @@ test('a fully recorded prescribed set is described as complete', () => {
   expect(screen.getByRole('heading', {name:'Recommended Set Complete'})).toBeInTheDocument();
 });
 
-test('Peak Test does not stop at five seconds or when force exceeds the selected load', () => {
+test('regular short holds do not stop at five seconds or when force exceeds the selected load', () => {
   let start, finish;
   const onRepDone = jest.fn();
   const tindeq = { targetKgRef: {}, connected: true, force: 28, avgForce: 24, peak: 28,
     startAutoDetect: (a, b) => { start = a; finish = b; }, stopAutoDetect: jest.fn() };
-  render(<AutoRepSessionView session={{ ...session, config: { ...config, peakTest: true,
+  render(<AutoRepSessionView session={{ ...session, config: { ...config,
     goal: 'max_strength', targetTime: 5, repsPerSet: 3, restTime: 150 } }}
     onRepDone={onRepDone} onAbort={() => {}} tindeq={tindeq} />);
   act(() => start());

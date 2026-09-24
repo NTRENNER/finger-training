@@ -1,3 +1,4 @@
+import { startingHandForDay } from '../../model/handOrder.js';
 import { measuredProgress } from "../../model/measuredProgress.js";
 import { sessionPerformanceContext } from "../../model/sessionPerformanceContext.js";
 import { trainingPurpose } from "../../model/trainingPurpose.js";
@@ -495,7 +496,7 @@ export function SessionPlanCard({
   // Total session time (per-hand × 2 if Both)
   const perHandSec = (reps || 0) * (activeT || 0) + Math.max(0, (reps || 1) - 1) * (rest || 0);
   const both = hand === "Both";
-  const totalSec = both ? perHandSec * 2 : perHandSec;
+  const totalSec = isPeakTest ? reps * activeT * (both ? 2 : 1) + (reps - 1) * rest : both ? perHandSec * 2 : perHandSec;
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
@@ -569,7 +570,7 @@ export function SessionPlanCard({
         // Under a tile override the ladder belongs to the override zone,
         // so the Recommended card falls back to the engine's curve pick.
         const recLadder = isOverridden ? null : ladder;
-        const purpose = trainingPurpose(rec, recLadder);
+        const purpose = rec.peakTest ? { label: 'Measure your peak', text: 'Three brief pulls per hand help us measure your maximum force.' } : trainingPurpose(rec, recLadder);
         const recT = recLadder ? recLadder.T : rec.T;
         let recLoadKg, recL, recR;
         if (recLadder && ladderPlanLoadByHand) {
@@ -620,6 +621,7 @@ export function SessionPlanCard({
                   {recT}<span style={{ fontSize: 13, color: C.muted, marginLeft: 2 }}>s</span>
                 </div>
               </div>
+              {rec.peakTest ? <div style={{ flex: 1, textAlign: 'center', fontWeight: 700, color: C.blue }}>Maximum effort<br /><span style={{ fontSize: 12, fontWeight: 400 }}>No target weight</span></div> : <>
               <div style={{ flex: 1, textAlign: "center" }}>
                 <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
                   Load
@@ -639,7 +641,8 @@ export function SessionPlanCard({
                     {recR != null && <>R {fmtW(recR, unit)}</>}
                   </div>
                 )}
-              </div>
+              </div></>}
+
             </div>
             <div style={{ marginTop: 12, fontSize: 16, lineHeight: 1.5, color: C.text, textAlign: "left" }}><b>{purpose.label}:</b> {purpose.text}</div>
             <div style={{ marginTop: 10, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
@@ -950,7 +953,7 @@ export function SessionPlanCard({
             </span>
           </div>
           <div style={{ fontSize: "var(--session-choice-meta-size, 10px)", color: C.muted, lineHeight: 1.4 }}>
-            {MAX_TEST_ATTEMPTS} pulls per hand · {MAX_TEST_REST_S}s rest
+            {MAX_TEST_ATTEMPTS} pulls per hand · {MAX_TEST_REST_S}s between rounds
           </div>
           <div style={{
             marginTop: 4,
@@ -965,10 +968,13 @@ export function SessionPlanCard({
         </button>
       </div>
       {isPeakTest && <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginTop: 12 }}>
-        Aim for about {MAX_TEST_TARGET_S}s at the selected load. Hold until force failure.
-        {" "}Records your peak and the force you sustained.
+        Build force smoothly. Pull as hard as you can for {MAX_TEST_TARGET_S}s, then release.
+        {" "}Alternate hands for three rounds. Records peak force; no target load or failure hold.
       </div>}
       </>}
+      {hand === 'Both' && <p style={{ fontSize: 12, color: C.muted, marginTop: 16 }}>
+        Today starts with your {startingHandForDay(history, ymdLocal()) === 'L' ? 'left' : 'right'} hand.
+      </p>}
       {plannerFooter}
     </Card>
   );

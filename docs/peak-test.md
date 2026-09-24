@@ -1,38 +1,44 @@
-# Peak Test and the five-domain rotation
+# Peak Test in warmup and training
 
-Peak Test is the single planner option for short-duration strength work. Normal
-recommendations and coverage reminders use Power, Power/Strength, Strength,
-Strength/Endurance and Endurance. Max remains in the six-domain analysis and
-all historical records remain intact. A Max observation has no automatic
-14-day coverage deadline or score boost.
+The planner has five routine training domains plus Peak Test. Max remains in
+six-domain analysis and historical records. The 4–5–6 ladder is unchanged.
 
-Peak Test uses three attempts per hand with 150 seconds of rest. The load is
-selected for approximately five seconds; maintain that force until muscular
-failure. It is not a five-second countdown, and exceeding the target force
-never ends the attempt. Existing force tolerance and confirmation settings
-continue to apply. The runner enforces this protocol even if an old caller
-supplies a different duration, repetition count or ladder pin.
+Peak Test now measures brief maximal force: three 3-second pulls per hand,
+alternating hands, with 60 seconds after each completed round except the last.
+There is no target load or requirement to reach failure. Build force smoothly,
+pull hard, then release. The sensor starts each pull; the timer ends it and
+requires release before another can begin. After rest the app waits for the
+user's next pull, so additional recovery is always possible. Single-hand tests
+use three attempts and two rests. Tindeq is required for a measured peak.
 
-Each attempt saves its measured average force with its actual measured hold
-duration, separately from its instantaneous peak. Only evidence accepted by
-the existing fresh-capacity rules enters the curve (normally the first valid
-attempt in the first set). A later attempt is not automatically declared fresh
-because it had a long rest. An interrupted opener is not replaced by a later
-attempt as fresh evidence. Peak measurements and historical sustained-force
-measurements are never interchanged or rewritten.
+In warmup, “Include Peak Test today” is off on every new warmup. When selected,
+it replaces the BORK maximal block after the normal two-handed ramp. Route
+warmup also supports this optional block after its ramp. Normal warmup holds
+remain timed and unsaved. Users see the same hand cue as training. The shared
+Peak Test flow saves each attempt, shows each hand's best valid result, and
+lets the user continue with no forced rest after the last round.
 
-New records carry force_recording.session_protocol.id = peak_test. This uses
-the existing JSON storage and export path; no migration is required. History
-labels these sessions Peak Test. They cannot advance a density ladder and do
-not offer extra sets. Regular 4–5–6 progression is unchanged.
+New tests use force_recording.session_protocol version 2 with id peak_test,
+source warmup/standalone, capacity_eligible false, peak_valid, failure_valid
+false and end_reason peak_test_complete for usable measurements. Interrupted
+attempts remain activity but cannot update peak history or the reminder.
+Brief pulls under one second and incomplete sensor traces are not accepted.
+The average and measured duration are retained for context; they are never
+used as a failure-capacity point. Version 1 sustained Peak Tests and all legacy
+records retain their existing meaning. No database migration is required.
 
-For sparse grips, the initial upper-curve check uses this same Peak Test
-instead of the former four short-rest pulls. The lower-bound check still uses
-four conservative long holds. Established grips are not assigned recurring
-Max workouts through coverage scoring. Manual-only short history is identified
-as a Peak Test estimate rather than a sixth routine workout choice.
+Valid version 2 peaks update peak history, the optional 28-day reminder and the
+measured peak ceiling. During sparse-history calibration they can satisfy the
+upper measurement check; a conservative 20% of peak is only an initial lower
+probe estimate, never a fabricated sustained-force observation. Warmup curve
+fitting and ordinary recovery/capacity fitting exclude peak-only rows.
 
-The existing optional 28-day peak-measurement reminder remains separate from
-routine training coverage; its planner badge says check-in, not due. It is a
-measurement-age prompt, not a claim of lost strength. Interrupted attempts do
-not refresh it. No precise optimal testing frequency is asserted.
+Starting hands alternate on actual recorded finger-training days, not calendar
+days. The initial default is left; existing historical two-hand sessions are
+interpreted as left-first. Every new rep saves force_recording.hand_order with
+the date and first hand. All grips, extra sets and Peak Tests on that day use
+the same choice. Skipped calendar days and starts cancelled before a pull do
+not rotate it. Explicit single-hand sessions still honor their selected hand.
+A session crossing midnight retains its starting date/order. This survives
+reload and cloud history sync; simultaneous offline devices cannot coordinate
+until their histories synchronize.

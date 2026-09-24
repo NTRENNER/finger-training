@@ -25,7 +25,7 @@ afterEach(() => { jest.useRealTimers(); delete navigator.bluetooth; });
 
 // Real sensor hook and real warm-up view. Only the physical BLE transport
 // and generated durations are substituted so an entire sequence is fast.
-async function setup() {
+async function setup({ peak = false } = {}) {
   let listener, hook;
   let streaming = false;
   const commands = [];
@@ -43,11 +43,14 @@ async function setup() {
   } };
   Object.defineProperty(navigator, "bluetooth", { configurable: true, value: { requestDevice: async () => device } });
   const onClose = jest.fn();
+  const addReps = jest.fn();
   function Harness({ visible = true }) {
     hook = useTindeq();
-    return visible && <WarmupView history={[]} wLog={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} />;
+    return visible && <WarmupView history={[]} wLog={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} addReps={addReps} />;
   }
   const view = render(<Harness />);
+  expect(screen.getByRole("checkbox", { name: "Include Peak Test today" })).not.toBeChecked();
+  if (peak) fireEvent.click(screen.getByRole("checkbox", { name: "Include Peak Test today" }));
   await act(async () => { await hook.connect(); });
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start", exact: true })); });
   const send = kg => {
@@ -64,7 +67,7 @@ async function setup() {
     }
   };
   const rest = () => { hold(0, 2000); };
-  return { ...view, hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, rest, commands, onClose };
+  return { ...view, hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, rest, commands, onClose, addReps };
 }
 
 test("first timed hold, rest release, and the next pull use one uninterrupted sensor stream", async () => {
@@ -154,4 +157,28 @@ test("skipping an active hold still requires release and leaving warm-up stops t
   expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
   hideWarmup();
   await waitFor(() => expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0], CMD_STOP[0]]));
+});
+
+
+test('optional Peak Test replaces the maximal block, saves only its pulls, then returns to warmup', async () => {
+  generateWarmupProtocol.mockImplementation(({ includePeakTest }) => ({ ...protocol, steps: [
+    hang('Two handed', 'Micro', 10),
+    ...(includePeakTest ? [{ id: 'peak', type: 'peak_test', grip: 'Micro', title: 'Micro Peak Test', restAfterSec: 0 }]
+      : [protocol.steps[4]]),
+    protocol.steps[5],
+  ] }));
+  const { hold, send, rest, addReps } = await setup({ peak: true });
+  hold(20, 2000); rest();
+  await act(async () => {}); // allow the shared sensor queue to switch views
+  expect(screen.getByText('🤚 Left Hand')).toBeInTheDocument();
+  expect(addReps).not.toHaveBeenCalled();
+  for(let round=0;round<3;round++) {
+    for(let h=0;h<2;h++) { hold(30,3100); send(0); }
+    if(round<2) act(() => jest.advanceTimersByTime(61000));
+  }
+  expect(addReps).toHaveBeenCalledTimes(6);
+  expect(addReps.mock.calls.flatMap(c=>c[0]).every(r=>r.force_recording.session_protocol.source==='warmup')).toBe(true);
+  fireEvent.click(screen.getByRole('button',{name:'Continue warm-up'}));
+  expect(screen.getByText('Pullup Finisher')).toBeInTheDocument();
+  expect(screen.queryByRole('timer',{name:'Rest'})).not.toBeInTheDocument();
 });

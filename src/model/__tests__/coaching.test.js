@@ -868,7 +868,7 @@ describe("cold-start seeding", () => {
   test("COLD_START_MIN_DURATIONS matches the baseline gate's duration requirement", () => {
     expect(COLD_START_MIN_REPS).toBe(5);
     expect(COLD_START_MIN_DURATIONS).toBe(3);
-    expect(COLD_START_SHORT_TARGET_T).toBe(5);
+    expect(COLD_START_SHORT_TARGET_T).toBe(3);
     expect(COLD_START_BOUNDARY_REPS).toBe(4);
     expect(COLD_START_BOUNDARY_REST_S).toBe(20);
   });

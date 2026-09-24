@@ -1,3 +1,4 @@
+import { HandCue } from './cards/HandCue.jsx';
 import { TindeqBattery, InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { finalizeDeviceActivity } from "../model/forceRecording.js";
 import { evidenceLabel } from "../model/forceRecording.js";
@@ -713,7 +714,7 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, restSeconds, 
   );
 }
 
-export function SwitchHandsView({ onReady }) {
+export function SwitchHandsView({ onReady, activeHand = "R" }) {
   // Wall-clock countdown — see RestView for the rationale.
   const SWITCH_SECONDS = 10;
   const [remaining, setRemaining] = useState(SWITCH_SECONDS);
@@ -743,8 +744,8 @@ export function SwitchHandsView({ onReady }) {
   return (
     <PageFrame style={{ padding: "40px 16px", textAlign: "center" }}>
       <div style={{ fontSize: 56 }}>🤚➡️✋</div>
-      <h2 style={{ margin: "16px 0 8px" }}>Switch to Right Hand</h2>
-      <p style={{ color: C.muted, marginBottom: 24 }}>Left hand complete. Get ready to train right hand.</p>
+      <h2 style={{ margin: "16px 0 8px" }}>Switch to {activeHand === "R" ? "Right" : "Left"} Hand</h2>
+      <p style={{ color: C.muted, marginBottom: 24 }}>{activeHand === "R" ? "Left" : "Right"} hand complete. Get ready to train {activeHand === "R" ? "right" : "left"} hand.</p>
       <div style={{ fontSize: 80, fontWeight: 900, color: remaining > 3 ? C.green : C.orange, lineHeight: 1, marginBottom: 24 }}>
         {remaining}
       </div>
@@ -1073,17 +1074,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
           </>
         ) : (
           <>
-            <div style={{
-              fontSize: 13, color: C.muted, letterSpacing: 1.2,
-              textTransform: "uppercase", marginBottom: 4,
-            }}>Use your</div>
-            <div style={{
-              fontSize: 32, fontWeight: 900,
-              color: activeHand === "R" ? C.orange : C.blue,
-              marginBottom: 14,
-            }}>
-              {activeHand === "R" ? "✋ Right Hand" : "🤚 Left Hand"}
-            </div>
+            <HandCue hand={activeHand} />
 
             {/* Program-recommended target weight */}
             <div style={{

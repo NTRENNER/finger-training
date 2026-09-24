@@ -131,7 +131,7 @@ test('shadow forecasts persist for both hands while live history changes and loa
   try {
     const { hook, addReps } = setup({ history });
     let firstModel;
-    for (const hand of ['L', 'R']) {
+    for (const hand of ['R', 'L']) {
       for (let i = 0; i < 5; i++) {
         complete(hook, { startedAtMs: i * 60000, endedAtMs: i * 60000 + 25000 });
         const r = addReps.mock.calls.at(-1)[0][0];
@@ -142,19 +142,19 @@ test('shadow forecasts persist for both hands while live history changes and loa
         expect(p.prior_rep_ids).toHaveLength(i);
         if (i === 0) {
           expect(p.prediction).toEqual(p.fresh_only);
-          if (hand === 'L') firstModel = p.model;
+          if (hand === 'R') firstModel = p.model;
         }
-        if (hand === 'L') expect(p.model).toEqual(firstModel);
+        if (hand === 'R') expect(p.model).toEqual(firstModel);
         // Simulate data changing during the workout. This must not refit it.
         history.push({ ...history[0], id: `new-${hand}-${i}`, session_id: `new-${hand}-${i}`,
           date: '2026-09-23', avg_force_kg: 100 });
         hook.rerender();
         if (i < 4) act(() => hook.result.current.handleRestDone());
       }
-      if (hand === 'L') act(() => hook.result.current.setPhase('rep_ready'));
+      if (hand === 'R') act(() => hook.result.current.setPhase('rep_ready'));
     }
     const saved = JSON.parse(JSON.stringify(addReps.mock.calls.flatMap(c => c[0])));
-    expect(saved.map(r => r.prescribed_load_kg)).toEqual([22,30,26,18,14,27,35,31,23,19]);
+    expect(saved.map(r => r.prescribed_load_kg)).toEqual([27,35,31,23,19,22,30,26,18,14]);
     expect(summarizeMixedPredictions(saved).excluded.edited_since_prediction).toBeUndefined();
     expect(saved.filter(r => r.force_recording.capacity_eligible)).toHaveLength(2);
     // A new session gets a new snapshot and no previous hand's fatigue.

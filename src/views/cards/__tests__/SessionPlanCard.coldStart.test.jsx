@@ -56,17 +56,17 @@ test("upper-bound stage hides unsupported alternatives and sends the exact probe
   expect(screen.getAllByText("after upper anchor")).toHaveLength(5);
   expect(screen.getAllByRole("button").filter(button => button.disabled)).toHaveLength(5);
   expect(document.body).toHaveTextContent("Pulls3");
-  expect(document.body).toHaveTextContent("Rest150s");
+  expect(document.body).toHaveTextContent("Rest60s");
 
   await waitFor(() => expect(onApplyPlan).toHaveBeenCalled());
   expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({
     goal: "max_strength",
-    targetTime: 5,
+    targetTime: 3,
     peakTest: true,
     repsPerSet: 3,
-    restTime: 150,
+    restTime: 60,
   });
-  expect(onApplyPlan.mock.calls.at(-1)[0].plannedLoadByHand.L).toBeGreaterThan(0);
+  expect(screen.getByText('No target weight')).toBeInTheDocument();
 });
 
 test("lower-bound stage uses the four-rep recovery protocol and defers the middle", async () => {
@@ -92,7 +92,7 @@ test("lower-bound stage uses the four-rep recovery protocol and defers the middl
   expect(plan.plannedLoadByHand.R).toBeCloseTo(1.6, 1);
 });
 
-test("peak test is a full-width selectable plan that uses the normal apply path", async () => {
+test("peak test is a selectable brief-pull plan that uses the normal apply path", async () => {
   const history = [
     rep("L", 5, 5, 6, 1),
     rep("R", 5, 5, 8, 1),
@@ -102,20 +102,20 @@ test("peak test is a full-width selectable plan that uses the normal apply path"
   expect(screen.getAllByRole("button", { name: /^Train / })).toHaveLength(5);
   const peakOption = screen.getByRole("button", { name: "Run peak test" });
 
-  expect(peakOption).toHaveStyle({ gridColumn: "1 / -1" });
+  expect(peakOption.style.gridColumn).toBe("");
   fireEvent.click(peakOption);
 
   await waitFor(() => expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({
     goal: "max_strength",
-    targetTime: 5,
+    targetTime: 3,
     peakTest: true,
     repsPerSet: 3,
-    restTime: 150,
+    restTime: 60,
     ladderLoadByHand: null,
     plannedLoadByHand: null,
   }));
   expect(document.body).toHaveTextContent("Pulls3");
-  expect(document.body).toHaveTextContent("Rest150s");
+  expect(document.body).toHaveTextContent("Rest60s");
 
   fireEvent.click(screen.getByRole("button", { name: "Use recommended session" }));
   await waitFor(() => expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({

@@ -1,3 +1,4 @@
+import { isPeakMeasurement, isValidPeakMeasurement } from './peakTest.js';
 // Descriptive force variation; valid measured efforts remain curve evidence.
 import { isMixedDomainRep, mixedDomainMetadata } from './mixedDomain.js';
 
@@ -84,6 +85,7 @@ export function isCapacityEvidenceRep(rep) {
 
 export function evidenceLabel(rep) {
   if (rep?.force_recording?.duration_basis === "elapsed_activity_estimate") return "Interrupted — elapsed activity time is estimated";
+  if (isPeakMeasurement(rep)) return isValidPeakMeasurement(rep) ? "Peak measurement — not a failure hold" : "Interrupted peak test — excluded";
   if (!isValidFailureRep(rep)) return "Interrupted — activity only";
   if (isMixedDomainRep(rep) && mixedDomainMetadata(rep).role === 'fatigued_hold') return "Beta · fatigued hold — recorded separately from fresh capacity";
   if (rep.force_recording?.capacity_eligible === false) return "Incomplete failure evidence — activity only";

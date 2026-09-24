@@ -1,3 +1,4 @@
+import { startingHandForDay, otherHand, handOrderMetadata } from '../model/handOrder.js';
 // ──────────────────────────────────────────────────────────────
 // useSessionRunner — in-workout finite state machine
 // ──────────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS } from "../model/setRecommendation.js";
 import { pushDailyState } from "../lib/sync.js";
 import { buildMixedLoadModel, prepareMixedPrediction, completeMixedPrediction } from '../model/mixedLoadPrediction.js';
-import { PEAK_TEST_ID, MAX_TEST_ATTEMPTS, MAX_TEST_REST_S, MAX_TEST_TARGET_S } from '../model/peakForce.js';
+import { MAX_TEST_ATTEMPTS, MAX_TEST_REST_S, MAX_TEST_TARGET_S } from '../model/peakForce.js';
 import { MIXED_DOMAIN_ID, MIXED_DOMAIN_REST_S, mixedDomainSteps, validMixedDomainPlan } from '../model/mixedDomain.js';
 
 // Manual-timing offset (June 2026): non-Tindeq users tap Done a beat
@@ -154,6 +155,7 @@ export function useSessionRunner({
   const [lastRepResult, setLastRepResult] = useState(null);
   const [leveledUp,   setLeveledUp]   = useState(false);
   const [newLevel,    setNewLevel]    = useState(1);
+  const firstHandRef = useRef("L");
   const [activeHand,  setActiveHand]  = useState("L"); // tracks current hand in Both mode
   // Per-session manual-timing offset opt-in (see MANUAL_OFFSET_S).
   // Chosen at session start via the offset_prompt phase; false until
@@ -240,6 +242,7 @@ export function useSessionRunner({
     // daily_state and stamped on every rep so the whole session stays
     // on the day it began even if it runs past local midnight.
     const startedDay = today();
+    firstHandRef.current = startingHandForDay(history, startedDay);
     mixedModelsRef.current = cfg.mixedDomainPlan ? Object.fromEntries(
       (cfg.hand === 'Both' ? ['L', 'R'] : [cfg.hand]).map(h =>
         [h, buildMixedLoadModel(history, cfg.grip, h, startedDay)])) : {};
@@ -261,7 +264,7 @@ export function useSessionRunner({
     setCurrentRep(0);
     setLeveledUp(false);
     setLastRepResult(null);
-    setActiveHand(cfg.hand === "Both" ? "L" : cfg.hand);
+    setActiveHand(cfg.hand === "Both" ? firstHandRef.current : cfg.hand);
     setManualOffset(false);
     // No Tindeq → ask once whether to apply the 2s manual-timing offset
     // before the first rep. Tindeq sessions skip straight into the rep
@@ -332,6 +335,7 @@ export function useSessionRunner({
 
   // ── Handle rep completion ─────────────────────────────────
   const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null, failureValid = true, endReason = "muscular_failure", forceRecording = null, startedAtMs = null, endedAtMs = null, loadProvenance = null }) => {
+    if (config.peakTest) return; // PeakTestView owns peak-only recording and alternating rounds.
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
@@ -369,10 +373,8 @@ export function useSessionRunner({
         role: currentRep === 0 ? 'opening_hold' : 'fatigued_hold',
         duration_reference: 'fresh_load_reference' },
       ...(currentRep > 0 ? { capacity_eligible: false } : {}),
-    } : config.peakTest ? { ...forceRecording,
-      session_protocol: { id: PEAK_TEST_ID, version: 1, position: currentRep + 1,
-        duration_reference: 'load_selection_until_failure' },
-    } : forceRecording;
+    } : { ...forceRecording };
+    recordedForce.hand_order = handOrderMetadata(firstHandRef.current, sessionDate || today());
     const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {
       // Real UUID, not uid(): pushRep re-stamps non-UUID ids into the
@@ -490,9 +492,9 @@ export function useSessionRunner({
     if (nextRep >= config.repsPerSet) {
       // Set complete. In Both-mode, switch to the other hand for
       // its set; otherwise finish.
-      if (config.hand === "Both" && activeHand === "L") {
+      if (config.hand === "Both" && activeHand === firstHandRef.current) {
         setCurrentRep(0);
-        setActiveHand("R");
+        setActiveHand(otherHand(firstHandRef.current));
         setPhase("switch_hands");
       } else {
         finishSession([...sessionReps, repRecord]);
@@ -519,7 +521,7 @@ export function useSessionRunner({
     if (mixed || config.peakTest || phase !== "done" || currentSet >= MAX_OPTIONAL_SETS) return;
     setCurrentSet(s => s + 1);
     setCurrentRep(0);
-    setActiveHand(config.hand === "Both" ? "L" : config.hand);
+    setActiveHand(config.hand === "Both" ? firstHandRef.current : config.hand);
     setLastRepResult(null);
     setLeveledUp(false);
     repDoneLockRef.current = false;

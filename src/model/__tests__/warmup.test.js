@@ -132,3 +132,14 @@ describe("getRecentMaxPullups — id migration", () => {
     expect(getRecentMaxPullups(wLog, { bodyWeightLbs: BW_LBS })).toBeNull();
   });
 });
+
+
+test.each(['boulder','route'])('optional peak block preserves %s ramp and replaces rather than stacks maximal work', mode => {
+  const base = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode});
+  const peak = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode,includePeakTest:true});
+  expect(base.steps.some(s=>s.type==='peak_test')).toBe(false);
+  expect(peak.steps.filter(s=>s.type==='peak_test')).toHaveLength(1);
+  expect(peak.steps.some(s=>s.type==='bork')).toBe(false);
+  expect(peak.steps.filter(s=>s.type==='hang')).toEqual(base.steps.filter(s=>s.type==='hang'));
+  expect(peak.steps.find(s=>s.type==='peak_test').restAfterSec).toBe(0);
+});

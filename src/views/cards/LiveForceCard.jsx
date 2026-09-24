@@ -67,7 +67,7 @@ function BigTimer({ seconds, targetSeconds, running, referenceOnly = false }) {
 //                marker visually for typical training loads)
 //   unit       — "lbs" or "kg" — display only, kg is the wire format
 //   numberSize — CSS font size for the live force; warm-ups scale for phones
-function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs", numberSize = 108 }) {
+function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs", numberSize = 108, emphasizePeak = false }) {
   const fPct    = clamp(force / maxDisplay, 0, 1);
   const avgPct  = clamp(avg   / maxDisplay, 0, 1);
   const tgtPct  = targetKg != null ? clamp(targetKg / maxDisplay, 0, 1) : null;
@@ -102,12 +102,12 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
           as the bar marker below (avg green, peak orange). */}
       <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", flexWrap: "wrap", gap: 16, color: C.muted, margin: "12px 0" }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>Average weight</div>
+          <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>{emphasizePeak ? 'Peak force' : 'Average weight'}</div>
           <div style={{ fontSize: "clamp(32px, 9vw, 44px)", fontWeight: 800, lineHeight: 1.1, color: C.green, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-            {fmtW(avg, unit)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
+            {fmtW(emphasizePeak ? peak : avg, unit)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
           </div>
         </div>
-        <span style={{ fontSize: 12 }}>Max: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(peak, unit)}</b></span>
+        <span style={{ fontSize: 12 }}>{emphasizePeak ? 'Avg' : 'Max'}: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(emphasizePeak ? avg : peak, unit)}</b></span>
       </div>
       {/* Bar — live force as colored fill, avg as a green tick, target
           as a faint white marker. */}

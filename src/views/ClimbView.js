@@ -114,6 +114,7 @@ function RecentClimbRow({ climb: c, showTopBorder }) {
 }
 
 export function ClimbView({
+  addReps,
   activities = [],
   onLogActivity = () => {},
   // Optional — when provided, the "View full history" button in the
@@ -137,6 +138,7 @@ export function ClimbView({
     return (
       <PageFrame style={{ padding: "20px 16px" }}>
         <WarmupView
+          addReps={addReps}
           history={history}
           wLog={wLog}
           bodyWeightKg={bodyWeight}

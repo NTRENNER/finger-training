@@ -1,3 +1,5 @@
+import { isValidPeakMeasurement } from './peakTest.js';
+import { isValidFailureRep, isCapacityEvidenceRep } from './forceRecording.js';
 // ─────────────────────────────────────────────────────────────
 // ADAPTIVE WARM-UP PROTOCOL GENERATOR
 // ─────────────────────────────────────────────────────────────
@@ -42,8 +44,8 @@
 // load, holds for the prescribed time, releases. No extrapolation —
 // loads always come from the curve at durations the curve has seen.
 //
-// IMPORTANT: warm-up reps DO NOT get logged or counted as training data.
-// Pure prescription — nothing flows back into the F-D fit.
+// Normal two-handed warmup holds remain unsaved. The optional single-hand
+// Peak Test saves peak-only observations, excluded from the failure F-D fit.
 //
 // Prescription model (rebuilt May 2026):
 //   - Holds are TWO-HANDED on one Tindeq, but the curve/MVC are
@@ -122,7 +124,7 @@ function fitGripAmps(history, grip) {
   // (T, F) failure data point. Drop the legacy r.failed filter.
   const pts = (history || [])
     .filter(r =>
-      r.grip === grip &&
+      isCapacityEvidenceRep(r) && r.grip === grip &&
       effectiveLoad(r) > 0 &&
       r.actual_time_s > 0
     )
@@ -253,7 +255,7 @@ function getRecentPeakMVC(history, grip, daysOld = 90) {
   const cutoffMs = Date.now() - daysOld * 24 * 60 * 60 * 1000;
   let maxPeak = 0;
   for (const r of history) {
-    if (r?.grip !== grip) continue;
+    if (r?.grip !== grip || !(isValidFailureRep(r) || isValidPeakMeasurement(r))) continue;
     const peak = Number(r?.peak_force_kg);
     if (!Number.isFinite(peak) || peak <= 0 || peak >= SANE_MAX_KG) continue;
     if (r.date) {
@@ -292,7 +294,7 @@ function getRecentPeakMVC(history, grip, daysOld = 90) {
  * Pullup finisher step:
  *   { id, title, type: 'pullup', targetReps, sets, restAfterSec, description }
  */
-export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "boulder" }) {
+export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "boulder", includePeakTest = false }) {
   if (!bodyWeightKg || bodyWeightKg <= 0) {
     return {
       ok: false,
@@ -421,7 +423,11 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
   // max-effort pulls on the Micro, no target — pull as hard as possible
   // ~5s, rest, repeat. PAP window opens 4-10 min later: that's the climb.
   // referenceMvcKg is two-handed (display ballpark on the gauge).
-  if (!isRoute && microMVC) {
+  if (includePeakTest) {
+    steps.push({ id: 'peak-test', title: `${ladderGrip} Peak Test`, type: 'peak_test',
+      grip: ladderGrip, intensityLabel: 'Single-handed · 3 rounds · 3s pulls · 60s between rounds',
+      restAfterSec: 0 });
+  } else if (!isRoute && microMVC) {
     steps.push({
       id: "bork-micro",
       title: "Micro BORK (potentiation primer)",

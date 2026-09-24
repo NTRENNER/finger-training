@@ -1,3 +1,4 @@
+import { isValidPeakMeasurement } from './peakTest.js';
 import { nominalPrescription } from "./prescription.js";
 import { effectiveSessionCount } from "./sessionConfidence.js";
 import { compareSessionOrder } from "./sessionOrder.js";
@@ -390,7 +391,7 @@ export const FRESH_TEST_STALE_DAYS = 45;
 
 // ── Cold-start boundary seeding (July 2026) ───────────────────
 // A sparse grip should identify the curve before optimizing training:
-//   1. three well-rested short efforts anchor the upper end;
+//   1. three brief maximal pulls measure the upper end;
 //   2. four deliberately conservative long holds anchor the lower end;
 //   3. the normal coverage engine fills the middle.
 //
@@ -452,16 +453,18 @@ function coldStartUpperAnchorRep(gripReps, hand) {
 export function coldStartLongProbeLoad(gripReps, hand, targetT = COLD_START_LONG_TARGET_T) {
   const reps = gripReps || [];
   const anchorRep = coldStartUpperAnchorRep(reps, hand);
-  if (!anchorRep || !(targetT > 0)) return null;
-  const anchorT = Math.max(1, Number(anchorRep.actual_time_s));
-  const anchorF = effectiveLoad(anchorRep);
-  const populationFraction = Math.pow(targetT / anchorT, -TAIL_B_PRIOR);
-  const fraction = Math.max(
-    COLD_START_LONG_INITIAL_MIN_FRACTION,
-    Math.min(1, populationFraction)
-  );
+  if (!(targetT > 0)) return null;
+  const peak = reps.filter(r => r.hand === hand && isValidPeakMeasurement(r))
+    .reduce((best, r) => !best || r.peak_force_kg > best.peak_force_kg ? r : best, null);
+  if (!anchorRep && !peak) return null;
+  const anchorT = anchorRep ? Math.max(1, Number(anchorRep.actual_time_s)) : null;
+  const anchorF = anchorRep ? effectiveLoad(anchorRep) : peak.peak_force_kg;
+  // A peak supports a conservative starting load, never a fabricated (3s, F)
+  // capacity point. Real lower-probe misses still revise this estimate below.
+  const fraction = anchorRep ? Math.max(COLD_START_LONG_INITIAL_MIN_FRACTION,
+    Math.min(1, Math.pow(targetT / anchorT, -TAIL_B_PRIOR))) : COLD_START_LONG_INITIAL_MIN_FRACTION;
   let value = anchorF * fraction;
-  let anchor = { T: anchorT, F: anchorF, date: anchorRep.date };
+  let anchor = anchorRep ? { T: anchorT, F: anchorF, date: anchorRep.date } : null;
 
   // A previous lower-bound attempt that still failed before the long
   // anchor threshold is useful evidence that the first probe was not
@@ -663,7 +666,9 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // Boundary-anchor state is hand-aware. In Both mode, one hand's
   // short/long point must not silently stand in for the other.
   const fitHands = Object.keys(handFits);
-  const hasUpperAnchor = hand => coldStartUpperAnchorRep(gripHistory, hand) != null;
+  const upperEvidence = history.filter(r => r?.grip === grip && r.date <= (today instanceof Date ? ymdLocal(today) : today));
+  const hasUpperAnchor = hand => coldStartUpperAnchorRep(gripHistory, hand) != null
+    || upperEvidence.some(r => r.hand === hand && isValidPeakMeasurement(r));
   const hasLowerAnchor = hand => freshGripReps.some(rep =>
     rep.hand === hand && rep.actual_time_s >= COLD_START_LONG_ANCHOR_MIN_T
   );
@@ -906,7 +911,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // margin, and because the curve is higher at the shorter hold it
   // naturally prescribes a HEAVIER load for a SHORTER target — the
   // overshoot-tolerant dose that actually clears the stale flag.
-  // Boundary probes carry an exact measurement duration (5s upper,
+  // Boundary probes carry an exact measurement duration (3s upper,
   // 220s lower). The generic zone-reference snap must not rewrite that
   // protocol merely because the new grip's zone is necessarily "never."
   if (
@@ -951,7 +956,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
 
   const headPres = prescription(history, best.hand, grip, best.T, presOpts);
   const headProbe = coldStartStage === "lower"
-    ? coldStartLongProbeLoad(gripHistory, best.hand, best.T)
+    ? coldStartLongProbeLoad(upperEvidence, best.hand, best.T)
     : null;
   const headBase = headProbe?.value
     ?? (headPres ? headPres.value : predForceThreeExp(handFits[best.hand].amps, best.T));
@@ -969,7 +974,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   for (const hand of Object.keys(handFits)) {
     const p = prescription(history, hand, grip, best.T, presOpts);
     const probe = coldStartStage === "lower"
-      ? coldStartLongProbeLoad(gripHistory, hand, best.T)
+      ? coldStartLongProbeLoad(upperEvidence, hand, best.T)
       : null;
     const base = probe?.value ?? p?.value;
     loadByHand[hand] = base > 0 ? capPeak(hand, base * oFactor) : null;

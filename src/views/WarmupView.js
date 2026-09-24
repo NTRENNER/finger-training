@@ -1,3 +1,4 @@
+import { PeakTestView } from './PeakTestView.jsx';
 import { TindeqBattery } from "./cards/TindeqBattery.jsx";
 // ─────────────────────────────────────────────────────────────
 // ADAPTIVE WARM-UP VIEW (Tindeq-driven)
@@ -82,7 +83,7 @@ function WarmupTime({ seconds, label, target }) {
   </div>;
 }
 
-export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", onClose }) {
+export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", onClose, addReps }) {
   // ── Warmup mode (boulder / route) ──
   // Persisted to LS so the user's last choice carries across sessions.
   // Default to "boulder" — most users are bouldering most of the time,
@@ -97,10 +98,14 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
     saveLS(LS_WARMUP_MODE_KEY, next);
   };
 
-  const protocol = useMemo(
-    () => generateWarmupProtocol({ history, wLog, bodyWeightKg, mode }),
-    [history, wLog, bodyWeightKg, mode]
+  const [includePeakTest, setIncludePeakTest] = useState(false);
+  const [frozenProtocol, setFrozenProtocol] = useState(null);
+  const previewProtocol = useMemo(
+    () => generateWarmupProtocol({ history, wLog, bodyWeightKg, mode, includePeakTest }),
+    [history, wLog, bodyWeightKg, mode, includePeakTest]
   );
+
+  const protocol = frozenProtocol || previewProtocol;
 
   // ── State machine ──
   const [phase, setPhase] = useState("preview"); // preview|needs-tindeq|swap-prompt|hang-armed|hang-active|rest|pullup|done
@@ -281,6 +286,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
       changePhase("needs-tindeq");
       return;
     }
+    setFrozenProtocol(previewProtocol);
     setStepIdx(0);
     setSetIdx(0);
     setPullupReps(0);
@@ -309,6 +315,8 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
       } else {
         changePhase("hang-armed");
       }
+    } else if (step.type === "peak_test") {
+      changePhase("peak-test");
     } else if (step.type === "pullup") {
       setPullupReps(0);
       changePhase("pullup");
@@ -426,7 +434,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
         </div>
         <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
           Timed two-handed holds, progressing from lighter to heavier loads.
-          {mode === "boulder"
+          {includePeakTest ? " Includes a single-handed Peak Test after the ramp." : mode === "boulder"
             ? " Includes five short maximum-effort pulls on the Micro."
             : " Includes a longer Micro hold to prepare for routes."}
           {" Connect the Crusher first; you'll be prompted to swap to the Micro mid-warmup."}
@@ -437,6 +445,11 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
           {modePill("boulder", "🪨 Bouldering", "Progressive holds and five short maximum-effort pulls.")}
           {modePill("route", "🧗 Routes", "Progressive holds and a longer Micro hold for routes.")}
         </div>
+        <label style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }}>
+          <input type="checkbox" checked={includePeakTest} onChange={e => setIncludePeakTest(e.target.checked)} />
+          Include Peak Test today
+        </label>
+        {includePeakTest && <p style={{ color: C.muted }}>Three 3-second pulls per hand, alternating hands. Rest 60 seconds between rounds. Replaces the maximal block; only the test measurements are saved.</p>}
         <div style={{ marginBottom: 16 }}>
           {steps.map((s, i) => (
             <div key={s.id} style={{
@@ -449,7 +462,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
                 <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{s.title}</div>
                 <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
                   {s.intensityLabel}
-                  {i < steps.length - 1 && ` · rest ${fmtSec(s.restAfterSec)}s`}
+                  {i < steps.length - 1 && s.restAfterSec > 0 && ` · rest ${fmtSec(s.restAfterSec)}s`}
                 </div>
               </div>
               <div style={{ textAlign: "right", marginLeft: 12 }}>
@@ -462,7 +475,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
                       {unit} · {s.targetSec}s
                     </div>
                   </>
-                ) : s.type === "bork" ? (
+                ) : s.type === "peak_test" ? <b>3 × L/R</b> : s.type === "bork" ? (
                   <>
                     <div style={{ fontSize: 22, fontWeight: 800, color: C.purple, lineHeight: 1 }}>
                       MVC
@@ -486,7 +499,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
         <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5, fontStyle: "italic" }}>
           Pullup count: {protocol.pullupSource.sourceText}
           {protocol.pullupSource.count != null && ` (${protocol.pullupSource.count})`}.
-          Nothing here gets logged as training data.
+          {includePeakTest ? "Only Peak Test measurements are saved. Warmup holds are not logged." : "Nothing here gets logged as training data."}
         </div>
 
         {/* Tindeq connect row — placed directly above the Start button
@@ -542,6 +555,11 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
         </div>
       </Card>
     );
+  }
+
+  if (phase === 'peak-test') {
+    return <PeakTestView grip={currentStep.grip} history={history} tindeq={tindeq}
+      addReps={addReps} unit={unit} source="warmup" onClose={advanceToNextStep} />;
   }
 
   // ── RENDER: NEEDS-TINDEQ (fallback for mid-warmup disconnect) ──
@@ -657,10 +675,10 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
           ✓ Warm-up complete
         </div>
         <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, marginBottom: 16 }}>
-          Forearms primed, fingers awake, neither flash-pumped nor under-cooked. The video calls for ~10 minutes of full rest now to clear fatigue, then you're ready for early goes.
+          Continue whenever you feel ready.
         </div>
         <div style={{ fontSize: 12, color: C.muted, marginBottom: 16, lineHeight: 1.5, fontStyle: "italic" }}>
-          Nothing here was logged — warm-up reps don't update the force curve.
+          {includePeakTest ? 'Peak Test measurements were saved separately. Warmup holds do not update the force curve.' : 'Nothing here was logged — warm-up reps do not update the force curve.'}
         </div>
         <Btn onClick={onClose} color={C.green}>Close</Btn>
       </Card>

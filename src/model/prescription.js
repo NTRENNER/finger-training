@@ -1,3 +1,4 @@
+import { isValidPeakMeasurement } from './peakTest.js';
 import { compareSessionOrder, compareOpeningRep } from "./sessionOrder.js";
 import { isCapacityEvidenceRep, isNominalPrescriptionRep, comparableCapacityHistory } from "./forceRecording.js";
 // ───────────────────────────────────────────────────────────────
@@ -480,7 +481,7 @@ export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
   const cutoff = ymdLocal(new Date(refMs - PEAK_CAP_LOOKBACK_DAYS * 86400 * 1000));
   let best = null;
   for (const r of history) {
-    if (!isCapacityEvidenceRep(r)) continue;
+    if (!(isCapacityEvidenceRep(r) || isValidPeakMeasurement(r))) continue;
     if (!isFirstSetRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if ((r.date || "") < cutoff) continue;
@@ -503,7 +504,7 @@ export function historicalBestPeakKg(history, hand, grip, referenceDate = null) 
   if (!history) return null;
   let best = null;
   for (const r of history) {
-    if (!isCapacityEvidenceRep(r)) continue;
+    if (!(isCapacityEvidenceRep(r) || isValidPeakMeasurement(r))) continue;
     if (!isFirstSetRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
