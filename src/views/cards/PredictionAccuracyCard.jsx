@@ -89,6 +89,7 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
     <h3 style={{ margin: '0 0 10px' }}>Prediction accuracy</h3>
     <HistoricalPredictionReview history={history} unit={unit} />
     <strong>New saved forecasts</strong>
+    <p style={{ color: C.muted }}>Models are compared using the same history through the previous day. Same-day workouts still inform your live recommendations. Earlier research versions remain in exports but are not included in this comparison.</p>
     <div style={{ fontSize: 20, fontWeight: 700, color: report.days >= REVIEW_DAYS ? C.green : C.text }}>
       {report.days < REVIEW_DAYS ? `${report.days} of ${REVIEW_DAYS} training days` : 'Ready for a model review'}
     </div>

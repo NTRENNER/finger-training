@@ -1,3 +1,4 @@
+import { isPeakMeasurement } from './peakTest.js';
 // ──────────────────────────────────────────────────────────────
 // DELOAD DETECTOR
 // ──────────────────────────────────────────────────────────────
@@ -408,7 +409,7 @@ export function fingerSessionsThisWeek(history, today) {
   if (!Array.isArray(history) || !today) return 0;
   const dates = new Set();
   for (const r of history) {
-    if (!r.date || !(r.actual_time_s > 0)) continue;
+    if (isPeakMeasurement(r) || !r.date || !(r.actual_time_s > 0)) continue;
     const ago = daysBetween(r.date, today);
     if (ago >= 0 && ago < DELOAD_WEEK_DAYS) dates.add(r.date);
   }

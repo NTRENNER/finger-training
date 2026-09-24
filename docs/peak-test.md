@@ -45,3 +45,27 @@ not rotate it. Explicit single-hand sessions still honor their selected hand.
 A session crossing midnight retains its starting date/order. This survives
 reload and cloud history sync; simultaneous offline devices cannot coordinate
 until their histories synchronize.
+
+## Audit follow-up: boundaries and navigation
+
+Peak measurements use the same `< 200 kg` sanity guard as other measured loads,
+including when reading already-saved rows. Invalid peaks cannot seed a cold-start
+endurance prescription. Recording a new peak can still update the observed peak
+and its existing prescription ceiling, but it does not enter the failure curve.
+
+Peak-only measurement days do not count toward hard finger-training days,
+weekly training volume/coverage, or session-pace projections. History retains the
+measurements. Older sustained peak-test protocols retain their own history label
+and are not reinterpreted as version-2 brief pulls.
+
+Warmup ramp percentages retain their existing **regular-training peak** reference
+(or the curve fallback). Dedicated peak tests do not automatically increase this
+reference. This preserves the existing calibration rather than inventing new
+percentages. If measured capacity is unavailable, fresh explicit manual-load
+anchors may supply a labeled warmup estimate; interrupted, mixed-protocol and
+optional-set rows cannot supply that fallback.
+
+Both the standalone test and warmup retain progress during tab navigation.
+Sensor acquisition pauses while hidden; rest deadlines keep running. Leaving
+mid-pull records an interrupted attempt rather than a valid maximum. This is
+in-memory navigation continuity, not resumption after closing or reloading the app.

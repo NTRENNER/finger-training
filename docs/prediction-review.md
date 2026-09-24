@@ -105,3 +105,28 @@ Changing either candidate or scoring semantics requires a new experiment ID.
 Unsupported experiment versions are excluded, not pooled. Reports include the
 build and frozen models for replay. The UI does not promote or tune anything
 automatically, and does not claim an accuracy improvement until one is measured.
+
+## Audit follow-up: research isolation
+
+Prospective comparison version `fresh-openers-v2-shared-history` rebuilds all
+competitors and derived inputs from the same strict prior-day history. Each model
+records `history_before`. Same-day data still informs live workout recommendations;
+research force comparisons use the shared cutoff. Prior experiment records remain
+exportable but are excluded from this version's scores.
+
+A dedicated worker builds prospective models while the plan is idle. Start only
+uses an already-completed result matching history identity, grip, target and day.
+If unavailable, research scoring is skipped for that session. Training never waits
+for the worker, and there is no synchronous fallback. Late replies, changed inputs
+and unmounting cannot attach stale results to a new session.
+
+Opening holds retain the full model snapshot. Completed later-hold scores retain
+only required diagnostics and a reference to their opener. Local persistence
+budgets optional prediction metadata at 512 KiB, keeping complete recent sessions.
+This is a local cache budget, not deletion of cloud records or recorded activity.
+Research exports can archive the full records currently in memory.
+
+If writing history fails, persistence retries without optional research metadata.
+If essential activity still cannot be saved, an explicit alert offers retry and a
+complete JSON backup. No workout is deleted to satisfy the research budget. The
+backup preserves measurement/protocol fields as well as the basic workout values.

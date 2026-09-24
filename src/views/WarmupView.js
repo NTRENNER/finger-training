@@ -83,7 +83,7 @@ function WarmupTime({ seconds, label, target }) {
   </div>;
 }
 
-export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", onClose, addReps }) {
+export function WarmupView({ visible = true, history, wLog, bodyWeightKg, tindeq, unit = "lbs", onClose, addReps }) {
   // ── Warmup mode (boulder / route) ──
   // Persisted to LS so the user's last choice carries across sessions.
   // Default to "boulder" — most users are bouldering most of the time,
@@ -234,7 +234,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   const inSensorPhase = ["hang-armed", "hang-active", "rest", "swap-prompt", "interrupted"].includes(phase)
     && (currentStep?.type === "hang" || currentStep?.type === "bork");
   useEffect(() => {
-    if (!tindeq?.connected || !inSensorPhase) return;
+    if (!visible || !tindeq?.connected || !inSensorPhase) return;
     let disposed = false;
     Promise.resolve(tindeq.startAutoDetect(
       () => onRepStartRef.current?.(),
@@ -248,16 +248,16 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
     };
     // The hook's methods are stable; changing phase/step must not restart BLE.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inSensorPhase, tindeq?.connected]);
+  }, [visible, inSensorPhase, tindeq?.connected]);
 
   useEffect(() => {
-    if (tindeq && inSensorPhase) tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
-  }, [tindeq, inSensorPhase, currentStep]);
+    if (visible && tindeq && inSensorPhase) tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
+  }, [visible, tindeq, inSensorPhase, currentStep]);
 
   useEffect(() => {
-    if (!tindeq?.connected && phaseRef.current === "hang-active") changePhase("interrupted");
+    if ((!visible || !tindeq?.connected) && phaseRef.current === "hang-active") changePhase("interrupted");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tindeq?.connected]);
+  }, [visible, tindeq?.connected]);
 
   if (!protocol.ok) {
     return (
@@ -439,6 +439,9 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
             : " Includes a longer Micro hold to prepare for routes."}
           {" Connect the Crusher first; you'll be prompted to swap to the Micro mid-warmup."}
         </div>
+        {protocol.estimatedGrips?.length > 0 && <p role="status" style={{ color: C.yellow }}>
+          {protocol.estimatedGrips.join(" and ")} loads are estimates from manually logged workouts. Adjust them to a comfortable warmup effort.
+        </p>}
         {/* Mode toggle: boulder (with BORK) or route (perfusion only).
             Persists to LS_WARMUP_MODE_KEY. */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -558,7 +561,7 @@ export function WarmupView({ history, wLog, bodyWeightKg, tindeq, unit = "lbs", 
   }
 
   if (phase === 'peak-test') {
-    return <PeakTestView grip={currentStep.grip} history={history} tindeq={tindeq}
+    return <PeakTestView visible={visible} grip={currentStep.grip} history={history} tindeq={tindeq}
       addReps={addReps} unit={unit} source="warmup" onClose={advanceToNextStep} />;
   }
 

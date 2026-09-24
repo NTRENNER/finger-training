@@ -25,9 +25,9 @@ async function setup(history = []) {
   Object.defineProperty(navigator, "bluetooth", { configurable: true, value: { requestDevice: async () => device } });
   const onClose = jest.fn();
   const addReps = jest.fn();
-  function Harness({ visible = true }) {
+  function Harness({ visible = true, tabVisible = true }) {
     hook = useTindeq();
-    return visible && <PeakTestView grip="Micro" history={history} tindeq={hook} unit="kg" addReps={addReps} onClose={onClose} />;
+    return visible && <PeakTestView visible={tabVisible} grip="Micro" history={history} tindeq={hook} unit="kg" addReps={addReps} onClose={onClose} />;
   }
   const view = render(<Harness />);
   await act(async () => { await hook.connect(); });
@@ -46,7 +46,7 @@ async function setup(history = []) {
     }
   };
   const rest = () => { hold(0, 2000); };
-  return { ...view, hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, rest, commands, onClose, addReps, disconnect: () => act(() => { onDisconnect(); }) };
+  return { ...view, leaveTab: () => view.rerender(<Harness tabVisible={false} />), returnTab: () => view.rerender(<Harness />), hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, rest, commands, onClose, addReps, disconnect: () => act(() => { onDisconnect(); }) };
 }
 
 test.each(['L', 'R'])('six real sensor pulls alternate from %s, with exactly two rests and no countdown start', async first => {
@@ -108,4 +108,20 @@ test('dropped link retains elapsed activity but cannot contribute a peak', async
   expect(r.end_reason).toBe('equipment_interruption');
   expect(isValidPeakMeasurement(r)).toBe(false);
   expect(screen.getByText('Connect the Tindeq to measure your peak.')).toBeInTheDocument();
+});
+
+test('browsing another tab preserves the round, session id, results and rest deadline',async()=>{
+  const h=await setup();
+  h.hold(25,3100);h.send(0);h.hold(30,3100);h.send(0);
+  expect(h.addReps).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('timer',{name:'Rest'})).toBeInTheDocument();
+  await act(async()=>h.leaveTab());
+  act(()=>jest.advanceTimersByTime(30000));
+  await act(async()=>h.returnTab());
+  expect(screen.getByText('Round 2 of 3')).toBeInTheDocument();
+  expect(Number(screen.getByRole('timer',{name:'Rest'}).textContent.replace('s',''))).toBeLessThanOrEqual(30);
+  act(()=>jest.advanceTimersByTime(31000));
+  h.hold(0,1000);h.hold(26,3100);
+  expect(h.addReps).toHaveBeenCalledTimes(3);
+  expect(new Set(h.addReps.mock.calls.map(c=>c[0][0].session_id)).size).toBe(1);
 });

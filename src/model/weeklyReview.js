@@ -1,3 +1,4 @@
+import { isPeakMeasurement } from './peakTest.js';
 // ─────────────────────────────────────────────────────────────
 // WEEKLY REVIEW — coach-voice training digest
 // ─────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ const daysDiff = (from, to) =>
 
 // ── Signal gathering (integration; validated on real data) ──────────
 export function gatherSignals(history = [], activities = [], workoutSessions = [], opts = {}) {
-  const fingerReps = (history || []).filter(r => r && r.date && Number(r.actual_time_s) > 0);
+  const fingerReps = (history || []).filter(r => r && !isPeakMeasurement(r) && r.date && Number(r.actual_time_s) > 0);
   const climbs = (activities || []).filter(a => a && a.date && a.type === "climbing");
   const support = (workoutSessions || []).filter(w => w && w.date && ["A", "B", "C"].includes(w.workout));
 
@@ -324,7 +325,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   const d28 = addDays(refDate, -27);
   const d56 = addDays(refDate, -55);
 
-  const fingerReps = (history || []).filter(r => r && r.date && Number(r.actual_time_s) > 0);
+  const fingerReps = (history || []).filter(r => r && !isPeakMeasurement(r) && r.date && Number(r.actual_time_s) > 0);
   const grips = [...new Set(fingerReps.map(r => r.grip).filter(Boolean))].sort();
 
   // ── Volume & zone coverage, last 7 days, per grip ──

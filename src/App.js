@@ -4,7 +4,7 @@ import { TindeqBattery } from "./views/cards/TindeqBattery.jsx";
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-exp F-D / curve-trust prescription · Tindeq Progressor BLE
 import React, {
-  useCallback, useState,
+  useCallback, useState, useEffect,
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
@@ -42,6 +42,7 @@ import { exercises as SUPPORT_EXERCISES } from "./model/supportTraining.js";
 
 // App-level hooks (see src/hooks/).
 import { useAuth } from "./hooks/useAuth.js";
+import { downloadHistoryBackup } from './lib/historyPersistence.js';
 import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useDailyState } from "./hooks/useDailyState.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
@@ -267,6 +268,7 @@ export default function App() {
   const {
     history,
     historySynced,
+    persistenceStatus, retryPersistence,
     freshMap, threeExpPriors,
     addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
     replaceHistory,
@@ -286,6 +288,8 @@ export default function App() {
   // ── Tab ───────────────────────────────────────────────────
   const researchMode = /^\/research\/?$/.test(window.location.pathname);
   const [tab, setTab] = useState(() => researchMode ? RESEARCH_TAB : 0);
+  const [climbVisited, setClimbVisited] = useState(false);
+  useEffect(() => { if (tab === 2) setClimbVisited(true); }, [tab]);
 
   // (activities + addActivity + deleteActivity + updateActivity all
   // come from useActivities — see hook call above. Hook owns the
@@ -558,8 +562,16 @@ export default function App() {
         </div>
       </div>
 
+      {persistenceStatus === 'failed' && <div role="alert" style={{ padding: 16, color: C.yellow }}>
+        Your latest workout changes could not be saved on this device. Keep this page open and download a backup before reloading.
+        <Btn small onClick={retryPersistence}>Retry saving</Btn>
+        <Btn small onClick={() => downloadHistoryBackup(history)}>Download backup</Btn>
+      </div>}
+      {persistenceStatus === 'research_trimmed' && <div role="status" style={{ padding: 12, color: C.muted }}>
+        Your workouts are saved. Research details were not saved on this device because storage is full.
+      </div>}
       {/* Connection + durable local-sync status */}
-      {(!isOnline || pendingSyncCount > 0) && (
+      {persistenceStatus !== 'failed' && (!isOnline || pendingSyncCount > 0) && (
         <div style={{
           background: "#3a1f00", borderBottom: `1px solid ${C.orange}`,
           padding: "8px 16px", display: "flex", alignItems: "center", gap: 10,
@@ -580,6 +592,11 @@ export default function App() {
         </div>
       )}
 
+      {config.peakTest && phase !== "idle" && <div hidden={tab !== 0}>
+        <PageFrame style={{ padding: '20px 16px' }}><PeakTestView key={sessionId} grip={config.grip} hand={config.hand}
+          history={history} tindeq={tindeq} addReps={addReps} unit={unit} visible={tab === 0}
+          onClose={() => setPhase("idle")} /></PageFrame>
+      </div>}
       {/* Train tab */}
       {tab === 0 && (() => {
         if (phase === "idle") {
@@ -639,11 +656,7 @@ export default function App() {
           );
         }
 
-        if (config.peakTest && phase !== "idle") {
-          return <PageFrame style={{ padding: '20px 16px' }}><PeakTestView key={sessionId} grip={config.grip} hand={config.hand}
-            history={history} tindeq={tindeq} addReps={addReps} unit={unit}
-            onClose={() => setPhase("idle")} /></PageFrame>;
-        }
+        if (config.peakTest && phase !== "idle") return null;
 
         if (phase === "offset_prompt") {
           return <ManualOffsetPrompt onChoose={chooseOffset} />;
@@ -719,8 +732,8 @@ export default function App() {
       })()}
 
       {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
-      {tab === 2 && (
-        <ClimbView
+      <div hidden={tab !== 2}>
+        {(tab === 2 || climbVisited) && <ClimbView visible={tab === 2}
           addReps={addReps}
           activities={activities}
           onLogActivity={addActivity}
@@ -729,8 +742,8 @@ export default function App() {
           bodyWeight={bodyWeight}
           tindeq={tindeq}
           unit={unit}
-        />
-      )}
+        />}
+      </div>
       {tab === 3 && (
         <AnalysisContainer
           history={history}

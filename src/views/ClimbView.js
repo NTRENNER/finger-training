@@ -127,6 +127,7 @@ export function ClimbView({
   // climbing session. Self-contained (its own Connect Tindeq button).
   history = [],
   bodyWeight = null,
+  visible = true,
   tindeq = null,
   unit = "lbs",
 }) {
@@ -137,7 +138,7 @@ export function ClimbView({
     const wLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
     return (
       <PageFrame style={{ padding: "20px 16px" }}>
-        <WarmupView
+        <WarmupView visible={visible}
           addReps={addReps}
           history={history}
           wLog={wLog}

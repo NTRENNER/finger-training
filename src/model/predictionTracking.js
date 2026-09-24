@@ -2,7 +2,7 @@
 // recommendation. Models are frozen at session start, predictions before holds.
 import { prescription, buildFreshLoadMap, repKey } from './prescription.js';
 import { freshFitReps } from './load.js';
-import { THREE_EXP_TAUS, predForceThreeExp } from './threeExp.js';
+import { THREE_EXP_TAUS, predForceThreeExp, buildThreeExpPriors } from './threeExp.js';
 import { buildPhysModel } from './repCurveData.js';
 import { PHYS_MODEL_DEFAULT, predictRepTimes } from './fatigue.js';
 import { zoneOf } from './zones.js';
@@ -10,7 +10,7 @@ import { ymdLocal } from '../util.js';
 import { buildAdaptiveShadow, adaptiveShadowForce, adaptiveShadowTime,
   ADAPTIVE_PREDICTION_EXPERIMENT } from './adaptivePrediction.js';
 
-export const PREDICTION_EXPERIMENT = 'fresh-openers-v1';
+export const PREDICTION_EXPERIMENT = 'fresh-openers-v2-shared-history';
 export const REVIEW_DAYS = 10;
 const KEY = 'prediction_check';
 const positive = n => Number.isFinite(n) && n > 0;
@@ -45,18 +45,25 @@ function curve(result) {
 // change. No evaluation outcome enters either fit. Clone to detach mutable refs.
 export function buildPredictionModels(history, grip, hand, target, options = {}) {
   try {
-    const freshMap = options.freshMap || buildFreshLoadMap(history);
+    // Every competitor gets the same strict prior-day history. Rebuild derived
+    // inputs here: caller memos may include today's warmup or another workout.
+    const historyBefore = options.shadowReferenceDate || options.referenceDate || ymdLocal();
+    history = history.filter(r => r.date && r.date < historyBefore);
+    const freshMap = buildFreshLoadMap(history);
+    const threeExpPriors = buildThreeExpPriors(history);
     const keys = new Set(freshFitReps(history).map(repKey));
     const candidateMap = new Map([...freshMap].map(([key, value]) => [key,
       { ...value, capacityEligible: value.capacityEligible !== false && keys.has(key) }]));
-    const opts = { ...options, freshMap, captureCurve: true };
+    const opts = { ...options, referenceDate: historyBefore, freshMap, threeExpPriors, captureCurve: true };
     const current = curve(prescription(history, hand, grip, target, opts));
     const candidate = curve(prescription(history, hand, grip, target, { ...opts, freshMap: candidateMap }));
     const personal = buildPhysModel(history, hand, grip);
     const adaptive = buildAdaptiveShadow(history, hand, grip, target,
-      options.shadowReferenceDate || options.referenceDate || ymdLocal());
-    return copy({ experiment: PREDICTION_EXPERIMENT, grip, hand, current, candidate,
-      adaptive,
+      historyBefore);
+    return copy({ experiment: PREDICTION_EXPERIMENT, grip, hand,
+      history_before: historyBefore,
+      current: { ...current, history_before: historyBefore },
+      candidate: { ...candidate, history_before: historyBefore }, adaptive,
       recovery: { current: personal, population: { ...personal, tauR: { ...PHYS_MODEL_DEFAULT.tauR } } } });
   } catch (_) {
     // Evaluation must never prevent recording a workout.
@@ -137,6 +144,15 @@ function observedInterval(rep, model) {
 }
 
 export function completePrediction(prepared, prefix, rep) {
+  const result = completePredictionWithModels(prepared, prefix, rep);
+  if (!result || result.kind !== 'recovery') return result;
+  return { ...result, model_snapshot_rep_id: prefix[0]?.id,
+    models: { grip: result.models.grip, hand: result.models.hand,
+      history_before: result.models.history_before,
+      current: { source_days: result.models.current?.source_days } } };
+}
+
+function completePredictionWithModels(prepared, prefix, rep) {
   if (!prepared) return null;
   const result = { ...prepared, outcome_fingerprint: predictionFingerprint(rep) };
   if (rep.hand !== prepared.models.hand || rep.grip !== prepared.models.grip || rep.set_num !== 1

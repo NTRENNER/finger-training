@@ -62,7 +62,8 @@ import {
   prescription,
   suggestWeight,
 } from "../model/prescription.js";
-import { buildPredictionModels, preparePrediction, completePrediction } from '../model/predictionTracking.js';
+import { usePreparedPredictions } from './usePreparedPredictions.js';
+import { preparePrediction, completePrediction } from '../model/predictionTracking.js';
 import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS } from "../model/setRecommendation.js";
 import { pushDailyState } from "../lib/sync.js";
@@ -163,6 +164,7 @@ export function useSessionRunner({
   // chosen, and irrelevant when a Tindeq is driving the timing.
   const [manualOffset, setManualOffset] = useState(false);
   const predictionModelsRef = useRef({});
+  const preparedModels = usePreparedPredictions(history, config, phase === "idle");
   const mixed = config.mixedDomainPlan?.id === MIXED_DOMAIN_ID;
   const currentStep = mixedDomainSteps(config.mixedDomainPlan, activeHand)[currentRep];
   const activeRepConfig = mixed && currentStep
@@ -250,14 +252,12 @@ export function useSessionRunner({
     // daily_state and stamped on every rep so the whole session stays
     // on the day it began even if it runs past local midnight.
     const startedDay = today();
-    firstHandRef.current = startingHandForDay(history, startedDay);
+    firstHandRef.current = cfg.hand === 'Both' ? startingHandForDay(history, startedDay) : cfg.hand;
     mixedModelsRef.current = cfg.mixedDomainPlan ? Object.fromEntries(
       (cfg.hand === 'Both' ? ['L', 'R'] : [cfg.hand]).map(h =>
         [h, buildMixedLoadModel(history, cfg.grip, h, startedDay)])) : {};
-    predictionModelsRef.current = !cfg.mixedDomainPlan && !cfg.peakTest ? Object.fromEntries(
-      (cfg.hand === 'Both' ? ['L', 'R'] : [cfg.hand]).map(h => [h,
-        buildPredictionModels(history, cfg.grip, h, cfg.targetTime, {
-          freshMap, threeExpPriors, shadowReferenceDate: startedDay })])) : {};
+    predictionModelsRef.current = !cfg.mixedDomainPlan && !cfg.peakTest
+      ? preparedModels(cfg, startedDay) : {};
     // Persist a STATED cookedness as the day's value, so later
     // sessions and retroactive curve fits see it. Skipped entirely
     // when the user didn't state one. Fire-and-forget.
@@ -283,7 +283,7 @@ export function useSessionRunner({
     // flow (auto-detect handles timing precisely).
     setPhase(tindeqConnected ? "rep_ready" : "offset_prompt");
     onSessionStart?.();
-  }, [history, config, freshMap, threeExpPriors, onSessionStart, tindeqConnected]);
+  }, [history, config, freshMap, threeExpPriors, onSessionStart, tindeqConnected, preparedModels]);
 
   // Resolve the offset_prompt phase: store the per-session choice and
   // enter the rep flow.

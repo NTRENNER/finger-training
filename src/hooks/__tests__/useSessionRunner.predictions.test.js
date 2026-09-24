@@ -3,11 +3,24 @@ import { useSessionRunner } from '../useSessionRunner.js';
 import { recoveryRows } from '../../testHelpers/recoveryRows.js';
 import { buildFreshLoadMap } from '../../model/prescription.js';
 import { buildThreeExpPriors } from '../../model/threeExp.js';
-import { summarizePredictions } from '../../model/predictionTracking.js';
+import { buildPredictionModels, summarizePredictions } from '../../model/predictionTracking.js';
 jest.mock('../../lib/sync.js', () => ({ pushDailyState: jest.fn() }));
 
-afterEach(() => jest.useRealTimers());
-test.each([4, 5, 6])('frozen forecasts persist without changing a %i-rep session or its loads', count => {
+jest.mock('../../model/predictionWorkerClient.js', () => ({ createPredictionWorker: jest.fn() }));
+const { createPredictionWorker } = require('../../model/predictionWorkerClient.js');
+beforeEach(() => {
+  global.Worker = jest.fn();
+  createPredictionWorker.mockImplementation(() => {
+    const worker = { terminate: jest.fn(), postMessage: ({ history, grip, target, day }) => {
+      const models = Object.fromEntries(['L','R'].map(hand => [hand,
+        buildPredictionModels(history, grip, hand, target, { referenceDate: day })]));
+      worker.onmessage({ data: { models } });
+    } };
+    return worker;
+  });
+});
+afterEach(() => { jest.useRealTimers(); delete global.Worker; });
+test.each([4, 5, 6])('frozen forecasts persist without changing a %i-rep session or its loads', async count => {
   jest.useFakeTimers().setSystemTime(new Date('2026-09-24T12:00:00Z'));
   const history = Array.from({ length: 8 }, (_, i) => recoveryRows('legacy', {
     sessionId: `old-${i}`, date: `2026-09-${String(i + 1).padStart(2, '0')}`,
@@ -15,8 +28,11 @@ test.each([4, 5, 6])('frozen forecasts persist without changing a %i-rep session
   const freshMap = buildFreshLoadMap(history), threeExpPriors = buildThreeExpPriors(history);
   const addReps = jest.fn();
   const { result, rerender } = renderHook(() => useSessionRunner({ history, freshMap, threeExpPriors, addReps, tindeqConnected: true }));
-  act(() => result.current.startSession({ grip: 'Crusher', hand: 'L', targetTime: 30,
-    repsPerSet: count, restTime: 20, ladderLoadByHand: { L: 30 }, cooked: null }));
+  const cfg = { grip: 'Crusher', hand: 'L', targetTime: 30,
+    repsPerSet: count, restTime: 20, ladderLoadByHand: { L: 30 }, cooked: null };
+  await act(async () => result.current.setConfig(cfg));
+  await act(async () => {});
+  act(() => result.current.startSession());
   const started = new Date().toISOString();
   // Change all fitting inputs before the outcome callback. The frozen model
   // must still match session-start data, including through a parent rerender.
@@ -39,8 +55,10 @@ test.each([4, 5, 6])('frozen forecasts persist without changing a %i-rep session
   const first = saved[0].force_recording.prediction_check;
   expect(first.prepared_at).toBe(started);
   expect(first.models.current.amps.every(n => n < 999)).toBe(true);
-  const unchangedModels = { ...first.models }; delete unchangedModels.adaptive;
-  expect(saved.at(-1).force_recording.prediction_check.models).toEqual(unchangedModels);
+  const last = saved.at(-1).force_recording.prediction_check;
+  expect(last.models.current.source_days).toBe(first.models.current.source_days);
+  expect(last.models.recovery).toBeUndefined();
+  expect(last.model_snapshot_rep_id).toBe(saved[0].id);
   expect(first.models.adaptive.status).toBe('ready');
   expect(first.models.adaptive.history_before).toBe('2026-09-24');
   expect(first.models.adaptive.forces.every(n => n < 999)).toBe(true);

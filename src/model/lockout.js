@@ -1,3 +1,4 @@
+import { isPeakMeasurement } from './peakTest.js';
 // ─────────────────────────────────────────────────────────────
 // LOCKOUT / TRAINING BALANCE MODEL
 // ─────────────────────────────────────────────────────────────
@@ -220,7 +221,7 @@ export function getRollingSessionPace(history, today = new Date()) {
   const sessions = new Set();
   let firstSessionDay = Infinity;
   for (const r of history || []) {
-    if (!r?.date) continue;
+    if (isPeakMeasurement(r) || !r?.date) continue;
     const repDay = calendarDay(r.date);
     if (repDay == null) continue;
     if (repDay < firstSessionDay) firstSessionDay = repDay;

@@ -83,3 +83,15 @@ test('extra snapshot is opening-only and unavailable models do not prevent norma
   const result = record({ ...m, adaptive: cold }, prefix[0]);
   expect(result.force_recording.prediction_check.comparison.status).toBe('recorded');
 });
+
+test('every competitor and derived fit uses the same prior-day history despite contaminated caller memos', () => {
+  const h = history();
+  const day = '2026-09-20';
+  const base = buildPredictionModels(h, 'Crusher', 'L', 30, { referenceDate:day });
+  const polluted = [...h, ...recoveryRows('measured', {date:day, sessionId:'today'}).map(r=>({...r,avg_force_kg:100})),
+    ...recoveryRows('measured', {date:'2026-10-01',sessionId:'future'})];
+  const candidate = buildPredictionModels(polluted, 'Crusher','L',30, {referenceDate:day,
+    threeExpPriors:new Map([['Crusher',[900,900,900]]]),freshMap:new Map()});
+  expect(candidate).toEqual(base);
+  for (const name of ['current','candidate','adaptive']) expect(candidate[name].history_before).toBe(day);
+});

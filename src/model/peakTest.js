@@ -1,3 +1,4 @@
+import { sane } from './load.js';
 import { uuid } from '../util.js';
 import { handOrderMetadata } from './handOrder.js';
 
@@ -9,12 +10,12 @@ export const isPeakMeasurement = r => r?.force_recording?.session_protocol?.id =
 export const isValidPeakMeasurement = r => isPeakMeasurement(r)
   && r.end_reason === 'peak_test_complete'
   && r.force_recording.peak_valid === true
-  && r.peak_force_kg > 0 && r.peak_force_kg < 500;
+  && sane(r.peak_force_kg) != null;
 
 export function peakMeasurementRecord({ stats, hand, round, grip, sessionId, date, startedAt,
   firstHand, source, previousEnd = null }) {
   const valid = stats.failureValid !== false && stats.endReason !== 'equipment_interruption' && stats.endReason !== 'interrupted'
-    && stats.actualTime >= 1 && stats.peakForce > 0 && stats.peakForce < 500;
+    && stats.actualTime >= 1 && sane(stats.peakForce) != null;
   const start = stats.startedAtMs ?? null;
   const end = stats.endedAtMs ?? null;
   return {
@@ -22,8 +23,8 @@ export function peakMeasurementRecord({ stats, hand, round, grip, sessionId, dat
     set_num: 1, rep_num: round + 1, target_duration: PEAK_HOLD_S,
     actual_time_s: Math.max(0, stats.actualTime || 0), rest_s: PEAK_ROUND_REST_S,
     weight_kg: 0, prescribed_load_kg: 0, manual_load_kg: null,
-    avg_force_kg: stats.avgForce > 0 && stats.avgForce < 500 ? stats.avgForce : null,
-    peak_force_kg: stats.peakForce > 0 && stats.peakForce < 500 ? stats.peakForce : null,
+    avg_force_kg: sane(stats.avgForce),
+    peak_force_kg: sane(stats.peakForce),
     load_provenance: 'measured_force', failure_valid: false, failed: false,
     end_reason: valid ? 'peak_test_complete' : stats.endReason === 'equipment_interruption'
       ? 'equipment_interruption' : 'interrupted',

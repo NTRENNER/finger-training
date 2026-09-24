@@ -458,7 +458,7 @@ export function coldStartLongProbeLoad(gripReps, hand, targetT = COLD_START_LONG
     .reduce((best, r) => !best || r.peak_force_kg > best.peak_force_kg ? r : best, null);
   if (!anchorRep && !peak) return null;
   const anchorT = anchorRep ? Math.max(1, Number(anchorRep.actual_time_s)) : null;
-  const anchorF = anchorRep ? effectiveLoad(anchorRep) : peak.peak_force_kg;
+  const anchorF = anchorRep ? effectiveLoad(anchorRep) : Number(peak.peak_force_kg);
   // A peak supports a conservative starting load, never a fabricated (3s, F)
   // capacity point. Real lower-probe misses still revise this estimate below.
   const fraction = anchorRep ? Math.max(COLD_START_LONG_INITIAL_MIN_FRACTION,
@@ -588,7 +588,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // The Setup tab's Curve Coverage card uses the all-grips view of
   // getZoneStaleness for its zone-balance framing; here we want the
   // grip-scoped view so the engine recommends what THIS grip needs.
-  const asOf = today instanceof Date ? ymdLocal(today) : today;
+  const asOf = today instanceof Date ? ymdLocal(today) : (today || ymdLocal());
   history = history.filter(r => r?.date && r.date <= asOf);
   const gripHistory = history.filter(r => isCapacityEvidenceRep(r) && r?.grip === grip);
   if (gripHistory.length === 0) {

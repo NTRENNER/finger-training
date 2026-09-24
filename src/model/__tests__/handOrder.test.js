@@ -25,3 +25,8 @@ test('opening or cancelling without a pull does not rotate; legacy two-hand orde
   expect(startingHandForDay(history, '2026-09-24')).toBe('R');
   expect(startingHandForDay(history, '2026-09-25')).toBe('R');
 });
+
+test('synthetic seed artifacts do not advance the training day', () => {
+  const seed = { date:'2026-09-23', hand:'L', actual_time_s:30, avg_force_kg:12, peak_force_kg:12 };
+  expect(startingHandForDay([seed], '2026-09-24')).toBe('L');
+});

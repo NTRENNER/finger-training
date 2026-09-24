@@ -56,3 +56,13 @@ test('a lower-probe miss reduces a peak-based starting estimate', () => {
     rep_num:1,set_num:1,target_duration:220,actual_time_s:30,avg_force_kg:8,failure_valid:true};
   expect(coldStartLongProbeLoad([r,attempt],'R').value).toBeLessThan(8);
 });
+
+test.each([200, 284, 499, Infinity, NaN])('rejects implausible peak %s both on write and from historical rows', kg => {
+  const recorded = measuredPeak({ peakForce: kg });
+  expect(recorded.peak_force_kg).toBeNull();
+  expect(isValidPeakMeasurement(recorded)).toBe(false);
+  const historical = { ...measuredPeak(), peak_force_kg: kg };
+  expect(isValidPeakMeasurement(historical)).toBe(false);
+  expect(coldStartLongProbeLoad([historical], 'R')).toBeNull();
+  expect(bestAvailablePeakMeasurement([historical], 'R', 'Micro')).toBeNull();
+});

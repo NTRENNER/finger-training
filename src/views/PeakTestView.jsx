@@ -13,10 +13,10 @@ import { TindeqBattery } from './cards/TindeqBattery.jsx';
 // Shared complete protocol for the standalone test and the optional warmup block.
 // Keep one sensor stream alive through hand changes/rest to observe releases.
 export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addReps,
-  source = 'standalone', onClose, unit = 'lbs' }) {
+  source = 'standalone', onClose, unit = 'lbs', visible = true }) {
   const [context] = useState(() => {
     const date = today();
-    const first = startingHandForDay(history, date);
+    const first = hand === 'Both' ? startingHandForDay(history, date) : hand;
     return { date, first, hands: hand === 'Both' ? [first, otherHand(first)] : [hand],
       sessionId: uuid(), startedAt: nowISO() };
   });
@@ -62,7 +62,7 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
   };
 
   useEffect(() => {
-    if (!tindeq?.connected || state.phase === 'done') return;
+    if (!visible || !tindeq?.connected || state.phase === 'done') return;
     let disposed = false;
     tindeq.targetKgRef.current = null;
     Promise.resolve(tindeq.startAutoDetect(
@@ -76,11 +76,11 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
     };
     // Callbacks read refs; changing hand must not restart the sensor stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tindeq?.connected, state.phase === 'done', retry]);
+  }, [visible, tindeq?.connected, state.phase === 'done', retry]);
 
   useEffect(() => {
-    if (!tindeq?.connected && live.current.phase === 'active') callbacks.current.complete({}, true);
-  }, [tindeq?.connected]);
+    if ((!visible || !tindeq?.connected) && live.current.phase === 'active') callbacks.current.complete({}, true);
+  }, [visible, tindeq?.connected]);
 
   useEffect(() => {
     const timer = setInterval(() => {

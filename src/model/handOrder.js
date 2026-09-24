@@ -1,11 +1,13 @@
 // Rotation follows recorded training days, not calendar parity or app launches.
 // The first session freezes the day's order in every saved rep, which also
 // preserves it across reloads and devices when history is synchronized.
+import { isSeedArtifactRep } from './load.js';
+
 export const otherHand = hand => hand === 'R' ? 'L' : 'R';
 
 export function startingHandForDay(history = [], day) {
   const rows = history.filter(r => r?.date && r.date <= day && ['L', 'R'].includes(r.hand)
-    && Number(r.actual_time_s) > 0 && !r.is_seed);
+    && Number(r.actual_time_s) > 0 && !isSeedArtifactRep(r));
   const latestDay = rows.reduce((latest, r) => r.date > latest ? r.date : latest, '');
   if (!latestDay) return 'L';
   const daily = rows.filter(r => r.date === latestDay).sort((a, b) =>

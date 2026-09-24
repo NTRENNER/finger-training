@@ -1,5 +1,4 @@
-import { isValidPeakMeasurement } from './peakTest.js';
-import { isValidFailureRep, isCapacityEvidenceRep } from './forceRecording.js';
+import { isValidFailureRep, isCapacityEvidenceRep, isNominalPrescriptionRep } from './forceRecording.js';
 // ─────────────────────────────────────────────────────────────
 // ADAPTIVE WARM-UP PROTOCOL GENERATOR
 // ─────────────────────────────────────────────────────────────
@@ -71,7 +70,7 @@ import {
   buildThreeExpPriors,
   THREE_EXP_LAMBDA_DEFAULT,
 } from "./threeExp.js";
-import { effectiveLoad, SANE_MAX_KG } from "./load.js";
+import { effectiveLoad, SANE_MAX_KG, isSeedArtifactRep } from "./load.js";
 import { computePersonalRecoveryTaus } from "./recoveryFit.js";
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 import { migrateExerciseId } from "./exerciseIds.js";
@@ -119,18 +118,18 @@ function restForGrip(baseRestSec, grip, personalTaus) {
 // Fit per-grip three-exp amps from the user's failure history. Mirrors
 // the AnalysisView grip3xEstimates pattern: per-grip prior + adaptive
 // shrinkage.
-function fitGripAmps(history, grip) {
-  // Train-to-failure model: every rep with valid actual_time_s is a
-  // (T, F) failure data point. Drop the legacy r.failed filter.
+function fitGripAmps(history, grip, nominal = false) {
+  // Prefer measured capacity. Only the explicit fallback uses fresh manual
+  // load anchors; it is labeled as an estimate and never enters the real fit.
   const pts = (history || [])
     .filter(r =>
-      isCapacityEvidenceRep(r) && r.grip === grip &&
+      (nominal ? isNominalPrescriptionRep(r) && !r.force_recording?.session_protocol && !isSeedArtifactRep(r) : isCapacityEvidenceRep(r)) && r.grip === grip &&
       effectiveLoad(r) > 0 &&
       r.actual_time_s > 0
     )
     .map(r => ({ T: r.actual_time_s, F: effectiveLoad(r) }));
   if (pts.length < 2) return null;
-  const priors = buildThreeExpPriors(history);
+  const priors = nominal ? null : buildThreeExpPriors(history);
   const prior  = priors?.get?.(grip) ?? [0, 0, 0];
   const hasPrior = (prior[0] + prior[1] + prior[2]) > 0;
   const lambda = hasPrior ? THREE_EXP_LAMBDA_DEFAULT / Math.max(pts.length, 1) : 0;
@@ -255,7 +254,7 @@ function getRecentPeakMVC(history, grip, daysOld = 90) {
   const cutoffMs = Date.now() - daysOld * 24 * 60 * 60 * 1000;
   let maxPeak = 0;
   for (const r of history) {
-    if (r?.grip !== grip || !(isValidFailureRep(r) || isValidPeakMeasurement(r))) continue;
+    if (r?.grip !== grip || !isValidFailureRep(r)) continue;
     const peak = Number(r?.peak_force_kg);
     if (!Number.isFinite(peak) || peak <= 0 || peak >= SANE_MAX_KG) continue;
     if (r.date) {
@@ -301,18 +300,22 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
       reason: "Bodyweight not set. Go to Settings, enter your bodyweight, and come back.",
     };
   }
-  const crusherAmps = fitGripAmps(history, "Crusher");
+  const measuredCrusher = fitGripAmps(history, "Crusher");
+  const crusherAmps = measuredCrusher || fitGripAmps(history, "Crusher", true);
   if (!crusherAmps) {
     return {
       ok: false,
       reason: "Need Crusher curve data first. Run a few Crusher hangs to failure (across multiple durations) to seed the force curve.",
     };
   }
-  const microAmps = fitGripAmps(history, "Micro");
+  const measuredMicro = fitGripAmps(history, "Micro");
+  const microAmps = measuredMicro || fitGripAmps(history, "Micro", true);
+  const estimatedGrips = [!measuredCrusher && crusherAmps && "Crusher", !measuredMicro && microAmps && "Micro"].filter(Boolean);
 
-  // ── Per-grip MVC reference (used only for the BORK potentiation
-  // step's display target, since BORK itself has no target load — the
-  // user just pulls max). Peak across recent reps; fall back to curve.
+  // Preserve the warmup ramp's existing reference: peaks from regular
+  // training, falling back to the curve. Dedicated maximum tests are a
+  // different protocol and must not silently raise all warmup rungs.
+  // BORK also displays this reference, but has no required target load.
   const crusherPeak = getRecentPeakMVC(history, "Crusher");
   const microPeak   = getRecentPeakMVC(history, "Micro");
   const crusherMVC  = crusherPeak ?? targetLoadFromCurve(crusherAmps, 30, 1.0);
@@ -496,6 +499,7 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
 
   return {
     ok: true,
+    estimatedGrips,
     mode,
     bodyWeightKg,
     bodyWeightLbs,

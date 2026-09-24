@@ -33,3 +33,15 @@ test.each([4, 5, 6])('right-first rotation preserves all %i reps for each hand a
   act(() => result.current.startSession(cfg));
   expect(result.current.activeHand).toBe('L');
 });
+
+test('single-hand sessions record the hand that actually started, then rotate the next day', () => {
+  jest.useFakeTimers().setSystemTime(new Date(2026,8,24,12));
+  const history = [];
+  const { result } = renderHook(() => useSessionRunner({history, addReps: rows => history.push(...rows), tindeqConnected:true}));
+  act(() => result.current.startSession({grip:'Micro',hand:'R',targetTime:30,repsPerSet:4,restTime:20,plannedLoadByHand:{R:10}}));
+  act(() => result.current.handleRepDone({actualTime:30,avgForce:10}));
+  expect(history[0].force_recording.hand_order.first_hand).toBe('R');
+  jest.setSystemTime(new Date(2026,8,25,12));
+  act(() => result.current.startSession({grip:'Micro',hand:'Both',targetTime:30,repsPerSet:4,restTime:20,plannedLoadByHand:{R:10,L:10}}));
+  expect(result.current.activeHand).toBe('L');
+});

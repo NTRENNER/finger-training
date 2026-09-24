@@ -44,9 +44,9 @@ async function setup({ peak = false } = {}) {
   Object.defineProperty(navigator, "bluetooth", { configurable: true, value: { requestDevice: async () => device } });
   const onClose = jest.fn();
   const addReps = jest.fn();
-  function Harness({ visible = true }) {
+  function Harness({ visible = true, tabVisible = true }) {
     hook = useTindeq();
-    return visible && <WarmupView history={[]} wLog={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} addReps={addReps} />;
+    return visible && <WarmupView visible={tabVisible} history={[]} wLog={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} addReps={addReps} />;
   }
   const view = render(<Harness />);
   expect(screen.getByRole("checkbox", { name: "Include Peak Test today" })).not.toBeChecked();
@@ -67,7 +67,7 @@ async function setup({ peak = false } = {}) {
     }
   };
   const rest = () => { hold(0, 2000); };
-  return { ...view, hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, rest, commands, onClose, addReps };
+  return { ...view, leaveTab: () => view.rerender(<Harness tabVisible={false} />), returnTab: () => view.rerender(<Harness />), hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, rest, commands, onClose, addReps };
 }
 
 test("first timed hold, rest release, and the next pull use one uninterrupted sensor stream", async () => {
@@ -181,4 +181,17 @@ test('optional Peak Test replaces the maximal block, saves only its pulls, then 
   fireEvent.click(screen.getByRole('button',{name:'Continue warm-up'}));
   expect(screen.getByText('Pullup Finisher')).toBeInTheDocument();
   expect(screen.queryByRole('timer',{name:'Rest'})).not.toBeInTheDocument();
+});
+
+
+test("tab navigation preserves warmup rest and cannot record hidden pulls", async () => {
+  const h=await setup();
+  h.hold(25,2000);h.send(0);
+  expect(screen.getByRole("timer",{name:"Rest"})).toBeInTheDocument();
+  await act(async()=>h.leaveTab());
+  act(()=>jest.advanceTimersByTime(5000));
+  await act(async()=>h.returnTab());
+  expect(screen.getByText("Warm-up · Step 2 of 6")).toBeInTheDocument();
+  h.send(0);h.hold(25,500);
+  expect(screen.getByRole("timer",{name:"Hold time"})).toBeInTheDocument();
 });
