@@ -834,8 +834,7 @@ export function SessionPlanCard({
           the active (selected) tile gets the bright background tint.
           Loads on every tile reflect the RPE slider's per-zone scale-
           down so the user sees the trade-off across the full curve.
-          Peak Test spans both columns and provides the short-strength
-          check alongside the five routine training choices. */}
+          Peak Test completes the grid beside Endurance. */}
       {!mixedEnabled && <><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
       <div className="session-choice-grid">
         {rows.filter(r => TRAINING_ZONE_KEYS.includes(r.key)).map(r => {
@@ -926,43 +925,37 @@ export function SessionPlanCard({
             setPeakTestSelected(true);
           }}
           style={{
-            gridColumn: "1 / -1",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 16,
+            minWidth: 0,
             textAlign: "left",
             cursor: "pointer",
             font: "inherit",
-            padding: "var(--session-choice-padding, 12px 14px)",
+            padding: "var(--session-choice-padding, 10px 12px)",
             borderRadius: 8,
             background: isPeakTest ? C.blue + "22" : C.bg,
             border: isPeakTest ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
             margin: isPeakTest ? 0 : 1,
           }}
         >
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: "var(--session-choice-label-size, 12px)", fontWeight: 700, color: C.blue, marginBottom: 3 }}>
-              {isPeakTest ? "✓ Peak Test selected" : "🎯 Peak Test"}
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+            <div style={{ fontSize: "var(--session-choice-label-size, 11px)", fontWeight: 700, color: C.blue }}>
+              {isPeakTest ? "✓ Peak Test" : "🎯 Peak Test"}
               {maxTest?.recommended && (
                 <span style={{ marginLeft: 7, fontSize: 9, color: C.orange, textTransform: "uppercase" }}>
                   check-in
                 </span>
               )}
             </div>
-            <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.4 }}>
-              {MAX_TEST_ATTEMPTS} pulls per hand · aim for about {MAX_TEST_TARGET_S}s at the selected load · {MAX_TEST_REST_S}s rest
-            </div>
-            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginTop: 4 }}>
-              Hold until force failure. Records your peak and the force you sustained.
-            </div>
+            <span style={{ fontSize: "var(--session-choice-duration-size, 18px)", fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+              {MAX_TEST_TARGET_S}s
+            </span>
+          </div>
+          <div style={{ fontSize: "var(--session-choice-meta-size, 10px)", color: C.muted, lineHeight: 1.4 }}>
+            {MAX_TEST_ATTEMPTS} pulls per hand · {MAX_TEST_REST_S}s rest
           </div>
           <div style={{
-            flex: "0 0 auto",
-            maxWidth: "42%",
-            fontSize: 10,
+            marginTop: 4,
+            fontSize: "var(--session-choice-meta-size, 10px)",
             color: maxTest?.recommended ? C.orange : C.muted,
-            textAlign: "right",
             lineHeight: 1.4,
           }}>
             {maxTest?.staleDays == null
@@ -971,6 +964,10 @@ export function SessionPlanCard({
           </div>
         </button>
       </div>
+      {isPeakTest && <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginTop: 12 }}>
+        Aim for about {MAX_TEST_TARGET_S}s at the selected load. Hold until force failure.
+        {" "}Records your peak and the force you sustained.
+      </div>}
       </>}
       {plannerFooter}
     </Card>
