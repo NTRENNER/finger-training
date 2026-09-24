@@ -29,6 +29,8 @@ test('ten independent days enable a review download, not an automatic model swit
   expect(screen.getByText('Ready for a model review')).toBeInTheDocument();
   expect(screen.getByText(/next is in 10 more training days/)).toBeInTheDocument();
   expect(screen.getByText('Most recent 10 training days')).toBeInTheDocument();
+  expect(screen.getByText('Established ability + recent performance')).toBeInTheDocument();
+  expect(screen.getByText(/10 new training days/)).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Apply|Promote/ })).not.toBeInTheDocument();
   URL.createObjectURL = jest.fn(() => 'blob:report');
   URL.revokeObjectURL = jest.fn();

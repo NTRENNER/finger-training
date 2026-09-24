@@ -256,7 +256,8 @@ export function useSessionRunner({
         [h, buildMixedLoadModel(history, cfg.grip, h, startedDay)])) : {};
     predictionModelsRef.current = !cfg.mixedDomainPlan && !cfg.peakTest ? Object.fromEntries(
       (cfg.hand === 'Both' ? ['L', 'R'] : [cfg.hand]).map(h => [h,
-        buildPredictionModels(history, cfg.grip, h, cfg.targetTime, { freshMap, threeExpPriors })])) : {};
+        buildPredictionModels(history, cfg.grip, h, cfg.targetTime, {
+          freshMap, threeExpPriors, shadowReferenceDate: startedDay })])) : {};
     // Persist a STATED cookedness as the day's value, so later
     // sessions and retroactive curve fits see it. Skipped entirely
     // when the user didn't state one. Fire-and-forget.

@@ -67,6 +67,21 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
       <Score title="Advance hold-time estimates" score={report.plannedForce} unit="s" />
       <p style={{ color: C.muted, fontSize: 13 }}>Only holds within 10% of the planned force enter this check.
         These estimates use the capacity curves; load limits and the rep ladder are separate.</p>
+      <details style={{ marginTop: 16 }}>
+        <summary style={{ cursor: 'pointer' }}>Established ability + recent performance</summary>
+        <p style={{ color: C.muted, lineHeight: 1.5 }}>A separate background comparison tests a steadier curve
+          with adjustments when several training days agree. It does not change your workout loads.</p>
+        <p>{report.adaptive.days} new training days · {report.adaptive.days >= REVIEW_DAYS
+          ? `Review checkpoint ${report.adaptive.checkpoints} reached`
+          : `${report.adaptive.daysToNextCheckpoint} more until the first review`}</p>
+        {report.adaptive.days > 0 && <>
+          <Score title="Established + recent curve" score={report.adaptive.force} unit={unit} factor={factor} candidateLabel="New model" />
+          <Score title="Established + recent hold-time estimates" score={report.adaptive.plannedForce} unit="s" candidateLabel="New model" />
+        </>}
+        <p style={{ color: C.muted, fontSize: 13 }}>Only new forecasts from this version count. Time comparisons require force
+          within 5% of plan. These scores test the curves; the proposed loads and floor adjustments are saved separately
+          in the download. Each grip and duration needs review before changing recommendations.</p>
+      </details>
       <Score title="Between-rep recovery · approximate" score={report.recovery} unit="s" candidateLabel="Population" />
       <p style={{ color: C.muted, fontSize: 13 }}>Current recovery versus the population estimate, checked using measured rest and similar force across holds.</p>
       <Score title="Advance recovery estimates" score={report.plannedRecovery} unit="s" candidateLabel="Population" />

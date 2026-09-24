@@ -6,6 +6,9 @@ import { THREE_EXP_TAUS, predForceThreeExp } from './threeExp.js';
 import { buildPhysModel } from './repCurveData.js';
 import { PHYS_MODEL_DEFAULT, predictRepTimes } from './fatigue.js';
 import { zoneOf } from './zones.js';
+import { ymdLocal } from '../util.js';
+import { buildAdaptiveShadow, adaptiveShadowForce, adaptiveShadowTime,
+  ADAPTIVE_PREDICTION_EXPERIMENT } from './adaptivePrediction.js';
 
 export const PREDICTION_EXPERIMENT = 'fresh-openers-v1';
 export const REVIEW_DAYS = 10;
@@ -50,7 +53,10 @@ export function buildPredictionModels(history, grip, hand, target, options = {})
     const current = curve(prescription(history, hand, grip, target, opts));
     const candidate = curve(prescription(history, hand, grip, target, { ...opts, freshMap: candidateMap }));
     const personal = buildPhysModel(history, hand, grip);
+    const adaptive = buildAdaptiveShadow(history, hand, grip, target,
+      options.shadowReferenceDate || options.referenceDate || ymdLocal());
     return copy({ experiment: PREDICTION_EXPERIMENT, grip, hand, current, candidate,
+      adaptive,
       recovery: { current: personal, population: { ...personal, tauR: { ...PHYS_MODEL_DEFAULT.tauR } } } });
   } catch (_) {
     // Evaluation must never prevent recording a workout.
@@ -99,7 +105,11 @@ export function preparePrediction(models, prefix, { loadKg, target, rest, prepar
   if (!models) return null;
   return copy({ version: 1, experiment: PREDICTION_EXPERIMENT, mode: 'shadow',
     build: process.env.REACT_APP_BUILD_SHA || 'local', prepared_at: preparedAt,
-    models, planned_load_kg: loadKg, target_s: target, planned_rest_s: rest,
+    // Store the additional grid once on the opening hold, not on every rep.
+    models: prefix.length ? { ...models, adaptive: undefined } : models,
+    ...(!prefix.length ? { adaptive_planned: { current: timeAt(models.current, loadKg),
+      candidate: adaptiveShadowTime(models.adaptive, loadKg) } } : {}),
+    planned_load_kg: loadKg, target_s: target, planned_rest_s: rest,
     prior: prefix.map(r => ({ id: r.id, fingerprint: predictionFingerprint(r) })),
     planned: prefix.length ? recoveryTimes(models, prefix, rest) : {
       current: timeAt(models.current, loadKg), candidate: timeAt(models.candidate, loadKg) },
@@ -130,7 +140,17 @@ export function completePrediction(prepared, prefix, rep) {
     if (!positive(currentT) || currentT !== candidateT) {
       return { ...result, comparison: unavailable('missing_or_incompatible_curve') };
     }
-    return { ...result, comparison: { status: 'recorded', actual: rep.avg_force_kg,
+    const adaptiveT = observedInterval(rep, prepared.models.adaptive);
+    const adaptiveForce = adaptiveT === currentT ? adaptiveShadowForce(prepared.models.adaptive, adaptiveT) : null;
+    const adaptiveComparison = Number.isFinite(adaptiveForce) ? {
+      status: 'recorded', experiment: ADAPTIVE_PREDICTION_EXPERIMENT,
+      kind: 'force_at_observed_duration', actual: rep.avg_force_kg, observed_s: currentT,
+      current: forceAt(prepared.models.current, currentT), candidate: adaptiveForce,
+      established: predForceThreeExp(prepared.models.adaptive.established_amps, currentT),
+      planned_matches: positive(prepared.planned_load_kg) && Math.abs(rep.avg_force_kg / prepared.planned_load_kg - 1) <= .05,
+    } : unavailable('adaptive_missing_or_incompatible_curve');
+    return { ...result, adaptive_comparison: adaptiveComparison,
+      comparison: { status: 'recorded', actual: rep.avg_force_kg,
       observed_s: currentT, current: forceAt(prepared.models.current, currentT),
       candidate: forceAt(prepared.models.candidate, currentT),
       // At-eventual-duration is a conditional check, not an advance forecast.
@@ -169,6 +189,7 @@ export function predictionMetrics(rows, model) {
 const scores = rows => ({ current: predictionMetrics(rows, 'current'), candidate: predictionMetrics(rows, 'candidate') });
 export function summarizePredictions(history) {
   const exclusions = {}, force = [], recovery = [], plannedForce = [], plannedRecovery = [];
+  const adaptiveForce = [], adaptivePlanned = [];
   const skip = key => { exclusions[key] = (exclusions[key] || 0) + 1; };
   const byId = new Map(), conflicts = new Set();
   for (const r of history || []) {
@@ -204,6 +225,17 @@ export function summarizePredictions(history) {
       observedDomain: zoneOf(r.actual_time_s), cooked: r.session_adjustment?.reported_cooked ?? null,
       actual: c.actual, current: c.current, candidate: c.candidate };
     (p.kind === 'capacity' ? force : recovery).push(row);
+    const a = p.adaptive_comparison;
+    if (p.kind === 'capacity' && a?.status === 'recorded'
+      && a.experiment === ADAPTIVE_PREDICTION_EXPERIMENT
+      && p.models?.adaptive?.experiment === ADAPTIVE_PREDICTION_EXPERIMENT
+      && p.models.adaptive.version === 2 && r.target_duration >= 12
+      && Number.isFinite(a.current) && Number.isFinite(a.candidate)) {
+      const adaptiveRow = { ...row, actual: a.actual, current: a.current, candidate: a.candidate, established: a.established };
+      adaptiveForce.push(adaptiveRow);
+      if (a.planned_matches && Number.isFinite(p.adaptive_planned?.current) && Number.isFinite(p.adaptive_planned?.candidate))
+        adaptivePlanned.push({ ...adaptiveRow, actual: a.observed_s, ...p.adaptive_planned });
+    }
     const candidate = p.kind === 'capacity' ? p.planned?.candidate : p.planned?.population;
     if (c.planned_matches && Number.isFinite(p.planned?.current) && Number.isFinite(candidate)) {
       (p.kind === 'capacity' ? plannedForce : plannedRecovery).push({ ...row,
@@ -212,11 +244,21 @@ export function summarizePredictions(history) {
   }
   const dates = [...new Set(force.map(r => r.date))].sort();
   const by = key => Object.fromEntries([...new Set(force.map(r => r[key]))].map(value => [value, scores(force.filter(r => r[key] === value))]));
+  const adaptiveDates = [...new Set(adaptiveForce.map(r => r.date))].sort();
+  const adaptiveBy = key => Object.fromEntries([...new Set(adaptiveForce.map(r => r[key]))]
+    .map(value => [value, scores(adaptiveForce.filter(r => r[key] === value))]));
   return { experiment: PREDICTION_EXPERIMENT, status: 'review_required_before_any_model_change',
     dates, days: dates.length, checkpoints: Math.floor(dates.length / REVIEW_DAYS),
     daysToNextCheckpoint: REVIEW_DAYS - dates.length % REVIEW_DAYS,
     force: scores(force), recovery: scores(recovery), plannedForce: scores(plannedForce), plannedRecovery: scores(plannedRecovery),
     lastTenDays: scores(force.filter(r => dates.slice(-REVIEW_DAYS).includes(r.date))),
     byGrip: by('grip'), byHand: by('hand'), byDomain: by('domain'), byObservedDomain: by('observedDomain'),
+    adaptive: { experiment: ADAPTIVE_PREDICTION_EXPERIMENT, days: adaptiveDates.length, dates: adaptiveDates,
+      checkpoints: Math.floor(adaptiveDates.length / REVIEW_DAYS),
+      daysToNextCheckpoint: REVIEW_DAYS - adaptiveDates.length % REVIEW_DAYS,
+      force: scores(adaptiveForce), established: predictionMetrics(adaptiveForce, 'established'),
+      plannedForce: scores(adaptivePlanned), byGrip: adaptiveBy('grip'), byHand: adaptiveBy('hand'),
+      byDomain: adaptiveBy('domain'), byObservedDomain: adaptiveBy('observedDomain'),
+      observations: { force: adaptiveForce, plannedForce: adaptivePlanned } },
     exclusions, observations: { force, recovery, plannedForce, plannedRecovery } };
 }

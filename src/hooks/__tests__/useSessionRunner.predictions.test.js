@@ -39,8 +39,13 @@ test.each([4, 5, 6])('frozen forecasts persist without changing a %i-rep session
   const first = saved[0].force_recording.prediction_check;
   expect(first.prepared_at).toBe(started);
   expect(first.models.current.amps.every(n => n < 999)).toBe(true);
-  expect(saved.at(-1).force_recording.prediction_check.models).toEqual(first.models);
+  const unchangedModels = { ...first.models }; delete unchangedModels.adaptive;
+  expect(saved.at(-1).force_recording.prediction_check.models).toEqual(unchangedModels);
+  expect(first.models.adaptive.status).toBe('ready');
+  expect(first.models.adaptive.history_before).toBe('2026-09-24');
+  expect(first.models.adaptive.forces.every(n => n < 999)).toBe(true);
   expect(summarizePredictions(saved)).toMatchObject({ days: 1,
+    adaptive: { days: 1 },
     recovery: { current: { observations: count - 1 } } });
   act(() => result.current.handleNextSet());
   act(() => result.current.handleRepDone({ actualTime: 25, avgForce: 30 }));
