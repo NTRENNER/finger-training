@@ -87,7 +87,7 @@ function CustomTooltip({ active, payload, label, unit }) {
         <>
           {forecast?.value != null && (
             <div style={{ color: forecast.color }}>
-              Forecast: {Number(forecast.value).toFixed(1)}s
+              Estimate: about {Math.round(Number(forecast.value))}s
             </div>
           )}
           {actual?.value != null && (
@@ -220,6 +220,9 @@ function RepCurveChart({
           )}
         </div>
       )}
+      {forecasted.length > 0 && <p style={{ fontSize: 12, color: C.muted, margin: '0 0 8px', lineHeight: 1.5 }}>
+        Dashed line: approximate hold times at a similar load and rest.
+      </p>}
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={merged} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.border} opacity={0.3} />
@@ -279,7 +282,7 @@ function RepCurveChart({
             <Line
               type="monotone"
               dataKey="forecasted"
-              name="Forecast from anchor"
+              name="Estimated hold time"
               stroke={COLORS.forecasted}
               strokeWidth={2}
               strokeDasharray="4 3"

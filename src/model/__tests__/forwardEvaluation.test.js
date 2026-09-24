@@ -96,3 +96,31 @@ test('comparison availability is explicit and pairwise errors use identical held
   expect(comparison.prescription.observations).toBe(1);
   expect(comparison.recentComparable.observations).toBe(1);
 });
+
+test('planned domain and observed duration remain separate when a long target ends early', () => {
+  const base = history().map(r => r.date === '2026-08-07'
+    ? { ...r, target_duration: 160, actual_time_s: r.rep_num === 1 ? 32 : r.actual_time_s } : r);
+  const result = evaluateForward(base);
+  const row = result.observations.force.find(r => r.date === '2026-08-07');
+  expect(row).toMatchObject({ domain: 'strength_endurance', observedDomain: 'power', targetDuration: 160, duration: 32 });
+  expect(result.force.byDomain.strength_endurance.available.prescription.observations).toBe(1);
+  expect(result.force.byObservedDurationDomain.power.available.prescription.observations).toBe(2);
+  expect(result.force.byObservedDurationDomain.strength_endurance).toBeUndefined();
+});
+
+test('optional stage diagnostics do not change predictions and remain past-only', () => {
+  const base = history();
+  const normal = evaluateForward(base);
+  const traced = evaluateForward(base, { diagnostics: true });
+  expect(traced.force.all).toEqual(normal.force.all);
+  expect(traced.recovery).toEqual(normal.recovery);
+  expect(traced.observations.force[0].diagnostics.fitPoints).toBeGreaterThan(0);
+  for (const row of traced.observations.force) {
+    expect(row.predictions.extrapolatedCurve + row.diagnostics.boundsChangeKg).toBeCloseTo(row.predictions.prescription, 10);
+    expect(row.predictions.fatigueCurve * row.diagnostics.scale).toBeCloseTo(row.predictions.anchoredCurve, 10);
+  }
+  const extra = recoveryRows('measured', { sessionId: 'later', date: '2026-09-20' })
+    .map(r => ({ ...r, avg_force_kg: 95, actual_time_s: 220 }));
+  const extended = evaluateForward([...base, ...extra], { diagnostics: true });
+  expect(extended.observations.force.filter(r => r.date < '2026-09-20')).toEqual(traced.observations.force);
+});

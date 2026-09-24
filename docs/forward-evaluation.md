@@ -6,6 +6,16 @@ including nullable provenance, force-recording and timing metadata. Keep exports
 and generated reports in the gitignored `scripts/data/` directory. The command is
 read-only and does not contact a service or change recommendations.
 
+Add `--diagnostics` to trace the prescription stages: a curve fitted to raw loads,
+the same eligible rows with fatigue-adjusted loads, the latest-workout amplitude
+anchor, the rounding/extrapolation floor, and the final bounded prescription.
+The existing fresh-openers curve remains a separate benchmark, not another
+sequential stage. The trace also evaluates the existing optional same-domain
+anchor as a counterfactual; it does not enable it in the app. Its domain is the
+scored duration, which can differ from the workout's planned domain. The trace
+checks that its reconstructed fit agrees with the production model's rounded
+potential and throws if it drifts. This diagnostic path is not imported by the UI.
+
 ## What it checks
 
 For each training date, every fit uses only earlier dates. This includes the
@@ -66,6 +76,22 @@ empty result means there are no eligible saved predictions, not zero error.
 Inspect coverage and excluded reasons before comparing scores. Read matched
 comparisons, grip, hand, domain and recording-type breakdowns; a favorable pooled
 average can conceal a weak domain. Positive bias means the forecast was too high.
+
+**Two distinct domain breakdowns are reported.** `byDomain` retains the original
+grouping by the prescribed target. `byObservedDurationDomain` groups by the actual
+scored hold duration; recovery uses the opener's duration. A workout targeting
+160 seconds but ending at 32 seconds appears in planned Strength/Endurance and
+observed Power. That distinction matters when the force model is evaluated at
+the observed duration: an error in that workout cannot automatically be called
+an error at 160 seconds. Neither grouping proves which physiological adaptation
+the workout stimulated. Both retain all eligible rows; this is not a filter that
+removes missed targets from the evaluation.
+
+Stage differences describe the implemented sequence, not independent causal
+effects. The fatigue fit, anchor and bounds can offset each other. Compare final
+errors across all domains as well as the selected problem slice before proposing
+a change. In particular, better fit in a small retrospective subset is not proof
+that an anchor variant is better for future recommendations.
 Relative timing error becomes large when a late rep lasts only a few seconds, so
 read seconds of error alongside it. Prime or another sparse grip may not qualify.
 

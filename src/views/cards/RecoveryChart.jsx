@@ -9,13 +9,12 @@
 //   observed   — actual_time_s(N) / actual_time_s(1) from session
 //                rep data. Always 1.0 at rep 1; subsequent reps
 //                track how the rest interval handled depletion.
-//   predicted  — what the user's personal recovery taus say the
-//                fraction SHOULD be, given rep 1's time + the rest
+//   predicted  — approximate fraction from the fitted recovery model,
+//                given rep 1's time + the rest
 //                interval. By construction 1.0 at rep 1.
 //
-// Reference band at 70%-90% marks the practical operating zone for
-// sustained sets: below 70% the rep is meaningfully degraded;
-// above 90% the rest interval has slack and could be shortened.
+// The 70%-90% reference band describes retention. It is not a validated
+// readiness threshold or a reason to shorten protocol rest automatically.
 //
 // Data shapes (from src/model/recoveryDynamics.js):
 //   observed:  [{rep:1, observedFraction:1.0}, ...]
@@ -54,7 +53,7 @@ function CustomTooltip({ active, payload, label }) {
       <div style={{ fontWeight: 700, marginBottom: 4 }}>Rep {label}</div>
       {payload.map(p => p.value != null && (
         <div key={p.dataKey} style={{ color: p.color }}>
-          {p.name}: {Math.round(Number(p.value) * 100)}%
+          {p.name}: {p.dataKey === 'predicted' ? 'about ' : ''}{Math.round(Number(p.value) * 100)}%
         </div>
       ))}
     </div>
@@ -101,11 +100,11 @@ function RecoveryChart({
   // so we don't editorialize about "under-rested."
   const headlineText = headline?.classification ? (
     headline.classification === "operating_zone"
-      ? "Within typical operating zone"
+      ? "Moderate drop from the first hold"
       : headline.classification === "deep_depletion"
-        ? "Deep depletion — steep loss between reps"
+        ? "Larger drop from the first hold"
         : headline.classification === "shallow_depletion"
-          ? "Shallow depletion — rest has headroom"
+          ? "Similar to or longer than the first hold"
           : null
   ) : null;
   const headlineColor =
@@ -132,10 +131,13 @@ function RecoveryChart({
           </span>
         </div>
       )}
+      {predicted.length > 0 && <p style={{ fontSize: 12, color: C.muted, margin: '0 0 8px', lineHeight: 1.5 }}>
+        Dashed line: approximate time retained between holds. This describes the current set.
+      </p>}
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={merged} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.border} opacity={0.3} />
-          {/* Operating zone — well-calibrated rest lands in this band. */}
+          {/* Retention reference band; not a readiness or rest prescription. */}
           <ReferenceArea
             y1={OPERATING_LOW} y2={OPERATING_HIGH}
             fill={COLORS.zone}
@@ -178,7 +180,7 @@ function RecoveryChart({
             <Line
               type="monotone"
               dataKey="predicted"
-              name="Forecast"
+              name="Approximate estimate"
               stroke={COLORS.predicted}
               strokeWidth={2}
               strokeDasharray="4 3"

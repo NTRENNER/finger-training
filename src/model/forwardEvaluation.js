@@ -8,6 +8,7 @@ import { recoveryEvidence } from './recoveryEvidence.js';
 import { PHYS_MODEL_DEFAULT, predictRepTimes } from './fatigue.js';
 import { summarizeMixedPredictions } from './mixedLoadPrediction.js';
 import { classifyZone6 } from './zones.js';
+import { tracePrescription } from './prescriptionDiagnostics.js';
 
 const mean = xs => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
 const round = n => n == null ? null : Number(n.toFixed(3));
@@ -91,14 +92,16 @@ function summarize(rows, primary, alternatives) {
     byGrip: Object.fromEntries([...group(rows, r => r.grip)].map(([key, rs]) => [key, one(rs)])),
     byHand: Object.fromEntries([...group(rows, r => r.hand)].map(([key, rs]) => [key, one(rs)])),
     byEvidence: Object.fromEntries([...group(rows, r => r.evidence)].map(([key, rs]) => [key, one(rs)])),
-    byDomain: Object.fromEntries([...group(rows, r => r.domain)].map(([key, rs]) => [key, one(rs)])) };
+    // Keep the historical key for consumers; name its meaning in the report.
+    byDomain: Object.fromEntries([...group(rows, r => r.domain)].map(([key, rs]) => [key, one(rs)])),
+    byObservedDurationDomain: Object.fromEntries([...group(rows, r => r.observedDomain || 'unknown')].map(([key, rs]) => [key, one(rs)])) };
 }
 
 const measuredOpener = r => sane(r.avg_force_kg) != null && positive(r.actual_time_s)
   && r.actual_time_s <= 600 && ['legacy_measured', 'measured_force'].includes(loadProvenance(r));
 const seriesKey = r => `${r.date}|${r.session_id}|${r.grip}|${r.hand}|${r.set_num ?? 1}`;
 
-export function evaluateForward(input, { minPriorDays = 5 } = {}) {
+export function evaluateForward(input, { minPriorDays = 5, diagnostics = false } = {}) {
   if (!Array.isArray(input)) throw new Error('Expected a JSON array of rep rows');
   if (!Number.isInteger(minPriorDays) || minPriorDays < 1) throw new Error('minPriorDays must be a positive integer');
   const { rows, excluded } = prepareEvaluationRows(input);
@@ -133,12 +136,17 @@ export function evaluateForward(input, { minPriorDays = 5 } = {}) {
       const comparable = past.filter(p => Math.max(p.actual_time_s, r.actual_time_s) / Math.min(p.actual_time_s, r.actual_time_s) <= 1.10
         && (Date.parse(date) - Date.parse(p.date)) / 86400000 <= 90).at(-1);
       const rx = prescription(prior, r.hand, r.grip, r.actual_time_s, { freshMap, threeExpPriors: priors, referenceDate: date });
+      const trace = diagnostics ? tracePrescription(prior, r.hand, r.grip, r.actual_time_s,
+        { freshMap, threeExpPriors: priors, referenceDate: date }, rx) : null;
       forceRows.push({ date, grip: r.grip, hand: r.hand, session: r.session_id, rep: r.rep_num,
         domain: classifyZone6(r.target_duration)?.key || 'unknown',
+        observedDomain: classifyZone6(r.actual_time_s)?.key || 'unknown',
+        targetDuration: r.target_duration,
         evidence: `${loadProvenance(stored)}:${stored.force_recording?.basis || 'legacy_interval'}`,
         actual: r.avg_force_kg, duration: r.actual_time_s,
         predictions: { prescription: rx?.value ?? null, freshCurve: fitted ? predForceThreeExp(fitted, r.actual_time_s) : null,
-          recentComparable: comparable?.avg_force_kg ?? null } });
+          recentComparable: comparable?.avg_force_kg ?? null, ...(trace?.predictions || {}) },
+        ...(trace ? { diagnostics: trace.details } : {}) });
     }
 
     for (const set of group(today.filter(r => r.session_id), seriesKey).values()) {
@@ -164,19 +172,23 @@ export function evaluateForward(input, { minPriorDays = 5 } = {}) {
         const r = evidence.reps[i];
         recoveryRows.push({ date, grip: r.grip, hand: r.hand, session: r.session_id, rep: r.rep_num,
           domain: classifyZone6(opener.target_duration)?.key || 'unknown', evidence: evidence.confidence,
+          observedDomain: classifyZone6(opener.actual_time_s)?.key || 'unknown',
           actual: r.actual_time_s, predictions: { personal: conditional[i], population: population[i],
             plannedPersonal: plannedPersonal?.[i] ?? null, plannedPopulation: plannedPopulation?.[i] ?? null } });
       }
     }
   }
-  return { version: 1,
+  return { version: 2,
     method: { cutoff: 'strictly earlier calendar days', minPriorDays, weighting: 'equal training-day weight; hands and reps averaged within day',
+      domains: 'byDomain groups by planned target; byObservedDurationDomain groups by scored hold duration (opener duration for recovery). Neither establishes a physiological stimulus.',
       force: 'Conditional force-at-observed-duration calibration in kg; not a pre-rep forecast or an exact replay of the ladder.',
       recovery: 'Later-hold seconds conditional on observed opener. Actual-rest diagnostic and constant planned-rest scenario reported separately.',
       caveat: 'One-user retrospective check. Historical edits and model development on this history prevent treating this as independent prospective validation.' },
     inventory: { inputRows: input.length, retainedRows: rows.length, trainingDays: dates.length, sessions: new Set(rows.map(r => r.session_id).filter(Boolean)).size,
       firstDate: dates[0] || null, lastDate: dates.at(-1) || null, excluded },
-    force: { excluded: forceExcluded, ...summarize(forceRows, 'prescription', ['freshCurve', 'recentComparable']) },
+    force: { excluded: forceExcluded, ...summarize(forceRows, 'prescription', ['freshCurve', 'recentComparable']),
+      ...(diagnostics ? { stages: summarize(forceRows.filter(r => r.diagnostics), 'prescription',
+        ['freshCurve', 'rawCurve', 'fatigueCurve', 'anchoredCurve', 'extrapolatedCurve', 'sameDomainAnchor']) } : {}) },
     recovery: { excluded: recoveryExcluded,
       actualRestDiagnostic: summarize(recoveryRows, 'personal', ['population']),
       plannedRestScenario: summarize(recoveryRows, 'plannedPersonal', ['plannedPopulation']) },

@@ -109,8 +109,8 @@ export function DeloadGauge({
         <div style={{ fontSize: 12.5, fontWeight: 700, color }}>{label}</div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
-        How close you {isHistorical ? "were" : "are"} to needing a deload, based on the available
-        between-rep recovery evidence. Gray = insufficient current evidence; green = observed recovery within range; yellow = recovery
+        An approximate recovery trend from your recorded sets. Consider it alongside how you feel and your recent training.
+        Gray = insufficient current evidence; green = observed recovery within range; yellow = recovery
         softening, ease up soon; red = deload recommended. Intentionally slow
         to move — it won't react to a single rough session.
       </div>

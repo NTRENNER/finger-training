@@ -40,7 +40,7 @@ test("scrubs recovery checkpoints and labels the live endpoint Now", () => {
     />
   );
   expect(screen.getByText(/As of:/).textContent).toContain("Jun 1, 2026");
-  expect(screen.getByText(/How close you were/i)).toBeInTheDocument();
+  expect(screen.getByText(/An approximate recovery trend/i)).toBeInTheDocument();
 });
 
 test("hides the slider until there is historical range to scrub", () => {
@@ -67,7 +67,7 @@ describe("collapsing", () => {
   test("collapsed shows one line and nothing that explains the reading", () => {
     render(<DeloadGauge status={greenStatus} expanded={false} onToggleExpanded={jest.fn()} />);
     expect(screen.getByText(greenStatus.label)).toBeInTheDocument();
-    expect(screen.queryByText(/How close you/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/An approximate recovery trend/)).not.toBeInTheDocument();
     expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   });
 
@@ -99,7 +99,7 @@ describe("collapsing", () => {
 
   test("a caller that passes no toggle gets the old always-open card", () => {
     render(<DeloadGauge status={greenStatus} />);
-    expect(screen.getByText(/How close you/)).toBeInTheDocument();
+    expect(screen.getByText(/An approximate recovery trend/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { expanded: true })).not.toBeInTheDocument();
   });
 });
