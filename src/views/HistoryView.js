@@ -46,7 +46,7 @@ import { CookednessSlider } from "./cards/CookednessSlider.jsx";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
-import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
+import { buildRecoveryBundle } from "../model/recoveryDynamics.js";
 import { deleteBW } from "../lib/sync.js";
 import { BadgeCollection } from "./cards/BadgeCollection.jsx";
 import { ClimbingPrBadgeCollection } from "./cards/ClimbingPrBadgeCollection.jsx";
@@ -1018,7 +1018,6 @@ export function HistoryView({
                           if (recBundle.eligibility === "descriptive_only" || recBundle.observed.length < 2) return (
                             <p>Descriptive only — recovery comparison needs measured rest and comparable force in consecutive valid reps.</p>
                           );
-                          const classification = classifyRecovery(recBundle.observedAtTarget);
                           return (
                             <div style={{ marginTop: 12 }}>
                               {recBundle.eligibility === "partial" && <p>Recovery comparison uses the valid opening reps only.</p>}
@@ -1028,7 +1027,6 @@ export function HistoryView({
                                 predicted={recBundle.predicted}
                                 headline={{
                                   observed: recBundle.observedAtTarget,
-                                  classification,
                                 }}
                                 title="Recovery dynamics"
                                 height={160}

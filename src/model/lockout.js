@@ -22,6 +22,7 @@
 // → resets endurance). Today's quick-log captures discipline + RPE
 // as raw inputs for that future logic.
 
+import { isCapacityEvidenceRep } from "./forceRecording.js";
 import { ZONE_KEYS, TRAINING_ZONE_KEYS, zoneOf } from "./zones.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -92,7 +93,7 @@ export const ANNUAL_SESSION_GOAL = 100;
 export function getLastZoneTrainedDates(history) {
   const out = Object.fromEntries(ZONE_KEYS.map(k => [k, null]));
   for (const r of history || []) {
-    if (!r?.date) continue;
+    if (!r?.date || !isCapacityEvidenceRep(r) || Number(r.set_num ?? 1) !== 1) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;  // fresh efforts only
     const td = r.actual_time_s > 0 ? r.actual_time_s : r.target_duration;
     if (!(td > 0)) continue;

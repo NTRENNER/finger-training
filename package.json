@@ -27,7 +27,8 @@
     "evaluate:forward": "node --no-warnings scripts/evaluate-forward.mjs",
     "evaluate:history": "node --no-warnings scripts/evaluate-history.mjs",
     "evaluate:trends": "node --no-warnings scripts/evaluate-trends.mjs",
-    "evaluate:adaptive": "node --no-warnings scripts/evaluate-adaptive.mjs"
+    "evaluate:adaptive": "node --no-warnings scripts/evaluate-adaptive.mjs",
+    "evaluate:windows": "node --no-warnings scripts/evaluate-windows.mjs"
   },
   "eslintConfig": {
     "extends": [

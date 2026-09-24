@@ -588,6 +588,8 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // The Setup tab's Curve Coverage card uses the all-grips view of
   // getZoneStaleness for its zone-balance framing; here we want the
   // grip-scoped view so the engine recommends what THIS grip needs.
+  const asOf = today instanceof Date ? ymdLocal(today) : today;
+  history = history.filter(r => r?.date && r.date <= asOf);
   const gripHistory = history.filter(r => isCapacityEvidenceRep(r) && r?.grip === grip);
   if (gripHistory.length === 0) {
     const todayDate = today instanceof Date ? ymdLocal(today) : (today || ymdLocal());

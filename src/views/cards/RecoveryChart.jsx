@@ -13,8 +13,7 @@
 //                given rep 1's time + the rest
 //                interval. By construction 1.0 at rep 1.
 //
-// The 70%-90% reference band describes retention. It is not a validated
-// readiness threshold or a reason to shorten protocol rest automatically.
+// Retention is descriptive. There is no universal good/bad reference band.
 //
 // Data shapes (from src/model/recoveryDynamics.js):
 //   observed:  [{rep:1, observedFraction:1.0}, ...]
@@ -24,10 +23,9 @@ import React, { useMemo } from "react";
 import {
   ResponsiveContainer, ComposedChart,
   Line, XAxis, YAxis, Tooltip, CartesianGrid,
-  ReferenceLine, ReferenceArea, Legend,
+  ReferenceLine, Legend,
 } from "recharts";
 import { C } from "../../ui/theme.js";
-import { OPERATING_LOW, OPERATING_HIGH } from "../../model/recoveryDynamics.js";
 
 // Color palette mirrors RepCurveChart so the two charts read as a
 // pair: observed/actual in green, predicted/forecast in pink,
@@ -35,7 +33,6 @@ import { OPERATING_LOW, OPERATING_HIGH } from "../../model/recoveryDynamics.js";
 const COLORS = {
   observed:  "#34d399",  // green
   predicted: "#e879f9",  // pink (dashed)
-  zone:      "#60a5fa",  // blue, low-opacity band
   fresh:     "#f59e0b",  // amber, 100% reference line
 };
 
@@ -63,8 +60,7 @@ function CustomTooltip({ active, payload, label }) {
 function RecoveryChart({
   observed = [],
   predicted = [],
-  // Coaching headline displayed above the chart when a gap is
-  // available. Shape: { observed: 0.78, classification: "well_calibrated" }.
+  // Observed retention, without a readiness classification.
   headline = null,
   height = 180,
   title = null,
@@ -95,24 +91,6 @@ function RecoveryChart({
     );
   }
 
-  // Headline: descriptive read on the depletion depth at rep 2.
-  // Frames what we OBSERVED — the rest is fixed by the protocol,
-  // so we don't editorialize about "under-rested."
-  const headlineText = headline?.classification ? (
-    headline.classification === "operating_zone"
-      ? "Moderate drop from the first hold"
-      : headline.classification === "deep_depletion"
-        ? "Larger drop from the first hold"
-        : headline.classification === "shallow_depletion"
-          ? "Similar to or longer than the first hold"
-          : null
-  ) : null;
-  const headlineColor =
-    headline?.classification === "operating_zone"    ? C.green
-    : headline?.classification === "deep_depletion"  ? C.orange
-    : headline?.classification === "shallow_depletion" ? C.muted
-    : C.muted;
-
   return (
     <div style={{ width: "100%" }}>
       {title && (
@@ -120,32 +98,20 @@ function RecoveryChart({
           {title}
         </div>
       )}
-      {headlineText && headline?.observed != null && (
+      {Number.isFinite(headline?.observed) && (
         <div style={{ fontSize: 11, marginBottom: 4, lineHeight: 1.4 }}>
-          <span style={{ color: headlineColor, fontWeight: 700 }}>
+          <span style={{ color: C.text, fontWeight: 700 }}>
             {Math.round(headline.observed * 100)}%
           </span>{" "}
           <span style={{ color: C.muted }}>of rep-1 time on rep 2</span>{" "}
-          <span style={{ color: headlineColor, fontStyle: "italic" }}>
-            · {headlineText}
-          </span>
         </div>
       )}
       {predicted.length > 0 && <p style={{ fontSize: 12, color: C.muted, margin: '0 0 8px', lineHeight: 1.5 }}>
-        Dashed line: approximate time retained between holds. This describes the current set.
+        Dashed line: approximate time retained between holds. Shorter holds are expected within a set. This is not a readiness score.
       </p>}
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={merged} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.border} opacity={0.3} />
-          {/* Retention reference band; not a readiness or rest prescription. */}
-          <ReferenceArea
-            y1={OPERATING_LOW} y2={OPERATING_HIGH}
-            fill={COLORS.zone}
-            fillOpacity={0.08}
-            stroke={COLORS.zone}
-            strokeOpacity={0.25}
-            strokeDasharray="2 3"
-          />
           <XAxis
             dataKey="rep"
             type="number"
@@ -173,7 +139,7 @@ function RecoveryChart({
             stroke={COLORS.fresh}
             strokeDasharray="1 4"
             strokeOpacity={0.5}
-            label={{ value: "fresh", fill: COLORS.fresh, fontSize: 9, position: "right" }}
+            label={{ value: "rep 1", fill: COLORS.fresh, fontSize: 9, position: "right" }}
           />
 
           {predicted.length > 0 && (

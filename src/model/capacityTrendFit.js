@@ -34,15 +34,26 @@ export function trendPoints(rows, halfLifeDays, quality = true) {
 }
 const sumWeight = pts => pts.reduce((s, p) => s + p.w, 0);
 
-export function fitEstablishedTrend(history, hand, grip, referenceDate) {
+export function selectRecentSessions(rows, count) {
+  if (!Number.isInteger(count) || count <= 0) throw new Error('Session count must be a positive integer');
+  const key = r => `${r.date}|${r.session_id || r.date}`;
+  const sessions = [...grouped(rows, key)].sort(([ka, a], [kb, b]) =>
+    a[0].date.localeCompare(b[0].date)
+    || String(a[0].session_started_at || '').localeCompare(String(b[0].session_started_at || ''))
+    || ka.localeCompare(kb));
+  return sessions.slice(-count).flatMap(([, rs]) => rs);
+}
+
+export function fitEstablishedTrend(history, hand, grip, referenceDate, { sessionWindow = null } = {}) {
   // Enforce the cutoff here too, so direct callers cannot leak the test date.
   const clean = prepareEvaluationRows(history).rows.filter(r => r.date < referenceDate);
-  const all = freshFitReps(clean).filter(r => r.grip === grip && measured(r));
+  const eligible = freshFitReps(clean).filter(r => r.grip === grip && measured(r));
+  const all = sessionWindow == null ? eligible : selectRecentSessions(eligible, sessionWindow);
   const own = all.filter(r => r.hand === hand);
   const days = new Set(own.map(r => r.date)).size;
   if (days < TREND_EXPERIMENT.minPriorDays) return null;
-  const points = trendPoints(own, TREND_EXPERIMENT.longHalfLifeDays);
-  const pooled = trendPoints(all, TREND_EXPERIMENT.longHalfLifeDays);
+  const points = trendPoints(own, sessionWindow == null ? TREND_EXPERIMENT.longHalfLifeDays : Infinity);
+  const pooled = trendPoints(all, sessionWindow == null ? TREND_EXPERIMENT.longHalfLifeDays : Infinity);
   const prior = fitThreeExpAmps(pooled);
   const effectiveDays = sumWeight(points);
   const established = fitThreeExpAmps(points, { prior, lambda: 100 / effectiveDays });

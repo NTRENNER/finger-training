@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useId } from 'react';
 import { HistoricalPredictionReview } from './HistoricalPredictionReview.jsx';
 import { Card, Btn } from '../../ui/components.js';
 import { C } from '../../ui/theme.js';
@@ -21,6 +21,56 @@ function Score({ title, score, unit, factor = 1, candidateLabel = 'Candidate' })
       </table>
     </div>
   </section>;
+}
+
+function DiagnosticBreakdowns({ report, unit, factor }) {
+  const id = useId();
+  const [measure, setMeasure] = useState('recovery');
+  const [dimension, setDimension] = useState('rep');
+  return <details style={{ marginTop: 20 }}>
+    <summary style={{ cursor: 'pointer' }}>Where predictions miss</summary>
+    <p style={{ color: C.muted }}>Each day has equal weight within a group. Small groups are exploratory;
+      more history does not guarantee a better prediction. Positive bias means the estimate was too high.</p>
+    <label htmlFor={`${id}-comparison`}>Comparison</label>
+    <select id={`${id}-comparison`} style={{ display: "block", width: "100%", margin: "6px 0 12px" }} value={measure} onChange={e => setMeasure(e.target.value)}>
+      <option value="force">Opening force</option>
+      <option value="recovery">Later holds · measured rest</option>
+      <option value="plannedRecovery">Later holds · updated after opener</option>
+      <option value="preSessionRecovery">Later holds · before opener</option>
+    </select>
+    <label htmlFor={`${id}-group`}>Group by</label>
+    <select id={`${id}-group`} style={{ display: "block", width: "100%", margin: "6px 0 12px" }} value={dimension} onChange={e => setDimension(e.target.value)}>
+      {Object.entries({ rep: 'Hold number', domain: 'Planned domain', grip: 'Device', hand: 'Hand',
+        restBand: 'Rest duration', basis: 'Recording method', priorDaysBand: 'Prior training days' })
+        .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </select>
+    {Object.entries(report.diagnostics[measure][dimension]).map(([key, score]) =>
+      <Score key={key} title={labels[key] || key} score={score} unit={measure === 'force' ? unit : 's'}
+        factor={measure === 'force' ? factor : 1} candidateLabel={measure === 'force' ? 'Candidate' : 'Population'} />)}
+    {!Object.keys(report.diagnostics[measure][dimension]).length && <p>No comparable saved forecasts in this group yet.</p>}
+  </details>;
+}
+
+function PrescriptionStages({ rows, unit, factor }) {
+  const fmt = x => Number.isFinite(x) ? (x * factor).toFixed(1) : '—';
+  return <details style={{ marginTop: 20 }}>
+    <summary style={{ cursor: 'pointer' }}>From estimated ability to planned load</summary>
+    <p style={{ color: C.muted, lineHeight: 1.5 }}>Established ability and recent adjustment belong to the experimental model.
+      The final planned load is the workout you actually chose, including progression and any selected fatigue adjustment.
+      These are separate calculations; the experimental estimate does not set your load.</p>
+    {!rows.length ? <p>No comparable saved opening forecasts yet.</p> : <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', textAlign: 'left', fontSize: 13, borderSpacing: 8 }}>
+        <caption style={{ textAlign: 'left' }}>Latest 20 opening holds · {unit}</caption>
+        <thead><tr>{['Workout', 'Target', 'Established', 'Recent change', 'Candidate after limits', 'Final planned']
+          .map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
+        <tbody>{rows.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20).map(row =>
+          <tr key={row.id}><th scope="row" style={{ fontWeight: 400 }}>{row.date} · {row.grip} · {row.hand}</th>
+            <td>{row.targetSeconds}s</td><td>{fmt(row.establishedKg)}</td><td>{fmt(row.recentChangeKg)}</td>
+            <td>{fmt(row.candidateBoundedKg)}</td><td>{fmt(row.finalPlannedKg)}</td></tr>)}</tbody>
+      </table>
+    </div>}
+    <p style={{ color: C.muted, fontSize: 13 }}>Missing estimates stay blank. The download includes every saved stage.</p>
+  </details>;
 }
 
 export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
@@ -84,10 +134,16 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
       </details>
       <Score title="Between-rep recovery · approximate" score={report.recovery} unit="s" candidateLabel="Population" />
       <p style={{ color: C.muted, fontSize: 13 }}>Current recovery versus the population estimate, checked using measured rest and similar force across holds.</p>
-      <Score title="Advance recovery estimates" score={report.plannedRecovery} unit="s" candidateLabel="Population" />
-      <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>This separate check also requires rest within 2 seconds of the plan.
+      <Score title="Later-hold estimates updated after the opener" score={report.plannedRecovery} unit="s" candidateLabel="Population" />
+      <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>These estimates already know your opening hold. This check also requires rest within 2 seconds of the plan.
         Lower error is better. Positive bias means overestimating; negative means underestimating.
         “Typical” is mean absolute error; “Larger misses” is root mean square error. A small sample cannot establish a winner.</p>
+      <Score title="Later-hold estimates before the opener" score={report.preSessionRecovery} unit="s" candidateLabel="Population" />
+      <p style={{ color: C.muted, fontSize: 13 }}>These use the saved capacity curve and planned rest without your opening result.
+        Every preceding hold must match the planned load and rest, with a compatible recording method.
+        Older records without this forecast are not reconstructed as advance predictions.</p>
+      <DiagnosticBreakdowns report={report} unit={unit} factor={factor} />
+      <PrescriptionStages rows={report.prescriptionStages} unit={unit} factor={factor} />
       {excluded > 0 && <p style={{ color: C.muted, fontSize: 13 }}>{excluded} saved checks are not comparable yet or were excluded.
         Interrupted holds, changed records and incomplete measurements do not count against either model. Reasons are included in the download.</p>}
       <Btn onClick={exportReport}>Download review</Btn>

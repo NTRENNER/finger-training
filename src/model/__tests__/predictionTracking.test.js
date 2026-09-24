@@ -147,3 +147,38 @@ test('day weights and signed bias remain honest with different numbers of reps',
   expect(predictionMetrics(rows, 'm')).toMatchObject({ days: 2, observations: 7, mae: 6, bias: 4, worst: 10 });
   expect(predictionMetrics([], 'm').mae).toBeNull();
 });
+
+test('before-opener forecasts never use the opening result; updated forecasts do', () => {
+  const { models } = setup();
+  const first = recoveryRows('measured')[0];
+  const a = prepare(models, [first]);
+  const b = prepare(models, [{ ...first, actual_time_s: first.actual_time_s * 2 }]);
+  expect(a.pre_session).toEqual(b.pre_session);
+  expect(a.planned).not.toEqual(b.planned);
+});
+
+test('diagnostics preserve rep position, basis, day counts and planned-load stages', () => {
+  const { models } = setup();
+  const raw = recoveryRows('measured');
+  const reps = [];
+  raw.forEach(rep => reps.push(record(models, rep, reps)));
+  const report = summarizePredictions(reps);
+  expect(report.diagnostics.recovery.rep['2'].current.observations).toBe(1);
+  expect(report.diagnostics.recovery.hand.L.current.days).toBe(1);
+  expect(report.diagnostics.force.priorDaysBand['5–9'].current.days).toBe(1);
+  expect(report.prescriptionStages[0]).toMatchObject({ finalPlannedKg: 30, targetSeconds: 30 });
+  expect(report.prescriptionStages[0].establishedKg).toBeGreaterThan(0);
+  expect(report.preSessionRecovery.current.observations).toBe(raw.length - 1);
+});
+
+test('pre-session scoring requires every prior rest to match, not only the final rest', () => {
+  const { models } = setup();
+  const raw = recoveryRows('measured');
+  const first = record(models, raw[0]);
+  const second = record(models, { ...raw[1], rep_timing: { ...raw[1].rep_timing, rest_before_s: 90 } }, [first]);
+  const third = record(models, raw[2], [first, second]);
+  const report = summarizePredictions([first, second, third]);
+  expect(report.preSessionRecovery.current.observations).toBe(0);
+  expect(report.recovery.current.observations).toBe(2);
+  expect(report.plannedRecovery.current.observations).toBe(1);
+});

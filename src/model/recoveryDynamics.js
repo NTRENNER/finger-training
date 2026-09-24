@@ -90,28 +90,8 @@ export function buildPredictedRecoverySeries({
 // intervals.
 export const GAP_TARGET_REP = 2;
 
-// Operating-zone thresholds. Used by the chart for the reference
-// band, and reported here so coaching helpers can read off the
-// same numbers without re-deriving them.
-export const OPERATING_LOW  = 0.7;  // below = meaningfully degraded
-export const OPERATING_HIGH = 0.9;  // above = rest interval has slack
-
-// Classify the observed recovery at the target rep. Purely
-// descriptive of the depletion depth — the rest interval is fixed
-// by the protocol, so we don't moralize about "under-rested." A
-// deeply-depleted rep 2 means rep 1 was hard + 20s wasn't enough
-// to refill; that's not a discipline issue, it's set shape.
-// Returns one of:
-//   "operating_zone"    — within [LOW, HIGH], typical training depth
-//   "deep_depletion"    — below LOW, steep loss between reps
-//   "shallow_depletion" — above HIGH, plenty of headroom in rest
-//   null                — observed value missing
-export function classifyRecovery(observedFraction) {
-  if (observedFraction == null || !Number.isFinite(observedFraction)) return null;
-  if (observedFraction < OPERATING_LOW) return "deep_depletion";
-  if (observedFraction > OPERATING_HIGH) return "shallow_depletion";
-  return "operating_zone";
-}
+// Raw duration retention has no universal good/bad band. It depends on
+// load, opening duration and rest; display it without a readiness verdict.
 
 // One-shot bundle for the chart. Given a session's reps + the
 // personalized physModel, build both series + a headline gap

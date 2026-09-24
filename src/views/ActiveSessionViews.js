@@ -37,7 +37,7 @@ import { levelTitle } from "../model/levels.js";
 import { downloadCSV } from "../lib/csv.js";
 import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
-import { buildRecoveryBundle, classifyRecovery } from "../model/recoveryDynamics.js";
+import { buildRecoveryBundle } from "../model/recoveryDynamics.js";
 import { sessionOverpull } from "../model/overpull.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 import { MAX_OPTIONAL_SETS, recommendAnotherSet, isSetComplete } from "../model/setRecommendation.js";
@@ -114,7 +114,6 @@ function LiveRecoveryCard({ history, config, currentSet = 1, activeHand, session
   if (!bundle) return null;
   if (bundle.eligibility === "descriptive_only") return <p>Activity recorded. Recovery comparison needs measured rest and comparable force.</p>;
   if (bundle.observed.length === 0) return null;
-  const classification = classifyRecovery(bundle.observedAtTarget);
   const inner = (
     <>
     {bundle.confidence === "historical_estimate" && <p>Historical estimate using planned rest.</p>}
@@ -123,7 +122,6 @@ function LiveRecoveryCard({ history, config, currentSet = 1, activeHand, session
       predicted={bundle.predicted}
       headline={{
         observed: bundle.observedAtTarget,
-        classification,
       }}
       height={140}
       showLegend={false}

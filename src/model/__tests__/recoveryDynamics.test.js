@@ -8,8 +8,7 @@ import {
   buildRecoveryBundle,
   buildRecoveryTrend,
   withRollingMean,
-  classifyRecovery,
-  OPERATING_LOW, OPERATING_HIGH, GAP_TARGET_REP, GAP_NOISE_BAND,
+  GAP_TARGET_REP, GAP_NOISE_BAND,
 } from "../recoveryDynamics.js";
 import { getPhysModel } from "../fatigue.js";
 
@@ -119,33 +118,6 @@ describe("buildPredictedRecoverySeries", () => {
 // classifyRecovery
 // ─────────────────────────────────────────────────────────────
 
-describe("classifyRecovery", () => {
-  test("inside [LOW, HIGH] → operating_zone", () => {
-    expect(classifyRecovery(0.8)).toBe("operating_zone");
-    expect(classifyRecovery(OPERATING_LOW)).toBe("operating_zone");
-    expect(classifyRecovery(OPERATING_HIGH)).toBe("operating_zone");
-  });
-
-  test("below LOW → deep_depletion", () => {
-    expect(classifyRecovery(0.5)).toBe("deep_depletion");
-    expect(classifyRecovery(OPERATING_LOW - 0.01)).toBe("deep_depletion");
-  });
-
-  test("above HIGH → shallow_depletion", () => {
-    expect(classifyRecovery(0.95)).toBe("shallow_depletion");
-    expect(classifyRecovery(1.0)).toBe("shallow_depletion");
-  });
-
-  test("null / invalid → null", () => {
-    expect(classifyRecovery(null)).toBeNull();
-    expect(classifyRecovery(undefined)).toBeNull();
-    expect(classifyRecovery(NaN)).toBeNull();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// buildRecoveryBundle — end-to-end shape
-// ─────────────────────────────────────────────────────────────
 
 describe("buildRecoveryBundle", () => {
   test("produces both series and a gap at the target rep", () => {
@@ -440,13 +412,7 @@ describe("GAP_NOISE_BAND", () => {
   });
 });
 
-describe("operating-zone constants", () => {
-  test("LOW < HIGH and both in (0, 1)", () => {
-    expect(OPERATING_LOW).toBeGreaterThan(0);
-    expect(OPERATING_LOW).toBeLessThan(OPERATING_HIGH);
-    expect(OPERATING_HIGH).toBeLessThan(1);
-  });
-
+describe("recovery reference", () => {
   test("GAP_TARGET_REP is the first inter-rep measurement (rep 2)", () => {
     expect(GAP_TARGET_REP).toBe(2);
   });

@@ -40,3 +40,11 @@ test('ten independent days enable a review download, not an automatic model swit
   expect(click).toHaveBeenCalledTimes(1);
   click.mockRestore();
 });
+
+test('research breakdown controls are labeled and missing forecasts stay explicitly unavailable', () => {
+  render(<PredictionAccuracyCard history={[]} />);
+  fireEvent.change(screen.getByLabelText('Comparison', { exact: true }), { target: { value: 'preSessionRecovery' } });
+  fireEvent.change(screen.getByLabelText('Group by', { exact: true }), { target: { value: 'priorDaysBand' } });
+  expect(screen.getByText('No comparable saved forecasts in this group yet.')).toBeInTheDocument();
+  expect(screen.getByText('No comparable saved opening forecasts yet.')).toBeInTheDocument();
+});

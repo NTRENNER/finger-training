@@ -1,3 +1,4 @@
+import { DomainHistory } from './DomainHistory.jsx';
 import { startingHandForDay } from '../../model/handOrder.js';
 import { measuredProgress } from "../../model/measuredProgress.js";
 import { sessionPerformanceContext } from "../../model/sessionPerformanceContext.js";
@@ -187,19 +188,19 @@ export function SessionPlanCard({
     [hand]
   );
   const ladder = useMemo(
-    () => (grip && activeZone && !isPeakTest && !isZoneOverridden && !rec?.boundaryProbe)
+    () => (grip && activeZone && !isPeakTest && !rec?.boundaryProbe)
       ? computeDensityLadder(history, grip, activeZone, { expectedHands })
       : null,
     [
       history, grip, activeZone, expectedHands, rec,
-      isPeakTest, isZoneOverridden,
+      isPeakTest,
     ]
   );
 
   // ── Per-zone tiles (with cookedness scale-down) ─────────────────
   // Every tile gets the same multiplier: the rate is a single published
   // constant, not a per-grip or per-zone table (see cookedScaling.js).
-  const rows = useMemo(() => {
+  const curveRows = useMemo(() => {
     if (!grip) return null;
     const fatigueMod = loadMultiplier;
     return ZONE_KEYS.map(key => {
@@ -242,14 +243,26 @@ export function SessionPlanCard({
     }).filter(Boolean);
   }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, loadMultiplier, rec]);
 
+  const rows = useMemo(() => curveRows?.map(row => {
+    if (row.deferredReason || rec?.boundaryProbe || !TRAINING_ZONE_KEYS.includes(row.key)) return row;
+    const domainLadder = computeDensityLadder(history, grip, row.key, { expectedHands });
+    if (!domainLadder) return row;
+    const curveLoads = Object.fromEntries(["L", "R"].map(h => [h,
+      prescription(history, h, grip, domainLadder.T, { freshMap, threeExpPriors })?.value ?? null]));
+    const loads = resolveDensityLadderLoads(domainLadder, curveLoads);
+    return { ...row, T: domainLadder.T, reps: domainLadder.reps, ladder: domainLadder, resolvedLoads: loads,
+      L: loads?.L != null ? loads.L * loadMultiplier : row.L,
+      R: loads?.R != null ? loads.R * loadMultiplier : row.R };
+  }), [curveRows, rec, history, grip, expectedHands, freshMap, threeExpPriors, loadMultiplier]);
+
   const mixedPlan = useMemo(() => {
     if (rec?.boundaryProbe) return null;
     const opening = mixedOpening || nextMixedDomainZone(history, grip, expectedHands, recommendedZone);
     // The runner applies the reported fatigue adjustment once at session start.
-    const freshRows = rows?.map(r => ({ ...r, L: r.L == null ? null : r.L / loadMultiplier,
+    const freshRows = curveRows?.map(r => ({ ...r, L: r.L == null ? null : r.L / loadMultiplier,
       R: r.R == null ? null : r.R / loadMultiplier }));
     return makeMixedDomainPlan(freshRows, opening, expectedHands);
-  }, [rows, mixedOpening, history, grip, expectedHands, recommendedZone, loadMultiplier, rec]);
+  }, [curveRows, mixedOpening, history, grip, expectedHands, recommendedZone, loadMultiplier, rec]);
   const mixedEnabled = mixedRequested && !!mixedPlan;
 
   // ── Active row — drives the bottom session-details panel ──────────────
@@ -390,7 +403,7 @@ export function SessionPlanCard({
   // those ARE the numbers on screen — and the curve's own decisive
   // factor drops into Details.
   const ladderText = (() => {
-    if (!ladder) return null;
+    if (!ladder || isOverridden) return null;
     const lb = ladder.basis;
     const lMult = loadMultiplier;
     const loadStr = ["L", "R"]
@@ -554,14 +567,16 @@ export function SessionPlanCard({
         // show THOSE, not the raw curve argmax, so the big numbers match
         // the Why line, the Hangs/Rest/Time strip, and the live session.
         // Under a tile override the ladder belongs to the override zone,
-        // so the Recommended card falls back to the engine's curve pick.
-        const recLadder = isOverridden ? null : ladder;
+        // so the Recommended card reads its own domain plan.
+        const recommendedRow = rows.find(row => row.key === recommendedZone);
+        const recLadder = isOverridden ? recommendedRow?.ladder : ladder;
+        const recommendedLoads = isOverridden ? recommendedRow?.resolvedLoads : ladderPlanLoadByHand;
         const purpose = rec.peakTest ? { label: 'Measure your peak', text: 'Three brief pulls per hand help us measure your maximum force.' } : trainingPurpose(rec, recLadder);
         const recT = recLadder ? recLadder.T : rec.T;
         let recLoadKg, recL, recR;
-        if (recLadder && ladderPlanLoadByHand) {
-          recL = ladderPlanLoadByHand.L != null ? ladderPlanLoadByHand.L * recMult : null;
-          recR = ladderPlanLoadByHand.R != null ? ladderPlanLoadByHand.R * recMult : null;
+        if (recLadder && recommendedLoads) {
+          recL = recommendedLoads.L != null ? recommendedLoads.L * recMult : null;
+          recR = recommendedLoads.R != null ? recommendedLoads.R * recMult : null;
           const vals = [recL, recR].filter(v => v != null);
           recLoadKg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
         } else {
@@ -822,7 +837,7 @@ export function SessionPlanCard({
           Loads on every tile reflect the RPE slider's per-zone scale-
           down so the user sees the trade-off across the full curve.
           Peak measurements are available in warmup. */}
-      {!mixedEnabled && <><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
+      {!mixedEnabled && <><DomainHistory history={history} grip={grip} hands={expectedHands} /><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
       <div className="session-choice-grid">
         {rows.filter(r => TRAINING_ZONE_KEYS.includes(r.key)).map(r => {
           // Tile is "active" only when it's the user's override pick.
@@ -831,8 +846,8 @@ export function SessionPlanCard({
           // the same zone as one of these tiles, the two represent
           // different things: the Recommended button shows the
           // continuous-engine T (e.g. 50s with curve-fitted load), the
-          // matching tile shows the zone's reference T (e.g. 70s with
-          // T-anchored load). Highlighting both would imply they're
+          // matching tile keeps its earned ladder, or uses the zone's
+          // reference time when new. Highlighting both would imply they're
           // interchangeable, which they aren't.
           const isActive = isZoneOverridden && !isPeakTest && r.key === activeZone;
           const isRec = r.key === recommendedZone;
@@ -875,6 +890,7 @@ export function SessionPlanCard({
                   <span style={{ fontSize: "var(--session-choice-duration-size, 18px)", fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                     {r.T}s
                   </span>
+                  {r.reps && <span style={{ display: "block" }}>{r.reps} holds · progression kept</span>}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>

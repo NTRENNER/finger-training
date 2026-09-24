@@ -101,6 +101,15 @@ function recoveryTimes(models, prefix, nextRest) {
       restIntervals, physModel, roundTo: null }).at(-1)]));
 }
 
+// Pre-session scenario uses no observed opener or measured rests. It is stored
+// separately from the existing forecasts updated after the opening hold.
+function preSessionTimes(models, loadKg, rest, count) {
+  const first = timeAt(models?.current, loadKg);
+  if (!positive(first) || !models?.recovery || !Number.isFinite(rest) || rest < 0) return null;
+  return Object.fromEntries(Object.entries(models.recovery).map(([key, physModel]) => [key,
+    predictRepTimes({ numReps: count, firstRepTime: first, restSeconds: rest, physModel, roundTo: null }).at(-1)]));
+}
+
 export function preparePrediction(models, prefix, { loadKg, target, rest, preparedAt }) {
   if (!models) return null;
   return copy({ version: 1, experiment: PREDICTION_EXPERIMENT, mode: 'shadow',
@@ -110,6 +119,7 @@ export function preparePrediction(models, prefix, { loadKg, target, rest, prepar
     ...(!prefix.length ? { adaptive_planned: { current: timeAt(models.current, loadKg),
       candidate: adaptiveShadowTime(models.adaptive, loadKg) } } : {}),
     planned_load_kg: loadKg, target_s: target, planned_rest_s: rest,
+    ...(prefix.length ? { pre_session: preSessionTimes(models, loadKg, rest, prefix.length + 1) } : {}),
     prior: prefix.map(r => ({ id: r.id, fingerprint: predictionFingerprint(r) })),
     planned: prefix.length ? recoveryTimes(models, prefix, rest) : {
       current: timeAt(models.current, loadKg), candidate: timeAt(models.candidate, loadKg) },
@@ -165,6 +175,10 @@ export function completePrediction(prepared, prefix, rep) {
   if (!conditional) return { ...result, comparison: unavailable('missing_actual_rest') };
   return { ...result, comparison: { status: 'recorded', kind: 'time_at_actual_rest',
     actual: rep.actual_time_s, current: conditional.current, candidate: conditional.population,
+    pre_session_matches: [...prefix, rep].every((r, i) =>
+      sameLoad(r.avg_force_kg, prepared.planned_load_kg)
+      && (!i || Math.abs(r.rep_timing.rest_before_s - prepared.planned_rest_s) <= 2)
+      && (r.force_recording.basis === 'target_acquired') === (prepared.models.current.duration_basis === 'target_acquired')),
     planned_matches: sameLoad(rep.avg_force_kg, prepared.planned_load_kg)
       && Math.abs(rest - prepared.planned_rest_s) <= 2 } };
 }
@@ -189,7 +203,7 @@ export function predictionMetrics(rows, model) {
 const scores = rows => ({ current: predictionMetrics(rows, 'current'), candidate: predictionMetrics(rows, 'candidate') });
 export function summarizePredictions(history) {
   const exclusions = {}, force = [], recovery = [], plannedForce = [], plannedRecovery = [];
-  const adaptiveForce = [], adaptivePlanned = [];
+  const adaptiveForce = [], adaptivePlanned = [], preSessionRecovery = [], prescriptionStages = [];
   const skip = key => { exclusions[key] = (exclusions[key] || 0) + 1; };
   const byId = new Map(), conflicts = new Set();
   for (const r of history || []) {
@@ -222,9 +236,33 @@ export function summarizePredictions(history) {
       skip(c?.reason || 'unavailable'); continue;
     }
     const row = { id: r.id, date: r.date, grip: r.grip, hand: r.hand, domain: zoneOf(r.target_duration),
-      observedDomain: zoneOf(r.actual_time_s), cooked: r.session_adjustment?.reported_cooked ?? null,
+      observedDomain: zoneOf(r.actual_time_s), rep: r.rep_num,
+      restSeconds: r.rep_timing?.rest_before_s ?? null,
+      restBand: r.rep_timing?.rest_before_s == null ? 'unknown' : r.rep_timing.rest_before_s < 30 ? 'under_30s' : r.rep_timing.rest_before_s < 60 ? '30_to_59s' : '60s_plus',
+      basis: r.force_recording?.basis || 'legacy_elapsed',
+      priorDays: p.models?.current?.source_days ?? null,
+      priorDaysBand: p.models?.current?.source_days == null ? 'unknown' : p.models.current.source_days < 10 ? '5–9' : p.models.current.source_days < 20 ? '10–19' : p.models.current.source_days < 50 ? '20–49' : '50+',
+      cooked: r.session_adjustment?.reported_cooked ?? null,
       actual: c.actual, current: c.current, candidate: c.candidate };
     (p.kind === 'capacity' ? force : recovery).push(row);
+    if (p.kind === 'capacity') {
+      const adaptive = p.models?.adaptive;
+      const established = adaptive?.status === 'ready' && Array.isArray(adaptive.established_amps)
+        ? predForceThreeExp(adaptive.established_amps, p.target_s) : null;
+      const adjusted = adaptiveShadowForce(adaptive, p.target_s);
+      prescriptionStages.push({ id: r.id, date: r.date, grip: r.grip, hand: r.hand,
+        targetSeconds: p.target_s, establishedKg: established, adjustedKg: adjusted,
+        recentChangeKg: established != null && adjusted != null ? adjusted - established : null,
+        candidateBoundedKg: adaptive?.planned_recommendation_kg ?? null,
+        currentCurveKg: forceAt(p.models.current, p.target_s), finalPlannedKg: p.planned_load_kg,
+        reportedCooked: r.session_adjustment?.reported_cooked ?? null,
+        adjustment: r.session_adjustment ?? null });
+    }
+    if (p.kind === 'recovery' && c.pre_session_matches
+      && Number.isFinite(p.pre_session?.current) && Number.isFinite(p.pre_session?.population)) {
+      preSessionRecovery.push({ ...row, actual: c.actual,
+        current: p.pre_session.current, candidate: p.pre_session.population });
+    }
     const a = p.adaptive_comparison;
     if (p.kind === 'capacity' && a?.status === 'recorded'
       && a.experiment === ADAPTIVE_PREDICTION_EXPERIMENT
@@ -247,9 +285,16 @@ export function summarizePredictions(history) {
   const adaptiveDates = [...new Set(adaptiveForce.map(r => r.date))].sort();
   const adaptiveBy = key => Object.fromEntries([...new Set(adaptiveForce.map(r => r[key]))]
     .map(value => [value, scores(adaptiveForce.filter(r => r[key] === value))]));
+  const breakdown = rows => Object.fromEntries(['grip', 'hand', 'domain', 'rep', 'restBand', 'basis', 'priorDaysBand']
+    .map(key => [key, Object.fromEntries([...new Set(rows.map(r => r[key]))].map(value =>
+      [value, scores(rows.filter(r => r[key] === value))]))]));
   return { experiment: PREDICTION_EXPERIMENT, status: 'review_required_before_any_model_change',
     dates, days: dates.length, checkpoints: Math.floor(dates.length / REVIEW_DAYS),
     daysToNextCheckpoint: REVIEW_DAYS - dates.length % REVIEW_DAYS,
+    diagnostics: { force: breakdown(force), recovery: breakdown(recovery),
+      plannedRecovery: breakdown(plannedRecovery), preSessionRecovery: breakdown(preSessionRecovery) },
+    prescriptionStages,
+    preSessionRecovery: scores(preSessionRecovery),
     force: scores(force), recovery: scores(recovery), plannedForce: scores(plannedForce), plannedRecovery: scores(plannedRecovery),
     lastTenDays: scores(force.filter(r => dates.slice(-REVIEW_DAYS).includes(r.date))),
     byGrip: by('grip'), byHand: by('hand'), byDomain: by('domain'), byObservedDomain: by('observedDomain'),
@@ -260,5 +305,5 @@ export function summarizePredictions(history) {
       plannedForce: scores(adaptivePlanned), byGrip: adaptiveBy('grip'), byHand: adaptiveBy('hand'),
       byDomain: adaptiveBy('domain'), byObservedDomain: adaptiveBy('observedDomain'),
       observations: { force: adaptiveForce, plannedForce: adaptivePlanned } },
-    exclusions, observations: { force, recovery, plannedForce, plannedRecovery } };
+    exclusions, observations: { force, recovery, plannedForce, plannedRecovery, preSessionRecovery } };
 }
