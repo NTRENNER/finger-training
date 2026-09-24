@@ -1,6 +1,9 @@
 # Peak Test in warmup and training
 
-The planner has five routine training domains plus Peak Test. Max remains in
+The planner shows five routine training domains in full-width stacked rows.
+Optional Peak Test lives in warmup rather than a sixth training tile.
+For a grip that still needs its initial upper measurement, the coach can
+recommend a Peak Test directly; this preserves the initial calibration path. Max remains in
 six-domain analysis and historical records. The 4–5–6 ladder is unchanged.
 
 Peak Test now measures brief maximal force: three 3-second pulls per hand,

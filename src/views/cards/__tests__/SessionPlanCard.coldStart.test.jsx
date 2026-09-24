@@ -92,35 +92,20 @@ test("lower-bound stage uses the four-rep recovery protocol and defers the middl
   expect(plan.plannedLoadByHand.R).toBeCloseTo(1.6, 1);
 });
 
-test("peak test is a selectable brief-pull plan that uses the normal apply path", async () => {
+test("training choices contain only the five domains and still apply a selected plan", async () => {
   const history = [
     rep("L", 5, 5, 6, 1),
     rep("R", 5, 5, 8, 1),
   ];
   const onApplyPlan = renderCard(history);
   expect(screen.queryByRole("button", { name: /Train Max Strength/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Run peak test" })).not.toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: /^Train / })).toHaveLength(5);
-  const peakOption = screen.getByRole("button", { name: "Run peak test" });
-
-  expect(peakOption.style.gridColumn).toBe("");
-  fireEvent.click(peakOption);
-
-  await waitFor(() => expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({
-    goal: "max_strength",
-    targetTime: 3,
-    peakTest: true,
-    repsPerSet: 3,
-    restTime: 60,
-    ladderLoadByHand: null,
-    plannedLoadByHand: null,
-  }));
-  expect(document.body).toHaveTextContent("Pulls3");
-  expect(document.body).toHaveTextContent("Rest60s");
-
-  fireEvent.click(screen.getByRole("button", { name: "Use recommended session" }));
+  fireEvent.click(screen.getByRole("button", { name: "Train Endurance at 220 seconds" }));
   await waitFor(() => expect(onApplyPlan.mock.calls.at(-1)[0]).toMatchObject({
     goal: "endurance",
     targetTime: 220,
+    peakTest: false,
     repsPerSet: 4,
     restTime: 20,
   }));
