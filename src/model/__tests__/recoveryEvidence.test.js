@@ -54,3 +54,16 @@ test('zero rest is measured; null and negative rest are not', () => {
 test('interrupted peaks do not set personal records', () => {
   expect(buildPeakForceTrend(set().map(r=>({...r,failure_valid:false})))).toBeNull();
 });
+
+
+test('a corrected false failure at rep two excludes the later recovery sequence but preserves activity', () => {
+  const rows = set();
+  rows[1] = { ...rows[1], actual_time_s: 5.8, failure_valid: false,
+    end_reason: 'equipment_interruption',
+    force_recording: { ...rows[1].force_recording, capacity_eligible: false } };
+  expect(recoveryEvidence(rows)).toMatchObject({ eligible: false, reason: 'invalid_failure' });
+  expect(recoveryEvidence(rows).reps).toEqual([rows[0]]);
+  expect(buildRecoveryTrend(rows, 'Crusher')).toEqual([]);
+  expect(rows[1].actual_time_s).toBe(5.8);
+  expect(rows).toHaveLength(4);
+});

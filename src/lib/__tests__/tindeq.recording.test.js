@@ -137,7 +137,7 @@ test('training restores target-drop detection after leaving a timed warmup', asy
     await hook.result.current.stopAutoDetect();
     await hook.result.current.startAutoDetect(onStart, onEnd);
   });
-  packet([[0, 26], [500, 26], [1000, 22], [1500, 22], [2000, 22]]);
+  packet([[0, 26], [500, 26], [1000, 22], [1500, 22], [2000, 22], [2500, 22], [3000, 22]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0].endReason).toBe('target_force_failure');
 });
@@ -147,10 +147,12 @@ test('live reps use the tolerance and confirm with sensor time in delayed batche
   const { packet, onEnd } = await setup(25);
   packet([[0, 27], [500, 24], [1000, 24], [1500, 24], [2000, 22], [2500, 22]]);
   expect(onEnd).not.toHaveBeenCalled();
-  packet([[3000, 22]]);
+  packet([[3000, 22], [3500, 22], [3999, 22]]);
+  expect(onEnd).not.toHaveBeenCalled();
+  packet([[4000, 22]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:2, avgForce:24.75,
-    forceRecording:{failure_policy:{version:6,below_target_fraction:0.93,confirmation_ms:1000}}});
+    forceRecording:{failure_policy:{version:7,below_target_fraction:0.93,confirmation_ms:2000}}});
 });
 
 
@@ -185,24 +187,24 @@ test('light training starts below 4 kg and holds below 3 kg without false releas
     [2500, 2.2], [3000, 2.2]]);
   expect(onStart).toHaveBeenCalledTimes(1);
   expect(onEnd).not.toHaveBeenCalled();
-  packet([[3500, 1.9], [4000, 1.9], [4499, 1.9]]);
+  packet([[3500, 1.9], [4000, 1.9], [4500, 1.9], [5000, 1.9], [5499, 1.9]]);
   expect(onEnd).not.toHaveBeenCalled();
-  packet([[4500, 1.9]]);
+  packet([[5500, 1.9]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({ actualTime: 2.5,
     endReason: 'target_force_failure', failureValid: true,
-    forceRecording: { failure_policy: { version: 6, minimum_drop_kg: 0.45359237,
+    forceRecording: { failure_policy: { version: 7, minimum_drop_kg: 0.45359237,
       maximum_drop_fraction: 0.20 } } });
 });
 
 test('light rep release gate retains its threshold when the next target increases', async () => {
   const { hook, packet, onStart, onEnd } = await setup(2.5);
-  packet([[0, 2.5], [500, 2.5], [1000, 2.5], [1500, 1.9], [2000, 1.9], [2500, 1.9]]);
+  packet([[0, 2.5], [500, 2.5], [1000, 2.5], [1500, 1.9], [2000, 1.9], [2500, 1.9], [3000, 1.9], [3500, 1.9]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   hook.result.current.targetKgRef.current = 20;
-  packet([[3000, 1.5], [3500, 20]]);
+  packet([[4000, 1.5], [4500, 20]]);
   expect(onStart).toHaveBeenCalledTimes(1);
-  packet([[4000, 0], [4500, 20]]);
+  packet([[5000, 0], [5500, 20]]);
   expect(onStart).toHaveBeenCalledTimes(2);
 });
 
@@ -226,7 +228,7 @@ test('manually started light sensor reps use the same tolerance and release rule
   });
   packet([[0, 2.5], [500, 2.2], [1000, 2.2], [1500, 2.2], [2000, 2.2]]);
   expect(onFailure).not.toHaveBeenCalled();
-  packet([[2500, 1.9], [3000, 1.9], [3500, 1.9]]);
+  packet([[2500, 1.9], [3000, 1.9], [3500, 1.9], [4000, 1.9], [4500, 1.9]]);
   expect(onFailure).toHaveBeenCalledTimes(1);
   let stats;
   await act(async () => { stats = await hook.result.current.stopMeasuring(); });
@@ -245,19 +247,19 @@ test('timed low-target warmups retain their existing start and release rules', a
 
 test('release during rest re-arms the next rep before it pulls, then stops the idle stream', async () => {
   const { hook, packet, onStart, onEnd, commands } = await setup(25);
-  packet([[0, 25], [500, 25], [1000, 25], [1500, 20], [2000, 20], [2500, 20]]);
+  packet([[0, 25], [500, 25], [1000, 25], [1500, 20], [2000, 20], [2500, 20], [3000, 20], [3500, 20]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   await act(async () => { await hook.result.current.stopAutoDetect({ observeRelease: true }); });
   expect(commands.at(-1)).toBe(CMD_START[0]);
-  packet([[3000, 0]]);
+  packet([[4000, 0]]);
   await act(async () => {});
   expect(commands.at(-1)).toBe(CMD_STOP[0]);
   expect(onStart).toHaveBeenCalledTimes(1);
   const nextStart = jest.fn(), nextEnd = jest.fn();
   await act(async () => { await hook.result.current.startAutoDetect(nextStart, nextEnd); });
   // No extra zero sample after rest. The physical release was already observed.
-  packet([[23000, 25], [23500, 25], [24000, 25], [24500, 25],
-    [25000, 0], [25500, 0], [26000, 0]]);
+  packet([[24000, 25], [24500, 25], [25000, 25], [25500, 25],
+    [26000, 0], [26500, 0], [27000, 0]]);
   expect(nextStart).toHaveBeenCalledTimes(1);
   expect(nextEnd).toHaveBeenCalledTimes(1);
   expect(nextEnd.mock.calls[0][0]).toMatchObject({ actualTime: 2, failureValid: true });
@@ -265,28 +267,28 @@ test('release during rest re-arms the next rep before it pulls, then stops the i
 
 test('rest release watching is bounded and cannot stop a newer rep stream', async () => {
   const { hook, packet, commands } = await setup(25);
-  packet([[0, 25], [500, 25], [1000, 20], [1500, 20], [2000, 20]]);
+  packet([[0, 25], [500, 25], [1000, 20], [1500, 20], [2000, 20], [2500, 20], [3000, 20]]);
   await act(async () => { await hook.result.current.stopAutoDetect({ observeRelease: true }); });
   act(() => jest.advanceTimersByTime(9000));
   expect(commands.at(-1)).toBe(CMD_START[0]);
   const nextStart = jest.fn(), nextEnd = jest.fn();
   await act(async () => { await hook.result.current.startAutoDetect(nextStart, nextEnd); });
   // A held handle is still gated. Release is required, even after restart.
-  packet([[3000, 25]]);
+  packet([[4000, 25]]);
   expect(nextStart).not.toHaveBeenCalled();
   expect(hook.result.current.awaitingRelease).toBe(true);
-  packet([[3500, 0]]);
+  packet([[4500, 0]]);
   expect(hook.result.current.awaitingRelease).toBe(false);
   act(() => jest.advanceTimersByTime(2000));
   await act(async () => {});
   expect(commands.at(-1)).toBe(CMD_START[0]);
-  packet([[4000, 25]]);
+  packet([[5000, 25]]);
   expect(nextStart).toHaveBeenCalledTimes(1);
 });
 
 test('release watcher stops after ten seconds without inventing a release', async () => {
   const { hook, packet, commands, onStart, onEnd } = await setup(25);
-  packet([[0, 25], [500, 25], [1000, 20], [1500, 20], [2000, 20]]);
+  packet([[0, 25], [500, 25], [1000, 20], [1500, 20], [2000, 20], [2500, 20], [3000, 20]]);
   await act(async () => { await hook.result.current.stopAutoDetect({ observeRelease: true }); });
   act(() => jest.advanceTimersByTime(10000));
   await act(async () => {});
@@ -298,14 +300,46 @@ test('release watcher stops after ten seconds without inventing a release', asyn
 
 test('a release sample before restart callbacks arm still clears the previous gate', async () => {
   const { hook, packet } = await setup(25);
-  packet([[0, 25], [500, 25], [1000, 20], [1500, 20], [2000, 20]]);
+  packet([[0, 25], [500, 25], [1000, 20], [1500, 20], [2000, 20], [2500, 20], [3000, 20]]);
   await act(async () => { await hook.result.current.stopAutoDetect(); });
   const nextStart = jest.fn();
   await act(async () => {
     const pending = hook.result.current.startAutoDetect(nextStart, jest.fn());
-    packet([[2500, 0]]); // arrives while START is awaiting its GATT write
+    packet([[3500, 0]]); // arrives while START is awaiting its GATT write
     await pending;
   });
-  packet([[3000, 25]]);
+  packet([[4000, 25]]);
   expect(nextStart).toHaveBeenCalledTimes(1);
+});
+
+
+test('a 1.5 second force adjustment recovers without ending the rep, then full release ends after 1 second', async () => {
+  const { packet, onEnd } = await setup(7.6);
+  packet([[0, 7.7], [500, 7.7], [1000, 6.8], [1500, 6.8], [2000, 6.8],
+    [2499, 6.8], [2500, 7.7], [3000, 7.7]]);
+  expect(onEnd).not.toHaveBeenCalled();
+  packet([[3500, 0], [4000, 0], [4499, 0]]);
+  expect(onEnd).not.toHaveBeenCalled();
+  packet([[4500, 0]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({ actualTime: 3.5, failureValid: true });
+});
+
+test('manual sensor reps also survive a 1.5 second adjustment and reset the failure countdown', async () => {
+  const { hook, packet } = await setup(7.6);
+  const onFailure = jest.fn();
+  await act(async () => {
+    await hook.result.current.stopAutoDetect();
+    hook.result.current.setAutoFailCallback(onFailure);
+    await hook.result.current.startMeasuring();
+  });
+  packet([[0, 7.7], [500, 7.7], [1000, 6.8], [1500, 6.8], [2000, 6.8],
+    [2500, 7.7], [3000, 6.8], [3500, 6.8], [4000, 6.8], [4500, 6.8], [4999, 6.8]]);
+  expect(onFailure).not.toHaveBeenCalled();
+  packet([[5000, 6.8]]);
+  expect(onFailure).toHaveBeenCalledTimes(1);
+  let stats;
+  await act(async () => { stats = await hook.result.current.stopMeasuring(); });
+  expect(stats).toMatchObject({ actualTime: 3, failureValid: true,
+    forceRecording: { failure_policy: { version: 7, confirmation_ms: 2000 } } });
 });

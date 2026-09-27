@@ -150,12 +150,12 @@ test('second workout rep shows its timer and completes after release during the 
   }
   const view = render(<Workout />);
   await waitFor(() => expect(writes).toEqual([CMD_START[0]]));
-  packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 18], [2500, 18], [3000, 18]]);
+  packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 18], [2500, 18], [3000, 18], [3500, 18], [4000, 18]]);
   expect(screen.getByRole('button', { name: 'Finish rest' })).toBeInTheDocument();
   expect(done).toHaveBeenCalledTimes(1);
   // Cleanup keeps the stream long enough to observe unloading during rest.
   expect(writes).toEqual([CMD_START[0]]);
-  packet([[3500, 0]]);
+  packet([[4500, 0]]);
   await waitFor(() => expect(writes).toEqual([CMD_START[0], CMD_STOP[0]]));
   fireEvent.click(screen.getByRole('button', { name: 'Finish rest' }));
   await waitFor(() => expect(writes).toEqual([CMD_START[0], CMD_STOP[0], CMD_START[0]]));

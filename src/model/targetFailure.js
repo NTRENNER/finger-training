@@ -1,7 +1,7 @@
 // Acquire the prescribed force before detecting failure. Allow small dips
 // within the policy tolerance; confirm continuous drops below that boundary.
 export const TARGET_FAILURE_POLICY = Object.freeze({
-  version: 6, below_target_fraction: 0.93, confirmation_ms: 1000,
+  version: 7, below_target_fraction: 0.93, confirmation_ms: 2000,
   minimum_drop_kg: 0.45359237, // 1 lb, independent of display units
   maximum_drop_fraction: 0.20, // bound the allowance for very light targets
 });
