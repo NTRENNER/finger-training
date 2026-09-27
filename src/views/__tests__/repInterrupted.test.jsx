@@ -97,3 +97,12 @@ test('Peak Test summary does not offer extra sets', () => {
     onDone={() => {}} onAddSet={() => {}} />);
   expect(screen.queryByRole('button', { name: /Add another set/ })).not.toBeInTheDocument();
 });
+
+
+test('a pending release gate explains why the next pull cannot start', () => {
+  const tindeq = { targetKgRef: {}, connected: true, awaitingRelease: true,
+    startAutoDetect: jest.fn(), stopAutoDetect: jest.fn() };
+  render(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()} tindeq={tindeq} />);
+  expect(screen.getByRole('status')).toHaveTextContent('Release the handle fully before your next pull');
+  expect(screen.queryByText('Pull to begin rep 1')).not.toBeInTheDocument();
+});

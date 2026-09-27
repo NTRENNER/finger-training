@@ -1019,7 +1019,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
     });
     return () => {
       disposed = true;
-      Promise.resolve(tindeq.stopAutoDetect()).catch(() => {});
+      Promise.resolve(tindeq.stopAutoDetect({ observeRelease: repEndedRef.current })).catch(() => {});
       clearInterval(timerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1090,7 +1090,9 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
             </div>
 
             <div style={{ fontSize: 40, marginBottom: 8 }}>⬇</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>Pull to begin rep {currentRep + 1}</div>
+            <div role="status" style={{ fontSize: 22, fontWeight: 700, color: C.text }}>
+              {tindeq.awaitingRelease ? "Release the handle fully before your next pull" : `Pull to begin rep ${currentRep + 1}`}
+            </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
               {config.mixedDomainPlan ? 'Fresh reference' : 'Target'}: <strong>{config.targetTime}s</strong> · Release when done
             </div>

@@ -70,3 +70,28 @@ test('sustained force within the 7 percent tolerance does not end the rep', () =
 test('the tolerance band does not arm a rep that never reaches its target', () => {
   expect(end(trace(10, t => t < 1 ? 24 : 22))).toBeNull();
 });
+
+test('one pound minimum allowance protects a 10 lb target from sustained sub-pound fluctuations', () => {
+  const lb = 0.45359237;
+  expect(end(trace(8, t => t < 1 ? 10 * lb : 9.2 * lb), 10 * lb)).toBeNull();
+  expect(end(trace(8, t => t < 3 ? 10 * lb : 8.9 * lb), 10 * lb))
+    .toEqual({ endTs: 3000, targetAcquired: true });
+});
+test('very light targets never allow more than a 20 percent loss', () => {
+  expect(end(trace(8, t => t < 1 ? 1 : 0.81), 1)).toBeNull();
+  expect(end(trace(8, t => t < 3 ? 1 : 0.79), 1))
+    .toEqual({ endTs: 3000, targetAcquired: true });
+});
+test('low-load recovery resets confirmation and separate dips cannot accumulate', () => {
+  const detector = createTargetFailureDetector(2);
+  for (const sample of [{ ts: 0, kg: 2 }, { ts: 100, kg: 1.5 },
+    { ts: 1099, kg: 1.5 }, { ts: 1100, kg: 1.6 }, { ts: 1200, kg: 1.5 },
+    { ts: 2199, kg: 1.5 }]) expect(detector(sample)).toBeNull();
+  expect(detector({ ts: 2200, kg: 1.5 })).toEqual({ endTs: 1200, targetAcquired: true });
+});
+test('minimum allowance never arms a low-load rep before target acquisition', () => {
+  expect(end(trace(8, t => t < 3 ? 1.9 : 1), 2)).toBeNull();
+});
+test.each([null, 0, -1, NaN, Infinity])('invalid target %s cannot create a failure', target => {
+  expect(end(trace(3, t => t < 1 ? 20 : 0), target)).toBeNull();
+});

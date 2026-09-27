@@ -39,6 +39,15 @@ async function setup() {
   await act(async () => hook.result.current.connect());
   writes.length = 0;
   return { hook, writes, collisions: () => collisions, fail: cmd => { rejectNext = cmd[0]; },
+    packet: samples => {
+      const value = new DataView(new ArrayBuffer(2 + samples.length * 8));
+      value.setUint8(0, 1); value.setUint8(1, samples.length * 8);
+      samples.forEach(([ms, kg], i) => {
+        value.setFloat32(2 + i * 8, kg, true);
+        value.setUint32(6 + i * 8, ms * 1000, true);
+      });
+      act(() => notify({ target: { value } }));
+    },
     pull: () => {
       const value = new DataView(new ArrayBuffer(10));
       value.setUint8(0, 1); value.setUint8(1, 8);
@@ -125,4 +134,39 @@ test('unmount cancels queued commands instead of writing to a retired connection
     expect(results.map(result => result.status)).toEqual(['rejected', 'rejected']);
   });
   expect(writes).toEqual([]);
+});
+
+
+test('second workout rep shows its timer and completes after release during the rest handoff', async () => {
+  const { hook, writes, packet, collisions } = await setup();
+  const done = jest.fn();
+  function Workout() {
+    const [rep, setRep] = React.useState(0);
+    const [resting, setResting] = React.useState(false);
+    if (resting) return <button onClick={() => setResting(false)}>Finish rest</button>;
+    return <AutoRepSessionView key={rep} session={{ ...session, currentRep: rep }}
+      tindeq={hook.result.current} onAbort={() => {}}
+      onRepDone={stats => { done(stats); setRep(n => n + 1); setResting(true); }} />;
+  }
+  const view = render(<Workout />);
+  await waitFor(() => expect(writes).toEqual([CMD_START[0]]));
+  packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 18], [2500, 18], [3000, 18]]);
+  expect(screen.getByRole('button', { name: 'Finish rest' })).toBeInTheDocument();
+  expect(done).toHaveBeenCalledTimes(1);
+  // Cleanup keeps the stream long enough to observe unloading during rest.
+  expect(writes).toEqual([CMD_START[0]]);
+  packet([[3500, 0]]);
+  await waitFor(() => expect(writes).toEqual([CMD_START[0], CMD_STOP[0]]));
+  fireEvent.click(screen.getByRole('button', { name: 'Finish rest' }));
+  await waitFor(() => expect(writes).toEqual([CMD_START[0], CMD_STOP[0], CMD_START[0]]));
+  expect(screen.getByText('Pull to begin rep 2')).toBeInTheDocument();
+  packet([[23000, 20], [23500, 20], [24000, 20], [24500, 20]]);
+  expect(screen.getByText('0s')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Rep interrupted' })).toBeInTheDocument();
+  packet([[25000, 0], [25500, 0], [26000, 0]]);
+  expect(done).toHaveBeenCalledTimes(2);
+  expect(done.mock.calls[1][0]).toMatchObject({ actualTime: 2, failureValid: true });
+  expect(screen.getByRole('button', { name: 'Finish rest' })).toBeInTheDocument();
+  expect(collisions()).toBe(0);
+  view.unmount();
 });

@@ -4,7 +4,9 @@ Target time determines the prescribed load. The athlete maintains that load unti
 
 ## Target-loss policy
 
-Once the athlete reaches the prescribed force, a continuous drop below 93% of target for 600 ms confirms failure. Both settings are read from the policy object. Recovery to the boundary cancels confirmation. Overshooting never ends a rep. The recorded endpoint is the onset of the confirmed drop. Warmups opt out and retain their timed-hold/release behavior. With no prescribed target, release detection remains the endpoint.
+Once the athlete reaches the prescribed force, a continuous drop greater than the larger of 7% of target or 1 lb (0.45359237 kg), capped at 20% of target, for 1000 ms confirms failure. These settings are read from failure policy version 6 and saved on target-failure reps. The 1 lb minimum is an initial engineering allowance, not a sensor accuracy specification; validate it against live low-load use. Existing records retain their original policy. Recovery to the boundary cancels confirmation. Overshooting never ends a rep. The recorded endpoint is the onset of the confirmed drop. Warmups opt out and retain their timed-hold/release behavior. With no prescribed target, release detection remains the endpoint.
+
+For targeted training, auto-start is the lower of 4 kg or 80% of target, and release is the lower of 3 kg or 50% of target. Release still requires 1000 ms. The release threshold is retained through the completed pull’s release gate even if the next target changes. This keeps the fixed release cutoff from ending light holds inside the permitted force band. Timed warmups and untargeted peak tests retain the existing 4 kg start / 3 kg release thresholds.
 
 The device sample clock determines elapsed duration, including timestamp rollover. Targeted sensor reps now use recording version 3, basis `target_acquired`: capacity force and duration start at the first sample reaching target and end at failure onset. Force is integrated over exactly that interval. The nested `activity` metadata preserves the full captured duration, average, impulse, and timestamps, including the ramp. Recorded rest starts from the physical activity start, not the later target-acquisition point. Peak is separate. Recording metadata also retains variability, signal completeness, and the longest contiguous phase above 80% of peak with its own average and duration. That descriptive phase is not substituted for full-rep capacity evidence.
 
@@ -40,3 +42,16 @@ Tests cover steady pulls, normal fluctuations, opening overshoot, gradual declin
 Three independent, comparable lower opening efforts within 30 days establish a decline. The first floor reduction is limited to 25%; each additional qualifying session can permit one more reduction, bounded by 25% and the load demonstrated by that comparison. A stronger comparable performance resets confirmation. Replaying unchanged or duplicated history cannot create another reduction. The confirmation window is evaluated at the evidence session date, so established reductions survive that window aging out; the existing 90-day historical-best eligibility remains in effect.
 
 An explicitly valid muscular failure shorter than the requested duration can weaken the floor when its prescribed load matches the replayed floor (within 0.11 kg for storage rounding), the target was acquired, and measured average force remains between 93% and 105% of that load. This uses the recorded prescription to reconstruct floor matching because historical rows do not store whether the floor raised the recommendation. Such a miss does not establish capacity at the requested duration. Interrupted, unacquired, substantially overshot, different-setup, and later-set efforts do not qualify.
+
+
+### Release between ordinary training reps
+
+After a target-force ending, the automatic workout view disarms rep callbacks
+but briefly keeps the force stream running to observe the athlete unloading
+the handle during rest. Once release is observed it stops the idle stream.
+The watch is bounded to 10 seconds; a new rep stream cancels its pending stop.
+Release samples are also recognized while no rep callbacks are installed,
+including during an in-flight stream-start command. Rest samples cannot start
+or save reps. If release has not been observed, the next workout screen asks
+the athlete to fully release rather than silently showing “Pull to begin.”
+The release requirement is preserved; it is never cleared merely by time passing.

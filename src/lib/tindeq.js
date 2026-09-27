@@ -1,4 +1,4 @@
-import { createTargetFailureDetector, TARGET_FAILURE_POLICY } from "../model/targetFailure.js";
+import { createTargetFailureDetector, TARGET_FAILURE_POLICY, repDetectionThresholds } from "../model/targetFailure.js";
 import { recordCapacityForce as recordForce } from "../model/forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // TINDEQ PROGRESSOR BLE HOOK
@@ -298,22 +298,33 @@ export function useTindeq() {
   const targetDetectorRef = useRef(null);
   const manualTargetDetectorRef = useRef(null);
   const manualTargetResultRef = useRef(null);
+  const manualReleaseKgRef = useRef(3);
+  const adReleaseKgRef = useRef(3);
   const adBelowRef      = useRef(null);   // timestamp when force first dipped below end-threshold
   // Set true by endRepAndRequireRelease() — used by the adaptive
   // warmup when it auto-ends a hang at target time while the user is
   // still pulling. Blocks onRepStart from firing on the user's
   // continued grip; cleared automatically once force drops below
-  // AD_END_KG (a real release).
+  // the completed pull’s release threshold (a real release).
   const adAwaitReleaseRef = useRef(false);
-  const AD_START_KG  = 4;    // force must exceed this to begin auto-rep
-  const AD_END_KG    = 3;    // force must drop below this to end auto-rep
+  const [awaitingRelease, setAwaitingRelease] = useState(false);
+  const releaseWatchTimerRef = useRef(null);
+  const markAwaitingRelease = useCallback(value => {
+    adAwaitReleaseRef.current = value;
+    setAwaitingRelease(value);
+  }, []);
+  const cancelReleaseWatch = useCallback(() => {
+    clearTimeout(releaseWatchTimerRef.current);
+    releaseWatchTimerRef.current = null;
+  }, []);
+  useEffect(() => () => cancelReleaseWatch(), [cancelReleaseWatch]);
   // A full second prevents a brief unload or sensor wobble from ending a
   // valid rep while still excluding the confirmation tail from its result.
   const AD_END_MS    = AUTO_RELEASE_CONFIRM_MS;
   const AD_MIN_MS    = 1500; // minimum rep duration — filters noise
 
-  // Force below the release threshold ends the rep. Falling below the
-  // prescribed load alone must not truncate a weaker continued pull.
+  // Target loss uses the tolerance policy; the separate release threshold
+  // also ends untargeted or never-acquired pulls after confirmation.
 
   // Stable setter — lets views register/clear the callback without prop drilling
   const setAutoFailCallback = useCallback((fn) => {
@@ -387,7 +398,7 @@ export function useTindeq() {
       if (adActiveRef.current && delta > 1000000) {
         const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current);
         adActiveRef.current = false;
-        adAwaitReleaseRef.current = true;
+        markAwaitingRelease(true);
         adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
         adSamplesRef.current = [];
         return;
@@ -395,6 +406,17 @@ export function useTindeq() {
       latestKgRef.current = kg;
       if (kg > peakRef.current) peakRef.current = kg;
       scheduleUiFlush();  // state mirror updates at most once per frame
+
+      // Observe release even between views or while START is still pending.
+      // A completed rep must not keep its release gate latched through rest.
+      const wasAwaitingRelease = adAwaitReleaseRef.current;
+      if (wasAwaitingRelease && kg < adReleaseKgRef.current) {
+        markAwaitingRelease(false);
+        if (releaseWatchTimerRef.current !== null) {
+          cancelReleaseWatch();
+          writeCommand(CMD_STOP).catch(() => {});
+        }
+      }
 
       if (measuringRef.current) {
         // Keep the full force trace, including below-target work.
@@ -410,7 +432,7 @@ export function useTindeq() {
           autoFailCallbackRef.current?.();
           return;
         }
-        if (kg < AD_END_KG) {
+        if (kg < manualReleaseKgRef.current) {
           if (belowSinceRef.current === null) belowSinceRef.current = now;
           else if (now - belowSinceRef.current >= AD_END_MS) autoFailCallbackRef.current?.();
         } else belowSinceRef.current = null;
@@ -422,12 +444,14 @@ export function useTindeq() {
           // — the warmup uses it when it auto-ends a hang at target
           // while the user is still pulling. We don't want their
           // continued grip to trigger an immediate new rep on the
-          // next hand; we wait for force to drop below AD_END_KG
-          // (real release) before re-arming.
-          if (adAwaitReleaseRef.current) {
-            if (kg < AD_END_KG) adAwaitReleaseRef.current = false;
-            // Either way, skip the AD_START_KG check this packet.
-          } else if (kg >= AD_START_KG) {
+          // next hand; wait for force to drop below this pull’s release
+          // threshold before re-arming.
+          if (wasAwaitingRelease) {
+            // Either way, skip the start check this packet.
+          } else {
+            const thresholds = repDetectionThresholds(adEndOnTargetDropRef.current ? targetKgRef.current : null);
+            if (!(kg >= thresholds.startKg)) return;
+            adReleaseKgRef.current = thresholds.releaseKg;
             targetDetectorRef.current = adEndOnTargetDropRef.current
               ? createTargetFailureDetector(targetKgRef.current) : null;
             targetDetectorRef.current?.({ kg, ts: now });
@@ -451,7 +475,7 @@ export function useTindeq() {
           if (failure) {
             const stats = recordWithBattery(adSamplesRef.current, failure.endTs, targetKgRef.current);
             adActiveRef.current = false;
-            adAwaitReleaseRef.current = true;
+            markAwaitingRelease(true);
             adStartTimeRef.current = null;
             adBelowRef.current = null;
             adSamplesRef.current = [];
@@ -463,7 +487,7 @@ export function useTindeq() {
               forceRecording: { ...stats.forceRecording, failure_policy: TARGET_FAILURE_POLICY } });
             return;
           }
-          if (kg < AD_END_KG) {
+          if (kg < adReleaseKgRef.current) {
             if (adBelowRef.current === null) adBelowRef.current = now;
             else if (now - adBelowRef.current >= AD_END_MS) {
               const actualTime = (adBelowRef.current - adStartTimeRef.current) / 1000;
@@ -509,12 +533,12 @@ export function useTindeq() {
           || Date.now() - lastPacketAtRef.current <= 1500) return;
       const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current);
       adActiveRef.current = false;
-      adAwaitReleaseRef.current = true;
+      markAwaitingRelease(true);
       adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
       adSamplesRef.current = [];
     }, 250);
     return () => clearInterval(timer);
-  }, [recordWithBattery]);
+  }, [recordWithBattery, markAwaitingRelease]);
 
   // ── GATT setup — called on initial connect and every reconnect ──
   const setupGatt = useCallback((device) => enqueueGatt(async () => {
@@ -572,7 +596,7 @@ export function useTindeq() {
         if (adActiveRef.current) {
           const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current);
           adActiveRef.current = false;
-          adAwaitReleaseRef.current = true;
+          markAwaitingRelease(true);
           adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
           adSamplesRef.current = [];
         }
@@ -608,7 +632,7 @@ export function useTindeq() {
       setBleError(err.message || "Connection failed");
       return false;
     }
-  }, [setupGatt, recordWithBattery]);
+  }, [setupGatt, recordWithBattery, markAwaitingRelease]);
 
   // ── Unmount cleanup ──
   // Chrome keeps the same BluetoothDevice/characteristic objects alive
@@ -639,9 +663,11 @@ export function useTindeq() {
   }, []);
 
   const startMeasuring = useCallback(async () => {
+    cancelReleaseWatch();
     measurementInterruptedRef.current = false;
     lastPacketAtRef.current = Date.now();
     manualTargetDetectorRef.current = createTargetFailureDetector(targetKgRef.current);
+    manualReleaseKgRef.current = repDetectionThresholds(targetKgRef.current).releaseKg;
     manualTargetResultRef.current = null;
     peakRef.current      = 0;  setPeak(0);
     sumRef.current       = 0;
@@ -657,7 +683,7 @@ export function useTindeq() {
       measurementInterruptedRef.current = true;
       throw error;
     }
-  }, [writeCommand]);
+  }, [writeCommand, cancelReleaseWatch]);
 
   // Return force, matched device duration, and measurement validity together.
   const stopMeasuring = useCallback(async () => {
@@ -710,6 +736,7 @@ export function useTindeq() {
   // force threshold crossings. onRepStart fires when a pull begins; onRepEnd
   // fires with { actualTime, avgForce } when the force drops back to baseline.
   const startAutoDetect = useCallback(async (onRepStart, onRepEnd, { endOnTargetDrop = true } = {}) => {
+    cancelReleaseWatch();
     const generation = ++adStreamGenerationRef.current;
     adOnStartRef.current = null;
     adOnEndRef.current = null;
@@ -726,7 +753,7 @@ export function useTindeq() {
     if (generation !== adStreamGenerationRef.current) return;
     adOnStartRef.current = onRepStart ?? null;
     adOnEndRef.current = onRepEnd ?? null;
-  }, [writeCommand]);
+  }, [writeCommand, cancelReleaseWatch]);
 
   // Programmatically end the current auto-detect rep and require the
   // user to fully release before the next pull is treated as a new
@@ -750,17 +777,30 @@ export function useTindeq() {
     adCountRef.current      = 0;
     adSamplesRef.current    = [];
     adBelowRef.current      = null;
-    adAwaitReleaseRef.current = true;
+    markAwaitingRelease(true);
     return { ...stats, actualTime, avgForce: avg, peakForce: peakF };
-  }, [recordWithBattery]);
+  }, [recordWithBattery, markAwaitingRelease]);
 
-  const stopAutoDetect = useCallback(async () => {
-    adStreamGenerationRef.current += 1;
+  const stopAutoDetect = useCallback(async ({ observeRelease = false } = {}) => {
+    cancelReleaseWatch();
+    const generation = ++adStreamGenerationRef.current;
     adOnStartRef.current = null;
     adOnEndRef.current   = null;
     adActiveRef.current  = false;
+    if (observeRelease && adAwaitReleaseRef.current && ctrlRef.current) {
+      // Listen only for release, never for a new rep, during the handoff to
+      // rest. Stop promptly on release; bound this to 10s if no samples arrive
+      // or the handle stays loaded. A later START cancels the pending stop.
+      releaseWatchTimerRef.current = setTimeout(() => {
+        releaseWatchTimerRef.current = null;
+        if (generation === adStreamGenerationRef.current && ctrlRef.current) {
+          writeCommand(CMD_STOP).catch(() => {});
+        }
+      }, 10000);
+      return;
+    }
     if (ctrlRef.current) await writeCommand(CMD_STOP);
-  }, [writeCommand]);
+  }, [writeCommand, cancelReleaseWatch]);
 
-  return { connected, reconnecting, force, peak, avgForce, bleError, battery, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
+  return { connected, reconnecting, force, peak, avgForce, bleError, battery, awaitingRelease, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
 }
