@@ -68,6 +68,7 @@ import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS } from "../model/setRecommendation.js";
 import { pushDailyState } from "../lib/sync.js";
 import { buildMixedLoadModel, prepareMixedPrediction, completeMixedPrediction } from '../model/mixedLoadPrediction.js';
+import { mixedReadinessModel, prepareAdaptiveMixedPrediction } from '../model/mixedLoadPrescription.js';
 import { MAX_TEST_ATTEMPTS, MAX_TEST_REST_S, MAX_TEST_TARGET_S } from '../model/peakForce.js';
 import { MIXED_DOMAIN_ID, MIXED_DOMAIN_REST_S, mixedDomainSteps, validMixedDomainPlan } from '../model/mixedDomain.js';
 
@@ -167,23 +168,37 @@ export function useSessionRunner({
   const preparedModels = usePreparedPredictions(history, config, phase === "idle");
   const mixed = config.mixedDomainPlan?.id === MIXED_DOMAIN_ID;
   const currentStep = mixedDomainSteps(config.mixedDomainPlan, activeHand)[currentRep];
-  const activeRepConfig = mixed && currentStep
-    ? { ...config, goal: currentStep.zone, targetTime: currentStep.targetTime, mixedDomainRep: currentRep + 1 }
-    : config;
+  const mixedPrefix = useMemo(() => sessionReps.filter(r => r.hand === activeHand), [sessionReps, activeHand]);
+  const adaptivePredictions = useMemo(() => {
+    if (!mixed || !config.mixedDomainPlan.adjustLoads) return {};
+    const multiplier = sessionAdjustmentRef.current?.applied_multiplier ?? 1;
+    return Object.fromEntries(['L', 'R'].map(h => {
+      const step = mixedDomainSteps(config.mixedDomainPlan, h)[currentRep];
+      return [h, step ? prepareAdaptiveMixedPrediction(mixedModelsRef.current[h],
+        sessionReps.filter(r => r.hand === h && r.rep_num <= currentRep), {
+          baselineKg: (step.loadByHand[h] ?? 0) * multiplier,
+          targetTime: step.targetTime, plannedRestS: config.restTime,
+        }) : null];
+    }));
+  }, [mixed, config.mixedDomainPlan, config.restTime, currentRep, sessionReps]);
   const refWeights = useMemo(() => {
     if (!mixed) return baseRefWeights;
     const multiplier = sessionAdjustmentRef.current?.applied_multiplier ?? 1;
     return Object.fromEntries(['L', 'R'].map(h => [h,
+      adaptivePredictions[h]?.load_kg ??
       (mixedDomainSteps(config.mixedDomainPlan, h)[currentRep]?.loadByHand[h] ?? 0) * multiplier]));
-  }, [mixed, config.mixedDomainPlan, currentRep, baseRefWeights]);
+  }, [mixed, config.mixedDomainPlan, currentRep, baseRefWeights, adaptivePredictions]);
 
-  // Frozen before this hold: no current outcome or newly fitted history enters
-  // the forecast. It is saved for evaluation only; views never consume it.
-  const mixedPrefix = useMemo(() => sessionReps.filter(r => r.hand === activeHand), [sessionReps, activeHand]);
+  // Prepared during rest and stable through the pull. Upcoming rest is planned;
+  // completed earlier rests are measured. Actual next rest is scored afterward.
   const mixedPrediction = useMemo(() => mixed
-    ? prepareMixedPrediction(mixedModelsRef.current[activeHand], mixedPrefix,
+    ? adaptivePredictions[activeHand] ?? prepareMixedPrediction(mixedModelsRef.current[activeHand], mixedPrefix,
       suggestWeight(refWeights[activeHand], 0), config.restTime)
-    : null, [mixed, activeHand, mixedPrefix, refWeights, config.restTime]);
+    : null, [mixed, activeHand, mixedPrefix, refWeights, config.restTime, adaptivePredictions]);
+  const activeRepConfig = mixed && currentStep
+    ? { ...config, goal: currentStep.zone, targetTime: currentStep.targetTime, mixedDomainRep: currentRep + 1,
+      mixedLoadAdjustment: mixedPrediction?.adjustment }
+    : config;
 
   const regularPrediction = useMemo(() => !mixed && !config.peakTest && currentSet === 1
     ? preparePrediction(predictionModelsRef.current[activeHand], mixedPrefix, {
@@ -255,7 +270,9 @@ export function useSessionRunner({
     firstHandRef.current = cfg.hand === 'Both' ? startingHandForDay(history, startedDay) : cfg.hand;
     mixedModelsRef.current = cfg.mixedDomainPlan ? Object.fromEntries(
       (cfg.hand === 'Both' ? ['L', 'R'] : [cfg.hand]).map(h =>
-        [h, buildMixedLoadModel(history, cfg.grip, h, startedDay)])) : {};
+        [h, cfg.mixedDomainPlan.adjustLoads
+          ? mixedReadinessModel(buildMixedLoadModel(history, cfg.grip, h, startedDay), fatigueMod)
+          : buildMixedLoadModel(history, cfg.grip, h, startedDay)])) : {};
     predictionModelsRef.current = !cfg.mixedDomainPlan && !cfg.peakTest
       ? preparedModels(cfg, startedDay) : {};
     // Persist a STATED cookedness as the day's value, so later
@@ -383,7 +400,8 @@ export function useSessionRunner({
       session_protocol: { id: MIXED_DOMAIN_ID, version: 1, zone: currentStep.zone,
         opening_zone: config.mixedDomainPlan.steps[0].zone, position: currentRep + 1,
         role: currentRep === 0 ? 'opening_hold' : 'fatigued_hold',
-        duration_reference: 'fresh_load_reference' },
+        duration_reference: config.mixedDomainPlan.adjustLoads ? 'approximate_hold_target' : 'fresh_load_reference',
+        load_mode: config.mixedDomainPlan.adjustLoads ? 'adaptive_targets' : 'fixed_references' },
       ...(currentRep > 0 ? { capacity_eligible: false } : {}),
     } : { ...forceRecording };
     recordedForce.hand_order = handOrderMetadata(firstHandRef.current, sessionDate || today());

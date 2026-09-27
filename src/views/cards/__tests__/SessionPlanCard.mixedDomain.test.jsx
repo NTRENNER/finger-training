@@ -11,11 +11,11 @@ const goals = Object.fromEntries(MIXED_DOMAIN_ZONES.map(key => [key, { label: MI
 test('beta is off by default, previews the five loads, supports another opener and returns to the regular plan', () => {
   const apply = jest.fn();
   render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
-  const toggle = screen.getByRole('checkbox', { name: 'Whole curve · Beta' });
+  const toggle = screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' });
   expect(toggle).not.toBeChecked();
   expect(screen.getByRole('button', { name: 'Use recommended session' })).toBeInTheDocument();
   fireEvent.click(toggle);
-  expect(screen.getByRole('region', { name: 'Whole curve beta plan' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Chaos Machine beta plan' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Use recommended session' })).not.toBeInTheDocument();
   expect(apply.mock.calls.at(-1)[0]).toMatchObject({ repsPerSet: 5, restTime: 30,
     ladderLoadByHand: null, mixedDomainPlan: { id: 'whole_curve_beta' } });
@@ -26,5 +26,20 @@ test('beta is off by default, previews the five loads, supports another opener a
 });
 test('missing domain estimates disable the beta', () => {
   render(<SessionPlanCard history={[]} grip="Micro" unit="kg" GOAL_CONFIG={{ power: goals.power }} />);
-  expect(screen.getByRole('checkbox', { name: 'Whole curve · Beta' })).toBeDisabled();
+  expect(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' })).toBeDisabled();
+});
+
+test('adaptive loads are optional, show total target time and reset for another grip', () => {
+  const apply = jest.fn();
+  const view = render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' }));
+  const adaptive=screen.getByRole('checkbox', { name:'Adjust loads to target times' });
+  expect(adaptive).not.toBeChecked();
+  fireEvent.click(adaptive);
+  expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.adjustLoads).toBe(true);
+  expect(screen.getByText(/About 23:50 for both hands/)).toBeInTheDocument();
+  expect(screen.getAllByText('Starting reference · adjusted before this hold')).toHaveLength(8);
+  view.rerender(<SessionPlanCard history={[]} grip="Crusher" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' }));
+  expect(screen.getByRole('checkbox', { name:'Adjust loads to target times' })).not.toBeChecked();
 });

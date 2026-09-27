@@ -24,8 +24,9 @@ export function nextMixedDomainZone(history, grip, hands, preferred = 'power') {
 }
 
 // Loads are fresh-load references, not predictions of fatigued hold times.
-// Freeze all five at session start so learning from rep 1 cannot change rep 2.
-export function makeMixedDomainPlan(rows, openingZone, hands) {
+// Freeze the reference loads and order at session start. Optional adaptive
+// loads use a separate frozen model and never rewrite these references.
+export function makeMixedDomainPlan(rows, openingZone, hands, adjustLoads = false) {
   if (!MIXED_DOMAIN_ZONES.includes(openingZone)) return null;
   const order = [openingZone, ...MIXED_DOMAIN_ZONES.filter(z => z !== openingZone)];
   const steps = order.map(zone => {
@@ -33,11 +34,12 @@ export function makeMixedDomainPlan(rows, openingZone, hands) {
     if (!row || row.deferredReason || hands.some(h => !(row[h] > 0 && row[h] < 200))) return null;
     return { zone, targetTime: ZONE_REF_T[zone], loadByHand: Object.fromEntries(hands.map(h => [h, row[h]])) };
   });
-  return steps.every(Boolean) ? { id: MIXED_DOMAIN_ID, version: 1, steps } : null;
+  return steps.every(Boolean) ? { id: MIXED_DOMAIN_ID, version: 1, steps, adjustLoads: adjustLoads === true } : null;
 }
 
 export function validMixedDomainPlan(plan, hands) {
-  return plan?.id === MIXED_DOMAIN_ID && plan.version === 1 && plan.steps?.length === 5
+  return plan?.id === MIXED_DOMAIN_ID && plan.version === 1
+    && (plan.adjustLoads == null || typeof plan.adjustLoads === 'boolean') && plan.steps?.length === 5
     && new Set(plan.steps.map(s => s.zone)).size === 5
     && plan.steps.every(s => MIXED_DOMAIN_ZONES.includes(s.zone)
       && s.targetTime === ZONE_REF_T[s.zone]

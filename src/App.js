@@ -703,6 +703,7 @@ export default function App() {
               lastRep={lastRepResult}
               nextWeight={nextWeight}
               nextDomain={config.mixedDomainPlan ? activeRepConfig.goal : null}
+              nextAdjustment={activeRepConfig.mixedLoadAdjustment}
               restSeconds={config.restTime}
               onRestDone={handleRestDone}
               repNum={currentRep}

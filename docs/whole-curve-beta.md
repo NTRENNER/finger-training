@@ -1,26 +1,27 @@
-# Whole curve beta
+# Chaos Machine (Beta)
 
 An optional mixed-load session inspired by the Whole HoG format. This is an
 experimental format, not a reproduction or validation of Grip Goblins' model.
-Enable **Whole curve · Beta** in the Fingers session planner. It is off by
+Enable **Chaos Machine (Beta)** in the Fingers session planner. It is off by
 default and requires an available load estimate for every selected hand in
 all five domains.
 
 ## Session
 
 - Five holds per hand: Power, Power/Strength, Strength, Strength/Endurance,
-  and Endurance. The regular six-domain system remains unchanged.
+  and Endurance. The regular five-domain system remains unchanged.
 - The selected opening domain goes first. The remaining holds run from
   highest to lowest planned load for each hand, with 30 seconds of rest.
 - The next beta session rotates the opening domain after a valid completed
   opener. The user can also choose it. Interrupted openers do not advance it.
-- Loads are fixed at session start. The existing fatigue adjustment applies
+- By default, loads are fixed at session start. The existing fatigue adjustment applies
   once, if selected. Each hold records its own prescribed and actual load.
 - Reference durations choose fresh loads; they do not predict the time an
   athlete will manage after earlier holds. Maintain force until failure.
   Existing force tolerance, confirmation, overshoot and interruption logic
-  are unchanged. Experimental mixed-load predictions are recorded in the background only;
-  they never change the displayed load or end a rep.
+  are unchanged. In fixed-reference mode, experimental mixed-load predictions are recorded in
+  the background only. Optional adaptive mode is described below. Predictions
+  never end a rep.
 - The rest screen shows the next domain and load. Manual mode waits for the
   athlete to start the next hold, allowing equipment changes. Actual rest
   continues to be recorded when measurable.
@@ -103,7 +104,55 @@ hold or its prefix invalidate its stored comparison rather than silently
 reusing old errors. Duplicate rows do not create extra votes.
 
 No mixed-session parameter tuning or automated promotion is enabled yet.
-Review several independent workouts, coverage and exclusions, and compare
-later-hold errors with the fresh-only baseline before exposing time ranges or
-changing loads. Synthetic tests check behavior and recording, not real-world
+Adaptive prescription is an explicit experimental opt-in, not a validation of
+these parameters. Review independent workouts, coverage and exclusions, and
+compare later-hold errors with the fresh-only baseline before changing defaults. Synthetic tests check behavior and recording, not real-world
 accuracy. Physical Tindeq validation remains outstanding.
+
+
+## Optional loads aimed at target times
+
+“Adjust loads to target times” is off by default. It resets when the selected
+grip changes. The stored protocol ID remains `whole_curve_beta`, so existing
+history, rotation and exclusions continue to work under the new display name.
+
+The opening load and per-hand domain order stay as planned. For each later
+hold, the frozen model consumes measured force-time work from completed holds
+on that hand and measured rests between them. It then assumes the upcoming
+planned 30-second rest. Inverting its available force-duration curve at the
+next target duration gives a candidate load. Round to the same 0.1 kg used by
+the live prescription, and cap at that domain's original adjusted load. We do
+not increase a reference load on this experimental model's advice.
+
+When the user elects a cookedness reduction, the frozen model's amplitudes and
+the original-load ceilings each receive that multiplier once. This is recorded
+as `readiness_multiplier`; it is an explicit assumption, not measured readiness.
+The current session never refits that model. Each new session builds a snapshot
+from the accumulated eligible history. There is no automatic parameter tuning.
+
+The rest screen shows the chosen next load and its adjustment/fallback status.
+It stays fixed through the next pull, including if the athlete waits longer;
+longer-than-planned rest is recorded and evaluated afterward. An interrupted or
+unmeasured prefix, missing actual rest, insufficient history, or target outside
+the fitted duration coverage falls back to the original load with an explicit
+message. Manual overrides remain available. Low/unusable estimates also fall
+back rather than displaying zero. Estimates remain approximate, including the
+existing legacy elapsed-time versus target-acquired timing distinction.
+
+Before starting, the preview shows original reference loads and a target-based
+time budget: 11:55 per hand or 23:50 for both, including four 30-second rests per
+hand. Setup/hand changes add time, and actual holds can be shorter or longer.
+The timer still runs until failure; target time never ends the hold.
+
+Each saved forecast has `mode: adaptive_targets` and an `adjustment` object
+containing target time, original and selected loads, status and fallback reason.
+The session protocol stores `load_mode` and `duration_reference`. Original
+forecasts and actual-load/rest diagnostics are preserved separately. Evaluation
+reports adaptive workouts under `v1|adaptive_targets|...`, apart from fixed-load
+shadow forecasts. Later holds remain excluded from fresh-capacity/recovery fits
+and ordinary 4–5–6 ladder progression.
+
+Tests cover inverse/forward agreement, rounding, measured work and rest,
+readiness scaling, hand isolation, interruptions, unavailable estimates,
+within-hold stability despite history refresh, and serialized predictions.
+Live Tindeq validation and real-world accuracy assessment remain necessary.

@@ -103,7 +103,7 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
       <summary style={{ cursor: 'pointer', padding: '8px 0' }}>See the comparison</summary>
       <p style={{ color: C.muted, lineHeight: 1.5 }}>We compare the current capacity curve with a candidate fitted to opening holds.
         Both use the same prior history and anchoring rules. A review checks each grip and duration before any change is made.</p>
-      <p style={{ color: C.muted, fontSize: 13 }}>These checks cover standard single-domain sessions. Whole Curve beta and peak tests use separate measurements.</p>
+      <p style={{ color: C.muted, fontSize: 13 }}>These checks cover standard single-domain sessions. Chaos Machine (Beta) and peak tests use separate measurements.</p>
       {!report.days && <p>No comparable opening holds saved yet. Recording starts with new standard sessions;
         older workouts still train the models. Each curve needs at least five prior training days.</p>}
       <Score title="Force at the time you held" score={report.force} unit={unit} factor={factor} />

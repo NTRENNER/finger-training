@@ -1,3 +1,4 @@
+import { mixedAdjustmentText } from '../model/mixedLoadPrescription.js';
 import { HandCue } from './cards/HandCue.jsx';
 import { TindeqBattery, InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { finalizeDeviceActivity } from "../model/forceRecording.js";
@@ -555,7 +556,7 @@ function playBeep(freq = 880, duration = 0.12, volume = 0.4) {
   } catch (e) { /* audio not available */ }
 }
 
-export function RestView({ lastRep, nextWeight, nextDomain = null, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs" }) {
+export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustment = null, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs" }) {
   // Wall-clock countdown, NOT tick-counted. The old version decremented
   // once per setInterval fire; background tabs / locked phones throttle
   // intervals to ≥1/min, so a 20s rest silently stretched to minutes —
@@ -690,6 +691,7 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, restSeconds, 
         <Card style={{ borderColor: C.blue }}>
           <Label>Next rep suggested weight</Label>
           {nextDomain && <p><strong>{MIXED_DOMAIN_LABELS[nextDomain]}</strong> · Change to this load before pulling.</p>}
+          {mixedAdjustmentText(nextAdjustment) && <p>{mixedAdjustmentText(nextAdjustment)}</p>}
           <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
             {fmtW(nextWeight, unit)} {unit}
           </div>
@@ -820,9 +822,9 @@ export function SessionSummaryView({
       )}
 
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>
-        {setComplete ? (config.mixedDomainPlan ? "Whole Curve Beta Complete" : currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
+        {setComplete ? (config.mixedDomainPlan ? "Chaos Machine Complete" : currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
       </h2>
-      {config.mixedDomainPlan && <p>Whole curve · Beta. Opening holds can update the curve; later holds are recorded as fatigued work. Your regular rep progression is unchanged.</p>}
+      {config.mixedDomainPlan && <p>Chaos Machine (Beta). Opening holds can update the curve; later holds are recorded as fatigued work. Your regular rep progression is unchanged.</p>}
 
       {(() => {
         const op = sessionOverpull(reps);
@@ -1142,9 +1144,9 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
 function MixedHoldInfo({ config, currentRep }) {
   if (!config.mixedDomainPlan) return null;
   return <div style={{ marginTop: 12, fontSize: 18, lineHeight: 1.5 }}>
-    <strong>Whole curve · Beta · {MIXED_DOMAIN_LABELS[config.goal]}</strong>
+    <strong>Chaos Machine (Beta) · {MIXED_DOMAIN_LABELS[config.goal]}</strong>
     <div style={{ fontSize: 14, color: C.muted }}>{currentRep === 0
       ? 'Opening hold. Maintain the target force until failure.'
-      : 'Fatigued hold. A shorter time is expected; there is no time to beat.'}</div>
+      : mixedAdjustmentText(config.mixedLoadAdjustment) || 'Fatigued hold. A shorter time is expected; there is no time to beat.'}</div>
   </div>;
 }

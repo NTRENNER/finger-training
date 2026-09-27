@@ -187,7 +187,8 @@ export function summarizeMixedPredictions(history) {
       exclude('out_of_range'); continue;
     }
     for (const category of ['all', `domain:${r.force_recording.session_protocol.zone}`, `position:${r.rep_num}`]) {
-      const groupKey = `v${p.version}|${category}`;
+      const groupKey = p.mode === 'adaptive_targets'
+        ? `v${p.version}|adaptive_targets|${category}` : `v${p.version}|${category}`;
       if (!groups.has(groupKey)) groups.set(groupKey, new Map());
       const sessions = groups.get(groupKey);
       const sid = r.session_id || r.session_started_at || r.date;
