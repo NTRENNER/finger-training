@@ -66,6 +66,7 @@ import {
 // benchmark bands aren't validated against personal performance, and
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
+import { PerformanceTrendCards } from "./analysis/PerformanceTrendCards.jsx";
 import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
 import { RecoveryStatusCard } from "./cards/RecoveryStatusCard.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
@@ -748,6 +749,7 @@ export function AnalysisView({
         />
         </CardBoundary>
 
+        <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} normalizeOn={normalizationActive} />
         <details style={{ marginBottom: 16 }}>
           <summary style={{ cursor: "pointer", fontSize: 14, color: C.muted, padding: "10px 0" }}>Overall curve summary</summary>
           <CardBoundary name="Whole-Curve Capacity">

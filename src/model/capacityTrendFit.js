@@ -1,4 +1,4 @@
-// Shared experimental fit; used by offline evaluation and frozen shadow forecasts only.
+// Shared experimental fit; used by evaluation, frozen shadow forecasts and descriptive analysis charts.
 import { freshFitReps, sane } from './load.js';
 import { loadProvenance } from './forceRecording.js';
 import { fitThreeExpAmps } from './threeExp.js';
@@ -44,9 +44,11 @@ export function selectRecentSessions(rows, count) {
   return sessions.slice(-count).flatMap(([, rs]) => rs);
 }
 
-export function fitEstablishedTrend(history, hand, grip, referenceDate, { sessionWindow = null } = {}) {
+export function fitEstablishedTrend(history, hand, grip, referenceDate, { sessionWindow = null, prepared = false } = {}) {
   // Enforce the cutoff here too, so direct callers cannot leak the test date.
-  const clean = prepareEvaluationRows(history).rows.filter(r => r.date < referenceDate);
+  // Chart callers validate/deduplicate once for the entire series. The date
+  // cutoff still applies here on every fit.
+  const clean = (prepared ? history : prepareEvaluationRows(history).rows).filter(r => r.date < referenceDate);
   const eligible = freshFitReps(clean).filter(r => r.grip === grip && measured(r));
   const all = sessionWindow == null ? eligible : selectRecentSessions(eligible, sessionWindow);
   const own = all.filter(r => r.hand === hand);
