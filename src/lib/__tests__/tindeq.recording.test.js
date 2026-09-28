@@ -84,19 +84,7 @@ test('device timestamp rollover preserves duration', async () => {
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime: 2, avgForce: 20, failureValid: true});
 });
 
-test('sustained target loss ends once while still pulling and requires release', async () => {
-  const { packet, onStart, onEnd } = await setup(25);
-  for (let ms = 0; ms <= 6000; ms += 100) packet([[ms, ms < 3000 ? 25 : 15]]);
-  expect(onEnd).toHaveBeenCalledTimes(1);
-  const stats = onEnd.mock.calls[0][0];
-  expect(stats.endReason).toBe('target_force_failure');
-  expect(stats.failureValid).toBe(true);
-  expect(stats.actualTime).toBeGreaterThanOrEqual(3);
-  expect(stats.actualTime).toBeLessThan(3.4);
-  expect(onStart).toHaveBeenCalledTimes(1);
-  packet([[6100, 0], [6200, 25]]);
-  expect(onStart).toHaveBeenCalledTimes(2);
-});
+
 test('a brief dip below target does not finish a live rep', async () => {
   const { packet, onEnd } = await setup(25);
   for (let ms = 0; ms <= 4000; ms += 100) packet([[ms, ms >= 2000 && ms < 2200 ? 20 : 25]]);
@@ -131,29 +119,10 @@ test('timed warmups still end on an actual early release', async () => {
   expect(onEnd.mock.calls[0][0].actualTime).toBe(3);
 });
 
-test('training restores target-drop detection after leaving a timed warmup', async () => {
-  const { hook, packet, onStart, onEnd } = await setup(25, { endOnTargetDrop: false });
-  await act(async () => {
-    await hook.result.current.stopAutoDetect();
-    await hook.result.current.startAutoDetect(onStart, onEnd);
-  });
-  packet([[0, 26], [500, 26], [1000, 22], [1500, 22], [2000, 22], [2500, 22], [3000, 22]]);
-  expect(onEnd).toHaveBeenCalledTimes(1);
-  expect(onEnd.mock.calls[0][0].endReason).toBe('target_force_failure');
-});
 
 
-test('live reps use the tolerance and confirm with sensor time in delayed batches', async () => {
-  const { packet, onEnd } = await setup(25);
-  packet([[0, 27], [500, 24], [1000, 24], [1500, 24], [2000, 22], [2500, 22]]);
-  expect(onEnd).not.toHaveBeenCalled();
-  packet([[3000, 22], [3500, 22], [3999, 22]]);
-  expect(onEnd).not.toHaveBeenCalled();
-  packet([[4000, 22]]);
-  expect(onEnd).toHaveBeenCalledTimes(1);
-  expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:2, avgForce:24.75,
-    forceRecording:{failure_policy:{version:7,below_target_fraction:0.93,confirmation_ms:2000}}});
-});
+
+
 
 
 test('sensor recording pairs post-acquisition force and duration and preserves ramp activity', async () => {
@@ -181,36 +150,13 @@ test('manually started sensor measurements remain interrupted after a disconnect
   expect(stats).toMatchObject({actualTime:1,failureValid:false,endReason:'equipment_interruption'});
 });
 
-test('light training starts below 4 kg and holds below 3 kg without false release', async () => {
-  const { packet, onStart, onEnd } = await setup(2.5);
-  packet([[0, 1], [500, 2], [1000, 2.5], [1500, 2.2], [2000, 2.2],
-    [2500, 2.2], [3000, 2.2]]);
-  expect(onStart).toHaveBeenCalledTimes(1);
-  expect(onEnd).not.toHaveBeenCalled();
-  packet([[3500, 1.9], [4000, 1.9], [4500, 1.9], [5000, 1.9], [5499, 1.9]]);
-  expect(onEnd).not.toHaveBeenCalled();
-  packet([[5500, 1.9]]);
-  expect(onEnd).toHaveBeenCalledTimes(1);
-  expect(onEnd.mock.calls[0][0]).toMatchObject({ actualTime: 2.5,
-    endReason: 'target_force_failure', failureValid: true,
-    forceRecording: { failure_policy: { version: 7, minimum_drop_kg: 0.45359237,
-      maximum_drop_fraction: 0.20 } } });
-});
 
-test('light rep release gate retains its threshold when the next target increases', async () => {
-  const { hook, packet, onStart, onEnd } = await setup(2.5);
-  packet([[0, 2.5], [500, 2.5], [1000, 2.5], [1500, 1.9], [2000, 1.9], [2500, 1.9], [3000, 1.9], [3500, 1.9]]);
-  expect(onEnd).toHaveBeenCalledTimes(1);
-  hook.result.current.targetKgRef.current = 20;
-  packet([[4000, 1.5], [4500, 20]]);
-  expect(onStart).toHaveBeenCalledTimes(1);
-  packet([[5000, 0], [5500, 20]]);
-  expect(onStart).toHaveBeenCalledTimes(2);
-});
+
+
 
 test('light attempts that never acquire target still end on confirmed release', async () => {
   const { packet, onEnd } = await setup(2.5);
-  packet([[0, 2.1], [500, 2.1], [1000, 2.1], [1500, 2.1],
+  packet([[0, 2.01], [500, 2.01], [1000, 2.01], [1500, 2.01],
     [2000, 0], [2500, 0], [2999, 0]]);
   expect(onEnd).not.toHaveBeenCalled();
   packet([[3000, 0]]);
@@ -218,22 +164,7 @@ test('light attempts that never acquire target still end on confirmed release', 
   expect(onEnd.mock.calls[0][0]).toMatchObject({ actualTime: 2, failureValid: false });
 });
 
-test('manually started light sensor reps use the same tolerance and release rules', async () => {
-  const { hook, packet } = await setup(2.5);
-  const onFailure = jest.fn();
-  await act(async () => {
-    await hook.result.current.stopAutoDetect();
-    hook.result.current.setAutoFailCallback(onFailure);
-    await hook.result.current.startMeasuring();
-  });
-  packet([[0, 2.5], [500, 2.2], [1000, 2.2], [1500, 2.2], [2000, 2.2]]);
-  expect(onFailure).not.toHaveBeenCalled();
-  packet([[2500, 1.9], [3000, 1.9], [3500, 1.9], [4000, 1.9], [4500, 1.9]]);
-  expect(onFailure).toHaveBeenCalledTimes(1);
-  let stats;
-  await act(async () => { stats = await hook.result.current.stopMeasuring(); });
-  expect(stats).toMatchObject({ actualTime: 2.5, endReason: 'target_force_failure', failureValid: true });
-});
+
 
 test('timed low-target warmups retain their existing start and release rules', async () => {
   const { packet, onStart, onEnd } = await setup(2.5, { endOnTargetDrop: false });
@@ -245,29 +176,12 @@ test('timed low-target warmups retain their existing start and release rules', a
 });
 
 
-test('release during rest re-arms the next rep before it pulls, then stops the idle stream', async () => {
-  const { hook, packet, onStart, onEnd, commands } = await setup(25);
-  packet([[0, 25], [500, 25], [1000, 25], [1500, 20], [2000, 20], [2500, 20], [3000, 20], [3500, 20]]);
-  expect(onEnd).toHaveBeenCalledTimes(1);
-  await act(async () => { await hook.result.current.stopAutoDetect({ observeRelease: true }); });
-  expect(commands.at(-1)).toBe(CMD_START[0]);
-  packet([[4000, 0]]);
-  await act(async () => {});
-  expect(commands.at(-1)).toBe(CMD_STOP[0]);
-  expect(onStart).toHaveBeenCalledTimes(1);
-  const nextStart = jest.fn(), nextEnd = jest.fn();
-  await act(async () => { await hook.result.current.startAutoDetect(nextStart, nextEnd); });
-  // No extra zero sample after rest. The physical release was already observed.
-  packet([[24000, 25], [24500, 25], [25000, 25], [25500, 25],
-    [26000, 0], [26500, 0], [27000, 0]]);
-  expect(nextStart).toHaveBeenCalledTimes(1);
-  expect(nextEnd).toHaveBeenCalledTimes(1);
-  expect(nextEnd.mock.calls[0][0]).toMatchObject({ actualTime: 2, failureValid: true });
-});
+
 
 test('rest release watching is bounded and cannot stop a newer rep stream', async () => {
   const { hook, packet, commands } = await setup(25);
   packet([[0, 25], [500, 25], [1000, 20], [1500, 20], [2000, 20], [2500, 20], [3000, 20]]);
+  act(() => { hook.result.current.endRepAndRequireRelease(); });
   await act(async () => { await hook.result.current.stopAutoDetect({ observeRelease: true }); });
   act(() => jest.advanceTimersByTime(9000));
   expect(commands.at(-1)).toBe(CMD_START[0]);
@@ -289,18 +203,20 @@ test('rest release watching is bounded and cannot stop a newer rep stream', asyn
 test('release watcher stops after ten seconds without inventing a release', async () => {
   const { hook, packet, commands, onStart, onEnd } = await setup(25);
   packet([[0, 25], [500, 25], [1000, 20], [1500, 20], [2000, 20], [2500, 20], [3000, 20]]);
+  act(() => { hook.result.current.endRepAndRequireRelease(); });
   await act(async () => { await hook.result.current.stopAutoDetect({ observeRelease: true }); });
   act(() => jest.advanceTimersByTime(10000));
   await act(async () => {});
   expect(commands.at(-1)).toBe(CMD_STOP[0]);
   expect(hook.result.current.awaitingRelease).toBe(true);
   expect(onStart).toHaveBeenCalledTimes(1);
-  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd).not.toHaveBeenCalled();
 });
 
 test('a release sample before restart callbacks arm still clears the previous gate', async () => {
   const { hook, packet } = await setup(25);
   packet([[0, 25], [500, 25], [1000, 20], [1500, 20], [2000, 20], [2500, 20], [3000, 20]]);
+  act(() => { hook.result.current.endRepAndRequireRelease(); });
   await act(async () => { await hook.result.current.stopAutoDetect(); });
   const nextStart = jest.fn();
   await act(async () => {
@@ -316,30 +232,89 @@ test('a release sample before restart callbacks arm still clears the previous ga
 test('a 1.5 second force adjustment recovers without ending the rep, then full release ends after 1 second', async () => {
   const { packet, onEnd } = await setup(7.6);
   packet([[0, 7.7], [500, 7.7], [1000, 6.8], [1500, 6.8], [2000, 6.8],
-    [2499, 6.8], [2500, 7.7], [3000, 7.7]]);
+    [2499, 6.8], [2500, 7.7], [3000, 7.7], [3500, 7.7], [4000, 7.7]]);
   expect(onEnd).not.toHaveBeenCalled();
-  packet([[3500, 0], [4000, 0], [4499, 0]]);
+  packet([[4500, 0], [5000, 0], [5499, 0]]);
   expect(onEnd).not.toHaveBeenCalled();
-  packet([[4500, 0]]);
+  packet([[5500, 0]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
-  expect(onEnd.mock.calls[0][0]).toMatchObject({ actualTime: 3.5, failureValid: true });
+  expect(onEnd.mock.calls[0][0]).toMatchObject({ actualTime: 4.5, failureValid: true });
 });
 
-test('manual sensor reps also survive a 1.5 second adjustment and reset the failure countdown', async () => {
-  const { hook, packet } = await setup(7.6);
-  const onFailure = jest.fn();
-  await act(async () => {
-    await hook.result.current.stopAutoDetect();
-    hook.result.current.setAutoFailCallback(onFailure);
-    await hook.result.current.startMeasuring();
-  });
-  packet([[0, 7.7], [500, 7.7], [1000, 6.8], [1500, 6.8], [2000, 6.8],
-    [2500, 7.7], [3000, 6.8], [3500, 6.8], [4000, 6.8], [4500, 6.8], [4999, 6.8]]);
+
+
+function feed(packet, from, to, force) {
+  for (let ms = from; ms <= to; ms += 100) packet([[ms, force(ms)]]);
+}
+test('confirmed loss freezes hold time, records weaker work until release, and then advances once', async () => {
+  const {hook,packet,onEnd,onStart}=await setup(25);
+  feed(packet,0,9000,ms=>ms<3000?25:20);
+  expect(hook.result.current.forceLoss.status).toBe('complete');
+  expect(onEnd).not.toHaveBeenCalled();
+  feed(packet,9100,10100,()=>0);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  const stats=onEnd.mock.calls[0][0];
+  expect(stats.actualTime).toBeGreaterThanOrEqual(3);
+  expect(stats.actualTime).toBeLessThan(3.4);
+  expect(stats).toMatchObject({failureValid:true,endReason:'target_force_failure',
+    forceRecording:{failure_policy:{version:8},recording_stop_reason:'release',
+      capacity_end_reason:'sustained_force_loss',activity:{duration_s:9.1}}});
+  feed(packet,10200,11000,()=>25);
+  expect(onStart).toHaveBeenCalledTimes(2);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+});
+test.each([2.5,25])('a two-second adjustment at target %s survives; zero release ends after one second', async target => {
+  const {packet,onEnd,hook}=await setup(target);
+  feed(packet,0,9000,ms=>ms>=3000&&ms<5000?target*.7:target*.98);
+  expect(onEnd).not.toHaveBeenCalled();
+  expect(hook.result.current.forceLoss.status).toBe('holding');
+  feed(packet,9100,10000,()=>0);
+  expect(onEnd).not.toHaveBeenCalled();
+  packet([[10100,0]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:9.1,failureValid:true,
+    forceRecording:{capacity_end_reason:'release',failure_policy:{version:8}}});
+});
+test('repeated short good pulses do not erase an ongoing loss in the live detector', async () => {
+  const {packet,hook,onEnd}=await setup(20);
+  feed(packet,0,10000,ms=>ms<3000?20:ms%1000===0?18.7:18);
+  expect(hook.result.current.forceLoss.status).toBe('complete');
+  feed(packet,10100,11100,()=>0);
+  expect(onEnd.mock.calls[0][0].actualTime).toBeLessThan(3.5);
+});
+test('manually started sensor reps use the same loss and release decisions', async () => {
+  const {hook,packet}=await setup(2.5);
+  const onFailure=jest.fn();
+  await act(async()=>{await hook.result.current.stopAutoDetect();
+    hook.result.current.setAutoFailCallback(onFailure);await hook.result.current.startMeasuring();});
+  feed(packet,0,9000,ms=>ms<3000?2.4:1.8);
+  expect(hook.result.current.forceLoss.status).toBe('complete');
   expect(onFailure).not.toHaveBeenCalled();
-  packet([[5000, 6.8]]);
+  feed(packet,9100,10100,()=>0);
   expect(onFailure).toHaveBeenCalledTimes(1);
-  let stats;
-  await act(async () => { stats = await hook.result.current.stopMeasuring(); });
-  expect(stats).toMatchObject({ actualTime: 3, failureValid: true,
-    forceRecording: { failure_policy: { version: 7, confirmation_ms: 2000 } } });
+  let stats;await act(async()=>{stats=await hook.result.current.stopMeasuring();});
+  expect(stats.actualTime).toBeLessThan(3.4);
+  expect(stats.forceRecording.activity.duration_s).toBe(9.1);
+});
+test('disconnect while awaiting release retains observed work but cannot prove a failure endpoint', async () => {
+  const {hook,packet,onEnd,deviceListeners}=await setup(25);
+  feed(packet,0,9000,ms=>ms<3000?25:20);
+  expect(hook.result.current.forceLoss.status).toBe('complete');
+  await act(async()=>{deviceListeners.gattserverdisconnected();});
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({failureValid:false,endReason:'equipment_interruption'});
+});
+test('short attempts notify the view instead of leaving its timer running', async () => {
+  const {packet,onEnd}=await setup(25);
+  feed(packet,0,1500,ms=>ms<500?25:0);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:.5,failureValid:false,endReason:'interrupted'});
+});
+test('training restores the new detector after a timed warmup', async () => {
+  const {hook,packet,onStart,onEnd}=await setup(25,{endOnTargetDrop:false});
+  await act(async()=>{await hook.result.current.stopAutoDetect();await hook.result.current.startAutoDetect(onStart,onEnd);});
+  feed(packet,0,9000,ms=>ms<3000?25:20);
+  expect(hook.result.current.forceLoss.status).toBe('complete');
+  feed(packet,9100,10100,()=>0);
+  expect(onEnd.mock.calls[0][0].endReason).toBe('target_force_failure');
 });

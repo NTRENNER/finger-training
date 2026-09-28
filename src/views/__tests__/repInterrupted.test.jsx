@@ -106,3 +106,19 @@ test('a pending release gate explains why the next pull cannot start', () => {
   expect(screen.getByRole('status')).toHaveTextContent('Release the handle fully before your next pull');
   expect(screen.queryByText('Pull to begin rep 1')).not.toBeInTheDocument();
 });
+
+test('confirmed force loss freezes the displayed credit and asks for release before advancing', () => {
+  let start;
+  const onRepDone=jest.fn();
+  const tindeq={targetKgRef:{},connected:true,force:15,avgForce:20,peak:25,
+    startAutoDetect:a=>{start=a;},stopAutoDetect:jest.fn()};
+  const view=render(<AutoRepSessionView session={session} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={tindeq}/>);
+  act(()=>start());
+  view.rerender(<AutoRepSessionView session={session} onRepDone={onRepDone} onAbort={jest.fn()}
+    tindeq={{...tindeq,forceLoss:{status:'complete',startTs:1000,endTs:11000}}}/>);
+  expect(screen.getByText('Rep complete — release the handle')).toBeInTheDocument();
+  expect(screen.getByText('10.0s')).toBeInTheDocument();
+  act(()=>jest.advanceTimersByTime(5000));
+  expect(screen.getByText('10.0s')).toBeInTheDocument();
+  expect(onRepDone).not.toHaveBeenCalled();
+});

@@ -29,3 +29,13 @@ test('missing timestamps are unknown, never filled with the prescribed rest',()=
  act(()=>hook.result.current.handleRepDone({actualTime:10,avgForce:25}));
  expect(addReps.mock.calls[0][0][0].rep_timing).toMatchObject({source:'unknown',rest_before_s:null});
 });
+test('credited loss onset never turns the weaker activity tail into rest',()=>{
+ const {hook,addReps}=setup();
+ act(()=>hook.result.current.handleRepDone({actualTime:10,avgForce:25,startedAtMs:1000,endedAtMs:11000,
+   forceRecording:{version:4,credited_end_at_ms:11000,activity:{started_at_ms:1000,ended_at_ms:18000,duration_s:17}}}));
+ act(()=>hook.result.current.handleRestDone());
+ act(()=>hook.result.current.handleRepDone({actualTime:8,avgForce:25,startedAtMs:38000,endedAtMs:46000}));
+ expect(addReps.mock.calls[0][0][0].rep_timing.ended_at_ms).toBe(18000);
+ expect(addReps.mock.calls[0][0][0].actual_time_s).toBe(10);
+ expect(addReps.mock.calls[1][0][0].rep_timing.rest_before_s).toBe(20);
+});

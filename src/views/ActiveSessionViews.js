@@ -148,6 +148,18 @@ const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","�
 // here are unchanged — they're just imported at the top of the file
 // now instead of defined inline.
 
+function ForceLossNotice({ state }) {
+  if (!state || state.status === 'holding') return null;
+  return <p role="status" style={{ color: C.yellow, fontSize: 22, fontWeight: 700 }}>
+    {state.status === 'complete' ? 'Rep complete — release the handle' : 'Force dipped — return to a steady hold'}
+  </p>;
+}
+
+function creditedSeconds(state, elapsed) {
+  return state?.status === 'complete' && state.startTs != null
+    ? Math.max(0, (state.endTs - state.startTs) / 1000).toFixed(1) : elapsed;
+}
+
 function RepDots({ total, done, current }) {
   return (
     <div style={{ display: "flex", gap: 8, justifyContent: "center", margin: "16px 0" }}>
@@ -433,7 +445,8 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       {/* Timer (shown during active rep) */}
       {repPhase === "active" && (
         <Card>
-          <BigTimer seconds={elapsed} targetSeconds={config.targetTime} running={true} referenceOnly={!!config.mixedDomainPlan} />
+          <ForceLossNotice state={tindeq.forceLoss} />
+          <BigTimer seconds={Number(creditedSeconds(tindeq.forceLoss, elapsed))} targetSeconds={config.targetTime} running={tindeq.forceLoss?.status !== 'complete'} referenceOnly={!!config.mixedDomainPlan} />
           {tindeq.connected ? (
             <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />
           ) : (
@@ -495,6 +508,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         {repPhase === "active" && (
           <Btn
             onClick={() => endRep()}
+            disabled={tindeq.connected && tindeq.forceLoss?.status === 'complete'}
             style={{ flex: 1, padding: "18px 0", fontSize: 18, borderRadius: 12 }}
             color={C.red}
           >
@@ -1044,7 +1058,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <MixedHoldInfo config={config} currentRep={currentRep} />
       <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
-      {suggestedKg > 0 && <p>The rep ends when force drops below {fmtW(suggestedKg, unit)} {unit}. Overshooting is recorded at the force you actually pull.</p>}
+      {suggestedKg > 0 && <p>Brief force adjustments are allowed. A sustained loss of force ends the hold; release the handle to begin rest.</p>}
       {startError && <div role="alert" style={{ color: C.red }}>
         <p>{startError}</p>
         <Btn onClick={() => setStreamAttempt(attempt => attempt + 1)}>Retry Tindeq</Btn>
@@ -1059,17 +1073,18 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
       <Card style={{ textAlign: "center", padding: "32px 16px", marginTop: 12 }}>
         {repActive ? (
           <>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Maintain the prescribed force until muscular failure</div>
+            <ForceLossNotice state={tindeq.forceLoss} />
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>{tindeq.forceLoss?.status === 'complete' ? 'Hold time recorded. Rest starts after release.' : 'Maintain a steady hold'}</div>
             <div style={{
               fontSize: 96, fontWeight: 900, lineHeight: 1,
               color: targetReached ? C.green : C.blue,
               fontVariantNumeric: "tabular-nums",
             }}>
-              {elapsed}s
+              {creditedSeconds(tindeq.forceLoss, elapsed)}s
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
               {config.mixedDomainPlan ? 'Fresh reference' : 'target'} {config.targetTime}s
-              {targetReached && <span style={{ color: C.green, marginLeft: 8 }}>Target reached — keep pulling to failure</span>}
+              {targetReached && tindeq.forceLoss?.status !== 'complete' && <span style={{ color: C.green, marginLeft: 8 }}>Target reached — keep pulling to failure</span>}
             </div>
           </>
         ) : (

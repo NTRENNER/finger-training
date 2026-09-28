@@ -624,7 +624,10 @@ export function demonstratedCapacityKg(
       // that this floor was too high. Short failures weaken only the constraint;
       // they never establish demonstrated capacity at the requested duration.
       const shortMiss = !fullHold && r.failure_valid === true
-        && r.end_reason === "muscular_failure"
+        && (r.end_reason === "muscular_failure" || (r.end_reason === "target_force_failure"
+          && r.force_recording?.failure_policy?.version >= 8
+          && r.force_recording?.recording_stop_reason === 'release'
+          && r.force_recording?.capacity_eligible === true))
         && Number(r.target_duration) === targetDuration
         && Math.abs(prescribed - workingFloor) <= 0.11
         && Number(r.peak_force_kg) >= prescribed

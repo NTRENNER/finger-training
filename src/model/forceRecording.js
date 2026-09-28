@@ -1,3 +1,4 @@
+import { TARGET_FAILURE_POLICY, targetFailureBoundary, repDetectionThresholds } from './targetFailure.js';
 import { isPeakMeasurement, isValidPeakMeasurement } from './peakTest.js';
 // Descriptive force variation; valid measured efforts remain curve evidence.
 import { isMixedDomainRep, mixedDomainMetadata } from './mixedDomain.js';
@@ -97,17 +98,41 @@ export function evidenceLabel(rep) {
 
 // Capacity force and duration share one acquisition-to-end interval. The
 // original integral remains activity metadata, including ramp-up work.
-export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, targetKg = null) {
-  const activity = recordForce(samples, endTs, targetKg);
+export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, targetKg = null, decision = null) {
+  endTs = decision?.endTs ?? endTs;
+  const activityEnd = decision?.activityEndTs ?? endTs;
+  const activity = recordForce(samples, activityEnd, targetKg);
   if (!(targetKg > 0)) return activity;
-  const first = samples.findIndex(s => s.ts <= endTs && s.kg >= targetKg);
-  if (first < 0) return activity;
-  const capacity = recordForce(samples.slice(first), endTs, targetKg);
+  const first = decision
+    ? samples.findIndex(s => decision.startTs != null && s.ts >= decision.startTs && s.ts <= endTs)
+    : samples.findIndex(s => s.ts <= endTs && s.kg >= targetKg);
+  if (first < 0) return { ...activity, ...(decision ? { failureValid: false, endReason: 'target_not_reached',
+    forceRecording: { ...activity.forceRecording, capacity_eligible: false, failure_policy: TARGET_FAILURE_POLICY,
+      recording_stop_reason: decision.stopReason, capacity_end_reason: 'target_not_reached' } } : {}) };
+  const capacity = recordForce(samples.slice(first), endTs, decision ? null : targetKg);
+  const eligible = capacity.failureValid && activity.forceRecording.signal_quality === 'complete'
+    && decision?.stopReason !== 'equipment_interruption';
+  let inBandMs = 0, unloadMs = 0;
+  for (let i = first; i < samples.length - 1 && samples[i].ts < endTs; i++) {
+    const dt = Math.min(samples[i + 1].ts, endTs) - samples[i].ts;
+    if (dt <= 0 || dt > 1000) continue;
+    if (samples[i].kg >= targetFailureBoundary(targetKg)) inBandMs += dt;
+    if (samples[i].kg < repDetectionThresholds(targetKg).releaseKg) unloadMs += dt;
+  }
+  // Meaningful unloading is activity, but not continuous capacity evidence.
+  const continuous = !decision || unloadMs < TARGET_FAILURE_POLICY.maximum_recovered_unload_ms;
   return { ...capacity, peakForce: activity.peakForce,
-    failureValid: capacity.failureValid && activity.failureValid,
-    endReason: activity.failureValid ? capacity.endReason : activity.endReason,
-    forceRecording: { ...capacity.forceRecording, version: 3, basis: 'target_acquired',
-      capacity_eligible: capacity.failureValid && activity.failureValid,
+    failureValid: eligible,
+    endReason: !eligible ? 'equipment_interruption' : decision?.reason === 'sustained_force_loss'
+      ? 'target_force_failure' : capacity.endReason,
+    forceRecording: { ...capacity.forceRecording, version: decision ? 4 : 3, basis: 'target_acquired',
+      target_kg: targetKg, capacity_eligible: eligible && continuous,
+      ...(decision ? { failure_policy: TARGET_FAILURE_POLICY, acquisition_basis: 'sustained_tolerance_band',
+        recording_stop_reason: decision.stopReason, capacity_end_reason: decision.reason,
+        credited_end_at_ms: capacity.endedAtMs,
+        target_band_time_s: inBandMs / 1000, target_band_fraction: capacity.actualTime > 0 ? inBandMs / (capacity.actualTime * 1000) : 0,
+        continuity: continuous ? 'continuous' : 'intermittent',
+        force_loss: decision.summary } : {}),
       activity: { duration_s: activity.actualTime, avg_force_kg: activity.avgForce,
         impulse_kg_s: activity.forceRecording.impulse_kg_s,
         started_at_ms: activity.startedAtMs, ended_at_ms: activity.endedAtMs,
@@ -143,11 +168,10 @@ export function isNominalPrescriptionRep(rep) {
 
 // Express a target-acquired rep on the earlier recording interval.
 //
-// Pre-basis rows timed the whole pull, from the 4 kg start threshold to
-// release. A v3 row times only the at-or-above-target interval, and stores
-// the difference as `acquisition_s` — so adding it back reproduces the
-// earlier interval exactly. The force axis needs no adjustment: both bases
-// average the working phase, and the recorded values agree to 2 d.p.
+// Pre-basis rows timed the whole pull, including acquisition. Add recorded
+// acquisition time to retain that convention. This does not restore the weaker
+// tail after a credited force-loss cutoff or erase detector-policy differences.
+// Keep the working-force average unchanged.
 //
 // The conversion only runs this direction. Pre-basis rows never recorded
 // their acquisition time, so they cannot be moved onto the newer interval;

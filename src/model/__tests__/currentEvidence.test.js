@@ -142,3 +142,13 @@ test('multiple stale holds taper without a jump when their ranking changes', () 
   previous=value;
  }
 });
+
+test('new confirmed loss and release failures revise the floor consistently',()=>{
+ const policy={failure_policy:{version:8},recording_stop_reason:'release',capacity_eligible:true};
+ const misses=lower.map(r=>miss(r.date,30,{end_reason:'target_force_failure',force_recording:policy}));
+ expect(floor([best,...misses])).toBe(22.5);
+ expect(floor([best,...misses.map(r=>({...r,end_reason:'muscular_failure'}))])).toBe(22.5);
+ for (const patch of [{failure_policy:{version:7}}, {capacity_eligible:false}, {recording_stop_reason:'manual_stop'}]) {
+   expect(floor([best,...misses.map(r=>({...r,force_recording:{...policy,...patch}}))])).toBe(30);
+ }
+});

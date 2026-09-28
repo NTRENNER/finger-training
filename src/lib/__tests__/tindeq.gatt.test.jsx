@@ -151,16 +151,22 @@ test('second workout rep shows its timer and completes after release during the 
   const view = render(<Workout />);
   await waitFor(() => expect(writes).toEqual([CMD_START[0]]));
   packet([[0, 20], [500, 20], [1000, 20], [1500, 20], [2000, 18], [2500, 18], [3000, 18], [3500, 18], [4000, 18]]);
-  expect(screen.getByRole('button', { name: 'Finish rest' })).toBeInTheDocument();
+  for (let ms=4500;ms<=7500;ms+=500) packet([[ms,18]]);
+  // Sustained force loss has ended the credited hold, but rest cannot begin
+  // while the athlete is still pulling. Capture physical release first.
+  expect(done).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', {name:'Finish rest'})).not.toBeInTheDocument();
+  packet([[8000,0],[8500,0],[9000,0]]);
   expect(done).toHaveBeenCalledTimes(1);
-  // Cleanup keeps the stream long enough to observe unloading during rest.
-  expect(writes).toEqual([CMD_START[0]]);
-  packet([[4500, 0]]);
+  expect(done.mock.calls[0][0].actualTime).toBeLessThan(3);
+  expect(done.mock.calls[0][0].forceRecording.activity.duration_s).toBe(8);
   await waitFor(() => expect(writes).toEqual([CMD_START[0], CMD_STOP[0]]));
   fireEvent.click(screen.getByRole('button', { name: 'Finish rest' }));
   await waitFor(() => expect(writes).toEqual([CMD_START[0], CMD_STOP[0], CMD_START[0]]));
   expect(screen.getByText('Pull to begin rep 2')).toBeInTheDocument();
   packet([[23000, 20], [23500, 20], [24000, 20], [24500, 20]]);
+  // This harness owns the device hook outside Workout; mirror App's updated props.
+  view.rerender(<Workout />);
   expect(screen.getByText('0s')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Rep interrupted' })).toBeInTheDocument();
   packet([[25000, 0], [25500, 0], [26000, 0]]);

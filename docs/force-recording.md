@@ -4,11 +4,19 @@ Target time determines the prescribed load. The athlete maintains that load unti
 
 ## Target-loss policy
 
-Once the athlete reaches the prescribed force, a continuous drop greater than the larger of 7% of target or 1 lb (0.45359237 kg), capped at 20% of target, for 2000 ms confirms failure. These settings are read from failure policy version 7 and saved on target-failure reps. The 1 lb minimum is an initial engineering allowance, not a sensor accuracy specification; validate it against live low-load use. The two-second confirmation is an engineering allowance for transient force adjustments and needs live-device validation. Existing records retain their original policy. Recovery to the boundary cancels confirmation. Overshooting never ends a rep. The recorded endpoint is the onset of the confirmed drop. Warmups opt out and retain their timed-hold/release behavior. With no prescribed target, release detection remains the endpoint.
+Current targeted training uses [force-loss policy 8](rep-force-loss.md): a 300 ms
+smoothed force signal, four seconds to recover from a partial drop, and a 750 ms
+steady return to clear it. A sustained hold within tolerance acquires the rep;
+exact-target spikes are not required. The tolerance remains the larger of 7% or
+1 lb, bounded at 20% for very light targets. A near-zero release confirms after one
+second. Timed warmups and peak-test protocols retain their own existing behavior.
 
-For targeted training, auto-start is the lower of 4 kg or 80% of target, and release is the lower of 3 kg or 50% of target. Release still requires 1000 ms. The release threshold is retained through the completed pull’s release gate even if the next target changes. This keeps the fixed release cutoff from ending light holds inside the permitted force band. Timed warmups and untargeted peak tests retain the existing 4 kg start / 3 kg release thresholds.
-
-The device sample clock determines elapsed duration, including timestamp rollover. Targeted sensor reps now use recording version 3, basis `target_acquired`: capacity force and duration start at the first sample reaching target and end at failure onset. Force is integrated over exactly that interval. The nested `activity` metadata preserves the full captured duration, average, impulse, and timestamps, including the ramp. Recorded rest starts from the physical activity start, not the later target-acquisition point. Peak is separate. Recording metadata also retains variability, signal completeness, and the longest contiguous phase above 80% of peak with its own average and duration. That descriptive phase is not substituted for full-rep capacity evidence.
+Confirmed loss freezes credited time and asks the athlete to release. Recording
+continues until release so the weaker tail remains activity and cannot become rest.
+Version-4 recording pairs capacity force with credited duration, preserves full
+activity separately, and stamps the policy on both target-loss and release endings.
+See the policy document for exact thresholds, metadata and continuity exclusions.
+Older policy versions and recorded workouts are retained without rewriting them.
 
 Opening overshoot, sustained overshoot, and force variation remain usable for curve fitting. The fitted observation uses actual time-weighted force over its recorded duration, never substitutes the prescription for measured force, and does not reject a valid failure because its force varies. Variability and plateau metrics are descriptive. Incomplete sensor records and interrupted efforts remain excluded. A targeted attempt that never reaches target is not valid failure evidence.
 
@@ -18,7 +26,7 @@ Opening overshoot, sustained overshoot, and force variation remain usable for cu
 
 New records retain start/end timestamps and actual same-hand rep-end-to-next-start rest separately from prescribed rest. Unknown rest remains unknown. New nominal spring settings and prescription-only loads remain activity rather than measured capacity evidence. Manual nominal loads can anchor an explicitly estimated load recommendation (evidence weight 0.5); they cannot establish measured capacity floors or recovery calibration. Interrupted nominal rows cannot anchor. The manual-only coach keeps the last prescribed duration and labels its estimated recommendation.
 
-Older baselines are not silently compared to the new interval basis. Where a grip spans the change, target-acquired records are expressed on the earlier whole-pull interval by adding their recorded `acquisition_s` back to the capacity duration, which reproduces that interval exactly; force needs no adjustment, because both bases average the working phase. The conversion runs only in that direction — rows predating the change never recorded an acquisition time, so they cannot be moved onto the newer interval. A grip recorded entirely on one basis keeps its native intervals, and a target-acquired row lacking `acquisition_s` is excluded from a spanning grip rather than compared across bases. Stored rows are never rewritten: the conversion is applied when a comparable series is read, and `force_recording.duration_s` continues to hold the native at-target interval. Because every rep stays in one series, a grip keeps its baseline, its curve and its capacity floor across the change, and nothing needs to be chained across a gap.
+Older baselines are not silently compared to the new interval basis. Where a grip spans the change, target-acquired records are expressed on the earlier whole-pull interval by adding their recorded `acquisition_s` back to the capacity duration, which retains the earlier acquisition-inclusive convention. This does not reconstruct work after a force-loss cutoff or erase differences between detector policies; the working-force average is left unchanged. The conversion runs only in that direction — rows predating the change never recorded an acquisition time, so they cannot be moved onto the newer interval. A grip recorded entirely on one basis keeps its native intervals, and a target-acquired row lacking `acquisition_s` is excluded from a spanning grip rather than compared across bases. Stored rows are never rewritten: the conversion is applied when a comparable series is read, and `force_recording.duration_s` continues to hold the native at-target interval. Because every rep stays in one series, a grip keeps its baseline, its curve and its capacity floor across the change, and nothing needs to be chained across a gap.
 
 ## Replaying a real history
 

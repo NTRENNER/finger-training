@@ -1,97 +1,114 @@
-import { createTargetFailureDetector } from '../targetFailure.js';
-import { recordForce, isCapacityEvidenceRep } from '../forceRecording.js';
-import { freshFitReps } from '../load.js';
-import { demonstratedCapacityKg } from '../prescription.js';
-
-const trace = (seconds, fn) => Array.from({length: seconds * 100 + 1}, (_, i) => ({ts:i*10, kg:fn(i/100)}));
-function end(samples, target = 25) {
+import { createTargetFailureDetector, repDetectionThresholds } from '../targetFailure.js';
+import { recordCapacityForce } from '../forceRecording.js';
+const lb = .45359237;
+const trace = (seconds, fn, step = 10) => Array.from({length: seconds * 1000 / step + 1}, (_, i) => ({ts:i*step, kg:fn(i*step/1000), at:100000+i*step}));
+function run(samples, target) {
   const detector = createTargetFailureDetector(target);
-  for (const sample of samples) { const result = detector(sample); if (result) return result; }
-  return null;
+  let result;
+  for (const sample of samples) result = detector(sample);
+  return { detector, result };
 }
-test('initial ramp and overshooting do not end a rep', () => {
-  const samples = trace(30, t => t < .3 ? 5 + t * 100 : 30 + Math.sin(t));
-  expect(end(samples)).toBeNull();
-  expect(recordForce(samples, 30000, 25).forceRecording.capacity_eligible).toBe(true);
+test('14 lb target accepts a steady 13.5 lb hold without an exact-target spike', () => {
+  const { detector, result } = run(trace(10, () => 13.5 * lb), 14 * lb);
+  expect(result).toBeNull();
+  expect(detector.snapshot().startTs).toBe(0);
+  expect(detector.finish(10000)).toMatchObject({endTs:10000,targetAcquired:true,reason:'release'});
 });
-test('a confirmed drop below the tolerance ends at its onset', () => {
-  const result = end(trace(10, t => t < 5 ? 55 : 51), 55);
-  expect(result).toEqual({endTs:5000, targetAcquired:true});
+test('14 lb target settling at 12.5 confirms a loss at its smoothed onset', () => {
+  const { result } = run(trace(12, t => (t < 5 ? 13.5 : 12.5) * lb), 14 * lb);
+  expect(result).toMatchObject({targetAcquired:true,reason:'sustained_force_loss'});
+  expect(result.endTs).toBeGreaterThanOrEqual(5000);
+  expect(result.endTs).toBeLessThanOrEqual(5300);
 });
-test('an attempt never reaching target does not arm failure detection', () => {
-  expect(end(trace(5, () => 15))).toBeNull();
-  expect(recordForce(trace(5, () => 15), 5000, 25).forceRecording.capacity_eligible).toBe(false);
+test.each([1, 1.5, 2])('%s second partial adjustment and a steady return preserve the rep', dip => {
+  const { detector, result } = run(trace(15, t => (t >= 5 && t < 5 + dip ? 80 : 100) * lb), 100 * lb);
+  expect(result).toBeNull();
+  expect(detector.snapshot().excursions).toHaveLength(1);
+  expect(detector.finish(15000).endTs).toBe(15000);
 });
-test('sustained and varying overshoot remain usable at their measured force', () => {
-  for (const samples of [trace(30, () => 35), trace(30, t => t < 5 ? 45 : 26)]) {
-    const result = recordForce(samples, 30000, 25);
-    const rep = {failure_valid:true, force_recording:result.forceRecording,
-      avg_force_kg:result.avgForce, load_provenance:'measured_force'};
-    expect(isCapacityEvidenceRep(rep)).toBe(true);
-    expect(result.avgForce).toBeGreaterThan(25);
-  }
+test('gradual decline is detected using recent force despite a long strong opening', () => {
+  const { result } = run(trace(75, t => Math.max(80, 100 - Math.max(0, t - 60) * 2) * lb), 100 * lb);
+  expect(result.endTs).toBeGreaterThan(63000);
+  expect(result.endTs).toBeLessThan(64000);
 });
-test('30 kg for 10 seconds then 10 kg for 50 preserves activity and its own strong-phase time', () => {
-  const result = recordForce(trace(60, t => t < 10 ? 30 : 10));
-  expect(result.avgForce).toBeCloseTo(13.3333, 3);
-  expect(result.forceRecording.plateau).toMatchObject({avg_force_kg:30, duration_s:10});
-  const rep = {date:'2026-09-10', hand:'L', grip:'Crusher', rep_num:1,
-    actual_time_s:result.actualTime, avg_force_kg:result.avgForce, peak_force_kg:30,
-    failure_valid:true, force_recording:result.forceRecording, load_provenance:'measured_force'};
-  expect(isCapacityEvidenceRep(rep)).toBe(true);
-  expect(freshFitReps([rep])).toHaveLength(1);
-  expect(demonstratedCapacityKg([rep], 'L','Crusher',60)).not.toBeNull();
+test('100 ms spikes cannot repeatedly reset a sustained loss', () => {
+  const { result } = run(trace(20, t => t < 5 ? 20 : Math.round(t*1000) % 1000 < 100 ? 18.7 : 18), 20);
+  expect(result.endTs).toBeGreaterThanOrEqual(5000);
+  expect(result.endTs).toBeLessThan(5400);
 });
-
-
-test('a brief dip after overshooting does not finish the rep', () => {
-  expect(end(trace(10, t => t < 2 ? 35 : t < 2.2 ? 22 : 25))).toBeNull();
+test('a return shorter than the recovery window does not clear a loss', () => {
+  const { detector, result } = run(trace(12, t => t < 5 || (t >= 7 && t < 7.4) ? 25 : 20), 25);
+  expect(result.endTs).toBeLessThan(5300);
+  expect(detector.snapshot().excursions).toHaveLength(0);
 });
-test('separate brief dips do not accumulate confirmation time', () => {
-  expect(end(trace(10, t => Math.round(t * 100) % 40 < 20 ? 27 : 22))).toBeNull();
+test('separate fully recovered dips do not accumulate to a failure', () => {
+  const { detector, result } = run(trace(20, t => t < 3 || t % 5 >= 2 ? 25 : 20), 25);
+  expect(result).toBeNull();
+  expect(detector.snapshot().excursions.length).toBeGreaterThan(1);
 });
-test('confirmation requires 2000 ms and recovery exactly to the tolerance resets it', () => {
+test('short initial spikes do not acquire a working hold', () => {
+  const { detector, result } = run(trace(8, t => t < .1 ? 25 : 15), 25);
+  expect(result).toBeNull();
+  expect(detector.finish(8000).targetAcquired).toBe(false);
+});
+test('confirmation takes four seconds from loss, not from acquisition', () => {
+  const samples = trace(15, t => t < 5 ? 25 : 20);
   const detector = createTargetFailureDetector(25);
-  for (const sample of [{ts:0,kg:30},{ts:100,kg:22},{ts:2099,kg:22},{ts:2100,kg:23.25},
-    {ts:2200,kg:22},{ts:4199,kg:22}]) expect(detector(sample)).toBeNull();
-  expect(detector({ts:4200,kg:22})).toEqual({endTs:2200,targetAcquired:true});
+  let first;
+  for (const sample of samples) if (detector(sample)) { first = sample; break; }
+  const result = detector(first);
+  expect(first.ts - result.endTs).toBe(4000);
 });
-test('abrupt release is confirmed and duration excludes the delay', () => {
-  const samples = trace(7, t => t < 5 ? 30 : 0);
-  const result = end(samples);
-  expect(result.endTs).toBe(5000);
-  expect(recordForce(samples, result.endTs, 25)).toMatchObject({actualTime:5,avgForce:30});
+test('release stops at physical release, excluding its confirmation delay', () => {
+  const samples = trace(6, t => t < 5 ? 25 : 0);
+  const { detector } = run(samples, 25);
+  const decision = {...detector.finish(5000),activityEndTs:5000,stopReason:'release',summary:detector.snapshot()};
+  expect(decision).toMatchObject({endTs:5000,reason:'release'});
+  expect(recordCapacityForce(samples, decision.endTs, 25, decision)).toMatchObject({actualTime:5,avgForce:25,
+    forceRecording:{failure_policy:{version:8},recording_stop_reason:'release',capacity_end_reason:'release'}});
 });
-
-
-test('sustained force within the 7 percent tolerance does not end the rep', () => {
-  expect(end(trace(10, t => t < 1 ? 55 : 52), 55)).toBeNull();
+test('sag tail is physical activity but not credited hold time or rest', () => {
+  const samples = trace(12, t => t < 5 ? 25 : t < 11 ? 20 : 0);
+  const { detector } = run(samples, 25);
+  const decision = {...detector.finish(11000),activityEndTs:11000,stopReason:'release',summary:detector.snapshot()};
+  const stats = recordCapacityForce(samples, decision.endTs, 25, decision);
+  expect(stats.actualTime).toBeLessThan(5.3);
+  expect(stats.forceRecording.activity).toMatchObject({duration_s:11,ended_at_ms:111000,impulse_kg_s:245});
+  expect(stats.endedAtMs).toBeLessThan(105300);
 });
-test('the tolerance band does not arm a rep that never reaches its target', () => {
-  expect(end(trace(10, t => t < 1 ? 24 : 22))).toBeNull();
+test('recovered dips retain elapsed credit and measured force, without claiming all time was in band', () => {
+  const samples = trace(12, t => t >= 5 && t < 7 ? 20 : 25);
+  const { detector } = run(samples, 25);
+  const decision = {...detector.finish(12000),activityEndTs:12000,stopReason:'release',summary:detector.snapshot()};
+  const stats = recordCapacityForce(samples, 12000, 25, decision);
+  expect(stats.actualTime).toBe(12);
+  expect(stats.avgForce).toBeCloseTo(290/12);
+  expect(stats.forceRecording.target_band_time_s).toBe(10);
+  expect(stats.forceRecording.target_band_fraction).toBeCloseTo(10/12);
 });
-
-test('one pound minimum allowance protects a 10 lb target from sustained sub-pound fluctuations', () => {
-  const lb = 0.45359237;
-  expect(end(trace(8, t => t < 1 ? 10 * lb : 9.2 * lb), 10 * lb)).toBeNull();
-  expect(end(trace(8, t => t < 3 ? 10 * lb : 8.9 * lb), 10 * lb))
-    .toEqual({ endTs: 3000, targetAcquired: true });
+test('substantial recovered unloading is preserved but excluded from continuous capacity', () => {
+  const samples = trace(12, t => t >= 5 && t < 5.5 ? 0 : 25);
+  const { detector } = run(samples, 25);
+  const decision = {...detector.finish(12000),activityEndTs:12000,stopReason:'release'};
+  expect(recordCapacityForce(samples,12000,25,decision).forceRecording)
+    .toMatchObject({capacity_eligible:false,continuity:'intermittent',activity:{duration_s:12}});
 });
-test('very light targets never allow more than a 20 percent loss', () => {
-  expect(end(trace(8, t => t < 1 ? 1 : 0.81), 1)).toBeNull();
-  expect(end(trace(8, t => t < 3 ? 1 : 0.79), 1))
-    .toEqual({ endTs: 3000, targetAcquired: true });
-});
-test('low-load recovery resets confirmation and separate dips cannot accumulate', () => {
-  const detector = createTargetFailureDetector(2);
-  for (const sample of [{ ts: 0, kg: 2 }, { ts: 100, kg: 1.5 },
-    { ts: 2099, kg: 1.5 }, { ts: 2100, kg: 1.6 }, { ts: 2200, kg: 1.5 },
-    { ts: 4199, kg: 1.5 }]) expect(detector(sample)).toBeNull();
-  expect(detector({ ts: 4200, kg: 1.5 })).toEqual({ endTs: 2200, targetAcquired: true });
-});
-test('minimum allowance never arms a low-load rep before target acquisition', () => {
-  expect(end(trace(8, t => t < 3 ? 1.9 : 1), 2)).toBeNull();
+test('light targets retain an absolute allowance bounded by 20 percent', () => {
+  expect(run(trace(8, () => .81), 1).result).toBeNull();
+  expect(run(trace(8, t => t < 2 ? 1 : .79), 1).result).not.toBeNull();
 });
 test.each([null, 0, -1, NaN, Infinity])('invalid target %s cannot create a failure', target => {
-  expect(end(trace(3, t => t < 1 ? 20 : 0), target)).toBeNull();
+  expect(run(trace(8, t => t < 1 ? 20 : 0), target).result).toBeNull();
+});
+test('targeted release is near zero and untargeted warmups keep legacy thresholds', () => {
+  expect(repDetectionThresholds(25)).toEqual({startKg:4,releaseKg:.5});
+  expect(repDetectionThresholds(2.5)).toEqual({startKg:2,releaseKg:.25});
+  expect(repDetectionThresholds(null)).toEqual({startKg:4,releaseKg:3});
+});
+test('audit runs cover acquisition through the last evaluated sample without gaps',()=>{
+  const {detector}=run(trace(15,t=>t>=5&&t<7?20:25),25);
+  const runs=detector.snapshot().runs;
+  expect(runs[0].from_ms).toBe(0);
+  expect(runs.at(-1).to_ms).toBe(15000);
+  for(let i=1;i<runs.length;i++) expect(runs[i].from_ms).toBe(runs[i-1].to_ms);
 });

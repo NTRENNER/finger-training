@@ -1,4 +1,4 @@
-import { createTargetFailureDetector, TARGET_FAILURE_POLICY, repDetectionThresholds } from "../model/targetFailure.js";
+import { createTargetFailureDetector, repDetectionThresholds } from "../model/targetFailure.js";
 import { recordCapacityForce as recordForce } from "../model/forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // TINDEQ PROGRESSOR BLE HOOK
@@ -184,6 +184,11 @@ export function computePlateauAvg(samples) {
 // ─────────────────────────────────────────────────────────────
 // useTindeq() — React hook wrapper around the BLE GATT API
 // ─────────────────────────────────────────────────────────────
+function forceDecision(detector, endTs, stopReason) {
+  return detector && Number.isFinite(endTs) ? { ...detector.finish(endTs), activityEndTs: endTs,
+    stopReason, summary: detector.snapshot() } : null;
+}
+
 export function useTindeq() {
   const [connected,     setConnected]     = useState(false);
   const [reconnecting,  setReconnecting]  = useState(false);
@@ -191,6 +196,15 @@ export function useTindeq() {
   const [peak,          setPeak]          = useState(0);
   const [avgForce,      setAvgForce]      = useState(0);
   const [bleError,      setBleError]      = useState(null);
+  const [forceLoss, setForceLoss] = useState(null);
+  const forceLossStatusRef = useRef(null);
+  const publishForceLoss = useCallback(detector => {
+    const state = detector?.snapshot(false);
+    if (state?.status !== forceLossStatusRef.current) {
+      forceLossStatusRef.current = state?.status ?? null;
+      setForceLoss(state ?? null);
+    }
+  }, []);
   const [battery, setBattery] = useState(emptyBattery);
   const batteryRef = useRef(emptyBattery());
   const batteryRequestRef = useRef(null);
@@ -297,7 +311,6 @@ export function useTindeq() {
   const lastPacketAtRef = useRef(null);
   const targetDetectorRef = useRef(null);
   const manualTargetDetectorRef = useRef(null);
-  const manualTargetResultRef = useRef(null);
   const manualReleaseKgRef = useRef(3);
   const adReleaseKgRef = useRef(3);
   const adBelowRef      = useRef(null);   // timestamp when force first dipped below end-threshold
@@ -396,7 +409,8 @@ export function useTindeq() {
         autoFailCallbackRef.current?.();
       }
       if (adActiveRef.current && delta > 1000000) {
-        const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current);
+        const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current,
+          forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'equipment_interruption'));
         adActiveRef.current = false;
         markAwaitingRelease(true);
         adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
@@ -426,12 +440,8 @@ export function useTindeq() {
       }
 
       if (measuringRef.current) {
-        const failure = manualTargetDetectorRef.current?.({ kg, ts: now });
-        if (failure) {
-          manualTargetResultRef.current = failure;
-          autoFailCallbackRef.current?.();
-          return;
-        }
+        manualTargetDetectorRef.current?.({ kg, ts: now });
+        publishForceLoss(manualTargetDetectorRef.current);
         if (kg < manualReleaseKgRef.current) {
           if (belowSinceRef.current === null) belowSinceRef.current = now;
           else if (now - belowSinceRef.current >= AD_END_MS) autoFailCallbackRef.current?.();
@@ -454,6 +464,7 @@ export function useTindeq() {
             adReleaseKgRef.current = thresholds.releaseKg;
             targetDetectorRef.current = adEndOnTargetDropRef.current
               ? createTargetFailureDetector(targetKgRef.current) : null;
+            publishForceLoss(null);
             targetDetectorRef.current?.({ kg, ts: now });
             adActiveRef.current    = true;
             adStartTimeRef.current = now;
@@ -471,49 +482,30 @@ export function useTindeq() {
           adSamplesRef.current.push({ kg, ts: now, at });
           adSumRef.current += kg;
           adCountRef.current += 1;
-          const failure = targetDetectorRef.current?.({ kg, ts: now });
-          if (failure) {
-            const stats = recordWithBattery(adSamplesRef.current, failure.endTs, targetKgRef.current);
-            adActiveRef.current = false;
-            markAwaitingRelease(true);
-            adStartTimeRef.current = null;
-            adBelowRef.current = null;
-            adSamplesRef.current = [];
-            adSumRef.current = 0;
-            adCountRef.current = 0;
-            adOnEndRef.current?.({ ...stats,
-              failureValid: stats.failureValid && failure.targetAcquired,
-              endReason: failure.targetAcquired ? "target_force_failure" : "target_not_reached",
-              forceRecording: { ...stats.forceRecording, failure_policy: TARGET_FAILURE_POLICY } });
-            return;
-          }
+          targetDetectorRef.current?.({ kg, ts: now });
+          publishForceLoss(targetDetectorRef.current);
           if (kg < adReleaseKgRef.current) {
             if (adBelowRef.current === null) adBelowRef.current = now;
             else if (now - adBelowRef.current >= AD_END_MS) {
               const actualTime = (adBelowRef.current - adStartTimeRef.current) / 1000;
-              if (actualTime * 1000 >= AD_MIN_MS) {
-                // Exclude release confirmation time from both force and duration.
-                const stats = recordWithBattery(adSamplesRef.current, adBelowRef.current, targetKgRef.current);
-                const avg = stats.avgForce;
-                // Read peak BEFORE clearing — peakRef gets reset
-                // on the next rep's start.
-                const peakF = peakRef.current;
-                const cb   = adOnEndRef.current;
-                adActiveRef.current    = false;
-                adStartTimeRef.current = null;
-                adSumRef.current       = 0;
-                adCountRef.current     = 0;
-                adSamplesRef.current   = [];
-                adBelowRef.current     = null;
-                cb?.({ ...stats, avgForce: avg, peakForce: peakF });
-              } else {
-                adActiveRef.current    = false;
-                adStartTimeRef.current = null;
-                adSumRef.current       = 0;
-                adCountRef.current     = 0;
-                adSamplesRef.current   = [];
-                adBelowRef.current     = null;
+              const detector = targetDetectorRef.current;
+              const decision = forceDecision(detector, adBelowRef.current, 'release');
+              const stats = recordWithBattery(adSamplesRef.current,
+                decision?.endTs ?? adBelowRef.current, targetKgRef.current, decision);
+              // A short attempt must complete the view too, but is not model evidence.
+              if (actualTime * 1000 < AD_MIN_MS) {
+                stats.failureValid = false;
+                stats.endReason = 'interrupted';
+                stats.forceRecording.capacity_eligible = false;
               }
+              const cb = adOnEndRef.current;
+              adActiveRef.current = false;
+              adStartTimeRef.current = null;
+              adSumRef.current = 0;
+              adCountRef.current = 0;
+              adSamplesRef.current = [];
+              adBelowRef.current = null;
+              cb?.(stats);
             }
           } else {
             adBelowRef.current = null;
@@ -531,7 +523,8 @@ export function useTindeq() {
       }
       if (!adActiveRef.current || lastPacketAtRef.current == null
           || Date.now() - lastPacketAtRef.current <= 1500) return;
-      const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current);
+      const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current,
+          forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'equipment_interruption'));
       adActiveRef.current = false;
       markAwaitingRelease(true);
       adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
@@ -594,7 +587,8 @@ export function useTindeq() {
           autoFailCallbackRef.current?.();
         }
         if (adActiveRef.current) {
-          const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current);
+          const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current,
+          forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'equipment_interruption'));
           adActiveRef.current = false;
           markAwaitingRelease(true);
           adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
@@ -668,7 +662,7 @@ export function useTindeq() {
     lastPacketAtRef.current = Date.now();
     manualTargetDetectorRef.current = createTargetFailureDetector(targetKgRef.current);
     manualReleaseKgRef.current = repDetectionThresholds(targetKgRef.current).releaseKg;
-    manualTargetResultRef.current = null;
+    publishForceLoss(null);
     peakRef.current      = 0;  setPeak(0);
     sumRef.current       = 0;
     countRef.current     = 0;  setAvgForce(0);
@@ -683,19 +677,17 @@ export function useTindeq() {
       measurementInterruptedRef.current = true;
       throw error;
     }
-  }, [writeCommand, cancelReleaseWatch]);
+  }, [writeCommand, cancelReleaseWatch, publishForceLoss]);
 
   // Return force, matched device duration, and measurement validity together.
   const stopMeasuring = useCallback(async () => {
     measuringRef.current = false;
-    const targetFailure = manualTargetResultRef.current;
-    const stats = recordWithBattery(samplesRef.current,
-      targetFailure?.endTs ?? belowSinceRef.current ?? undefined, targetKgRef.current);
-    if (targetFailure) {
-      stats.failureValid = stats.failureValid && targetFailure.targetAcquired;
-      stats.endReason = targetFailure.targetAcquired ? "target_force_failure" : "target_not_reached";
-      stats.forceRecording.failure_policy = TARGET_FAILURE_POLICY;
-    }
+    const detector = manualTargetDetectorRef.current;
+    const activityEndTs = belowSinceRef.current ?? samplesRef.current.at(-1)?.ts;
+    const decision = forceDecision(detector, activityEndTs,
+      measurementInterruptedRef.current ? 'equipment_interruption' : belowSinceRef.current != null ? 'release' : 'manual_stop');
+    const stats = recordWithBattery(samplesRef.current, decision?.endTs ?? activityEndTs,
+      targetKgRef.current, decision);
     if (measurementInterruptedRef.current) {
       stats.failureValid = false;
       stats.endReason = "equipment_interruption";
@@ -768,7 +760,8 @@ export function useTindeq() {
   // rep-end callback so the caller can record the rep if it wants
   // (the warmup doesn't, but the contract stays consistent).
   const endRepAndRequireRelease = useCallback(() => {
-    const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current);
+    const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current,
+          forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'manual_stop'));
     const { actualTime, avgForce: avg } = stats;
     const peakF = peakRef.current;
     adActiveRef.current     = false;
@@ -802,5 +795,5 @@ export function useTindeq() {
     if (ctrlRef.current) await writeCommand(CMD_STOP);
   }, [writeCommand, cancelReleaseWatch]);
 
-  return { connected, reconnecting, force, peak, avgForce, bleError, battery, awaitingRelease, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
+  return { connected, reconnecting, force, peak, avgForce, bleError, battery, awaitingRelease, forceLoss, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
 }
