@@ -580,25 +580,28 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
   // (beeps, onRestDone) live in effects keyed off `remaining`, not
   // inside the setState updater — StrictMode double-invokes updaters,
   // which double-fired the beep and the phase transition in dev.
-  const [remaining, setRemaining] = useState(restSeconds);
+  const mountedAtRef = useRef(Date.now());
+  const restStartedAtMs = Number.isFinite(lastRep?.restStartedAtMs)
+    ? Math.min(mountedAtRef.current, lastRep.restStartedAtMs) : mountedAtRef.current;
+  const [remaining, setRemaining] = useState(() => Math.max(0,
+    Math.ceil((restStartedAtMs + restSeconds * 1000 - Date.now()) / 1000)));
   const deadlineRef = useRef(null);
   const intervalRef = useRef(null);
   const lastBeepRef = useRef(null);
   const doneRef     = useRef(false);
 
   useEffect(() => {
-    deadlineRef.current = Date.now() + restSeconds * 1000;
-    doneRef.current = false;
-    setRemaining(restSeconds);
+    // Release confirmation and rendering can take time. Credit that time;
+    // the weaker pulling tail before physical release is never rest.
+    deadlineRef.current = restStartedAtMs + restSeconds * 1000;
     const tick = () => {
       const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
       setRemaining(left);
     };
-    // 250ms cadence keeps the displayed second accurate without
-    // relying on 1000ms fires landing on second boundaries.
-    intervalRef.current = setInterval(tick, 250);
+    tick();
+    if (!doneRef.current) intervalRef.current = setInterval(tick, 250);
     return () => clearInterval(intervalRef.current);
-  }, [restSeconds]);
+  }, [restSeconds, restStartedAtMs]);
 
   useEffect(() => {
     if (remaining <= 3 && remaining >= 1 && lastBeepRef.current !== remaining) {

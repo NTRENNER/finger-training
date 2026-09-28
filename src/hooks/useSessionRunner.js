@@ -504,6 +504,10 @@ export function useSessionRunner({
     setLastRepResult({
       actualTime: adjTime, avgForce, peakForce, failureValid, endReason,
       forceRecording: recordedForce, restBefore, loadProvenance: provenance,
+      // Only a confirmed physical release can backdate the visible rest clock.
+      // Interrupted/manual stops use completion time, never the capacity cutoff.
+      restStartedAtMs: forceRecording?.recording_stop_reason === 'release' && Number.isFinite(adjustedEnd)
+        ? Math.min(Date.now(), adjustedEnd) : Date.now(),
       targetTime: repTargetTime,
       prescribedWeight: roundedPrescribed,
     });

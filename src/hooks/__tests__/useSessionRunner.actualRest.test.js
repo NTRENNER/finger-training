@@ -39,3 +39,16 @@ test('credited loss onset never turns the weaker activity tail into rest',()=>{
  expect(addReps.mock.calls[0][0][0].actual_time_s).toBe(10);
  expect(addReps.mock.calls[1][0][0].rep_timing.rest_before_s).toBe(20);
 });
+test('visible rest uses physical release rather than the earlier credited cutoff',()=>{
+ const {hook}=setup();
+ act(()=>hook.result.current.handleRepDone({actualTime:10,avgForce:25,startedAtMs:1000,endedAtMs:11000,
+   forceRecording:{version:4,recording_stop_reason:'release',credited_end_at_ms:11000,
+     activity:{started_at_ms:1000,ended_at_ms:18000,duration_s:17}}}));
+ expect(hook.result.current.lastRepResult.restStartedAtMs).toBe(18000);
+});
+test.each(['manual_stop','equipment_interruption'])('a %s never backdates the visible countdown',reason=>{
+ const now=Date.now();const {hook}=setup();
+ act(()=>hook.result.current.handleRepDone({actualTime:10,avgForce:25,startedAtMs:1000,endedAtMs:11000,
+   failureValid:false,forceRecording:{recording_stop_reason:reason,activity:{ended_at_ms:18000}}}));
+ expect(hook.result.current.lastRepResult.restStartedAtMs).toBeGreaterThanOrEqual(now);
+});

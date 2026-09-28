@@ -20,7 +20,10 @@ endpoints: weaker pulling after a loss is work, never rest.
   Backdate physical release to the first sample in that sustained near-zero run.
   Near-zero releases use this shorter confirmation, not the partial-dip grace.
 - Rest starts after confirmed physical release. Its measured start is the release
-  onset, not the earlier force-loss cutoff. Both manual-start and automatic sensor
+  onset, not the earlier force-loss cutoff. The visible countdown also credits
+  release-confirmation and render delay; a 20-second rest normally opens at 19
+  seconds after one-second release confirmation. Unknown or interrupted endings
+  start the countdown at completion instead. Both manual-start and automatic sensor
   training use this rule. Timed warmups and peak-test protocols retain their
   existing detection; manual stopwatch training is unchanged.
 - Even a sub-1.5-second attempt completes the UI, with invalid failure evidence,
