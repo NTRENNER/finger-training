@@ -32,7 +32,7 @@ import { Card, Sect } from "../ui/components.js";
 import {
   CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS, VENUES,
   V_GRADES, YDS_GRADES,
-  gradeRank, afaVSum, weekKey,
+  gradeRank, afaVSum, weekKey, isCompletedClimb,
   disciplineMeta,
 } from "../lib/climbing-grades.js";
 import { inferProjectGrade, computeGraduation } from "../model/gradePyramid.js";
@@ -95,8 +95,6 @@ const MAX_STYLES = ["onsight", "flash", "redpoint"];
 // session-volume (v-sum) chart so a session where you actually finished
 // every route gets credit even if you took rests; only attempts are
 // excluded from volume since by definition you didn't send the route.
-const SENT_STYLES = new Set(["onsight", "flash", "redpoint", "rest"]);
-const wasSent = (a) => SENT_STYLES.has(a.ascent);
 
 // Time window options for the grade pyramid. "All" is included so a
 // new climber with sparse data still sees something useful.
@@ -210,7 +208,7 @@ export function ClimbingAnalysisView({
   //
   // Most recent 60 sessions to keep the bar count readable on phones.
   const sessionVolume = useMemo(() => {
-    const sent = allClimbs.filter(c => c.discipline === "boulder" && wasSent(c));
+    const sent = allClimbs.filter(c => c.discipline === "boulder" && isCompletedClimb(c));
     if (sent.length === 0) return { rows: [], disciplines: [] };
     const byDate = {};
     for (const c of sent) {
@@ -239,10 +237,10 @@ export function ClimbingAnalysisView({
   // (afaVSum) and sum per session date — yielding a v-sum in the SAME
   // units as the boulder chart. Lead + top rope both use YDS, so both
   // count; afaVSum returns null for anything non-route (e.g. a stray V
-  // grade), which we skip. Same wasSent gate (sends + rest-completions)
+  // grade), which we skip. Same completed-climb gate (sends + rest-completions)
   // and 60-session cap as the boulder chart.
   const routeVolume = useMemo(() => {
-    const sent = allClimbs.filter(c => c.discipline !== "boulder" && wasSent(c));
+    const sent = allClimbs.filter(c => c.discipline !== "boulder" && isCompletedClimb(c));
     if (sent.length === 0) return { rows: [] };
     const byDate = {};
     for (const c of sent) {
@@ -501,7 +499,7 @@ export function ClimbingAnalysisView({
             <Stat label="Avg RPE (30d)" value={headline.avgRpe30d != null ? headline.avgRpe30d.toFixed(1) : "—"} />
           </div>
           <div style={{ marginTop: 10, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
-            "Clean sends" counts onsight, flash, and send (sent clean after
+            "Clean sends" counts onsight, flash, repeat, and send (sent clean after
             working) — the route went
             without taking weight. {headline.totalClimbs - headline.sends} entries
             ({headline.totalClimbs > 0 ? Math.round(((headline.totalClimbs - headline.sends) / headline.totalClimbs) * 100) : 0}%)
@@ -520,7 +518,7 @@ export function ClimbingAnalysisView({
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Boulder session volume (v-sum)</div>
             <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
               Sum of V-grade ranks per boulder session — quantity × quality
-              in one number. Sends and rest-completions count; attempts don't.
+              in one number. Sends, repeats, and rest-completions count; attempts don't.
               Lead and top rope are excluded (v-sum is a boulder convention).
             </div>
             <ResponsiveContainer width="100%" height={200}>
@@ -555,7 +553,7 @@ export function ClimbingAnalysisView({
               Sum of afa V-equivalents per route session — each YDS send
               converted to its V-rating (afa chart), then summed. Same
               units as the boulder v-sum, so they're comparable. Lead and
-              top rope both count; sends and rest-completions, not attempts.
+              top rope both count; sends, repeats, and rest-completions, not attempts.
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <ComposedChart data={routeVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>

@@ -292,3 +292,13 @@ describe("assembleCheckIn", () => {
     expect(out.sections.did[0]).toMatch(/No finger or climbing sessions/);
   });
 });
+
+ test("a repeat counts as the week's hardest completed climb without becoming a PR", () => {
+   const activities = [
+     {type:"climbing",date:REF,discipline:"boulder",grade:"V6",ascent:"repeat"},
+     {type:"climbing",date:REF,discipline:"boulder",grade:"V7",ascent:"attempt"},
+   ];
+   const signals=gatherCheckInSignals([],activities,[],{refDate:REF});
+   expect(signals.climbCtx.hardestSend).toBe("V6");
+   expect(signals.climbing.prs).toHaveLength(0);
+ });

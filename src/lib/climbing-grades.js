@@ -46,6 +46,11 @@ export const isFirstTryAscent = ascent => ascent === "flash" || ascent === "onsi
 export const ascentForAttempts = (ascent, attempts) =>
   Number(attempts) > 1 && isFirstTryAscent(ascent) ? "redpoint" : ascent;
 
+// Every completed ascent contributes to volume, including repeat sends and
+// completions with rests. Keep this separate from new-achievement eligibility.
+const COMPLETED_ASCENTS = new Set(["onsight", "flash", "redpoint", "repeat", "rest"]);
+export const isCompletedClimb = activity => !!activity && COMPLETED_ASCENTS.has(activity.ascent);
+
 const CLIMBING_PR_ASCENTS = new Set(["onsight", "flash", "redpoint"]);
 
 // A climbing PR is a new clean-send grade. Repeats still count toward

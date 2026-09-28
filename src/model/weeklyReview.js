@@ -31,7 +31,7 @@ import { buildGripBaselines, buildGripEstimates, buildGripImprovement } from "./
 import { computeDensityLadder } from "./densityLadder.js";
 import { deloadStatus, buildDeloadGuidance } from "./deload.js";
 import { ZONE_KEYS, ZONE_REF_T, zoneOf } from "./zones.js";
-import { gradeRank, isClimbingPrSend, weekKey } from "../lib/climbing-grades.js";
+import { gradeRank, isClimbingPrSend, isCompletedClimb, weekKey } from "../lib/climbing-grades.js";
 import { effectiveLoad, isOpenerRep } from "./load.js";
 import { maxTestStaleness } from "./peakForce.js";
 import { CLIMBING_PR_CONTEXTS, climbingPrContext } from "./climbingPrBadges.js";
@@ -56,11 +56,6 @@ const STALE_DAYS = 12;          // a grip "goes quiet" past this
 const SUPPORT_STALE_DAYS = 14;  // an A/B/C workout counts as skipped past this
 const CURVE_TICK_PP = 3;        // curve Δ% (percentage points) this week to call a win (≥3 = earned, filters fit noise)
 const LOW_WEEK_FRAC = 0.7;      // finger days below this × baseline = a "lighter week"
-
-// Completed climbs are useful for weekly volume context even when the
-// climber rested. PRs use the stricter shared clean-send predicate.
-const COMPLETED_STYLES = new Set(["onsight", "flash", "redpoint", "rest"]);
-const wasCompleted = (activity) => activity && COMPLETED_STYLES.has(activity.ascent);
 
 const round1 = (v) => Math.round(v * 10) / 10;
 function addDays(ymd, n) {
@@ -382,7 +377,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   const climbs7 = (activities || []).filter(a =>
     a && a.type === "climbing" && a.date >= d7 && a.date <= refDate);
   const rpes = climbs7.map(a => Number(a.rpe)).filter(v => v > 0);
-  const sent7 = climbs7.filter(wasCompleted);
+  const sent7 = climbs7.filter(isCompletedClimb);
   const hardest = sent7.length
     ? sent7.reduce((b, c) => (gradeRank(c.grade) > gradeRank(b.grade) ? c : b))
     : null;
