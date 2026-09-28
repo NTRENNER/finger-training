@@ -21,6 +21,8 @@ export function recoveryEvidence(reps) {
     confidence: 'measured', weight: 0, eligible: false, status: 'descriptive_only' };
   for (let i = 0; i < sorted.length; i++) {
     const r = sorted[i];
+    if (r.force_recording?.recovery_eligible === false
+        || r.force_recording?.recording_stop_reason === 'release_not_observed') { reason = 'unobserved_release'; break; }
     if (Number(r.rep_num) !== i + 1 || Number(sorted[i + 1]?.rep_num) === Number(r.rep_num)) { reason = "missing_or_duplicate_rep"; break; }
     if (!isCapacityEvidenceRep(r) || !(r.actual_time_s > 0)) { reason = "invalid_failure"; break; }
     if (r.grip !== opener.grip || r.hand !== opener.hand || r.session_id !== opener.session_id

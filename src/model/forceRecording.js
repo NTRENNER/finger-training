@@ -1,4 +1,4 @@
-import { TARGET_FAILURE_POLICY, targetFailureBoundary, repDetectionThresholds } from './targetFailure.js';
+import { TARGET_FAILURE_POLICY, RELEASE_BACKSTOP_POLICY, targetFailureBoundary, repDetectionThresholds } from './targetFailure.js';
 import { isPeakMeasurement, isValidPeakMeasurement } from './peakTest.js';
 // Descriptive force variation; valid measured efforts remain curve evidence.
 import { isMixedDomainRep, mixedDomainMetadata } from './mixedDomain.js';
@@ -86,6 +86,8 @@ export function isCapacityEvidenceRep(rep) {
 
 export function evidenceLabel(rep) {
   if (rep?.force_recording?.duration_basis === "elapsed_activity_estimate") return "Interrupted — elapsed activity time is estimated";
+  if (rep?.force_recording?.recording_stop_reason === 'release_not_observed' && isValidFailureRep(rep))
+    return "Hold recorded — release not detected; rest and extra work are uncertain";
   if (isPeakMeasurement(rep)) return isValidPeakMeasurement(rep) ? "Peak measurement — not a failure hold" : "Interrupted peak test — excluded";
   if (!isValidFailureRep(rep)) return "Interrupted — activity only";
   if (isMixedDomainRep(rep) && mixedDomainMetadata(rep).role === 'fatigued_hold') return "Beta · fatigued hold — recorded separately from fresh capacity";
@@ -120,6 +122,7 @@ export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, target
     if (samples[i].kg < repDetectionThresholds(targetKg).releaseKg) unloadMs += dt;
   }
   // Meaningful unloading is activity, but not continuous capacity evidence.
+  const releaseUnknown = decision?.stopReason === 'release_not_observed';
   const continuous = !decision || unloadMs < TARGET_FAILURE_POLICY.maximum_recovered_unload_ms;
   return { ...capacity, peakForce: activity.peakForce,
     failureValid: eligible,
@@ -132,10 +135,13 @@ export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, target
         credited_end_at_ms: capacity.endedAtMs,
         target_band_time_s: inBandMs / 1000, target_band_fraction: capacity.actualTime > 0 ? inBandMs / (capacity.actualTime * 1000) : 0,
         continuity: continuous ? 'continuous' : 'intermittent',
+        ...(releaseUnknown ? { release_policy: RELEASE_BACKSTOP_POLICY, recovery_eligible: false,
+          release_uncertain: true } : {}),
         force_loss: decision.summary } : {}),
       activity: { duration_s: activity.actualTime, avg_force_kg: activity.avgForce,
         impulse_kg_s: activity.forceRecording.impulse_kg_s,
-        started_at_ms: activity.startedAtMs, ended_at_ms: activity.endedAtMs,
+        started_at_ms: activity.startedAtMs, ended_at_ms: releaseUnknown ? null : activity.endedAtMs,
+        ...(releaseUnknown ? { endpoint_quality: 'release_not_observed', observed_until_at_ms: activity.endedAtMs } : {}),
         signal_quality: activity.forceRecording.signal_quality },
       acquisition_s: (samples[first].ts - samples[0].ts) / 1000 } };
 }

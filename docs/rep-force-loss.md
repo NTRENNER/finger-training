@@ -65,3 +65,47 @@ A new policy-8 confirmed target loss can weaken a demonstrated-capacity floor un
 exactly the same existing load/duration/session requirements as a release failure,
 but only with measured release and eligible capacity. Older target-loss rows retain
 their conservative treatment. The 4–5–6 progression itself is unchanged.
+
+## Missing-release backstop and unloaded zero check
+
+Release-backstop policy 1 stops a targeted sensor recording 15 seconds **after
+confirmed force loss** if near-zero release has not been observed. It does not
+shorten the four-second partial-dip window. A normal confirmed release wins if it
+arrives at the deadline. No acquired/confirmed loss means no backstop; warmup and
+peak protocols that opt out of target-drop detection keep their existing behavior.
+Signal gaps or disconnects still produce invalid failure evidence, not a valid
+timeout result.
+
+The saved result uses `recording_stop_reason: release_not_observed`. The already
+frozen credited endpoint and eligible capacity remain intact. `release_uncertain`
+and `recovery_eligible: false` describe the missing physical endpoint. Activity
+keeps its observed duration/integral and `observed_until_at_ms`, but its
+`ended_at_ms` is null and `endpoint_quality` is `release_not_observed`. Neither
+that activity tail nor an invented rest interval can feed recovery fitting or
+Chaos Machine adjustments. Existing measured force is not retrospectively tare
+corrected. The next rep's measured rest remains unknown.
+
+The visible rest countdown pauses and rep arming stays blocked until the athlete
+explicitly selects **Handle unloaded — zero Tindeq** with the handle and attachments
+hanging freely. This issues tare, then requires 500 ms of fresh readings within
+min(0.25 kg, the release threshold) of zero. Failed verification times out after
+five seconds, leaves the gate blocked, and offers retry. Disconnect cancels the
+verification; reconnect alone cannot clear it. Tare is never automatically issued
+by auto-detect or during a detected pull. On successful verification, a full rest
+countdown starts from the check, without claiming the uncertain earlier interval
+was measured rest. The same optional zero action is available before a pull.
+
+Four seconds is intentionally unchanged: shortening confirmation can convert a
+recoverable dip into a permanently completed rep. This is not purely a UI timer.
+The small smoothing delay in the credited cutoff also remains unchanged.
+
+## Bounded force-loss provenance
+
+Detailed `force_loss` version 2 uses millisecond offsets from acquisition
+(`time_basis: acquisition_offset_ms`), retaining first eight and last eight runs
+and recovered excursions. Arrays are bounded while recording, not just at save.
+`run_count`, `excursion_count`, truncation flags, `below_boundary_ms`, and
+`recovered_excursion_ms` retain totals across omitted entries. Runs stop at loss
+confirmation; their summaries are not a raw trace for threshold replay. The live
+UI snapshot retains device-clock timestamps and excludes arrays. Historical
+version-1 details are left unchanged; this provenance is not research cache data.

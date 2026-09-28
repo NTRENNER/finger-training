@@ -386,7 +386,7 @@ export function useSessionRunner({
     const roundedActual = Math.round(adjTime * 10) / 10;
     const measuredTiming = Number.isFinite(startedAtMs) && Number.isFinite(endedAtMs)
       && endedAtMs >= startedAtMs;
-    const adjustedEnd = measuredTiming
+    const adjustedEnd = forceRecording?.recording_stop_reason === 'release_not_observed' ? null : measuredTiming
       ? (forceRecording?.activity?.ended_at_ms ?? endedAtMs) - (actualTime - adjTime) * 1000 : null;
     const previousRep = [...sessionReps].reverse().find(r => r.hand === effectiveHand);
     const previousEnd = previousRep?.rep_timing?.ended_at_ms;

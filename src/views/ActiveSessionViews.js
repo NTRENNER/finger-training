@@ -148,6 +148,18 @@ const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","�
 // here are unchanged — they're just imported at the top of the file
 // now instead of defined inline.
 
+function UnloadedZeroCheck({ tindeq }) {
+  if (!tindeq?.zeroForNextRep) return null;
+  return <div style={{ marginTop: 16 }}>
+    {tindeq.releaseCheckRequired && <p role="status"><strong>Unloaded check required.</strong> Release and zero the handle before continuing.</p>}
+    <p>Let the handle hang freely with its attachments in place before zeroing.</p>
+    <Btn disabled={!tindeq.connected || tindeq.zeroing} onClick={() => tindeq.zeroForNextRep()}>
+      {tindeq.zeroing ? 'Checking unloaded zero…' : 'Handle unloaded — zero Tindeq'}
+    </Btn>
+    {tindeq.bleError && <p role="alert">{tindeq.bleError}</p>}
+  </div>;
+}
+
 function ForceLossNotice({ state }) {
   if (!state || state.status === 'holding') return null;
   return <p role="status" style={{ color: C.yellow, fontSize: 22, fontWeight: 700 }}>
@@ -494,10 +506,12 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         </Card>
       )}
 
+      {repPhase === 'ready' && tindeq.connected && <UnloadedZeroCheck tindeq={tindeq} />}
       {/* Controls */}
       <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
         {repPhase === "ready" && (
           <Btn
+            disabled={tindeq.releaseCheckRequired || tindeq.zeroing}
             onClick={() => { setCountdown(3); setRepPhase("countdown"); }}
             style={{ flex: 1, padding: "18px 0", fontSize: 18, borderRadius: 12 }}
             color={C.green}
@@ -570,7 +584,7 @@ function playBeep(freq = 880, duration = 0.12, volume = 0.4) {
   } catch (e) { /* audio not available */ }
 }
 
-export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustment = null, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs" }) {
+export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustment = null, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs", tindeq = null }) {
   // Wall-clock countdown, NOT tick-counted. The old version decremented
   // once per setInterval fire; background tabs / locked phones throttle
   // intervals to ≥1/min, so a 20s rest silently stretched to minutes —
@@ -580,6 +594,8 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
   // (beeps, onRestDone) live in effects keyed off `remaining`, not
   // inside the setState updater — StrictMode double-invokes updaters,
   // which double-fired the beep and the phase transition in dev.
+  const releaseBlocked = !!(tindeq?.releaseCheckRequired || tindeq?.zeroing);
+  const wasBlockedRef = useRef(releaseBlocked);
   const mountedAtRef = useRef(Date.now());
   const restStartedAtMs = Number.isFinite(lastRep?.restStartedAtMs)
     ? Math.min(mountedAtRef.current, lastRep.restStartedAtMs) : mountedAtRef.current;
@@ -591,9 +607,15 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
   const doneRef     = useRef(false);
 
   useEffect(() => {
+    if (releaseBlocked) {
+      wasBlockedRef.current = true;
+      setRemaining(restSeconds);
+      return;
+    }
     // Release confirmation and rendering can take time. Credit that time;
     // the weaker pulling tail before physical release is never rest.
-    deadlineRef.current = restStartedAtMs + restSeconds * 1000;
+    deadlineRef.current = (wasBlockedRef.current ? Date.now() : restStartedAtMs) + restSeconds * 1000;
+    wasBlockedRef.current = false;
     const tick = () => {
       const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
       setRemaining(left);
@@ -601,9 +623,10 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
     tick();
     if (!doneRef.current) intervalRef.current = setInterval(tick, 250);
     return () => clearInterval(intervalRef.current);
-  }, [restSeconds, restStartedAtMs]);
+  }, [restSeconds, restStartedAtMs, releaseBlocked]);
 
   useEffect(() => {
+    if (releaseBlocked) return;
     if (remaining <= 3 && remaining >= 1 && lastBeepRef.current !== remaining) {
       lastBeepRef.current = remaining;
       playBeep(remaining === 1 ? 1100 : 880);
@@ -614,7 +637,7 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
       onRestDone();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remaining]);
+  }, [remaining, releaseBlocked]);
 
   const pct = remaining / restSeconds;
   // Single-set model (curve-trust commit C): no more "set complete"
@@ -632,14 +655,16 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
               ? "Session complete!"
               : `Rest — rep ${repNum} of ${repsPerSet}`}
           </div>
-          <div style={{ fontSize: 64, fontWeight: 800, color: pct > 0.3 ? C.green : C.orange, lineHeight: 1 }}>
-            {remaining}s
+          <div style={{ fontSize: releaseBlocked ? 28 : 64, fontWeight: 800, color: pct > 0.3 ? C.green : C.orange, lineHeight: 1 }}>
+            {releaseBlocked ? 'Release check' : `${remaining}s`}
           </div>
           <div style={{ marginTop: 10, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
             <div style={{ height: "100%", width: `${pct * 100}%`, background: C.green, borderRadius: 3, transition: "width 1s linear" }} />
           </div>
         </div>
       </Card>
+
+      {releaseBlocked && <Card><p>Your hold is saved. Rest starts after this check.</p><UnloadedZeroCheck tindeq={tindeq} /></Card>}
 
       {/* OVER-PULL WARNING (July 2026, per Nathan). Spring/anchor
           setups let the user pull whatever they like — and pulling
@@ -715,9 +740,9 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
         </Card>
       )}
 
-      <Btn
+      <Btn disabled={releaseBlocked}
         onClick={() => {
-          if (doneRef.current) return;   // already transitioned
+          if (doneRef.current || releaseBlocked) return;   // already transitioned or release unknown
           doneRef.current = true;
           clearInterval(intervalRef.current);
           onRestDone();
@@ -1111,7 +1136,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
 
             <div style={{ fontSize: 40, marginBottom: 8 }}>⬇</div>
             <div role="status" style={{ fontSize: 22, fontWeight: 700, color: C.text }}>
-              {tindeq.awaitingRelease ? "Release the handle fully before your next pull" : `Pull to begin rep ${currentRep + 1}`}
+              {tindeq.releaseCheckRequired || tindeq.zeroing ? "Release and zero the handle before your next pull" : tindeq.awaitingRelease ? "Release the handle fully before your next pull" : `Pull to begin rep ${currentRep + 1}`}
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
               {config.mixedDomainPlan ? 'Fresh reference' : 'Target'}: <strong>{config.targetTime}s</strong> · Release when done
@@ -1119,6 +1144,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
           </>
         )}
       </Card>
+
+      {!repActive && <UnloadedZeroCheck tindeq={tindeq} />}
 
       {/* Live force */}
       {tindeq.connected && (

@@ -83,6 +83,7 @@ function usableActivity(rep) {
   if (rep.failure_valid !== true || !['muscular_failure', 'target_force_failure'].includes(rep.end_reason)) return null;
   if (rep.load_provenance !== 'measured_force' || !validLoad(rep.avg_force_kg)
     || f?.signal_quality !== 'complete' || !finitePositive(rep.actual_time_s)) return null;
+  if (f.recording_stop_reason === 'release_not_observed' || f.activity?.endpoint_quality === 'release_not_observed') return null;
   const activity = f.activity || f;
   if (activity.signal_quality !== 'complete' || !finitePositive(activity.duration_s)
     || !finitePositive(activity.impulse_kg_s)) return null;

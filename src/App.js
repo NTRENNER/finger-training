@@ -700,6 +700,7 @@ export default function App() {
         if (phase === "resting") {
           return (
             <RestView
+              tindeq={tindeq}
               lastRep={lastRepResult}
               nextWeight={nextWeight}
               nextDomain={config.mixedDomainPlan ? activeRepConfig.goal : null}

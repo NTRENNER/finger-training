@@ -149,3 +149,11 @@ test('session-weighted evaluation does not let a workout with more holds dominat
   expect(report.groups['v1|all'].holds).toBe(3);
   expect(report.groups['v1|all'].conditional_mae_s).toBeCloseTo(((error(second) + error(third)) / 2 + error(otherSecond)) / 2, 2);
 });
+
+test('a saved hold with unknown release cannot drive later Chaos Machine adjustments',()=>{
+ const first=rep();
+ first.force_recording.recording_stop_reason='release_not_observed';
+ first.force_recording.activity.endpoint_quality='release_not_observed';
+ expect(first.force_recording.capacity_eligible).toBe(true);
+ expect(prepareMixedPrediction(model(),[first],15,30).prediction.status).toBe('unavailable');
+});

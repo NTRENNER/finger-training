@@ -112,3 +112,25 @@ test('audit runs cover acquisition through the last evaluated sample without gap
   expect(runs.at(-1).to_ms).toBe(15000);
   for(let i=1;i<runs.length;i++) expect(runs[i].from_ms).toBe(runs[i-1].to_ms);
 });
+
+test('long oscillating holds retain bounded first/last audit details and complete totals',()=>{
+ const samples=trace(220,t=>t<3||t%2>=.6?20:17);
+ const full=run(samples,20).detector.snapshot();
+ expect(full.excursion_count).toBeGreaterThan(100);
+ expect(full.excursions).toHaveLength(16);
+ expect(full.runs).toHaveLength(16);
+ expect(full.excursions_truncated).toBe(true);
+ expect(full.runs_truncated).toBe(true);
+ expect(full.recovered_excursion_ms).toBeGreaterThan(100000);
+ expect(full.below_boundary_ms).toBeGreaterThan(40000);
+ const short=run(samples.filter(s=>s.ts<=20000),20).detector.snapshot();
+ expect(full.excursions.slice(0,8)).toEqual(short.excursions.slice(0,8));
+ expect(full.runs.slice(0,8)).toEqual(short.runs.slice(0,8));
+ expect(full.excursions.at(-1).recovered_at_ms).toBeGreaterThan(215000);
+ expect(JSON.stringify(full).length).toBeLessThan(2600);
+ const origin=1730000000000;
+ const shifted=run(samples.map(s=>({...s,ts:s.ts+origin})),20).detector;
+ expect(shifted.snapshot()).toEqual(full);
+ expect(shifted.snapshot(false).startTs).toBe(origin);
+ expect(shifted.snapshot(false).runs).toBeUndefined();
+});

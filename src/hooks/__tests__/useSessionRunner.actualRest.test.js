@@ -52,3 +52,14 @@ test.each(['manual_stop','equipment_interruption'])('a %s never backdates the vi
    failureValid:false,forceRecording:{recording_stop_reason:reason,activity:{ended_at_ms:18000}}}));
  expect(hook.result.current.lastRepResult.restStartedAtMs).toBeGreaterThanOrEqual(now);
 });
+
+test('missing physical release preserves the hold but cannot fabricate subsequent rest',()=>{
+ const {hook,addReps}=setup();
+ act(()=>hook.result.current.handleRepDone({actualTime:10,avgForce:25,startedAtMs:1000,endedAtMs:11000,
+   failureValid:true,forceRecording:{version:4,recording_stop_reason:'release_not_observed',
+     activity:{ended_at_ms:null,observed_until_at_ms:30000}}}));
+ act(()=>hook.result.current.handleRestDone());
+ act(()=>hook.result.current.handleRepDone({actualTime:8,avgForce:25,startedAtMs:60000,endedAtMs:68000}));
+ expect(addReps.mock.calls[0][0][0]).toMatchObject({actual_time_s:10,failure_valid:true,rep_timing:{ended_at_ms:null}});
+ expect(addReps.mock.calls[1][0][0].rep_timing.rest_before_s).toBeNull();
+});

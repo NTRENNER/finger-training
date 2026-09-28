@@ -67,3 +67,11 @@ test('a corrected false failure at rep two excludes the later recovery sequence 
   expect(rows[1].actual_time_s).toBe(5.8);
   expect(rows).toHaveLength(4);
 });
+
+test('an unobserved release is valid capacity but cannot establish recovery',()=>{
+ const rows=set();
+ rows[0].force_recording={...rows[0].force_recording,capacity_eligible:true,
+   recording_stop_reason:'release_not_observed',recovery_eligible:false};
+ expect(recoveryEvidence(rows)).toMatchObject({eligible:false,reason:'unobserved_release'});
+ expect(computePersonalRecoveryTausForGrip(rows,'Crusher')).toBeNull();
+});
