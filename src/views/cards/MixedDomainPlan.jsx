@@ -4,21 +4,16 @@ import { C } from '../../ui/theme.js';
 import { fmtW } from '../../ui/format.js';
 import { MIXED_DOMAIN_ZONES, MIXED_DOMAIN_LABELS, mixedDomainSteps } from '../../model/mixedDomain.js';
 
-export function MixedDomainPlan({ plan, hands, unit, multiplier, onOpeningChange, onAdjustLoadsChange, goalConfig = {} }) {
+export function MixedDomainPlan({ plan, hands, unit, multiplier, onOpeningChange, goalConfig = {} }) {
   const targetSeconds = (plan.steps.reduce((sum, step) => sum + step.targetTime, 0) + 4 * 30) * hands.length;
   const targetEstimate = `${Math.floor(targetSeconds / 60)}:${String(targetSeconds % 60).padStart(2, '0')}`;
   return <section aria-label="Chaos Machine beta plan" style={{ marginBottom: 20 }}>
     <p style={{ fontSize: 16, lineHeight: 1.5 }}>Five holds per hand. A different load each hold. Rest 30 seconds between holds.</p>
-    <label style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 52, marginBottom: 8 }}>
-      <input type="checkbox" checked={plan.adjustLoads === true}
-        onChange={e => onAdjustLoadsChange?.(e.target.checked)} style={{ width: 24, height: 24 }} />
-      <strong>Adjust loads to target times</strong>
-    </label>
-    {plan.adjustLoads && <p style={{ color: C.muted, lineHeight: 1.5 }}>
+    <p style={{ color: C.muted, lineHeight: 1.5 }}>
       Later loads are estimated from your measured pulls and rest, then fixed for each hold.
       If measurements are missing, the original load is shown. You can still change it.
       About {targetEstimate}{hands.length === 2 ? ' for both hands' : ' for one hand'} if you reach every target, including rests. Setup and hand changes add time.
-    </p>}
+    </p>
     <label style={{ display: 'block', marginBottom: 6 }}>
       First domain
       <select value={plan.steps[0].zone} onChange={e => onOpeningChange(e.target.value)}
@@ -48,14 +43,14 @@ export function MixedDomainPlan({ plan, hands, unit, multiplier, onOpeningChange
                 {fmtW(step.loadByHand[hand] * multiplier, unit)} <span style={{ fontSize: 14 }}>{unit}</span>
               </strong>
               <div style={{ color: C.muted, fontSize: 12, marginTop: 6 }}>
-                {i === 0 ? 'First hold · Fresh reference' : plan.adjustLoads ? 'Starting reference · adjusted before this hold' : 'Fresh reference'}
+                {i === 0 ? 'First hold · Fresh reference' : 'Starting reference · adjusted before this hold'}
               </div>
             </li>;
           })}
         </ol>
       </div>)}
     </div>
-    <p style={{ color: C.muted, lineHeight: 1.5 }}>{plan.adjustLoads ? 'Aim for approximately the displayed times. Keep the load steady and hold until failure; reaching the target does not stop the timer.' : 'The times choose the loads; they are not countdowns. Later holds will usually be shorter. Maintain each target force until failure.'}</p>
+    <p style={{ color: C.muted, lineHeight: 1.5 }}>Aim for approximately the displayed times. Keep the load steady and hold until failure; reaching the target does not stop the timer.</p>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>Your first measured hold can update the curve. Later holds are saved as fatigued work. These estimates are experimental. Your 4–6 rep progression is unchanged.</p>
   </section>;
 }

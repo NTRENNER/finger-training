@@ -10,7 +10,7 @@ const fresh = () => ['L','R'].flatMap(hand => [10,30,70,115,160,220].map((t,i)=>
   actual_time_s:t,avg_force_kg:predForceThreeExp([18,15,25],t),load_provenance:'measured_force',failure_valid:true,
   force_recording:{version:3,basis:'target_acquired',capacity_eligible:true,signal_quality:'complete'},
 })));
-const plan = (adaptive=true) => makeMixedDomainPlan(MIXED_DOMAIN_ZONES.map(key=>({key,
+const plan = (adaptive) => makeMixedDomainPlan(MIXED_DOMAIN_ZONES.map(key=>({key,
   L:predForceThreeExp([18,15,25],ZONE_REF_T[key]),R:predForceThreeExp([18,15,25],ZONE_REF_T[key]),
 })), 'endurance', ['L','R'], adaptive);
 const finish = (hook, time, start, extra={}) => {
@@ -22,7 +22,7 @@ const finish = (hook, time, start, extra={}) => {
 };
 beforeEach(()=>jest.useFakeTimers().setSystemTime(new Date('2026-09-26T12:00:00Z')));
 afterEach(()=>jest.useRealTimers());
-test('adaptive loads freeze between holds, persist predictions, isolate hands and never enter the regular ladder',()=>{
+test('default Chaos Machine loads adapt and freeze between holds, persist predictions, isolate hands and never enter the regular ladder',()=>{
  const history=fresh(),addReps=jest.fn();
  const hook=renderHook(()=>useSessionRunner({history,addReps,tindeqConnected:true}));
  act(()=>hook.result.current.startSession({grip:'Micro',hand:'Both',mixedDomainPlan:plan()}));
@@ -58,7 +58,7 @@ test('interruption disables subsequent adaptive loads with an explicit fallback'
  expect(hook.result.current.activeRepConfig.mixedLoadAdjustment).toMatchObject({status:'unavailable',reason:'unmeasured_or_interrupted_prefix'});
  expect(hook.result.current.refWeights.L).toBe(Math.round(plan().steps.find(s=>s.zone==='power').loadByHand.L*10)/10);
 });
-test('readiness applies once and does not affect the default fixed-reference beta',()=>{
+test('readiness applies once and does not affect the legacy fixed-reference beta',()=>{
  for(const adaptive of [false,true]){
  const hook=renderHook(()=>useSessionRunner({history:fresh(),addReps:jest.fn(),tindeqConnected:true}));
  act(()=>hook.result.current.startSession({grip:'Micro',hand:'L',cooked:5,adjustLoadForFatigue:true,mixedDomainPlan:plan(adaptive)}));

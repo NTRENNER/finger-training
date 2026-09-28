@@ -24,9 +24,10 @@ export function nextMixedDomainZone(history, grip, hands, preferred = 'power') {
 }
 
 // Loads are fresh-load references, not predictions of fatigued hold times.
-// Freeze the reference loads and order at session start. Optional adaptive
-// loads use a separate frozen model and never rewrite these references.
-export function makeMixedDomainPlan(rows, openingZone, hands, adjustLoads = false) {
+// Freeze the reference loads and order at session start. Adaptive loads
+// use a separate frozen model and never rewrite these references. Explicit
+// false remains supported for legacy fixed-reference plans.
+export function makeMixedDomainPlan(rows, openingZone, hands, adjustLoads = true) {
   if (!MIXED_DOMAIN_ZONES.includes(openingZone)) return null;
   const order = [openingZone, ...MIXED_DOMAIN_ZONES.filter(z => z !== openingZone)];
   const steps = order.map(zone => {

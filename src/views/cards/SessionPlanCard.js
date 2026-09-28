@@ -151,7 +151,6 @@ export function SessionPlanCard({
   // Stored as the zone key (e.g. "power") or null = "follow recommendation"
   const [overrideZone, setOverrideZone] = useState(null);
   const [mixedRequested, setMixedRequested] = useState(false);
-  const [mixedAdjustLoads, setMixedAdjustLoads] = useState(false);
   const [mixedOpening, setMixedOpening] = useState(null);
   // Why-line Details expander (July 2026) — receipts and secondary
   // factors hide behind a tap so the headline stays one sentence.
@@ -166,7 +165,6 @@ export function SessionPlanCard({
   useEffect(() => {
     setOverrideZone(null);
     setMixedRequested(false);
-    setMixedAdjustLoads(false);
     setMixedOpening(null);
   }, [grip]);
 
@@ -255,8 +253,8 @@ export function SessionPlanCard({
     // The runner applies the reported fatigue adjustment once at session start.
     const freshRows = curveRows?.map(r => ({ ...r, L: r.L == null ? null : r.L / loadMultiplier,
       R: r.R == null ? null : r.R / loadMultiplier }));
-    return makeMixedDomainPlan(freshRows, opening, expectedHands, mixedAdjustLoads);
-  }, [curveRows, mixedOpening, history, grip, expectedHands, recommendedZone, loadMultiplier, rec, mixedAdjustLoads]);
+    return makeMixedDomainPlan(freshRows, opening, expectedHands);
+  }, [curveRows, mixedOpening, history, grip, expectedHands, recommendedZone, loadMultiplier, rec]);
   const mixedEnabled = mixedRequested && !!mixedPlan;
 
   // ── Active row — drives the bottom session-details panel ──────────────
@@ -507,7 +505,7 @@ export function SessionPlanCard({
       </label>
       {!mixedPlan && <p style={{ color: C.muted }}>The beta needs a load estimate in all five domains for each selected hand. Complete the initial sessions first.</p>}
       {mixedEnabled && <MixedDomainPlan goalConfig={GOAL_CONFIG} plan={mixedPlan} hands={expectedHands} unit={unit}
-        multiplier={loadMultiplier} onOpeningChange={setMixedOpening} onAdjustLoadsChange={setMixedAdjustLoads} />}
+        multiplier={loadMultiplier} onOpeningChange={setMixedOpening} />}
 
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
       {/* Standalone title or optional training-focus control. */}

@@ -14,14 +14,14 @@ all five domains.
   highest to lowest planned load for each hand, with 30 seconds of rest.
 - The next beta session rotates the opening domain after a valid completed
   opener. The user can also choose it. Interrupted openers do not advance it.
-- By default, loads are fixed at session start. The existing fatigue adjustment applies
-  once, if selected. Each hold records its own prescribed and actual load.
-- Reference durations choose fresh loads; they do not predict the time an
-  athlete will manage after earlier holds. Maintain force until failure.
-  Existing force tolerance, confirmation, overshoot and interruption logic
-  are unchanged. In fixed-reference mode, experimental mixed-load predictions are recorded in
-  the background only. Optional adaptive mode is described below. Predictions
-  never end a rep.
+- Original reference loads and the model are fixed at session start. Later loads
+  adjust automatically before each hold to aim for its target duration, then stay
+  fixed during that pull. The existing fatigue adjustment applies once, if
+  selected. Each hold records its own prescribed and actual load.
+- Target durations are approximate. Maintain force until failure; predictions
+  never end a rep. Existing force tolerance, confirmation, overshoot and
+  interruption logic are unchanged. Missing reliable measurements fall back to
+  the original reference load with an explanation. See the details below.
 - The rest screen shows the next domain and load. Manual mode waits for the
   athlete to start the next hold, allowing equipment changes. Actual rest
   continues to be recorded when measurable.
@@ -110,11 +110,14 @@ compare later-hold errors with the fresh-only baseline before changing defaults.
 accuracy. Physical Tindeq validation remains outstanding.
 
 
-## Optional loads aimed at target times
+## Loads aimed at target times
 
-“Adjust loads to target times” is off by default. It resets when the selected
-grip changes. The stored protocol ID remains `whole_curve_beta`, so existing
+Chaos Machine automatically adjusts later loads toward each hold’s target time;
+there is no separate adjustment switch. Chaos Machine itself remains optional
+and off by default. Selecting another grip keeps this behavior when the beta is
+enabled again. The stored protocol ID remains `whole_curve_beta`, so existing
 history, rotation and exclusions continue to work under the new display name.
+Legacy fixed-reference plans and their saved load-mode metadata remain supported.
 
 The opening load and per-hand domain order stay as planned. For each later
 hold, the frozen model consumes measured force-time work from completed holds

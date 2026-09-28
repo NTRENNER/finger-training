@@ -10,7 +10,7 @@ import { findPrevSessionReps } from '../../model/repCurveData.js';
 jest.mock('../../lib/sync.js', () => ({ pushDailyState: jest.fn() }));
 
 const rows = MIXED_DOMAIN_ZONES.map((key, i) => ({ key, L: 30 - i * 4, R: 35 - i * 4 }));
-const makePlan = () => makeMixedDomainPlan(rows, 'strength', ['L', 'R']);
+const makePlan = () => makeMixedDomainPlan(rows, 'strength', ['L', 'R'], false); // Legacy fixed-reference plans remain supported.
 function setup({ connected = true, hand = 'Both', cooked = null, adjust = false, history = [] } = {}) {
   const addReps = jest.fn();
   const hook = renderHook(() => useSessionRunner({ history, addReps, tindeqConnected: connected }));
