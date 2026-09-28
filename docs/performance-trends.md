@@ -1,8 +1,9 @@
 # Performance trend charts
 
 Analysis → Fingers has linked long- and short-term cards above the existing
-collapsed overall-curve summary. The shared two-handle date slider, date inputs,
-and Show all dates control change only the visible window. Fits always use
+collapsed overall-curve summary. The shared two-handle date slider
+and Show all dates control change only the visible window. Selected dates appear
+as plain labels; there are no calendar inputs. Fits always use
 history available at each plotted date. Grip and hand changes reset the window;
 new history preserves a deliberately selected date window. Counts mean plotted
 training dates, not repetitions or sessions. Rest days do not generate points.
@@ -36,3 +37,7 @@ Validation covers historical stability when future data is appended, pre-day
 comparisons, invalid evidence, duration extrapolation, independent range handles,
 keyboard access, shared windows without model refits, and empty/single-date cases.
 Phone (375px) and desktop (1280px) previews use synthetic training data.
+
+History controls share a rounded outlined track and white pill handles. The
+recovery as-of date and frozen-baseline comparison date remain single-handle
+controls because they select one snapshot rather than a date window.

@@ -29,6 +29,7 @@
 //     improvement but no overlay yet.
 //   • pooled fallback — static total + tiles (no overlay/slider).
 
+import { HistorySlider } from '../../ui/HistorySlider.jsx';
 import React, { useMemo, useState } from "react";
 import {
   ResponsiveContainer, LineChart, Line,
@@ -462,10 +463,8 @@ function GripBlock({
           <span>Now: <b>{nowDate}</b></span>
           <span style={{ color: C.muted }}>{idx + 1} of {dates.length} session{dates.length === 1 ? "" : "s"} since baseline</span>
         </div>
-        <input aria-label={`${grip} comparison date`} type="range" min={0} max={last} step={1} value={idx}
-          onChange={(e) => onScrub(grip, parseInt(e.target.value, 10))}
-          style={{ width: "100%", accentColor: color, cursor: "pointer" }}
-        />
+        <HistorySlider endLabel={`${grip} comparison date`} endText={nowDate}
+          max={last} end={idx} color={color} onEndChange={value => onScrub(grip, value)} />
       </div>}
     </div>
   );

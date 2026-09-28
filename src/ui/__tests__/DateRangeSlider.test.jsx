@@ -14,8 +14,9 @@ test('both handles move independently, cannot cross, and expose dates to assisti
  expect(start).toHaveValue('1');
  fireEvent.change(end,{target:{value:0}});
  expect(end).toHaveValue('2');
- fireEvent.change(screen.getByLabelText('From date'),{target:{value:'2026-08-01'}});
- expect(start).toHaveValue('0');
+ expect(screen.getByText('2026-08-03')).toHaveAttribute('datetime','2026-08-03');
+ expect(screen.getByText('2026-08-07')).toHaveAttribute('datetime','2026-08-07');
+ expect(document.querySelector('input[type="date"]')).toBeNull();
 });
 test('one training date disables both handles without invalid range arithmetic',()=>{
  render(<DateRangeSlider dates={dates.slice(0,1)} start={0} end={0} onChange={jest.fn()}/>);

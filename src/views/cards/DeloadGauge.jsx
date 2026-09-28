@@ -9,6 +9,7 @@
 // gating as the deload trigger, so red doesn't flicker on one rough
 // session. Pure presentational; takes a deloadStatus() result.
 
+import { HistorySlider } from '../../ui/HistorySlider.jsx';
 import React from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
@@ -148,16 +149,9 @@ export function DeloadGauge({
             </span>
             <span>{selectedIndex + 1} of {timelineDates.length}</span>
           </div>
-          <input
-            aria-label="Recovery status history"
-            type="range"
-            min={0}
-            max={timelineDates.length - 1}
-            step={1}
-            value={selectedIndex}
-            onChange={event => onAsOfDateChange(timelineDates[Number(event.target.value)])}
-            style={{ width: "100%", accentColor: color, cursor: "pointer" }}
-          />
+          <HistorySlider endLabel="Recovery status history" endText={timelineDates[selectedIndex]}
+            max={timelineDates.length - 1} end={selectedIndex} color={color}
+            onEndChange={value => onAsOfDateChange(timelineDates[value])} />
         </div>
       )}
 
