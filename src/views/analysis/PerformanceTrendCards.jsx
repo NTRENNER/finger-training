@@ -8,8 +8,8 @@ import {buildPerformanceTrends} from '../../model/performanceTrends.js';
 import {suggestCookedFromClimbs} from '../../model/climbingFatigue.js';
 const fmtDate = ts=>new Date(ts).toISOString().slice(5,10);
 
-export function PerformanceTrendCards({history,grips,handView='pooled',activities=[],normalizeOn=false}) {
-  const rows=useMemo(()=>buildPerformanceTrends(history,grips,handView),[history,grips,handView]);
+export function PerformanceTrendCards({history,grips,handView='pooled',activities=[],normalizeOn=false,trendModel='original'}) {
+  const rows=useMemo(()=>buildPerformanceTrends(history,grips,handView,{model:trendModel}),[history,grips,handView,trendModel]);
   const [window,setWindow]=useState(null),[climbing,setClimbing]=useState(false);
   const dates=rows.map(r=>r.date);
   const start=window?Math.max(0,dates.findIndex(d=>d>=window[0])):0;
@@ -17,6 +17,7 @@ export function PerformanceTrendCards({history,grips,handView='pooled',activitie
   const end=Math.max(start,last);
   const visible=useMemo(()=>rows.slice(start,end+1).map(r=>({...r,
     climbLoad:climbing?suggestCookedFromClimbs(activities,r.date)?.cooked??null:null})),[rows,start,end,activities,climbing]);
+  const laterHolds=visible.reduce((sum,r)=>sum+grips.reduce((n,g)=>n+(r[`${g}_laterHolds`]||0),0),0);
   const ready=grips.filter(g=>rows.some(r=>Number.isFinite(r[`${g}_long`])));
   if (!rows.length) return <Card style={{marginBottom:16}}><h3>Performance trends</h3><p style={{color:C.muted}}>More training dates needed. Trends appear after five eligible training dates per hand. For a single hand, select Left or Right above.</p></Card>;
   const chart=(kind)=>!visible.some(r=>grips.some(g=>Number.isFinite(r[`${g}_${kind}`])))?<p style={{color:C.muted}}>No comparable points in this date range.</p>:<ResponsiveContainer width="100%" height={270}>
@@ -38,6 +39,7 @@ export function PerformanceTrendCards({history,grips,handView='pooled',activitie
       <h3 style={{marginTop:0}}>Long-term performance trend</h3>
       <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>{grips.map(g=><span key={g} style={{color:GRIP_COLORS[g]||C.blue}}>━ {g}</span>)}</div>
       <p style={{color:C.muted,lineHeight:1.5}}>Estimated whole-curve capacity, relative to your first established estimate. Each point uses the training recorded by that date.</p>
+      {trendModel!=='original'&&<p style={{color:C.yellow}}>Research preview: later sessions receive less weight{trendModel==='contextRobust'?' and unusual results have reduced influence':''}. Use the historical comparison to assess accuracy; this is not the default trend.</p>}
       {normalizeOn&&<p style={{color:C.muted,fontSize:13}}>These performance trends use measured force. The bodyweight toggle applies to the other curve charts.</p>}
       {!ready.length?<p>More data needed to compare both hands. Try a single-hand view.</p>:chart('long')}
       <DateRangeSlider dates={dates} start={start} end={end} onChange={(a,b)=>setWindow([dates[a],dates[b]])}/>
@@ -50,6 +52,7 @@ export function PerformanceTrendCards({history,grips,handView='pooled',activitie
     </Card>
     <Card style={{marginBottom:16}}><h3 style={{marginTop:0}}>Short-term performance trend</h3>
       <p style={{color:C.muted,lineHeight:1.5}}>How opening holds compared with the curve estimated before that day, at the same hold duration. Above zero means more force than expected; below means less. This is variation, not a recovery diagnosis.</p>
+      {laterHolds>0&&<p style={{color:C.muted,fontSize:13}}>{laterHolds} opening holds in this date range followed earlier finger training that day. These results may reflect accumulated fatigue; they remain part of the short-term chart.</p>}
       {chart('short')}
       <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>{grips.map(g=><span key={g} style={{color:GRIP_COLORS[g]||C.blue}}>━ {g}</span>)}</div>
       <p style={{color:C.muted,fontSize:13}}>Both charts show {dates[start]} through {dates[end]}. Only eligible opening holds within previously measured durations are compared. Same-day results cannot alter that day’s expected curve.</p>

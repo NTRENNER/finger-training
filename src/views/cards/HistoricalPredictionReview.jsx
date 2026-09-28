@@ -1,3 +1,4 @@
+import { ContextualTrendResults } from './ContextualTrendResults.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { Btn } from '../../ui/components.js';
 import { C } from '../../ui/theme.js';
@@ -101,6 +102,7 @@ export function HistoricalPredictionReview({ history, unit }) {
           Each day has equal weight. A small overall gain can hide worse predictions for one grip.
           The download also includes bounded load recommendations, duration groups and recovery comparisons.</p>
       </details>
+      {report.contextualTrends && <ContextualTrendResults report={report.contextualTrends} history={history} unit={unit} />}
       <p style={{ color: C.muted, fontSize: 13 }}>History helps us choose what to test next. New saved forecasts provide a separate check on later workouts; they are not mixed into this score.</p>
       <Btn onClick={download}>Download historical review</Btn>
     </>}

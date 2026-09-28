@@ -1,3 +1,4 @@
+import { evaluateContextualTrends } from './contextualTrendEvaluation.js';
 import { evaluateForward, prepareEvaluationRows } from './forwardEvaluation.js';
 import { freshFitReps, sane } from './load.js';
 import { loadProvenance } from './forceRecording.js';
@@ -71,7 +72,9 @@ export function evaluateRecordedPrescriptions(input) {
 }
 
 export function evaluateHistorical(input) {
-  return { version: 1, generatedAt: new Date().toISOString(),
-    recorded: evaluateRecordedPrescriptions(input), replay: evaluateForward(input),
+  const replay = evaluateForward(input);
+  return { version: 2, generatedAt: new Date().toISOString(),
+    recorded: evaluateRecordedPrescriptions(input), replay,
+    contextualTrends: evaluateContextualTrends(input, replay.observations.force),
     caution: 'Historical analysis, not independent prospective validation. Original model versions, history edits and all past inputs cannot be reconstructed exactly.' };
 }

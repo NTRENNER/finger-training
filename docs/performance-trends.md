@@ -41,3 +41,9 @@ Phone (375px) and desktop (1280px) previews use synthetic training data.
 History controls share a rounded outlined track and white pill handles. The
 recovery as-of date and frozen-baseline comparison date remain single-handle
 controls because they select one snapshot rather than a date window.
+
+The short-term card reports opening holds that followed earlier recorded finger
+training on the same date, including another grip. This is context only. The
+experimental alternatives and replay results are documented in
+[contextual-performance-trends.md](contextual-performance-trends.md) and can be
+previewed from Research; the default charts retain the original fit.

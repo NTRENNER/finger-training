@@ -1,3 +1,5 @@
+import { fitContextualTrend } from './contextualTrendFit.js';
+import { trainingDayContext } from './trainingDayContext.js';
 // Descriptive analysis only. Never used to prescribe loads. Fit the full
 // available history at each date BEFORE applying the chart's visible window.
 import { prepareEvaluationRows } from './evaluationRows.js';
@@ -9,8 +11,9 @@ const dayMs = 86400000;
 const mean = values => values.reduce((a,b)=>a+b,0)/values.length;
 const nextDate = date => new Date(Date.parse(date)+dayMs).toISOString().slice(0,10);
 
-export function buildPerformanceTrends(history, grips, hand = 'pooled') {
+export function buildPerformanceTrends(history, grips, hand = 'pooled', {model = 'original'} = {}) {
   const clean = prepareEvaluationRows(history || []).rows;
+  const context = trainingDayContext(clean);
   const eligibleAt = date => freshFitReps(clean.filter(r=>r.date<=date)).filter(r => grips.includes(r.grip)
     && ['legacy_measured','measured_force'].includes(loadProvenance(r))
     && Number.isFinite(r.avg_force_kg) && r.avg_force_kg > 0
@@ -20,7 +23,9 @@ export function buildPerformanceTrends(history, grips, hand = 'pooled') {
   const baselines = new Map(), cache = new Map();
   const fit = (grip,h,date) => {
     const key = `${grip}|${h}|${date}`;
-    if (!cache.has(key)) cache.set(key,fitEstablishedTrend(clean,h,grip,date,{prepared:true}));
+    if (!cache.has(key)) cache.set(key,model==='original'
+      ? fitEstablishedTrend(clean,h,grip,date,{prepared:true})
+      : fitContextualTrend(clean,h,grip,date,{prepared:true,robust:model==='contextRobust'}));
     return cache.get(key);
   };
   return dates.map(date => {
@@ -58,6 +63,7 @@ export function buildPerformanceTrends(history, grips, hand = 'pooled') {
       }).filter(Number.isFinite);
       if (deviations.length) row[`${grip}_short`] = mean(deviations);
       row[`${grip}_holds`] = current.length;
+      row[`${grip}_laterHolds`] = current.filter(r=>context(r).status==='after_training').length;
     }
     return row;
   }).filter(row=>grips.some(g=>Number.isFinite(row[`${g}_long`])||Number.isFinite(row[`${g}_short`])));
