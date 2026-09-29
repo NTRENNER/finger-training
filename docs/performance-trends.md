@@ -8,8 +8,9 @@ history available at each plotted date. Grip and hand changes reset the window;
 new history preserves a deliberately selected date window. Counts mean plotted
 training dates, not repetitions or sessions. Rest days do not generate points.
 
-Long-term capacity uses the existing experimental established-curve fit (90-day
-half-life, one total weight per training date). It is shown as percentage change
+Long-term capacity uses the context-only established-curve fit (90-day half-life,
+at most one total weight per training date, reduced confidence for later sessions
+after earlier recorded finger work across grips). It is shown as percentage change
 from the first available established estimate, separately for each grip. Both-hand
 capacity uses the geometric mean of the two hand scores with equal hand weights,
 and requires both curves. Each hand needs five eligible prior-or-current dates.
@@ -46,4 +47,8 @@ The short-term card reports opening holds that followed earlier recorded finger
 training on the same date, including another grip. This is context only. The
 experimental alternatives and replay results are documented in
 [contextual-performance-trends.md](contextual-performance-trends.md) and can be
-previewed from Research; the default charts retain the original fit.
+compared in Research. Context-only weighting is the default descriptive chart;
+the original fit remains available there and robust smoothing stays experimental.
+Short-term results still compare actual opening holds with a strictly pre-day
+reference curve, using the selected chart model. Workout prescriptions do not use
+this chart fit.

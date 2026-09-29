@@ -75,15 +75,17 @@ test('fits are causal, order-independent, positive and monotone; duplicates and 
  let prev=Infinity;
  for(const t of [0,30,70,160,220,600]){const f=predForceThreeExp(a.established,t);expect(f).toBeGreaterThan(0);expect(f).toBeLessThanOrEqual(prev);prev=f;}
 });
-test('evaluation uses earlier days and separates session contexts; chart default remains original',()=>{
+test('evaluation uses earlier days and separates session contexts; chart default accounts for earlier training',()=>{
  const h=baseline(),held=row(30,{hour:'12',id:'held'}),earlier=row(30,{grip:'Crusher',id:'prior'});
  const observation={date:date(30),session:'held',grip:'Micro',hand:'L',targetDuration:160,duration:160,actual:20};
  const a=evaluateContextualTrends([...h,earlier,held],[observation]);
  const b=evaluateContextualTrends([...h,earlier,{...held,avg_force_kg:100}],[{...observation,actual:100}]);
  expect(a.observations[0].predictions).toEqual(b.observations[0].predictions);
  expect(a.byContext.after_training.original.observations).toBe(1);
- const defaultRows=buildPerformanceTrends(h,['Micro'],'L');
- expect(buildPerformanceTrends(h,['Micro'],'L',{model:'original'})).toEqual(defaultRows);
+ const complete=[...h,earlier,{...held,avg_force_kg:held.avg_force_kg*.5}];
+ const defaultRows=buildPerformanceTrends(complete,['Micro'],'L');
+ expect(buildPerformanceTrends(complete,['Micro'],'L',{model:'contextOnly'})).toEqual(defaultRows);
+ expect(buildPerformanceTrends(complete,['Micro'],'L',{model:'original'}).at(-1).Micro_long).not.toEqual(defaultRows.at(-1).Micro_long);
  const candidate=buildPerformanceTrends(h,['Micro'],'L',{model:'contextOnly'});
  expect(buildPerformanceTrends([...h,held],['Micro'],'L',{model:'contextOnly'}).filter(r=>r.date<held.date)).toEqual(candidate);
 });

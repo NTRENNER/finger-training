@@ -4,11 +4,11 @@ import {Card} from '../../ui/components.js';
 import {C} from '../../ui/theme.js';
 import {GRIP_COLORS} from '../../ui/grip-colors.js';
 import {DateRangeSlider} from '../../ui/DateRangeSlider.jsx';
-import {buildPerformanceTrends} from '../../model/performanceTrends.js';
+import {buildPerformanceTrends,DEFAULT_PERFORMANCE_TREND_MODEL} from '../../model/performanceTrends.js';
 import {suggestCookedFromClimbs} from '../../model/climbingFatigue.js';
 const fmtDate = ts=>new Date(ts).toISOString().slice(5,10);
 
-export function PerformanceTrendCards({history,grips,handView='pooled',activities=[],normalizeOn=false,trendModel='original'}) {
+export function PerformanceTrendCards({history,grips,handView='pooled',activities=[],normalizeOn=false,trendModel=DEFAULT_PERFORMANCE_TREND_MODEL}) {
   const rows=useMemo(()=>buildPerformanceTrends(history,grips,handView,{model:trendModel}),[history,grips,handView,trendModel]);
   const [window,setWindow]=useState(null),[climbing,setClimbing]=useState(false);
   const dates=rows.map(r=>r.date);
@@ -39,7 +39,8 @@ export function PerformanceTrendCards({history,grips,handView='pooled',activitie
       <h3 style={{marginTop:0}}>Long-term performance trend</h3>
       <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>{grips.map(g=><span key={g} style={{color:GRIP_COLORS[g]||C.blue}}>━ {g}</span>)}</div>
       <p style={{color:C.muted,lineHeight:1.5}}>Estimated whole-curve capacity, relative to your first established estimate. Each point uses the training recorded by that date.</p>
-      {trendModel!=='original'&&<p style={{color:C.yellow}}>Research preview: later sessions receive less weight{trendModel==='contextRobust'?' and unusual results have reduced influence':''}. Use the historical comparison to assess accuracy; this is not the default trend.</p>}
+      {trendModel!=='original'&&<p style={{color:C.muted,fontSize:13}}>Sessions after earlier finger training that day receive less weight, including training on another grip.</p>}
+      {trendModel==='contextRobust'&&<p style={{color:C.yellow}}>Research preview: unusually high and low results also have reduced influence. This additional smoothing is experimental.</p>}
       {normalizeOn&&<p style={{color:C.muted,fontSize:13}}>These performance trends use measured force. The bodyweight toggle applies to the other curve charts.</p>}
       {!ready.length?<p>More data needed to compare both hands. Try a single-hand view.</p>:chart('long')}
       <DateRangeSlider dates={dates} start={start} end={end} onChange={(a,b)=>setWindow([dates[a],dates[b]])}/>

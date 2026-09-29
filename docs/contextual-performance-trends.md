@@ -1,7 +1,9 @@
 # Training order and long-term performance: research candidate
 
-Status: research only. Default performance fits, frozen forecast versions,
-workout recommendations, the 4–5–6 ladder and saved workout records are unchanged.
+Status (September 29): context-only weighting is the default descriptive
+performance chart, at the user's request. The stronger robust fit remains a
+Research preview. Frozen forecast versions, workout recommendations, the 4–5–6
+ladder and saved workout records are unchanged.
 Analysis now identifies how many plotted opening holds followed earlier recorded
 finger training that day. That is context, not a diagnosis of fatigue.
 
@@ -76,7 +78,10 @@ Relative to each model's own pre-sequence capacity estimate, the Micro/Crusher
 changes were -1.01%/-2.23% originally, -0.18%/-1.24% for context only and
 -0.08%/-1.36% for robust. The smaller dip alone is not grounds for promotion.
 
-Keep both candidates in Research. Settings → Research → Review earlier workouts
+Initial September 28 decision: keep both candidates in Research. The September
+29 chart release adopts context-only weighting for descriptive capacity, without
+claiming improved predictive accuracy. Research retains the previous fit and
+robust alternative for ongoing comparisons. Settings → Research → Review earlier workouts
 → Does earlier training explain trend changes? shows error tables by grip and
 session context and an optional chart preview. The downloaded report includes
 all observations, paired intervals and chronological splits. Rerun after new
@@ -87,4 +92,4 @@ CLI: `node --no-warnings scripts/evaluate-contextual-trends.mjs /path/to/reps.js
 Do not commit private exports. Tests cover session chronology, cross-grip prior
 work, unknown/tied times, bounded day weighting, future-data isolation, duplicate
 handling, monotone positive curves, isolated outliers, sustained changes, and
-research-only chart selection.
+chart default selection and opt-in robust previews.

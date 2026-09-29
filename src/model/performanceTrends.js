@@ -11,7 +11,9 @@ const dayMs = 86400000;
 const mean = values => values.reduce((a,b)=>a+b,0)/values.length;
 const nextDate = date => new Date(Date.parse(date)+dayMs).toISOString().slice(0,10);
 
-export function buildPerformanceTrends(history, grips, hand = 'pooled', {model = 'original'} = {}) {
+export const DEFAULT_PERFORMANCE_TREND_MODEL = 'contextOnly';
+
+export function buildPerformanceTrends(history, grips, hand = 'pooled', {model = DEFAULT_PERFORMANCE_TREND_MODEL} = {}) {
   const clean = prepareEvaluationRows(history || []).rows;
   const context = trainingDayContext(clean);
   const eligibleAt = date => freshFitReps(clean.filter(r=>r.date<=date)).filter(r => grips.includes(r.grip)
