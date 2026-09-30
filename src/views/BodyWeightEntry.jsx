@@ -8,13 +8,13 @@ import { saveLS, LS_BW_LOG_KEY, LS_BW_REMINDER_DISMISSED_KEY } from "../lib/stor
 import { bodyWeightReminderDue, latestBodyWeight, validWeightDate } from "../lib/bodyWeight.js";
 import "./BodyWeightEntry.css";
 
-// Shared by the weekly reminder and History → Weight. The date is fixed
+// Shared by Settings, the weekly reminder, and History → Weight. The date is fixed
 // when correcting an entry; logging supports today or any previous date.
-export function BodyWeightEntry({ unit = "lbs", entry = null, latest = null, reminder = false, onSave, onClose }) {
+export function BodyWeightEntry({ unit = "lbs", entry = null, latest = null, initialWeightKg = null, reminder = false, onSave, onClose }) {
   const dialogRef = useRef(null);
   const titleId = useId();
   const [date, setDate] = useState(() => entry?.date || today());
-  const initialKg = entry?.kg ?? latest?.kg;
+  const [initialKg] = useState(() => entry?.kg ?? latest?.kg ?? initialWeightKg);
   const [value, setValue] = useState(() => initialKg > 0 ? fmt1(toDisp(initialKg, unit)) : "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -66,7 +66,7 @@ export function BodyWeightEntry({ unit = "lbs", entry = null, latest = null, rem
           {reminder ? "Update your body weight" : entry ? "Edit weight" : "Log weight"}
         </h2>
         <p style={{ color: C.muted, fontSize: 15, lineHeight: 1.5, margin: "0 0 20px" }}>
-          {latest ? <>Last recorded: <strong style={{ color: C.text }}>{fmt1(toDisp(latest.kg, unit))} {unit}</strong> on {latest.date}.</> : "Add your first body-weight entry."}
+          {latest ? <>Last recorded: <strong style={{ color: C.text }}>{fmt1(toDisp(latest.kg, unit))} {unit}</strong> on {latest.date}.</> : initialKg > 0 ? "Confirm your weight and the date below." : "Add your first body-weight entry."}
           {reminder && <> A weekly update keeps relative-strength tracking useful.</>}
         </p>
         {!reminder && <label className="body-weight-field">

@@ -4,7 +4,7 @@
 // User preferences + auth + cloud sync controls. Cards stacked:
 //
 //   Units             — lbs / kg toggle
-//   Body Weight       — input field, drives relative-strength display
+//   Body Weight       — confirmed entry, drives relative-strength display
 //   Training Goal     — trip name + date; powers the WorkoutTab
 //                       countdown ("days until __").
 //   Cloud Sync        — Supabase OTP auth + manual pull
@@ -23,7 +23,8 @@
 import React, { useState } from "react";
 import { C } from "../ui/theme.js";
 import { Card, Btn, PageFrame, Sect } from "../ui/components.js";
-import { KG_TO_LBS, fmt0, toDisp, fromDisp } from "../ui/format.js";
+import { KG_TO_LBS, fmt1, toDisp } from "../ui/format.js";
+import { BodyWeightEntry } from "./BodyWeightEntry.jsx";
 import { tripCountdown } from "../lib/trip.js";
 import { longBuildLabel } from "../lib/buildInfo.js";
 import {
@@ -47,6 +48,7 @@ export function SettingsView({
   onPullFromCloud = () => {}, pullStatus = "idle", lastPulledAt = null,
 }) {
   const [showSQL, setShowSQL] = useState(false);
+  const [editingWeight, setEditingWeight] = useState(false);
   const sql = `-- Run this once in your Supabase SQL editor (fresh install):
 CREATE TABLE reps (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -96,30 +98,23 @@ CREATE POLICY "auth_all" ON reps
             Used to show <b>relative strength</b> (force ÷ bodyweight) in the Analysis tab.
             Helps compare progress through weight changes.
           </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <input
-              type="number" inputMode="numeric" min={30} max={500} step={1}
-              value={bodyWeight != null ? fmt0(toDisp(bodyWeight, unit)) : ""}
-              onChange={e => {
-                const v = e.target.value === "" ? null : fromDisp(Math.round(Number(e.target.value)), unit);
-                onBWChange(v);
-              }}
-              placeholder={`Weight in ${unit}`}
-              style={{
-                width: 110, background: C.bg,
-                border: `1px solid ${C.border}`, borderRadius: 8,
-                padding: "8px 12px", color: C.text, fontSize: 15,
-              }}
-            />
-            <span style={{ fontSize: 14, color: C.muted }}>{unit}</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <strong style={{ fontSize: 22, color: C.text }}>
+              {bodyWeight != null ? `${fmt1(toDisp(bodyWeight, unit))} ${unit}` : "Not recorded"}
+            </strong>
             {bodyWeight != null && (
-              <span style={{ fontSize: 12, color: C.muted, marginLeft: 4 }}>
-                ({unit === "lbs" ? `${fmt0(bodyWeight)} kg` : `${fmt0(bodyWeight * KG_TO_LBS)} lbs`})
+              <span style={{ fontSize: 12, color: C.muted }}>
+                ({unit === "lbs" ? `${fmt1(bodyWeight)} kg` : `${fmt1(bodyWeight * KG_TO_LBS)} lbs`})
               </span>
             )}
+            <Btn onClick={() => setEditingWeight(true)}>Log weight</Btn>
           </div>
         </Sect>
       </Card>
+
+      {editingWeight && <BodyWeightEntry key={unit} unit={unit}
+        initialWeightKg={bodyWeight} onSave={onBWChange}
+        onClose={() => setEditingWeight(false)} />}
 
       <Card>
         <Sect title="Training Goal">

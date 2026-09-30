@@ -1,6 +1,7 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BwPrompt, BodyWeightEntry } from "../BodyWeightEntry.jsx";
+import { SettingsView } from "../SettingsView.js";
 import { HistoryView } from "../HistoryView.js";
 import { bodyWeightReminderDue, latestBodyWeight } from "../../lib/bodyWeight.js";
 import { LS_BW_LOG_KEY, LS_BW_REMINDER_DISMISSED_KEY, LS_HISTORY_DOMAIN_KEY, loadLS, saveLS } from "../../lib/storage.js";
@@ -103,4 +104,45 @@ test("confirming the prefilled value preserves kg precision", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(onClose).toHaveBeenCalled());
   expect(onSave).toHaveBeenCalledWith(71.45678, "2026-09-16");
+});
+
+
+test("Settings saves only the confirmed decimal weight, never intermediate typing", async () => {
+  const onSave = jest.fn();
+  render(<SettingsView unit="lbs" bodyWeight={fromDisp(150, "lbs")} onBWChange={onSave} />);
+  expect(screen.getByText("150.0 lbs")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Log weight" }));
+  const input = screen.getByLabelText("Weight (lbs)");
+  for (const value of ["", "1", "15", "150", "150.4"]) {
+    fireEvent.change(input, { target: { value } });
+    expect(onSave).not.toHaveBeenCalled();
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(onSave).toHaveBeenCalledTimes(1);
+  expect(onSave).toHaveBeenCalledWith(fromDisp(150.4, "lbs"), "2026-09-16");
+});
+
+test("Settings Cancel discards edits and an empty weight cannot be saved", () => {
+  const onSave = jest.fn();
+  render(<SettingsView unit="kg" bodyWeight={68.12345} onBWChange={onSave} />);
+  fireEvent.click(screen.getByRole("button", { name: "Log weight" }));
+  fireEvent.change(screen.getByLabelText("Weight (kg)"), { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("greater than zero");
+  fireEvent.change(screen.getByLabelText("Weight (kg)"), { target: { value: "75" } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(onSave).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Log weight" }));
+  expect(screen.getByLabelText("Weight (kg)")).toHaveValue(68.1);
+});
+
+test("Settings retains original precision when the prefilled weight is confirmed", async () => {
+  const onSave = jest.fn();
+  render(<SettingsView unit="lbs" bodyWeight={68.12345} onBWChange={onSave} />);
+  fireEvent.click(screen.getByRole("button", { name: "Log weight" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(onSave).toHaveBeenCalledWith(68.12345, "2026-09-16");
 });

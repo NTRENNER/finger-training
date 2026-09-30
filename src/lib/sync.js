@@ -89,7 +89,7 @@
 
 import { supabase } from "./supabase.js";
 import {
-  loadLS, saveLS,
+  loadLS, saveLS, getStorageUserId, readRawLastUser,
   LS_REP_DELETED_KEY, LS_USER_SETTINGS_PATCH_KEY,
 } from "./storage.js";
 import { today } from "../util.js";
@@ -1070,7 +1070,7 @@ export async function pushActivityTombstones(ids) {
   }
 }
 
-// Returns null on error so callers skip tombstone filtering rather
+// Returns null on error so callers defer reconciliation rather
 // than treating "fetch failed" as "nothing is deleted".
 export async function fetchActivityTombstoneIds() {
   try {
@@ -1132,17 +1132,27 @@ export async function fetchActivities() {
 // upsert via the UNIQUE date constraint, so logging twice in one
 // day overwrites cleanly across devices.
 
+// Bind BW requests to the frozen local namespace. During sign-in/switch,
+// anonymous/previous-account work waits for its own page's reconcile.
+// Explicit owner filters plus RLS also protect a switch after this check
+// but before the network request. Never re-label a queued payload.
+async function ownsBWSession(ownerId) {
+  if (!ownerId || getStorageUserId() !== ownerId || readRawLastUser() !== ownerId) return false;
+  const authenticatedId = await currentUserId();
+  return authenticatedId === ownerId && getStorageUserId() === ownerId && readRawLastUser() === ownerId;
+}
+
 export async function pushBW(date, kg) {
-  if (!date || !(kg > 0)) return false;
+  if (!date || !Number.isFinite(kg) || !(kg > 0)) return false;
+  const userId = getStorageUserId();
   try {
-    const userId = await currentUserId();
-    if (!userId) return false;
+    if (!await ownsBWSession(userId)) return false;
     const { error } = await supabase.from("body_weights").upsert(
       { user_id: userId, date, kg },
       { onConflict: "user_id,date" }
     );
     if (error) { console.warn("Supabase BW push:", error.message); return false; }
-    return true;
+    return await ownsBWSession(userId);
   } catch (e) {
     console.warn("Supabase BW push exception:", e.message);
     return false;
@@ -1155,14 +1165,18 @@ export async function pushBW(date, kg) {
 // helpers don't touch localStorage.
 export async function deleteBW(date) {
   if (!date) return false;
+  const userId = getStorageUserId();
   try {
+    if (!await ownsBWSession(userId)) return false;
     // Tombstone first — without it, any other device whose
     // LS_BW_LOG_KEY still holds this date re-pushes it on its next
     // reconcile backfill ("local-only date"), resurrecting the delete.
-    await pushBWTombstones([date]);
-    const { error } = await supabase.from("body_weights").delete().eq("date", date);
+    if (!await pushBWTombstones([date])) return false;
+    if (!await ownsBWSession(userId)) return false;
+    const { error } = await supabase.from("body_weights").delete()
+      .eq("user_id", userId).eq("date", date);
     if (error) { console.warn("Supabase BW delete:", error.message); return false; }
-    return true;
+    return await ownsBWSession(userId);
   } catch (e) {
     console.warn("Supabase BW delete exception:", e.message);
     return false;
@@ -1179,15 +1193,15 @@ export async function deleteBW(date) {
 export async function pushBWTombstones(dates) {
   const valid = (dates || []).filter(Boolean);
   if (valid.length === 0) return true;
+  const userId = getStorageUserId();
   try {
-    const userId = await currentUserId();
-    if (!userId) return false;
+    if (!await ownsBWSession(userId)) return false;
     const { error } = await supabase
       .from("bw_tombstones")
       .upsert(valid.map(date => ({ user_id: userId, date })),
         { onConflict: "user_id,date", ignoreDuplicates: true });
     if (error) { console.warn("Supabase BW tombstone push:", error.message); return false; }
-    return true;
+    return await ownsBWSession(userId);
   } catch (e) {
     console.warn("Supabase BW tombstone push exception:", e.message);
     return false;
@@ -1205,30 +1219,34 @@ export async function pushBWTombstones(dates) {
 export async function removeBWTombstones(dates) {
   const valid = (dates || []).filter(Boolean);
   if (valid.length === 0) return true;
+  const userId = getStorageUserId();
   try {
-    const userId = await currentUserId();
-    if (!userId) return false;
+    if (!await ownsBWSession(userId)) return false;
     const { error } = await supabase
       .from("bw_tombstones")
       .delete()
       .eq("user_id", userId)
       .in("date", valid);
     if (error) { console.warn("Supabase BW un-tombstone:", error.message); return false; }
-    return true;
+    return await ownsBWSession(userId);
   } catch (e) {
     console.warn("Supabase BW un-tombstone exception:", e.message);
     return false;
   }
 }
 
-// Returns null on error so callers skip tombstone filtering rather
+// Returns null on error so callers defer reconciliation rather
 // than treating "fetch failed" as "nothing is deleted".
 export async function fetchBWTombstoneDates() {
+  const userId = getStorageUserId();
   try {
+    if (!await ownsBWSession(userId)) return null;
     const { data, error } = await supabase
       .from("bw_tombstones")
-      .select("date");
+      .select("date")
+      .eq("user_id", userId);
     if (error) { console.warn("Supabase BW tombstone fetch:", error.message); return null; }
+    if (!await ownsBWSession(userId)) return null;
     return (data || []).map(r => r.date).filter(Boolean);
   } catch (e) {
     console.warn("Supabase BW tombstone fetch exception:", e.message);
@@ -1240,12 +1258,16 @@ export async function fetchBWTombstoneDates() {
 // error. Shape matches the local LS_BW_LOG_KEY contents so the merge
 // path can union the two and dedupe by date trivially.
 export async function fetchBWLog() {
+  const userId = getStorageUserId();
   try {
+    if (!await ownsBWSession(userId)) return null;
     const { data, error } = await supabase
       .from("body_weights")
       .select("date, kg")
+      .eq("user_id", userId)
       .order("date", { ascending: true });
     if (error) { console.warn("Supabase BW fetch:", error.message); return null; }
+    if (!await ownsBWSession(userId)) return null;
     return (data || [])
       .filter(r => r?.date && Number(r.kg) > 0)
       .map(r => ({ date: r.date, kg: Number(r.kg) }));

@@ -39,6 +39,8 @@ jest.mock("../../lib/sync.js", () => ({
 beforeEach(() => {
   localStorage.clear();
   jest.clearAllMocks();
+  pushBW.mockResolvedValue(true);
+  removeBWTombstones.mockResolvedValue(true);
   fetchBWLog.mockResolvedValue([]);
   fetchBWTombstoneDates.mockResolvedValue([]);
 });
@@ -110,6 +112,7 @@ test("backdated weight syncs its date without replacing current weight; correcti
   expect(loadLS("ft_bw")).toBe(70);
   await waitFor(() => expect(pushBW).toHaveBeenCalledWith("2026-01-01", 72.3));
   expect(removeBWTombstones).toHaveBeenCalledWith(["2026-01-01"]);
+  await waitFor(() => expect(loadLS(LS_BW_DIRTY_KEY) || []).not.toContain("2026-01-01"));
   act(() => result.current.saveBW(71.8, "2026-01-01"));
   await waitFor(() => expect(pushBW).toHaveBeenCalledWith("2026-01-01", 71.8));
   expect(loadLS(LS_BW_LOG_KEY)).toEqual([
@@ -138,4 +141,25 @@ test("invalid weights and dates cannot mutate weight history", () => {
   }
   expect(loadLS(LS_BW_LOG_KEY)).toEqual([]);
   expect(pushBW).not.toHaveBeenCalled();
+});
+
+
+test("failed un-tombstone keeps the weight dirty without attempting its upload", async () => {
+  removeBWTombstones.mockResolvedValueOnce(false);
+  const { result } = renderHook(() => useUserSettings({ user: null }));
+  await act(async () => result.current.saveBW(68.2, "2026-01-01"));
+  expect(removeBWTombstones).toHaveBeenCalledWith(["2026-01-01"]);
+  expect(pushBW).not.toHaveBeenCalled();
+  expect(loadLS(LS_BW_LOG_KEY)).toEqual([{ date: "2026-01-01", kg: 68.2 }]);
+  expect(loadLS(LS_BW_DIRTY_KEY)).toContain("2026-01-01");
+});
+
+test("unavailable deletion history defers reconciliation instead of resurrecting a weight", async () => {
+  saveLS(LS_BW_LOG_KEY, [{ date: "2026-01-01", kg: 68.2 }]);
+  fetchBWTombstoneDates.mockResolvedValueOnce(null);
+  const user = { id: "user-1" };
+  await act(async () => { renderHook(() => useUserSettings({ user })); });
+  expect(fetchBWLog).toHaveBeenCalled();
+  expect(pushBW).not.toHaveBeenCalled();
+  expect(loadLS(LS_BW_LOG_KEY)).toEqual([{ date: "2026-01-01", kg: 68.2 }]);
 });

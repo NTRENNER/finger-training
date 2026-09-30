@@ -102,6 +102,12 @@ export function readRawLastUser() {
 // later ft_last_user writes (hole (b)).
 let nsUid = readRawLastUser();
 
+// Cloud sync must use the owner of this page's data, not whichever
+// account happens to be authenticated when an asynchronous save resumes.
+export function getStorageUserId() {
+  return nsUid;
+}
+
 // Map a logical key to its physical localStorage key. Device-scoped
 // keys pass through bare. User-scoped keys get the page's namespace
 // prefix; with no namespace (signed out / never signed in) the bare

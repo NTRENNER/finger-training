@@ -142,7 +142,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     // tombstone must die before the push. On failure (offline) the
     // date stays dirty and the reconcile's re-log path retries both.
     (async () => {
-      await removeBWTombstones([d]);
+      if (!await removeBWTombstones([d])) return;
       const ok = await pushBW(d, kg);
       if (ok) confirmBWPushed(d, kg);
     })();
@@ -172,13 +172,13 @@ export function useUserSettings({ user, syncSignal = 0 }) {
       // deleted on another device must be filtered out of BOTH sides
       // of the merge and out of the backfill push list — the backfill
       // was the delete-resurrection vector ("local-only date" →
-      // re-push). null tombstone fetch = error → skip the filter
-      // rather than treating "fetch failed" as "nothing deleted".
+      // re-push). If either fetch fails, defer the merge/backfill so
+      // unknown deletion state cannot resurrect another device's delete.
       const [cloud, tombDates] = await Promise.all([
         fetchBWLog(),
         fetchBWTombstoneDates(),
       ]);
-      if (cancelled || !cloud) return;
+      if (cancelled || !cloud || !tombDates) return;
       const deleted = new Set(tombDates || []);
       const local = loadLS(LS_BW_LOG_KEY) || [];
       const dirty = loadDirtySet(LS_BW_DIRTY_KEY);
