@@ -874,7 +874,7 @@ export function SessionPlanCard({
                 margin: isActive ? 0 : 1,
               }}
             >
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+              <div className="session-choice-heading">
                 <div style={{ fontSize: "var(--session-choice-label-size, 11px)", fontWeight: 700, color: r.color }}>
                   {r.emoji} {r.label}
                   {isRec && (

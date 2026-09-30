@@ -8,3 +8,17 @@
   --session-choice-value-size: 24px;
   --session-choice-duration-size: 20px;
 }
+
+/* Reserve the same duration column whether or not progression text exists. */
+.session-choice-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.session-choice-heading > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
