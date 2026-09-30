@@ -379,7 +379,7 @@ describe("prescription (unified)", () => {
         trueAmps[0]*Math.exp(-T/tau[0])
       + trueAmps[1]*Math.exp(-T/tau[1])
       + trueAmps[2]*Math.exp(-T/tau[2]),
-      date: "2026-04-01", session_id: `s${i}`,
+      date: `2026-04-${String(i + 1).padStart(2, "0")}`, session_id: `s${i}`,
     }));
   };
 
@@ -449,7 +449,7 @@ describe("prescription (unified)", () => {
     // remove the prior, which isn't what this case is testing.) Dates are
     // >90d old so the demonstrated-capacity floor is inactive too, and
     // value === potential.
-    const history = buildCurveHistory().map(r => ({ ...r, date: "2020-01-01" }));
+    const history = buildCurveHistory().map((r, i) => ({ ...r, date: `2020-01-${String(i + 1).padStart(2, "0")}` }));
     const priors = buildThreeExpPriors(history);
     const out = prescription(history, "L", "Crusher", 45, { threeExpPriors: priors });
     expect(out).not.toBeNull();
@@ -583,7 +583,7 @@ describe("prescription (unified)", () => {
         hand: "L", grip: "Crusher",
         target_duration: 30, rep_num: 1, set_num: 1,
         actual_time_s: 30 + i * 5, avg_force_kg: 24,
-        failed: false, date: olderDate, session_id: `older${i}`,
+        failed: false, date: new Date(Date.parse(olderDate) - i * 86400000).toISOString().slice(0, 10), session_id: `older${i}`,
       })),
       // The anchor rep itself — 10 days before sessDate (inside
       // sessDate-30d) but well outside today-30d.
@@ -718,7 +718,7 @@ describe("peak-force ceiling", () => {
         id: `r${i}`, hand: "L", grip: "Crusher", target_duration: T,
         rep_num: 1, actual_time_s: T, failed: true,
         avg_force_kg: F, peak_force_kg: F * 1.05,
-        date: today, session_id: `s${i}`,
+        date: new Date(Date.parse(today) - (i + 1) * 86400000).toISOString().slice(0, 10), session_id: `s${i}`,
       };
     });
   };
@@ -863,8 +863,8 @@ describe("demonstrated-capacity floor", () => {
   test("demonstratedCapacityKg: best fresh load over holds of duration >= T", () => {
     const h = [
       rep({ actual_time_s: 188, avg_force_kg: 5.5, session_id: "a" }), // 188s @ 5.5
-      rep({ actual_time_s: 130, avg_force_kg: 6.0, session_id: "b" }), // 130s @ 6.0
-      rep({ actual_time_s: 40,  avg_force_kg: 9.0, session_id: "c" }), // 40s  @ 9.0
+      rep({ actual_time_s: 130, avg_force_kg: 6.0, date: day(4), session_id: "b" }), // 130s @ 6.0
+      rep({ actual_time_s: 40,  avg_force_kg: 9.0, date: day(3), session_id: "c" }), // 40s  @ 9.0
     ];
     expect(demonstratedCapacityKg(h, "L", "Micro", 160)).toBeCloseTo(5.5, 5); // only the 188s hold reaches 160
     expect(demonstratedCapacityKg(h, "L", "Micro", 120)).toBeCloseTo(6.0, 5); // 188 + 130 qualify -> max 6.0
@@ -874,7 +874,7 @@ describe("demonstrated-capacity floor", () => {
 
   test("ignores fatigued reps and fully expires old direct proof", () => {
     const h = [
-      rep({ actual_time_s: 200, avg_force_kg: 9.0, rep_num: 3, session_id: "x" }),    // fatigued -> ignored
+      rep({ actual_time_s: 200, avg_force_kg: 9.0, rep_num: 3, session_id: "z" }),    // fatigued -> ignored
       rep({ actual_time_s: 200, avg_force_kg: 8.0, date: day(120), session_id: "y" }), // stale -> ignored
       rep({ actual_time_s: 200, avg_force_kg: 5.5, session_id: "z" }),                 // fresh, recent
     ];
@@ -913,7 +913,7 @@ describe("demonstrated-capacity floor", () => {
     // under it. The floor lifts it back to the demonstrated load.
     const history = [
       ...Array.from({ length: 12 }, (_, i) =>
-        rep({ target_duration: 7, actual_time_s: 7, avg_force_kg: 18, date: day(6), session_id: `sh${i}` })),
+        rep({ target_duration: 7, actual_time_s: 7, avg_force_kg: 18, date: day(7+i), session_id: `sh${i}` })),
       rep({ target_duration: 160, actual_time_s: 188, avg_force_kg: 5.5, date: day(6), session_id: "long" }),
     ];
     const priors = buildThreeExpPriors(history);
@@ -926,7 +926,7 @@ describe("demonstrated-capacity floor", () => {
   test("floor does not apply for a target longer than any demonstrated hold", () => {
     const history = [
       ...Array.from({ length: 12 }, (_, i) =>
-        rep({ target_duration: 7, actual_time_s: 7, avg_force_kg: 18, date: day(6), session_id: `sh${i}` })),
+        rep({ target_duration: 7, actual_time_s: 7, avg_force_kg: 18, date: day(7+i), session_id: `sh${i}` })),
       rep({ target_duration: 160, actual_time_s: 188, avg_force_kg: 5.5, date: day(6), session_id: "long" }),
     ];
     const priors = buildThreeExpPriors(history);

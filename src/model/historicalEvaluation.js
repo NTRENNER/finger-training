@@ -32,7 +32,7 @@ function attainment(rows) {
 // of any single model version. A ladder pin or load adjustment is also a plan.
 export function evaluateRecordedPrescriptions(input) {
   const { rows, excluded: inputExcluded } = prepareEvaluationRows(input);
-  const openers = freshFitReps(rows.map(r => ({ ...r, original: r })), { preserveAllBases: true });
+  const openers = freshFitReps(rows.map(r => ({ ...r, original: r })), { preserveAllBases: true, includeLaterSessions: true });
   const observations = [], shortTargets = [], excluded = {};
   const skip = reason => { excluded[reason] = (excluded[reason] || 0) + 1; };
   for (const r of openers.map(r => r.original)) {

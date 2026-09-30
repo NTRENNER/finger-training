@@ -2,7 +2,7 @@ import { coachingRecommendationContinuous, buildContinuousRecency } from '../coa
 import { predictRepTimes, PHYS_MODEL_DEFAULT } from '../fatigue.js';
 import { sessionPerformanceContext } from '../sessionPerformanceContext.js';
 const history = [5,15,30,60,120,200].flatMap((t,i)=>[1,4,8].map(d=>({
- id:`${t}-${d}`,session_id:`${t}-${d}`,date:`2026-09-${String(10-d).padStart(2,'0')}`,
+ id:`${t}-${d}`,session_id:undefined,date:`2026-09-${String(10-d).padStart(2,'0')}`,
  grip:'Micro',hand:'L',rep_num:1,actual_time_s:t,target_duration:t,
  avg_force_kg:30*Math.exp(-t/30)+10*Math.exp(-t/180),peak_force_kg:40,
  failure_valid:true,load_provenance:'measured_force',force_recording:{version:2,capacity_eligible:true}

@@ -16,7 +16,7 @@ export const DEFAULT_PERFORMANCE_TREND_MODEL = 'contextOnly';
 export function buildPerformanceTrends(history, grips, hand = 'pooled', {model = DEFAULT_PERFORMANCE_TREND_MODEL} = {}) {
   const clean = prepareEvaluationRows(history || []).rows;
   const context = trainingDayContext(clean);
-  const eligibleAt = date => freshFitReps(clean.filter(r=>r.date<=date)).filter(r => grips.includes(r.grip)
+  const eligibleAt = date => freshFitReps(clean.filter(r=>r.date<=date), { includeLaterSessions: true }).filter(r => grips.includes(r.grip)
     && ['legacy_measured','measured_force'].includes(loadProvenance(r))
     && Number.isFinite(r.avg_force_kg) && r.avg_force_kg > 0
     && r.actual_time_s > 0 && r.actual_time_s <= 600);

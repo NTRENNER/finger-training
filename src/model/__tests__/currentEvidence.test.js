@@ -34,7 +34,7 @@ test('same-day morning/evening anchor is stable under input reversal',()=>{
  const a=prescription([morning,evening],'L','Micro',20,{referenceDate:'2026-09-10'});
  const b=prescription([evening,morning],'L','Micro',20,{referenceDate:'2026-09-10'});
  expect(a).toEqual(b);
- expect(a.anchor.F).toBe(20);
+ expect(a.anchor.F).toBe(10); // evening training cannot replace the first session
 });
 test('later set opener cannot replace the actual fresh opener',()=>{
  const first=rep('2026-09-09',20,{set_num:1,actual_time_s:10});
@@ -66,7 +66,8 @@ test('repeated calls and reordered unchanged history never lower the floor again
  expect(JSON.stringify(h)).toBe(before);
 });
 test('each further session permits a bounded reduction after decline is established', () => {
- const extra=['2026-09-08','2026-09-09','2026-09-09'].map((d,i)=>rep(d,10,{id:'extra'+i,session_id:'extra'+i,
+ const lower=['2026-09-01','2026-09-03','2026-09-05'].map(d=>rep(d,10));
+ const extra=['2026-09-06','2026-09-07','2026-09-09'].map((d,i)=>rep(d,10,{id:'extra'+i,session_id:'extra'+i,
   session_started_at:d+'T18:0'+i+':00Z'}));
  expect(floor([best,...lower,...extra.slice(0,1)])).toBe(16.875);
  expect(floor([best,...lower,...extra.slice(0,2)])).toBe(12.65625);

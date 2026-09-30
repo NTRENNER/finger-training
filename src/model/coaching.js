@@ -1,3 +1,4 @@
+import { firstTrainingSessionRows } from './firstSessionEvidence.js';
 import { isValidPeakMeasurement } from './peakTest.js';
 import { nominalPrescription } from "./prescription.js";
 import { effectiveSessionCount } from "./sessionConfidence.js";
@@ -39,18 +40,11 @@ import { isCapacityEvidenceRep, isNominalPrescriptionRep } from "./forceRecordin
 // Prescriptions are anchored to the most recent rep 1 via
 // prescription().value.
 //
-// CURVE-CONSISTENCY CAVEAT (corrected June 2026): the engine fits on
-// ALL of a hand's reps with freshMap fatigue-corrected loads, whereas
-// the F-D chart (post June-2026 curve-trust pass) renders a fit on
-// rep-1-only RAW loads (freshFitReps). These are deliberately different
-// de-fatigue strategies — the engine de-fatigues every rep via the
-// physiological model; the chart sidesteps the question by showing only
-// fresh first reps — so the two curves are close but NOT identical, and
-// the old claim that the recommendation "matches the literal purple
-// curve" overstated it. They're verified to agree within tolerance on
-// consistent data (coaching.test.js), and the residual/LOO signal the
-// engine acts on is robust to the small gap; if they ever diverge
-// materially, that's the regression test's job to catch.
+// The live fit and force-curve chart share first-session opening evidence.
+// Later repetitions describe within-set recovery; later sessions and optional
+// sets cannot become fresh capacity through a fatigue correction. Recorded
+// load adjustments may still normalize an eligible opener. Bounds and earned
+// progression can change the final training load; it is not the raw chart fit.
 
 import { ymdLocal } from "../util.js";
 import { MAX_TEST_TARGET_S } from "./peakForce.js";
@@ -64,7 +58,7 @@ import {
   effectiveLoad, freshLoadFor, buildFreshLoadMap,
   prescription, bestAvailablePeakMeasurement,
 } from "./prescription.js";
-import { freshFitReps, isFirstSetRep, isOpenerRep, isSeedArtifactRep } from "./load.js";
+import { freshFitReps, isOpenerRep, isSeedArtifactRep } from "./load.js";
 import { TAIL_B_PRIOR } from "./enduranceTail.js";
 
 // Population mean of COACH_RECOVERY_TAU_DAYS — the normalizer for the
@@ -451,7 +445,7 @@ function coldStartUpperAnchorRep(gripReps, hand) {
 // from producing an impractically tiny load. Returns null until the requested
 // hand has a valid short max-intent rep.
 export function coldStartLongProbeLoad(gripReps, hand, targetT = COLD_START_LONG_TARGET_T) {
-  const reps = gripReps || [];
+  const reps = firstTrainingSessionRows(gripReps || []);
   const anchorRep = coldStartUpperAnchorRep(reps, hand);
   if (!(targetT > 0)) return null;
   const peak = reps.filter(r => r.hand === hand && isValidPeakMeasurement(r))
@@ -590,7 +584,8 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // grip-scoped view so the engine recommends what THIS grip needs.
   const asOf = today instanceof Date ? ymdLocal(today) : (today || ymdLocal());
   history = history.filter(r => r?.date && r.date <= asOf);
-  const gripHistory = history.filter(r => isCapacityEvidenceRep(r) && r?.grip === grip);
+  const eligibleHistory = firstTrainingSessionRows(history);
+  const gripHistory = eligibleHistory.filter(r => isCapacityEvidenceRep(r) && r?.grip === grip);
   if (gripHistory.length === 0) {
     const todayDate = today instanceof Date ? ymdLocal(today) : (today || ymdLocal());
     const manual = history.filter(r => isNominalPrescriptionRep(r) && r.grip === grip && r.date <= todayDate)
@@ -636,7 +631,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // argmax can favor the weaker hand (more pooled-AUC gain per session).
   const handFits = {};   // hand -> { amps, ratios, strength }
   for (const hand of ["L", "R"]) {
-    const handPts = (history || []).filter(r => isFirstSetRep(r) && isCapacityEvidenceRep(r) &&
+    const handPts = freshFitReps(history || []).filter(r =>
       r.hand === hand && r.grip === grip
       && r.actual_time_s > 0 && effectiveLoad(r) > 0
     );
@@ -649,10 +644,10 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     if (hasPrior) {
       const lambda = THREE_EXP_LAMBDA_DEFAULT / Math.max(fitPts.length, 1);
       ({ amps, ratios: looRatios } = fitThreeExpAmpsLOO(fitPts, { prior, lambda }));
-    } else if (fitPts.length >= 2) {
+    } else if (fitPts.length >= 1) {
       ({ amps, ratios: looRatios } = fitThreeExpAmpsLOO(fitPts));
     } else {
-      continue;  // need ≥2 points without a prior
+      continue;  // no usable opening measurements
     }
     if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) continue;
 
@@ -668,7 +663,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // Boundary-anchor state is hand-aware. In Both mode, one hand's
   // short/long point must not silently stand in for the other.
   const fitHands = Object.keys(handFits);
-  const upperEvidence = history.filter(r => r?.grip === grip && r.date <= (today instanceof Date ? ymdLocal(today) : today));
+  const upperEvidence = eligibleHistory.filter(r => r?.grip === grip && r.date <= (today instanceof Date ? ymdLocal(today) : today));
   const hasUpperAnchor = hand => coldStartUpperAnchorRep(gripHistory, hand) != null
     || upperEvidence.some(r => r.hand === hand && isValidPeakMeasurement(r));
   const hasLowerAnchor = hand => freshGripReps.some(rep =>
@@ -720,7 +715,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // staleness drives the score in those regions).
       const localRatio = weightSum > 1e-6 ? ratioSum / weightSum : 1.0;
 
-      // Curve fitting and residual averaging retain every usable rep.
+      // Curve fitting and residual averaging retain eligible opening reps.
       // Certainty depends on nearby evidence repeated across sessions.
       const effN = effectiveSessionCount(evidence, T, todayStr, bandwidthLog);
       const confidence = effN / (effN + confidenceK);

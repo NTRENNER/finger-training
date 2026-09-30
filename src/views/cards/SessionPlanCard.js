@@ -1,3 +1,4 @@
+import { markUncertainDomainTimes, progressionLabel } from '../../model/domainTargetConsistency.js';
 import { startingHandForDay } from '../../model/handOrder.js';
 import { trainingPurpose } from "../../model/trainingPurpose.js";
 // ─────────────────────────────────────────────────────────────
@@ -236,7 +237,7 @@ export function SessionPlanCard({
     }).filter(Boolean);
   }, [history, grip, freshMap, threeExpPriors, GOAL_CONFIG, loadMultiplier, rec]);
 
-  const rows = useMemo(() => curveRows?.map(row => {
+  const rows = useMemo(() => markUncertainDomainTimes(curveRows?.map(row => {
     if (row.deferredReason || rec?.boundaryProbe || !TRAINING_ZONE_KEYS.includes(row.key)) return row;
     const domainLadder = computeDensityLadder(history, grip, row.key, { expectedHands });
     if (!domainLadder) return row;
@@ -246,7 +247,7 @@ export function SessionPlanCard({
     return { ...row, T: domainLadder.T, reps: domainLadder.reps, ladder: domainLadder, resolvedLoads: loads,
       L: loads?.L != null ? loads.L * loadMultiplier : row.L,
       R: loads?.R != null ? loads.R * loadMultiplier : row.R };
-  }), [curveRows, rec, history, grip, expectedHands, freshMap, threeExpPriors, loadMultiplier]);
+  }), n => fmtW(n, unit)), [curveRows, rec, history, grip, expectedHands, freshMap, threeExpPriors, loadMultiplier, unit]);
 
   const mixedPlan = useMemo(() => {
     if (rec?.boundaryProbe) return null;
@@ -641,6 +642,9 @@ export function SessionPlanCard({
               </div></>}
 
             </div>
+            {recommendedRow?.uncertainTimeHands?.length > 0 && !rec.peakTest && <p style={{ fontSize: 12, color: C.muted }}>
+              Starting load · hold time uncertain for {recommendedRow.uncertainTimeHands.join(" / ")}. The duration is a training goal, not a confirmed failure prediction.
+            </p>}
             <div style={{ marginTop: 12, fontSize: 16, lineHeight: 1.5, color: C.text, textAlign: "left" }}><b>{purpose.label}:</b> {purpose.text}</div>
             <div style={{ marginTop: 10, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
               <span style={{ color: recCfg.color, fontWeight: 700 }}>Why: </span>
@@ -882,7 +886,7 @@ export function SessionPlanCard({
                   <span style={{ fontSize: "var(--session-choice-duration-size, 18px)", fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                     {r.T}s
                   </span>
-                  {r.reps && <span style={{ display: "block" }}>{r.reps} holds · progression kept</span>}
+                  {r.reps && <span style={{ display: "block" }}>{r.reps} holds · {progressionLabel(r.ladder?.decision)}</span>}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
@@ -899,6 +903,9 @@ export function SessionPlanCard({
                   </div>
                 </div>
               </div>
+              {r.uncertainTimeHands?.length > 0 && <div style={{ fontSize: 12, color: C.muted, marginTop: 8 }}>
+                {r.uncertainTimeHands.join(" / ")}: Starting load · hold time uncertain. More fresh measurements are needed to distinguish these durations.
+              </div>}
               {deferred ? (
                 <div style={{ fontSize: "var(--session-choice-meta-size, 9px)", color: C.muted, marginTop: 4, fontStyle: "italic" }}>
                   {r.deferredReason}

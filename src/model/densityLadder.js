@@ -1,3 +1,4 @@
+import { firstTrainingSessionRows } from "./firstSessionEvidence.js";
 import { isPeakTestRep } from './peakForce.js';
 import { isCapacityEvidenceRep } from "./forceRecording.js";
 import { isMixedDomainRep } from './mixedDomain.js';
@@ -28,8 +29,9 @@ import { isMixedDomainRep } from './mixedDomain.js';
 // Integration contract (see SessionPlanCard): the ladder activates
 // when the user repeats a (grip, zone) they've trained before — it
 // pins the previous session's T and load and prescribes the rep
-// count. The curve fit keeps learning from every rep regardless, and
-// takes over again for new (grip, zone) combos or after resets.
+// count. Only the first session per grip/hand/day can change this ladder.
+// The curve learns from that session's opener; later reps judge the earned
+// rung. The curve supplies loads for new (grip, zone) combinations.
 //
 // July 2026 hardening (the 7/20 + 7/22 endurance misses were pins,
 // not engine output):
@@ -200,7 +202,7 @@ function latestSessionInZone(history, grip, zoneKey) {
 export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   const { expectedHands = null } = opts;
   if (!grip || !zoneKey) return null;
-  const sess = latestSessionInZone(history, grip, zoneKey);
+  const sess = latestSessionInZone(firstTrainingSessionRows(history), grip, zoneKey);
   if (!sess) return null;
 
   // Per-hand rep sequences from the session's FIRST set, sorted by rep

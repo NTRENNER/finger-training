@@ -25,6 +25,7 @@
 // guards every downstream consumer (fits, ladder, peak, prescription)
 // from garbage. Was 500 until June 2026, which let a 284 kg glitch
 // slip through; the strongest real pull on record is ~77 kg.
+import { firstTrainingSessionRows, isSeedArtifactRep } from "./firstSessionEvidence.js";
 import { isCapacityEvidenceRep, comparableCapacityHistory } from "./forceRecording.js";
 
 export const SANE_MAX_KG = 200;
@@ -82,7 +83,10 @@ export function isFirstSetRep(r) {
   return r?.set_num == null || Number(r.set_num) === 1;
 }
 
-// Reps suitable for CURVE FITTING — fresh + de-duplicated (May 2026).
+// Reps suitable for CURVE FITTING — first-session openers + de-duplicated.
+// Session order is established on all work before filtering quality/sets.
+// `includeLaterSessions` is only for descriptive/research outcomes and the
+// existing experimental trend candidates; live prescriptions use the default.
 //
 //  - rep_num === 1 and set_num === 1 (or null for legacy/manual rows):
 //    only the fresh first rep of the session. Later reps and optional
@@ -110,10 +114,10 @@ export function isFirstSetRep(r) {
 // `preserveAllBases` keeps a target-acquired rep that carries no
 // `acquisition_s` — it cannot be placed on the shared interval, so a fitted
 // series drops it while a display of every recorded pull keeps it.
-export function freshFitReps(history, { preserveAllBases = false } = {}) {
+export function freshFitReps(history, { preserveAllBases = false, includeLaterSessions = false } = {}) {
   const seen = new Set();
   const out = [];
-  for (const r of comparableCapacityHistory(history, { dropUnconvertible: !preserveAllBases })) {
+  for (const r of comparableCapacityHistory(includeLaterSessions ? history : firstTrainingSessionRows(history), { dropUnconvertible: !preserveAllBases })) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;
     if (!isFirstSetRep(r)) continue;
@@ -162,14 +166,7 @@ export function isOpenerRep(r) {
 // points), where one inflated point can dominate. Manual reps
 // (avg_force_kg null, load in manual_load_kg) are NOT flagged — null is
 // not a finite peak — so genuine manual endurance entries still count.
-export function isSeedArtifactRep(r) {
-  if (!r) return false;
-  if (r.force_recording?.version >= 1) return false;
-  const a = Number(r.avg_force_kg);
-  const p = Number(r.peak_force_kg);
-  return Number.isFinite(a) && Number.isFinite(p) && a > 0 && p > 0
-    && Math.abs(a - p) < 1e-6;
-}
+export { isSeedArtifactRep } from "./firstSessionEvidence.js";
 
 // A rep whose load was actually MEASURED (Tindeq average force present),
 // as opposed to a manual/spring entry where the recorded load is a nominal

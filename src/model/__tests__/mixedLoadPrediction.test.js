@@ -120,7 +120,7 @@ test('evaluation groups by independent workout, survives JSON, and excludes corr
   const third = saved(m, [first, second], rep(3, 10, 100));
   const history = JSON.parse(JSON.stringify([first, second, third]));
   const report = summarizeMixedPredictions(history);
-  expect(report.groups['v1|all']).toMatchObject({ sessions: 1, holds: 2, planned_scenario_sessions: 1 });
+  expect(report.groups['v2|all']).toMatchObject({ sessions: 1, holds: 2, planned_scenario_sessions: 1 });
   expect(report.excluded.opening_hold).toBe(1);
   history[0].actual_time_s = 10;
   expect(summarizeMixedPredictions(history)).toMatchObject({ groups: {}, excluded: {
@@ -131,7 +131,7 @@ test('a prediction of zero is scored as an error, not hidden as missing data', (
   const m = model(), first = saved(m, [], rep());
   const second = saved(m, [first], rep(2, 100, 20));
   const report = summarizeMixedPredictions([first, second]);
-  expect(report.groups['v1|all']).toMatchObject({ sessions: 1, holds: 1, conditional_mae_s: 20 });
+  expect(report.groups['v2|all']).toMatchObject({ sessions: 1, holds: 1, conditional_mae_s: 20 });
 });
 
 test('session-weighted evaluation does not let a workout with more holds dominate', () => {
@@ -145,9 +145,9 @@ test('session-weighted evaluation does not let a workout with more holds dominat
     return Math.abs(c.conditional.seconds - c.observed_s);
   };
   const report = summarizeMixedPredictions([first, second, third, otherFirst, otherSecond, second]);
-  expect(report.groups['v1|all'].sessions).toBe(2);
-  expect(report.groups['v1|all'].holds).toBe(3);
-  expect(report.groups['v1|all'].conditional_mae_s).toBeCloseTo(((error(second) + error(third)) / 2 + error(otherSecond)) / 2, 2);
+  expect(report.groups['v2|all'].sessions).toBe(2);
+  expect(report.groups['v2|all'].holds).toBe(3);
+  expect(report.groups['v2|all'].conditional_mae_s).toBeCloseTo(((error(second) + error(third)) / 2 + error(otherSecond)) / 2, 2);
 });
 
 test('a saved hold with unknown release cannot drive later Chaos Machine adjustments',()=>{
@@ -171,17 +171,17 @@ test('adaptive target attainment is separate from the forecast and weighted by d
   };
   const rows = [...make('2026-09-28', 'a', 80), ...make('2026-09-28', 'b', 80), ...make('2026-09-29', 'c', 100)];
   const report = summarizeMixedPredictions(rows);
-  const score = report.groups['v1|adaptive_targets|all'];
+  const score = report.groups['v2|adaptive_targets|all'];
   expect(score).toMatchObject({ days: 2, target_days: 2, target_mae_s: 20, target_bias_s: 20 });
-  expect(report.groups['v1|adaptive_targets|grip:Micro'].holds).toBe(3);
+  expect(report.groups['v2|adaptive_targets|grip:Micro'].holds).toBe(3);
   expect(score.advance_mae_s).not.toBe(score.target_mae_s);
   const fallback = rows.slice(0,2).map(r => JSON.parse(JSON.stringify(r)));
   fallback[1].force_recording.mixed_load_prediction.adjustment.status = 'unavailable';
-  expect(summarizeMixedPredictions(fallback).groups['v1|adaptive_targets|all'].target_days).toBe(0);
+  expect(summarizeMixedPredictions(fallback).groups['v2|adaptive_targets|all'].target_days).toBe(0);
   fallback[1].force_recording.mixed_load_prediction.adjustment.status = 'adjusted';
   fallback[1].force_recording.mixed_load_prediction.comparison.planned_scenario_matches = false;
-  expect(summarizeMixedPredictions(fallback).groups['v1|adaptive_targets|all'].advance_days).toBe(0);
-  expect(summarizeMixedPredictions(fallback).groups['v1|adaptive_targets|all'].target_days).toBe(0);
+  expect(summarizeMixedPredictions(fallback).groups['v2|adaptive_targets|all'].advance_days).toBe(0);
+  expect(summarizeMixedPredictions(fallback).groups['v2|adaptive_targets|all'].target_days).toBe(0);
 });
 
 test('JSONB key order is harmless; conflicting current or prefix copies cannot score', () => {
@@ -192,4 +192,17 @@ test('JSONB key order is harmless; conflicting current or prefix copies cannot s
   const changed = { ...first, avg_force_kg: 80 };
   expect(summarizeMixedPredictions([first, changed, second]).groups).toEqual({});
   expect(summarizeMixedPredictions([first, second, { ...second, actual_time_s: 800 }]).groups).toEqual({});
+});
+
+
+test('older frozen model versions remain separately reviewable', () => {
+  const m = model(), first = saved(m, [], rep());
+  const second = saved(m, [first], rep(2, 20, 50));
+  const current = summarizeMixedPredictions([first, second]);
+  expect(current.groups['v2|all'].holds).toBe(1);
+  const old = JSON.parse(JSON.stringify([first, second]));
+  old.forEach(r => { r.force_recording.mixed_load_prediction.version = 1; });
+  const legacy = summarizeMixedPredictions(old);
+  expect(legacy.groups['v1|all'].holds).toBe(1);
+  expect(legacy.groups['v2|all']).toBeUndefined();
 });

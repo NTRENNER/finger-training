@@ -187,3 +187,12 @@ Tests cover inverse/forward agreement, rounding, measured work and rest,
 readiness scaling, hand isolation, interruptions, unavailable estimates,
 within-hold stability despite history refresh, and serialized predictions.
 Live Tindeq validation and real-world accuracy assessment remain necessary.
+
+### Daily freshness boundary (September 30)
+
+Only the first hold per hand of the first training session for that grip and
+date can fit fresh capacity. A Chaos opener after an earlier same-grip workout
+is still fatigued context. A Chaos session earlier that day also prevents a
+later ordinary workout from resetting the fresh curve or ordinary 4–5–6
+ladder. Actual work and within-session adjustment remain recorded separately.
+New frozen mixed-load predictions use version 2 for the changed evidence basis.

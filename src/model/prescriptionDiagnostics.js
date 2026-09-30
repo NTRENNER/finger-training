@@ -1,3 +1,4 @@
+import { firstTrainingSessionRows } from './firstSessionEvidence.js';
 // Offline stage trace for the forward evaluator. No live recommendation caller.
 import { comparableCapacityHistory, isCapacityEvidenceRep } from './forceRecording.js';
 import { effectiveLoad, isFirstSetRep, isSeedArtifactRep } from './load.js';
@@ -11,7 +12,7 @@ import { fitThreeExpAmps, predForceThreeExp, THREE_EXP_LAMBDA_DEFAULT } from './
 export function tracePrescription(history, hand, grip, duration, options, result) {
   if (!['anchored-curve', 'unanchored-curve'].includes(result?.source)) return null;
   const { freshMap, threeExpPriors, referenceDate } = options;
-  const points = comparableCapacityHistory(history.filter(r => isFirstSetRep(r) && r.date < referenceDate))
+  const points = comparableCapacityHistory(firstTrainingSessionRows(history).filter(r => isFirstSetRep(r) && (r.rep_num == null || Number(r.rep_num) === 1) && r.date < referenceDate))
     .filter(r => isCapacityEvidenceRep(r) && freshMap.get(repKey(r))?.capacityEligible !== false
       && r.hand === hand && r.grip === grip && r.actual_time_s > 0 && effectiveLoad(r) > 0 && !isSeedArtifactRep(r));
   const fitOptions = { prior: threeExpPriors.get(grip), lambda: THREE_EXP_LAMBDA_DEFAULT / Math.max(1, points.length) };

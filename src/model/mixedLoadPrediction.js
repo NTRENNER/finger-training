@@ -7,7 +7,7 @@ import { PHYS_MODEL_DEFAULT } from './fatigue.js';
 import { computePersonalRecoveryTausForGrip } from './recoveryFit.js';
 import { isMixedDomainRep } from './mixedDomain.js';
 
-export const MIXED_PREDICTION_VERSION = 1;
+export const MIXED_PREDICTION_VERSION = 2;
 const KEYS = ['fast', 'medium', 'slow'];
 const finitePositive = x => Number.isFinite(x) && x > 0;
 const validLoad = x => finitePositive(x) && x < 200;

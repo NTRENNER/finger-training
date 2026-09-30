@@ -1,3 +1,4 @@
+import { firstTrainingSessionRows } from "./firstSessionEvidence.js";
 import { isCapacityEvidenceRep } from "./forceRecording.js";
 // ─────────────────────────────────────────────────────
 // ENDURANCE TAIL  (long-duration prescription ceiling)
@@ -97,7 +98,7 @@ export function fitEnduranceTail(points) {
 export function enduranceTailFit(history, hand, grip, referenceDate = null) {
   if (!history) return null;
   const pts = [];
-  for (const r of history) {
+  for (const r of firstTrainingSessionRows(history)) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     // Fresh efforts only — set 1, rep 1. An optional set's long hold is

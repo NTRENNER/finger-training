@@ -162,7 +162,7 @@ test('shadow forecasts persist for both hands while live history changes and loa
     const next = addReps.mock.calls.at(-1)[0][0].force_recording.mixed_load_prediction;
     expect(next.prior_rep_ids).toEqual([]);
     // Identical repeated rows are deduplicated by the shared fresh-history filter.
-    expect(next.model.source_sessions).toBe(7);
+    expect(next.model.source_sessions).toBe(6); // a second same-day session is not fresh evidence
   } finally { jest.useRealTimers(); }
 });
 

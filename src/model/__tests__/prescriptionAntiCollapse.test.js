@@ -19,7 +19,7 @@ const buildCurveHistory = () => {
       amps[0] * Math.exp(-T / tau[0]) +
       amps[1] * Math.exp(-T / tau[1]) +
       amps[2] * Math.exp(-T / tau[2]),
-    date: "2026-04-01", session_id: `s${i}`,
+    date: `2026-04-${String(i + 1).padStart(2, "0")}`, session_id: `s${i}`,
   }));
 };
 

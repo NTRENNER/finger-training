@@ -1,3 +1,4 @@
+import { firstTrainingSessionRows } from "./firstSessionEvidence.js";
 import { isValidPeakMeasurement } from './peakTest.js';
 import { compareSessionOrder, compareOpeningRep } from "./sessionOrder.js";
 import { isCapacityEvidenceRep, isNominalPrescriptionRep, comparableCapacityHistory } from "./forceRecording.js";
@@ -17,7 +18,7 @@ import { isCapacityEvidenceRep, isNominalPrescriptionRep, comparableCapacityHist
 // regardless of how it compares to the prescribed target_duration.
 // The legacy `failed` flag is retained on records for backward compat
 // (and may still be true/false in old data) but is NO LONGER USED to
-// gate fit logic — every rep contributes a data point. Old reps where
+// gate fit logic. Only eligible first-session openers fit fresh capacity. Old reps where
 // actual_time_s == target_duration are read pragmatically as failure
 // points at that duration (the user might have held longer if pushed,
 // but we accept the approximation rather than re-collecting history).
@@ -65,7 +66,7 @@ import { enduranceCeilingKg } from "./enduranceTail.js";
 // (prescription.js imports threeExp.js). effectiveLoad + loadedWeight
 // are used internally below; all four are re-exported just after so
 // existing call sites that import them from prescription.js keep working.
-import { sane, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep, isMeasuredLoadRep, isFirstSetRep } from "./load.js";
+import { freshFitReps, sane, effectiveLoad, loadedWeight, SANE_MAX_KG, isSeedArtifactRep, isMeasuredLoadRep, isFirstSetRep } from "./load.js";
 
 // ───────────────────────────────────────────────────────────────
 // LOAD EXTRACTION HELPERS
@@ -326,7 +327,7 @@ export function fitDoseK(history, opts = {}) {
 export function estimateRefWeight(history, hand, grip, targetDuration) {
   if (!history || history.length === 0) return null;
   const tol = targetDuration * 0.40;
-  const matches = history.filter(r => isCapacityEvidenceRep(r) &&
+  const matches = freshFitReps(history).filter(r => isCapacityEvidenceRep(r) &&
     r.hand === hand &&
     (!grip || r.grip === grip) &&
     r.actual_time_s > 0 &&
@@ -480,9 +481,10 @@ export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
     : Date.now();
   const cutoff = ymdLocal(new Date(refMs - PEAK_CAP_LOOKBACK_DAYS * 86400 * 1000));
   let best = null;
-  for (const r of history) {
+  for (const r of firstTrainingSessionRows(history)) {
     if (!(isCapacityEvidenceRep(r) || isValidPeakMeasurement(r))) continue;
     if (!isFirstSetRep(r)) continue;
+    if (!isValidPeakMeasurement(r) && Number(r.rep_num ?? 1) !== 1) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if ((r.date || "") < cutoff) continue;
     if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
@@ -503,9 +505,10 @@ export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
 export function historicalBestPeakKg(history, hand, grip, referenceDate = null) {
   if (!history) return null;
   let best = null;
-  for (const r of history) {
+  for (const r of firstTrainingSessionRows(history)) {
     if (!(isCapacityEvidenceRep(r) || isValidPeakMeasurement(r))) continue;
     if (!isFirstSetRep(r)) continue;
+    if (!isValidPeakMeasurement(r) && Number(r.rep_num ?? 1) !== 1) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
     if (isSeedArtifactRep(r)) continue;
@@ -568,7 +571,7 @@ export function demonstratedCapacityKg(
   const refDay = ymdDay(referenceDate || ymdLocal());
   const candidates = [];
   let best = null;
-  for (const r of history) {
+  for (const r of firstTrainingSessionRows(history)) {
     if (!isCapacityEvidenceRep(r)) continue;
     if (!r || r.hand !== hand || r.grip !== grip) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;        // fresh efforts only
@@ -661,6 +664,7 @@ export function demonstratedCapacityKg(
 // whether the endurance ceiling (not the peak cap) is what bound v.
 export function loadBounds(history, hand, grip, targetDuration, opts = {}) {
   const { referenceDate = null, enduranceCeiling = true } = opts;
+  history = firstTrainingSessionRows(history || []);
   const peakMeasurement = bestAvailablePeakMeasurement(history, hand, grip, referenceDate);
   const bestPeakKg = peakMeasurement?.kg ?? null;
   const peakCapKg = bestPeakKg != null
@@ -729,10 +733,10 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // recentBestPeakKg already guarded this; the anchor and fit did not,
   // so an untruncated caller would have anchored an old session's
   // reconstruction on reps from its own future.
-  // Optional sets describe volume tolerance, not fresh capacity. Keep every
-  // prescription input on set 1 so an intentionally fatigued set 2-5 can
-  // never pull down the next workout's opening load.
-  const capacityHistory = comparableCapacityHistory(history.filter(r =>
+  // Establish daily session order before filtering quality or set number.
+  // Only set 1 of the first session per grip/hand can supply fresh capacity;
+  // below, only its opening hold enters the fit and anchor.
+  const capacityHistory = comparableCapacityHistory(firstTrainingSessionRows(history).filter(r =>
     isFirstSetRep(r) && (!referenceDate || (r.date && r.date < referenceDate))
   ));
   const sessionRep1 = new Map();
@@ -819,6 +823,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   // mixes and we fall through to the cold-start paths.
   const fitMap = freshMap || buildFreshLoadMap(history);
   const points = capacityHistory.filter(r => isCapacityEvidenceRep(r)
+    && (r.rep_num == null || Number(r.rep_num) === 1)
     && fitMap.get(repKey(r))?.capacityEligible !== false &&
     r.hand === hand && r.grip === grip
     && r.actual_time_s > 0 && effectiveLoad(r) > 0

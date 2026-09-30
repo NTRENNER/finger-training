@@ -49,7 +49,7 @@ export function fitEstablishedTrend(history, hand, grip, referenceDate, { sessio
   // Chart callers validate/deduplicate once for the entire series. The date
   // cutoff still applies here on every fit.
   const clean = (prepared ? history : prepareEvaluationRows(history).rows).filter(r => r.date < referenceDate);
-  const eligible = freshFitReps(clean).filter(r => r.grip === grip && measured(r));
+  const eligible = freshFitReps(clean, { includeLaterSessions: true }).filter(r => r.grip === grip && measured(r));
   const all = sessionWindow == null ? eligible : selectRecentSessions(eligible, sessionWindow);
   const own = all.filter(r => r.hand === hand);
   const days = new Set(own.map(r => r.date)).size;

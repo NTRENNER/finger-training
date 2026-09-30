@@ -28,7 +28,7 @@ describe("demonstrated-capacity floor ignores manual/spring reps", () => {
   test("a manual 258s entry does not pin the 160s floor; the measured hold does", () => {
     const h = [
       rep({ actual_time_s: 258, avg_force_kg: null, manual_load_kg: 9.1, session_id: "spring" }),
-      rep({ actual_time_s: 188, avg_force_kg: 5.5, session_id: "tindeq" }),
+      rep({ actual_time_s: 188, avg_force_kg: 5.5, date: day(4), session_id: "tindeq" }),
     ];
     expect(demonstratedCapacityKg(h, "L", "Micro", 160)).toBeCloseTo(5.5, 5);
   });

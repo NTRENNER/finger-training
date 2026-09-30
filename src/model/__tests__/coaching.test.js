@@ -123,6 +123,8 @@ describe("coachingRecommendationContinuous", () => {
                        + trueAmps[1]*Math.exp(-T/tau[1])
                        + trueAmps[2]*Math.exp(-T/tau[2]);
 
+  // Legacy mathematical samples without session identity; ordering behavior
+  // is tested with distinct sessions in firstSessionEvidence.test.js.
   const buildRep = (hand, T, F, daysAgo = 0) => ({
     id: `r-${hand}-${T}-${daysAgo}`,
     hand, grip: "Crusher",
@@ -131,7 +133,7 @@ describe("coachingRecommendationContinuous", () => {
     rep_num: 1,
     // Match the engine's local training date, including evenings after UTC midnight.
     date: ymdLocal(new Date(Date.now() - daysAgo * 86400000)),
-    session_id: `s-${daysAgo}-${T}`,
+    session_id: undefined,
   });
 
   test("returns null with no history", () => {
@@ -188,19 +190,20 @@ describe("coachingRecommendationContinuous", () => {
       buildRep("L", 160, F_curve(160), d),
       buildRep("L", 180, F_curve(180), d),
     ];
-    const thinHistory = [...coverage(), buildRep("L", 90, F_curve(90) * 0.5, d)];
-    const denseHistory = [
+    const independent = rows => rows.map((r, i) => ({ ...r, session_id: `day-${i}`, date: ymdLocal(new Date(Date.now() - (8 + i) * 86400000)) }));
+    const thinHistory = independent([...coverage(), buildRep("L", 90, F_curve(90) * 0.5, d)]);
+    const denseHistory = independent([
       ...coverage(),
       buildRep("L", 88, F_curve(88) * 0.5, d),
       buildRep("L", 89, F_curve(89) * 0.5, d),
       buildRep("L", 90, F_curve(90) * 0.5, d),
       buildRep("L", 91, F_curve(91) * 0.5, d),
       buildRep("L", 92, F_curve(92) * 0.5, d),
-    ];
+    ]);
     const recThin = coachingRecommendationContinuous(
-      thinHistory, "Crusher", { threeExpPriors: buildThreeExpPriors(thinHistory), today });
+      thinHistory, "Crusher", { threeExpPriors: buildThreeExpPriors(thinHistory), today, tMin: 90, tMax: 90 });
     const recDense = coachingRecommendationContinuous(
-      denseHistory, "Crusher", { threeExpPriors: buildThreeExpPriors(denseHistory), today });
+      denseHistory, "Crusher", { threeExpPriors: buildThreeExpPriors(denseHistory), today, tMin: 90, tMax: 90 });
     expect(recThin).not.toBeNull();
     expect(recDense).not.toBeNull();
     expect(recDense.confidence).toBeGreaterThan(recThin.confidence);
@@ -560,7 +563,7 @@ describe("coachingRecommendationContinuous", () => {
       avg_force_kg: F,
       rep_num: 1,
       date: new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10),
-      session_id: `s-${grip}-${daysAgo}-${T}`,
+      session_id: undefined,
     });
     // History: Crusher trained across all zones recently (none stale on
     // Crusher), AND Micro trained everywhere EXCEPT endurance (also 50
@@ -615,7 +618,7 @@ describe("overloadFactor", () => {
     const F = (T) => 30*Math.exp(-T/10) + 12*Math.exp(-T/30) + 6*Math.exp(-T/180);
     const mk = (T, d) => ({ id:`o-${T}-${d}`, hand:"L", grip:"Crusher",
       target_duration:T, actual_time_s:T, avg_force_kg:F(T), rep_num:1,
-      date:new Date(Date.now()-d*86400000).toISOString().slice(0,10), session_id:`o-${d}-${T}` });
+      date:new Date(Date.now()-d*86400000).toISOString().slice(0,10), session_id: undefined });
     // Force a short max-strength pick: only max_strength is never.
     const hist = [mk(30,6), mk(70,6), mk(110,6), mk(160,6), mk(220,6)];
     const priors = buildThreeExpPriors(hist);
@@ -655,7 +658,7 @@ describe("LOO de-biasing + weaker-hand boost (engine)", () => {
   const F = (T) => 30*Math.exp(-T/10) + 12*Math.exp(-T/30) + 6*Math.exp(-T/180);
   const mk = (hand, T, Fv, d=8) => ({ id:`x-${hand}-${T}-${d}`, hand, grip:"Crusher",
     target_duration:T, actual_time_s:T, avg_force_kg:Fv, rep_num:1,
-    date:new Date(Date.now()-d*86400000).toISOString().slice(0,10), session_id:`x-${d}-${T}-${hand}` });
+    date:new Date(Date.now()-d*86400000).toISOString().slice(0,10), session_id: undefined });
 
   test("weaker hand is favored when both hands have the same staleness", () => {
     // Both hands sampled across EVERY zone (no never-zone, so the 3×
@@ -710,8 +713,8 @@ describe("coaching fit vs chart (buildGripEstimates) fit consistency", () => {
     // All fresh rep_num===1 reps, spread over dates and durations.
     const hist = [];
     let i = 0;
-    for (const d of [20, 16, 12, 8, 4]) {
-      for (const T of [5, 15, 30, 60, 120, 200]) hist.push(mk(T, d, i++));
+    for (const d of [35, 28, 21, 14, 7]) {
+      for (const [offset, T] of [5, 15, 30, 60, 120, 200].entries()) hist.push(mk(T, d - (5 - offset), i++));
     }
     const priors = buildThreeExpPriors(hist);
 
@@ -760,7 +763,7 @@ describe("shortEndFailureStaleness / freshTest advisory", () => {
     grip: "Crusher", hand: "L", rep_num: 1,
     target_duration: T, actual_time_s: T,
     avg_force_kg: 30, failed,
-    date: daysAgoStr(daysAgo), session_id: `s${T}-${daysAgo}`,
+    date: daysAgoStr(daysAgo), session_id: undefined,
   });
 
   test("never tested short → recommended, null staleDays", () => {
@@ -991,7 +994,7 @@ describe("cold-start seeding", () => {
 test('established history stays in five routine domains even when Max is old or missing', () => {
   const today = new Date('2026-09-24T12:00:00');
   const rows = [30, 70, 115, 160, 220].flatMap((T, i) => ['L', 'R'].map(hand => ({
-    id: `${hand}-${i}`, session_id: `s-${i}`, date: '2026-09-20', hand, grip: 'Crusher',
+    id: `${hand}-${i}`, session_id: `s-${i}`, date: `2026-09-${String(20-i).padStart(2,'0')}`, hand, grip: 'Crusher',
     rep_num: 1, set_num: 1, actual_time_s: T, target_duration: T,
     avg_force_kg: 30 * Math.exp(-T / 30) + 20 * Math.exp(-T / 480),
   })));

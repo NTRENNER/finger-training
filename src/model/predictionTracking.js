@@ -11,7 +11,7 @@ import { ymdLocal } from '../util.js';
 import { buildAdaptiveShadow, adaptiveShadowForce, adaptiveShadowTime,
   ADAPTIVE_PREDICTION_EXPERIMENT } from './adaptivePrediction.js';
 
-export const PREDICTION_EXPERIMENT = 'fresh-openers-v2-shared-history';
+export const PREDICTION_EXPERIMENT = 'first-session-openers-v3';
 export const REVIEW_DAYS = 10;
 const KEY = 'prediction_check';
 const positive = n => Number.isFinite(n) && n > 0;

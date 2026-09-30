@@ -44,7 +44,7 @@ function robustFit(points,options={},robust=true) {
 export function fitContextualTrend(history,hand,grip,referenceDate,{prepared=false,robust=true}={}) {
   const clean=(prepared?history:prepareEvaluationRows(history).rows).filter(r=>r.date<referenceDate);
   const context=trainingDayContext(clean); // all grips, before filtering capacity evidence
-  const all=freshFitReps(clean).filter(r=>r.grip===grip && sane(r.avg_force_kg)!=null
+  const all=freshFitReps(clean, { includeLaterSessions: true }).filter(r=>r.grip===grip && sane(r.avg_force_kg)!=null
     && r.actual_time_s>0 && r.actual_time_s<=600
     && ['legacy_measured','measured_force'].includes(loadProvenance(r)));
   const own=all.filter(r=>r.hand===hand),days=new Set(own.map(r=>r.date)).size;

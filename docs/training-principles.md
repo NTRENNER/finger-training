@@ -105,3 +105,37 @@ A range spanning zero does not establish an improvement. Historical comparisons
 are not independent validation. Descriptive charts, exposure summaries, and
 retrospective experiments stay outside the prescription dependency graph; a
 transitive import-boundary test enforces this separation.
+
+## Fresh-capacity evidence and daily session order
+
+The live curve, its prior, amplitude anchor, endurance bounds, fallback load,
+and Chaos source curve use the valid opening hold of set 1 from the first
+training session for each local date, grip and hand. A later rep is never
+promoted when the opener is invalid. Establish order before filtering failed
+recordings, domains, optional sets or Chaos holds: those attempts still count
+as preceding work. Different grips and the other hand keep their own scope.
+Explicit peak tests and historical brief max-intent measurements remain
+separate upper-bound evidence; they do not consume the training opener.
+
+Only that eligible first session's first set can advance or recalibrate the
+4–5–6 ladder. Its later reps still determine the earned rung. Later sets and
+sessions remain recorded for workload, recovery and short-term performance.
+Manual selection of an alternate domain remains available.
+
+Use saved session start or measured start times, never upload order or IDs.
+If distinguishable sessions share a date but their order is missing or tied,
+exclude that ambiguous day's sessions from fresh fitting. A lone legacy
+session remains usable with `legacy_single_session` provenance; without
+session identity, multiple historical workouts cannot be reliably separated.
+Never rewrite old workouts or invent missing order.
+
+Independent progression targets, bounds or display rounding can still yield
+equal or reversed loads across durations. Mark both affected hand/domain
+values as starting loads with uncertain hold times. Do not invent an arbitrary
+numeric separation or claim two distinct predicted failure times. Explain
+recalibration, repetition and advancement separately on the tiles.
+
+New live-model research snapshots use `first-session-openers-v3`; new Chaos
+predictions use version 2 so comparisons do not pool them with older fits.
+Existing descriptive/context-weighted trend candidates keep their explicit
+later-session policy for comparison; they do not supply live prescriptions.

@@ -70,8 +70,8 @@ test('adaptive results are reported separately from shadow-only forecasts and cu
   next.force_recording.mixed_load_prediction=completeMixedPrediction(prepared,[first],next);
   expect(JSON.stringify(prepared)).toBe(frozen);
   const report=summarizeMixedPredictions([first,next]);
-  expect(report.groups['v1|adaptive_targets|all']).toMatchObject({sessions:1,holds:1});
-  expect(report.groups['v1|all']).toBeUndefined();
+  expect(report.groups['v2|adaptive_targets|all']).toMatchObject({sessions:1,holds:1});
+  expect(report.groups['v2|all']).toBeUndefined();
 });
 
 

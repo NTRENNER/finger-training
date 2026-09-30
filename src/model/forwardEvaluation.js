@@ -90,7 +90,7 @@ export function evaluateForward(input, { minPriorDays = 5, diagnostics = false }
     const priors = buildThreeExpPriors(prior);
     const fresh = freshFitReps(prior).filter(measuredOpener);
     let freshMap, candidateMap;
-    for (const raw of freshFitReps(today.map(r => ({ ...r, evaluationOriginal: r })), { preserveAllBases: true })) {
+    for (const raw of freshFitReps(today.map(r => ({ ...r, evaluationOriginal: r })), { preserveAllBases: true, includeLaterSessions: true })) {
       if (!measuredOpener(raw)) { count(forceExcluded, 'no_measured_failure_force'); continue; }
       const past = fresh.filter(r => r.hand === raw.hand && r.grip === raw.grip);
       if (dayCount(past) < minPriorDays) { count(forceExcluded, 'insufficient_prior_days'); continue; }
