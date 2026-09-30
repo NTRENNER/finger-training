@@ -1,4 +1,5 @@
-import { mixedReadinessModel, prepareAdaptiveMixedPrediction } from '../mixedLoadPrescription.js';
+import { makeMixedDomainPlan, MIXED_DOMAIN_ZONES } from '../mixedDomain.js';
+import { mixedReadinessModel, prepareAdaptiveMixedPrediction, mixedPlanReadiness, mixedLoadProtocolFields } from '../mixedLoadPrescription.js';
 import { buildMixedLoadModel, mixedHoldTime, mixedStateBefore, summarizeMixedPredictions, completeMixedPrediction } from '../mixedLoadPrediction.js';
 import { predForceThreeExp } from '../threeExp.js';
 
@@ -71,4 +72,41 @@ test('adaptive results are reported separately from shadow-only forecasts and cu
   const report=summarizeMixedPredictions([first,next]);
   expect(report.groups['v1|adaptive_targets|all']).toMatchObject({sessions:1,holds:1});
   expect(report.groups['v1|all']).toBeUndefined();
+});
+
+
+test('plan readiness is per hand and per duration, including partial coverage', () => {
+  const rows = MIXED_DOMAIN_ZONES.map(key => ({ key, L: 20, R: 20 }));
+  const plan = makeMixedDomainPlan(rows, 'power', ['L', 'R']);
+  const partialHistory = history.filter(r => r.actual_time_s <= 160);
+  const readiness = mixedPlanReadiness(partialHistory, 'Micro', ['L', 'R'], plan, '2026-09-23');
+  expect(readiness.status).toBe('partial');
+  expect(readiness.byHand.L.map(r => r.status)).toEqual(['opening_hold', 'ready', 'ready', 'ready', 'unavailable']);
+  expect(readiness.byHand.L[4].reason).toBe('outside_measured_duration_range');
+  expect(readiness.byHand.R[1].reason).toBe('insufficient_fresh_history');
+  const complete = [...history, ...history.map(r => ({ ...r, id: r.id+'R', hand: 'R' }))];
+  expect(mixedPlanReadiness(complete, 'Micro', ['L','R'], plan, '2026-09-23').status).toBe('ready');
+  expect(mixedPlanReadiness(history.slice(0, 4), 'Micro', ['L'], plan, '2026-09-23').status).toBe('unavailable');
+});
+
+test('runtime and preview use the same duration boundary and preserve fallback loads', () => {
+  const m = buildMixedLoadModel(history.filter(r => r.actual_time_s <= 160), 'Micro', 'L', '2026-09-23');
+  expect(m.status).toBe('ready');
+  const result = prepareAdaptiveMixedPrediction(m, [rep(1)], { baselineKg: 15, targetTime: 220, plannedRestS: 30 });
+  expect(result.load_kg).toBe(15);
+  expect(result.adjustment).toMatchObject({ status: 'unavailable', reason: 'outside_measured_duration_range' });
+});
+
+test('metadata records requested policy separately from actual adjustment and fallback', () => {
+  expect(mixedLoadProtocolFields(true, { status: 'opening_hold' }, 1)).toMatchObject({
+    requested_load_mode: 'adaptive_targets', load_mode: 'opening_reference', duration_reference: 'fresh_load_reference',
+  });
+  for (const status of ['adjusted', 'capped_at_original']) {
+    expect(mixedLoadProtocolFields(true, { status }, 2)).toMatchObject({ load_mode: 'adaptive_targets', adjustment_status: status });
+  }
+  expect(mixedLoadProtocolFields(true, { status: 'unavailable', reason: 'insufficient_fresh_history' }, 2)).toMatchObject({
+    requested_load_mode: 'adaptive_targets', load_mode: 'reference_fallback', duration_reference: 'fresh_load_reference',
+    adjustment_status: 'unavailable', adjustment_reason: 'insufficient_fresh_history',
+  });
+  expect(mixedLoadProtocolFields(false, null, 2)).toMatchObject({ load_mode: 'fixed_references', adjustment_status: 'not_requested' });
 });

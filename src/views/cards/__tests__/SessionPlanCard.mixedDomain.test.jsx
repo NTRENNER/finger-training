@@ -33,14 +33,15 @@ test('missing domain estimates disable the beta', () => {
   expect(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' })).toBeDisabled();
 });
 
-test('adaptive loads are automatic, show total target time and remain enabled for another grip', () => {
+test('adaptive loads are automatic, disclose missing readiness before starting and remain enabled for another grip', () => {
   const apply = jest.fn();
   const view = render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
   fireEvent.click(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' }));
   expect(screen.queryByRole('checkbox', { name:'Adjust loads to target times' })).not.toBeInTheDocument();
   expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.adjustLoads).toBe(true);
-  expect(screen.getByText(/About 23:50 for both hands/)).toBeInTheDocument();
-  expect(screen.getAllByText('Starting reference · adjusted before this hold')).toHaveLength(8);
+  expect(screen.queryByText(/23:50/)).not.toBeInTheDocument();
+  expect(screen.getByText(/More measured history is needed for automatic adjustments/)).toBeInTheDocument();
+  expect(screen.getAllByText('Reference target · adjustment unavailable')).toHaveLength(8);
   view.rerender(<SessionPlanCard history={[]} grip="Crusher" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
   fireEvent.click(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' }));
   expect(screen.queryByRole('checkbox', { name:'Adjust loads to target times' })).not.toBeInTheDocument();

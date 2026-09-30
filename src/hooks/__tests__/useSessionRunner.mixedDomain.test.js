@@ -192,3 +192,20 @@ test('new domain-cycle plans run the frozen sequence on both hands and save its 
   }
   expect(saved.every(r => r.force_recording.session_protocol.version === 2)).toBe(true);
 });
+
+
+test('adaptive sessions with no measured history persist opening and fallback truthfully', () => {
+  const addReps = jest.fn();
+  const hook = renderHook(() => useSessionRunner({ history: [], addReps, tindeqConnected: true }));
+  act(() => hook.result.current.startSession({ grip: 'Micro', hand: 'L',
+    mixedDomainPlan: makeMixedDomainPlan(rows, 'power', ['L']) }));
+  complete(hook);
+  act(() => hook.result.current.handleRestDone());
+  complete(hook);
+  const [first, second] = addReps.mock.calls.flatMap(c => c[0]);
+  expect(first.force_recording.session_protocol).toMatchObject({ load_mode: 'opening_reference', requested_load_mode: 'adaptive_targets' });
+  expect(second.force_recording.session_protocol).toMatchObject({ load_mode: 'reference_fallback',
+    duration_reference: 'fresh_load_reference', adjustment_reason: 'insufficient_fresh_history' });
+  expect(second.force_recording.mixed_load_prediction.adjustment.status).toBe('unavailable');
+  expect(second.prescribed_load_kg).toBe(rows[1].L);
+});

@@ -7,15 +7,30 @@ export function ContextualTrendResults({report,history,unit}) {
   const grips=useMemo(()=>[...new Set(history.map(r=>r.grip))].filter(Boolean),[history]);
   const fmt=v=>v==null?'—':`${(v*(unit==='lbs'?2.2046226218:1)).toFixed(2)} ${unit}`;
   const table=(scores)=><div style={{overflowX:'auto'}}><table style={{width:'100%',minWidth:540,textAlign:'left',fontSize:14}}>
-    <thead><tr><th>Trend model</th><th>Typical error</th><th>Larger misses</th><th>Bias</th></tr></thead>
+    <thead><tr><th>Trend model</th><th>Typical error</th><th>Larger misses</th><th>Bias</th><th>Training days</th><th>Holds</th></tr></thead>
     <tbody>{Object.entries(names).map(([key,name])=><tr key={key}><th scope="row" style={{fontWeight:400,padding:'8px 8px 8px 0'}}>{name}</th>
-      <td>{fmt(scores[key]?.mae)}</td><td>{fmt(scores[key]?.rmse)}</td><td>{fmt(scores[key]?.bias)}</td></tr>)}</tbody>
+      <td>{fmt(scores[key]?.mae)}</td><td>{fmt(scores[key]?.rmse)}</td><td>{fmt(scores[key]?.bias)}</td><td>{scores[key]?.trainingDays ?? 0}</td><td>{scores[key]?.observations ?? 0}</td></tr>)}</tbody>
   </table></div>;
   return <details style={{marginTop:18}}><summary style={{cursor:'pointer',fontWeight:700}}>Does earlier training explain trend changes?</summary>
     <p style={{color:C.muted,lineHeight:1.5}}>A first rep can follow another tiring workout. The current chart reduces the influence of later sessions, including work on another grip. The experimental alternative also limits the influence of unusually high or low results. Neither assumes how much fatigue was present.</p>
     <p>{report.all.original.trainingDays} training days · {report.all.original.observations} opening holds</p>
     {table(report.all)}
     <p style={{color:C.muted,fontSize:13}}>Lower error is better. These are predictions from strictly earlier dates, tested at each recorded hold duration. A smoother chart alone does not establish better accuracy. Current recommendations remain unchanged.</p>
+    <p style={{color:C.muted,fontSize:13}}>Error differences below compare each alternative with the previous trend. Negative means lower error. The 95% uncertainty range resamples whole training days, keeping same-day holds together. This historical comparison is not independent validation.</p>
+    {Object.entries(names).filter(([key])=>key!=='original').map(([key,name])=>{
+      const result=report.pairedDifferences?.[key], interval=result?.interval95;
+      return <div key={key} style={{marginBottom:12}}>
+        <strong>{name}</strong>
+        <div>{result?.days ?? 0} paired training days · Error difference: {fmt(result?.deltaMae)}</div>
+        {interval ? <>
+          <div>95% uncertainty range: {fmt(interval[0])} to {fmt(interval[1])}</div>
+          <div style={{color:C.muted}}>{interval[0]<=0 && interval[1]>=0
+            ? 'The range includes zero: a reliable improvement has not been established.'
+            : interval[1]<0 ? 'Lower error in this historical comparison; independent validation is still needed.'
+              : 'Higher error in this historical comparison.'}</div>
+        </> : <div style={{color:C.muted}}>More paired training days are needed to estimate uncertainty.</div>}
+      </div>;
+    })}
     {Object.entries(report.byGrip).map(([grip,scores])=><details key={grip}><summary>{grip}</summary>{table(scores)}</details>)}
     {Object.entries(report.byContext).map(([context,scores])=><details key={context}><summary>{context==='after_training'?'After earlier training':context==='first_recorded'?'First recorded session of the day':'Session order unknown'} · {scores.original.trainingDays} days</summary>{table(scores)}</details>)}
     <label style={{display:'flex',gap:8,alignItems:'center',minHeight:44,marginTop:12}}><input type="checkbox" checked={preview} onChange={e=>setPreview(e.target.checked)}/>Compare trend charts</label>

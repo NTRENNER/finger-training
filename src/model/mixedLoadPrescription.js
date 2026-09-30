@@ -1,5 +1,40 @@
 import { predForceThreeExp } from './threeExp.js';
-import { mixedStateBefore, prepareMixedPrediction } from './mixedLoadPrediction.js';
+import { buildMixedLoadModel, mixedStateBefore, prepareMixedPrediction } from './mixedLoadPrediction.js';
+
+// Shared by setup and the runner: a fitted model alone does not establish
+// support for every duration. Setup cannot predict future recording quality.
+export function mixedTargetReadiness(model, targetTime) {
+  if (model?.status !== 'ready') return { status: 'unavailable', reason: model?.reason || 'insufficient_fresh_history' };
+  if (!Number.isFinite(targetTime) || targetTime < model.min_duration_s || targetTime > model.max_duration_s) {
+    return { status: 'unavailable', reason: 'outside_measured_duration_range' };
+  }
+  return { status: 'ready' };
+}
+
+export function mixedPlanReadiness(history, grip, hands, plan, asOf) {
+  const byHand = Object.fromEntries(hands.map(hand => {
+    const model = buildMixedLoadModel(history, grip, hand, asOf);
+    return [hand, plan.steps.map((step, i) => i === 0 ? { status: 'opening_hold' }
+      : mixedTargetReadiness(model, step.targetTime))];
+  }));
+  const later = Object.values(byHand).flat().filter(s => s.status !== 'opening_hold');
+  const ready = later.filter(s => s.status === 'ready').length;
+  return { byHand, status: ready === later.length ? 'ready' : ready ? 'partial' : 'unavailable' };
+}
+
+// Keep requested policy separate from the actual decision for this hold.
+export function mixedLoadProtocolFields(requested, adjustment, position) {
+  const status = !requested ? 'not_requested' : position === 1 ? 'opening_hold' : adjustment?.status || 'unavailable';
+  const applied = ['adjusted', 'capped_at_original'].includes(status);
+  return {
+    requested_load_mode: requested ? 'adaptive_targets' : 'fixed_references',
+    load_mode: !requested ? 'fixed_references' : position === 1 ? 'opening_reference'
+      : applied ? 'adaptive_targets' : 'reference_fallback',
+    duration_reference: applied ? 'approximate_hold_target' : 'fresh_load_reference',
+    adjustment_status: status,
+    ...(requested && position > 1 && !applied ? { adjustment_reason: adjustment?.reason || 'unavailable' } : {}),
+  };
+}
 
 // Experimental prescription layer over the frozen mixed-load forecast.
 // Apply the user's elected readiness reduction once to the model as well as
@@ -18,8 +53,7 @@ export function prepareAdaptiveMixedPrediction(model, prefix, { baselineKg, targ
   if (prefix.length) {
     const before = mixedStateBefore(model, prefix, plannedRestS);
     let reason = before.status !== 'ready' ? before.reason : null;
-    if (!reason && (!Number.isFinite(targetTime) || targetTime < model.min_duration_s
-      || targetTime > model.max_duration_s)) reason = 'outside_measured_duration_range';
+    if (!reason) reason = mixedTargetReadiness(model, targetTime).reason;
     if (!reason) {
       const availability = before.state.reduce((sum, v, i) => sum + v * model.weights[i], 0);
       const candidate = availability * predForceThreeExp(model.amps, targetTime, model.curve_taus);

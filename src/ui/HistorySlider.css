@@ -9,3 +9,7 @@
 .history-slider input:focus-visible{outline:2px solid var(--history-color);outline-offset:2px;border-radius:8px}
 .history-slider input:disabled::-webkit-slider-thumb{cursor:default}
 .history-slider input:disabled::-moz-range-thumb{cursor:default}
+
+.history-slider-range{touch-action:pan-y;cursor:ew-resize}
+.history-slider-range input::-webkit-slider-thumb{pointer-events:none}
+.history-slider-range input::-moz-range-thumb{pointer-events:none}

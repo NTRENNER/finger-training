@@ -3,7 +3,7 @@ import {ResponsiveContainer,ComposedChart,Line,Bar,XAxis,YAxis,Tooltip,Cartesian
 import {Card} from '../../ui/components.js';
 import {C} from '../../ui/theme.js';
 import {GRIP_COLORS} from '../../ui/grip-colors.js';
-import {DateRangeSlider} from '../../ui/DateRangeSlider.jsx';
+import {DateRangeSlider,normalizeHistoryWindow} from '../../ui/DateRangeSlider.jsx';
 import {buildPerformanceTrends,DEFAULT_PERFORMANCE_TREND_MODEL} from '../../model/performanceTrends.js';
 import {suggestCookedFromClimbs} from '../../model/climbingFatigue.js';
 const fmtDate = ts=>new Date(ts).toISOString().slice(5,10);
@@ -12,9 +12,9 @@ export function PerformanceTrendCards({history,grips,handView='pooled',activitie
   const rows=useMemo(()=>buildPerformanceTrends(history,grips,handView,{model:trendModel}),[history,grips,handView,trendModel]);
   const [window,setWindow]=useState(null);
   const dates=rows.map(r=>r.date);
-  const start=window?Math.max(0,dates.findIndex(d=>d>=window[0])):0;
+  const first=window?Math.max(0,dates.findIndex(d=>d>=window[0])):0;
   const last=window?dates.findLastIndex(d=>d<=window[1]):dates.length-1;
-  const end=Math.max(start,last);
+  const [start,end]=normalizeHistoryWindow(first,Math.max(first,last),dates.length-1);
   const visible=useMemo(()=>rows.slice(start,end+1).map(r=>({...r,
     climbLoad:suggestCookedFromClimbs(activities,r.date)?.cooked??null})),[rows,start,end,activities]);
   const laterHolds=visible.reduce((sum,r)=>sum+grips.reduce((n,g)=>n+(r[`${g}_laterHolds`]||0),0),0);
@@ -37,7 +37,7 @@ export function PerformanceTrendCards({history,grips,handView='pooled',activitie
   return <section aria-label="Performance trends">
     <Card style={{marginBottom:16}}>
       <h3 style={{marginTop:0}}>Long-term performance trend</h3>
-      <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>{grips.map(g=><span key={g} style={{color:GRIP_COLORS[g]||C.blue}}>━ {g}</span>)}<span style={{color:C.muted}}>▮ Climbing load</span></div>
+      <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>{grips.map(g=><span key={g} style={{color:GRIP_COLORS[g]||C.blue}}>━ {g}</span>)}<span style={{color:C.orange}}>▮ Climbing load (0–10)</span></div>
       <p style={{color:C.muted,lineHeight:1.5}}>Estimated whole-curve capacity, relative to your first established estimate. Each point uses the training recorded by that date.</p>
       {trendModel!=='original'&&<p style={{color:C.muted,fontSize:13}}>Sessions after earlier finger training that day receive less weight, including training on another grip.</p>}
       {trendModel==='contextRobust'&&<p style={{color:C.yellow}}>Research preview: unusually high and low results also have reduced influence. This additional smoothing is experimental.</p>}
@@ -46,14 +46,14 @@ export function PerformanceTrendCards({history,grips,handView='pooled',activitie
       <DateRangeSlider dates={dates} start={start} end={end} onChange={(a,b)=>setWindow([dates[a],dates[b]])}/>
       <details style={{marginTop:16}}><summary style={{cursor:'pointer',padding:'12px 0'}}>Chart details</summary>
         <p style={{color:C.muted,lineHeight:1.5}}>The longer trend uses a 90-day half-life: older training gradually receives less weight. Both-hand capacity weights the two hands equally. These are experimental, unadjusted-for-bodyweight estimates; they do not change your workout recommendations. Thinly tested durations remain uncertain.</p>
-        <p style={{color:C.muted}}>Orange bars show estimated climbing load around each training date, including the previous day. They give context, not proof of what caused a change.</p>
+        <p style={{color:C.muted}}>Orange bars show estimated climbing load around each training date, including the previous day. Their separate scale is 0–10, with 10 filling the bottom quarter of the chart. Read the bars against that scale, not the percentage axis. They give context, not proof of what caused a change.</p>
       </details>
     </Card>
     <Card style={{marginBottom:16}}><h3 style={{marginTop:0}}>Short-term performance trend</h3>
       <p style={{color:C.muted,lineHeight:1.5}}>How opening holds compared with the curve estimated before that day, at the same hold duration. Above zero means more force than expected; below means less. This is variation, not a recovery diagnosis.</p>
       {laterHolds>0&&<p style={{color:C.muted,fontSize:13}}>{laterHolds} opening holds in this date range followed earlier finger training that day. These results may reflect accumulated fatigue; they remain part of the short-term chart.</p>}
       {chart('short')}
-      <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>{grips.map(g=><span key={g} style={{color:GRIP_COLORS[g]||C.blue}}>━ {g}</span>)}<span style={{color:C.muted}}>▮ Climbing load</span></div>
+      <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>{grips.map(g=><span key={g} style={{color:GRIP_COLORS[g]||C.blue}}>━ {g}</span>)}<span style={{color:C.orange}}>▮ Climbing load (0–10)</span></div>
       <p style={{color:C.muted,fontSize:13}}>Both charts show {dates[start]} through {dates[end]}. Only eligible opening holds within previously measured durations are compared. Same-day results cannot alter that day’s expected curve.</p>
     </Card>
   </section>;

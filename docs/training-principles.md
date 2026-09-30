@@ -65,3 +65,32 @@ Review new independent days, each grip and duration, session context, large miss
 and exclusions before adopting a candidate. Ten days invites a review and never
 automatically promotes a model. More records and a smoother chart do not establish
 better predictions. Controlled and prospective checks should both support promotion.
+
+
+## Audit corrections
+
+Return mode reduces set count without erasing prior failed-rep evidence. The
+existing bad-miss load reduction remains applicable, as does at-limit easing
+for maintenance work. A gap alone still does not imply a strength-loss percentage.
+Bodyweight exercises retry their intended rep target instead of copying a missed
+actual count. Completion uses the saved prescription, including deliberate user
+changes; progression receipts describe that prescription rather than inventing
+completion of a different template target.
+
+Chaos setup checks measured-history readiness independently per hand and later
+hold duration using the same support bounds as the runner. Unsupported holds
+remain available at reference weights, clearly labeled before Start. Automatic
+adjustment remains the default. A fully supported preview labels the sum of
+hold targets and rests as conditional; unsupported previews omit that budget.
+The runner still checks completed measurements and rest before each adjustment.
+New session_protocol records distinguish requested_load_mode from load_mode:
+opening_reference, adaptive_targets (including a ceiling-capped decision),
+reference_fallback, or legacy fixed_references. adjustment_status/reason preserve
+why a reference was used. Historical records are not rewritten.
+
+Completed climbing output counts logged completions once; accumulated climbing
+load includes attempts and effort. They intentionally measure different things.
+Research comparisons display sample sizes and paired-day 95% intervals. An
+interval spanning zero does not establish an improvement. An import-boundary
+regression test prevents descriptive charts, exposure summaries, and retrospective
+experiments from entering the prescription dependency graph.

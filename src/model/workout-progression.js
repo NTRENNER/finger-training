@@ -120,15 +120,20 @@ function recommendSide(prev, exDef, repRange, ladder = null) {
   // accumulate, steps/jumps only at top-out, and KB rep-up runs only
   // in bridge mode. Without a ladder (legacy callers, tests), the
   // original per-set strategies below apply unchanged.
-  if (ladder?.mode === 'return') return { weight: String(prev.weight ?? ''),
-    reps: String(targetReps || prevReps || ''), reasoning: ladder.reasoning };
-  if (ladder?.mode === 'ease' && hasWeight) {
+  if ((ladder?.mode === 'ease' || ladder?.loadMode === 'ease') && hasWeight) {
     const lower = (exDef.availableLoads || []).filter(w => w < prevWeight).sort((a, b) => b-a)[0];
     // A modest coaching reduction, kept in the stored display unit. No claim
     // about a measured percentage of capacity; the athlete can edit it.
     const weight = lower ?? (exDef.availableLoads?.length ? prevWeight : Math.round(prevWeight * .95 * 10) / 10);
     return { weight: String(weight), reps: String(targetReps || prevReps),
       reasoning: 'Last time was at your limit. Use a comfortable load for this light session.' };
+  }
+  // A break reduces volume, but does not erase a demonstrated bad miss.
+  // Preserve the existing plate back-off below; discrete implements retain
+  // their existing policy. Successful returns never earn a load increase.
+  if (ladder?.mode === 'return' && !(hasWeight && badMiss && !usesAvailableLoads)) {
+    return { weight: String(prev.weight ?? ''), reps: String(targetReps || prevReps || ''),
+      reasoning: ladder.reasoning };
   }
   if (ladder && hasWeight && !badMiss) {   // catastrophic miss → legacy back-off below
     if (ladder.mode === "accumulate" || ladder.mode === "repeat") {
@@ -273,7 +278,7 @@ function recommendSide(prev, exDef, repRange, ladder = null) {
   // target and let the user log what they actually did.
   return {
     weight: String(prev.weight ?? ""),
-    reps:   String(prev.reps ?? targetReps ?? ""),
+    reps:   String(targetReps || prev.reps || ""),
     reasoning: "",
   };
 }
@@ -379,9 +384,12 @@ function computeSetCount(history, exDef, templateSets, referenceDate) {
   if (referenceDate) history = (history || []).filter(s => s.date && s.date <= referenceDate);
   const base = Math.max(1, Number(templateSets) || 1);
   const returning = returnToTrainingPlan(history, exDef, base, referenceDate);
-  if (returning) return returning;
   const latest = findLastSession(history, null, exDef?.id)?.exercises?.[exDef?.id];
   const atLimit = latest?.effort === "at_limit";
+  if (returning) return { ...returning,
+    ...(atLimit && exDef?.progressionPolicy === 'maintain' ? { loadMode: 'ease' } : {}),
+    reasoning: returning.reasoning + (atLimit ? ' Last time was at your limit; keep this session manageable.' : ''),
+  };
 
   // Per-exercise progression policy (June 2026): the set ladder's
   // "clean session = advance" gate assumes near-failure rep targets.
@@ -432,7 +440,7 @@ function computeSetCount(history, exDef, templateSets, referenceDate) {
     return {
       sets: Math.min(cap, next),
       mode: "accumulate",
-      reasoning: `ladder: clean ${prevCount}×${targetReps} → ${Math.min(cap, next)} sets, same load`,
+      reasoning: `Completed all ${prevCount} planned sets and their rep targets → ${Math.min(cap, next)} sets, same load`,
     };
   }
 

@@ -71,3 +71,49 @@ test('partial power work cannot earn extra repetitions', () => {
   expect(p.mode).toBe('repeat');
   expect(recommendSet(h, def, 'B', 0, null, p).reps).toBe('5');
 });
+
+
+test('returning preserves the bad-miss back-off while reducing sets', () => {
+  const def = { ...ex, reps: '10', sets: 4 };
+  const h = [session('2026-07-01', [set('200', true, '2')])];
+  const normal = plan(h, '2026-07-03', def), returning = plan(h, '2026-09-30', def);
+  expect(returning).toMatchObject({ mode: 'return', sets: 2 });
+  expect(recommendSet(h, def, 'A', 0, null, returning).weight)
+    .toBe(recommendSet(h, def, 'A', 0, null, normal).weight);
+  expect(recommendSet(h, def, 'A', 0, null, returning)).toMatchObject({ weight: '195', reps: '10' });
+});
+
+test('returning maintenance retains at-limit easing and respects available implements', () => {
+  const h = [session('2026-07-01', [set('50')], { effort: 'at_limit' })];
+  for (const availableLoads of [undefined, [35, 50], [50, 70]]) {
+    const def = { ...ex, progressionPolicy: 'maintain', availableLoads };
+    const returning = plan(h, '2026-09-30', def), normal = plan(h, '2026-07-03', def);
+    expect(returning).toMatchObject({ mode: 'return', sets: 2, loadMode: 'ease' });
+    expect(recommendSet(h, def, 'C', 0, null, returning).weight)
+      .toBe(recommendSet(h, def, 'C', 0, null, normal).weight);
+  }
+});
+
+test.each(['', '0'])('bodyweight with added weight %s retries the target instead of the previous miss', weight => {
+  const def = { ...ex, id: 'weightedPullup', reps: '3-5', sets: 2 };
+  const old = { date: '2026-09-28', workout: 'A', exercises: { weightedPullup: { sets: [set(weight, true, '1'), set(weight, true, '1')] } } };
+  const h = [old];
+  const p = plan(h, '2026-09-29', def);
+  const target = recommendSet(h, def, 'A', 0, null, p);
+  expect(target.reps).toBe('3');
+  h.push({ date: '2026-09-29', workout: 'A', exercises: { weightedPullup: {
+    prescription: { sets: [target, target] }, sets: [set(weight, true, '1'), set(weight, true, '1')],
+  } } });
+  expect(plan(h, '2026-09-30', def).mode).toBe('repeat');
+  h[1].exercises.weightedPullup.sets = [set(weight, true, '3'), set(weight, true, '3')];
+  expect(plan(h, '2026-09-30', def)).toMatchObject({ mode: 'accumulate', sets: 3 });
+});
+
+test('deliberately chosen rep targets remain the completion gate and receive an accurate receipt', () => {
+  const h = [session('2026-09-29', [set('', true, '1'), set('', true, '1')],
+    { prescription: { sets: [{ reps: '1' }, { reps: '1' }] } })];
+  const p = plan(h);
+  expect(p.mode).toBe('accumulate');
+  expect(p.reasoning).toContain('Completed all 2 planned sets and their rep targets');
+  expect(p.reasoning).not.toContain('2×5');
+});

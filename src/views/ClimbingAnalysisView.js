@@ -231,7 +231,7 @@ export function ClimbingAnalysisView({
     return { rows, disciplines: ["boulder"] };
   }, [allClimbs]);
 
-  // ── Route session volume (afa v-sum) ──
+  // ── Completed route output (afa v-sum) ──
   // The route analog of the boulder v-sum. Routes are YDS, so we convert
   // each send's grade to its V-equivalent via the afa v-sum chart
   // (afaVSum) and sum per session date — yielding a v-sum in the SAME
@@ -507,7 +507,7 @@ export function ClimbingAnalysisView({
           </div>
         </Card>
 
-        {/* Boulder session volume (v-sum). One bar per boulder session
+        {/* Completed boulder output (v-sum). One bar per boulder session
             date. Boulder-only by design — the v-sum concept is a
             bouldering convention and mixing rope grades in via gradeRank
             blurs the unit. Renders as soon as any boulder session
@@ -515,11 +515,11 @@ export function ClimbingAnalysisView({
             the chart works and gives you a baseline to beat). */}
         {sessionVolume.rows.length >= 1 && (
           <Card>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Boulder session volume (v-sum)</div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Completed boulder output (v-sum)</div>
             <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-              Sum of V-grade ranks per boulder session — quantity × quality
-              in one number. Sends, repeats, and rest-completions count; attempts don't.
-              Lead and top rope are excluded (v-sum is a boulder convention).
+              Sum of grade ranks for completed boulders. Each logged completion counts once,
+              including repeat ascents and completions with rests. Eight attempts ending in one send count as one completion here.
+              Climbing load separately accounts for all logged attempts and their effort. Lead and top rope are excluded.
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <ComposedChart data={sessionVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
@@ -541,19 +541,20 @@ export function ClimbingAnalysisView({
           </Card>
         )}
 
-        {/* Route session volume (afa v-sum). The route analog of the
+        {/* Completed route output (afa v-sum). The route analog of the
             boulder chart — YDS sends converted to V-equivalents via the
             afa v-sum chart, summed per session. Same V-equivalent units
             as the boulder v-sum, so the two are directly comparable.
             Lead + top rope both counted. */}
         {routeVolume.rows.length >= 1 && (
           <Card>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Route session volume (afa v-sum)</div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Completed route output (afa v-sum)</div>
             <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
               Sum of afa V-equivalents per route session — each YDS send
               converted to its V-rating (afa chart), then summed. Same
               units as the boulder v-sum, so they're comparable. Lead and
-              top rope both count; sends, repeats, and rest-completions, not attempts.
+              top rope both count. Each logged completion counts once, including repeat ascents
+              and completions with rests. Climbing load separately accounts for all logged attempts and their effort.
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <ComposedChart data={routeVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>

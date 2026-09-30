@@ -69,6 +69,7 @@ import {
 } from "../../model/densityLadder.js";
 import { today } from "../../util.js";
 import { makeMixedDomainPlan, recommendedMixedDomainZone, MIXED_DOMAIN_REST_S } from '../../model/mixedDomain.js';
+import { mixedPlanReadiness } from '../../model/mixedLoadPrescription.js';
 import { MixedDomainPlan } from './MixedDomainPlan.jsx';
 
 // Display labels for the climbing-focus pill in the header. Kept here
@@ -256,6 +257,10 @@ export function SessionPlanCard({
     return makeMixedDomainPlan(freshRows, opening, expectedHands);
   }, [curveRows, mixedOpening, expectedHands, recommendedZone, loadMultiplier, rec]);
   const mixedEnabled = mixedRequested && !!mixedPlan;
+  const readinessDate = today();
+  const mixedReadiness = useMemo(() => mixedEnabled
+    ? mixedPlanReadiness(history, grip, expectedHands, mixedPlan, readinessDate) : null,
+  [mixedEnabled, history, grip, expectedHands, mixedPlan, readinessDate]);
 
   // ── Active row — drives the bottom session-details panel ──────────────
   const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
@@ -504,7 +509,7 @@ export function SessionPlanCard({
         <strong>Chaos Machine (Beta)</strong>
       </label>
       {!mixedPlan && <p style={{ color: C.muted }}>The beta needs a load estimate in all five domains for each selected hand. Complete the initial sessions first.</p>}
-      {mixedEnabled && <MixedDomainPlan goalConfig={GOAL_CONFIG} plan={mixedPlan} hands={expectedHands} unit={unit}
+      {mixedEnabled && <MixedDomainPlan goalConfig={GOAL_CONFIG} plan={mixedPlan} readiness={mixedReadiness} hands={expectedHands} unit={unit}
         multiplier={loadMultiplier} onOpeningChange={setMixedOpening} />}
 
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}

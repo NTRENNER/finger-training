@@ -68,7 +68,7 @@ import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS } from "../model/setRecommendation.js";
 import { pushDailyState } from "../lib/sync.js";
 import { buildMixedLoadModel, prepareMixedPrediction, completeMixedPrediction } from '../model/mixedLoadPrediction.js';
-import { mixedReadinessModel, prepareAdaptiveMixedPrediction } from '../model/mixedLoadPrescription.js';
+import { mixedReadinessModel, prepareAdaptiveMixedPrediction, mixedLoadProtocolFields } from '../model/mixedLoadPrescription.js';
 import { MAX_TEST_ATTEMPTS, MAX_TEST_REST_S, MAX_TEST_TARGET_S } from '../model/peakForce.js';
 import { MIXED_DOMAIN_ID, MIXED_DOMAIN_REST_S, mixedDomainSteps, validMixedDomainPlan } from '../model/mixedDomain.js';
 
@@ -401,8 +401,7 @@ export function useSessionRunner({
       session_protocol: { id: MIXED_DOMAIN_ID, version: config.mixedDomainPlan.version, zone: currentStep.zone,
         opening_zone: config.mixedDomainPlan.steps[0].zone, position: currentRep + 1,
         role: currentRep === 0 ? 'opening_hold' : 'fatigued_hold',
-        duration_reference: config.mixedDomainPlan.adjustLoads ? 'approximate_hold_target' : 'fresh_load_reference',
-        load_mode: config.mixedDomainPlan.adjustLoads ? 'adaptive_targets' : 'fixed_references' },
+        ...mixedLoadProtocolFields(config.mixedDomainPlan.adjustLoads, mixedPrediction?.adjustment, currentRep + 1) },
       ...(currentRep > 0 ? { capacity_eligible: false } : {}),
     } : { ...forceRecording };
     recordedForce.hand_order = handOrderMetadata(firstHandRef.current, sessionDate || today());

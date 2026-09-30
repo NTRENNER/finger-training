@@ -4,16 +4,21 @@ import { C } from '../../ui/theme.js';
 import { fmtW } from '../../ui/format.js';
 import { MIXED_DOMAIN_ZONES, MIXED_DOMAIN_LABELS, mixedDomainSteps } from '../../model/mixedDomain.js';
 
-export function MixedDomainPlan({ plan, hands, unit, multiplier, onOpeningChange, goalConfig = {} }) {
+export function MixedDomainPlan({ plan, readiness, hands, unit, multiplier, onOpeningChange, goalConfig = {} }) {
   const targetSeconds = (plan.steps.reduce((sum, step) => sum + step.targetTime, 0) + 4 * 30) * hands.length;
   const targetEstimate = `${Math.floor(targetSeconds / 60)}:${String(targetSeconds % 60).padStart(2, '0')}`;
   return <section aria-label="Chaos Machine beta plan" style={{ marginBottom: 20 }}>
     <p style={{ fontSize: 16, lineHeight: 1.5 }}>Five holds per hand. A different target weight each hold. Rest 30 seconds between holds.</p>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>
-      Later target weights are estimated from your measured pulls and rest, then fixed for each hold.
-      If earlier measurements are incomplete, the original target weight is shown and may not match the target time.
-      About {targetEstimate}{hands.length === 2 ? ' for both hands' : ' for one hand'} if you reach every target, including rests. Setup and hand changes add time.
+      Where your measured history supports it, later target weights are adjusted for earlier pulls and rest, then fixed for each hold.
+      Incomplete measurements during this session can also prevent an adjustment.
     </p>
+    {readiness?.status === 'ready' ? <p style={{ color: C.muted, lineHeight: 1.5 }}>
+      Time if all targets are reached: {targetEstimate}{hands.length === 2 ? ' for both hands' : ' for one hand'}, including rests. Setup and hand changes add time.
+    </p> : <p style={{ color: C.yellow, lineHeight: 1.5 }}>
+      {readiness?.status === 'partial' ? 'Some holds need more measured history.' : 'More measured history is needed for automatic adjustments.'}
+      {' '}You can still train with the reference target weights. You may reach failure earlier than the displayed times, so session length will vary.
+    </p>}
     <label style={{ display: 'block', marginBottom: 6 }}>
       First domain
       <select value={plan.steps[0].zone} onChange={e => onOpeningChange(e.target.value)}
@@ -43,14 +48,20 @@ export function MixedDomainPlan({ plan, hands, unit, multiplier, onOpeningChange
                 {fmtW(step.loadByHand[hand] * multiplier, unit)} <span style={{ fontSize: 14 }}>{unit}</span>
               </strong>
               <div style={{ color: C.muted, fontSize: 12, marginTop: 6 }}>
-                {i === 0 ? 'First hold · Fresh reference' : 'Starting reference · adjusted before this hold'}
+                {i === 0 ? 'First hold · Fresh reference' : readiness?.byHand?.[hand]?.[i]?.status === 'ready'
+                  ? 'Reference · adjustment estimated before this hold' : 'Reference target · adjustment unavailable'}
               </div>
+              {i > 0 && readiness?.byHand?.[hand]?.[i]?.status !== 'ready' && <p style={{ color: C.muted, fontSize: 12, margin: '6px 0 0' }}>
+                {readiness?.byHand?.[hand]?.[i]?.reason === 'outside_measured_duration_range'
+                  ? 'This duration is outside the measured range for this hand.'
+                  : 'More measured history is needed for this hand.'}
+              </p>}
             </li>;
           })}
         </ol>
       </div>)}
     </div>
-    <p style={{ color: C.muted, lineHeight: 1.5 }}>Aim for approximately the displayed times. Keep your pulling force steady at the target weight and hold until failure; reaching the target does not stop the timer.</p>
+    <p style={{ color: C.muted, lineHeight: 1.5 }}>{readiness?.status === 'ready' ? 'Adjusted targets aim for approximately the displayed times.' : 'The displayed times identify each domain; reference weights may not produce holds that long after earlier work.'} Keep your pulling force steady at the target weight and hold until failure; reaching the target does not stop the timer.</p>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>Your first measured hold can update the curve. Later holds are saved as fatigued work. These estimates are experimental. Your 4–6 rep progression is unchanged.</p>
   </section>;
 }

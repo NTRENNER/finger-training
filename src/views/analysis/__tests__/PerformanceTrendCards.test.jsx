@@ -32,3 +32,17 @@ test('empty history explains why the charts are unavailable',()=>{
  expect(screen.getByText(/More training dates needed/)).toBeInTheDocument();
  expect(screen.queryByRole('slider')).not.toBeInTheDocument();
 });
+
+
+test('deleting dates in a selected window keeps charts and both handles usable',()=>{
+ const view=render(<PerformanceTrendCards history={history} grips={grips}/>);
+ fireEvent.change(screen.getByRole('slider',{name:'Start date'}),{target:{value:4}});
+ const rows=Array.from({length:5},(_,i)=>({date:`2026-08-0${i+1}`,timestamp:Date.UTC(2026,7,i+1),Micro_long:i,Micro_short:i}));
+ buildPerformanceTrends.mockReturnValue(rows);
+ view.rerender(<PerformanceTrendCards history={[{id:'changed'}]} grips={grips}/>);
+ expect(screen.getByText('Showing 2 of 5 training dates')).toBeInTheDocument();
+ screen.getAllByTestId('trend-chart').forEach(chart=>expect(chart).toHaveAttribute('data-dates','2026-08-04,2026-08-05'));
+ fireEvent.change(screen.getByRole('slider',{name:'Start date'}),{target:{value:0}});
+ expect(screen.getByText('Showing 5 of 5 training dates')).toBeInTheDocument();
+ expect(screen.getAllByText('▮ Climbing load (0–10)')).toHaveLength(2);
+});
