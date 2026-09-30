@@ -1,3 +1,4 @@
+import { SustainedMaxCard } from './analysis/SustainedMaxCard.jsx';
 import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/forceRecording.js";
 import { MeasuredProgressSection } from "./cards/MeasuredProgressCard.jsx";
 // ──────────────────────────────────────────────────────────────
@@ -232,6 +233,11 @@ export function AnalysisView({
     () => selGrip ? [selGrip] : grips,
     [selGrip, grips]
   );
+
+  // Peak records use every measured hold, independently of curve eligibility.
+  const peakRecordHistory = useMemo(() => history.filter(r =>
+    (!selGrip || r.grip === selGrip) && (handView === "pooled" || r.hand === handView)
+  ), [history, selGrip, handView]);
 
   // All reps with usable force + time data for the shared grip/hand scope.
   const reps = useMemo(() => history.filter(r =>
@@ -684,6 +690,11 @@ export function AnalysisView({
         attentionCounts={coverageAttentionCounts}
       />
 
+
+      {peakRecordHistory.length > 0 && <CardBoundary name="Best two-second force">
+        <SustainedMaxCard history={peakRecordHistory} unit={unit} normalizeOn={normalizationActive}
+          bodyWeight={bodyWeight} bwLog={bwLog} />
+      </CardBoundary>}
 
       {reps.length > 0 && (<>
         <CardBoundary name="Force-Duration chart">

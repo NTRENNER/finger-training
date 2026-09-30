@@ -22,7 +22,7 @@ export function SustainedMaxCard({ history = [], unit = 'lbs', normalizeOn = fal
         <div style={{ color: C.muted, fontSize: 12 }}>{r.date}</div>
       </div>)}
     </div> : <p>No verified two-second measurement yet. Your next recorded holds will start this record.
-      Older instantaneous peaks remain in the chart below.</p>}
+      Older instantaneous peaks remain in your workout history.</p>}
     <p style={{ color: C.muted, fontSize: 12, marginBottom: 0 }}>A record proves force sustained for at least two seconds;
       it does not establish time to failure. Lower results never erase your best.</p>
   </Card>;

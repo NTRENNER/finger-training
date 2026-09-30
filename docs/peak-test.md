@@ -82,7 +82,7 @@ a record even when a later interruption makes the full rep unsuitable for
 failure fitting. The window does not certify the rest of that recording.
 
 Analysis shows best two-second force separately for each grip and hand, above
-the explicitly labeled instantaneous-peak chart. Every recorded hold is eligible,
+the force-duration chart. Instantaneous peaks remain in workout history. Every recorded hold is eligible,
 including later sessions, extra sets, and fatigued Chaos Machine holds. Lower
 results never erase a record. Peak Test summaries show both measurements.
 Historical peaks cannot be converted into two-second records without raw samples.

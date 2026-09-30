@@ -1,4 +1,3 @@
-import { SustainedMaxCard } from './SustainedMaxCard.jsx';
 // ─────────────────────────────────────────────────────────────
 // PeakForceCard — max-strength (peak force) trajectory over time
 // ─────────────────────────────────────────────────────────────
@@ -241,16 +240,14 @@ export function PeakForceCard({
     };
   }, [trend, split, gripHistory, trendOptions, normalizeOn, displayValue]);
 
-  const sustainedCard = <SustainedMaxCard history={scopedHistory} unit={unit} normalizeOn={normalizeOn}
-    bodyWeight={bodyWeight} bwLog={bwLog} />;
-  if (!view || view.rows.length < 1) return scopedHistory.length ? sustainedCard : null;
+  if (!view || view.rows.length < 1) return null;
 
   return (
-    <>{sustainedCard}<Card style={{ marginBottom: 16 }}>
+    <Card style={{ marginBottom: 16 }}>
       <div style={{ marginBottom: 4 }}>
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700, flex: "1 1 190px", minWidth: 0 }}>
-            Instantaneous peak — max strength over time
+            Peak force — max strength over time
           </div>
           {handView === "pooled" && (
             <div style={{ display: "flex", gap: 4 }} aria-label="Peak force display">
@@ -302,7 +299,7 @@ export function PeakForceCard({
         </div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
-        Highest individual Tindeq reading observed in any valid workout
+        Highest valid Tindeq peak observed in any workout
         {handView === "pooled" ? "" : ` for the ${handView === "L" ? "left" : "right"} hand`}.
         {normalizeOn ? " Values are normalized to bodyweight on each measurement date." : ""} The solid line
         is your running best-to-date; dots mark new PRs and identify the
@@ -386,6 +383,6 @@ export function PeakForceCard({
           )}
         </ComposedChart>
       </ResponsiveContainer>
-    </Card></>
+    </Card>
   );
 }
