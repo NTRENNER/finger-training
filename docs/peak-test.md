@@ -69,3 +69,30 @@ Both the standalone test and warmup retain progress during tab navigation.
 Sensor acquisition pauses while hidden; rest deadlines keep running. Leaving
 mid-pull records an interrupted attempt rather than a valid maximum. This is
 in-memory navigation continuity, not resumption after closing or reloading the app.
+
+## Demonstrated two-second force
+
+New sensor recordings persist `force_recording.sustained_max`: the highest
+**time-weighted two-second average**, with its start/end offsets relative to the
+activity recording, method/version and window quality. It uses actual device
+timestamps, never bridges a gap over 250 ms, and rejects reversed timestamps,
+nonfinite values and readings outside the existing 200 kg sanity bound. Only
+this small summary is stored, not sample arrays. An intact window may establish
+a record even when a later interruption makes the full rep unsuitable for
+failure fitting. The window does not certify the rest of that recording.
+
+Analysis shows best two-second force separately for each grip and hand, above
+the explicitly labeled instantaneous-peak chart. Every recorded hold is eligible,
+including later sessions, extra sets, and fatigued Chaos Machine holds. Lower
+results never erase a record. Peak Test summaries show both measurements.
+Historical peaks cannot be converted into two-second records without raw samples.
+
+New max-intent recordings use the verified two-second value for the prescription
+peak reference; a single-sample spike cannot raise it. A higher verified window
+in any other workout may raise an established peak reference. Routine submaximal
+work alone does not impose a falsely low maximum-force cap. Existing legacy
+peak references and the recent/historical lookup policy remain compatible.
+Grip, hand and retrospective date boundaries still apply. This updates the
+upper bound, not a whole-curve multiplier, and never inserts an invented
+(2 seconds, force) failure point. Fresh session eligibility and the 4–5–6 ladder
+are unchanged. No database migration or historical rewrite is needed.

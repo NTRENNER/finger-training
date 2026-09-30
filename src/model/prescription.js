@@ -1,3 +1,4 @@
+import { sustainedMaxKg } from './sustainedMax.js';
 import { firstTrainingSessionRows } from "./firstSessionEvidence.js";
 import { isValidPeakMeasurement } from './peakTest.js';
 import { compareSessionOrder, compareOpeningRep } from "./sessionOrder.js";
@@ -453,71 +454,56 @@ export function capLoad(v, peakCapKg, absMax = SANE_MAX_KG) {
   return v > ceil ? ceil : v;
 }
 
-// Best measured instantaneous peak (kg) for (hand, grip) within the
-// lookback window — MAX/POWER-PROTOCOL reps only (target ≤
-// PEAK_MAX_PROTOCOL_T, same intent filter as the Peak Force card).
-// A sub-max session's peak tracks the prescribed load, not the
-// user's max: capping on it would bound a new grip's first max-day
-// prescription at ~its endurance load (June 2026 — Prime's only
-// session was 35s holds at ~6 kg; an unfiltered cap would have
-// frozen its 5s prescriptions at ~6.9 kg indefinitely). Within a
-// qualifying session, any rep's peak counts (fatigue lowers peaks,
-// never raises) and missing targets (legacy/manual rows) are kept.
-// referenceDate mirrors prescription()'s retrospective semantics:
-// null = today. Returns null when no qualifying peak exists in the
-// window; prescription() then checks the historical measured fallback.
-// Peak caps bound a FRESH-capacity prescription, so a peak produced under
-// the accumulated fatigue of an optional set is not the demonstration they
-// are looking for. Note the direction of risk differs from the rest of the
-// optional-set isolation: a high optional-set peak would RAISE the cap, not
-// lower the prescription. Excluded anyway, so "what have you demonstrated
-// fresh" means one thing everywhere. The cost is that a deliberate max
-// attempt logged as an optional set no longer counts; peak protocols run as
-// set 1 (see PEAK_MAX_PROTOCOL_T) so that should stay rare.
-export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
-  if (!history) return null;
-  const refMs = referenceDate
-    ? new Date(`${referenceDate}T00:00:00`).getTime()
-    : Date.now();
-  const cutoff = ymdLocal(new Date(refMs - PEAK_CAP_LOOKBACK_DAYS * 86400 * 1000));
+// Peak references retain the existing lookback and strictly-before-date
+// replay boundaries. Unlike fresh curve fitting, an independently verified
+// higher two-second force may come from any set or session.
+// Existing instantaneous-peak history retains its meaning. New recordings
+// require their measured two-second window; their single-sample spikes cannot
+// raise this bound. Ordinary work can RAISE a known maximum, but a submaximal
+// workout by itself must not establish a falsely low maximum-force cap.
+function qualifyingPeakReference(history, hand, grip, referenceDate, cutoff = '') {
+  const firstRows = new Set(firstTrainingSessionRows(history));
   let best = null;
-  for (const r of firstTrainingSessionRows(history)) {
-    if (!(isCapacityEvidenceRep(r) || isValidPeakMeasurement(r))) continue;
-    if (!isFirstSetRep(r)) continue;
-    if (!isValidPeakMeasurement(r) && Number(r.rep_num ?? 1) !== 1) continue;
-    if (!r || r.hand !== hand || r.grip !== grip) continue;
-    if ((r.date || "") < cutoff) continue;
-    if (referenceDate && (r.date || "") >= referenceDate) continue; // retrospective: strictly before
-    if (isSeedArtifactRep(r)) continue; // seeded twin's mirrored peak can't set the ceiling
-    const tgt = Number(r.target_duration);
-    if (Number.isFinite(tgt) && tgt > PEAK_MAX_PROTOCOL_T) continue; // sub-max protocol
-    const p = sane(r.peak_force_kg);
-    if (p != null && (best == null || p > best)) best = p;
+  for (const r of history) {
+    if (!r || r.hand !== hand || r.grip !== grip || !r.date || r.date < cutoff
+      || (referenceDate && r.date >= referenceDate) || isSeedArtifactRep(r)) continue;
+    const target = Number(r.target_duration);
+    if (Number.isFinite(target) && target > PEAK_MAX_PROTOCOL_T) continue;
+    let kg;
+    if (Object.prototype.hasOwnProperty.call(r.force_recording || {}, 'sustained_max')) {
+      kg = sustainedMaxKg(r);
+    } else {
+      if (!firstRows.has(r) || !(isCapacityEvidenceRep(r) || isValidPeakMeasurement(r))
+        || !isFirstSetRep(r) || (!isValidPeakMeasurement(r) && Number(r.rep_num ?? 1) !== 1)) continue;
+      kg = sane(r.peak_force_kg);
+    }
+    if (kg != null && (best == null || kg > best)) best = kg;
   }
   return best;
 }
 
-// Best qualifying peak from all prior history. This is a fallback
-// ceiling only: a recent peak is preferred, but an older measured max
-// remains a far safer physical bound than the generic 200 kg corruption
-// guard. The staleness bit returned by bestAvailablePeakMeasurement lets
-// the UI distinguish "current measurement" from "historical ceiling."
-export function historicalBestPeakKg(history, hand, grip, referenceDate = null) {
+function peakReferenceWithDemonstratedRecords(history, hand, grip, referenceDate, cutoff = '') {
   if (!history) return null;
-  let best = null;
-  for (const r of firstTrainingSessionRows(history)) {
-    if (!(isCapacityEvidenceRep(r) || isValidPeakMeasurement(r))) continue;
-    if (!isFirstSetRep(r)) continue;
-    if (!isValidPeakMeasurement(r) && Number(r.rep_num ?? 1) !== 1) continue;
-    if (!r || r.hand !== hand || r.grip !== grip) continue;
-    if (referenceDate && (!r.date || r.date >= referenceDate)) continue;
-    if (isSeedArtifactRep(r)) continue;
-    const tgt = Number(r.target_duration);
-    if (Number.isFinite(tgt) && tgt > PEAK_MAX_PROTOCOL_T) continue;
-    const p = sane(r.peak_force_kg);
-    if (p != null && (best == null || p > best)) best = p;
+  let best = qualifyingPeakReference(history, hand, grip, referenceDate, cutoff);
+  const established = best ?? qualifyingPeakReference(history, hand, grip, referenceDate);
+  if (established == null) return null;
+  for (const r of history) {
+    if (!r || r.hand !== hand || r.grip !== grip || !r.date || r.date < cutoff
+      || (referenceDate && r.date >= referenceDate)) continue;
+    const kg = sustainedMaxKg(r);
+    if (kg != null && kg >= established && (best == null || kg > best)) best = kg;
   }
   return best;
+}
+
+export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
+  const refMs = referenceDate ? new Date(`${referenceDate}T00:00:00`).getTime() : Date.now();
+  const cutoff = ymdLocal(new Date(refMs - PEAK_CAP_LOOKBACK_DAYS * 86400 * 1000));
+  return peakReferenceWithDemonstratedRecords(history, hand, grip, referenceDate, cutoff);
+}
+
+export function historicalBestPeakKg(history, hand, grip, referenceDate = null) {
+  return peakReferenceWithDemonstratedRecords(history, hand, grip, referenceDate);
 }
 
 export function bestAvailablePeakMeasurement(history, hand, grip, referenceDate = null) {

@@ -1,3 +1,4 @@
+import { sustainedMaxKg } from '../model/sustainedMax.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { Card, Btn } from '../ui/components.js';
 import { C } from '../ui/theme.js';
@@ -105,6 +106,7 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
     });
     transition({ ...live.current, phase: 'done' });
   };
+  const bestSustained = h => Math.max(0, ...state.rows.filter(r => r.hand === h).map(r => sustainedMaxKg(r) || 0));
   const best = h => Math.max(0, ...state.rows.filter(r => r.hand === h && isValidPeakMeasurement(r)).map(r => r.peak_force_kg));
 
   return <div>
@@ -121,7 +123,11 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
       {context.hands.map(h => <p key={h} style={{ fontSize: 22, fontWeight: 700 }}>
         {h === 'L' ? 'Left' : 'Right'}: {best(h) ? `${fmtW(best(h), unit)} ${unit}` : 'No valid measurement'}
       </p>)}
-      <p>Best measured peak for each hand. Continue whenever you feel ready.</p>
+      <p>Instantaneous peak for each hand.</p>
+      {context.hands.map(h => <p key={`sustained-${h}`}>
+        {h === 'L' ? 'Left' : 'Right'} best two-second force: {bestSustained(h) ? `${fmtW(bestSustained(h), unit)} ${unit}` : 'No verified two-second measurement'}
+      </p>)}
+      <p>Continue whenever you feel ready.</p>
       <Btn onClick={onClose}>{source === 'warmup' ? 'Continue warm-up' : 'Done'}</Btn>
     </Card> : <>
       <Card style={{ textAlign: 'center', padding: '32px 16px' }}>

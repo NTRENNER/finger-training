@@ -1,3 +1,5 @@
+import { recordForce } from '../../model/forceRecording.js';
+import { sustainedMaxKg } from '../../model/sustainedMax.js';
 // Regression: the live weight-override box (non-Tindeq) must persist to the
 // saved rep. It fed only the live color/auto-fail threshold and never reached
 // handleRepDone, so manual users' reps saved load=0 (the elcerritotom bug).
@@ -112,4 +114,15 @@ test("a completed recommendation can add optional sets up to five", () => {
   act(() => hook.result.current.handleNextSet());
   expect(hook.result.current.currentSet).toBe(5);
   expect(hook.result.current.phase).toBe("done");
+});
+
+
+test("sensor two-second summary survives rep saving independently of the instantaneous peak", () => {
+  const { hook, addReps } = setup();
+  act(() => hook.result.current.startSession(cfg));
+  const stats = recordForce(Array.from({ length: 301 }, (_, i) => ({ ts: i * 10, kg: i === 100 ? 80 : 20 })));
+  act(() => hook.result.current.handleRepDone(stats));
+  const saved = JSON.parse(JSON.stringify(addReps.mock.calls[0][0][0]));
+  expect(saved.peak_force_kg).toBe(80);
+  expect(sustainedMaxKg(saved)).toBeCloseTo(20.3);
 });

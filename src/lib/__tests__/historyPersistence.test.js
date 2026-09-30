@@ -26,3 +26,14 @@ test('failure of essential persistence is exposed and can be retried',()=>{
   saveLS.mockReturnValue(true);
   expect(persistHistory(rows).status).toBe('saved');
 });
+
+
+test('two-second measurement provenance survives research trimming and quota retries', () => {
+  saveLS.mockReturnValueOnce(false).mockReturnValueOnce(true);
+  const sustained_max = { version: 1, method: 'time_weighted', window_ms: 2000,
+    avg_force_kg: 40, start_offset_s: 0.5, end_offset_s: 2.5, signal_quality: 'complete', max_gap_ms: 250 };
+  const rep = row('record', '2026-09-30');
+  rep.force_recording.sustained_max = sustained_max;
+  expect(persistHistory([rep]).status).toBe('research_trimmed');
+  expect(saveLS.mock.calls[1][1][0].force_recording.sustained_max).toEqual(sustained_max);
+});

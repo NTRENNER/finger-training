@@ -1,3 +1,4 @@
+import { measureSustainedMax } from './sustainedMax.js';
 import { TARGET_FAILURE_POLICY, RELEASE_BACKSTOP_POLICY, targetFailureBoundary, repDetectionThresholds } from './targetFailure.js';
 import { isPeakMeasurement, isValidPeakMeasurement } from './peakTest.js';
 // Descriptive force variation; valid measured efforts remain curve evidence.
@@ -63,6 +64,7 @@ export function recordForce(samples, endTs = samples?.at(-1)?.ts, targetKg = nul
     failureValid: eligible,
     endReason: !signalValid ? "equipment_interruption" : eligible ? "muscular_failure" : "target_not_reached",
     forceRecording: { version: 2, method: "time_weighted", observed_time_s: covered / 1000,
+      sustained_max: measureSustainedMax(samples, endTs),
       duration_s: durationMs / 1000, impulse_kg_s: area / 1000,
       signal_quality: signalValid ? "complete" : "incomplete",
       force_sd_kg: sd, force_cv: cv, in_band_fraction: inBand,
@@ -135,6 +137,7 @@ export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, target
       ? 'target_force_failure' : capacity.endReason,
     forceRecording: { ...capacity.forceRecording, version: decision ? 4 : 3, basis: 'target_acquired',
       target_kg: targetKg, capacity_eligible: eligible && continuous,
+      sustained_max: activity.forceRecording.sustained_max,
       ...(decision ? { failure_policy: TARGET_FAILURE_POLICY, acquisition_basis: 'sustained_tolerance_band',
         recording_stop_reason: decision.stopReason, capacity_end_reason: decision.reason,
         credited_end_at_ms: capacity.endedAtMs,
