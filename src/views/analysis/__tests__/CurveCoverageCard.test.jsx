@@ -21,20 +21,22 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-test("stays hidden when every sampled zone is fresh", () => {
+test("shows exposure separately even when opening measurements are current", () => {
   const history = [5, 30, 70, 115, 160, 220].map(duration =>
     rep("2026-07-20", duration)
   );
 
-  const { container } = render(<CurveCoverageCard history={history} />);
-  expect(container.firstChild).toBeNull();
+  render(<CurveCoverageCard history={history} />);
+  expect(screen.getByText("Training & measurements")).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Opening measurement" })).toBeInTheDocument();
+  expect(screen.queryByText(/1 stale/)).not.toBeInTheDocument();
 });
 
 test("renders only when a sampled zone needs attention", () => {
   render(<CurveCoverageCard history={[rep("2026-05-01", 30)]} />);
 
-  expect(screen.getByText("Curve Coverage")).toBeInTheDocument();
-  expect(screen.getByText(/data that needs attention/i)).toBeInTheDocument();
+  expect(screen.getByText("Training & measurements")).toBeInTheDocument();
+  expect(screen.getByText(/Training exposure and fresh-curve evidence/i)).toBeInTheDocument();
   expect(screen.getByText(/1 stale/i)).toBeInTheDocument();
   expect(screen.queryByText(/modeled/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/last 12 months/i)).not.toBeInTheDocument();
@@ -69,7 +71,7 @@ test("focused grip and hand remove unrelated coverage", () => {
   );
 
   expect(screen.getByText(/left hand/i)).toBeInTheDocument();
-  expect(screen.getByText(/Power/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/Power/i).length).toBeGreaterThan(0);
   expect(screen.queryByText("Micro")).not.toBeInTheDocument();
-  expect(screen.queryByText(/Strength$/i)).not.toBeInTheDocument();
+  expect(screen.queryByText("2026-05-01 · R")).not.toBeInTheDocument();
 });

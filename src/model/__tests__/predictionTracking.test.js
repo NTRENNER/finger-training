@@ -182,3 +182,20 @@ test('pre-session scoring requires every prior rest to match, not only the final
   expect(report.recovery.current.observations).toBe(2);
   expect(report.plannedRecovery.current.observations).toBe(1);
 });
+
+
+test('research distinguishes earlier same-day work from unknown order without changing paired errors', () => {
+  const { models } = setup();
+  const raw = { ...recoveryRows('measured', { date: '2026-09-20' })[0], session_started_at: '2026-09-20T12:00:00Z' };
+  const r = record(models, raw);
+  const earlier = { id: 'earlier', date: r.date, session_id: 'other-grip', grip: 'Micro',
+    session_started_at: '2026-09-20T10:00:00Z', actual_time_s: 60, avg_force_kg: 20 };
+  const alone = summarizePredictions([r]);
+  const after = summarizePredictions([earlier, r]);
+  expect(alone.observations.force[0].trainingContext).toBe('first_recorded');
+  expect(after.observations.force[0].trainingContext).toBe('after_training');
+  expect(after.force).toEqual(alone.force);
+  expect(after.diagnostics.force.trainingContext.after_training.current.observations).toBe(1);
+  const unknown = summarizePredictions([{ ...earlier, session_started_at: undefined }, r]);
+  expect(unknown.observations.force[0].trainingContext).toBe('unknown');
+});

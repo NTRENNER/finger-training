@@ -1,4 +1,4 @@
-import { recordForce, isValidFailureRep } from '../forceRecording.js';
+import { recordForce, recordCapacityForce, isValidFailureRep } from '../forceRecording.js';
 import { freshFitReps, effectiveLoad } from '../load.js';
 import { prescription, demonstratedCapacityKg } from '../prescription.js';
 import { computeDensityLadder } from '../densityLadder.js';
@@ -55,4 +55,27 @@ test('interrupted activity retains its load but cannot fit, anchor, or advance',
 });
 test('legacy failure records retain their existing eligibility', () => {
   expect(isValidFailureRep({ ...rep, failure_valid: undefined })).toBe(true);
+});
+
+
+test('fractional device timestamps with a normal release retain valid capacity and activity', () => {
+  const samples = Array.from({ length: 3074 }, (_, i) => ({
+    ts: 0.01 + i * 10.001, kg: i < 290 ? 5 : i < 3043 ? 16.5 : 0,
+  }));
+  const result = recordCapacityForce(samples, samples[3073].ts, 15.9, {
+    startTs: samples[290].ts, endTs: samples[3043].ts,
+    activityEndTs: samples[3073].ts, stopReason: 'release', reason: 'sustained_force_loss',
+  });
+  expect(result.failureValid).toBe(true);
+  expect(result.endReason).toBe('target_force_failure');
+  expect(result.forceRecording).toMatchObject({ signal_quality: 'complete', capacity_eligible: true,
+    activity: { signal_quality: 'complete' } });
+  expect(result.actualTime).toBeCloseTo(27.532753, 6);
+  expect(result.avgForce).toBeCloseTo(16.5, 6);
+});
+
+test('endpoint coverage still rejects missing tails and reversed timestamps', () => {
+  const samples = [{ ts: 0.01, kg: 20 }, { ts: 10.011, kg: 20 }, { ts: 20.012, kg: 0 }];
+  expect(recordForce(samples, 20.012 + 0.000001).failureValid).toBe(false);
+  expect(recordForce([samples[0], samples[2], samples[1]], 30).failureValid).toBe(false);
 });

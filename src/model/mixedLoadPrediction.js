@@ -1,3 +1,4 @@
+import { trainingDayContext } from './trainingDayContext.js';
 // Shadow experiment only. Nothing in this module changes prescribed loads,
 // failure detection, capacity eligibility or the regular ladder.
 import { freshFitReps } from './load.js';
@@ -160,6 +161,20 @@ export function completeMixedPrediction(prepared, prefix, rep) {
 // Session means first: ten holds from one workout cannot masquerade as ten
 // independent validations. Report versions separately; skip edited records.
 export function summarizeMixedPredictions(history) {
+  const contextFor = trainingDayContext(history || []);
+  const canonical = x => Array.isArray(x) ? x.map(canonical) : x && typeof x === 'object'
+    ? Object.fromEntries(Object.keys(x).sort().map(k => [k, canonical(x[k])])) : x;
+  const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+  const sameFingerprint = (a, b) => {
+    try { return same(JSON.parse(a), JSON.parse(b)); } catch { return false; }
+  };
+  const conflicts = new Set(), copies = new Map();
+  for (const r of history || []) {
+    if (copies.has(r.id) && !same(copies.get(r.id), r)) conflicts.add(r.id);
+    copies.set(r.id, r);
+  }
+  const observations = [];
+
   const groups = new Map(), excluded = {};
   const exclude = reason => { excluded[reason] = (excluded[reason] || 0) + 1; };
   const seen = new Set();
@@ -168,16 +183,17 @@ export function summarizeMixedPredictions(history) {
     const p = r.force_recording?.mixed_load_prediction;
     if (!p || !isMixedDomainRep(r)) continue;
     const key = `${r.session_id}|${r.hand}|${r.rep_num}`;
+    if (conflicts.has(r.id)) { exclude('conflicting_copy'); continue; }
     if (seen.has(key)) continue;
     seen.add(key);
-    if (p.prior_rep_ids?.some((id, i) => !byId.has(id) || fingerprint(byId.get(id)) !== p.prior_fingerprints?.[i])) {
+    if (p.prior_rep_ids?.some((id, i) => conflicts.has(id) || !byId.has(id) || !sameFingerprint(fingerprint(byId.get(id)), p.prior_fingerprints?.[i]))) {
       exclude('edited_or_missing_prefix'); continue;
     }
     const o = p.observation;
     const f = { ...r.force_recording }; delete f.mixed_load_prediction;
     if (!o || o.actual_time_s !== r.actual_time_s || o.avg_force_kg !== r.avg_force_kg
       || o.rest_before_s !== r.rep_timing?.rest_before_s || o.failure_valid !== r.failure_valid
-      || o.end_reason !== r.end_reason || o.load_provenance !== r.load_provenance || JSON.stringify(o.force_recording) !== JSON.stringify(f)) {
+      || o.end_reason !== r.end_reason || o.load_provenance !== r.load_provenance || !same(o.force_recording, f)) {
       exclude('edited_since_prediction'); continue;
     }
     const c = p.comparison;
@@ -187,24 +203,50 @@ export function summarizeMixedPredictions(history) {
     if (!Number.isFinite(c.conditional.seconds) || !Number.isFinite(c.fresh_only.seconds)) {
       exclude('out_of_range'); continue;
     }
-    for (const category of ['all', `domain:${r.force_recording.session_protocol.zone}`, `position:${r.rep_num}`]) {
+    const plannedError = c.planned_scenario_matches && Number.isFinite(p.prediction.seconds)
+      ? p.prediction.seconds - c.observed_s : null;
+    const targetError = plannedError != null && p.mode === 'adaptive_targets'
+      && ['adjusted', 'capped_at_original'].includes(p.adjustment?.status)
+      && p.adjustment.target_s === r.target_duration && r.force_recording.basis === 'target_acquired'
+      ? r.actual_time_s - p.adjustment.target_s : null;
+    observations.push({ id: r.id, date: r.date, grip: r.grip, hand: r.hand,
+      rep: r.rep_num, version: p.version, mode: p.mode, trainingContext: contextFor(r).status,
+      plannedError, targetError });
+    for (const category of ['all', `domain:${r.force_recording.session_protocol.zone}`, `position:${r.rep_num}`,
+      `grip:${r.grip}`, `hand:${r.hand}`, `context:${contextFor(r).status}`]) {
       const groupKey = p.mode === 'adaptive_targets'
         ? `v${p.version}|adaptive_targets|${category}` : `v${p.version}|${category}`;
       if (!groups.has(groupKey)) groups.set(groupKey, new Map());
       const sessions = groups.get(groupKey);
       const sid = r.session_id || r.session_started_at || r.date;
       if (!sessions.has(sid)) sessions.set(sid, []);
-      sessions.get(sid).push({ error: Math.abs(c.conditional.seconds - c.observed_s),
+      sessions.get(sid).push({ date: r.date, plannedError, targetError, error: Math.abs(c.conditional.seconds - c.observed_s),
         baseline: Math.abs(c.fresh_only.seconds - c.observed_s),
         planned: c.planned_scenario_matches && Number.isFinite(p.prediction.seconds)
           ? Math.abs(p.prediction.seconds - c.observed_s) : null });
     }
   }
   const mean = xs => xs.length ? round(xs.reduce((s, x) => s + x, 0) / xs.length) : null;
-  return { status: 'experimental_not_validated', excluded, groups: Object.fromEntries([...groups].map(([key, sessions]) => {
+  return { status: 'experimental_not_validated', excluded, observations, groups: Object.fromEntries([...groups].map(([key, sessions]) => {
     const values = [...sessions.values()];
     const planned = values.map(rs => mean(rs.map(r => r.planned).filter(x => x != null))).filter(x => x != null);
-    return [key, { sessions: sessions.size, holds: values.reduce((s, rs) => s + rs.length, 0),
+    const all = values.flat();
+    const dayScore = (field, transform) => {
+      const days = new Map();
+      for (const r of all) if (r.date && Number.isFinite(r[field])) {
+        if (!days.has(r.date)) days.set(r.date, []);
+        days.get(r.date).push(transform(r[field]));
+      }
+      return { days: days.size, value: mean([...days.values()].map(xs => mean(xs))) };
+    };
+    const advance = dayScore('plannedError', Math.abs), target = dayScore('targetError', Math.abs);
+    return [key, { days: new Set(all.map(r => r.date).filter(Boolean)).size,
+      advance_days: advance.days, advance_mae_s: advance.value,
+      advance_bias_s: dayScore('plannedError', x => x).value,
+      advance_rmse_s: advance.days ? round(Math.sqrt(dayScore('plannedError', x => x*x).value)) : null,
+      target_days: target.days, target_mae_s: target.value,
+      target_bias_s: dayScore('targetError', x => x).value,
+      sessions: sessions.size, holds: values.reduce((s, rs) => s + rs.length, 0),
       conditional_mae_s: mean(values.map(rs => mean(rs.map(r => r.error)))),
       fresh_only_mae_s: mean(values.map(rs => mean(rs.map(r => r.baseline)))),
       planned_scenario_sessions: planned.length, planned_scenario_mae_s: mean(planned) }];

@@ -248,7 +248,7 @@ export function WorkoutHistoryView({
   const editUpdateExerciseSets = (exId, next) => {
     setEditSession(prev => ({
       ...prev,
-      exercises: { ...prev.exercises, [exId]: next },
+      exercises: { ...prev.exercises, [exId]: { ...prev.exercises[exId], ...next } },
     }));
   };
   const editToggleExerciseDone = (exId) => {
@@ -631,7 +631,9 @@ export function WorkoutHistoryView({
 
                 return (
                   <div key={id} style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{exName}</div>
+                    <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{exName}
+                      {data.effort && <span> · {{ could_do_more: 'Could do more', about_right: 'About right', at_limit: 'At my limit' }[data.effort] || ''}</span>}
+                    </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {data.sets.map((s, si) => {
                         // Detect schema by which fields are present.

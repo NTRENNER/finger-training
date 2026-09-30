@@ -157,3 +157,39 @@ test('a saved hold with unknown release cannot drive later Chaos Machine adjustm
  expect(first.force_recording.capacity_eligible).toBe(true);
  expect(prepareMixedPrediction(model(),[first],15,30).prediction.status).toBe('unavailable');
 });
+
+
+test('adaptive target attainment is separate from the forecast and weighted by date', () => {
+  const m = model();
+  const make = (date, sid, seconds) => {
+    const first = saved(m, [], { ...rep(), id: `${sid}-1`, session_id: sid, date });
+    const current = { ...rep(2, 15, seconds), id: `${sid}-2`, session_id: sid, date, target_duration: 70 };
+    const prepared = { ...prepareMixedPrediction(m, [first], 15, 30), mode: 'adaptive_targets',
+      adjustment: { status: 'adjusted', target_s: 70 } };
+    current.force_recording.mixed_load_prediction = completeMixedPrediction(prepared, [first], current);
+    return [first, current];
+  };
+  const rows = [...make('2026-09-28', 'a', 80), ...make('2026-09-28', 'b', 80), ...make('2026-09-29', 'c', 100)];
+  const report = summarizeMixedPredictions(rows);
+  const score = report.groups['v1|adaptive_targets|all'];
+  expect(score).toMatchObject({ days: 2, target_days: 2, target_mae_s: 20, target_bias_s: 20 });
+  expect(report.groups['v1|adaptive_targets|grip:Micro'].holds).toBe(3);
+  expect(score.advance_mae_s).not.toBe(score.target_mae_s);
+  const fallback = rows.slice(0,2).map(r => JSON.parse(JSON.stringify(r)));
+  fallback[1].force_recording.mixed_load_prediction.adjustment.status = 'unavailable';
+  expect(summarizeMixedPredictions(fallback).groups['v1|adaptive_targets|all'].target_days).toBe(0);
+  fallback[1].force_recording.mixed_load_prediction.adjustment.status = 'adjusted';
+  fallback[1].force_recording.mixed_load_prediction.comparison.planned_scenario_matches = false;
+  expect(summarizeMixedPredictions(fallback).groups['v1|adaptive_targets|all'].advance_days).toBe(0);
+  expect(summarizeMixedPredictions(fallback).groups['v1|adaptive_targets|all'].target_days).toBe(0);
+});
+
+test('JSONB key order is harmless; conflicting current or prefix copies cannot score', () => {
+  const m = model(), first = saved(m, [], rep()), second = saved(m, [first], rep(2));
+  const reverse = x => Array.isArray(x) ? x.map(reverse) : x && typeof x === 'object'
+    ? Object.fromEntries(Object.keys(x).reverse().map(k => [k, reverse(x[k])])) : x;
+  expect(summarizeMixedPredictions(reverse([first, second]))).toEqual(summarizeMixedPredictions([first, second]));
+  const changed = { ...first, avg_force_kg: 80 };
+  expect(summarizeMixedPredictions([first, changed, second]).groups).toEqual({});
+  expect(summarizeMixedPredictions([first, second, { ...second, actual_time_s: 800 }]).groups).toEqual({});
+});

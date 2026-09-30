@@ -1,3 +1,4 @@
+import { trainingDayContext } from './trainingDayContext.js';
 // Prospective, versioned experiments. This module never supplies a training
 // recommendation. Models are frozen at session start, predictions before holds.
 import { prescription, buildFreshLoadMap, repKey } from './prescription.js';
@@ -218,6 +219,7 @@ export function predictionMetrics(rows, model) {
 
 const scores = rows => ({ current: predictionMetrics(rows, 'current'), candidate: predictionMetrics(rows, 'candidate') });
 export function summarizePredictions(history) {
+  const contextFor = trainingDayContext(history || []);
   const exclusions = {}, force = [], recovery = [], plannedForce = [], plannedRecovery = [];
   const adaptiveForce = [], adaptivePlanned = [], preSessionRecovery = [], prescriptionStages = [];
   const skip = key => { exclusions[key] = (exclusions[key] || 0) + 1; };
@@ -258,6 +260,7 @@ export function summarizePredictions(history) {
       basis: r.force_recording?.basis || 'legacy_elapsed',
       priorDays: p.models?.current?.source_days ?? null,
       priorDaysBand: p.models?.current?.source_days == null ? 'unknown' : p.models.current.source_days < 10 ? '5–9' : p.models.current.source_days < 20 ? '10–19' : p.models.current.source_days < 50 ? '20–49' : '50+',
+      trainingContext: contextFor(r).status,
       cooked: r.session_adjustment?.reported_cooked ?? null,
       actual: c.actual, current: c.current, candidate: c.candidate };
     (p.kind === 'capacity' ? force : recovery).push(row);
@@ -301,14 +304,15 @@ export function summarizePredictions(history) {
   const adaptiveDates = [...new Set(adaptiveForce.map(r => r.date))].sort();
   const adaptiveBy = key => Object.fromEntries([...new Set(adaptiveForce.map(r => r[key]))]
     .map(value => [value, scores(adaptiveForce.filter(r => r[key] === value))]));
-  const breakdown = rows => Object.fromEntries(['grip', 'hand', 'domain', 'rep', 'restBand', 'basis', 'priorDaysBand']
+  const breakdown = rows => Object.fromEntries(['grip', 'hand', 'domain', 'rep', 'restBand', 'basis', 'priorDaysBand', 'trainingContext']
     .map(key => [key, Object.fromEntries([...new Set(rows.map(r => r[key]))].map(value =>
       [value, scores(rows.filter(r => r[key] === value))]))]));
   return { experiment: PREDICTION_EXPERIMENT, status: 'review_required_before_any_model_change',
     dates, days: dates.length, checkpoints: Math.floor(dates.length / REVIEW_DAYS),
     daysToNextCheckpoint: REVIEW_DAYS - dates.length % REVIEW_DAYS,
     diagnostics: { force: breakdown(force), recovery: breakdown(recovery),
-      plannedRecovery: breakdown(plannedRecovery), preSessionRecovery: breakdown(preSessionRecovery) },
+      plannedRecovery: breakdown(plannedRecovery), preSessionRecovery: breakdown(preSessionRecovery),
+      plannedForce: breakdown(plannedForce), adaptiveForce: breakdown(adaptiveForce), adaptivePlanned: breakdown(adaptivePlanned) },
     prescriptionStages,
     preSessionRecovery: scores(preSessionRecovery),
     force: scores(force), recovery: scores(recovery), plannedForce: scores(plannedForce), plannedRecovery: scores(plannedRecovery),

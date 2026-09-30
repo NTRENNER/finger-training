@@ -398,7 +398,7 @@ export function useSessionRunner({
     const repTargetTime = currentStep?.targetTime ?? config.targetTime;
     const derivedFailed = mixed && currentRep > 0 ? false : failed || isShortfall(roundedActual, repTargetTime);
     const recordedForce = mixed ? { ...forceRecording,
-      session_protocol: { id: MIXED_DOMAIN_ID, version: 1, zone: currentStep.zone,
+      session_protocol: { id: MIXED_DOMAIN_ID, version: config.mixedDomainPlan.version, zone: currentStep.zone,
         opening_zone: config.mixedDomainPlan.steps[0].zone, position: currentRep + 1,
         role: currentRep === 0 ? 'opening_hold' : 'fatigued_hold',
         duration_reference: config.mixedDomainPlan.adjustLoads ? 'approximate_hold_target' : 'fresh_load_reference',

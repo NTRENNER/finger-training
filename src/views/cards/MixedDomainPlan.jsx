@@ -8,10 +8,10 @@ export function MixedDomainPlan({ plan, hands, unit, multiplier, onOpeningChange
   const targetSeconds = (plan.steps.reduce((sum, step) => sum + step.targetTime, 0) + 4 * 30) * hands.length;
   const targetEstimate = `${Math.floor(targetSeconds / 60)}:${String(targetSeconds % 60).padStart(2, '0')}`;
   return <section aria-label="Chaos Machine beta plan" style={{ marginBottom: 20 }}>
-    <p style={{ fontSize: 16, lineHeight: 1.5 }}>Five holds per hand. A different load each hold. Rest 30 seconds between holds.</p>
+    <p style={{ fontSize: 16, lineHeight: 1.5 }}>Five holds per hand. A different target weight each hold. Rest 30 seconds between holds.</p>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>
-      Later loads are estimated from your measured pulls and rest, then fixed for each hold.
-      If measurements are missing, the original load is shown. You can still change it.
+      Later target weights are estimated from your measured pulls and rest, then fixed for each hold.
+      If earlier measurements are incomplete, the original target weight is shown and may not match the target time.
       About {targetEstimate}{hands.length === 2 ? ' for both hands' : ' for one hand'} if you reach every target, including rests. Setup and hand changes add time.
     </p>
     <label style={{ display: 'block', marginBottom: 6 }}>
@@ -22,7 +22,7 @@ export function MixedDomainPlan({ plan, hands, unit, multiplier, onOpeningChange
         {MIXED_DOMAIN_ZONES.map(z => <option key={z} value={z}>{MIXED_DOMAIN_LABELS[z]}</option>)}
       </select>
     </label>
-    <p style={{ margin: '0 0 16px', color: C.muted, fontSize: 13 }}>Rotates automatically for your next beta session.</p>
+    <p style={{ margin: '0 0 16px', color: C.muted, fontSize: 13 }}>Starts with your recommended domain unless you choose another. Continues through the domains in order, wrapping from Endurance to Power. Both hands follow the same sequence.</p>
     <div className="mixed-plan-hands" style={{ '--mixed-plan-columns': hands.length }}>
       {hands.map(hand => <div key={hand} style={{ minWidth: 0 }}>
         <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>{hand === 'L' ? 'Left hand' : 'Right hand'}</h3>
@@ -50,7 +50,7 @@ export function MixedDomainPlan({ plan, hands, unit, multiplier, onOpeningChange
         </ol>
       </div>)}
     </div>
-    <p style={{ color: C.muted, lineHeight: 1.5 }}>Aim for approximately the displayed times. Keep the load steady and hold until failure; reaching the target does not stop the timer.</p>
+    <p style={{ color: C.muted, lineHeight: 1.5 }}>Aim for approximately the displayed times. Keep your pulling force steady at the target weight and hold until failure; reaching the target does not stop the timer.</p>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>Your first measured hold can update the curve. Later holds are saved as fatigued work. These estimates are experimental. Your 4–6 rep progression is unchanged.</p>
   </section>;
 }

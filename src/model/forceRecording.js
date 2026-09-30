@@ -9,6 +9,7 @@ export function recordForce(samples, endTs = samples?.at(-1)?.ts, targetKg = nul
   const start = samples?.[0]?.ts ?? 0;
   const intervals = [];
   let area = 0, squareArea = 0, covered = 0, peak = 0, gap = false;
+  let coveredThrough = start;
   for (let i = 0; i < (samples?.length ?? 0); i++) {
     const s = samples[i];
     if (s.ts <= endTs) peak = Math.max(peak, s.kg);
@@ -22,9 +23,13 @@ export function recordForce(samples, endTs = samples?.at(-1)?.ts, targetKg = nul
     area += p.kg * used;
     squareArea += p.kg * p.kg * used;
     covered += used;
+    coveredThrough = Math.min(s.ts, endTs);
   }
   const durationMs = Math.max(0, (endTs ?? start) - start);
-  const signalValid = !gap && covered > 0 && covered === durationMs;
+  // Check the observed endpoint, not exact equality of summed fractional
+  // intervals: floating-point roundoff can reject a continuous device trace.
+  // Gaps/reversed timestamps and an unobserved tail still invalidate it.
+  const signalValid = !gap && covered > 0 && coveredThrough === endTs;
   const avg = covered ? area / covered : null;
   const sd = covered ? Math.sqrt(Math.max(0, squareArea / covered - avg * avg)) : null;
   const cv = avg > 0 ? sd / avg : null;

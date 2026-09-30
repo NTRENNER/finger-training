@@ -1,10 +1,12 @@
-// Curve coverage is an exception surface: it stays out of the metric stack
-// unless a previously sampled zone is stale or approaching its lockout.
+// Separate recorded training exposure from opening measurements. Freshness
+// notices describe the measurement record, not evidence of lost ability.
 
 import React, { useMemo } from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.js";
 import { ZONE_KEYS, ZONE6 } from "../../model/zones.js";
+import { trainingExposure } from "../../model/trainingExposure.js";
+import { ymdLocal } from "../../util.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { getZoneStaleness, LOCKOUT_WINDOW_DAYS } from "../../model/lockout.js";
 
@@ -31,10 +33,12 @@ export function curveCoverageAttentionByGrip(history = [], { handView = "pooled"
     const attentionZones = ZONE_KEYS.filter(zone =>
       ATTENTION_STATUSES.has(staleness?.[zone]?.status)
     );
-    if (attentionZones.length === 0) continue;
+    const exposure = trainingExposure(scopedHistory.filter(rep => rep?.grip === grip), ymdLocal());
+    if (!Object.values(exposure).some(x => x.attemptedDate || x.measuredDate)) continue;
     const staleCount = attentionZones.filter(zone => staleness[zone].status === "stale").length;
     out[grip] = {
       staleness,
+      exposure,
       attentionZones,
       staleCount,
       warningCount: attentionZones.length - staleCount,
@@ -44,7 +48,7 @@ export function curveCoverageAttentionByGrip(history = [], { handView = "pooled"
 }
 
 function GripCoverage({ grip, coverage, showGrip }) {
-  const { staleness, attentionZones, staleCount, warningCount } = coverage;
+  const { staleness, exposure, attentionZones, staleCount, warningCount } = coverage;
   return (
     <div style={{ marginTop: showGrip ? 16 : 0 }}>
       {showGrip && (
@@ -58,7 +62,7 @@ function GripCoverage({ grip, coverage, showGrip }) {
         </div>
       )}
 
-      <div style={{
+      {attentionZones.length > 0 && <div style={{
         padding: "8px 10px",
         marginBottom: 8,
         background: C.bg,
@@ -77,10 +81,10 @@ function GripCoverage({ grip, coverage, showGrip }) {
         )}
         <div style={{ marginTop: 4 }}>
           {staleCount > 0
-            ? "The engine will prioritize a fresh sample."
-            : "The engine is beginning to favor a fresh sample."}
+            ? "Fresh measurements would help refine these estimates."
+            : "Some fresh measurements are getting older."}
         </div>
-      </div>
+      </div>}
 
       {attentionZones.map(zone => {
         const status = staleness[zone];
@@ -122,6 +126,17 @@ function GripCoverage({ grip, coverage, showGrip }) {
           </div>
         );
       })}
+      <div style={{ overflowX: 'auto', marginTop: 12 }}>
+        <table style={{ width: '100%', minWidth: 350, textAlign: 'left', fontSize: 12, borderSpacing: '0 10px' }}>
+          <thead><tr><th>Domain</th><th>Training exposure</th><th>Opening measurement</th></tr></thead>
+          <tbody>{Object.entries(exposure).map(([zone, value]) => <tr key={zone}>
+            <th scope="row" style={{ fontWeight: 400 }}>{zone.replace(/_/g, ' / ')}</th>
+            <td>{value.trainedDate || 'Not yet'}{value.attemptedDate && value.attemptedDate !== value.trainedDate
+              && <div style={{ color: C.muted }}>Attempt: {value.attemptedDate}</div>}</td>
+            <td>{value.measuredDate || 'Not yet'}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -144,13 +159,18 @@ export function CurveCoverageCard({ history = [], grip = "", handView = "pooled"
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{ marginBottom: attentionGrips.length > 1 ? 0 : 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Curve Coverage</div>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Training & measurements</div>
         <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-          Data that needs attention
+          Training exposure and fresh-curve evidence are different
           {handView !== "pooled" && ` · ${handView === "L" ? "left" : "right"} hand`}
         </div>
       </div>
 
+      <p style={{ color: C.muted, fontSize: 12, lineHeight: 1.5 }}>
+        Later Chaos holds can count as exposure when a valid hold reaches at least 80% of its target time.
+        Short or interrupted attempts stay visible. They do not become fresh-capacity measurements.
+        Opening measurements can still reflect earlier training that day; these dates do not establish accuracy or recovery.
+      </p>
       {attentionGrips.map(item => (
         <GripCoverage
           key={item}

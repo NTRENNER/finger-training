@@ -68,7 +68,7 @@ import {
   LADDER_COLLAPSE_STEP_FRAC,
 } from "../../model/densityLadder.js";
 import { today } from "../../util.js";
-import { makeMixedDomainPlan, nextMixedDomainZone, MIXED_DOMAIN_REST_S } from '../../model/mixedDomain.js';
+import { makeMixedDomainPlan, recommendedMixedDomainZone, MIXED_DOMAIN_REST_S } from '../../model/mixedDomain.js';
 import { MixedDomainPlan } from './MixedDomainPlan.jsx';
 
 // Display labels for the climbing-focus pill in the header. Kept here
@@ -249,12 +249,12 @@ export function SessionPlanCard({
 
   const mixedPlan = useMemo(() => {
     if (rec?.boundaryProbe) return null;
-    const opening = mixedOpening || nextMixedDomainZone(history, grip, expectedHands, recommendedZone);
+    const opening = mixedOpening || recommendedMixedDomainZone(recommendedZone);
     // The runner applies the reported fatigue adjustment once at session start.
     const freshRows = curveRows?.map(r => ({ ...r, L: r.L == null ? null : r.L / loadMultiplier,
       R: r.R == null ? null : r.R / loadMultiplier }));
     return makeMixedDomainPlan(freshRows, opening, expectedHands);
-  }, [curveRows, mixedOpening, history, grip, expectedHands, recommendedZone, loadMultiplier, rec]);
+  }, [curveRows, mixedOpening, expectedHands, recommendedZone, loadMultiplier, rec]);
   const mixedEnabled = mixedRequested && !!mixedPlan;
 
   // ── Active row — drives the bottom session-details panel ──────────────

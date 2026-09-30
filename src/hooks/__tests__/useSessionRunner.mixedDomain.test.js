@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { useSessionRunner } from '../useSessionRunner.js';
-import { makeMixedDomainPlan, MIXED_DOMAIN_ZONES, nextMixedDomainZone } from '../../model/mixedDomain.js';
+import { makeMixedDomainPlan, MIXED_DOMAIN_ZONES } from '../../model/mixedDomain.js';
 import { freshFitReps } from '../../model/load.js';
 import { predForceThreeExp } from '../../model/threeExp.js';
 import { summarizeMixedPredictions } from '../../model/mixedLoadPrediction.js';
@@ -10,7 +10,7 @@ import { findPrevSessionReps } from '../../model/repCurveData.js';
 jest.mock('../../lib/sync.js', () => ({ pushDailyState: jest.fn() }));
 
 const rows = MIXED_DOMAIN_ZONES.map((key, i) => ({ key, L: 30 - i * 4, R: 35 - i * 4 }));
-const makePlan = () => makeMixedDomainPlan(rows, 'strength', ['L', 'R'], false); // Legacy fixed-reference plans remain supported.
+const makePlan = () => ({ ...makeMixedDomainPlan(rows, 'strength', ['L', 'R'], false), version: 1 }); // Legacy fixed-reference plans remain supported.
 function setup({ connected = true, hand = 'Both', cooked = null, adjust = false, history = [] } = {}) {
   const addReps = jest.fn();
   const hook = renderHook(() => useSessionRunner({ history, addReps, tindeqConnected: connected }));
@@ -85,7 +85,7 @@ test('fatigue adjustment is applied exactly once to every planned load', () => {
   expect(hook.result.current.nextWeight).toBeCloseTo(24);
 });
 
-test('interrupted opener is retained but neither fits capacity nor advances opening rotation', () => {
+test('interrupted opener is retained but does not fit capacity', () => {
   const { hook } = setup({ hand: 'L' });
   complete(hook, { failureValid: false, endReason: 'equipment_interruption',
     forceRecording: { capacity_eligible: false } });
@@ -93,7 +93,6 @@ test('interrupted opener is retained but neither fits capacity nor advances open
   const saved = hook.result.current.sessionReps;
   expect(saved[0].actual_time_s).toBe(25);
   expect(freshFitReps(saved)).toEqual([]);
-  expect(nextMixedDomainZone(saved, 'Micro', ['L'], 'strength')).toBe('strength');
 });
 
 test('beta history cannot advance, reset, or replace a regular ladder or same-load comparison', () => {
@@ -165,4 +164,31 @@ test('shadow forecasts persist for both hands while live history changes and loa
     // Identical repeated rows are deduplicated by the shared fresh-history filter.
     expect(next.model.source_sessions).toBe(7);
   } finally { jest.useRealTimers(); }
+});
+
+
+test('new domain-cycle plans run the frozen sequence on both hands and save its version', () => {
+  const addReps = jest.fn();
+  const history = [];
+  const hook = renderHook(() => useSessionRunner({ history, addReps, tindeqConnected: true }));
+  const plan = makeMixedDomainPlan(rows, 'strength_endurance', ['L', 'R'], false);
+  act(() => hook.result.current.startSession({ grip: 'Micro', hand: 'Both', mixedDomainPlan: plan }));
+  const expected = ['strength_endurance', 'endurance', 'power', 'power_strength', 'strength'];
+  plan.steps.reverse(); // Changes to setup data cannot rearrange an active session.
+  const first = hook.result.current.activeHand;
+  for (let h = 0; h < 2; h++) {
+    const hand = hook.result.current.activeHand;
+    expect(hand).toBe(h === 0 ? first : first === 'L' ? 'R' : 'L');
+    for (let i = 0; i < 5; i++) {
+      expect(hook.result.current.activeRepConfig.goal).toBe(expected[i]);
+      complete(hook);
+      if (i < 4) act(() => hook.result.current.handleRestDone());
+    }
+    if (h === 0) act(() => hook.result.current.setPhase('rep_ready'));
+  }
+  const saved = addReps.mock.calls.flatMap(c => c[0]);
+  for (const hand of ['L', 'R']) {
+    expect(saved.filter(r => r.hand === hand).map(r => r.force_recording.session_protocol.zone)).toEqual(expected);
+  }
+  expect(saved.every(r => r.force_recording.session_protocol.version === 2)).toBe(true);
 });

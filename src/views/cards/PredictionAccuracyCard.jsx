@@ -1,11 +1,13 @@
 import React, { useMemo, useState, useId } from 'react';
+import { ChaosPredictionReview } from './ChaosPredictionReview.jsx';
 import { HistoricalPredictionReview } from './HistoricalPredictionReview.jsx';
 import { Card, Btn } from '../../ui/components.js';
 import { C } from '../../ui/theme.js';
 import { REVIEW_DAYS, summarizePredictions } from '../../model/predictionTracking.js';
 
 const labels = { max_strength: 'Peak', power: 'Power', power_strength: 'Power / Strength',
-  strength: 'Strength', strength_endurance: 'Strength / Endurance', endurance: 'Endurance' };
+  strength: 'Strength', strength_endurance: 'Strength / Endurance', endurance: 'Endurance',
+  first_recorded: 'First recorded finger workout that day', after_training: 'After earlier finger training', unknown: 'Training order unknown' };
 
 function Score({ title, score, unit, factor = 1, candidateLabel = 'Candidate' }) {
   const fmt = n => n == null ? '—' : `${(n * factor).toFixed(1)} ${unit}`;
@@ -13,7 +15,7 @@ function Score({ title, score, unit, factor = 1, candidateLabel = 'Candidate' })
     <h4 style={{ margin: '0 0 8px' }}>{title}</h4>
     <div style={{ color: C.muted, marginBottom: 8 }}>{score.current.days} training days · {score.current.observations} holds</div>
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', textAlign: 'left', fontSize: 14, borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', minWidth: 340, textAlign: 'left', fontSize: 14, borderCollapse: 'collapse' }}>
         <thead><tr><th scope="col">Error</th><th scope="col">Current</th><th scope="col">{candidateLabel}</th></tr></thead>
         <tbody>{[['Typical', 'mae'], ['Larger misses', 'rmse'], ['Bias', 'bias']].map(([name, key]) =>
           <tr key={key}><th scope="row" style={{ fontWeight: 400, padding: '6px 4px 6px 0' }}>{name}</th>
@@ -34,6 +36,9 @@ function DiagnosticBreakdowns({ report, unit, factor }) {
     <label htmlFor={`${id}-comparison`}>Comparison</label>
     <select id={`${id}-comparison`} style={{ display: "block", width: "100%", margin: "6px 0 12px" }} value={measure} onChange={e => setMeasure(e.target.value)}>
       <option value="force">Opening force</option>
+      <option value="plannedForce">Opening hold time · planned load</option>
+      <option value="adaptiveForce">Established + recent · opening force</option>
+      <option value="adaptivePlanned">Established + recent · hold time</option>
       <option value="recovery">Later holds · measured rest</option>
       <option value="plannedRecovery">Later holds · updated after opener</option>
       <option value="preSessionRecovery">Later holds · before opener</option>
@@ -41,12 +46,12 @@ function DiagnosticBreakdowns({ report, unit, factor }) {
     <label htmlFor={`${id}-group`}>Group by</label>
     <select id={`${id}-group`} style={{ display: "block", width: "100%", margin: "6px 0 12px" }} value={dimension} onChange={e => setDimension(e.target.value)}>
       {Object.entries({ rep: 'Hold number', domain: 'Planned domain', grip: 'Device', hand: 'Hand',
-        restBand: 'Rest duration', basis: 'Recording method', priorDaysBand: 'Prior training days' })
+        trainingContext: 'Earlier finger training that day', restBand: 'Rest duration', basis: 'Recording method', priorDaysBand: 'Prior training days' })
         .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
     </select>
     {Object.entries(report.diagnostics[measure][dimension]).map(([key, score]) =>
-      <Score key={key} title={labels[key] || key} score={score} unit={measure === 'force' ? unit : 's'}
-        factor={measure === 'force' ? factor : 1} candidateLabel={measure === 'force' ? 'Candidate' : 'Population'} />)}
+      <Score key={key} title={labels[key] || key} score={score} unit={['force', 'adaptiveForce'].includes(measure) ? unit : 's'}
+        factor={['force', 'adaptiveForce'].includes(measure) ? factor : 1} candidateLabel={['force', 'plannedForce', 'adaptiveForce', 'adaptivePlanned'].includes(measure) ? 'Candidate' : 'Population'} />)}
     {!Object.keys(report.diagnostics[measure][dimension]).length && <p>No comparable saved forecasts in this group yet.</p>}
   </details>;
 }
@@ -88,6 +93,10 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
   return <Card>
     <h3 style={{ margin: '0 0 10px' }}>Prediction accuracy</h3>
     <HistoricalPredictionReview history={history} unit={unit} />
+    <p style={{ color: C.muted, lineHeight: 1.5 }}><strong>Review rule:</strong> compare opening holds,
+      later-hold recovery, and Chaos target times separately. Check each grip and duration, large misses,
+      training order, and new independent days. A checkpoint invites review; it never switches a model automatically.</p>
+    <ChaosPredictionReview history={history} />
     <strong>New saved forecasts</strong>
     <p style={{ color: C.muted }}>Models are compared using the same history through the previous day. Same-day workouts still inform your live recommendations. Earlier research versions remain in exports but are not included in this comparison.</p>
     <div style={{ fontSize: 20, fontWeight: 700, color: report.days >= REVIEW_DAYS ? C.green : C.text }}>

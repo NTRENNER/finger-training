@@ -731,8 +731,8 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
 
       {nextWeight != null && !isLastRepInSet && (
         <Card style={{ borderColor: C.blue }}>
-          <Label>Next rep suggested weight</Label>
-          {nextDomain && <p><strong>{MIXED_DOMAIN_LABELS[nextDomain]}</strong> · Change to this load before pulling.</p>}
+          <Label>{nextAdjustment?.status === 'adjusted' ? 'New target weight' : 'Next target weight'}</Label>
+          {nextDomain && <p><strong>{MIXED_DOMAIN_LABELS[nextDomain]}</strong> · Pull to this target on your next hold.</p>}
           {mixedAdjustmentText(nextAdjustment) && <p>{mixedAdjustmentText(nextAdjustment)}</p>}
           <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
             {fmtW(nextWeight, unit)} {unit}

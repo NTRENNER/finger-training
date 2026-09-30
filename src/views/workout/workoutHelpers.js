@@ -72,16 +72,15 @@ export function setSummary(set) {
   return set.done ? "✓" : "";
 }
 
-// Walk wLog backward to find the most recent session that contains
-// a sets-shaped entry for the given exercise. Used to seed band-mode
-// exercises (recommendSet handles weight-mode seeding internally).
+// The same exercise can appear in different workouts. Seed only performed
+// sets from its latest chronological session; skipped prefilled bands, variants,
+// and weights are not evidence of work. Do not mutate the saved history.
 export function findLastSessionFor(wLog, workoutId, exId) {
-  for (let i = (wLog?.length ?? 0) - 1; i >= 0; i--) {
-    const s = wLog[i];
-    if (!s || s.workout === ROTATION_PIN_KEY) continue;
-    if (s.workoutId !== workoutId && s.workout !== workoutId) continue;
-    const exData = s.exercises?.[exId];
-    if (exData?.sets?.length) return s;
-  }
-  return null;
+  const s = (wLog || []).filter(s => s && s.workout !== ROTATION_PIN_KEY
+    && s.exercises?.[exId]?.sets?.some(t => t.done)).slice()
+    .sort((a,b) => (b.date || '').localeCompare(a.date || '')
+      || (b.completedAt || '').localeCompare(a.completedAt || ''))[0];
+  if (!s) return null;
+  return { ...s, exercises: { ...s.exercises, [exId]: { ...s.exercises[exId],
+    sets: s.exercises[exId].sets.filter(t => t.done) } } };
 }

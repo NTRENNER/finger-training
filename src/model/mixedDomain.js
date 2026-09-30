@@ -11,16 +11,10 @@ export const MIXED_DOMAIN_LABELS = {
 export const mixedDomainMetadata = rep => rep?.force_recording?.session_protocol;
 export const isMixedDomainRep = rep => mixedDomainMetadata(rep)?.id === MIXED_DOMAIN_ID;
 
-// Only completed, valid opening holds move the beta rotation forward.
-// Training another grip or aborting before an opener cannot skip a domain.
-export function nextMixedDomainZone(history, grip, hands, preferred = 'power') {
-  const openings = (history || []).filter(r => r.grip === grip && hands.includes(r.hand)
-    && isMixedDomainRep(r) && Number(r.rep_num) === 1 && r.failure_valid !== false
-    && r.actual_time_s > 0 && MIXED_DOMAIN_ZONES.includes(mixedDomainMetadata(r).zone));
-  openings.sort((a, b) => String(b.session_started_at || b.date).localeCompare(String(a.session_started_at || a.date)));
-  if (!openings.length) return MIXED_DOMAIN_ZONES.includes(preferred) ? preferred : 'power';
-  const previous = mixedDomainMetadata(openings[0]).zone;
-  return MIXED_DOMAIN_ZONES[(MIXED_DOMAIN_ZONES.indexOf(previous) + 1) % MIXED_DOMAIN_ZONES.length];
+// Follow the ordinary recommender; peak tests or unavailable recommendations
+// cannot become a Chaos domain. Manual choices are handled by the setup card.
+export function recommendedMixedDomainZone(zone) {
+  return MIXED_DOMAIN_ZONES.includes(zone) ? zone : 'power';
 }
 
 // Loads are fresh-load references, not predictions of fatigued hold times.
@@ -29,17 +23,18 @@ export function nextMixedDomainZone(history, grip, hands, preferred = 'power') {
 // false remains supported for legacy fixed-reference plans.
 export function makeMixedDomainPlan(rows, openingZone, hands, adjustLoads = true) {
   if (!MIXED_DOMAIN_ZONES.includes(openingZone)) return null;
-  const order = [openingZone, ...MIXED_DOMAIN_ZONES.filter(z => z !== openingZone)];
+  const start = MIXED_DOMAIN_ZONES.indexOf(openingZone);
+  const order = [...MIXED_DOMAIN_ZONES.slice(start), ...MIXED_DOMAIN_ZONES.slice(0, start)];
   const steps = order.map(zone => {
     const row = rows?.find(r => r.key === zone);
     if (!row || row.deferredReason || hands.some(h => !(row[h] > 0 && row[h] < 200))) return null;
     return { zone, targetTime: ZONE_REF_T[zone], loadByHand: Object.fromEntries(hands.map(h => [h, row[h]])) };
   });
-  return steps.every(Boolean) ? { id: MIXED_DOMAIN_ID, version: 1, steps, adjustLoads: adjustLoads === true } : null;
+  return steps.every(Boolean) ? { id: MIXED_DOMAIN_ID, version: 2, steps, adjustLoads: adjustLoads === true } : null;
 }
 
 export function validMixedDomainPlan(plan, hands) {
-  return plan?.id === MIXED_DOMAIN_ID && plan.version === 1
+  return plan?.id === MIXED_DOMAIN_ID && [1, 2].includes(plan.version)
     && (plan.adjustLoads == null || typeof plan.adjustLoads === 'boolean') && plan.steps?.length === 5
     && new Set(plan.steps.map(s => s.zone)).size === 5
     && plan.steps.every(s => MIXED_DOMAIN_ZONES.includes(s.zone)
@@ -47,9 +42,10 @@ export function validMixedDomainPlan(plan, hands) {
       && hands.every(h => Number.isFinite(s.loadByHand?.[h]) && s.loadByHand[h] > 0 && s.loadByHand[h] < 200));
 }
 
-// After the opener, use actual planned loads to order the remaining holds.
-// Separate hand orderings handle asymmetric or bounded prescriptions honestly.
+// New plans preserve the domain cycle for both hands. Older saved plans keep
+// their original per-hand descending-load order. Never re-sort adaptive targets.
 export function mixedDomainSteps(plan, hand) {
   if (!plan?.steps?.length) return [];
+  if (plan.version === 2) return plan.steps;
   return [plan.steps[0], ...plan.steps.slice(1).sort((a, b) => b.loadByHand[hand] - a.loadByHand[hand])];
 }

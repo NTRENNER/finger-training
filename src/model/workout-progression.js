@@ -120,6 +120,16 @@ function recommendSide(prev, exDef, repRange, ladder = null) {
   // accumulate, steps/jumps only at top-out, and KB rep-up runs only
   // in bridge mode. Without a ladder (legacy callers, tests), the
   // original per-set strategies below apply unchanged.
+  if (ladder?.mode === 'return') return { weight: String(prev.weight ?? ''),
+    reps: String(targetReps || prevReps || ''), reasoning: ladder.reasoning };
+  if (ladder?.mode === 'ease' && hasWeight) {
+    const lower = (exDef.availableLoads || []).filter(w => w < prevWeight).sort((a, b) => b-a)[0];
+    // A modest coaching reduction, kept in the stored display unit. No claim
+    // about a measured percentage of capacity; the athlete can edit it.
+    const weight = lower ?? (exDef.availableLoads?.length ? prevWeight : Math.round(prevWeight * .95 * 10) / 10);
+    return { weight: String(weight), reps: String(targetReps || prevReps),
+      reasoning: 'Last time was at your limit. Use a comfortable load for this light session.' };
+  }
   if (ladder && hasWeight && !badMiss) {   // catastrophic miss → legacy back-off below
     if (ladder.mode === "accumulate" || ladder.mode === "repeat") {
       return {
@@ -127,7 +137,7 @@ function recommendSide(prev, exDef, repRange, ladder = null) {
         reps:   String(targetReps || prevReps),
         reasoning: ladder.mode === "accumulate"
           ? "= hold (ladder: building sets)"
-          : "= hold (ladder: repeat)",
+          : (ladder.reasoning || "= hold (ladder: repeat)"),
       };
     }
     if (ladder.mode === "step_load" && cleanLast) {
@@ -301,16 +311,53 @@ export function epley1RM(weight, reps) {
   return w * (1 + r / 30);
 }
 
-// Per-set rep check for clean-session evaluation, handling both
-// bilateral and unilateral set shapes. Unilateral: BOTH sides must
-// hit target (the weaker side gates, same as the finger ladder).
-function setHitTarget(set, unilateral, targetReps) {
-  if (!set || !set.done || !(targetReps > 0)) return false;
-  if (unilateral) {
-    return parseRepsCount(set.leftReps) >= targetReps
-        && parseRepsCount(set.rightReps) >= targetReps;
+// Return policy is an exercise-specific coaching default, not an estimate of
+// strength lost. Two completed, separate-date return exposures restore ordinary
+// progression. The reference load stays visible and editable.
+export const RETURN_GAP_DAYS = 28;
+export function returnToTrainingPlan(history, exDef, templateSets, referenceDate) {
+  if (!referenceDate) return null;
+  const rows = (history || []).filter(s => s?.date && s.date <= referenceDate
+    && s.exercises?.[exDef.id]?.sets?.some(t => t.done))
+    .slice().sort((a, b) => a.date.localeCompare(b.date)
+      || (a.completedAt || '').localeCompare(b.completedAt || ''));
+  if (!rows.length) return null;
+  const age = (a, b) => (Date.parse(b) - Date.parse(a)) / 86400000;
+  const last = rows[rows.length - 1];
+  let checkpoint = null;
+  if (age(last.date, referenceDate) >= RETURN_GAP_DAYS) checkpoint = referenceDate;
+  else {
+    for (let i = 1; i < rows.length; i++) {
+      if (age(rows[i-1].date, rows[i].date) >= RETURN_GAP_DAYS) checkpoint = rows[i].date;
+    }
+    // Persisted return plans also cover the first session after an old gap
+    // whose earlier history may no longer be available locally.
+    if (!checkpoint && last.exercises[exDef.id].prescription?.returnStartedOn)
+      checkpoint = last.exercises[exDef.id].prescription.returnStartedOn;
   }
-  return parseRepsCount(set.reps) >= targetReps;
+  if (!checkpoint) return null;
+  const completedDays = new Set(rows.filter(s => s.date >= checkpoint && s.date < referenceDate
+    && exerciseCompleted(s.exercises[exDef.id], exDef)).map(s => s.date));
+  if (completedDays.size >= 2) return null;
+  return { sets: Math.min(2, Math.max(1, Number(templateSets) || 1)), mode: 'return',
+    returnStartedOn: checkpoint, completedReturnDays: completedDays.size,
+    reasoning: 'Returning after a break: fewer sets, no automatic increase. Use the previous load as a reference and choose a comfortable starting weight.' };
+}
+
+function exerciseCompleted(data, exDef) {
+  const actual = data?.sets || [];
+  const planned = data?.prescription?.sets;
+  const required = planned?.length || actual.length;
+  return required > 0 && actual.length >= required && actual.slice(0, required).every((set, i) => {
+    if (exDef.circlesOnly) return !!set.done;
+    const target = parseRepRange(planned?.[i]?.reps || exDef?.reps).targetReps;
+    if (exDef.unilateral) {
+      const left = parseRepRange(planned?.[i]?.leftReps || exDef.reps).targetReps;
+      const right = parseRepRange(planned?.[i]?.rightReps || exDef.reps).targetReps;
+      return !!set.done && parseRepsCount(set.leftReps) >= left && parseRepsCount(set.rightReps) >= right;
+    }
+    return !!set.done && (target > 0 ? parseRepsCount(set.reps) >= target : true);
+  });
 }
 
 // Decide next session's SET COUNT (and load directive) for one
@@ -324,8 +371,17 @@ function setHitTarget(set, unilateral, targetReps) {
 //     est1RM, requiredRM,   // KB gate receipts (bridge/jump modes)
 //     reasoning,   // human-readable receipt for the UI
 //   }
-export function recommendSetCount(history, exDef, templateSets) {
+export function recommendSetCount(history, exDef, templateSets, { referenceDate = null } = {}) {
+  const plan = computeSetCount(history, exDef, templateSets, referenceDate);
+  return referenceDate ? { ...plan, referenceDate } : plan;
+}
+function computeSetCount(history, exDef, templateSets, referenceDate) {
+  if (referenceDate) history = (history || []).filter(s => s.date && s.date <= referenceDate);
   const base = Math.max(1, Number(templateSets) || 1);
+  const returning = returnToTrainingPlan(history, exDef, base, referenceDate);
+  if (returning) return returning;
+  const latest = findLastSession(history, null, exDef?.id)?.exercises?.[exDef?.id];
+  const atLimit = latest?.effort === "at_limit";
 
   // Per-exercise progression policy (June 2026): the set ladder's
   // "clean session = advance" gate assumes near-failure rep targets.
@@ -341,8 +397,8 @@ export function recommendSetCount(history, exDef, templateSets) {
   if (policy === "double" || policy === "maintain" || policy === "quality") {
     return {
       sets: base,
-      mode: policy,
-      reasoning: policy === "maintain"
+      mode: atLimit && policy === "maintain" ? "ease" : (atLimit || (latest && !exerciseCompleted(latest, exDef))) && policy === "double" ? "repeat" : policy,
+      reasoning: atLimit ? "Last time was at your limit. Keep this session manageable." : policy === "maintain"
         ? "maintenance dose — sets and load held by design"
         : policy === "double"
           ? "fixed sets — build fast reps, then step the load"
@@ -361,16 +417,16 @@ export function recommendSetCount(history, exDef, templateSets) {
     return { sets: base, mode: "seed", reasoning: "" };
   }
   const prevCount = doneSets.length;
-  const clean = doneSets.every(s => setHitTarget(s, exDef?.unilateral, targetReps));
+  const data = lastSession.exercises[exDef.id];
+  const complete = exerciseCompleted(data, exDef);
+  if (!complete || atLimit) return {
+    sets: Math.min(cap, Math.max(base, data.prescription?.sets?.length || data.sets.length)),
+    mode: "repeat",
+    reasoning: atLimit ? "Last time was at your limit. Repeat before adding work."
+      : "Complete the planned sets and reps before progressing. Skipped sets do not count as failed repetitions.",
+  };
   const usesKB = Array.isArray(exDef?.availableLoads) && exDef.availableLoads.length > 0;
 
-  if (!clean) {
-    return {
-      sets: Math.min(cap, Math.max(base, prevCount)),
-      mode: "repeat",
-      reasoning: `ladder: missed reps — repeat ${Math.max(base, prevCount)} sets at the same load`,
-    };
-  }
   if (prevCount < cap) {
     const next = Math.max(base, prevCount) + 1;
     return {
@@ -497,9 +553,10 @@ function findLastSession(history, workoutKey, exId) {
 // NOT add bodyweight to the recorded weight (the user types added
 // weight, the volume math folds bodyweight in separately).
 export function recommendSet(history, exDef, workoutKey, setIdx, bw = null, ladder = null) {
+  if (ladder?.referenceDate) history = (history || []).filter(s => s.date && s.date <= ladder.referenceDate);
   const repRange = parseRepRange(exDef?.reps);
   const lastSession = findLastSession(history, workoutKey, exDef.id);
-  const prevSets = lastSession?.exercises?.[exDef.id]?.sets;
+  const prevSets = lastSession?.exercises?.[exDef.id]?.sets?.filter(s => s?.done);
   // Ladder-added sets have no positional precedent in the previous
   // session (setIdx beyond its count) — inherit the last set's values
   // so the new set seeds at the same weight instead of blank.

@@ -10,10 +10,15 @@ all five domains.
 
 - Five holds per hand: Power, Power/Strength, Strength, Strength/Endurance,
   and Endurance. The regular five-domain system remains unchanged.
-- The selected opening domain goes first. The remaining holds run from
-  highest to lowest planned load for each hand, with 30 seconds of rest.
-- The next beta session rotates the opening domain after a valid completed
-  opener. The user can also choose it. Interrupted openers do not advance it.
+- The ordinary recommended training domain is the default opener. The user can
+  choose another first domain; that override resets when changing grips.
+- Version 2 plans continue through the five domains in their listed order,
+  wrapping Endurance to Power, with 30 seconds of rest. For example:
+  Strength/Endurance → Endurance → Power → Power/Strength → Strength.
+  Both hands use the same sequence, frozen at session start. Version 1 saved
+  plans retain their original per-hand descending-load order after the opener.
+- When the recommendation is a peak test or unavailable, Power is the fallback;
+  all five domain estimates are still required to enable Chaos.
 - Original reference loads and the model are fixed at session start. Later loads
   adjust automatically before each hold to aim for its target duration, then stay
   fixed during that pull. The existing fatigue adjustment applies once, if
@@ -46,9 +51,9 @@ ordinary constant-load set. Existing recorded reps can still be corrected.
 
 ## Validation
 
-Tests cover all opening orders, hand-specific load ordering, missing-data
+Tests cover all opening orders, identical hand sequences and legacy load ordering, missing-data
 gating, frozen plans, both-hand execution, actual rest, fatigue adjustment,
-manual load changes, interrupted openers, rotation, serialization, exports,
+manual load changes, interrupted openers, recommendation defaults and manual overrides, serialization, exports,
 and unchanged regular ladder behavior. Physical Tindeq testing of this new
 sequence is still needed; automated tests do not replace that check.
 
@@ -116,7 +121,7 @@ Chaos Machine automatically adjusts later loads toward each hold’s target time
 there is no separate adjustment switch. Chaos Machine itself remains optional
 and off by default. Selecting another grip keeps this behavior when the beta is
 enabled again. The stored protocol ID remains `whole_curve_beta`, so existing
-history, rotation and exclusions continue to work under the new display name.
+history and exclusions continue to work under the new display name.
 Legacy fixed-reference plans and their saved load-mode metadata remain supported.
 
 The opening load and per-hand domain order stay as planned. For each later

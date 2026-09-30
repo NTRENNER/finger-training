@@ -64,7 +64,8 @@ import {
 
 import { today, nowISO } from "../util.js";
 import { useLSValue } from "../hooks/useLSValue.js";
-import { recommendSet, recommendSetCount } from "../model/workout-progression.js";
+import { WorkoutEffort } from "./workout/WorkoutEffort.jsx";
+import { recommendSet, recommendSetCount, returnToTrainingPlan } from "../model/workout-progression.js";
 import "./workout/WorkoutPlanner.css";
 
 import {
@@ -245,7 +246,7 @@ export function WorkoutTab({
   // Per-exercise seed builder. Pulled out of startSession so the
   // mid-session swap/add picker can reuse it for a single exercise
   // without duplicating the three-logging-mode branching.
-  const seedExercise = (ex) => {
+  const seedExerciseData = (ex) => {
     if (!ex.loggable) return { done: false, notes: "" };
     // Set ladder (June 2026): weight-logged exercises earn sets at
     // constant load — see recommendSetCount. circles/band exercises
@@ -255,7 +256,7 @@ export function WorkoutTab({
     // they're maintenance-dosed by design (no set accumulation).
     const isWeightLogged = !ex.circlesOnly && !ex.logBand && !ex.logVariant;
     const ladder = isWeightLogged
-      ? recommendSetCount(wLog, ex, ex.sets || 1)
+      ? recommendSetCount(wLog, ex, ex.sets || 1, { referenceDate: today() })
       : null;
     const setCount = ladder ? ladder.sets : (ex.sets || 1);
     const sets = Array.from({ length: setCount }, (_, i) => {
@@ -264,7 +265,8 @@ export function WorkoutTab({
         // reps too; otherwise just a bare done flag.
         if (ex.reps) {
           const lastSession = findLastSessionFor(wLog, activeId, ex.id);
-          const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
+          const doneSets = lastSession?.exercises?.[ex.id]?.sets;
+          const lastSet = doneSets?.[i] ?? doneSets?.at(-1);
           return { reps: lastSet?.reps ?? "", done: false };
         }
         return { done: false };
@@ -275,7 +277,8 @@ export function WorkoutTab({
         // manually when they're ready). Lookup the most-recent
         // session containing this exercise to pull the prior band.
         const lastSession = findLastSessionFor(wLog, activeId, ex.id);
-        const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
+        const doneSets = lastSession?.exercises?.[ex.id]?.sets;
+          const lastSet = doneSets?.[i] ?? doneSets?.at(-1);
         if (ex.unilateral) {
           return {
             leftReps:  lastSet?.leftReps  ?? ex.reps ?? "",
@@ -301,7 +304,8 @@ export function WorkoutTab({
         // Default variant = the easiest rung (first in `variants`);
         // weight stays blank until the user actually adds a vest.
         const lastSession = findLastSessionFor(wLog, activeId, ex.id);
-        const lastSet = lastSession?.exercises?.[ex.id]?.sets?.[i];
+        const doneSets = lastSession?.exercises?.[ex.id]?.sets;
+          const lastSet = doneSets?.[i] ?? doneSets?.at(-1);
         return {
           variant: lastSet?.variant ?? (ex.variants?.[0] ?? ""),
           reps:    lastSet?.reps    ?? ex.reps ?? "",
@@ -329,6 +333,19 @@ export function WorkoutTab({
       };
     });
     return { sets };
+  };
+
+  const seedExercise = ex => {
+    const data = seedExerciseData(ex);
+    if (!data.sets) return data;
+    const returnPlan = returnToTrainingPlan(wLog, ex, ex.sets || 1, today());
+    if (returnPlan) data.sets = data.sets.slice(0, returnPlan.sets);
+    const plan = recommendSetCount(wLog, ex, ex.sets || 1, { referenceDate: today() });
+    return { ...data, prescription: { version: 1, date: today(),
+      sets: data.sets.map(({ done, ...target }) => ({ ...target })),
+      progressionMode: plan.mode,
+      ...(returnPlan ? { returnStartedOn: returnPlan.returnStartedOn } : {}) },
+      planNote: returnPlan?.reasoning || '' };
   };
 
   // ── Session start ────────────────────────────────────
@@ -491,7 +508,7 @@ export function WorkoutTab({
 
   // ── Per-exercise update helpers ──────────────────────
   const updateExerciseSets = (exId, next) => {
-    setSessionData(prev => ({ ...prev, [exId]: next }));
+    setSessionData(prev => ({ ...prev, [exId]: { ...prev[exId], ...next } }));
   };
   const toggleExerciseDone = (exId) => {
     setSessionData(prev => ({
@@ -509,15 +526,8 @@ export function WorkoutTab({
   // Surface previous session's reps/weights for each exercise so
   // SessionExRow's "prev" column populates. Walks back through wLog
   // for the most recent session containing this exercise id.
-  const prevSetsFor = (exId) => {
-    for (let i = wLog.length - 1; i >= 0; i--) {
-      const s = wLog[i];
-      const exData = s?.exercises?.[exId];
-      if (!exData?.sets?.length) continue;
-      return exData.sets.map(setSummary);
-    }
-    return [];
-  };
+  const prevSetsFor = exId =>
+    (findLastSessionFor(wLog, activeId, exId)?.exercises?.[exId]?.sets || []).map(setSummary);
 
   const abortSession = () => {
     setSessionActive(false);
@@ -602,7 +612,7 @@ export function WorkoutTab({
                 // their progression variable (leverage) isn't
                 // something recommendSet can reason about.
                 const plan = (!ex.circlesOnly && !ex.logBand && !ex.logVariant)
-                  ? recommendSetCount(wLog, ex, ex.sets || 1)
+                  ? recommendSetCount(wLog, ex, ex.sets || 1, { referenceDate: today() })
                   : null;
                 const recommendations = ex.logVariant ? [] : Array.from(
                   { length: (exData.sets?.length || ex.sets || 1) },
@@ -611,6 +621,7 @@ export function WorkoutTab({
                 return (
                   <div key={ex.id}>
                     {swapBar}
+                    {exData.planNote && <p style={{ color: C.muted, lineHeight: 1.5 }}>{exData.planNote}</p>}
                     <SessionExRow
                       ex={ex}
                       unit={unit}
@@ -620,6 +631,8 @@ export function WorkoutTab({
                       recommendations={recommendations}
                       last={last}
                     />
+                    <WorkoutEffort name={ex.name} data={exData}
+                      onChange={effort => updateExerciseSets(ex.id, { effort })} />
                   </div>
                 );
               }
