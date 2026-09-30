@@ -133,7 +133,9 @@ function recommendSide(prev, exDef, repRange, ladder = null) {
   // their existing policy. Successful returns never earn a load increase.
   if (ladder?.mode === 'return' && !(hasWeight && badMiss && !usesAvailableLoads)) {
     return { weight: String(prev.weight ?? ''), reps: String(targetReps || prevReps || ''),
-      reasoning: ladder.reasoning };
+      reasoning: hasWeight && badMiss && usesAvailableLoads
+        ? `${ladder.reasoning} You did not reach the previous rep target. Choose a manageable available weight; use a lighter implement if needed.`
+        : ladder.reasoning };
   }
   if (ladder && hasWeight && !badMiss) {   // catastrophic miss → legacy back-off below
     if (ladder.mode === "accumulate" || ladder.mode === "repeat") {

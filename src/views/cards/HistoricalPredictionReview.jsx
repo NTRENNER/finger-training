@@ -23,7 +23,7 @@ function ReplayScores({ name, scores, unit }) {
   </div>;
 }
 
-export function HistoricalPredictionReview({ history, unit }) {
+export function HistoricalPredictionReview({ history, activities, unit }) {
   const [report, setReport] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const worker = useRef(null), generation = useRef(0);
   useEffect(() => {
@@ -102,7 +102,7 @@ export function HistoricalPredictionReview({ history, unit }) {
           Each day has equal weight. A small overall gain can hide worse predictions for one grip.
           The download also includes bounded load recommendations, duration groups and recovery comparisons.</p>
       </details>
-      {report.contextualTrends && <ContextualTrendResults report={report.contextualTrends} history={history} unit={unit} />}
+      {report.contextualTrends && <ContextualTrendResults report={report.contextualTrends} history={history} activities={activities} unit={unit} />}
       <p style={{ color: C.muted, fontSize: 13 }}>History helps us choose what to test next. New saved forecasts provide a separate check on later workouts; they are not mixed into this score.</p>
       <Btn onClick={download}>Download historical review</Btn>
     </>}

@@ -78,7 +78,7 @@ function PrescriptionStages({ rows, unit, factor }) {
   </details>;
 }
 
-export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
+export function PredictionAccuracyCard({ history, activities, unit = 'lbs' }) {
   const report = useMemo(() => summarizePredictions(history), [history]);
   const factor = unit === 'lbs' ? 2.2046226218 : 1;
   const excluded = Object.values(report.exclusions).reduce((sum, n) => sum + n, 0);
@@ -92,7 +92,7 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
   };
   return <Card>
     <h3 style={{ margin: '0 0 10px' }}>Prediction accuracy</h3>
-    <HistoricalPredictionReview history={history} unit={unit} />
+    <HistoricalPredictionReview history={history} activities={activities} unit={unit} />
     <p style={{ color: C.muted, lineHeight: 1.5 }}><strong>Review rule:</strong> compare opening holds,
       later-hold recovery, and Chaos target times separately. Check each grip and duration, large misses,
       training order, and new independent days. A checkpoint invites review; it never switches a model automatically.</p>

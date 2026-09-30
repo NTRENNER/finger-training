@@ -4,7 +4,7 @@ import { CardBoundary } from '../ui/ErrorBoundary.jsx';
 import { C } from '../ui/theme.js';
 import { PredictionAccuracyCard } from './cards/PredictionAccuracyCard.jsx';
 
-export function ResearchView({ history, unit, signedIn, historySynced, onOpenSettings }) {
+export function ResearchView({ history, activities, unit, signedIn, historySynced, onOpenSettings }) {
   return <PageFrame style={{ padding: '24px 16px' }}>
     <header style={{ marginBottom: 24 }}>
       <div style={{ color: C.purple, fontSize: 13, fontWeight: 700 }}>BETA · RESEARCH</div>
@@ -22,7 +22,7 @@ export function ResearchView({ history, unit, signedIn, historySynced, onOpenSet
     {signedIn && !historySynced
       ? <p role="status" style={{ color: C.muted }}>Loading your synced history…</p>
       : <CardBoundary name="Prediction accuracy">
-          <PredictionAccuracyCard history={history} unit={unit} />
+          <PredictionAccuracyCard history={history} activities={activities} unit={unit} />
         </CardBoundary>}
   </PageFrame>;
 }

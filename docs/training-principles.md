@@ -1,4 +1,4 @@
-# Training principles and September 30 implementation
+# Training principles
 
 Remember demonstrated progress, require evidence to escalate, and avoid
 interpreting every difficult session as lost ability.
@@ -29,6 +29,21 @@ At-my-limit feedback blocks escalation. For maintenance work, suggest the next
 lower available implement, or a modest 5% reduction in the stored unit; if already
 at the lightest implement, keep it editable and advise a comfortable load.
 Unrated history does not invent an effort score. No new required logging step.
+Return mode preserves this maintenance easing;
+for other policies, at-limit feedback holds progression rather than automatically
+reducing weight.
+
+A return phase does not erase previous failed-rep evidence. Plate-loaded exercises
+retain the existing severe-miss backoff. Outside maintenance easing, discrete
+implements keep the previous
+weight as an editable reference rather than automatically taking a potentially
+large step down. After a severe miss, coaching explicitly names the missed target
+and advises choosing a manageable available weight, using a lighter implement
+if needed. Reduced set count alone is not proof the previous weight is suitable.
+
+Bodyweight exercises retry the intended rep target rather than copying missed
+actual reps. Completion honors the saved prescription, including deliberate user
+changes; progression receipts describe the targets actually judged.
 
 ## Finger exposure and measurement
 
@@ -44,9 +59,28 @@ Exposure never turns fatigued Chaos holds into fresh-curve points or advances
 an ordinary density ladder. Existing measurement-coverage scheduling remains
 unchanged while the separate exposure record becomes available for evaluation.
 
+## Chaos Machine
+
+Automatic adjustment is part of the optional Chaos Machine. Setup checks support
+per hand and later hold duration; unsupported holds remain available at clearly
+labeled reference targets. Only a fully supported preview shows the conditional
+time if all targets are reached. During the session, adjustments also require
+usable measurements and rest. Saved records distinguish requested policy from
+the actual per-hold decision without rewriting history. The protocol fields,
+readiness rules, and fallback behavior are specified in
+[Chaos Machine](whole-curve-beta.md#loads-aimed-at-target-times).
+
+## Climbing analysis
+
+Completed climbing output counts each logged completion once, including repeats.
+Accumulated climbing load includes attempts and effort; these measure different
+things. Climbing load remains visible alongside performance trends on its own
+0–10 scale, including in Research comparisons. It is contextual information,
+not a percentage change in finger capacity.
+
 ## Research review
 
-Keep live finger model and 4–5–6 policies unchanged. Existing frozen models now
+Keep live finger model and 4–5–6 policies unchanged. Frozen models
 have paired error breakdowns by first-recorded, after-earlier-training, and unknown
 session order. This is recorded finger-training context, not proof of being rested;
 climbing and support-workout order are not inferred from upload/completion times.
@@ -66,31 +100,8 @@ and exclusions before adopting a candidate. Ten days invites a review and never
 automatically promotes a model. More records and a smoother chart do not establish
 better predictions. Controlled and prospective checks should both support promotion.
 
-
-## Audit corrections
-
-Return mode reduces set count without erasing prior failed-rep evidence. The
-existing bad-miss load reduction remains applicable, as does at-limit easing
-for maintenance work. A gap alone still does not imply a strength-loss percentage.
-Bodyweight exercises retry their intended rep target instead of copying a missed
-actual count. Completion uses the saved prescription, including deliberate user
-changes; progression receipts describe that prescription rather than inventing
-completion of a different template target.
-
-Chaos setup checks measured-history readiness independently per hand and later
-hold duration using the same support bounds as the runner. Unsupported holds
-remain available at reference weights, clearly labeled before Start. Automatic
-adjustment remains the default. A fully supported preview labels the sum of
-hold targets and rests as conditional; unsupported previews omit that budget.
-The runner still checks completed measurements and rest before each adjustment.
-New session_protocol records distinguish requested_load_mode from load_mode:
-opening_reference, adaptive_targets (including a ceiling-capped decision),
-reference_fallback, or legacy fixed_references. adjustment_status/reason preserve
-why a reference was used. Historical records are not rewritten.
-
-Completed climbing output counts logged completions once; accumulated climbing
-load includes attempts and effort. They intentionally measure different things.
-Research comparisons display sample sizes and paired-day 95% intervals. An
-interval spanning zero does not establish an improvement. An import-boundary
-regression test prevents descriptive charts, exposure summaries, and retrospective
-experiments from entering the prescription dependency graph.
+Research comparisons display sample sizes and paired-day 95% uncertainty ranges.
+A range spanning zero does not establish an improvement. Historical comparisons
+are not independent validation. Descriptive charts, exposure summaries, and
+retrospective experiments stay outside the prescription dependency graph; a
+transitive import-boundary test enforces this separation.

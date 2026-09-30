@@ -109,8 +109,8 @@ hold or its prefix invalidate its stored comparison rather than silently
 reusing old errors. Duplicate rows do not create extra votes.
 
 No mixed-session parameter tuning or automated promotion is enabled yet.
-Adaptive prescription is an explicit experimental opt-in, not a validation of
-these parameters. Review independent workouts, coverage and exclusions, and
+Enabling Chaos Machine opts into experimental adaptive prescription; there is
+no separate adjustment toggle. This does not validate these parameters. Review independent workouts, coverage and exclusions, and
 compare later-hold errors with the fresh-only baseline before changing defaults. Synthetic tests check behavior and recording, not real-world
 accuracy. Physical Tindeq validation remains outstanding.
 
@@ -147,15 +147,38 @@ message. Manual overrides remain available. Low/unusable estimates also fall
 back rather than displaying zero. Estimates remain approximate, including the
 existing legacy elapsed-time versus target-acquired timing distinction.
 
-Before starting, the preview shows original reference loads and a target-based
-time budget: 11:55 per hand or 23:50 for both, including four 30-second rests per
-hand. Setup/hand changes add time, and actual holds can be shorter or longer.
-The timer still runs until failure; target time never ends the hold.
+Before starting, the preview checks adjustment support separately for each hand
+and later hold duration, using the same measured-history requirements and duration
+bounds as the runner. Each unsupported hold is labeled as a reference target,
+with the reason (insufficient history or outside that hand's measured range).
+A usable reference load still permits training; it does not establish adjustment
+readiness. The runner also checks measured work and rest as the session proceeds.
+
+The preview shows original reference loads. Only when every later hold is
+supported does it show the conditional time if all targets are reached: 11:55
+per hand or 23:50 for both, including four 30-second rests per hand. Unsupported
+previews omit that budget and explain that session length will vary. Setup/hand
+changes add time, and actual holds can be shorter or longer even when supported.
+The timer runs until failure; target time never ends the hold.
 
 Each saved forecast has `mode: adaptive_targets` and an `adjustment` object
 containing target time, original and selected loads, status and fallback reason.
-The session protocol stores `load_mode` and `duration_reference`. Original
-forecasts and actual-load/rest diagnostics are preserved separately. Evaluation
+The forecast's `mode` identifies the requested adaptive policy, including when
+it falls back. `force_recording.session_protocol` distinguishes that request
+from the actual decision for each hold:
+
+- `requested_load_mode`: `adaptive_targets` or legacy `fixed_references`.
+- `load_mode`: `opening_reference` for an adaptive opener, `adaptive_targets`
+  for an adjusted or ceiling-capped decision, `reference_fallback` when a later
+  adjustment is unavailable, or `fixed_references` for a legacy fixed plan.
+- `duration_reference`: `approximate_hold_target` only for an adjusted or
+  ceiling-capped decision; otherwise `fresh_load_reference`.
+- `adjustment_status`: `opening_hold`, `adjusted`, `capped_at_original`,
+  `unavailable`, or `not_requested`. `adjustment_reason` records why a requested
+  later adjustment fell back.
+
+Historical records are not rewritten. Original forecasts and actual-load/rest
+diagnostics are preserved separately. Evaluation
 reports adaptive workouts under `v1|adaptive_targets|...`, apart from fixed-load
 shadow forecasts. Later holds remain excluded from fresh-capacity/recovery fits
 and ordinary 4–5–6 ladder progression.

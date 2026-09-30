@@ -2,7 +2,7 @@ import React,{useMemo,useState} from 'react';
 import {PerformanceTrendCards} from '../analysis/PerformanceTrendCards.jsx';
 import {C} from '../../ui/theme.js';
 const names={original:'Previous trend',contextOnly:'Current trend · earlier training accounted for',contextRobust:'Earlier training + unusual-result protection'};
-export function ContextualTrendResults({report,history,unit}) {
+export function ContextualTrendResults({report,history,activities,unit}) {
   const [preview,setPreview]=useState(false),[model,setModel]=useState('contextOnly');
   const grips=useMemo(()=>[...new Set(history.map(r=>r.grip))].filter(Boolean),[history]);
   const fmt=v=>v==null?'—':`${(v*(unit==='lbs'?2.2046226218:1)).toFixed(2)} ${unit}`;
@@ -36,6 +36,6 @@ export function ContextualTrendResults({report,history,unit}) {
     <label style={{display:'flex',gap:8,alignItems:'center',minHeight:44,marginTop:12}}><input type="checkbox" checked={preview} onChange={e=>setPreview(e.target.checked)}/>Compare trend charts</label>
     {preview&&<><label style={{display:'block',marginBottom:16}}>Trend model <select aria-label="Research trend model" value={model} onChange={e=>setModel(e.target.value)} style={{maxWidth:'100%',minHeight:44,background:C.bg,color:C.text}}>
       {Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
-      <PerformanceTrendCards key={model} history={history} grips={grips} trendModel={model}/></>}
+      <PerformanceTrendCards key={model} history={history} activities={activities} grips={grips} trendModel={model}/></>}
   </details>;
 }

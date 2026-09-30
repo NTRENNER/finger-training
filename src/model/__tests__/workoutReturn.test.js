@@ -117,3 +117,24 @@ test('deliberately chosen rep targets remain the completion gate and receive an 
   expect(p.reasoning).toContain('Completed all 2 planned sets and their rep targets');
   expect(p.reasoning).not.toContain('2×5');
 });
+
+
+test.each([[[35, 50]], [[50, 70]]])('return after a severe kettlebell miss keeps an editable reference and names the miss (%j)', availableLoads => {
+  const def = { ...ex, reps: '10', sets: 4, availableLoads };
+  const h = [session('2026-07-01', [set('50', true, '2')])];
+  const returning = plan(h, '2026-09-30', def);
+  expect(returning).toMatchObject({ mode: 'return', sets: 2 });
+  const target = recommendSet(h, def, 'A', 0, null, returning);
+  expect(target).toMatchObject({ weight: '50', reps: '10' });
+  expect(target.reasoning).toContain('You did not reach the previous rep target');
+  expect(target.reasoning).toContain('Choose a manageable available weight');
+  expect(target.reasoning).toContain('use a lighter implement if needed');
+});
+
+test('a successful kettlebell return is not described as a missed target', () => {
+  const def = { ...ex, reps: '10', availableLoads: [35, 50] };
+  const h = [session('2026-07-01', [set('50', true, '10')])];
+  const target = recommendSet(h, def, 'A', 0, null, plan(h, '2026-09-30', def));
+  expect(target).toMatchObject({ weight: '50', reps: '10' });
+  expect(target.reasoning).not.toContain('did not reach');
+});

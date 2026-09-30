@@ -816,7 +816,7 @@ export default function App() {
           lifts have their own homes too. Climbing trends were also
           dropped when the Climbing tab was retired.) */}
       {researchMode && tab === RESEARCH_TAB && (
-        <ResearchView history={history} unit={unit} signedIn={!!user}
+        <ResearchView history={history} activities={activities} unit={unit} signedIn={!!user}
           historySynced={historySynced} onOpenSettings={() => setTab(SETTINGS_TAB)} />
       )}
       {tab === SETTINGS_TAB && (
