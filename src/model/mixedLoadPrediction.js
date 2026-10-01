@@ -14,7 +14,8 @@ const validLoad = x => finitePositive(x) && x < 200;
 const round = x => Math.round(x * 1000) / 1000;
 const fingerprint = r => JSON.stringify([r.hand, r.grip, r.rep_num, r.session_id, r.actual_time_s,
   r.avg_force_kg, r.failure_valid, r.end_reason, r.load_provenance, r.rep_timing,
-  Object.fromEntries(Object.entries(r.force_recording || {}).filter(([k]) => k !== 'mixed_load_prediction'))]);
+  Object.fromEntries(Object.entries(r.force_recording || {}).filter(([k]) => k !== 'mixed_load_prediction')),
+  ...(Number(r.set_num ?? 1) > 1 ? [r.set_num] : [])]);
 const sessionKey = r => r.session_id || r.session_started_at || r.date;
 const unavailable = reason => ({ status: 'unavailable', reason });
 
@@ -99,7 +100,7 @@ export function mixedStateBefore(model, prefix, restBeforeS) {
   for (let i = 0; i < prefix.length; i++) {
     const r = prefix[i];
     if (!isMixedDomainRep(r) || r.hand !== model.hand || r.grip !== model.grip
-      || r.session_id !== prefix[0].session_id || r.rep_num !== i + 1) return unavailable('invalid_sequence');
+      || r.session_id !== prefix[0].session_id || Number(r.set_num ?? 1) !== Math.floor(i / 5) + 1 || r.rep_num !== (i % 5) + 1) return unavailable('invalid_sequence');
     if (i) {
       const rest = r.rep_timing?.rest_before_s;
       if (!Number.isFinite(rest) || rest < 0) return unavailable('missing_actual_rest');
@@ -182,7 +183,7 @@ export function summarizeMixedPredictions(history) {
   for (const r of history || []) {
     const p = r.force_recording?.mixed_load_prediction;
     if (!p || !isMixedDomainRep(r)) continue;
-    const key = `${r.session_id}|${r.hand}|${r.rep_num}`;
+    const key = `${r.session_id}|${r.hand}|${r.set_num ?? 1}|${r.rep_num}`;
     if (conflicts.has(r.id)) { exclude('conflicting_copy'); continue; }
     if (seen.has(key)) continue;
     seen.add(key);
@@ -199,7 +200,7 @@ export function summarizeMixedPredictions(history) {
     const c = p.comparison;
     if (c?.status !== 'recorded') { exclude(c?.reason || 'unavailable'); continue; }
     // An opener does not test mixed-load fatigue; report later holds only.
-    if (r.rep_num === 1) { exclude('opening_hold'); continue; }
+    if (r.rep_num === 1 && Number(r.set_num ?? 1) === 1) { exclude('opening_hold'); continue; }
     if (!Number.isFinite(c.conditional.seconds) || !Number.isFinite(c.fresh_only.seconds)) {
       exclude('out_of_range'); continue;
     }
@@ -213,7 +214,7 @@ export function summarizeMixedPredictions(history) {
       rep: r.rep_num, version: p.version, mode: p.mode, trainingContext: contextFor(r).status,
       plannedError, targetError });
     for (const category of ['all', `domain:${r.force_recording.session_protocol.zone}`, `position:${r.rep_num}`,
-      `grip:${r.grip}`, `hand:${r.hand}`, `context:${contextFor(r).status}`]) {
+      `set:${r.set_num ?? 1}`, `grip:${r.grip}`, `hand:${r.hand}`, `context:${contextFor(r).status}`]) {
       const groupKey = p.mode === 'adaptive_targets'
         ? `v${p.version}|adaptive_targets|${category}` : `v${p.version}|${category}`;
       if (!groups.has(groupKey)) groups.set(groupKey, new Map());

@@ -1,3 +1,4 @@
+import { MAX_OPTIONAL_SETS } from '../../model/setRecommendation.js';
 import { detectPlateaus } from '../../model/plateau.js';
 import { betaEligibility, BETA_ELIGIBILITY_DESCRIPTION } from '../../model/betaEligibility.js';
 import { markUncertainDomainTimes, progressionLabel } from '../../model/domainTargetConsistency.js';
@@ -167,6 +168,7 @@ export function SessionPlanCard({
   const [mixedRequested, setMixedRequested] = useState(false);
   const [mixedOpening, setMixedOpening] = useState(null);
   const [volumeOverride, setVolumeOverride] = useState(null);
+  const [selectedSets, setSelectedSets] = useState(1);
   const [volumeSetupOpen, setVolumeSetupOpen] = useState(false);
   const [volumeGrips, setVolumeGrips] = useState(() => grip ? [grip] : []);
   const [plateauDismissed, setPlateauDismissed] = useState(false);
@@ -184,6 +186,7 @@ export function SessionPlanCard({
   // Reset the override when the grip changes — a Crusher pick shouldn't
   // carry into Micro silently.
   useEffect(() => {
+    setSelectedSets(1);
     setPlateauDismissed(false);
     setPlateauAccepted(false);
     setOverrideZone(null);
@@ -426,7 +429,7 @@ export function SessionPlanCard({
     if (mixedEnabled) {
       const first = mixedPlan.steps[0];
       onApplyPlan?.({ goal: first.zone, targetTime: first.targetTime, repsPerSet: 5,
-        restTime: MIXED_DOMAIN_REST_S, ladderLoadByHand: null,
+        restTime: MIXED_DOMAIN_REST_S, plannedSets: selectedSets, ladderLoadByHand: null,
         plannedLoadByHand: first.loadByHand, mixedDomainPlan: mixedPlan, peakTest: false, volumePlan: null });
       return;
     }
@@ -434,6 +437,7 @@ export function SessionPlanCard({
     onApplyPlan?.({
       mixedDomainPlan: null,
       volumePlan: volumeEnabled ? volumePlan : null,
+      plannedSets: isPeakTest ? 1 : volumeEnabled ? 2 : selectedSets,
       peakTest: isPeakTest,
       goal: activeZone,
       targetTime: activeT,
@@ -451,7 +455,7 @@ export function SessionPlanCard({
   }, [
     activeZone, activeT, reps, rest, ladder, ladderPlanLoadByHand,
     rec, isOverridden, isPeakTest, mixedEnabled, mixedPlan,
-    volumeEnabled, volumePlan,
+    volumeEnabled, volumePlan, selectedSets,
   ]);
 
   // ── Empty / loading states ───────────────────────────────────
@@ -595,6 +599,26 @@ export function SessionPlanCard({
     <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
       {plannerHeader}
 
+      {(!isPeakTest || mixedEnabled) && <div style={{ marginBottom: 20 }}>
+        <label style={{ display: 'block', fontWeight: 700 }}>
+          Sets per hand
+          <select value={volumeEnabled ? 2 : selectedSets} onChange={e => {
+            setSelectedSets(Number(e.target.value));
+            setVolumeOverride(false);
+            setVolumeSetupOpen(false);
+          }} style={{ display: 'block', width: '100%', minHeight: 48, marginTop: 8, padding: 10,
+            background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 16 }}>
+            {Array.from({ length: MAX_OPTIONAL_SETS }, (_, i) => i + 1).map(n =>
+              <option key={n} value={n}>{n} {n === 1 ? 'set' : 'sets'} per hand</option>)}
+          </select>
+        </label>
+        <p style={{ color: C.muted, marginBottom: 0 }}>
+          {volumeEnabled ? 'Your Volume Beta plan uses two sets. Changing this selection makes this workout independent of the study.'
+            : 'Your choice for this workout. Extra sets do not enroll you in the six-week Volume Beta. You can finish early.'}
+          {(volumeEnabled || selectedSets > 1) && ' Allow five minutes per hand between sets; start when ready.'}
+        </p>
+      </div>}
+
       <div className="session-beta-options">
         {!betasAvailable && <p style={{ color: C.muted }}>
           {!volumeReady ? 'Your training history and plan are still loading.' : <>
@@ -603,7 +627,7 @@ export function SessionPlanCard({
           </>}
         </p>}
         {betasAvailable && <>
-        <Toggle label="Chaos Machine (Beta)" checked={mixedEnabled} description="Five different loads in one session. Try a different training structure while keeping it separate from a volume experiment." disabled={!betasAvailable || !mixedPlan || volumeBusy}
+        <Toggle label="Chaos Machine (Beta)" checked={mixedEnabled} description="Five different loads per set. Try a different training structure while keeping it separate from a volume experiment." disabled={!betasAvailable || !mixedPlan || volumeBusy}
           onChange={enabled => {
             setMixedRequested(enabled);
             if (enabled) { setVolumeOverride(false); setVolumeSetupOpen(false); }
@@ -638,7 +662,7 @@ export function SessionPlanCard({
         {!volumeSetupOpen && volumeError && <p role="alert" style={{ color: C.orange }}>{volumeError}</p>}
       </div>
       {betasAvailable && !mixedPlan && <p style={{ color: C.muted }}>The beta needs a load estimate in all five domains for each selected hand. Complete the initial sessions first.</p>}
-      {mixedEnabled && <MixedDomainPlan goalConfig={GOAL_CONFIG} plan={mixedPlan} readiness={mixedReadiness} hands={expectedHands} unit={unit}
+      {mixedEnabled && <MixedDomainPlan goalConfig={GOAL_CONFIG} plan={mixedPlan} sets={selectedSets} readiness={mixedReadiness} hands={expectedHands} unit={unit}
         multiplier={loadMultiplier} onOpeningChange={setMixedOpening} />}
 
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
@@ -809,7 +833,7 @@ export function SessionPlanCard({
         {[
           { label: isPeakTest ? "Pulls" : volumeEnabled ? "Holds / set" : "Hangs", value: reps },
           { label: volumeEnabled ? "Rest / hold" : "Rest", value: `${rest}s` },
-          { label: volumeEnabled ? "Sets / hand" : "Time", value: volumeEnabled ? 2 : timeStr },
+          { label: volumeEnabled || selectedSets > 1 ? "Sets / hand" : "Time", value: volumeEnabled ? 2 : selectedSets > 1 ? selectedSets : timeStr },
         ].map(({ label, value }, i, arr) => (
           <React.Fragment key={label}>
             <div style={{ textAlign: "center", flex: 1 }}>

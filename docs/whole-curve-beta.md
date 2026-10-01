@@ -30,11 +30,11 @@ all five domains.
 - The rest screen shows the next domain and load. Manual mode waits for the
   athlete to start the next hold, allowing equipment changes. Actual rest
   continues to be recorded when measurable.
-- This beta is one set. Normal sessions retain their 4–5–6 progression.
+- Each set contains five holds per hand. Users may select one to five sets before starting or add another completed set from the summary, up to five. Normal sessions retain their 4–5–6 progression.
 
 ## Evidence and history
 
-The first valid hold per hand can enter the fresh-capacity fit under the
+Only the first valid hold per hand in the first set can enter the fresh-capacity fit under the
 existing evidence rules. Later holds remain recorded activity, with valid
 failure status preserved, but are excluded from fresh-capacity and recovery
 fits. All beta reps are excluded from constant-load recovery fitting, regular
@@ -196,3 +196,12 @@ is still fatigued context. A Chaos session earlier that day also prevents a
 later ordinary workout from resetting the fresh curve or ordinary 4–5–6
 ladder. Actual work and within-session adjustment remain recorded separately.
 New frozen mixed-load predictions use version 2 for the changed evidence basis.
+
+
+## User-selected sets
+
+The setup set selector is independent of research enrollment. It starts at one and supports up to five sets per hand. Every Chaos set repeats the frozen domain sequence. Between sets, an optional five-minute same-hand rest clock counts other-hand work; users explicitly continue when ready and may finish early. Each later hand receives its own rest check.
+
+Adaptive prescriptions retain all preceding measured work on that hand across sets. The first hold of a later set is a fatigued hold, not a fresh reference. Its next-rest estimate uses the elapsed interval when the user leaves the between-set rest screen, then stays fixed through that pull. Actual release-to-start rest is saved separately. Unknown releases remain unknown; incomplete prefixes still fall back explicitly. Subsequent holds use the ordinary planned 30-second rest. Frozen curve models are never refitted from this session.
+
+Set and rep numbers identify each hold independently. Later sets cannot fit fresh capacity, advance the ordinary ladder, or enroll in Volume Beta. Mixed-load prediction review includes later-set openers as fatigued observations and groups sets separately while retaining session-level weighting.

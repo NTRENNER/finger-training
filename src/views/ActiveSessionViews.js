@@ -835,7 +835,7 @@ export function SwitchHandsView({ onReady, activeHand = "R" }) {
 // The same hand rests while the other hand trains. This clock starts at the
 // last physical release, not when this view mounts, and never starts a rep.
 export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
-  source = 'estimated_transition', onReady, onFinish, tindeq }) {
+  source = 'estimated_transition', setNumber = 2, onReady, onFinish, tindeq }) {
   const [mountedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const [extraSeconds, setExtraSeconds] = useState(0);
@@ -853,7 +853,7 @@ export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
     handler?.();
   };
   return <PageFrame style={{ padding: '32px 16px', textAlign: 'center' }}>
-    <h2 style={{ margin: '0 0 18px' }}>Rest before set 2</h2>
+    <h2 style={{ margin: '0 0 18px' }}>Rest before set {setNumber}</h2>
     <HandCue hand={hand} />
     <Card>
       <div style={{ fontSize: 64, fontWeight: 900, color: remaining ? C.blue : C.green }} aria-live="off">
@@ -863,12 +863,12 @@ export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
       {source === 'estimated_transition' && <p style={{ color: C.muted }}>
         Rest is estimated from when the last hold was recorded because its release time was not captured.
       </p>}
-      {remaining === 0 && <p>Ready for set 2 when you are.</p>}
+      {remaining === 0 && <p>Ready for set {setNumber} when you are.</p>}
       {releaseBlocked && <UnloadedZeroCheck tindeq={tindeq} />}
     </Card>
     <Btn onClick={() => finish(onReady)} disabled={releaseBlocked}
       style={{ width: '100%', marginBottom: 12, padding: '14px 0' }}>
-      {remaining > 0 ? 'Start when ready' : 'Start set 2'}
+      {remaining > 0 ? 'Start when ready' : `Start set ${setNumber}`}
     </Btn>
     <div style={{ display: 'flex', gap: 12 }}>
       <Btn color={C.muted} onClick={() => setExtraSeconds(s =>
@@ -939,9 +939,10 @@ export function SessionSummaryView({
       )}
 
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>
-        {setComplete ? (volume && currentSet === 2 ? 'Volume Beta Complete' : config.mixedDomainPlan ? "Chaos Machine Complete" : currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
+        {setComplete ? (volume && currentSet === 2 ? 'Volume Beta Complete' : config.mixedDomainPlan ? `Chaos Machine · Set ${currentSet} Complete` : currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
       </h2>
-      {config.mixedDomainPlan && <p>Chaos Machine (Beta). Opening holds can update the curve; later holds are recorded as fatigued work. Your regular rep progression is unchanged.</p>}
+      {!volume && config.plannedSets > 1 && <p style={{ color: C.muted }}>{config.plannedSets} sets per hand selected. Continue when ready, or finish today.</p>}
+      {config.mixedDomainPlan && <p>Chaos Machine (Beta). Only eligible opening holds from set one can update the curve; later holds and sets are recorded as fatigued work. Your regular rep progression is unchanged.</p>}
 
       {(() => {
         const op = sessionOverpull(reps);
@@ -1039,7 +1040,7 @@ export function SessionSummaryView({
         <Btn onClick={onAddSet} style={{ width: '100%', padding: '14px 0' }}>Continue to set 2</Btn>
       </Card>}
 
-      {!volume && !config.mixedDomainPlan && !config.peakTest && currentSet < MAX_OPTIONAL_SETS && onAddSet && (
+      {!volume && !config.peakTest && (!config.mixedDomainPlan || setComplete) && currentSet < MAX_OPTIONAL_SETS && onAddSet && (
         <>
           {setSuggestion?.recommend && (
             <div style={{
@@ -1052,7 +1053,7 @@ export function SessionSummaryView({
             </div>
           )}
           <Btn onClick={onAddSet} style={{ width: "100%", marginBottom: 12, padding: "14px 0" }}>
-            + Add another set ({currentSet + 1} of {MAX_OPTIONAL_SETS})
+            {currentSet < (config.plannedSets || 1) ? `Continue to set ${currentSet + 1} of ${config.plannedSets}` : `+ Add another set (${currentSet + 1} of ${MAX_OPTIONAL_SETS})`}
           </Btn>
         </>
       )}
@@ -1062,7 +1063,7 @@ export function SessionSummaryView({
           ↓ Export CSV
         </Btn>
         <Btn onClick={onDone} style={{ flex: 2 }}>
-          {volume ? 'Finish today' : 'Back to Setup'}
+          {volume || config.plannedSets > 1 ? 'Finish today' : 'Back to Setup'}
         </Btn>
       </div>
     </PageFrame>

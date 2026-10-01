@@ -74,3 +74,19 @@ test('the completed second set has no third-set action', () => {
   expect(screen.getByText('Volume Beta Complete')).toBeInTheDocument();
   expect(screen.queryByText(/Continue to set|Add another set|Good set/)).not.toBeInTheDocument();
 });
+
+
+test('self-selected Chaos sets can continue and stop without research enrollment', () => {
+  const add = jest.fn();
+  render(<SessionSummaryView config={{ ...config, volumePlan: null, mixedDomainPlan: { id: 'whole_curve_beta' }, plannedSets: 3 }}
+    reps={rows(1)} onAddSet={add} onDone={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Continue to set 2 of 3' }));
+  expect(add).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: 'Finish today' })).toBeInTheDocument();
+  expect(screen.queryByText('Volume Beta: second set planned')).not.toBeInTheDocument();
+});
+test('later rest screens display the actual set number', () => {
+  render(<BetweenSetRestView setNumber={3} startedAtMs={400000} onReady={() => {}} />);
+  expect(screen.getByRole('heading', { name: 'Rest before set 3' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Start set 3' })).toBeInTheDocument();
+});

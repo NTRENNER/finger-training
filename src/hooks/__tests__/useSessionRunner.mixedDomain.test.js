@@ -64,8 +64,8 @@ test('both hands run five frozen loads, rest shows the next load, and only opene
   expect(freshFitReps(saved).map(r => [r.hand, r.rep_num])).toEqual([['L', 1], ['R', 1]]);
   expect(recoveryEvidence(saved.filter(r => r.hand === 'L'))).toMatchObject({ eligible: false, reason: 'mixed_load_protocol' });
   act(() => hook.result.current.handleNextSet());
-  expect(hook.result.current.currentSet).toBe(1);
-  expect(hook.result.current.phase).toBe('done');
+  expect(hook.result.current.currentSet).toBe(2);
+  expect(hook.result.current.phase).toBe('between_sets');
 });
 
 test('manual rest waits for the next load and records nominal loads without inventing sensor evidence', () => {

@@ -12,7 +12,7 @@ const renderPlan=history=>render(<MixedDomainPlan plan={plan} hands={['L','R']} 
   readiness={mixedPlanReadiness(history,'Micro',['L','R'],plan,'2026-09-23')} onOpeningChange={jest.fn()}/>);
 test('ready preview describes a conditional total rather than an assured session length',()=>{
  renderPlan([...h,...h.map(r=>({...r,id:r.id+'R',hand:'R'}))]);
- expect(screen.getByText(/Time if all targets are reached: 23:50 for both hands/)).toBeInTheDocument();
+ expect(screen.getByText(/Time per set if all targets are reached: 23:50 for both hands/)).toBeInTheDocument();
  expect(screen.getAllByText('Reference · adjustment estimated before this hold')).toHaveLength(8);
 });
 test('partial readiness identifies each affected hand and duration without promising a budget',()=>{

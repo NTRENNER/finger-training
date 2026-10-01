@@ -66,3 +66,10 @@ An invitation requires a persistent plateau in the same domain on both hands, be
 At explicit enrollment, a bounded screening receipt (date, version, thresholds, reasons, per-domain comparisons and limited observation IDs) is frozen alongside the existing historical baseline. The receipt records whether setup was opened from the plateau prompt or voluntarily. Research and downloaded Volume reviews retain it through sync, reviews, and lifecycle changes. Future history cannot rewrite the enrollment receipt. Personal before/after changes remain observational and cannot prove that extra volume caused improvement.
 
 Validation: synthetic tests cover genuine flat patterns, growth, decline, noise, short flat patches, unilateral differences, travel, changed measurement methods, altered force, interrupted/later work, confounders, duplicate records and future-data exclusion. Replaying the saved 953-rep personal export at July 1, August 1, September 1 and October 1, 2026 produced no beta invitations: training gaps and/or sparse comparable fresh measurements prevent a plateau conclusion. This validates conservative handling of the known travel periods; it does not establish detector sensitivity on real plateaus.
+
+
+## Independent workout set selection
+
+Users can choose one to five sets per hand before an ordinary workout, without meeting beta eligibility or enrolling in research. Eligible Chaos users have the same selector. One remains the default. Selected multi-set workouts use an optional five-minute same-hand rest between sets, with explicit continuation and the ability to stop early. Normal load targets and the earned 4–5–6 holds remain unchanged.
+
+An active Volume Beta applies its fixed two-set plan. Changing the set selector opts this workout out of the study without pausing or ending enrollment. Merely choosing two sets never enrolls a user. Independent workouts carry `force_recording.workout_plan` (selected sets, selection source, and later-set opening rest), not `volume_beta`; the latter is reserved for enrolled protocol workouts. Later sets remain excluded from fresh fitting and ladder advancement.

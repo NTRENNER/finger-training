@@ -272,7 +272,7 @@ test('eligible users see purpose descriptions without a plateau prompt', () => {
   render(<SessionPlanCard {...props} onStartVolumeExperiment={jest.fn()} />);
   expect(volumeSwitch()).toBeEnabled();
   expect(chaosSwitch()).toBeEnabled();
-  expect(screen.getByText(/Five different loads in one session/)).toBeInTheDocument();
+  expect(screen.getByText(/Five different loads per set/)).toBeInTheDocument();
   expect(screen.getByText(/test whether extra volume helps when progress stalls/)).toBeInTheDocument();
   expect(screen.queryByRole('region', { name: 'Plateau experiment suggestion' })).not.toBeInTheDocument();
 });
@@ -294,4 +294,31 @@ test('dismissing an invitation retains manual beta access', () => {
   expect(screen.queryByRole('region', { name: 'Plateau experiment suggestion' })).not.toBeInTheDocument();
   expect(volumeSwitch()).toBeEnabled();
   expect(chaosSwitch()).toBeEnabled();
+});
+
+
+test('self-selected sets are available before research eligibility and never enroll', () => {
+  betaEligibility.mockReturnValue({ eligible: false, qualifyingWeeks: 1 });
+  const apply = jest.fn(), start = jest.fn();
+  render(<SessionPlanCard {...props} onApplyPlan={apply} onStartVolumeExperiment={start} />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Sets per hand' }), { target: { value: '3' } });
+  expect(lastPlan(apply)).toMatchObject({ plannedSets: 3, volumePlan: null, mixedDomainPlan: null });
+  expect(start).not.toHaveBeenCalled();
+});
+test('Chaos retains the chosen set count and ordinary mode keeps the choice', () => {
+  const apply = jest.fn();
+  render(<SessionPlanCard {...props} onApplyPlan={apply} />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Sets per hand' }), { target: { value: '3' } });
+  fireEvent.click(chaosSwitch());
+  expect(lastPlan(apply)).toMatchObject({ plannedSets: 3, volumePlan: null, mixedDomainPlan: { id: 'whole_curve_beta' } });
+  fireEvent.click(chaosSwitch());
+  expect(lastPlan(apply)).toMatchObject({ plannedSets: 3, volumePlan: null, mixedDomainPlan: null });
+});
+test('changing sets takes this workout outside Volume Beta without changing the study', () => {
+  const apply = jest.fn(), change = jest.fn();
+  render(<SessionPlanCard {...props} volumeExperiment={newExperiment()} onApplyPlan={apply} onVolumeExperimentStatusChange={change} />);
+  expect(lastPlan(apply)).toMatchObject({ plannedSets: 2, volumePlan: { id: 'volume_beta' } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Sets per hand' }), { target: { value: '4' } });
+  expect(lastPlan(apply)).toMatchObject({ plannedSets: 4, volumePlan: null });
+  expect(change).not.toHaveBeenCalled();
 });

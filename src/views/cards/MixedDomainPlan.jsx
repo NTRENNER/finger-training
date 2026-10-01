@@ -4,21 +4,22 @@ import { C } from '../../ui/theme.js';
 import { fmtW } from '../../ui/format.js';
 import { MIXED_DOMAIN_ZONES, MIXED_DOMAIN_LABELS, mixedDomainSteps } from '../../model/mixedDomain.js';
 
-export function MixedDomainPlan({ plan, readiness, hands, unit, multiplier, onOpeningChange, goalConfig = {} }) {
+export function MixedDomainPlan({ plan, sets = 1, readiness, hands, unit, multiplier, onOpeningChange, goalConfig = {} }) {
   const targetSeconds = (plan.steps.reduce((sum, step) => sum + step.targetTime, 0) + 4 * 30) * hands.length;
   const targetEstimate = `${Math.floor(targetSeconds / 60)}:${String(targetSeconds % 60).padStart(2, '0')}`;
   return <section aria-label="Chaos Machine beta plan" style={{ marginBottom: 20 }}>
-    <p style={{ fontSize: 16, lineHeight: 1.5 }}>Five holds per hand. A different target weight each hold. Rest 30 seconds between holds.</p>
+    <p style={{ fontSize: 16, lineHeight: 1.5 }}>Five holds per hand in each set. A different target weight each hold. Rest 30 seconds between holds.</p>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>
       Where your measured history supports it, later target weights are adjusted for earlier pulls and rest, then fixed for each hold.
       Incomplete measurements during this session can also prevent an adjustment.
     </p>
     {readiness?.status === 'ready' ? <p style={{ color: C.muted, lineHeight: 1.5 }}>
-      Time if all targets are reached: {targetEstimate}{hands.length === 2 ? ' for both hands' : ' for one hand'}, including rests. Setup and hand changes add time.
+      Time per set if all targets are reached: {targetEstimate}{hands.length === 2 ? ' for both hands' : ' for one hand'}, including rests. Setup and hand changes add time.
     </p> : <p style={{ color: C.yellow, lineHeight: 1.5 }}>
       {readiness?.status === 'partial' ? 'Some holds need more measured history.' : 'More measured history is needed for automatic adjustments.'}
       {' '}You can still train with the reference target weights. You may reach failure earlier than the displayed times, so session length will vary.
     </p>}
+    {sets > 1 && <p style={{ color: C.muted }}>{sets} sets per hand selected. Each set repeats this sequence. Later sets account for earlier work and rest; they do not start fresh.</p>}
     <label style={{ display: 'block', marginBottom: 6 }}>
       First domain
       <select value={plan.steps[0].zone} onChange={e => onOpeningChange(e.target.value)}
@@ -62,6 +63,6 @@ export function MixedDomainPlan({ plan, readiness, hands, unit, multiplier, onOp
       </div>)}
     </div>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>{readiness?.status === 'ready' ? 'Adjusted targets aim for approximately the displayed times.' : 'The displayed times identify each domain; reference weights may not produce holds that long after earlier work.'} Keep your pulling force steady at the target weight and hold until failure; reaching the target does not stop the timer.</p>
-    <p style={{ color: C.muted, lineHeight: 1.5 }}>Your first measured hold can update the curve. Later holds are saved as fatigued work. These estimates are experimental. Your 4–6 rep progression is unchanged.</p>
+    <p style={{ color: C.muted, lineHeight: 1.5 }}>Only the first eligible measured hold per hand in set one can update the curve. Later holds are saved as fatigued work. These estimates are experimental. Your 4–6 rep progression is unchanged.</p>
   </section>;
 }
