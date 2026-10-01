@@ -27,12 +27,12 @@
 // source of truth for hook state.
 
 import React, { useState } from "react";
-import { Card, PageFrame } from "../ui/components.js";
+import { Card, PageFrame } from "../ui/components.jsx";
 import { loadLS, saveLS, LS_ANALYSIS_SUBTAB_KEY } from "../lib/storage.js";
-import { AnalysisView } from "./AnalysisView.js";
-import { WorkoutAnalysisView } from "./WorkoutAnalysisView.js";
-import { ClimbingAnalysisView } from "./ClimbingAnalysisView.js";
-import { BodyWeightAnalysisView } from "./BodyWeightAnalysisView.js";
+import { AnalysisView } from "./AnalysisView.jsx";
+import { WorkoutAnalysisView } from "./WorkoutAnalysisView.jsx";
+import { ClimbingAnalysisView } from "./ClimbingAnalysisView.jsx";
+import { BodyWeightAnalysisView } from "./BodyWeightAnalysisView.jsx";
 import { WeeklyReviewCard } from "./cards/WeeklyReviewCard.jsx";
 
 import { SectionSelector } from "../ui/SectionSelector.jsx";

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { ascentMeta, disciplineMeta } from "../../lib/climbing-grades.js";
 import { deriveClimbingPrBadges } from "../../model/climbingPrBadges.js";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card } from "../../ui/components.jsx";
 
 const BADGE_COLORS = {
   boulder_indoor_commercial: C.orange,

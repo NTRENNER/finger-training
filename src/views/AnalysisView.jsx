@@ -38,7 +38,7 @@ import React, { useMemo, useState } from "react";
 // (May 2026 BACKLOG #156). AnalysisView no longer renders any chart
 // directly — child cards own their own chart machinery.
 import { C } from "../ui/theme.js";
-import { Card } from "../ui/components.js";
+import { Card } from "../ui/components.jsx";
 import { CardBoundary } from "../ui/ErrorBoundary.jsx";
 import { bwOnDate, toDisp, forceOverBW } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
@@ -60,7 +60,7 @@ import { buildForceDurationGripScope } from "../model/analysisScope.js";
 import {
   CurveCoverageCard,
   curveCoverageAttentionByGrip,
-} from "./analysis/CurveCoverageCard.js";
+} from "./analysis/CurveCoverageCard.jsx";
 // EnduranceCeilingCard dropped May 2026 — the F(180s)/F(5s) ratio is
 // invariant to proportional strength gains (so it reads "NEEDS WORK"
 // even while the user is measurably getting stronger), the literature
@@ -68,7 +68,7 @@ import {
 // the underlying curve shape is already visible on the F-D chart and
 // the 3-min hold weight is shown on the Strength Balance card.
 import { PerformanceTrendCards } from "./analysis/PerformanceTrendCards.jsx";
-import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.js";
+import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.jsx";
 import { RecoveryStatusCard } from "./cards/RecoveryStatusCard.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";

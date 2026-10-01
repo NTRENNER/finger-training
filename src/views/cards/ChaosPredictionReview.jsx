@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { summarizeMixedPredictions } from '../../model/mixedLoadPrediction.js';
 import { C } from '../../ui/theme.js';
-import { Btn } from '../../ui/components.js';
+import { Btn } from '../../ui/components.jsx';
 
 const groupLabel = key => key.split('|').map(part => {
   const labels = { all: 'Overall', adaptive_targets: 'Adjusted targets',

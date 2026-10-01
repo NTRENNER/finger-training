@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { StretchSessionBuilder } from "../StretchSessionBuilder.js";
+import { StretchSessionBuilder } from "../StretchSessionBuilder.jsx";
 import { DEFAULT_STRETCH_PREFERENCES } from "../../../model/stretching.js";
 
 const emptyCoverage = {

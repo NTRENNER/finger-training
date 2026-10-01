@@ -1,6 +1,6 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { WarmupView } from "../WarmupView.js";
+import { WarmupView } from "../WarmupView.jsx";
 import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP, CMD_BATTERY } from "../../lib/tindeq.js";
 import { generateWarmupProtocol } from "../../model/warmup.js";
 
@@ -52,7 +52,8 @@ async function setup({ peak = false } = {}) {
   expect(screen.getByRole("checkbox", { name: "Include Peak Test today" })).not.toBeChecked();
   if (peak) fireEvent.click(screen.getByRole("checkbox", { name: "Include Peak Test today" }));
   await act(async () => { await hook.connect(); });
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start", exact: true })); });
+  fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
+  await waitFor(() => expect(commands).toContain(CMD_START[0]));
   const send = kg => {
     if (!streaming) return;
     const value = new DataView(new ArrayBuffer(10));
@@ -90,29 +91,34 @@ test("first timed hold, rest release, and the next pull use one uninterrupted se
 
 test("complete sequence retains stage layout, shows every primer rep, then both pullup sets", async () => {
   const { hold, rest, commands } = await setup();
-  for (let step = 1; step <= 4; step++) {
+  const completeStep = step => {
     expect(screen.getByText(`Warm-up · Step ${step} of 6`)).toBeInTheDocument();
     expect(screen.getByText("Target weight")).toBeInTheDocument();
     hold(30, 2000); rest();
-    if (step === 2) {
-      expect(screen.getByText("Swap to Micro")).toBeInTheDocument();
-      // Moving equipment during the swap must not start a rep.
-      hold(15, 200); hold(0, 100);
-      expect(screen.queryByRole("timer")).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    }
-  }
+  };
+  completeStep(1); completeStep(2);
+  expect(screen.getByText("Swap to Micro")).toBeInTheDocument();
+  // Moving equipment during the swap must not start a rep.
+  hold(15, 200); hold(0, 100);
+  expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  completeStep(3); completeStep(4);
+  const followingStages = [];
   for (let rep = 1; rep <= 5; rep++) {
     expect(screen.getByText(`Micro · Rep ${rep} of 5`)).toBeInTheDocument();
     expect(screen.queryByText("Target weight")).not.toBeInTheDocument();
     hold(30, 2000);
     expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
-    if (rep < 5) {
-      expect(screen.getByText(`Rep ${rep + 1} of 5 · 2s maximum effort`)).toBeInTheDocument();
-      expect(screen.queryByText("Pullup Finisher")).not.toBeInTheDocument();
-    } else expect(screen.getByText("Pullup Finisher")).toBeInTheDocument();
+    followingStages.push({
+      nextRep: screen.queryByText(`Rep ${rep + 1} of 5 · 2s maximum effort`) !== null,
+      finisher: screen.queryByText("Pullup Finisher") !== null,
+    });
     rest();
   }
+  expect(followingStages).toEqual([
+    ...Array.from({ length: 4 }, () => ({ nextRep: true, finisher: false })),
+    { nextRep: false, finisher: true },
+  ]);
   await waitFor(() => expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0], CMD_STOP[0]]));
   expect(screen.getByText("Set 1 of 2")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "+1 rep" }));
@@ -167,9 +173,9 @@ test('optional Peak Test replaces the maximal block, saves only its pulls, then 
       : [protocol.steps[4]]),
     protocol.steps[5],
   ] }));
-  const { hold, send, rest, addReps } = await setup({ peak: true });
+  const { hold, send, rest, addReps, commands } = await setup({ peak: true });
   hold(20, 2000); rest();
-  await act(async () => {}); // allow the shared sensor queue to switch views
+  await waitFor(() => expect(commands.filter(command => command === CMD_START[0])).toHaveLength(2));
   expect(screen.getByText('🤚 Left Hand')).toBeInTheDocument();
   expect(addReps).not.toHaveBeenCalled();
   for(let round=0;round<3;round++) {

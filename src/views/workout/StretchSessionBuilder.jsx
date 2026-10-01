@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Card } from "../../ui/components.js";
+import { Card } from "../../ui/components.jsx";
 import { C } from "../../ui/theme.js";
 import {
   buildStretchPlan,
@@ -9,7 +9,7 @@ import {
   toggleStretchEquipment,
   toggleStretchPriority,
 } from "../../model/stretching.js";
-import { VideoLink } from "./VideoLink.js";
+import { VideoLink } from "./VideoLink.jsx";
 
 const embeddedStyle = { padding: "20px 0 0", margin: "24px 0 0", border: "none", borderTop: `1px solid ${C.border}`, borderRadius: 0, background: "transparent" };
 

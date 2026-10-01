@@ -1,6 +1,6 @@
 import { PlateauReview } from './cards/PlateauReview.jsx';
 import React from 'react';
-import { PageFrame, Btn } from '../ui/components.js';
+import { PageFrame, Btn } from '../ui/components.jsx';
 import { CardBoundary } from '../ui/ErrorBoundary.jsx';
 import { C } from '../ui/theme.js';
 import { PredictionAccuracyCard } from './cards/PredictionAccuracyCard.jsx';

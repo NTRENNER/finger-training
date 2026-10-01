@@ -16,6 +16,8 @@ test('both handles move independently, cannot cross, and expose dates to assisti
  expect(end).toHaveValue('2');
  expect(screen.getByText('2026-08-03')).toHaveAttribute('datetime','2026-08-03');
  expect(screen.getByText('2026-08-07')).toHaveAttribute('datetime','2026-08-07');
+ // Date inputs have no implicit accessible role; explicitly check their absence.
+ // eslint-disable-next-line testing-library/no-node-access
  expect(document.querySelector('input[type="date"]')).toBeNull();
 });
 test('one training date disables both handles without invalid range arithmetic',()=>{
@@ -42,6 +44,8 @@ test('overlapping touch targets allow dragging either handle and keep keyboard f
   start={a} end={b} onChange={(x,y)=>set([x,y])}/>;}
  try {
   const {container}=render(<Dense/>);
+  // Exercise the shared pointer surface, including its measured geometry.
+  // eslint-disable-next-line testing-library/no-container, testing-library/no-node-access
   const surface=container.querySelector('.history-slider');
   surface.getBoundingClientRect=()=>({left:0,width:240});
   surface.setPointerCapture=jest.fn();

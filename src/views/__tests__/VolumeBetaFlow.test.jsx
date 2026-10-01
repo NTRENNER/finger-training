@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, render, screen, fireEvent } from '@testing-library/react';
-import { BetweenSetRestView, SessionSummaryView } from '../ActiveSessionViews.js';
+import { BetweenSetRestView, SessionSummaryView } from '../ActiveSessionViews.jsx';
 beforeEach(() => jest.useFakeTimers().setSystemTime(1000000));
 afterEach(() => jest.useRealTimers());
 

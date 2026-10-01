@@ -8,7 +8,7 @@ async function currentUserId() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     return user?.id ?? null;
-  } catch (e) {
+  } catch {
     return null;
   }
 }

@@ -20,9 +20,9 @@
 
 import React, { useState } from "react";
 import { C } from "../ui/theme.js";
-import { Card, PageFrame } from "../ui/components.js";
-import { ClimbingLogCard } from "./cards/ClimbingLogCard.js";
-import { WarmupView } from "./WarmupView.js";
+import { Card, PageFrame } from "../ui/components.jsx";
+import { ClimbingLogCard } from "./cards/ClimbingLogCard.jsx";
+import { WarmupView } from "./WarmupView.jsx";
 import {
   disciplineMeta, ascentMeta, wallMeta, describeClimb,
 } from "../lib/climbing-grades.js";

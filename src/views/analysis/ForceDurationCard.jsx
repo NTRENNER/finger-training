@@ -38,7 +38,7 @@ import {
   ReferenceLine, ReferenceArea,
 } from "recharts";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card } from "../../ui/components.jsx";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { bwOnDate, fmt1, fmtW, toDisp, forceOverBW } from "../../ui/format.js";
 import { ZONE6 } from "../../model/zones.js";

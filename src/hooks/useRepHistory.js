@@ -254,7 +254,7 @@ export function useRepHistory({
       });
     })();
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [user, syncSignal]);
 
   // True once the full reconcile below has landed (or immediately
@@ -425,7 +425,7 @@ export function useRepHistory({
 
     })();
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [user, syncSignal]);
 
   // ── Workout-session sync ────────────────────────────────────
@@ -557,7 +557,7 @@ export function useRepHistory({
 
       saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [user, syncSignal]);
 
   // ── CRUD ────────────────────────────────────────────────────

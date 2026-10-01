@@ -8,7 +8,7 @@
 // grid on tap, so it doesn't crowd the top of History.
 import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card } from "../../ui/components.jsx";
 import { deriveBadges } from "../../model/badges.js";
 
 export function BadgeCollection({ history = [] }) {

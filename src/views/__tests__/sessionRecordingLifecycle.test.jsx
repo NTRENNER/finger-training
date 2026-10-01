@@ -1,6 +1,6 @@
 import React, { StrictMode } from 'react';
 import { act, render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { AutoRepSessionView, ActiveSessionView } from '../ActiveSessionViews.js';
+import { AutoRepSessionView, ActiveSessionView } from '../ActiveSessionViews.jsx';
 import { useSessionRunner } from '../../hooks/useSessionRunner.js';
 import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP } from '../../lib/tindeq.js';
 import { isCapacityEvidenceRep } from '../../model/forceRecording.js';
@@ -51,7 +51,8 @@ function feed(from, to, force) {
     const value = new DataView(new ArrayBuffer(10));
     value.setUint8(0, 1); value.setUint8(1, 8);
     value.setFloat32(2, force(ms), true); value.setUint32(6, ms * 1000, true);
-    act(() => packetListener({ target: { value } }));
+    const notify = packetListener;
+    act(() => notify({ target: { value } }));
     act(() => jest.advanceTimersByTime(20));
   }
 }
@@ -181,7 +182,7 @@ test.each(['end', 'navigate'])('a manual active pull is saved when leaving by %s
   fireEvent.click(screen.getByRole('button', { name: /Start Rep/ }));
   for (let i = 0; i < 3; i++) await act(async () => jest.advanceTimersByTime(1000));
   act(() => jest.advanceTimersByTime(5000));
-  if (action === 'end') await act(async () => fireEvent.click(screen.getByRole('button', { name: 'End Session' })));
+  if (action === 'end') fireEvent.click(screen.getByRole('button', { name: 'End Session' }));
   else await act(async () => view.hide());
   expect(saved).toHaveBeenCalledTimes(1);
   expect(saved.mock.calls[0][0][0]).toMatchObject({ failure_valid: false, end_reason: 'interrupted', actual_time_s: 5 });

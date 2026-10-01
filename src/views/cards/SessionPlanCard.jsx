@@ -47,7 +47,7 @@ import { trainingPurpose } from "../../model/trainingPurpose.js";
 import React, { useEffect, useMemo, useState } from "react";
 import "./SessionPlanCard.css";
 import { C } from "../../ui/theme.js";
-import { Card, Btn } from "../../ui/components.js";
+import { Card, Btn } from "../../ui/components.jsx";
 import { fmtW } from "../../ui/format.js";
 import { ZONE_KEYS, TRAINING_ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";

@@ -9,7 +9,7 @@
 // offers a retry (reusing the same record so a retry never duplicates).
 import React, { useState } from "react";
 import { C } from "../../ui/theme.js";
-import { Card, Btn } from "../../ui/components.js";
+import { Card, Btn } from "../../ui/components.jsx";
 import {
   TENDON_PRESETS, DEFAULT_PRESET_KEY, resolvePreset, getPreset,
   tendonAdherence, totalSets, totalWorkSeconds,

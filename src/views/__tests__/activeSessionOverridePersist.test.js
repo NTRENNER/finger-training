@@ -5,7 +5,7 @@
 // persisted in a module-scoped store keyed by sessionId.
 import React from "react";
 import { render, fireEvent, screen, cleanup, act, waitFor } from "@testing-library/react";
-import { ActiveSessionView } from "../ActiveSessionViews.js";
+import { ActiveSessionView } from "../ActiveSessionViews.jsx";
 
 // Keep the render light: the live charts are irrelevant to this test.
 jest.mock("../cards/RepCurveChart.jsx", () => ({ RepCurveChart: () => null }));

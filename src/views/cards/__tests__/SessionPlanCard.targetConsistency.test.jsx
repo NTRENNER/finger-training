@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import { SessionPlanCard } from '../SessionPlanCard.js';
+import { SessionPlanCard } from '../SessionPlanCard.jsx';
 import { ZONE_REF_T, TRAINING_ZONE_KEYS } from '../../../model/zones.js';
 jest.mock('../../../model/coaching.js', () => ({ coachingRecommendationContinuous: () => ({
   zone:'strength_endurance', T:160, loadByHand:{L:8,R:6.3}, reasons:[],

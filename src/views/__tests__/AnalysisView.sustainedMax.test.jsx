@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import { AnalysisView } from '../AnalysisView.js';
+import { AnalysisView } from '../AnalysisView.jsx';
 import { recordForce } from '../../model/forceRecording.js';
 import { peakMeasurementRecord } from '../../model/peakTest.js';
 

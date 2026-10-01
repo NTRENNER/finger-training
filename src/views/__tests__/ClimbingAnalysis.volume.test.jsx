@@ -1,6 +1,6 @@
 import React from 'react';
 import {render,screen,cleanup} from '@testing-library/react';
-import {ClimbingAnalysisView} from '../ClimbingAnalysisView.js';
+import {ClimbingAnalysisView} from '../ClimbingAnalysisView.jsx';
 import {sessionFatigueDetail} from '../../model/climbingFatigue.js';
 import {gradeRank,afaVSum} from '../../lib/climbing-grades.js';
 jest.mock('../cards/PyramidChart.jsx',()=>({PyramidChart:()=>null}));

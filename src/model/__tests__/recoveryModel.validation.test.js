@@ -94,7 +94,7 @@ maybe("nonlinear recovery model: personalization wins + noise/deload calibration
   const firing = { "-0.10": fireAt(-0.10), "-0.15": fireAt(-0.15), "-0.20": fireAt(-0.20),
                    [`production(-${DELOAD_GAP_TRIGGER})`]: fireAt(-DELOAD_GAP_TRIGGER) };
 
-  // eslint-disable-next-line no-console
+
   console.log("RECOVERY VALIDATION\n" + JSON.stringify({
     GAP_NOISE_BAND, DELOAD_GAP_TRIGGER, DELOAD_MIN_SESSIONS, perGrip: report, crossGripDeloadFiring: firing,
   }, null, 2));

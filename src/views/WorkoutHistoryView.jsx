@@ -17,7 +17,7 @@
 
 import React, { useMemo, useState } from "react";
 import { C } from "../ui/theme.js";
-import { Card } from "../ui/components.js";
+import { Card } from "../ui/components.jsx";
 import { fmt1, toDisp, fmtClock, bwOnDate } from "../ui/format.js";
 import { ymdLocal } from "../util.js";
 import {
@@ -36,9 +36,9 @@ import {
 } from "../model/exerciseIds.js";
 import { exercises as SUPPORT_EXERCISES } from "../model/supportTraining.js";
 import { BAND_COLOR_LOOKUP, normalizeBands } from "./workout/workoutConstants.js";
-import { SessionExRow } from "./workout/SessionExRow.js";
-import { SimpleExRow } from "./workout/SimpleExRow.js";
-import { ExercisePicker } from "./workout/ExercisePicker.js";
+import { SessionExRow } from "./workout/SessionExRow.jsx";
+import { SimpleExRow } from "./workout/SimpleExRow.jsx";
+import { ExercisePicker } from "./workout/ExercisePicker.jsx";
 
 // Build an empty seed for an exercise added to an existing logged
 // session. Unlike WorkoutTab's seedExercise (which calls recommendSet

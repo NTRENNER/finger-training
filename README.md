@@ -10,8 +10,8 @@ based on which energy compartment is your current limiter.
 
 ```
 src/
-  App.js               React shell — auth, top-level state, render switch
-  hooks/               Custom hooks lifted out of App.js
+  App.jsx               React shell — auth, top-level state, render switch
+  hooks/               Custom hooks lifted out of App.jsx
     useAuth.js           Supabase auth + 6-digit OTP login
     useRepHistory.js     rep array + cloud reconcile + CRUD + freshMap memos
     useSessionRunner.js  in-workout finite state machine
@@ -49,7 +49,7 @@ src/
     trip.js              user-configurable target-date
     climbing-grades.js   V/YDS grade tables
   ui/                  Theme + shared components
-    theme.js, components.js, format.js
+    theme.js, components.jsx, format.js
 ```
 
 ## Local dev
@@ -59,9 +59,9 @@ key. Both values are designed to be public (anon key is the
 publishable browser key, gated by Row-Level Security).
 
 ```sh
-npm install
-npm start          # dev server on localhost:3000
-npm test           # model + lib + UI test suite (702 tests)
+npm ci
+npm start          # Vite dev server on localhost:3000 (PORT=3099 npm start also works)
+npm test           # model + lib + UI test suite
 npm run build      # production bundle
 ```
 
@@ -107,3 +107,11 @@ Prediction collection continues during ordinary workouts; research comparisons
 do not select loads or change the rep ladder. Normal Analysis shows training
 progress without the research card. Vercel rewrites `/research` (with or without
 a trailing slash) to the app shell; no separate deployment or database is needed.
+
+### Build and checks
+
+Use Node 22.19+ (22.x) and `npm ci`. `npm run lint` enforces the source/test rules with zero warnings; `npm test -- --runInBand` runs standalone Jest. `npm run build` uses Vite and verifies the generated offline cache. `npm run preview` serves the production build on localhost:5000. Vercel serves `build/`; `/research` rewrites to the app shell.
+
+Existing `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY` settings are retained. Only these public values and build metadata are substituted into the browser bundle; never add private keys to this allowlist. JSX components use `.jsx`; model modules remain `.js`.
+
+ESLint is pinned to 9.39.5 because the React, accessibility, and import plugins currently declare support through ESLint 9. It is outside upstream support; move to ESLint 10 when those peer dependencies support it, without forcing an incompatible install. The production build currently reports a large main bundle; splitting view code is a separate performance task.

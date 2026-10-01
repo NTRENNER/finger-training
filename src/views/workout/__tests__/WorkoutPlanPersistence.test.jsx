@@ -1,13 +1,13 @@
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import { WorkoutTab } from '../../WorkoutTab.js';
+import { WorkoutTab } from '../../WorkoutTab.jsx';
 import { saveLS, loadLS, LS_WORKOUT_LOG_KEY } from '../../../lib/storage.js';
 
 jest.mock('../../../lib/sync.js', () => ({ pushWorkoutSession: jest.fn(() => Promise.resolve()) }));
 jest.mock('../../BodyWeightEntry.jsx', () => ({ BwPrompt: () => null }));
-jest.mock('../StretchPill.js', () => ({ StretchPill: () => null }));
-jest.mock('../RecommendationCard.js', () => ({ RecommendationCard: () => null }));
-jest.mock('../SessionExRow.js', () => ({ SessionExRow: ({ ex, setsData, onSetsChange }) => <div data-testid={ex.id}>
+jest.mock('../StretchPill.jsx', () => ({ StretchPill: () => null }));
+jest.mock('../RecommendationCard.jsx', () => ({ RecommendationCard: () => null }));
+jest.mock('../SessionExRow.jsx', () => ({ SessionExRow: ({ ex, setsData, onSetsChange }) => <div data-testid={ex.id}>
   <span>{setsData.sets.length} sets</span>
   <button onClick={() => onSetsChange({ sets: setsData.sets.map((s,i) => ({ ...s, done: i === 0 })) })}>Complete one</button>
   <button onClick={() => onSetsChange({ sets: setsData.sets.slice(0,1) })}>Remove sets</button>

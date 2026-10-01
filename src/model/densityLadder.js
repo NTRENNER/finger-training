@@ -128,7 +128,7 @@ function sessionConformance(historyBefore, hand, grip, reps) {
   // must obey the same first-session/first-set boundary as the judged set;
   // otherwise extra fatigued work can indirectly change the fresh ladder.
   const freshHistory = firstTrainingSessionRows(historyBefore).filter(isFirstSetRep);
-  try { physModel = buildPhysModel(freshHistory, hand, grip); } catch (e) { physModel = null; }
+  try { physModel = buildPhysModel(freshHistory, hand, grip); } catch { physModel = null; }
   if (!physModel) return null;
   const evidence = progressionSetEvidence(reps);
   if (!evidence.complete) return null;

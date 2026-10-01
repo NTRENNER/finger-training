@@ -1,6 +1,6 @@
 import { sustainedMaxKg } from '../model/sustainedMax.js';
 import React, { useEffect, useRef, useState } from 'react';
-import { Card, Btn } from '../ui/components.js';
+import { Card, Btn } from '../ui/components.jsx';
 import { C } from '../ui/theme.js';
 import { fmtW } from '../ui/format.js';
 import { today, nowISO, uuid } from '../util.js';

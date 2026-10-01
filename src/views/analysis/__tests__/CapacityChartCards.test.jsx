@@ -1,6 +1,6 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { CapacityTrajectoryCard } from "../CapacityChartCards.js";
+import { CapacityTrajectoryCard } from "../CapacityChartCards.jsx";
 
 test("shows baseline progress when a grip is not ready for a capacity line", () => {
   render(

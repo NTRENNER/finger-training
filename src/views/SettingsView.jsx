@@ -22,7 +22,7 @@
 
 import React, { useState } from "react";
 import { C } from "../ui/theme.js";
-import { Card, Btn, PageFrame, Sect } from "../ui/components.js";
+import { Card, Btn, PageFrame, Sect } from "../ui/components.jsx";
 import { KG_TO_LBS, fmt1, toDisp } from "../ui/format.js";
 import { BodyWeightEntry } from "./BodyWeightEntry.jsx";
 import { tripCountdown } from "../lib/trip.js";

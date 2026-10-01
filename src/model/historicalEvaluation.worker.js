@@ -1,5 +1,3 @@
-/* eslint-env worker */
-/* global globalThis */
 import { evaluateHistorical } from './historicalEvaluation.js';
 
 globalThis.onmessage = event => {

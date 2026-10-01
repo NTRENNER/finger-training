@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { PeakTestView } from '../PeakTestView.jsx';
-import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP, CMD_BATTERY } from '../../lib/tindeq.js';
+import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP } from '../../lib/tindeq.js';
 import { isValidPeakMeasurement } from '../../model/peakTest.js';
 import { freshFitReps } from '../../model/load.js';
 beforeEach(() => { jest.useFakeTimers().setSystemTime(new Date(2026, 8, 24, 12)); localStorage.clear(); });
@@ -53,6 +53,16 @@ test.each(['L', 'R'])('six real sensor pulls alternate from %s, with exactly two
   const history = first === 'R' ? [{ date: '2026-09-20', hand: 'L', actual_time_s: 30 }] : [];
   const { hold, send, addReps, commands } = await setup(history);
   const order = first === 'L' ? ['L','R'] : ['R','L'];
+  function checkRestBetweenRounds(round) {
+      expect(screen.getByRole('timer', { name: 'Rest' })).toBeInTheDocument();
+      // Handling equipment during rest cannot record another pull.
+      hold(10, 100); send(0);
+      act(() => jest.advanceTimersByTime(61000));
+      expect(screen.queryByRole('timer', { name: 'Rest' })).not.toBeInTheDocument();
+      expect(screen.getByText('Pull to begin')).toBeInTheDocument();
+      act(() => jest.advanceTimersByTime(10000));
+      expect(addReps).toHaveBeenCalledTimes((round + 1) * 2);
+  }
   for (let round = 0; round < 3; round++) {
     for (const h of order) {
       expect(screen.getByText(h === 'L' ? '🤚 Left Hand' : '✋ Right Hand')).toBeInTheDocument();
@@ -63,16 +73,7 @@ test.each(['L', 'R'])('six real sensor pulls alternate from %s, with exactly two
       expect(addReps).toHaveBeenCalledTimes(round * 2 + order.indexOf(h) + 1);
       send(0);
     }
-    if (round < 2) {
-      expect(screen.getByRole('timer', { name: 'Rest' })).toBeInTheDocument();
-      // Handling equipment during rest cannot record another pull.
-      hold(10, 100); send(0);
-      act(() => jest.advanceTimersByTime(61000));
-      expect(screen.queryByRole('timer', { name: 'Rest' })).not.toBeInTheDocument();
-      expect(screen.getByText('Pull to begin')).toBeInTheDocument();
-      act(() => jest.advanceTimersByTime(10000));
-      expect(addReps).toHaveBeenCalledTimes((round + 1) * 2);
-    }
+    if (round < 2) checkRestBetweenRounds(round);
   }
   expect(screen.getByText('Peak Test complete')).toBeInTheDocument();
   expect(screen.queryByRole('timer')).not.toBeInTheDocument();

@@ -51,7 +51,7 @@
 import React, { useMemo, useState } from "react";
 
 import { C } from "../ui/theme.js";
-import { Btn, PageFrame } from "../ui/components.js";
+import { Btn, PageFrame } from "../ui/components.jsx";
 
 import { loadLS, saveLS, LS_WORKOUT_LOG_KEY, LS_DELOAD_WEEK_KEY } from "../lib/storage.js";
 import { BwPrompt } from "./BodyWeightEntry.jsx";
@@ -59,7 +59,7 @@ import { today } from "../util.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { deloadStatus, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
-import { SessionPlanCard } from "./cards/SessionPlanCard.js";
+import { SessionPlanCard } from "./cards/SessionPlanCard.jsx";
 import { TendonCard } from "./cards/TendonCard.jsx";
 import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 

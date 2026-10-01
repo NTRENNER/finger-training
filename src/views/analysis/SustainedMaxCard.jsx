@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { sustainedMaxRecords } from '../../model/sustainedMax.js';
-import { Card } from '../../ui/components.js';
+import { Card } from '../../ui/components.jsx';
 import { C } from '../../ui/theme.js';
 import { GRIP_COLORS } from '../../ui/grip-colors.js';
 import { bwOnDate, fmt1, toDisp } from '../../ui/format.js';

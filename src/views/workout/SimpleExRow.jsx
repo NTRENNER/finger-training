@@ -10,8 +10,8 @@
 
 import React from "react";
 import { C } from "../../ui/theme.js";
-import { WTypeBadge } from "./WTypeBadge.js";
-import { VideoLink } from "./VideoLink.js";
+import { WTypeBadge } from "./WTypeBadge.jsx";
+import { VideoLink } from "./VideoLink.jsx";
 
 export function SimpleExRow({ ex, done, notes, onToggle, onNotesChange, last }) {
   return (

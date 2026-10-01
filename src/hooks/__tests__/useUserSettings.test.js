@@ -1,4 +1,3 @@
-/* global globalThis */
 import { act, renderHook, waitFor } from "@testing-library/react";
 
 import { useUserSettings } from "../useUserSettings.js";

@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, render, screen, fireEvent } from '@testing-library/react';
-import { RestView } from '../ActiveSessionViews.js';
+import { RestView } from '../ActiveSessionViews.jsx';
 const lastRep = {actualTime:10,avgForce:20,failureValid:true,targetTime:30};
 const props = {restSeconds:20,repNum:1,repsPerSet:4,lastRep};
 beforeEach(()=>{jest.useFakeTimers();jest.setSystemTime(100000);});

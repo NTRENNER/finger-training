@@ -1,5 +1,5 @@
 import React, {useMemo} from 'react';
-import {Card} from '../../ui/components.js';
+import {Card} from '../../ui/components.jsx';
 import {C} from '../../ui/theme.js';
 import {fmtW} from '../../ui/format.js';
 import {measuredProgress} from '../../model/measuredProgress.js';

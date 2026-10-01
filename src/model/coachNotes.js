@@ -211,7 +211,7 @@ export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreA
   // compute internally from history (guarded — the fits can throw on
   // sparse data). buildCoachNotes already receives history.
   let recSignals = recoverySignals;
-  if (recSignals == null) { try { recSignals = recoveryCoachSignals(history, { todayStr }); } catch (e) { recSignals = []; } }
+  if (recSignals == null) { try { recSignals = recoveryCoachSignals(history, { todayStr }); } catch { recSignals = []; } }
   const candidates = [
     adherenceNote(history, todayStr),
     volumeRampNote(history, todayStr),

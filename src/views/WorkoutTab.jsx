@@ -47,7 +47,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { C } from "../ui/theme.js";
-import { Card, PageFrame } from "../ui/components.js";
+import { Card, PageFrame } from "../ui/components.jsx";
 
 import {
   loadLS, saveLS,
@@ -80,15 +80,15 @@ import {
 import { BwPrompt } from "./BodyWeightEntry.jsx";
 
 import { WORKOUT_COLORS } from "./workout/workoutConstants.js";
-import { WTypeBadge } from "./workout/WTypeBadge.js";
-import { VideoLink } from "./workout/VideoLink.js";
-import { SessionExRow } from "./workout/SessionExRow.js";
-import { SimpleExRow } from "./workout/SimpleExRow.js";
-import { RecommendationCard } from "./workout/RecommendationCard.js";
-import { WorkoutPicker } from "./workout/WorkoutPicker.js";
-import { StretchPill } from "./workout/StretchPill.js";
-import { StretchSessionBuilder } from "./workout/StretchSessionBuilder.js";
-import { ExercisePicker } from "./workout/ExercisePicker.js";
+import { WTypeBadge } from "./workout/WTypeBadge.jsx";
+import { VideoLink } from "./workout/VideoLink.jsx";
+import { SessionExRow } from "./workout/SessionExRow.jsx";
+import { SimpleExRow } from "./workout/SimpleExRow.jsx";
+import { RecommendationCard } from "./workout/RecommendationCard.jsx";
+import { WorkoutPicker } from "./workout/WorkoutPicker.jsx";
+import { StretchPill } from "./workout/StretchPill.jsx";
+import { StretchSessionBuilder } from "./workout/StretchSessionBuilder.jsx";
+import { ExercisePicker } from "./workout/ExercisePicker.jsx";
 import {
   countSupportSessions, setSummary, findLastSessionFor,
 } from "./workout/workoutHelpers.js";

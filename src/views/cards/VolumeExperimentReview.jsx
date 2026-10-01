@@ -1,6 +1,6 @@
 import { betaEligibility, BETA_ELIGIBILITY_DESCRIPTION } from '../../model/betaEligibility.js';
 import React, { useMemo, useState } from 'react';
-import { Card, Btn } from '../../ui/components.js';
+import { Card, Btn } from '../../ui/components.jsx';
 import { C } from '../../ui/theme.js';
 import { today } from '../../util.js';
 import { toDisp } from '../../ui/format.js';

@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, render, renderHook, screen, fireEvent, waitFor } from '@testing-library/react';
 import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP, CMD_TARE } from '../tindeq.js';
-import { AutoRepSessionView } from '../../views/ActiveSessionViews.js';
+import { AutoRepSessionView } from '../../views/ActiveSessionViews.jsx';
 jest.mock('../../views/cards/RepCurveChart.jsx', () => ({ RepCurveChart: () => null }));
 jest.mock('../../views/cards/RecoveryChart.jsx', () => ({ RecoveryChart: () => null }));
 jest.mock('../../views/cards/LiveForceCard.jsx', () => ({ BigTimer: () => null, ForceGauge: () => null }));
@@ -35,10 +35,10 @@ async function setup() {
     })),
   } };
   Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { requestDevice: async () => device } });
-  const hook = renderHook(() => useTindeq());
-  await act(async () => hook.result.current.connect());
+  const view = renderHook(() => useTindeq());
+  await act(async () => view.result.current.connect());
   writes.length = 0;
-  return { hook, writes, collisions: () => collisions, fail: cmd => { rejectNext = cmd[0]; },
+  return { hook: view, writes, collisions: () => collisions, fail: cmd => { rejectNext = cmd[0]; },
     packet: samples => {
       const value = new DataView(new ArrayBuffer(2 + samples.length * 8));
       value.setUint8(0, 1); value.setUint8(1, samples.length * 8);

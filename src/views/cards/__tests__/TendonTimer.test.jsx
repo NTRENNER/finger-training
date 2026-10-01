@@ -4,7 +4,7 @@
 // never claiming "Session logged" until the parent reports success, and
 // offering a retry on failure.
 import React from "react";
-import { render, screen, act, cleanup } from "@testing-library/react";
+import { render, screen, act, cleanup, fireEvent } from "@testing-library/react";
 import { TendonTimer } from "../TendonTimer.jsx";
 
 // AudioContext isn't in jsdom; beep is guarded, but stub it anyway.
@@ -27,7 +27,7 @@ test("fires onComplete once with totals and reflects the real save outcome", () 
     <TendonTimer preset={preset} onComplete={onComplete} saveState="saving" onCancel={() => {}} onRetry={() => {}} />
   );
 
-  act(() => { screen.getByText("▶ Start").click(); });
+  fireEvent.click(screen.getByText("▶ Start"));
 
   // Cross the 1s hold deadline: move the clock forward, then let the
   // 200ms interval tick observe that time has elapsed.

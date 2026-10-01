@@ -107,7 +107,7 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
       const then = impThen[grip] ? impThen[grip].total : null;
       curveByGrip[grip] = { totalNow: now, weekDelta: then == null ? null : now - then };
     }
-  } catch (e) { /* fit can fail on thin data — no curve signal */ }
+  } catch { /* fit can fail on thin data — no curve signal */ }
 
   // Finger: density-ladder load bumps earned this week.
   const ladderBumps = [];
@@ -115,7 +115,7 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
   for (const grip of grips) {
     for (const zoneKey of ZONE_KEYS) {
       let ld;
-      try { ld = computeDensityLadder(history, grip, zoneKey); } catch (e) { ld = null; }
+      try { ld = computeDensityLadder(history, grip, zoneKey); } catch { ld = null; }
       if (ld && ld.decision === "step_load" && ld.basis && inWeek(ld.basis.date)) {
         ladderBumps.push({ grip, zoneKey, T: ld.T, date: ld.basis.date });
       }
@@ -177,7 +177,7 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
       guidanceAction = g ? g.action : null;
     }
     recovery = { level: ds.level, label: ds.label, guidanceAction };
-  } catch (e) { /* leave unknown: missing computation is not reassuring evidence */ }
+  } catch { /* leave unknown: missing computation is not reassuring evidence */ }
 
   const finger = {
     daysThisWeek: distinctDates(weekReps),
@@ -478,7 +478,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   }
   for (const g of grips) {
     let mt = null;
-    try { mt = maxTestStaleness(fingerReps.filter(r => r.grip === g), refDate); } catch (e) { mt = null; }
+    try { mt = maxTestStaleness(fingerReps.filter(r => r.grip === g), refDate); } catch { mt = null; }
     if (mt && mt.recommended && focus.length < 3) {
       focus.push({
         key: `peak|${g}`,
@@ -542,7 +542,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   let supportNudge = null;
   if (!anyFull7 && touchedByEx.size > 0) {
     let picks = [];
-    try { picks = exerciseSupportRisk(workoutSessions, refDate).slice(0, 3); } catch (e) { picks = []; }
+    try { picks = exerciseSupportRisk(workoutSessions, refDate).slice(0, 3); } catch { picks = []; }
     if (picks.length) supportNudge = { picks };
   }
 
@@ -551,7 +551,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   // ramp-drop priority; no trajectory injection here — the check-in's
   // hold-ratio trend + curve-Δ wins already cover trajectory.
   let behaviorNotes = [];
-  try { behaviorNotes = buildCoachNotes(history, { todayStr: refDate }); } catch (e) { behaviorNotes = []; }
+  try { behaviorNotes = buildCoachNotes(history, { todayStr: refDate }); } catch { behaviorNotes = []; }
 
   return { ...base, volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates: focus.slice(0, 3) };
 }

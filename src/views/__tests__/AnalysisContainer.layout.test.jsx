@@ -1,6 +1,6 @@
 import React from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { AnalysisContainer } from "../AnalysisContainer.js";
+import { AnalysisContainer } from "../AnalysisContainer.jsx";
 
 jest.mock("../../lib/storage.js", () => ({
   loadLS: jest.fn(() => null),
@@ -11,16 +11,16 @@ jest.mock("../../lib/storage.js", () => ({
 jest.mock("../cards/WeeklyReviewCard.jsx", () => ({
   WeeklyReviewCard: () => <div>Weekly review</div>,
 }));
-jest.mock("../AnalysisView.js", () => ({
+jest.mock("../AnalysisView.jsx", () => ({
   AnalysisView: () => <div>Finger analysis</div>,
 }));
-jest.mock("../WorkoutAnalysisView.js", () => ({
+jest.mock("../WorkoutAnalysisView.jsx", () => ({
   WorkoutAnalysisView: () => <div>Lift analysis</div>,
 }));
-jest.mock("../ClimbingAnalysisView.js", () => ({
+jest.mock("../ClimbingAnalysisView.jsx", () => ({
   ClimbingAnalysisView: () => <div>Climb analysis</div>,
 }));
-jest.mock("../BodyWeightAnalysisView.js", () => ({
+jest.mock("../BodyWeightAnalysisView.jsx", () => ({
   BodyWeightAnalysisView: () => <div>Weight analysis</div>,
 }));
 

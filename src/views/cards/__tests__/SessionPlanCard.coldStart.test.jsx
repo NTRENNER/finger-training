@@ -1,6 +1,6 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { SessionPlanCard } from "../SessionPlanCard.js";
+import { SessionPlanCard } from "../SessionPlanCard.jsx";
 import { buildThreeExpPriors } from "../../../model/threeExp.js";
 
 const GOAL_CONFIG = {
@@ -42,7 +42,7 @@ function renderCard(history) {
       onCookedChange={jest.fn()}
     />
   );
-  return onApplyPlan;
+  return { onApplyPlan };
 }
 
 test("upper-bound stage hides unsupported alternatives and sends the exact probe plan", async () => {
@@ -51,7 +51,7 @@ test("upper-bound stage hides unsupported alternatives and sends the exact probe
     rep(hand, 30, 33, hand === "L" ? 5.8 : 6.0, 2),
     rep(hand, 30, 35, hand === "L" ? 5.6 : 5.8, 3),
   ]);
-  const onApplyPlan = renderCard(history);
+  const { onApplyPlan } = renderCard(history);
 
   expect(screen.getAllByText("after upper anchor")).toHaveLength(5);
   expect(screen.getAllByRole("button").filter(button => button.disabled)).toHaveLength(5);
@@ -74,7 +74,7 @@ test("lower-bound stage uses the four-rep recovery protocol and defers the middl
     rep("L", 5, 5, 6, 1),
     rep("R", 5, 5, 8, 1),
   ];
-  const onApplyPlan = renderCard(history);
+  const { onApplyPlan } = renderCard(history);
 
   expect(screen.getAllByText("after lower anchor")).toHaveLength(4);
   expect(document.body).toHaveTextContent("Hangs4");
@@ -97,7 +97,7 @@ test("training choices contain only the five domains and still apply a selected 
     rep("L", 5, 5, 6, 1),
     rep("R", 5, 5, 8, 1),
   ];
-  const onApplyPlan = renderCard(history);
+  const { onApplyPlan } = renderCard(history);
   expect(screen.queryByRole("button", { name: /Train Max Strength/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Run peak test" })).not.toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: /^Train / })).toHaveLength(5);
@@ -118,7 +118,7 @@ test("clicking the starred zone tile selects its displayed reference time", asyn
       rep(hand, T, T + 2, Math.max(1.5, 12 - index * 1.5), index + 1)
     )
   );
-  const onApplyPlan = renderCard(history);
+  const { onApplyPlan } = renderCard(history);
   const starredTile = screen.getAllByRole("button")
     .find(button =>
       button.getAttribute("aria-label")?.startsWith("Train ")
@@ -142,7 +142,7 @@ test('three manual sessions show an estimated 12kg plan rather than an empty sta
   target_duration:160,actual_time_s:160,manual_load_kg:12,avg_force_kg:null,
   load_provenance:'nominal_setting',failure_valid:true,rest_s:20,
  })));
- const onApplyPlan=renderCard(history);
+ const { onApplyPlan }=renderCard(history);
  expect(screen.getByText(/Estimated from your recorded manual load/)).toBeInTheDocument();
  expect(screen.queryByText(/Need at least 2 reps/)).not.toBeInTheDocument();
  await waitFor(()=>expect(onApplyPlan).toHaveBeenCalled());

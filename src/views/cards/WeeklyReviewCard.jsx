@@ -19,7 +19,7 @@
 
 import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card } from "../../ui/components.jsx";
 import { buildCheckIn } from "../../model/weeklyReview.js";
 import { weekKey } from "../../lib/climbing-grades.js";
 import { loadLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY } from "../../lib/storage.js";
@@ -55,8 +55,8 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
     const refDate = addDays(weekKey(todayYMD), -1);
     let workoutSessions = [];
     let bwLog = [];
-    try { workoutSessions = loadLS(LS_WORKOUT_LOG_KEY) || []; } catch (e) { workoutSessions = []; }
-    try { bwLog = loadLS(LS_BW_LOG_KEY) || []; } catch (e) { bwLog = []; }
+    try { workoutSessions = loadLS(LS_WORKOUT_LOG_KEY) || []; } catch { workoutSessions = []; }
+    try { bwLog = loadLS(LS_BW_LOG_KEY) || []; } catch { bwLog = []; }
     return buildCheckIn(history, activities, workoutSessions, { refDate, bwLog });
   }, [history, activities]);
 

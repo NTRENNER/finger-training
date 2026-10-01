@@ -1,6 +1,6 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ExercisePicker } from "../ExercisePicker.js";
+import { ExercisePicker } from "../ExercisePicker.jsx";
 
 test("surfaces the lock-off eccentric as the suggested TRX-row substitute", () => {
   const onPick = jest.fn();
@@ -14,10 +14,10 @@ test("surfaces the lock-off eccentric as the suggested TRX-row substitute", () =
     />
   );
 
-  const label = screen.getByText("90° Lock-Off + Eccentric");
+  const button = screen.getByRole("button", { name: /90° Lock-Off \+ Eccentric/ });
   expect(screen.getByText("suggested substitute")).toBeInTheDocument();
 
-  fireEvent.click(label.closest("button"));
+  fireEvent.click(button);
   expect(onPick).toHaveBeenCalledWith(
     expect.objectContaining({ id: "lockoffEccentric" })
   );

@@ -674,7 +674,7 @@ export function useSessionRunner({
     if (phase !== "resting") return null;
     const hand = config.hand === "Both" ? activeHand : config.hand;
     return suggestWeight(refWeights[hand], 0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [phase, config.hand, refWeights, activeHand]);
 
   return {

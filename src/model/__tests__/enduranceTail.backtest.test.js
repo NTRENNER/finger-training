@@ -54,7 +54,7 @@ maybe("endurance ceiling lowers long-hold error, leaves mid-zone untouched", () 
       }
     }
   }
-  // eslint-disable-next-line no-console
+
   console.log("ENDURANCE CEILING BACKTEST\n" + JSON.stringify({
     longN: cLong.length,
     engine: { med: r3(med(eLong)), mean: r3(mean(eLong)) },

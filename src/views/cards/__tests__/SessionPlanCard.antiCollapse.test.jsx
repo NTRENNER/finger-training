@@ -4,7 +4,7 @@
 // knows a long-hold number is a sane floor, not a literal curve read.
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { SessionPlanCard } from "../SessionPlanCard.js";
+import { SessionPlanCard } from "../SessionPlanCard.jsx";
 
 // Force a floored, extrapolating prescription for every zone/hand.
 jest.mock("../../../model/prescription.js", () => ({

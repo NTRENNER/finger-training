@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Card } from '../../ui/components.js';
+import { Card } from '../../ui/components.jsx';
 import { C } from '../../ui/theme.js';
 import { today } from '../../util.js';
 import { toDisp } from '../../ui/format.js';

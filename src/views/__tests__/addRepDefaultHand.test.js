@@ -1,4 +1,4 @@
-import { addRepDefaultHand } from "../HistoryView.js";
+import { addRepDefaultHand } from "../HistoryView.jsx";
 
 describe("addRepDefaultHand", () => {
   test("STICKY wins over the session hand — the bug case", () => {

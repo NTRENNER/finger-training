@@ -26,7 +26,7 @@ import { isMixedDomainRep, mixedDomainMetadata, MIXED_DOMAIN_LABELS } from '../m
 import React, { useMemo, useRef, useState } from "react";
 import { SectionSelector } from "../ui/SectionSelector.jsx";
 import { C } from "../ui/theme.js";
-import { Card, Btn, PageFrame } from "../ui/components.js";
+import { Card, Btn, PageFrame } from "../ui/components.jsx";
 import {
   fmt1, fmtW, fmtTime, toDisp, fromDisp, fmtClock, bwOnDate,
 } from "../ui/format.js";
@@ -38,8 +38,8 @@ import {
   LS_BW_LOG_KEY, LS_HISTORY_DOMAIN_KEY, LS_WORKOUT_LOG_KEY,
   LS_BW_DIRTY_KEY, markDirty, clearDirty,
 } from "../lib/storage.js";
-import { WorkoutHistoryView } from "./WorkoutHistoryView.js";
-import { ClimbingHistoryList } from "./ClimbingHistoryList.js";
+import { WorkoutHistoryView } from "./WorkoutHistoryView.jsx";
+import { ClimbingHistoryList } from "./ClimbingHistoryList.jsx";
 import { CalendarHeatmap } from "./CalendarHeatmap.jsx";
 import { useLSValue } from "../hooks/useLSValue.js";
 import { CookednessSlider } from "./cards/CookednessSlider.jsx";
@@ -355,7 +355,7 @@ export function HistoryView({
   }, [bwLogSorted]);
   const handleDeleteBW = async (date) => {
     // Native confirm — same pattern the session-delete buttons use.
-    // eslint-disable-next-line no-alert
+
     if (!window.confirm(`Delete body weight entry for ${date}?\n\nThis removes it locally and from the cloud.`)) return;
     // NEW array through saveLS — never mutate bwLog in place, it's
     // the shared snapshot every subscriber renders from.
@@ -824,7 +824,7 @@ export function HistoryView({
                     <button onClick={() => {
                       const n = sess.reps?.length ?? 0;
                       const msg = `Delete this session?\n\n${n} rep${n === 1 ? "" : "s"} · ${sess.grip || ""} · ${sess.date}\n\nThis cannot be undone.`;
-                      // eslint-disable-next-line no-alert
+
                       if (window.confirm(msg)) {
                         // deleteSession in useRepHistory removes EVERY rep
                         // matching (session_id || date) — but cards are

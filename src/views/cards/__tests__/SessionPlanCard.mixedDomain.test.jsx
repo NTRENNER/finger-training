@@ -1,12 +1,12 @@
 import { betaEligibility } from '../../../model/betaEligibility.js';
-jest.mock('../../../model/betaEligibility.js', () => ({ ...jest.requireActual('../../../model/betaEligibility.js'), betaEligibility: jest.fn(() => ({ eligible: true })) }));
-beforeEach(() => betaEligibility.mockReturnValue({ eligible: true }));
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import { SessionPlanCard } from '../SessionPlanCard.js';
+import { SessionPlanCard } from '../SessionPlanCard.jsx';
 import { MIXED_DOMAIN_LABELS, MIXED_DOMAIN_ZONES } from '../../../model/mixedDomain.js';
 import { coachingRecommendationContinuous } from '../../../model/coaching.js';
 import { ZONE_REF_T } from '../../../model/zones.js';
+jest.mock('../../../model/betaEligibility.js', () => ({ ...jest.requireActual('../../../model/betaEligibility.js'), betaEligibility: jest.fn(() => ({ eligible: true })) }));
+beforeEach(() => betaEligibility.mockReturnValue({ eligible: true }));
 jest.mock('../../../model/prescription.js', () => ({ prescription: (history, h, g, t) => ({ value: 40 - t / 10 }) }));
 jest.mock('../../../model/coaching.js', () => ({ coachingRecommendationContinuous: jest.fn(() => ({
   zone: 'power', T: 45, loadKg: 20, loadByHand: { L: 20, R: 20 }, reasons: [],

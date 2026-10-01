@@ -29,7 +29,7 @@ import { MIXED_DOMAIN_LABELS, isMixedDomainRep, mixedDomainMetadata } from '../m
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { C } from "../ui/theme.js";
-import { Card, Btn, Label, PageFrame } from "../ui/components.js";
+import { Card, Btn, Label, PageFrame } from "../ui/components.jsx";
 import { fmtW, fmtTime, fromDisp } from "../ui/format.js";
 import { BigTimer, ForceGauge } from "./cards/LiveForceCard.jsx";
 
@@ -300,7 +300,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   // runner provides a new reference for each domain. We don't
   // fatigue-discount the displayed weight; the user holds the same load
   // each rep and we track how actual_time_s decays. See also AutoRepSessionView.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   const suggestions = useMemo(() => {
     const handList = config.hand === "Both" ? ["L", "R"] : [config.hand];
     return Object.fromEntries(
@@ -611,7 +611,7 @@ function playBeep(freq = 880, duration = 0.12, volume = 0.4) {
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + duration);
     osc.onended = () => ctx.close();
-  } catch (e) { /* audio not available */ }
+  } catch { /* audio not available */ }
 }
 
 export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustment = null, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs", tindeq = null }) {

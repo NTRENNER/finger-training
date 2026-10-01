@@ -21,7 +21,7 @@
 
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { C } from "../ui/theme.js";
-import { Card } from "../ui/components.js";
+import { Card } from "../ui/components.jsx";
 import { ymdLocal } from "../util.js";
 import { ascentMeta } from "../lib/climbing-grades.js";
 

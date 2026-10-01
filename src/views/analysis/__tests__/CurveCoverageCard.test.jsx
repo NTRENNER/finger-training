@@ -1,6 +1,6 @@
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
-import { CurveCoverageCard } from "../CurveCoverageCard.js";
+import { CurveCoverageCard } from "../CurveCoverageCard.jsx";
 
 const rep = (date, actual_time_s, over = {}) => ({
   grip: "Crusher",

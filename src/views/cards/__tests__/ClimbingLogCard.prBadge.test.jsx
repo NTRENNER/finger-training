@@ -1,6 +1,6 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ClimbingLogCard } from "../ClimbingLogCard.js";
+import { ClimbingLogCard } from "../ClimbingLogCard.jsx";
 
 test("celebrates a context PR and reports the badge upgrade", () => {
   const onLog = jest.fn();

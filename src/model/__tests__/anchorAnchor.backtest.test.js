@@ -52,7 +52,7 @@ maybe("zone-scoped anchor: median flat, tail lower (kept opt-in)", () => {
     zoneWorse: rs.filter(r => r.errB > r.errA + 1e-9).length,
   });
   const hitDiffer = rows.filter(r => r.hit && r.differs);
-  // eslint-disable-next-line no-console
+
   console.log("ANCHOR BACKTEST\n" + JSON.stringify({
     all: report(rows), hitTarget: report(rows.filter(r => r.hit)),
     anchorDiffers: report(rows.filter(r => r.differs)), hitTargetAndDiffers: report(hitDiffer),

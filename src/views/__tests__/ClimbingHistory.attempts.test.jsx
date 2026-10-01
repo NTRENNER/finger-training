@@ -1,6 +1,6 @@
 import React from "react";
 import {render,screen,fireEvent} from "@testing-library/react";
-import {ClimbingHistoryList} from "../ClimbingHistoryList.js";
+import {ClimbingHistoryList} from "../ClimbingHistoryList.jsx";
 import {saveLS,LS_CLIMBING_HISTORY_FILTERS_KEY} from "../../lib/storage.js";
 
 const climb={id:"climb",type:"climbing",date:"2026-09-16",discipline:"boulder",venue:"indoor",wall:"commercial",grade:"V4",ascent:"flash",attempts:10,rpe:7};

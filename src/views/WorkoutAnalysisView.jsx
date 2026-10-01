@@ -21,7 +21,7 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from "recharts";
 import { C } from "../ui/theme.js";
-import { Card, Sect } from "../ui/components.js";
+import { Card, Sect } from "../ui/components.jsx";
 import {
   sessionExerciseTopWeight, sessionExerciseVolume, isBodyweightAdditive,
   buildRepsVariantSeries,

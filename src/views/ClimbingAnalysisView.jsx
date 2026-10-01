@@ -28,7 +28,7 @@ import {
 } from "recharts";
 import { PyramidChart } from "./cards/PyramidChart.jsx";
 import { C } from "../ui/theme.js";
-import { Card, Sect } from "../ui/components.js";
+import { Card, Sect } from "../ui/components.jsx";
 import {
   CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS, VENUES,
   V_GRADES, YDS_GRADES,

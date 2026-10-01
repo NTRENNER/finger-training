@@ -1,17 +1,17 @@
 import { detectPlateaus } from '../../../model/plateau.js';
-jest.mock('../../../model/plateau.js', () => ({ detectPlateaus: jest.fn(() => ({ byGrip: [] })) }));
-beforeEach(() => detectPlateaus.mockReturnValue({ byGrip: [] }));
 import { betaEligibility } from '../../../model/betaEligibility.js';
-jest.mock('../../../model/betaEligibility.js', () => ({ ...jest.requireActual('../../../model/betaEligibility.js'), betaEligibility: jest.fn(() => ({ eligible: true })) }));
-beforeEach(() => betaEligibility.mockReturnValue({ eligible: true }));
 import React, { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { SessionPlanCard } from '../SessionPlanCard.js';
+import { SessionPlanCard } from '../SessionPlanCard.jsx';
 import { createVolumeExperiment } from '../../../model/volumeExperiment.js';
 import { computeDensityLadder } from '../../../model/densityLadder.js';
 import { coachingRecommendationContinuous } from '../../../model/coaching.js';
 import { today } from '../../../util.js';
 import { TRAINING_ZONE_KEYS, ZONE_REF_T } from '../../../model/zones.js';
+jest.mock('../../../model/plateau.js', () => ({ detectPlateaus: jest.fn(() => ({ byGrip: [] })) }));
+beforeEach(() => detectPlateaus.mockReturnValue({ byGrip: [] }));
+jest.mock('../../../model/betaEligibility.js', () => ({ ...jest.requireActual('../../../model/betaEligibility.js'), betaEligibility: jest.fn(() => ({ eligible: true })) }));
+beforeEach(() => betaEligibility.mockReturnValue({ eligible: true }));
 
 jest.mock('../../../model/prescription.js', () => ({ ...jest.requireActual('../../../model/prescription.js'),
   prescription: (history, h, g, t) => ({ value: 40 - t / 10 }) }));

@@ -28,8 +28,8 @@
 
 import React from "react";
 import { C } from "../../ui/theme.js";
-import { WTypeBadge } from "./WTypeBadge.js";
-import { VideoLink } from "./VideoLink.js";
+import { WTypeBadge } from "./WTypeBadge.jsx";
+import { VideoLink } from "./VideoLink.jsx";
 import {
   BAND_COLORS, BAND_COLOR_LOOKUP,
   normalizeBands, toggleBand,

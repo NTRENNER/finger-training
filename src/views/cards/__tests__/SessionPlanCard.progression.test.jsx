@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { SessionPlanCard } from '../SessionPlanCard.js';
+import { SessionPlanCard } from '../SessionPlanCard.jsx';
 import { computeDensityLadder } from '../../../model/densityLadder.js';
 import { ZONE_REF_T, TRAINING_ZONE_KEYS } from '../../../model/zones.js';
 jest.mock('../../../model/coaching.js', () => ({ coachingRecommendationContinuous: () => ({

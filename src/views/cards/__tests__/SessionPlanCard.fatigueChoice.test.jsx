@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 import {render, screen, fireEvent, within} from '@testing-library/react';
-import {SessionPlanCard} from '../SessionPlanCard.js';
+import {SessionPlanCard} from '../SessionPlanCard.jsx';
 jest.mock('../../../model/prescription.js',()=>({prescription:()=>({value:20})}));
 jest.mock('../../../model/coaching.js',()=>({coachingRecommendationContinuous:()=>({
   zone:'power',T:45,loadKg:20,loadByHand:{L:20,R:20},reasons:[],

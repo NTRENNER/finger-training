@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useId } from 'react';
 import { ChaosPredictionReview } from './ChaosPredictionReview.jsx';
 import { HistoricalPredictionReview } from './HistoricalPredictionReview.jsx';
-import { Card, Btn } from '../../ui/components.js';
+import { Card, Btn } from '../../ui/components.jsx';
 import { C } from '../../ui/theme.js';
 import { REVIEW_DAYS, summarizePredictions } from '../../model/predictionTracking.js';
 

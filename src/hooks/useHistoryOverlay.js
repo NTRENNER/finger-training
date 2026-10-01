@@ -186,7 +186,7 @@ export function useHistoryOverlay({
     return byGrip;
   // fitAmpsForPts closes over threeExpPriors; explicit dep here keeps
   // memo honest. eslint can't see through the closure.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [history, grips, gripBaselines, perHandGripBaselines, threeExpPriors]);
 
   // (Open-hand vs Crimp dominance / balanceHistory — the per-hand

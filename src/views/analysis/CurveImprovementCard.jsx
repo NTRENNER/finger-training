@@ -36,7 +36,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card } from "../../ui/components.jsx";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 import { bwOnDate, fmt1, toDisp } from "../../ui/format.js";
 import { ZONE6, ZONE_REF_T } from "../../model/zones.js";

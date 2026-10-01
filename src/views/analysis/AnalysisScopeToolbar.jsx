@@ -1,6 +1,6 @@
 import React from "react";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card } from "../../ui/components.jsx";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
 
 const pillStyle = (active, color) => ({

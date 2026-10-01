@@ -20,7 +20,7 @@
 
 import React, { useState } from "react";
 import { C } from "../../ui/theme.js";
-import { Card, Btn } from "../../ui/components.js";
+import { Card, Btn } from "../../ui/components.jsx";
 import { today } from "../../util.js";
 import {
   CLIMB_DISCIPLINES, ASCENT_STYLES, BOULDER_WALLS, VENUES,

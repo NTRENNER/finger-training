@@ -3,7 +3,7 @@
 
 import React, { useMemo } from "react";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card } from "../../ui/components.jsx";
 import { ZONE_KEYS, ZONE6 } from "../../model/zones.js";
 import { trainingExposure } from "../../model/trainingExposure.js";
 import { ymdLocal } from "../../util.js";

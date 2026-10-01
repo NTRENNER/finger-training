@@ -338,7 +338,7 @@ export function recoveryCoachSignals(history, {
     // grip; recovery taus are grip-level so the hand barely moves the gap.
     const hand = scopedHistory.some(r => r.grip === grip && r.hand === "R" && Number(r.actual_time_s) > 0) ? "R" : "L";
     let physModel = null;
-    try { physModel = buildPhysModel(scopedHistory, hand, grip); } catch (e) { physModel = null; }
+    try { physModel = buildPhysModel(scopedHistory, hand, grip); } catch { physModel = null; }
     const trend = withRollingMean(buildRecoveryReadinessTrend(scopedHistory, grip, { physModel }), window);
     const recPts = trend.filter(r => Number.isFinite(r.observedSmoothed));
     if (recPts.length < minPoints) continue;

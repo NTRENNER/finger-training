@@ -12,7 +12,7 @@
 import { HistorySlider } from '../../ui/HistorySlider.jsx';
 import React from "react";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card } from "../../ui/components.jsx";
 
 const LEVEL_COLOR = { green: C.green, yellow: C.yellow, red: C.red, unknown: C.muted };
 

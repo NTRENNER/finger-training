@@ -1,6 +1,6 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { PAGE_MAX_WIDTH, PageFrame } from "../components.js";
+import { PAGE_MAX_WIDTH, PageFrame } from "../components.jsx";
 
 test("provides the shared fluid page-width contract", () => {
   render(

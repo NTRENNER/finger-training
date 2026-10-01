@@ -6,7 +6,7 @@
 // trash to delete (a failed delete is surfaced, not silently ignored).
 import React, { useState } from "react";
 import { C } from "../ui/theme.js";
-import { Card } from "../ui/components.js";
+import { Card } from "../ui/components.jsx";
 import { useTendon } from "../hooks/useTendon.js";
 import { presetName, tendonAdherence } from "../model/tendon.js";
 import { today } from "../util.js";
@@ -19,7 +19,7 @@ export function TendonHistoryList() {
   const [busyId, setBusyId] = useState(null);
 
   const handleDelete = async (s) => {
-    // eslint-disable-next-line no-alert
+
     if (!window.confirm(`Delete tendon session from ${s.date}?`)) return;
     setDeleteError(false);
     setBusyId(s.id);

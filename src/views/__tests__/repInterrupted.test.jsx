@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, render, fireEvent, screen } from '@testing-library/react';
-import { AutoRepSessionView, ActiveSessionView, RestView, SessionSummaryView } from '../ActiveSessionViews.js';
+import { AutoRepSessionView, ActiveSessionView, RestView, SessionSummaryView } from '../ActiveSessionViews.jsx';
 jest.mock('../cards/RepCurveChart.jsx', () => ({ RepCurveChart: () => null }));
 jest.mock('../cards/RecoveryChart.jsx', () => ({ RecoveryChart: () => null }));
 jest.mock('../cards/LiveForceCard.jsx', () => ({ BigTimer: () => null, ForceGauge: () => null }));

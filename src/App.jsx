@@ -10,25 +10,25 @@ import React, {
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
-import { Btn, PageFrame } from "./ui/components.js";
+import { Btn, PageFrame } from "./ui/components.jsx";
 import { fmtW } from "./ui/format.js";
 
 // Top-level views extracted from this file. See src/views/.
-import { HistoryView } from "./views/HistoryView.js";
-import { SettingsView } from "./views/SettingsView.js";
+import { HistoryView } from "./views/HistoryView.jsx";
+import { SettingsView } from "./views/SettingsView.jsx";
 // AnalysisView is now imported by AnalysisContainer (see below) rather
 // than by App.js directly — the container hosts the Fingers / Lifts
 // pill toggle and renders one of two analysis views beneath it.
-import { SetupView } from "./views/SetupView.js";
-import { ClimbView } from "./views/ClimbView.js";
+import { SetupView } from "./views/SetupView.jsx";
+import { ClimbView } from "./views/ClimbView.jsx";
 import {
   ActiveSessionView, AutoRepSessionView,
   RestView, SwitchHandsView, BetweenSetRestView,
   SessionSummaryView, ManualOffsetPrompt,
-} from "./views/ActiveSessionViews.js";
-import { WorkoutTab } from "./views/WorkoutTab.js";
+} from "./views/ActiveSessionViews.jsx";
+import { WorkoutTab } from "./views/WorkoutTab.jsx";
 import { ALL_WORKOUTS_LOOKUP } from "./data/legacyWorkouts.js";
-import { AnalysisContainer } from "./views/AnalysisContainer.js";
+import { AnalysisContainer } from "./views/AnalysisContainer.jsx";
 
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {

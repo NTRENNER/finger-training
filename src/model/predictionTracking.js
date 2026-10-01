@@ -63,7 +63,7 @@ export function buildPredictionModels(history, grip, hand, target, options = {})
       current: { ...current, history_before: historyBefore },
       candidate: { ...candidate, history_before: historyBefore }, adaptive,
       recovery: { current: personal, population: { ...personal, tauR: { ...PHYS_MODEL_DEFAULT.tauR } } } });
-  } catch (_) {
+  } catch {
     // Evaluation must never prevent recording a workout.
     return { experiment: PREDICTION_EXPERIMENT, grip, hand, current: unavailable('model_unavailable'),
       candidate: unavailable('model_unavailable') };

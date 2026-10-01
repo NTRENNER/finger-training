@@ -1,8 +1,8 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BwPrompt, BodyWeightEntry } from "../BodyWeightEntry.jsx";
-import { SettingsView } from "../SettingsView.js";
-import { HistoryView } from "../HistoryView.js";
+import { SettingsView } from "../SettingsView.jsx";
+import { HistoryView } from "../HistoryView.jsx";
 import { bodyWeightReminderDue, latestBodyWeight } from "../../lib/bodyWeight.js";
 import { LS_BW_LOG_KEY, LS_BW_REMINDER_DISMISSED_KEY, LS_HISTORY_DOMAIN_KEY, loadLS, saveLS } from "../../lib/storage.js";
 import { fromDisp } from "../../ui/format.js";
@@ -37,9 +37,9 @@ test("Not now suppresses the reminder after remount that day but not the next da
   fireEvent.click(screen.getByRole("button", { name: "Not now" }));
   expect(loadLS(LS_BW_REMINDER_DISMISSED_KEY)).toBe("2026-09-16");
   view.unmount();
-  const next = render(<BwPrompt onSave={jest.fn()} />);
+  const { unmount } = render(<BwPrompt onSave={jest.fn()} />);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  next.unmount();
+  unmount();
   jest.setSystemTime(new Date("2026-09-17T12:00:00"));
   render(<BwPrompt onSave={jest.fn()} />);
   expect(screen.getByRole("dialog")).toBeInTheDocument();

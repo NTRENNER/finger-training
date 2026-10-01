@@ -22,7 +22,7 @@ export function buildAdaptiveShadow(history, hand, grip, target, referenceDate) 
       target_s: target, planned_recommendation_kg: applyAdaptiveBounds(raw, bounds, revision.floor),
       original_floor_kg: bounds.floorKg, revised_floor_kg: revision.floor,
       evidence: model.evidenceAt(target), floor_events: revision.events };
-  } catch (_) {
+  } catch {
     // A research calculation must never prevent someone recording a workout.
     return { status: 'unavailable', reason: 'adaptive_model_unavailable' };
   }

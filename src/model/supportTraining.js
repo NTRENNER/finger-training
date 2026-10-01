@@ -1031,7 +1031,7 @@ const ROTATION = ["A", "B", "C"];
  *   alternatives: object[]
  * }}
  */
-// eslint-disable-next-line no-unused-vars
+
 export function recommendNextWorkout(workoutHistory = [], opts = {}) {
   // refDate is no longer used internally (no day-budget math), but
   // we keep the option signature so older callers and tests don't

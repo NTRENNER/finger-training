@@ -46,7 +46,7 @@ import { TindeqBattery } from "./cards/TindeqBattery.jsx";
 //   done           — completion
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Card, Btn } from "../ui/components.js";
+import { Card, Btn } from "../ui/components.jsx";
 import { C } from "../ui/theme.js";
 import { fmtW } from "../ui/format.js";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
@@ -256,7 +256,7 @@ export function WarmupView({ visible = true, history, wLog, bodyWeightKg, tindeq
 
   useEffect(() => {
     if ((!visible || !tindeq?.connected) && phaseRef.current === "hang-active") changePhase("interrupted");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [visible, tindeq?.connected]);
 
   if (!protocol.ok) {

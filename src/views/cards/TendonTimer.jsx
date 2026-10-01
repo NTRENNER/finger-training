@@ -9,7 +9,7 @@
 // state if it didn't — so we never falsely claim a session was saved.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { C } from "../../ui/theme.js";
-import { Btn } from "../../ui/components.js";
+import { Btn } from "../../ui/components.jsx";
 import { buildIntervals, totalSets, totalWorkSeconds } from "../../model/tendon.js";
 
 function beep(freq = 880, dur = 0.12, vol = 0.35) {
@@ -22,7 +22,7 @@ function beep(freq = 880, dur = 0.12, vol = 0.35) {
     g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
     o.start(); o.stop(ctx.currentTime + dur);
     o.onended = () => ctx.close();
-  } catch (e) { /* no audio available */ }
+  } catch { /* no audio available */ }
 }
 
 // saveState: "saving" | "ok" | "error" (undefined = treat as saving, so

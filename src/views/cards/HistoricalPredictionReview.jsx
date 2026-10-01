@@ -1,6 +1,6 @@
 import { ContextualTrendResults } from './ContextualTrendResults.jsx';
 import React, { useEffect, useRef, useState } from 'react';
-import { Btn } from '../../ui/components.js';
+import { Btn } from '../../ui/components.jsx';
 import { C } from '../../ui/theme.js';
 
 const domainNames = { power: 'Power', power_strength: 'Power / Strength', strength: 'Strength',
@@ -52,7 +52,7 @@ export function HistoricalPredictionReview({ history, activities, unit }) {
         w.terminate(); worker.current = null; setBusy(false); setError('The review could not finish. Please try again.');
       };
       w.postMessage(history);
-    } catch (_) {
+    } catch {
       if (id === generation.current) { setBusy(false); setError('The review could not start. Please try again.'); }
     }
   };

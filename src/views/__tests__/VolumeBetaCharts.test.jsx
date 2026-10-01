@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { HistoryView } from '../HistoryView.js';
-import { AnalysisView } from '../AnalysisView.js';
+import { HistoryView } from '../HistoryView.jsx';
+import { AnalysisView } from '../AnalysisView.jsx';
 import { recoveryRows } from '../../testHelpers/recoveryRows.js';
 
 jest.mock('../cards/RepCurveChart.jsx', () => ({ RepCurveChart: ({ actual }) =>

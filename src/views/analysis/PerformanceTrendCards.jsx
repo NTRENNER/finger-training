@@ -1,6 +1,6 @@
 import React,{useMemo,useState} from 'react';
 import {ResponsiveContainer,ComposedChart,Line,Bar,XAxis,YAxis,Tooltip,CartesianGrid,ReferenceLine} from 'recharts';
-import {Card} from '../../ui/components.js';
+import {Card} from '../../ui/components.jsx';
 import {C} from '../../ui/theme.js';
 import {GRIP_COLORS} from '../../ui/grip-colors.js';
 import {DateRangeSlider,normalizeHistoryWindow} from '../../ui/DateRangeSlider.jsx';

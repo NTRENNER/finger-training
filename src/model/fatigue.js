@@ -81,7 +81,7 @@ export const availFrac = (F) => clamp(1 - F, 0.05, 1.0);
 // Pass an optional opts.sMaxIndex to share a precomputed index across
 // multiple lookups in the same render pass. Pass opts.doseK to override
 // the dose constant (e.g., from fitDoseK).
-// eslint-disable-next-line no-unused-vars
+
 export function getPhysModel(history, hand, grip, opts = {}) {
   const { sMaxIndex = null, doseK = null } = opts;
   // Lazy-import to avoid circular dep — buildSMaxIndex lives in

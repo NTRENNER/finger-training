@@ -15,6 +15,8 @@ if (!fs.existsSync(workerPath) || !fs.existsSync(manifestPath)) {
 const listeners = {};
 const stored = new Map();
 let shellUrls = [];
+let currentCache;
+const deletedCaches = [];
 const cache = {
   async addAll(urls) {
     shellUrls = [...urls];
@@ -37,9 +39,9 @@ const cache = {
   },
 };
 const caches = {
-  async open() { return cache; },
-  async keys() { return []; },
-  async delete() { return true; },
+  async open(name) { currentCache = name; return cache; },
+  async keys() { return [currentCache, "finger-training-shell-old-cra", "unrelated-cache"]; },
+  async delete(name) { deletedCaches.push(name); return true; },
   async match(request) { return cache.match(request); },
 };
 const self = {
@@ -89,23 +91,26 @@ async function run() {
     }
   }
 
-  let responsePromise;
-  listeners.fetch({
-    request: {
-      method: "GET",
-      mode: "navigate",
-      url: "https://finger-training.test/analysis",
-    },
-    respondWith(promise) { responsePromise = promise; },
-  });
-  const response = await responsePromise;
-  assert.strictEqual(
-    response.cachedUrl,
-    "/index.html",
-    "offline navigation did not fall back to the cached app shell"
-  );
+  // Both compute workers must be available without a network connection.
+  for (const name of ["predictionBuild.worker-", "historicalEvaluation.worker-"]) {
+    assert(shellUrls.some(url => url.includes(name)), `missing cached worker: ${name}`);
+  }
+  await waitForLifecycle("activate");
+  assert.deepStrictEqual(deletedCaches, ["finger-training-shell-old-cra"],
+    "activation must retire old app caches while preserving unrelated caches");
 
-  console.log("Verified cached app-shell install and offline navigation fallback");
+  for (const pathname of ["/analysis", "/research", "/research/"]) {
+    let responsePromise;
+    listeners.fetch({
+      request: { method: "GET", mode: "navigate", url: `https://finger-training.test${pathname}` },
+      respondWith(promise) { responsePromise = promise; },
+    });
+    const response = await responsePromise;
+    assert.strictEqual(response.cachedUrl, "/index.html",
+      `offline ${pathname} did not fall back to the cached app shell`);
+  }
+
+  console.log("Verified app shell, both compute workers, cache upgrades, and offline analysis/research routes");
 }
 
 run().catch((error) => {

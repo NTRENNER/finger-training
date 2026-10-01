@@ -19,7 +19,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import { C } from "../ui/theme.js";
-import { Card, Sect } from "../ui/components.js";
+import { Card, Sect } from "../ui/components.jsx";
 import { fmt1, toDisp } from "../ui/format.js";
 import { LS_BW_LOG_KEY } from "../lib/storage.js";
 import { useLSValue } from "../hooks/useLSValue.js";

@@ -74,8 +74,8 @@ test("hold-time evidence respects hand and selected date, excluding interruption
     { ...history[0], id: "future", date: "2026-08-01", actual_time_s: 100 },
   ]} />);
   choose("Time");
-  const summary = screen.getByText("Recorded pulls at this weight (1)");
-  expect(within(summary.parentElement).getByRole("list", { hidden: true })).toHaveTextContent("2026-06-01 · L · 50.0s");
+  fireEvent.click(screen.getByText("Recorded pulls at this weight (1)"));
+  expect(screen.getByRole("list")).toHaveTextContent("2026-06-01 · L · 50.0s");
 });
 
 test("hold-time weights are independent for each domain", () => {
