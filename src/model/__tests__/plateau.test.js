@@ -12,12 +12,24 @@ const micro = r => r.byGrip[0];
 
 test('a persistent bilateral plateau with consistent history offers an optional experiment', () => {
   const r = report(), g = micro(r);
-  expect(r.eligibility.eligible).toBe(true);
+  expect(g.eligibility.eligible).toBe(true);
   expect(g.recommendation).toBe('consider_volume_beta');
   expect(g.plateauZones).toEqual(['power']);
   expect(g.cells.filter(c => c.status === 'plateau')).toHaveLength(2);
   expect(g.cells.find(c => c.status === 'plateau').current).toMatchObject({ earlyS: 30, recentS: 30, changePct: 0 });
   expect(g.cells.find(c => c.status === 'plateau').current.earlyIds.length).toBeLessThanOrEqual(6);
+});
+test('a plateau in a new grip cannot use another grip to qualify for the beta invitation', () => {
+  const prime = steady().filter(r => r.date >= shift(70)).map(r => ({ ...r, grip: 'Prime', id: `prime-${r.id}` }));
+  // Historical Micro experience is sufficient on its own, before Prime began.
+  const other = steady().map(r => row(new Date(Date.parse(r.date) - 100 * DAY).toISOString().slice(0, 10), r.hand));
+  const result = report([...other, ...prime]);
+  expect(micro(result).eligibility.eligible).toBe(true);
+  const g = result.byGrip.find(g => g.grip === 'Prime');
+  expect(g.cells.filter(c => c.status === 'plateau')).toHaveLength(2);
+  expect(g.eligibility.hasThreeMonths).toBe(false);
+  expect(g.blockers).toContain('beta_ineligible');
+  expect(g.recommendation).toBe('continue_observing');
 });
 test.each([['improving', 1.2, 'progress_continues'], ['declining', 0.8, 'performance_declining']])('%s never prompts more volume', (status, factor, reason) => {
   const r = report(steady().map(r => ({ ...r, actual_time_s: r.date >= shift(28) ? 30 * factor : 30 })));

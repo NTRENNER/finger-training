@@ -4,7 +4,7 @@ import { Toggle } from '../../ui/Toggle.jsx';
 export function VolumeBetaEnrollment({ grips, selectedGrips, onGripsChange, onStart, onCancel, busy, error }) {
   return <section className="volume-beta-panel" aria-label="Set up Volume Beta">
     <h3>Try two sets for six weeks</h3>
-    <p>Choose the grips you want to include. Aim for three sessions per week for each grip: 18 sessions per grip over six weeks.</p>
+    <p>Choose the grips you want to include. Only grips with three months of consistent training are available. Aim for three sessions per week for each grip: 18 sessions per grip over six weeks.</p>
     <div role="group" aria-label="Grips in Volume Beta">
       {grips.map(grip => <Toggle key={grip} label={grip} checked={selectedGrips.includes(grip)} disabled={busy}
         onChange={checked => onGripsChange(checked ? [...selectedGrips, grip] : selectedGrips.filter(g => g !== grip))} />)}

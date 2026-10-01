@@ -236,7 +236,7 @@ export function useSessionRunner({
     let cfg = (override && override.grip) ? override : config;
     const startedDay = today();
     // Recheck at start: an old preview or restored config cannot bypass access.
-    if ((cfg.mixedDomainPlan || cfg.volumePlan) && !betaEligibility(history, startedDay).eligible) return false;
+    if ((cfg.mixedDomainPlan || cfg.volumePlan) && !betaEligibility(history, startedDay, cfg.grip).eligible) return false;
     const volumePlan = !cfg.mixedDomainPlan && !cfg.peakTest
       ? snapshotVolumePlan(cfg.volumePlan, startedDay) : null;
     cfg = { ...cfg, volumePlan, plannedSets: volumePlan ? 2 : cfg.peakTest ? 1

@@ -290,7 +290,9 @@ export function SessionPlanCard({
     return makeMixedDomainPlan(freshRows, opening, expectedHands);
   }, [curveRows, mixedOpening, expectedHands, recommendedZone, loadMultiplier, rec]);
   const readinessDate = today();
-  const betaAccess = useMemo(() => betaEligibility(history, readinessDate), [history, readinessDate]);
+  const betaAccess = useMemo(() => betaEligibility(history, readinessDate, grip), [history, readinessDate, grip]);
+  const eligibleVolumeGrips = useMemo(() => availableGrips.filter(g => betaEligibility(history, readinessDate, g).eligible),
+    [availableGrips, history, readinessDate]);
   const betasAvailable = volumeReady && betaAccess.eligible;
   const plateauReport = useMemo(() => betasAvailable ? detectPlateaus({ history, activities, asOf: readinessDate,
     experiments: volumeExperiment ? { [volumeExperiment.id]: volumeExperiment } : {} }) : null,
@@ -306,14 +308,17 @@ export function SessionPlanCard({
   const volumeEnabled = betasAvailable && volumeEligible && !mixedEnabled && !!volumePlan && volumeOverride !== false;
   const volumeFinished = volumeStatus === 'completed' || volumeStatus === 'ended';
   const volumeGripIncluded = !volumeExperiment || volumeExperiment.grips?.includes(grip);
+  const canResumeVolume = !volumeExperiment || (volumeExperiment.grips?.length > 0
+    && volumeExperiment.grips.every(g => eligibleVolumeGrips.includes(g)));
   const canSetupAnotherVolume = betasAvailable && !volumeBusy && volumeEligible && !!onStartVolumeExperiment;
   const canChangeVolume = betasAvailable && !volumeBusy && (!volumeFinished || volumeSetupOpen)
+    && (volumeStatus !== 'paused' || canResumeVolume)
     && (volumeFinished ? !!onStartVolumeExperiment : volumeGripIncluded
       && (volumeExperiment ? !!onVolumeExperimentStatusChange : !!onStartVolumeExperiment))
     && (volumeEligible || volumeEnabled);
 
   const changeVolume = async enabled => {
-    if (enabled && !betasAvailable) return;
+    if (enabled && (!betasAvailable || (volumeStatus === 'paused' && !canResumeVolume))) return;
     setPlateauAccepted(false);
     setVolumeError(null);
     if (!volumeExperiment || volumeFinished) {
@@ -335,11 +340,12 @@ export function SessionPlanCard({
   };
 
   const startVolume = async () => {
-    if (!volumeGrips.length || volumeBusy || !betasAvailable || !volumeEligible) return;
+    const selectedGrips = volumeGrips.filter(g => eligibleVolumeGrips.includes(g));
+    if (!selectedGrips.length || volumeBusy || !betasAvailable || !volumeEligible) return;
     setVolumeBusy(true);
     setVolumeError(null);
     try {
-      const saved = await onStartVolumeExperiment?.({ grips: volumeGrips, ...(plateauAccepted ? { trigger: 'plateau_prompt' } : {}) });
+      const saved = await onStartVolumeExperiment?.({ grips: selectedGrips, ...(plateauAccepted ? { trigger: 'plateau_prompt' } : {}) });
       if (saved === false) throw new Error('Volume plan was not saved.');
       setMixedRequested(false);
       setVolumeOverride(null);
@@ -622,7 +628,7 @@ export function SessionPlanCard({
       <div className="session-beta-options">
         {!betasAvailable && <p style={{ color: C.muted }}>
           {!volumeReady ? 'Your training history and plan are still loading.' : <>
-            {BETA_ELIGIBILITY_DESCRIPTION} Best 13-week period: {betaAccess.qualifyingWeeks} of 10 qualifying weeks recorded.
+            {BETA_ELIGIBILITY_DESCRIPTION} {grip}: {betaAccess.qualifyingWeeks} of 10 qualifying weeks in your best 13-week period.
             {!betaAccess.hasThreeMonths && ' Three months of training history is not established yet.'}
           </>}
         </p>}
@@ -647,7 +653,7 @@ export function SessionPlanCard({
           <Btn small color={C.border} onClick={() => setPlateauDismissed(true)}>Not now</Btn>{' '}
           <a href="/research" style={{ color: C.blue }}>See the evidence</a>
         </section>}
-        {betasAvailable && volumeSetupOpen && <VolumeBetaEnrollment grips={availableGrips} selectedGrips={volumeGrips}
+        {betasAvailable && volumeSetupOpen && <VolumeBetaEnrollment grips={eligibleVolumeGrips} selectedGrips={volumeGrips.filter(g => eligibleVolumeGrips.includes(g))}
           onGripsChange={setVolumeGrips} onStart={startVolume} onCancel={() => { setVolumeSetupOpen(false); setVolumeError(null); }}
           busy={volumeBusy} error={volumeError} />}
         <VolumeBetaSummary experiment={volumeExperiment} progress={volumeReport} status={volumeStatus}

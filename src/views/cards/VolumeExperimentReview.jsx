@@ -45,7 +45,8 @@ function ExperimentReport({ experiment, history, activities, unit, onSave, ready
   const [reviewWeek, setReviewWeek] = useState(Math.max(1, progress.week));
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const access = useMemo(() => betaEligibility(history, date), [history, date]);
+  const access = useMemo(() => ({ eligible: !!experiment.grips?.length
+    && experiment.grips.every(grip => betaEligibility(history, date, grip).eligible) }), [history, date, experiment.grips]);
   const finished = ['completed', 'ended'].includes(progress.status);
   const taggedRows = useMemo(() => history.filter(r => r.force_recording?.volume_beta?.experiment_id === experiment.id), [history, experiment.id]);
   const rests = taggedRows.filter(r => r.set_num === 2 && r.rep_num === 1)

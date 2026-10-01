@@ -98,8 +98,8 @@ export function detectPlateaus({ history = [], activities = [], asOf, experiment
     if (fatigue(r) >= 6) { excluded.highFatigue++; return false; }
     return p.timeS <= 600 && TRAINING_ZONE_KEYS.includes(zoneOf(p.targetDurationS || p.timeS));
   });
-  const eligibility = betaEligibility(rows, asOf);
   const byGrip = GRIPS.map(grip => {
+    const eligibility = betaEligibility(rows, asOf, grip);
     const frequency = attendance(rows, grip, asOf), contextInfo = confounders(rows, activities, grip, asOf);
     const cells = HANDS.flatMap(hand => TRAINING_ZONE_KEYS.map(zone => {
       const own = points.filter(p => scope(p) === `${grip}|${hand}|${zone}`);
@@ -122,15 +122,15 @@ export function detectPlateaus({ history = [], activities = [], asOf, experiment
     if (cells.some(c => c.status === 'improving')) blockers.push('progress_continues');
     if (cells.some(c => c.status === 'declining')) blockers.push('performance_declining');
     if (!bothHandZones.length) blockers.push('no_persistent_bilateral_plateau');
-    return { grip, frequency, context: contextInfo, cells, plateauZones: bothHandZones, blockers,
+    return { grip, eligibility, frequency, context: contextInfo, cells, plateauZones: bothHandZones, blockers,
       recommendation: blockers.length ? 'continue_observing' : 'consider_volume_beta' };
   });
-  return { version: 1, asOf, policy: { ...PLATEAU_POLICY }, eligibility, excluded, byGrip,
+  return { version: 1, asOf, policy: { ...PLATEAU_POLICY }, excluded, byGrip,
     experimental: true };
 }
 
 export const PLATEAU_REASON = {
-  beta_ineligible: 'Three months of consistent training is not established.',
+  beta_ineligible: 'Three months of consistent training is not established for this grip.',
   inconsistent_attendance: 'Training frequency has changed or has gaps. Re-establish a steady schedule first.',
   existing_experiment: 'Finish or end the existing experiment before starting another.',
   progress_continues: 'Comparable performance is still improving elsewhere in this grip. Keep the current dose.',
@@ -145,7 +145,8 @@ export const PLATEAU_REASON = {
 // baseline remains separate; neither changes when future history accumulates.
 export function plateauEnrollmentEvidence(report, grips, source = 'voluntary') {
   return { version: 1, asOf: report.asOf, source: source === 'plateau_prompt' ? source : 'voluntary',
-    policy: { ...report.policy }, eligible: report.eligibility.eligible,
+    policy: { ...report.policy }, eligible: grips.length > 0
+      && grips.every(grip => report.byGrip.some(g => g.grip === grip && g.eligibility?.eligible)),
     byGrip: report.byGrip.filter(g => grips.includes(g.grip)).map(g => ({
       grip: g.grip, recommendation: g.recommendation, blockers: [...g.blockers], frequency: { ...g.frequency },
       context: { ...g.context }, plateauZones: [...g.plateauZones],

@@ -337,10 +337,10 @@ export default function App() {
       || (b.createdAt || b.startDate).localeCompare(a.createdAt || a.startDate)
       || b.id.localeCompare(a.id))[0] || null;
   const startVolumeExperiment = ({ grips, trigger }) => {
-    if (!volumeReady || !betaEligibility(history, today()).eligible || Object.values(volumeExperiments || {}).some(plan =>
+    if (!volumeReady || Object.values(volumeExperiments || {}).some(plan =>
       ['active', 'paused'].includes(volumeExperimentStatus(plan, today())))) return false;
     const selected = [...new Set(grips || [])].filter(grip => GRIP_PRESETS.includes(grip));
-    if (!selected.length) return false;
+    if (!selected.length || selected.some(grip => !betaEligibility(history, today(), grip).eligible)) return false;
     const plan = createVolumeExperiment({ history, grips: selected, startDate: today(),
       id: uuid(), createdAt: new Date().toISOString(),
       entryEvidence: plateauEnrollmentEvidence(detectPlateaus({ history, activities, asOf: today(),
@@ -348,8 +348,9 @@ export default function App() {
     return saveVolumeExperiment(plan);
   };
   const changeVolumeStatus = status => {
-    if (status === 'active' && !betaEligibility(history, today()).eligible) return false;
     if (!volumeReady || !volumeExperiment || !['active', 'paused', 'ended'].includes(status)) return false;
+    if (status === 'active' && (!volumeExperiment.grips?.length
+      || volumeExperiment.grips.some(grip => !betaEligibility(history, today(), grip).eligible))) return false;
     if (['completed', 'ended'].includes(volumeExperimentStatus(volumeExperiment, today()))) return false;
     return saveVolumeExperiment({ ...volumeExperiment, status, updatedAt: new Date().toISOString() }, { statusOnly: true });
   };

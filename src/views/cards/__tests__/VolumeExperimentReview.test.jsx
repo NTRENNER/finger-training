@@ -49,3 +49,16 @@ test('research cannot resume an ineligible plan but can retain reviews and end i
   expect(screen.getByRole('button', { name: 'End plan' })).toBeEnabled();
   expect(screen.getByText(/Betas unlock after three calendar months/)).toBeInTheDocument();
 });
+test('research checks every enrolled grip before resuming a mixed-eligibility legacy plan', () => {
+  const history = Array.from({ length: 15 }, (_, w) => [1, 4].map(d => ({
+    date: new Date(Date.parse('2026-10-01') - (w * 7 + d) * 86400000).toISOString().slice(0, 10),
+    grip: 'Micro', hand: 'L', target_duration: 30, actual_time_s: 30, avg_force_kg: 20, peak_force_kg: 22,
+  }))).flat();
+  const experiment = { ...plan(), status: 'paused' }, save = jest.fn();
+  const view = render(<VolumeExperimentReview experiments={{ trial: experiment }} history={history} onSave={save} date="2026-10-10" />);
+  expect(screen.getByRole('button', { name: 'Resume plan' })).toBeEnabled();
+  const mixed = { ...createVolumeExperiment({ grips: ['Micro', 'Prime'], startDate: '2026-10-01', id: 'trial' }), status: 'paused' };
+  view.rerender(<VolumeExperimentReview experiments={{ trial: mixed }} history={history} onSave={save} date="2026-10-10" />);
+  expect(screen.getByRole('button', { name: 'Resume plan' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'End plan' })).toBeEnabled();
+});

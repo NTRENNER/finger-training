@@ -275,6 +275,25 @@ test('historically consistent training keeps both toggles visible after a break 
   expect(chaosSwitch()).not.toBeChecked();
   expect(screen.queryByRole('button', { name: 'Review Volume Beta' })).not.toBeInTheDocument();
 });
+test('only eligible grips appear in enrollment and switching to Prime hides beta controls but keeps sets', () => {
+  betaEligibility.mockImplementation(jest.requireActual('../../../model/betaEligibility.js').betaEligibility);
+  const history = Array.from({ length: 15 }, (_, w) => [1, 4].map(d => ({
+    date: new Date(Date.parse('2026-10-01') - (w * 7 + d) * 86400000).toISOString().slice(0, 10),
+    grip: 'Micro', hand: 'L', target_duration: 30, actual_time_s: 30, avg_force_kg: 20, peak_force_kg: 22,
+  }))).flat();
+  const apply = jest.fn();
+  const view = render(<SessionPlanCard {...props} history={history} onApplyPlan={apply} onStartVolumeExperiment={jest.fn()} />);
+  fireEvent.click(volumeSwitch());
+  expect(screen.getByRole('switch', { name: 'Micro' })).toBeInTheDocument();
+  expect(screen.queryByRole('switch', { name: 'Crusher' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('switch', { name: 'Prime' })).not.toBeInTheDocument();
+  view.rerender(<SessionPlanCard {...props} grip="Prime" history={history} onApplyPlan={apply} />);
+  expect(screen.queryByRole('switch', { name: 'Chaos Machine (Beta)' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('switch', { name: 'Volume (Beta)' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Set up Volume Beta' })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Sets per hand'), { target: { value: '3' } });
+  expect(lastPlan(apply)).toMatchObject({ plannedSets: 3, mixedDomainPlan: null, volumePlan: null });
+});
 test('both betas wait for account history loading to finish', () => {
   render(<SessionPlanCard {...props} volumeReady={false} />);
   expect(screen.queryByRole('switch', { name: 'Volume (Beta)' })).not.toBeInTheDocument();

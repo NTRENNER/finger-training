@@ -4,7 +4,7 @@ const DAY_MS = 86400000;
 export const BETA_CONSISTENCY_WEEKS = 13;
 export const BETA_REQUIRED_WEEKS = 10;
 export const BETA_DAYS_PER_WEEK = 2;
-export const BETA_ELIGIBILITY_DESCRIPTION = 'Betas unlock after three calendar months of recorded finger training, with at least two training days in 10 weeks within a 13-week period in your history. Once earned, access stays available through lighter training periods and breaks. Extra sets and multiple grips on one day count as one day.';
+export const BETA_ELIGIBILITY_DESCRIPTION = 'Betas unlock after three calendar months of recorded training for this grip, with at least two training days in 10 weeks within a 13-week period. Each grip qualifies separately. Once earned, access stays available through lighter training periods and breaks. Extra hands and sets on one day count as one day.';
 const positive = value => Number.isFinite(Number(value)) && Number(value) > 0;
 const dateMs = value => {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -21,16 +21,17 @@ const threeMonthsBefore = ms => {
 };
 
 // Attendance is separate from model-quality evidence: sensor interruptions
-// don't erase training. Count dates once across hands, grips, sets and sessions.
+// don't erase training. Count dates once across hands, sets and sessions for
+// the selected grip only. A missing or unknown grip must never grant access.
 // Experience is earned, not a rolling readiness score. Search historical
 // 13-week periods as well as the current one; breaks cannot erase experience.
 // Recompute from history so account changes/deleted evidence still take effect.
-export function betaEligibility(history = [], asOf) {
+export function betaEligibility(history = [], asOf, grip) {
   const now = dateMs(asOf);
   const days = new Set();
-  if (now != null) for (const r of Array.isArray(history) ? history : []) {
+  if (now != null && ['Micro', 'Crusher', 'Prime'].includes(grip)) for (const r of Array.isArray(history) ? history : []) {
     const date = dateMs(r?.date);
-    if (date == null || date >= now || !['Micro', 'Crusher', 'Prime'].includes(r?.grip)
+    if (date == null || date >= now || r?.grip !== grip
       || !['L', 'R'].includes(r.hand) || isSeedArtifactRep(r)
       || r.force_recording?.session_protocol?.id === 'peak_test'
       || !(Number(r.target_duration) > 5)
