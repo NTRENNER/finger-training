@@ -53,7 +53,7 @@ test.each(RECOVERY_ROW_SHAPES)('new recording with %s fields is classified expli
   const rep = record(models, recoveryRows(shape)[0]);
   const result = summarizePredictions([rep]);
   expect(result.days).toBe(shape === 'measured' ? 1 : 0);
-  if (shape !== 'measured') expect(result.exclusions.unmeasured_or_interrupted).toBe(1);
+  expect(result.exclusions.unmeasured_or_interrupted || 0).toBe(shape === 'measured' ? 0 : 1);
 });
 
 test('sustained overshoot scores conditional force but not the planned-load scenario', () => {

@@ -54,7 +54,7 @@ describe("StretchSessionBuilder", () => {
     fireEvent.click(swapButtons[0]);
     const demo = screen.getByRole("link", { name: "View Seated Pancake Hinge demo" });
     expect(demo).toHaveAttribute("target", "_blank");
-    expect(demo.closest("button")).toBeNull();
+    for (const button of screen.getAllByRole("button")) expect(button).not.toContainElement(demo);
   });
 
   test("logs the selected plan with the full time allocation", () => {

@@ -109,15 +109,11 @@ test.each(operations)("%s does not acknowledge or return data after an in-flight
   };
   expect(await run()).toBe(failure);
   expect(queries).toHaveLength(1); // In particular, no delete after a stale tombstone response.
-  for (const query of queries) {
-    if (query.action === "upsert") {
-      for (const row of Array.isArray(query.rows) ? query.rows : [query.rows]) {
-        expect(row.user_id).toBe("account-a");
-      }
-    } else {
-      expect(query.filters).toContainEqual(["user_id", "account-a"]);
-    }
-  }
+  const owners = queries.flatMap(query => query.action === "upsert"
+    ? (Array.isArray(query.rows) ? query.rows : [query.rows]).map(row => row.user_id)
+    : query.filters.filter(([key]) => key === "user_id").map(([, value]) => value));
+  expect(owners).not.toHaveLength(0);
+  expect(owners.every(owner => owner === "account-a")).toBe(true);
 });
 
 test("a failed tombstone cannot proceed to deleting a weight", async () => {

@@ -292,4 +292,6 @@ export const climbingSkills = {
   focusRoutine: s("focusRoutine", "Focus / Pre-Climb Routine", "mental", "Consistent concentration", "A repeatable sequence (breath, cue word, quick visualization, tie-in ritual) before every burn."),
 };
 
-export default { STRENGTH_AXES, SKILL_DIMENSIONS, EQUIPMENT, strengthLibrary, climbingSkills };
+const climbingLibrarySeed = { STRENGTH_AXES, SKILL_DIMENSIONS, EQUIPMENT, strengthLibrary, climbingSkills };
+
+export default climbingLibrarySeed;

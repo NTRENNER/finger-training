@@ -1,3 +1,4 @@
+/* global globalThis */
 import { act, renderHook, waitFor } from "@testing-library/react";
 
 import { useUserSettings } from "../useUserSettings.js";
@@ -117,14 +118,14 @@ test('a failed secondary cache write recovers from the durable journal on offlin
     if (key === LS_VOLUME_EXPERIMENTS_KEY) throw new DOMException('Quota', 'QuotaExceededError');
     return originalSetItem.call(this, key, value);
   });
-  const first = renderHook(() => useUserSettings({ user: null }));
-  act(() => expect(first.result.current.saveVolumeExperiment(active)).toBe(true));
-  act(() => expect(first.result.current.saveVolumeExperiment({ ...active, status: 'paused' }, { statusOnly: true })).toBe(true));
+  const view = renderHook(() => useUserSettings({ user: null }));
+  act(() => expect(view.result.current.saveVolumeExperiment(active)).toBe(true));
+  act(() => expect(view.result.current.saveVolumeExperiment({ ...active, status: 'paused' }, { statusOnly: true })).toBe(true));
   expect(loadLS(LS_VOLUME_EXPERIMENTS_KEY)).toBeNull();
   expect(loadLS(LS_USER_SETTINGS_PATCH_KEY)).toHaveProperty('volume_beta_plan_current');
-  first.unmount();
-  const restored = renderHook(() => useUserSettings({ user: null }));
-  expect(restored.result.current.volumeExperiments.current).toMatchObject({ status: 'paused', baseline: active.baseline });
+  view.unmount();
+  const utils = renderHook(() => useUserSettings({ user: null }));
+  expect(utils.result.current.volumeExperiments.current).toMatchObject({ status: 'paused', baseline: active.baseline });
   write.mockRestore(); error.mockRestore();
 });
 
@@ -258,7 +259,8 @@ test("unavailable deletion history defers reconciliation instead of resurrecting
   saveLS(LS_BW_LOG_KEY, [{ date: "2026-01-01", kg: 68.2 }]);
   fetchBWTombstoneDates.mockResolvedValueOnce(null);
   const user = { id: "user-1" };
-  await act(async () => { renderHook(() => useUserSettings({ user })); });
+  renderHook(() => useUserSettings({ user }));
+  await waitFor(() => expect(fetchBWLog).toHaveBeenCalled());
   expect(fetchBWLog).toHaveBeenCalled();
   expect(pushBW).not.toHaveBeenCalled();
   expect(loadLS(LS_BW_LOG_KEY)).toEqual([{ date: "2026-01-01", kg: 68.2 }]);

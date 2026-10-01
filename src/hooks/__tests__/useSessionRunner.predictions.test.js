@@ -31,7 +31,6 @@ test.each([4, 5, 6])('frozen forecasts persist without changing a %i-rep session
   const cfg = { grip: 'Crusher', hand: 'L', targetTime: 30,
     repsPerSet: count, restTime: 20, ladderLoadByHand: { L: 30 }, cooked: null };
   await act(async () => result.current.setConfig(cfg));
-  await act(async () => {});
   act(() => result.current.startSession());
   const started = new Date().toISOString();
   // Change all fitting inputs before the outcome callback. The frozen model

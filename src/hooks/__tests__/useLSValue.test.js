@@ -47,6 +47,7 @@ describe("useLSValue", () => {
       renders += 1;
       return useLSValue("ft_v3");
     });
+    // eslint-disable-next-line testing-library/render-result-naming-convention -- numeric render count, not a render result
     const mountRenders = renders;
     const snap = result.current;
 
@@ -63,6 +64,7 @@ describe("useLSValue", () => {
       renders += 1;
       return useLSValue("ft_v3");
     });
+    // eslint-disable-next-line testing-library/render-result-naming-convention -- numeric render count, not a render result
     const before = renders;
     unmount();
     act(() => { saveLS("ft_v3", [1]); });
@@ -90,12 +92,12 @@ describe("useLSValue", () => {
 
   test("two components subscribed to one key share the same snapshot reference", () => {
     saveLS("ft_v3", [{ id: 1 }]);
-    const h1 = renderHook(() => useLSValue("ft_v3"));
-    const h2 = renderHook(() => useLSValue("ft_v3"));
-    expect(h1.result.current).toBe(h2.result.current);
+    const view = renderHook(() => useLSValue("ft_v3"));
+    const utils = renderHook(() => useLSValue("ft_v3"));
+    expect(view.result.current).toBe(utils.result.current);
 
     act(() => { saveLS("ft_v3", [{ id: 1 }, { id: 2 }]); });
-    expect(h1.result.current).toBe(h2.result.current);
-    expect(h1.result.current).toHaveLength(2);
+    expect(view.result.current).toBe(utils.result.current);
+    expect(view.result.current).toHaveLength(2);
   });
 });

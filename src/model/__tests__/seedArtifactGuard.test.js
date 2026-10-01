@@ -1,6 +1,13 @@
 import { isSeedArtifactRep } from "../load.js";
 import { demonstratedCapacityKg } from "../prescription.js";
 
+// July 2026 extension: the guard now also covers the shared fit basis
+// and every peak reader — a seeded twin mirrors its inflated load into
+// peak_force_kg too, so peak-derived surfaces need the same exclusion.
+import { freshFitReps } from "../load.js";
+import { recentBestPeakKg } from "../prescription.js";
+import { buildPeakForceTrend, maxTestStaleness } from "../peakForce.js";
+
 describe("isSeedArtifactRep", () => {
   test("flags avg==peak seeded rows", () => {
     expect(isSeedArtifactRep({ avg_force_kg: 14.3, peak_force_kg: 14.3 })).toBe(true);
@@ -25,13 +32,6 @@ describe("floor excludes seeded twins", () => {
     expect(floor).toBeCloseTo(6.5, 3);
   });
 });
-
-// July 2026 extension: the guard now also covers the shared fit basis
-// and every peak reader — a seeded twin mirrors its inflated load into
-// peak_force_kg too, so peak-derived surfaces need the same exclusion.
-import { freshFitReps } from "../load.js";
-import { recentBestPeakKg } from "../prescription.js";
-import { buildPeakForceTrend, maxTestStaleness } from "../peakForce.js";
 
 const real    = { hand: "L", grip: "Micro", rep_num: 1, session_id: "real", date: "2026-05-20",
                   target_duration: 10, actual_time_s: 9, avg_force_kg: 6.5, peak_force_kg: 7.9 };

@@ -13,7 +13,7 @@
 import fs from "fs";
 import { prescription, buildFreshLoadMap } from "../prescription.js";
 import { buildThreeExpPriors } from "../threeExp.js";
-import { enduranceCeilingKg, CEIL_MIN_T } from "../enduranceTail.js";
+import { CEIL_MIN_T } from "../enduranceTail.js";
 
 const DATA = process.env.ENDURANCE_BACKTEST_JSON;
 const maybe = (DATA && fs.existsSync(DATA)) ? test : test.skip;

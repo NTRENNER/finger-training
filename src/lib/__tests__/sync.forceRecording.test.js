@@ -1,13 +1,13 @@
 import { peakMeasurementRecord, isValidPeakMeasurement } from '../../model/peakTest.js';
 import { startingHandForDay } from '../../model/handOrder.js';
-const mockOrder = jest.fn();
-jest.mock('../supabase.js', () => ({supabase: {from: () => ({select: () => ({order: (...args) => mockOrder(...args)})})}}));
 import { repPayload, fetchReps } from '../sync.js';
 import { freshFitReps } from '../../model/load.js';
 import { recoveryEvidence } from '../../model/recoveryEvidence.js';
 import { buildPredictionModels, preparePrediction, completePrediction, summarizePredictions } from '../../model/predictionTracking.js';
 import { buildThreeExpPriors } from '../../model/threeExp.js';
 import { recoveryRows } from '../../testHelpers/recoveryRows.js';
+const mockOrder = jest.fn();
+jest.mock('../supabase.js', () => ({supabase: {from: () => ({select: () => ({order: (...args) => mockOrder(...args)})})}}));
 
 test('regular forecast and scores survive the actual rep cloud mapping', async () => {
   const history = Array.from({ length: 6 }, (_, i) => recoveryRows('legacy', {

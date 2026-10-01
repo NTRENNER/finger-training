@@ -4,7 +4,7 @@
 // rep silently fell back to the prescribed weight. The override is now
 // persisted in a module-scoped store keyed by sessionId.
 import React from "react";
-import { render, fireEvent, screen, cleanup, act } from "@testing-library/react";
+import { render, fireEvent, screen, cleanup, act, waitFor } from "@testing-library/react";
 import { ActiveSessionView } from "../ActiveSessionViews.js";
 
 // Keep the render light: the live charts are irrelevant to this test.
@@ -95,12 +95,12 @@ test('a sensor-started rep with an empty buffer retains elapsed activity after d
   tindeq.stopMeasuring=jest.fn(async()=>({actualTime:0,avgForce:null,peakForce:null,
     failureValid:false,endReason:'equipment_interruption',forceRecording:{observed_time_s:0}}));
   const onRepDone=jest.fn(); const session=baseSession('dropout');
-  let view;
-  await act(async()=>{view=render(<ActiveSessionView {...props(session)} tindeq={tindeq} autoStart onRepDone={onRepDone}/>);});
+  const view=render(<ActiveSessionView {...props(session)} tindeq={tindeq} autoStart onRepDone={onRepDone}/>);
   act(()=>jest.advanceTimersByTime(45000));
   tindeq.connected=false;
   view.rerender(<ActiveSessionView {...props(session)} tindeq={tindeq} autoStart onRepDone={onRepDone}/>);
-  await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Done — muscular failure'})));
+  fireEvent.click(screen.getByRole('button',{name:'Done — muscular failure'}));
+  await waitFor(() => expect(onRepDone).toHaveBeenCalledTimes(1));
   expect(tindeq.stopMeasuring).toHaveBeenCalledTimes(1);
   expect(onRepDone).toHaveBeenCalledTimes(1);
   expect(onRepDone.mock.calls[0][0]).toMatchObject({actualTime:45,failureValid:false,endReason:'equipment_interruption',

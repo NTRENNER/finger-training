@@ -17,8 +17,8 @@ test.each([4, 5, 6])('right-first rotation preserves all %i reps for each hand a
       act(() => result.current.handleRepDone({ actualTime: 30, avgForce: 10 }));
       if (i < count - 1) act(() => result.current.handleRestDone());
     }
+    expect(result.current.phase).toBe(hand === 'R' ? 'switch_hands' : 'done');
     if (hand === 'R') {
-      expect(result.current.phase).toBe('switch_hands');
       act(() => result.current.setPhase('rep_ready'));
     }
   }

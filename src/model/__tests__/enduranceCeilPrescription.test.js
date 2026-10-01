@@ -25,7 +25,6 @@ const shorts = [
   mk({ actual_time_s: 45, avg_force_kg: 17, date: "2026-06-10", session_id: "s4" }),
 ];
 const history = [...longs, ...shorts];
-const priors = buildThreeExpPriors(history);
 const REF = "2026-06-12";
 const at = (T, h = history) => prescription(h, "R", "Micro", T, { threeExpPriors: buildThreeExpPriors(h), referenceDate: REF });
 

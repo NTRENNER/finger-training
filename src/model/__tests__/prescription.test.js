@@ -296,11 +296,9 @@ describe("fitDoseK", () => {
       }));
     const history = [...buildSet("s1", 1), ...buildSet("s2", 1)];
     const k = fitDoseK(history);
-    if (k != null) {
-      // Search range is [0.0005, 0.030]
-      expect(k).toBeGreaterThanOrEqual(0.0005);
-      expect(k).toBeLessThanOrEqual(0.030);
-    }
+    expect(k).not.toBeNull();
+    expect(k).toBeGreaterThanOrEqual(0.0005);
+    expect(k).toBeLessThanOrEqual(0.030);
   });
 });
 
@@ -541,7 +539,7 @@ describe("prescription (unified)", () => {
     // estimateRefWeight has no lookback gate, so the historical path
     // can still fire — assert the source is historical, not anchored.
     const out = prescription(history, "L", "Crusher", 45);
-    if (out) expect(["historical", null]).toContain(out.source);
+    expect(["historical", null]).toContain(out?.source ?? null);
   });
 
   test("higher T → lower potential (curve decays)", () => {
@@ -776,9 +774,8 @@ describe("peak-force ceiling", () => {
     expect(out).not.toBeNull();
     expect(out.peakCapKg).toBeCloseTo(Math.round(bestPeak * PEAK_CAP_FRACTION * 10) / 10, 1);
     expect(out.value).toBeLessThanOrEqual(out.peakCapKg);
-    if (out.peakCapped) {
-      expect(out.potential * out.scale).toBeGreaterThan(out.value);
-    }
+    expect(out.peakCapped).toBe(true);
+    expect(out.potential * out.scale).toBeGreaterThan(out.value);
   });
 
   test("cap does not bind at long durations (curve sits far below peak)", () => {

@@ -1,3 +1,5 @@
+import { guardUserSwitch } from "../useAuth.js";
+
 const mockReadRawLastUser = jest.fn();
 const mockSetLastUserRaw = jest.fn();
 const mockAdoptAnonDataForUser = jest.fn();
@@ -9,8 +11,6 @@ jest.mock("../../lib/storage.js", () => ({
 }));
 
 jest.mock("../../lib/supabase.js", () => ({ supabase: { auth: {} } }));
-
-import { guardUserSwitch } from "../useAuth.js";
 
 beforeEach(() => {
   mockReadRawLastUser.mockReset();

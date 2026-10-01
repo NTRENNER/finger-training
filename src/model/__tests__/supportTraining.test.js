@@ -440,9 +440,7 @@ describe("workouts (templates)", () => {
         expect(modes).toHaveLength(1);
         // logWeight and logBand also require a reps prescription
         // string for the input placeholders. circlesOnly skips reps.
-        if (ex.logWeight || ex.logBand) {
-          expect(typeof ex.reps).toBe("string");
-        }
+        expect(ex.circlesOnly || typeof ex.reps === "string").toBe(true);
       }
     }
   });

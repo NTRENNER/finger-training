@@ -3,7 +3,6 @@
 // margin-based (in-range) perfusion loads.
 
 import { generateWarmupProtocol, BILATERAL_FACTOR, getRecentMaxPullups } from "../warmup.js";
-import { predForceThreeExp } from "../threeExp.js";
 
 // Synthetic Crusher + Micro history spanning several durations so the
 // per-grip curves fit. Each rep is a single-hand (T, F) failure point;

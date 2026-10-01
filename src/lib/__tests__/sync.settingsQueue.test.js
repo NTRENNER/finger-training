@@ -1,3 +1,10 @@
+import { loadLS, __setNsUidForTests, setLastUserRaw } from "../storage.js";
+import {
+  enqueueUserSettingsPatch,
+  flushUserSettingsPatch,
+} from "../sync.js";
+import { LS_USER_SETTINGS_PATCH_KEY } from "../storage.js";
+
 const mockGetUser = jest.fn();
 const mockRpc = jest.fn();
 
@@ -7,13 +14,6 @@ jest.mock("../supabase.js", () => ({
     rpc: (...args) => mockRpc(...args),
   },
 }));
-
-import { loadLS, __setNsUidForTests, setLastUserRaw } from "../storage.js";
-import {
-  enqueueUserSettingsPatch,
-  flushUserSettingsPatch,
-} from "../sync.js";
-import { LS_USER_SETTINGS_PATCH_KEY } from "../storage.js";
 
 beforeEach(() => {
   localStorage.clear();

@@ -1,7 +1,6 @@
 import {
   fitEnduranceTail, enduranceTailFit, enduranceCeilingKg,
-  TAIL_B_PRIOR, TAIL_MIN_T, CEIL_MIN_T, CEIL_MARGIN,
-} from "../enduranceTail.js";
+  CEIL_MIN_T, } from "../enduranceTail.js";
 
 const mk = (over) => ({
   hand: "L", grip: "Micro", rep_num: 1, set_num: 1,

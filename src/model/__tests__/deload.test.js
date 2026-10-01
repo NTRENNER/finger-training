@@ -10,8 +10,7 @@ import {
   fingerSessionsThisWeek, deloadPlan, buildDeloadGuidance,
   deloadStatus, recoveryStatusDates, recentGapHeldOut,
   gripIsDown, gripPressure, climbingLoadByDate,
-  DELOAD_STALE_DAYS, DELOAD_GAP_TRIGGER, DELOAD_GAP_TRIGGER_SD,
-  DELOAD_BASELINE_MIN_SESSIONS, DELOAD_BASELINE_MIN_SD,
+  DELOAD_STALE_DAYS, DELOAD_GAP_TRIGGER, DELOAD_BASELINE_MIN_SESSIONS, DELOAD_BASELINE_MIN_SD,
 } from "../deload.js";
 
 // ── Session builder ──────────────────────────────────
@@ -426,7 +425,7 @@ test("a degenerate baseline cannot manufacture an alarm", () => {
   }).flat();
   const rg = recentGapHeldOut(flat, "Crusher", flat[flat.length - 1].date, 2);
   expect(rg).toBeTruthy();
-  if (rg.baseline) expect(rg.baseline.sd).toBeGreaterThanOrEqual(DELOAD_BASELINE_MIN_SD);
+  expect(rg.baseline?.sd ?? DELOAD_BASELINE_MIN_SD).toBeGreaterThanOrEqual(DELOAD_BASELINE_MIN_SD);
   expect(gripIsDown(rg)).toBe(false);
 });
 

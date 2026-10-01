@@ -11,7 +11,6 @@
 import fs from "fs";
 import { prescription } from "../prescription.js";
 import { buildThreeExpPriors } from "../threeExp.js";
-import { zoneOf } from "../zones.js";
 
 const DATA = process.env.ANCHOR_BACKTEST_JSON;
 const maybe = (DATA && fs.existsSync(DATA)) ? test : test.skip;

@@ -43,15 +43,16 @@ describe.each(RECOVERY_ROW_SHAPES)('%s prescription path',shape=>{
   const rows=recoveryRows(shape).map(r=>({...r,actual_time_s:160,target_duration:160,manual_load_kg:shape==='manual'?12:r.manual_load_kg,
    avg_force_kg:shape==='manual'?null:12,peak_force_kg:shape==='manual'?null:13}));
   const p=prescription(rows,'L','Crusher',160,{referenceDate:'2026-08-21'});
-  if(shape==='interrupted') expect(p).toBeNull();
-  else expect(p.value).toBe(12);
-  if(shape==='manual') {
-   expect(p).toMatchObject({source:'manual-load-estimate',evidenceWeight:0.5});
-   expect(recoveryEvidence(rows).eligible).toBe(false);
-   const rec=coachingRecommendationContinuous(rows,'Crusher',{today:'2026-08-21'});
-   expect(rec).toMatchObject({loadKg:12,source:'manual-load-estimate',T:160});
-  }
+  expect(p?.value ?? null).toBe(shape === 'interrupted' ? null : 12);
+
  });
+});
+test('manual prescription preserves its source and excludes measured recovery', () => {
+ const rows = recoveryRows('manual').map(r => ({ ...r, actual_time_s:160, target_duration:160, manual_load_kg:12, avg_force_kg:null, peak_force_kg:null }));
+ const p = prescription(rows,'L','Crusher',160,{referenceDate:'2026-08-21'});
+ expect(p).toMatchObject({source:'manual-load-estimate',evidenceWeight:0.5});
+ expect(recoveryEvidence(rows).eligible).toBe(false);
+ expect(coachingRecommendationContinuous(rows,'Crusher',{today:'2026-08-21'})).toMatchObject({loadKg:12,source:'manual-load-estimate',T:160});
 });
 const sequence=()=>recoveryRows('measured');
 test('an interrupted but completely recorded pull still contributes to fatigue',()=>{

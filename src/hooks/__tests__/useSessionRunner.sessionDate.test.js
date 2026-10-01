@@ -8,12 +8,12 @@ import { useSessionRunner } from "../useSessionRunner.js";
 
 function setup() {
   const addReps = jest.fn();
-  const hook = renderHook(() => useSessionRunner({
+  const view = renderHook(() => useSessionRunner({
     history: [], freshMap: null, threeExpPriors: null,
     addReps, tindeqConnected: false,
     onSessionStart: () => {},
   }));
-  return { hook, addReps };
+  return { view, addReps };
 }
 const cfg = { grip: "Crusher", targetTime: 90, repsPerSet: 5, restTime: 20, hand: "L" };
 
@@ -25,19 +25,19 @@ test("all reps keep the session's start date even when the clock rolls to the ne
   const todaySpy = jest.spyOn(util, "today");
   todaySpy.mockReturnValue("2026-07-12"); // start-of-session value
 
-  const { hook, addReps } = setup();
-  act(() => hook.result.current.startSession(cfg));
+  const { view, addReps } = setup();
+  act(() => view.result.current.startSession(cfg));
 
   // Clock rolls past midnight before the reps land.
   todaySpy.mockReturnValue("2026-07-13");
 
   for (let i = 0; i < 3; i++) {
-    act(() => hook.result.current.handleRepDone({
+    act(() => view.result.current.handleRepDone({
       actualTime: 30, avgForce: 31, peakForce: 33, failed: false,
     }));
     // Advance past the rest phase so the duplicate-rep lock re-arms for
     // the next rep (mirrors the real rep -> rest -> rep flow).
-    act(() => hook.result.current.handleRestDone());
+    act(() => view.result.current.handleRestDone());
   }
 
   const dates = addReps.mock.calls.map(c => c[0][0].date);
