@@ -22,3 +22,34 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.session-beta-options { margin-bottom: 16px; }
+.volume-beta-panel {
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  background: #0d1117;
+  padding: 14px;
+  margin: 8px 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.volume-beta-panel h3 { margin: 0 0 8px; font-size: 16px; }
+.volume-beta-panel p { color: #8b949e; margin: 8px 0; }
+.volume-beta-actions, .volume-beta-summary-heading { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.volume-beta-summary-heading { justify-content: space-between; }
+.volume-beta-summary a { color: #58a6ff; }
+.volume-beta-summary ul { padding-left: 20px; margin: 8px 0; }
+.volume-beta-actions button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #161b22;
+  color: #e6edf3;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.volume-beta-actions .volume-beta-primary { background: #58a6ff; color: #0d1117; }
+.volume-beta-actions button:disabled { opacity: 0.5; cursor: default; }
+.volume-beta-actions button:focus-visible, .volume-beta-summary a:focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }

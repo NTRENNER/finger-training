@@ -42,6 +42,7 @@ import { buildRecoveryBundle } from "../model/recoveryDynamics.js";
 import { sessionOverpull } from "../model/overpull.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 import { MAX_OPTIONAL_SETS, recommendAnotherSet, isSetComplete } from "../model/setRecommendation.js";
+import { isVolumeSetComplete } from "../model/volumeSession.js";
 
 // Small wrapper used by both ActiveSessionView and AutoRepSessionView
 // (and SessionSummaryView) to render the live forecasted-vs-actual
@@ -69,6 +70,8 @@ function LiveRepCurveCard({
       actualReps: sameHandReps,
       targetDuration: config.targetTime,
       beforeDate: undefined, // live session — match any prior date
+      setNum: currentSet,
+      excludeSessionId: sessionReps?.[0]?.session_id ?? null,
     });
   }, [history, config, currentSet, handForLookup, sessionReps]);
   const targetWeightKg = suggestWeight(refWeights?.[handForLookup] ?? null, 0) || null;
@@ -829,11 +832,56 @@ export function SwitchHandsView({ onReady, activeHand = "R" }) {
   );
 }
 
+// The same hand rests while the other hand trains. This clock starts at the
+// last physical release, not when this view mounts, and never starts a rep.
+export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
+  source = 'estimated_transition', onReady, onFinish, tindeq }) {
+  const [mountedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  const [extraSeconds, setExtraSeconds] = useState(0);
+  const doneRef = useRef(false);
+  const origin = Number.isFinite(startedAtMs) ? Math.min(mountedAt, startedAtMs) : mountedAt;
+  const remaining = Math.max(0, Math.ceil((origin + (restSeconds + extraSeconds) * 1000 - now) / 1000));
+  const releaseBlocked = !!(tindeq?.releaseCheckRequired || tindeq?.zeroing);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, []);
+  const finish = handler => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    handler?.();
+  };
+  return <PageFrame style={{ padding: '32px 16px', textAlign: 'center' }}>
+    <h2 style={{ margin: '0 0 18px' }}>Rest before set 2</h2>
+    <HandCue hand={hand} />
+    <Card>
+      <div style={{ fontSize: 64, fontWeight: 900, color: remaining ? C.blue : C.green }} aria-live="off">
+        {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')}
+      </div>
+      <p style={{ color: C.muted }}>Five minutes for this hand. Time spent training your other hand counts.</p>
+      {source === 'estimated_transition' && <p style={{ color: C.muted }}>
+        Rest is estimated from when the last hold was recorded because its release time was not captured.
+      </p>}
+      {remaining === 0 && <p>Ready for set 2 when you are.</p>}
+      {releaseBlocked && <UnloadedZeroCheck tindeq={tindeq} />}
+    </Card>
+    <Btn onClick={() => finish(onReady)} disabled={releaseBlocked}
+      style={{ width: '100%', marginBottom: 12, padding: '14px 0' }}>
+      {remaining > 0 ? 'Start when ready' : 'Start set 2'}
+    </Btn>
+    <div style={{ display: 'flex', gap: 12 }}>
+      <Btn color={C.muted} onClick={() => setExtraSeconds(s =>
+        Math.max(s + 60, (Date.now() - origin) / 1000 - restSeconds + 60))} style={{ flex: 1 }}>Rest another minute</Btn>
+      <Btn color={C.muted} onClick={() => finish(onFinish)} style={{ flex: 1 }}>Finish today</Btn>
+    </div>
+  </PageFrame>;
+}
+
 // (AltSwitchView removed — alternating-hand mode was retired with
 // the flat-20s-rest workout flow; Both-mode now does all L hangs then
 // all R hangs, with the existing HandSwitchView prompt covering the
 // single switch.)
-// (BetweenSetsView removed — single-set under curve-trust commit C.)
 
 export function SessionSummaryView({
   reps, config, leveledUp, newLevel, currentSet = 1, onAddSet, onDone,
@@ -866,10 +914,12 @@ export function SessionSummaryView({
     (r.peak_force_kg > 0 && r.peak_force_kg < 500 && r.peak_force_kg > m) ? r.peak_force_kg : m,
     0);
   const hasPeak    = sessionPeak > 0;
-  const setComplete = isSetComplete({ sessionReps: reps, config, setNum: currentSet });
-  const setSuggestion = useMemo(() => recommendAnotherSet({
+  const volume = config.volumePlan?.id === 'volume_beta' && !config.mixedDomainPlan && !config.peakTest;
+  const setComplete = volume ? isVolumeSetComplete(reps, config, currentSet)
+    : isSetComplete({ sessionReps: reps, config, setNum: currentSet });
+  const setSuggestion = useMemo(() => volume ? null : recommendAnotherSet({
     history, sessionReps: reps, config, setNum: currentSet,
-  }), [history, reps, config, currentSet]);
+  }), [history, reps, config, currentSet, volume]);
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
@@ -889,7 +939,7 @@ export function SessionSummaryView({
       )}
 
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>
-        {setComplete ? (config.mixedDomainPlan ? "Chaos Machine Complete" : currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
+        {setComplete ? (volume && currentSet === 2 ? 'Volume Beta Complete' : config.mixedDomainPlan ? "Chaos Machine Complete" : currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
       </h2>
       {config.mixedDomainPlan && <p>Chaos Machine (Beta). Opening holds can update the curve; later holds are recorded as fatigued work. Your regular rep progression is unchanged.</p>}
 
@@ -983,7 +1033,13 @@ export function SessionSummaryView({
         </Card>
       ))}
 
-      {!config.mixedDomainPlan && !config.peakTest && currentSet < MAX_OPTIONAL_SETS && onAddSet && (
+      {volume && currentSet === 1 && setComplete && onAddSet && <Card>
+        <strong>Volume Beta: second set planned</strong>
+        <p style={{ color: C.muted }}>Same target weights and holds. Each hand gets five minutes of rest, including time spent training the other hand.</p>
+        <Btn onClick={onAddSet} style={{ width: '100%', padding: '14px 0' }}>Continue to set 2</Btn>
+      </Card>}
+
+      {!volume && !config.mixedDomainPlan && !config.peakTest && currentSet < MAX_OPTIONAL_SETS && onAddSet && (
         <>
           {setSuggestion?.recommend && (
             <div style={{
@@ -1006,7 +1062,7 @@ export function SessionSummaryView({
           ↓ Export CSV
         </Btn>
         <Btn onClick={onDone} style={{ flex: 2 }}>
-          Back to Setup
+          {volume ? 'Finish today' : 'Back to Setup'}
         </Btn>
       </div>
     </PageFrame>

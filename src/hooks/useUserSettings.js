@@ -23,7 +23,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  loadLS, saveLS,
+  loadLS, saveLS, subscribeLS,
   LS_BW_LOG_KEY,
   LS_BW_DIRTY_KEY, loadDirtySet, markDirty, clearDirty,
   LS_USER_SETTINGS_PATCH_KEY,
@@ -35,6 +35,10 @@ import {
 import { today } from "../util.js";
 import { validWeightDate } from "../lib/bodyWeight.js";
 import { DEFAULT_TRIP } from "../lib/trip.js";
+import {
+  LS_VOLUME_EXPERIMENTS_KEY, volumeExperimentPatch,
+  volumeExperimentsFromSettings, validVolumeExperiments, restoreVolumeExperiments,
+} from '../lib/volumeExperimentStorage.js';
 import {
   pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates, removeBWTombstones,
   fetchUserSettings, enqueueUserSettingsPatch, flushUserSettingsPatch,
@@ -89,6 +93,33 @@ function confirmBWPushed(date, kg) {
 }
 
 export function useUserSettings({ user, syncSignal = 0 }) {
+  const [volumeExperiments, setVolumeExperiments] = useState(() =>
+    restoreVolumeExperiments(loadLS(LS_VOLUME_EXPERIMENTS_KEY), loadLS(LS_USER_SETTINGS_PATCH_KEY)));
+  const volumeExperimentsRef = useRef(volumeExperiments);
+  const publishVolumeExperiments = useCallback(next => {
+    volumeExperimentsRef.current = next;
+    setVolumeExperiments(next);
+  }, []);
+  useEffect(() => subscribeLS(LS_VOLUME_EXPERIMENTS_KEY, () => {
+    publishVolumeExperiments(restoreVolumeExperiments(loadLS(LS_VOLUME_EXPERIMENTS_KEY), loadLS(LS_USER_SETTINGS_PATCH_KEY)));
+  }), [publishVolumeExperiments]);
+  const saveVolumeExperiment = useCallback((experiment, options = {}) => {
+    const current = restoreVolumeExperiments({ ...validVolumeExperiments(loadLS(LS_VOLUME_EXPERIMENTS_KEY)),
+      ...volumeExperimentsRef.current }, loadLS(LS_USER_SETTINGS_PATCH_KEY));
+    const existing = current[experiment?.id];
+    const updating = options?.statusOnly === true || options?.reviewWeek != null;
+    if ((existing && !updating) || (!existing && updating)) return false;
+    const patch = volumeExperimentPatch(experiment, options);
+    if (!Object.keys(patch).length) return false;
+    // Persist the retry journal before publishing activation. Cache writes
+    // may fail independently; boot and reconcile can recover from the queue.
+    if (!enqueueUserSettingsPatch(patch)) return false;
+    const next = restoreVolumeExperiments(current, loadLS(LS_USER_SETTINGS_PATCH_KEY));
+    saveLS(LS_VOLUME_EXPERIMENTS_KEY, next);
+    publishVolumeExperiments(next);
+    if (user) flushUserSettingsPatch();
+    return true;
+  }, [user, publishVolumeExperiments]);
   // ── Unit preference ───────────────────────────────────────
   const [unit, setUnit] = useState(() => loadLS("unit_pref") || "lbs");
   const saveUnit = useCallback((u) => {
@@ -416,6 +447,10 @@ export function useUserSettings({ user, syncSignal = 0 }) {
         : {};
       const hasPending = key => Object.prototype.hasOwnProperty.call(pending, key);
 
+      const volumePlans = volumeExperimentsFromSettings({ ...cloud, ...pending });
+      publishVolumeExperiments(volumePlans);
+      saveLS(LS_VOLUME_EXPERIMENTS_KEY, volumePlans);
+
       const pendingFocus = hasPending("climbing_focus")
         && typeof pending.climbing_focus === "string"
         && pending.climbing_focus
@@ -493,9 +528,10 @@ export function useUserSettings({ user, syncSignal = 0 }) {
       cancelled = true;
       clearTimeout(retryTimer);
     };
-  }, [user, syncSignal, settingsRetrySignal]);
+  }, [user, syncSignal, settingsRetrySignal, publishVolumeExperiments]);
 
   return {
+    volumeExperiments, saveVolumeExperiment,
     unit, saveUnit,
     bodyWeight, saveBW,
     trip, saveTrip,

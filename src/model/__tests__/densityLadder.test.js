@@ -15,6 +15,7 @@ import {
 } from "../densityLadder.js";
 import { capacityMultiplier } from "../cookedScaling.js";
 import { enduranceCeilingKg } from "../enduranceTail.js";
+import { measuredRecoveryFields } from '../../testHelpers/recovery.js';
 
 // Build one session's reps: `times[hand]` is the per-rep hold times in
 // rep order; every rep carries the same T, load, session id, and date.
@@ -34,6 +35,29 @@ function session({ id, date, T, loadKg, times, cooked = null }) {
   }
   return out;
 }
+
+test('historical extra sets and later sessions cannot recalibrate the fresh ladder recovery model', () => {
+  const measuredSet = (date, setNum, times, laterSession = false) => times.map((time, i) => ({
+    id: `${date}-${setNum}-${laterSession}-${i}`, date,
+    session_id: `${date}-${laterSession ? 'evening' : 'morning'}`,
+    session_started_at: `${date}T${laterSession ? '18' : '08'}:00:00Z`,
+    grip: 'Micro', hand: 'L', set_num: setNum, rep_num: i + 1,
+    target_duration: 40, actual_time_s: time, prescribed_load_kg: 25,
+    failure_valid: true, rest_s: 20, ...measuredRecoveryFields(20),
+  }));
+  const dates = Array.from({ length: 8 }, (_, i) => `2026-09-${10 + i}`);
+  const firstSets = dates.flatMap(date => measuredSet(date, 1, [40, 25, 18, 13]));
+  const extraSets = dates.flatMap(date => measuredSet(date, 2, [30, 29, 28, 27]));
+  const laterSessions = dates.flatMap(date => measuredSet(date, 1, [30, 29, 28, 27], true));
+  const latest = measuredSet('2026-09-20', 1, [40, 23, 16, 12]);
+  const ladder = history => computeDensityLadder(history, 'Micro', 'power', { expectedHands: ['L'] });
+  const earned = ladder([...firstSets, ...latest]);
+  expect(earned).toMatchObject({ decision: 'advance', reps: 5, loadByHand: { L: 25 } });
+  // Before this boundary, the extra sets altered the recovery fit enough to
+  // call the unchanged latest first set collapsed: four holds at 22.5 kg.
+  expect(ladder([...firstSets, ...extraSets, ...latest])).toEqual(earned);
+  expect(ladder([...firstSets, ...laterSessions, ...latest])).toEqual(earned);
+});
 
 describe("computeDensityLadder", () => {
   test("null when the (grip, zone) has never been trained", () => {

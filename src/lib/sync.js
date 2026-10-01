@@ -742,12 +742,12 @@ export async function pushUserSettingsPatch(patch) {
 // Merge a user_settings patch into the durable offline queue. Later values
 // win per top-level key, matching the server RPC's JSONB merge semantics.
 export function enqueueUserSettingsPatch(patch) {
-  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return;
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return false;
   const current = loadLS(LS_USER_SETTINGS_PATCH_KEY);
   const queued = current && typeof current === "object" && !Array.isArray(current)
     ? current
     : {};
-  saveLS(LS_USER_SETTINGS_PATCH_KEY, { ...queued, ...patch });
+  return saveLS(LS_USER_SETTINGS_PATCH_KEY, { ...queued, ...patch });
 }
 
 let settingsPatchFlushPromise = null;

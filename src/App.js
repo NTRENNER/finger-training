@@ -21,7 +21,7 @@ import { SetupView } from "./views/SetupView.js";
 import { ClimbView } from "./views/ClimbView.js";
 import {
   ActiveSessionView, AutoRepSessionView,
-  RestView, SwitchHandsView,
+  RestView, SwitchHandsView, BetweenSetRestView,
   SessionSummaryView, ManualOffsetPrompt,
 } from "./views/ActiveSessionViews.js";
 import { WorkoutTab } from "./views/WorkoutTab.js";
@@ -30,7 +30,7 @@ import { AnalysisContainer } from "./views/AnalysisContainer.js";
 
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
-  loadLS, saveLS,
+  loadLS, saveLS, getStorageUserId,
   LS_HISTORY_KEY, LS_REP_DELETED_KEY,
   LS_WORKOUT_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
@@ -47,6 +47,8 @@ import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useDailyState } from "./hooks/useDailyState.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import { useUserSettings } from "./hooks/useUserSettings.js";
+import { createVolumeExperiment, volumeExperimentStatus } from './model/volumeExperiment.js';
+import { today, uuid } from './util.js';
 import { useActivities } from "./hooks/useActivities.js";
 import { useConnectivity } from "./hooks/useConnectivity.js";
 import { usePendingSyncCount } from "./hooks/usePendingSyncCount.js";
@@ -225,6 +227,7 @@ export default function App() {
     pinnedGripBaselines, savePinnedGripBaselines,
     pinnedPerHandBaselines, savePinnedPerHandBaselines,
     settingsSynced,
+    volumeExperiments, saveVolumeExperiment,
   } = useUserSettings({ user, syncSignal });
 
   // ── Activities (climbing log + 1RM) ──────────────────────
@@ -317,12 +320,34 @@ export default function App() {
     activeHand,
     nextWeight,
     startSession, chooseOffset, handleRepDone,
-    handleRestDone, handleNextSet, handleAbort,
+    handleRestDone, handleNextSet, handleAbort, handleSwitchHandsReady,
+    setRestStartedAtMs, setRestSeconds, setRestHand, setRestSource, handleSetRestDone,
   } = useSessionRunner({
     history, freshMap, threeExpPriors, addReps,
     tindeqConnected: tindeq.connected,
     onSessionStart: () => setTab(0),
   });
+
+  const volumeReady = user ? historySynced && settingsSynced : getStorageUserId() == null;
+  const volumeExperiment = Object.values(volumeExperiments || {})
+    .sort((a, b) => Number(['active', 'paused'].includes(volumeExperimentStatus(b, today())))
+      - Number(['active', 'paused'].includes(volumeExperimentStatus(a, today())))
+      || (b.createdAt || b.startDate).localeCompare(a.createdAt || a.startDate)
+      || b.id.localeCompare(a.id))[0] || null;
+  const startVolumeExperiment = ({ grips }) => {
+    if (!volumeReady || Object.values(volumeExperiments || {}).some(plan =>
+      ['active', 'paused'].includes(volumeExperimentStatus(plan, today())))) return false;
+    const selected = [...new Set(grips || [])].filter(grip => GRIP_PRESETS.includes(grip));
+    if (!selected.length) return false;
+    const plan = createVolumeExperiment({ history, grips: selected, startDate: today(),
+      id: uuid(), createdAt: new Date().toISOString() });
+    return saveVolumeExperiment(plan);
+  };
+  const changeVolumeStatus = status => {
+    if (!volumeReady || !volumeExperiment || !['active', 'paused', 'ended'].includes(status)) return false;
+    if (['completed', 'ended'].includes(volumeExperimentStatus(volumeExperiment, today()))) return false;
+    return saveVolumeExperiment({ ...volumeExperiment, status, updatedAt: new Date().toISOString() }, { statusOnly: true });
+  };
 
   // A post-session effect used to re-fetch user_settings here, to pick
   // up the β the server trigger had just written. Learner and trigger
@@ -651,6 +676,10 @@ export default function App() {
               connectSlot={tindeqConnectCard}
               GOAL_CONFIG={GOAL_CONFIG}
               GRIP_PRESETS={GRIP_PRESETS}
+              volumeExperiment={volumeExperiment}
+              onStartVolumeExperiment={startVolumeExperiment}
+              onVolumeExperimentStatusChange={changeVolumeStatus}
+              volumeReady={volumeReady}
               climbingFocus={climbingFocus}
               onNavigateToSettings={() => setTab(SETTINGS_TAB)}
             />
@@ -697,7 +726,13 @@ export default function App() {
         }
 
         if (phase === "switch_hands") {
-          return <SwitchHandsView activeHand={activeHand} onReady={() => setPhase("rep_ready")} />;
+          return <SwitchHandsView activeHand={activeHand} onReady={handleSwitchHandsReady} />;
+        }
+
+        if (phase === 'between_sets') {
+          return <BetweenSetRestView startedAtMs={setRestStartedAtMs} restSeconds={setRestSeconds}
+            hand={setRestHand} source={setRestSource} onReady={handleSetRestDone}
+            onFinish={handleAbort} tindeq={tindeq} />;
         }
 
         if (phase === "resting") {
@@ -821,7 +856,9 @@ export default function App() {
           dropped when the Climbing tab was retired.) */}
       {researchMode && tab === RESEARCH_TAB && (
         <ResearchView history={history} activities={activities} unit={unit} signedIn={!!user}
-          historySynced={historySynced} onOpenSettings={() => setTab(SETTINGS_TAB)} />
+          historySynced={historySynced} onOpenSettings={() => setTab(SETTINGS_TAB)}
+          volumeExperiments={volumeExperiments} onSaveVolumeExperiment={saveVolumeExperiment}
+          volumeReady={volumeReady} />
       )}
       {tab === SETTINGS_TAB && (
         <SettingsView

@@ -124,7 +124,11 @@ function sessionConformance(historyBefore, hand, grip, reps) {
   const rep1 = reps[0];
   if (!(Number(rep1.actual_time_s) > 0)) return null;
   let physModel = null;
-  try { physModel = buildPhysModel(historyBefore, hand, grip); } catch (e) { physModel = null; }
+  // This model decides the next fresh set's load and rung. Its calibration
+  // must obey the same first-session/first-set boundary as the judged set;
+  // otherwise extra fatigued work can indirectly change the fresh ladder.
+  const freshHistory = firstTrainingSessionRows(historyBefore).filter(isFirstSetRep);
+  try { physModel = buildPhysModel(freshHistory, hand, grip); } catch (e) { physModel = null; }
   if (!physModel) return null;
   const evidence = progressionSetEvidence(reps);
   if (!evidence.complete) return null;

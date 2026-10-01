@@ -18,6 +18,7 @@ import { startingHandForDay, otherHand, handOrderMetadata } from '../model/handO
 //   rep_active    — rep in progress
 //   resting       — countdown between reps
 //   switch_hands  — Both-mode prompt to swap to the other hand
+//   between_sets  — optional Volume Beta's same-hand rest, explicit ready
 //   done          — SessionSummaryView is rendered
 //
 // One set is the ordinary recommendation. Voluntary additional sets can
@@ -63,6 +64,7 @@ import { usePreparedPredictions } from './usePreparedPredictions.js';
 import { preparePrediction, completePrediction } from '../model/predictionTracking.js';
 import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS } from "../model/setRecommendation.js";
+import { snapshotVolumePlan, isVolumeSetComplete } from "../model/volumeSession.js";
 import { pushDailyState } from "../lib/sync.js";
 import { buildMixedLoadModel, prepareMixedPrediction, completeMixedPrediction } from '../model/mixedLoadPrediction.js';
 import { mixedReadinessModel, prepareAdaptiveMixedPrediction, mixedLoadProtocolFields } from '../model/mixedLoadPrescription.js';
@@ -87,8 +89,7 @@ export function useSessionRunner({
   onSessionStart,
 }) {
   // ── Session config (see comment at top) ─────────────────────
-  // Multi-set fields (numSets, setRestTime) removed — every session
-  // is single-set under the curve-trust model.
+  // One ordinary set; the separate Volume Beta snapshot plans a second.
   const [rawConfig, setConfig] = useState(() => ({
     hand:       "Both",
     grip:       "",
@@ -116,6 +117,7 @@ export function useSessionRunner({
     // ordinary curve-driven sessions.
     plannedLoadByHand: null,
     mixedDomainPlan: null,
+    volumePlan: null,
     peakTest: false,
   }));
 
@@ -123,9 +125,7 @@ export function useSessionRunner({
   const config = rawConfig;
 
   // ── Phase machine + per-rep counters ──────────────────────
-  // (currentSet removed — single-set model. Rep records still write
-  // set_num: 1 as a constant for backward compat with the existing
-  // Supabase schema; the column is otherwise unused going forward.)
+  // Additional sets retain their set number and never become fresh openers.
   const [phase,       setPhase]       = useState("idle");
   const [currentSet,  setCurrentSet]  = useState(1);
   const [currentRep,  setCurrentRep]  = useState(0);
@@ -143,6 +143,12 @@ export function useSessionRunner({
   const preSessionHistoryRef = useRef(null);
   const sessionAdjustmentRef = useRef(null);
   const sessionPrescriptionRef = useRef({});
+  const volumePlanRef = useRef(null);
+  const lastActivityByHandRef = useRef({});
+  const [setRestStartedAtMs, setSetRestStartedAtMs] = useState(null);
+  const [setRestSeconds, setSetRestSeconds] = useState(300);
+  const [setRestHand, setSetRestHand] = useState(null);
+  const [setRestSource, setSetRestSource] = useState(null);
   const mixedModelsRef = useRef({});
   const [sessionStartedAt, setSessionStartedAt] = useState("");
   // Session-anchored local date (YYYY-MM-DD), captured once at
@@ -224,6 +230,10 @@ export function useSessionRunner({
   // is ignored, so the plain Start button keeps working unchanged.
   const startSession = useCallback((override) => {
     let cfg = (override && override.grip) ? override : config;
+    const startedDay = today();
+    const volumePlan = !cfg.mixedDomainPlan && !cfg.peakTest
+      ? snapshotVolumePlan(cfg.volumePlan, startedDay) : null;
+    cfg = { ...cfg, volumePlan };
     if (cfg.peakTest && !cfg.mixedDomainPlan) {
       cfg = { ...cfg, goal: 'max_strength', targetTime: MAX_TEST_TARGET_S,
         repsPerSet: MAX_TEST_ATTEMPTS, restTime: MAX_TEST_REST_S, ladderLoadByHand: null };
@@ -236,7 +246,12 @@ export function useSessionRunner({
         targetTime: plan.steps[0].targetTime, repsPerSet: 5, restTime: MIXED_DOMAIN_REST_S,
         ladderLoadByHand: null, plannedLoadByHand: plan.steps[0].loadByHand };
     }
-    if ((override && override.grip) || cfg.mixedDomainPlan || cfg.peakTest) setConfig(cfg);
+    volumePlanRef.current = volumePlan;
+    lastActivityByHandRef.current = {};
+    setSetRestStartedAtMs(null);
+    setSetRestHand(null);
+    setSetRestSource(null);
+    setConfig(cfg);
     const sid = uid();
     const rw = {};
     const originalLoads = {};
@@ -275,7 +290,6 @@ export function useSessionRunner({
     // Anchor the session's local date ONCE, here at start. Reused for
     // daily_state and stamped on every rep so the whole session stays
     // on the day it began even if it runs past local midnight.
-    const startedDay = today();
     firstHandRef.current = cfg.hand === 'Both' ? startingHandForDay(history, startedDay) : cfg.hand;
     mixedModelsRef.current = cfg.mixedDomainPlan ? Object.fromEntries(
       (cfg.hand === 'Both' ? ['L', 'R'] : [cfg.hand]).map(h =>
@@ -400,8 +414,11 @@ export function useSessionRunner({
     const previousRep = [...sessionReps].reverse().find(r => r.hand === effectiveHand);
     const previousEnd = previousRep?.rep_timing?.ended_at_ms;
     const activityStart = forceRecording?.activity?.started_at_ms ?? startedAtMs;
-    const restBefore = measuredTiming && currentRep > 0 && Number.isFinite(previousEnd)
-      && activityStart >= previousEnd ? (activityStart - previousEnd) / 1000 : null;
+    const betweenSet = volumePlanRef.current && currentSet === 2 && currentRep === 0;
+    const setRestOrigin = betweenSet ? lastActivityByHandRef.current[effectiveHand] : null;
+    const restEnd = betweenSet ? setRestOrigin?.releaseAtMs : previousEnd;
+    const restBefore = measuredTiming && (currentRep > 0 || betweenSet) && Number.isFinite(restEnd)
+      && activityStart >= restEnd ? (activityStart - restEnd) / 1000 : null;
     const provenance = loadProvenance || (avgForce > 0 ? "measured_force"
       : manualLoadKg > 0 ? "nominal_setting" : "prescription_only");
     const repTargetTime = currentStep?.targetTime ?? config.targetTime;
@@ -414,6 +431,17 @@ export function useSessionRunner({
       ...(currentRep > 0 ? { capacity_eligible: false } : {}),
     } : { ...forceRecording };
     recordedForce.hand_order = handOrderMetadata(firstHandRef.current, sessionDate || today());
+    if (volumePlanRef.current) {
+      recordedForce.volume_beta = { ...volumePlanRef.current,
+        ...(betweenSet ? { between_set_rest: {
+          planned_s: volumePlanRef.current.rest_s, actual_s: restBefore,
+          source: setRestOrigin?.source ?? 'unknown',
+          estimated_s: setRestOrigin?.source === 'estimated_transition' && measuredTiming
+            && activityStart >= setRestOrigin.transitionAtMs
+            ? (activityStart - setRestOrigin.transitionAtMs) / 1000 : null,
+        } } : {}),
+      };
+    }
     if (!mixed && sessionPrescriptionRef.current[effectiveHand]) {
       recordedForce.session_prescription = { ...sessionPrescriptionRef.current[effectiveHand] };
     }
@@ -454,6 +482,8 @@ export function useSessionRunner({
                             : null,
       rep_timing: { version: 1, started_at_ms: measuredTiming ? activityStart : null,
         ended_at_ms: adjustedEnd, rest_before_s: restBefore,
+        ...(betweenSet ? { rest_planned_s: volumePlanRef.current.rest_s,
+          rest_source: setRestOrigin?.source ?? 'unknown' } : {}),
         source: forceRecording?.duration_basis === "elapsed_activity_estimate" ? "elapsed_activity_estimate"
           : measuredTiming ? (forceRecording ? "device_aligned" : "manual_tap") : "unknown" },
       load_provenance: provenance,
@@ -523,6 +553,17 @@ export function useSessionRunner({
       prescribedWeight: roundedPrescribed,
     });
     setSessionReps(reps => [...reps, repRecord]);
+    // Keep the physical last activity endpoint, not the earlier credited
+    // capacity cutoff. Unknown release gets an explicitly estimated clock.
+    if (volumePlanRef.current) {
+      const measuredRelease = Number.isFinite(adjustedEnd)
+        && (forceRecording?.recording_stop_reason === 'release' || (!tindeqConnected && !forceRecording));
+      lastActivityByHandRef.current[effectiveHand] = {
+        releaseAtMs: measuredRelease ? adjustedEnd : null,
+        transitionAtMs: Date.now(),
+        source: measuredRelease ? (forceRecording ? 'device_release' : 'manual_tap') : 'estimated_transition',
+      };
+    }
     addReps([repRecord]);
     if (endSession) {
       finishSession([...sessionReps, repRecord]);
@@ -566,19 +607,47 @@ export function useSessionRunner({
     setPhase(tindeqConnected || mixed ? "rep_ready" : "rep_active");
   }, [tindeqConnected, mixed]);
 
+  const beginSetRest = useCallback(hand => {
+    const origin = lastActivityByHandRef.current[hand];
+    setSetRestStartedAtMs(origin?.releaseAtMs ?? origin?.transitionAtMs ?? Date.now());
+    setSetRestSource(origin?.source ?? 'estimated_transition');
+    setSetRestSeconds(volumePlanRef.current?.rest_s ?? 300);
+    setSetRestHand(hand);
+    setPhase('between_sets');
+  }, []);
+
+  const handleSwitchHandsReady = useCallback(() => {
+    if (phase !== 'switch_hands') return;
+    if (volumePlanRef.current && currentSet === 2) beginSetRest(activeHand);
+    else setPhase('rep_ready');
+  }, [phase, currentSet, activeHand, beginSetRest]);
+
+  const handleSetRestDone = useCallback(() => {
+    if (phase !== 'between_sets') return;
+    repDoneLockRef.current = false;
+    // Even with a manual timer, reaching zero never starts a hold. The athlete
+    // can finish early or extend rest; actual release-to-pull timing is saved.
+    setPhase('rep_ready');
+  }, [phase]);
+
   // One set is the complete recommendation. Extra sets are voluntary,
   // launched from the completed-set summary, and deliberately have no
   // mandatory between-set timer.
   const handleNextSet = useCallback(() => {
     if (mixed || config.peakTest || phase !== "done" || currentSet >= MAX_OPTIONAL_SETS) return;
-    setCurrentSet(s => s + 1);
+    const volume = volumePlanRef.current;
+    if (volume && (currentSet !== 1 || !isVolumeSetComplete(sessionReps, config, 1))) return;
+    // Two queued taps must not turn the beta's planned second set into a third.
+    if (volume) setCurrentSet(2);
+    else setCurrentSet(s => s + 1);
     setCurrentRep(0);
     setActiveHand(config.hand === "Both" ? firstHandRef.current : config.hand);
     setLastRepResult(null);
     setLeveledUp(false);
     repDoneLockRef.current = false;
-    setPhase(tindeqConnected ? "rep_ready" : "rep_active");
-  }, [phase, currentSet, config.hand, config.peakTest, tindeqConnected, mixed]);
+    if (volume) beginSetRest(config.hand === 'Both' ? firstHandRef.current : config.hand);
+    else setPhase(tindeqConnected ? "rep_ready" : "rep_active");
+  }, [phase, currentSet, config, tindeqConnected, mixed, sessionReps, beginSetRest]);
 
   const handleAbort = useCallback(() => {
     if (sessionReps.length > 0) finishSession(sessionReps);
@@ -605,5 +674,7 @@ export function useSessionRunner({
     nextWeight,
     startSession, chooseOffset, handleRepDone,
     handleRestDone, handleNextSet, handleAbort,
+    setRestStartedAtMs, setRestSeconds, setRestHand, setRestSource,
+    handleSetRestDone, handleSwitchHandsReady,
   };
 }

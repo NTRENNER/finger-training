@@ -1,6 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 
 import { useUserSettings } from "../useUserSettings.js";
+import { createVolumeExperiment } from '../../model/volumeExperiment.js';
+import { LS_VOLUME_EXPERIMENTS_KEY, volumeExperimentPatch } from '../../lib/volumeExperimentStorage.js';
 import {
   LS_BW_LOG_KEY,
   LS_BW_DIRTY_KEY,
@@ -32,17 +34,115 @@ jest.mock("../../lib/sync.js", () => ({
       "ft_user_settings_patch",
       JSON.stringify({ ...current, ...patch })
     );
+    return true;
   }),
   flushUserSettingsPatch: jest.fn(),
 }));
 
 beforeEach(() => {
+  jest.restoreAllMocks();
   localStorage.clear();
   jest.clearAllMocks();
   pushBW.mockResolvedValue(true);
   removeBWTombstones.mockResolvedValue(true);
   fetchBWLog.mockResolvedValue([]);
   fetchBWTombstoneDates.mockResolvedValue([]);
+  enqueueUserSettingsPatch.mockImplementation(patch => saveLS(LS_USER_SETTINGS_PATCH_KEY,
+    { ...(loadLS(LS_USER_SETTINGS_PATCH_KEY) || {}), ...patch }));
+});
+
+afterEach(() => jest.restoreAllMocks());
+
+test('Volume plans restore from cloud while pending edits and separate experiments survive', async () => {
+  const oldPlan = createVolumeExperiment({ grips: ['Micro'], startDate: '2026-07-01', id: 'previous' });
+  const active = createVolumeExperiment({ grips: ['Micro', 'Crusher'], startDate: '2026-10-01', id: 'current' });
+  const paused = { ...active, status: 'paused', updatedAt: '2026-10-02T08:00:00Z',
+    reviews: { 1: { notes: 'Travel this week' } } };
+  saveLS(LS_USER_SETTINGS_PATCH_KEY, { ...volumeExperimentPatch(paused, { statusOnly: true }),
+    ...volumeExperimentPatch(paused, { reviewWeek: 1 }) });
+  flushUserSettingsPatch.mockResolvedValue(false);
+  fetchUserSettings.mockResolvedValue({ ...volumeExperimentPatch(oldPlan), ...volumeExperimentPatch(active) });
+  const { result } = renderHook(() => useUserSettings({ user: { id: 'user-1' } }));
+  await waitFor(() => expect(result.current.settingsSynced).toBe(true));
+  expect(result.current.volumeExperiments).toEqual({ previous: oldPlan, current: paused });
+  expect(loadLS(LS_VOLUME_EXPERIMENTS_KEY)).toEqual(result.current.volumeExperiments);
+});
+
+test('Volume lifecycle writes one experiment, preserves its frozen baseline and rejects malformed plans', () => {
+  const oldPlan = createVolumeExperiment({ grips: ['Micro'], startDate: '2026-07-01', id: 'previous' });
+  const active = createVolumeExperiment({ grips: ['Micro'], startDate: '2026-10-01', id: 'current' });
+  saveLS(LS_VOLUME_EXPERIMENTS_KEY, { previous: oldPlan });
+  const { result } = renderHook(() => useUserSettings({ user: null }));
+  act(() => expect(result.current.saveVolumeExperiment(active)).toBe(true));
+  const paused = { ...active, status: 'paused', updatedAt: '2026-10-02T08:00:00Z' };
+  act(() => expect(result.current.saveVolumeExperiment(paused, { statusOnly: true })).toBe(true));
+  expect(result.current.volumeExperiments.previous).toEqual(oldPlan);
+  expect(result.current.volumeExperiments.current.baseline).toEqual(active.baseline);
+  expect(enqueueUserSettingsPatch).toHaveBeenLastCalledWith({ volume_beta_status_current: {
+    version: 1, experiment_id: 'current', status: 'paused', updatedAt: paused.updatedAt,
+  } });
+  act(() => expect(result.current.saveVolumeExperiment({ ...active, endDate: '2026-12-01' })).toBe(false));
+  expect(result.current.volumeExperiments.current.status).toBe('paused');
+});
+
+test('stale weekly review preserves a pause and another week already saved', () => {
+  const active = createVolumeExperiment({ grips: ['Micro'], startDate: '2026-10-01', id: 'current' });
+  const { result } = renderHook(() => useUserSettings({ user: null }));
+  act(() => result.current.saveVolumeExperiment(active));
+  act(() => result.current.saveVolumeExperiment({ ...active, status: 'paused' }, { statusOnly: true }));
+  act(() => result.current.saveVolumeExperiment({ ...active, reviews: { 1: { notes: 'Week one' } } }, { reviewWeek: 1 }));
+  act(() => result.current.saveVolumeExperiment({ ...active, reviews: { 2: { notes: 'Week two' } } }, { reviewWeek: 2 }));
+  expect(result.current.volumeExperiments.current).toMatchObject({ status: 'paused',
+    reviews: { 1: { notes: 'Week one' }, 2: { notes: 'Week two' } }, baseline: active.baseline });
+  expect(enqueueUserSettingsPatch).toHaveBeenLastCalledWith({ volume_beta_review_current_2: {
+    version: 1, experiment_id: 'current', week: 2, review: { notes: 'Week two' },
+  } });
+});
+
+test('refuses activation if the durable settings queue cannot be saved', () => {
+  const active = createVolumeExperiment({ grips: ['Micro'], startDate: '2026-10-01', id: 'current' });
+  const { result } = renderHook(() => useUserSettings({ user: null }));
+  enqueueUserSettingsPatch.mockReturnValueOnce(false);
+  act(() => expect(result.current.saveVolumeExperiment(active)).toBe(false));
+  expect(result.current.volumeExperiments).toEqual({});
+  expect(loadLS(LS_VOLUME_EXPERIMENTS_KEY)).toBeNull();
+  expect(loadLS(LS_USER_SETTINGS_PATCH_KEY)).toBeNull();
+});
+
+test('a failed secondary cache write recovers from the durable journal on offline remount', () => {
+  const active = createVolumeExperiment({ grips: ['Micro'], startDate: '2026-10-01', id: 'current' });
+  const originalSetItem = Storage.prototype.setItem;
+  const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+  const write = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+    if (key === LS_VOLUME_EXPERIMENTS_KEY) throw new DOMException('Quota', 'QuotaExceededError');
+    return originalSetItem.call(this, key, value);
+  });
+  const first = renderHook(() => useUserSettings({ user: null }));
+  act(() => expect(first.result.current.saveVolumeExperiment(active)).toBe(true));
+  act(() => expect(first.result.current.saveVolumeExperiment({ ...active, status: 'paused' }, { statusOnly: true })).toBe(true));
+  expect(loadLS(LS_VOLUME_EXPERIMENTS_KEY)).toBeNull();
+  expect(loadLS(LS_USER_SETTINGS_PATCH_KEY)).toHaveProperty('volume_beta_plan_current');
+  first.unmount();
+  const restored = renderHook(() => useUserSettings({ user: null }));
+  expect(restored.result.current.volumeExperiments.current).toMatchObject({ status: 'paused', baseline: active.baseline });
+  write.mockRestore(); error.mockRestore();
+});
+
+test('existing plans cannot replace their frozen baseline through a full-plan save', () => {
+  const active = createVolumeExperiment({ grips: ['Micro'], startDate: '2026-10-01', id: 'current' });
+  const { result } = renderHook(() => useUserSettings({ user: null }));
+  act(() => result.current.saveVolumeExperiment(active));
+  act(() => expect(result.current.saveVolumeExperiment({ ...active, status: 'ended' })).toBe(false));
+  expect(result.current.volumeExperiments.current.status).toBe('active');
+});
+
+test('invalid cloud Volume keys cannot replace a real experiment', async () => {
+  const active = createVolumeExperiment({ grips: ['Micro'], startDate: '2026-10-01', id: 'current' });
+  flushUserSettingsPatch.mockResolvedValue(true);
+  fetchUserSettings.mockResolvedValue({ volume_beta_plan_wrong: active, volume_beta_plan_current: null });
+  const { result } = renderHook(() => useUserSettings({ user: { id: 'user-1' } }));
+  await waitFor(() => expect(result.current.settingsSynced).toBe(true));
+  expect(result.current.volumeExperiments).toEqual({});
 });
 
 test("still fetches cloud settings when the queued patch flush fails", async () => {

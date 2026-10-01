@@ -86,7 +86,8 @@ export function buildActualSeries(reps) {
 // "Same zone" is the right grouping because absolute target_duration
 // drifts session to session, but the zone bucket stays stable — so
 // last week's 60s power session matches this week's 45s power session.
-export function findPrevSessionReps(history, { grip, hand, beforeDate, targetDuration }) {
+export function findPrevSessionReps(history, { grip, hand, beforeDate, targetDuration,
+  setNum = 1, excludeSessionId = null }) {
   if (!Array.isArray(history) || history.length === 0 || !grip) return null;
   const zone = zoneOf(targetDuration);
   if (!zone) return null;
@@ -98,6 +99,10 @@ export function findPrevSessionReps(history, { grip, hand, beforeDate, targetDur
   const byKey = new Map();
   for (const r of history) {
     if (r.force_recording?.session_protocol?.id === 'whole_curve_beta') continue;
+    // An optional/Volume second set is a separate fatigued sequence. Never
+    // flatten it into the first set or substitute it for a fresh comparison.
+    if (Number(r.set_num ?? 1) !== Number(setNum)) continue;
+    if (excludeSessionId != null && r.session_id === excludeSessionId) continue;
     if (r.grip !== grip) continue;
     if (hand && r.hand !== hand && r.hand !== "B") continue;
     if (zoneOf(r.target_duration) !== zone) continue;
@@ -146,7 +151,7 @@ export function computeAsymptoticHold({ firstRepTime, restSeconds, physModel }) 
 // the prescribed target_duration (before rep 1).
 export function buildRepCurveBundle({
   history, grip, hand, numReps, firstRepTime, restSeconds,
-  actualReps = [], targetDuration, beforeDate, physModel,
+  actualReps = [], targetDuration, beforeDate, physModel, setNum = 1, excludeSessionId = null,
 }) {
   const model = physModel || buildPhysModel(history, hand, grip);
   return {
@@ -155,7 +160,7 @@ export function buildRepCurveBundle({
     }),
     actual: buildActualSeries(actualReps),
     prevSession: ((reps) => reps ? buildActualSeries(reps) : [])(
-      findPrevSessionReps(history, { grip, hand, beforeDate, targetDuration })
+      findPrevSessionReps(history, { grip, hand, beforeDate, targetDuration, setNum, excludeSessionId })
     ),
     asymptoticHold: computeAsymptoticHold({
       firstRepTime, restSeconds, physModel: model,

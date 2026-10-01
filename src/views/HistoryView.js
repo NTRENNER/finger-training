@@ -439,7 +439,7 @@ export function HistoryView({
       const entries = [];
       for (const handKey of hands) {
         const handReps = validReps
-          .filter(r => r.hand === handKey)
+          .filter(r => r.hand === handKey && Number(r.set_num ?? 1) === 1)
           .sort((a, b) =>
             (a.set_num ?? 1) - (b.set_num ?? 1)
             || (a.rep_num ?? 0) - (b.rep_num ?? 0)
@@ -754,6 +754,7 @@ export function HistoryView({
         // so it stays in use for those callbacks below.
         const cardKey = `${sessKey}|${sess.date}`;
         const isEditing    = editKey    === cardKey;
+        const multipleSets = sess.reps.some(r => Number(r.set_num ?? 1) > 1);
         return (
           <Card key={cardKey} style={{ marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
@@ -768,6 +769,7 @@ export function HistoryView({
                   {sess.hand === "L" && "Left · "}
                   {sess.hand === "R" && "Right · "}
                   {sess.reps.some(isMixedDomainRep) ? 'Chaos Machine (Beta)' : sess.reps.some(isPeakMeasurement) ? 'Peak Test' : sess.reps.some(isPeakTestRep) ? 'Sustained peak test (legacy)' : TARGET_OPTIONS.find(o => o.seconds === sess.target_duration)?.label ?? sess.target_duration + "s"}
+                  {sess.reps.some(r => r.force_recording?.volume_beta?.id === 'volume_beta') && ' · Volume (Beta)'}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -960,6 +962,9 @@ export function HistoryView({
               const handCount = handEntries.length;
               return (
                 <div style={{ marginBottom: 10 }}>
+                  {multipleSets && <p style={{ color: C.muted, fontSize: 12 }}>
+                    Set 1 comparison. All sets are listed in the workout details below.
+                  </p>}
                   {handEntries.map(({ handKey, handReps, rep1, restS, bundle, physModel }) => {
                     // The stored prescribed_load_kg on rep 1 IS the
                     // prescription the user saw at session time. Read
@@ -1068,6 +1073,7 @@ export function HistoryView({
                         paddingRight: repEditMode === cardKey ? 22 : 10,
                       }}
                     >
+                      {multipleSets && <div style={{ color: C.muted, fontSize: 11 }}>Set {r.set_num ?? 1} · Rep {r.rep_num}</div>}
                       {handLetter && (
                         <span style={{ color: handColor, fontWeight: 700, marginRight: 6 }}>
                           {handLetter}

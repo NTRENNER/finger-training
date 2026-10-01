@@ -127,6 +127,26 @@ describe("findPrevSessionReps", () => {
     expect(out).toBeTruthy();
     expect(out.every(r => r.session_id === "s_old")).toBe(true);
   });
+
+  test('matches the same set without flattening prior optional sets', () => {
+    const sets = [1, 2].flatMap(set_num => [1, 2, 3, 4].map(rep_num => rep({
+      date: '2026-05-12', session_id: 'two-set', set_num, rep_num,
+      actual_time_s: 40 / (set_num * rep_num),
+    })));
+    const args = { grip: 'Crusher', hand: 'L', targetDuration: 45 };
+    expect(findPrevSessionReps(sets, args)).toEqual(sets.slice(0, 4));
+    expect(findPrevSessionReps(sets, { ...args, setNum: 2 })).toEqual(sets.slice(4));
+    expect(findPrevSessionReps(sets.slice(0, 4), { ...args, setNum: 2 })).toBeNull();
+  });
+
+  test('a live session cannot become its own previous comparison after saving a rep', () => {
+    const current = rep({ date: '2026-05-20', session_id: 'live' });
+    const previous = findPrevSessionReps([...history, current], {
+      grip: 'Crusher', hand: 'L', targetDuration: 45, excludeSessionId: 'live',
+    });
+    expect(previous).toHaveLength(2);
+    expect(previous.every(r => r.session_id === 's_recent')).toBe(true);
+  });
 });
 
 describe("computeAsymptoticHold", () => {
@@ -154,6 +174,18 @@ describe("computeAsymptoticHold", () => {
 });
 
 describe("buildRepCurveBundle", () => {
+  test('second-set bundle compares four prior second-set reps, never eight combined reps', () => {
+    const previous = [1, 2].flatMap(set_num => [1, 2, 3, 4].map(rep_num => rep({
+      set_num, rep_num, actual_time_s: 40 / (set_num * rep_num),
+    })));
+    const current = rep({ date: '2026-05-20', session_id: 'live', set_num: 2, actual_time_s: 18 });
+    const bundle = buildRepCurveBundle({ history: [...previous, current], grip: 'Crusher', hand: 'L',
+      numReps: 4, firstRepTime: 18, restSeconds: 20, actualReps: [current], targetDuration: 45,
+      setNum: 2, excludeSessionId: 'live', physModel: PHYS_MODEL_DEFAULT });
+    expect(bundle.actual).toHaveLength(1);
+    expect(bundle.forecasted).toHaveLength(4);
+    expect(bundle.prevSession.map(p => p.t)).toEqual([20, 10, 40 / 6, 5]);
+  });
   test("returns all four series with sensible shapes", () => {
     const history = [
       rep({ date: "2026-05-01", session_id: "s_old", target_duration: 45,

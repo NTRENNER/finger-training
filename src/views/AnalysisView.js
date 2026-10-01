@@ -137,9 +137,10 @@ export function AnalysisView({
     const hands = presentHands.length > 0 ? presentHands : [sortedAll[0].hand || "L"];
     const priorHistory = history.filter(r => r.date < sessDate);
     return {
-      meta: { date: sessDate, grip, targetDuration, restS },
+      meta: { date: sessDate, grip, targetDuration, restS,
+        multipleSets: sortedAll.some(r => Number(r.set_num ?? 1) > 1) },
       perHand: hands.map(handKey => {
-        const handReps = sortedAll.filter(r => r.hand === handKey);
+        const handReps = sortedAll.filter(r => r.hand === handKey && Number(r.set_num ?? 1) === 1);
         const handRep1 = handReps[0];
         if (!handRep1) return null;
         // The stored prescribed_load_kg on rep 1 IS what was actually
@@ -625,6 +626,9 @@ export function AnalysisView({
                 aria-label="Close"
               >×</button>
             </div>
+            {selectedSession.meta.multipleSets && <p style={{ color: C.muted, fontSize: 12 }}>
+              Set 1 comparison. All sets remain available in History.
+            </p>}
             {selectedSession.perHand.map(h => (
               <div key={h.handKey} style={{ marginBottom: selectedSession.perHand.length > 1 ? 14 : 0 }}>
                 {selectedSession.perHand.length > 1 && (

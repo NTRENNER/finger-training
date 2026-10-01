@@ -420,7 +420,7 @@ CREATE POLICY "auth_all" ON reps
       <Card>
         <Sect title="Research">
           <p style={{ margin: "0 0 12px", color: C.muted, fontSize: 14, lineHeight: 1.5 }}>
-            Review prediction accuracy and compare candidate models using your training history.
+            Review Volume Beta, prediction accuracy, and candidate models using your training history.
           </p>
           <a href="/research" target="_blank" rel="noopener noreferrer"
             style={{ color: C.blue, fontWeight: 700, display: "inline-block", padding: "8px 0" }}>

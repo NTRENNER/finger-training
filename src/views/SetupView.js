@@ -89,6 +89,8 @@ export function SetupView({
   // Tab-switch callback used by SessionPlanCard's focus pill to jump
   // to Settings when the user wants to change their climbing focus.
   onNavigateToSettings,
+  volumeExperiment = null, onStartVolumeExperiment, onVolumeExperimentStatusChange,
+  volumeReady = true,
 }) {
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
 
@@ -214,6 +216,11 @@ export function SetupView({
         onCookedChange={(v) => setConfig(c => ({ ...c, cooked: v }))}
         climbingFocus={climbingFocus}
         onNavigateToSettings={onNavigateToSettings}
+        volumeExperiment={volumeExperiment}
+        onStartVolumeExperiment={onStartVolumeExperiment}
+        onVolumeExperimentStatusChange={onVolumeExperimentStatusChange}
+        volumeReady={volumeReady}
+        availableGrips={GRIP_PRESETS}
       />
 
       {/* Abrahangs-inspired low-intensity finger loading — a submaximal

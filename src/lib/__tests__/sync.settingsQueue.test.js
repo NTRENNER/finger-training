@@ -25,7 +25,7 @@ beforeEach(() => {
 });
 
 test("coalesces settings edits by top-level key", () => {
-  enqueueUserSettingsPatch({ climbing_focus: "bouldering" });
+  expect(enqueueUserSettingsPatch({ climbing_focus: "bouldering" })).toBe(true);
   enqueueUserSettingsPatch({
     climbing_focus: "endurance",
     pyramid_project: { indoor: "V9" },
@@ -35,6 +35,17 @@ test("coalesces settings edits by top-level key", () => {
     climbing_focus: "endurance",
     pyramid_project: { indoor: "V9" },
   });
+});
+
+test('reports failure when a settings patch cannot be persisted', () => {
+  const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+  const write = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new DOMException('Quota', 'QuotaExceededError');
+  });
+  expect(enqueueUserSettingsPatch({ volume_beta_plan_trial: { id: 'trial' } })).toBe(false);
+  expect(loadLS(LS_USER_SETTINGS_PATCH_KEY)).toBeNull();
+  expect(enqueueUserSettingsPatch(null)).toBe(false);
+  write.mockRestore(); error.mockRestore();
 });
 
 test("keeps a failed settings patch queued", async () => {

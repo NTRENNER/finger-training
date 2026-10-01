@@ -15,7 +15,7 @@ const goals = Object.fromEntries(MIXED_DOMAIN_ZONES.map(key => [key, { label: MI
 test('beta is off by default, previews the five loads, supports another opener and returns to the regular plan', () => {
   const apply = jest.fn();
   render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
-  const toggle = screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' });
+  const toggle = screen.getByRole('switch', { name: 'Chaos Machine (Beta)' });
   expect(toggle).not.toBeChecked();
   expect(screen.getByRole('button', { name: 'Use recommended session' })).toBeInTheDocument();
   fireEvent.click(toggle);
@@ -30,20 +30,20 @@ test('beta is off by default, previews the five loads, supports another opener a
 });
 test('missing domain estimates disable the beta', () => {
   render(<SessionPlanCard history={[]} grip="Micro" unit="kg" GOAL_CONFIG={{ power: goals.power }} />);
-  expect(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' })).toBeDisabled();
+  expect(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' })).toBeDisabled();
 });
 
 test('adaptive loads are automatic, disclose missing readiness before starting and remain enabled for another grip', () => {
   const apply = jest.fn();
   const view = render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' }));
+  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' }));
   expect(screen.queryByRole('checkbox', { name:'Adjust loads to target times' })).not.toBeInTheDocument();
   expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.adjustLoads).toBe(true);
   expect(screen.queryByText(/23:50/)).not.toBeInTheDocument();
   expect(screen.getByText(/More measured history is needed for automatic adjustments/)).toBeInTheDocument();
   expect(screen.getAllByText('Reference target · adjustment unavailable')).toHaveLength(8);
   view.rerender(<SessionPlanCard history={[]} grip="Crusher" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' }));
+  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' }));
   expect(screen.queryByRole('checkbox', { name:'Adjust loads to target times' })).not.toBeInTheDocument();
   expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.adjustLoads).toBe(true);
 });
@@ -59,7 +59,7 @@ test('Chaos follows the recommendation instead of past rotation, and keeps manua
   const props = { history: [old], grip: 'Micro', hand: 'Both', unit: 'kg', GOAL_CONFIG: goals, onApplyPlan: apply };
   recommend('strength_endurance');
   const view = render(<SessionPlanCard {...props} />);
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' }));
+  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' }));
   expect(screen.getByRole('combobox', { name: 'First domain' })).toHaveValue('strength_endurance');
   expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.steps.map(s => s.zone)).toEqual([
     'strength_endurance', 'endurance', 'power', 'power_strength', 'strength']);
@@ -74,6 +74,6 @@ test('Chaos follows the recommendation instead of past rotation, and keeps manua
   view.rerender(<SessionPlanCard {...props} history={[old]} />);
   expect(screen.getByRole('combobox', { name: 'First domain' })).toHaveValue('endurance');
   view.rerender(<SessionPlanCard {...props} grip="Crusher" history={[old]} />);
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Chaos Machine (Beta)' }));
+  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' }));
   expect(screen.getByRole('combobox', { name: 'First domain' })).toHaveValue('power_strength');
 });
