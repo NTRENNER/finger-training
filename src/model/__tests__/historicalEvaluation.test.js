@@ -59,6 +59,7 @@ test('anchored candidate and capacity replay cannot see same-day or future outco
     session_id: 'other', avg_force_kg: 80, actual_time_s: 200 })), ...set('2026-09-20')]);
   const select = r => r.observations.force.filter(x => x.session !== 'other' && x.date <= '2026-08-07');
   expect(select(a)).toEqual(select(b));
-  expect(a.force.capacityCurves.all.matched.candidateCapacity.currentCapacity.observations).toBe(2);
-  expect(a.observations.force[0].predictions.freshAnchored).not.toBeNull();
+  expect(a.force.capacityCurves.all.available.currentCapacity.observations).toBe(2);
+  expect(a.observations.force[0].predictions.freshAnchored).toBeNull();
+  expect(a.retiredComparisons).toContain("candidateCapacity");
 });

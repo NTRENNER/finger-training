@@ -8,7 +8,7 @@ jest.mock("../supabase.js", () => ({
   },
 }));
 
-import { loadLS } from "../storage.js";
+import { loadLS, __setNsUidForTests, setLastUserRaw } from "../storage.js";
 import {
   enqueueUserSettingsPatch,
   flushUserSettingsPatch,
@@ -17,6 +17,8 @@ import { LS_USER_SETTINGS_PATCH_KEY } from "../storage.js";
 
 beforeEach(() => {
   localStorage.clear();
+  __setNsUidForTests("user-a");
+  setLastUserRaw("user-a");
   mockGetUser.mockReset();
   mockRpc.mockReset();
   mockGetUser.mockResolvedValue({ data: { user: { id: "user-a" } } });
@@ -68,3 +70,5 @@ test("drains a newer edit queued while a push is in flight", async () => {
   });
   expect(loadLS(LS_USER_SETTINGS_PATCH_KEY)).toEqual({});
 });
+
+afterEach(() => __setNsUidForTests(null));

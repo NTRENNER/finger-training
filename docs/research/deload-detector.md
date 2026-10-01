@@ -1,5 +1,12 @@
 # The deload detector: why it never fired, and what fixed it
 
+> Historical investigation, followed by the October 2026 evidence correction
+> below. The reported replay numbers describe that earlier implementation and
+> have not been recomputed for the current independent-date policy. An observed
+> between-rep residual is not a validated diagnosis of systemic fatigue or a
+> test of whether rest has restored readiness. Correlation with climbing load
+> motivates investigation; it does not establish a cause or an optimal deload.
+
 This records why the recovery gauge sat on green for five months, why that was a property of the threshold rather than of the training, and what it now reads. It is the companion to `cookedness.md`: that document is about a signal worth deleting, and this one is about a signal worth repairing. The difference between them is the whole argument.
 
 ## Why this one is worth keeping
@@ -51,3 +58,39 @@ It collapses to a single line carrying the state and its colour, and opens on ye
 The card itself has moved to Analysis → Fingers. It is read from between-rep recovery across grips, which makes it a finger diagnostic, and it belongs with the other diagnostics rather than on the first screen of the app — where, for someone with no history yet, it is furniture. It opens by default there, since arriving on that tab is already the decision to look.
 
 Nothing actionable was lost by moving it. The deload banner already lived on Session Setup and renders only when the detector actually fires, so the gauge was redundant exactly when it mattered. The banner now also carries a single quiet line for the softening state, which is short of the cross-grip bar a deload needs but is still worth knowing before a session; it appears only once a grip has enough history to be judged against itself, so a new user will not see it.
+
+## October 2026: comparable dates, uncertain readiness
+
+The previous recent window counted sessions. One normal morning and one deeply
+fatigued evening could become the entire two-session window and trigger a
+sustained warning on that single date. Extra sets could also pull the session
+average down. That confounded acute work with a change across training days.
+
+Current readiness uses set 1 of the first training session per local date,
+grip and hand. Session order is established before filtering measurement
+quality or protocol: an earlier Chaos workout or interrupted attempt still
+prevents a later set being treated as fresh. Unknown ordering is excluded;
+a lone legacy session retains its explicit legacy provenance. Hands aggregate
+to one daily observation. Descriptive recovery still retains later valid work.
+
+The recent window requires two distinct comparable dates and both must be
+within 14 days. Calibration uses the same context for its earlier fit and
+held-out baseline. The implemented baseline center is the mean of rolling
+daily windows, not the median described in the historical investigation above.
+Overlapping windows are not counted as independent evidence for personalization.
+The coaching companion similarly requires its full three-date recent window
+to be current. These recency and sample thresholds are product policies, not
+empirically validated readiness cutoffs.
+
+When the data are old or missing, the result is unknown. Rest without another
+measurement cannot turn a past residual into a fresh recovery assessment.
+Guidance now suggests reducing hard work relative to the athlete's own week,
+avoiding optional extra sets, and reviewing other training. It neither invents
+three weekly climbing days nor requires a green gauge before resuming.
+
+Regression coverage in `recoveryReadiness.test.js` and
+`recoveryCoachNote.test.js` verifies that depleted later sessions and additional
+sets cannot manufacture a sustained decline, while poor comparable first sets
+on separate dates still register. It also covers ambiguous session order,
+preceding Chaos/interrupted work, stale windows, and unchanged evidence after
+rest. The numerical thresholds still require prospective validation.

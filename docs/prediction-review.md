@@ -130,3 +130,19 @@ If writing history fails, persistence retries without optional research metadata
 If essential activity still cannot be saved, an explicit alert offers retry and a
 complete JSON backup. No workout is deleted to satisfy the research budget. The
 backup preserves measurement/protocol fields as well as the basic workout values.
+
+## October 1: measured-capacity-v4
+
+The former fresh-only competitor is retired: the incumbent already uses those
+opening holds. New snapshots label it retired and do not duplicate its scores.
+Historical replay retains empty legacy fields with `retiredComparisons` metadata;
+older saved forecasts remain readable in downloads, but are not pooled with v4.
+The separate established-capacity + recent-performance challenger remains active
+in research only. It does not set training loads. The new incumbent version also
+marks the removal of load-choice-based inflation from observed force.
+
+Normal human timing variation is not a progression penalty. Recovery calibration
+uses measured rest. The narrower planned-rest forecast comparison still identifies
+which observations match its prespecified scenario; exclusion from that research
+comparison is not a failed workout or adherence judgment. These are separate
+questions, and no metric automatically promotes a model.

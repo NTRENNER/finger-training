@@ -219,7 +219,7 @@ export function ForceDurationCard({
       </div>
       <div style={{ display: "flex", gap: 16, fontSize: 11, color: C.muted, marginBottom: 10, flexWrap: "wrap" }}>
         {!splitMode && <span><span style={{ color: POOLED_DOT }}>●</span> reps ({handView === "pooled" ? "pooled" : handView === "L" ? "left hand" : "right hand"})</span>}
-        {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model fit on the SAME basis the prescription engine uses: every rep, at its fresh-equivalent load (corrected for within-set fatigue). The curve is modeled fresh capacity — the line your recommendations come from — while the dots are observed fresh first reps."><span style={{ color: curveColor }}>―</span>{fdBasis === "raw" ? " modeled capacity (raw, 3-exp)" : " modeled fresh capacity (3-exp)"}</span>}
+        {!splitMode && threeExpCurveDataRel.length > 0 && <span title="Three-timescale F-D model fit on the SAME basis the prescription engine uses: eligible first-session opening holds at measured force. The curve is modeled fresh capacity — the line your recommendations come from — while the dots are observed fresh first reps."><span style={{ color: curveColor }}>―</span>{fdBasis === "raw" ? " modeled capacity (raw, 3-exp)" : " modeled fresh capacity (3-exp)"}</span>}
         {!splitMode && threeExpRef180 != null && <span title="Three-exp prediction at T=180s — well past the medium component's decay, where the slow component carries essentially the whole load. The closest model analog to a 'long-duration sustainable force' reference."><span style={{ color: curveColor }}>╌</span> 3-min sustainable</span>}
         {splitMode && Object.keys(fdSplitData).map(g => (
           <span key={g}>

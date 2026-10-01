@@ -170,7 +170,7 @@ export function trendNote(dates, fitScoreAt) {
 //     so the declining line isn't misread as fatigue.
 // Consumes the compact signals from recoveryCoachSignals (percentage
 // points). Pure over the injected array.
-export const RECOVERY_BAND_PP    = Math.round(GAP_NOISE_BAND * 100); // ±10pp "matches model" band
+export const RECOVERY_BAND_PP    = Math.round(GAP_NOISE_BAND * 100); // descriptive model-gap band
 export const RECOVERY_DECLINE_PP = -8;  // smoothed duration ratio dropped ≥ this to reassure
 
 export function recoveryNote(signals) {
@@ -183,19 +183,19 @@ export function recoveryNote(signals) {
     const s = slipping[0];
     return {
       key: "recovery-warn", tone: "warn",
-      text: `Between-rep recovery on ${s.grip} is running ~${Math.abs(s.recentGapPct)}pp under your model over recent sessions — a grip-specific early fatigue sign the recovery gauge won't flag until every grip dips. A fresher or lighter ${s.grip} day would help.`,
+      text: `Between-rep recovery on ${s.grip} was ~${Math.abs(s.recentGapPct)}pp under the model across comparable first sets on separate days. Consider less hard work alongside how you feel; this approximate trend does not establish broader fatigue.`,
     };
   }
   // Reassure: biggest recovery decline that's still tracking the model.
   const declining = signals
     .filter(s => Number.isFinite(s.recoveryDeltaPct) && s.recoveryDeltaPct <= RECOVERY_DECLINE_PP
-      && (s.recentGapPct == null || s.recentGapPct > -RECOVERY_BAND_PP))
+      && Number.isFinite(s.recentGapPct) && Math.abs(s.recentGapPct) < RECOVERY_BAND_PP)
     .sort((a, b) => a.recoveryDeltaPct - b.recoveryDeltaPct);
   if (declining.length) {
     const s = declining[0];
     return {
       key: "recovery-ok", tone: "info",
-      text: `Your ${s.grip} rep-time retention has drifted down lately, but it's still tracking the nonlinear fatigue model — expected as your failure times lengthen, not a fatigue sign by itself.`,
+      text: `Your ${s.grip} rep-time retention has drifted down across comparable first sets, but it's still tracking the nonlinear fatigue model. That change alone does not establish fatigue or confirm today's recovery.`,
     };
   }
   return null;
@@ -211,7 +211,7 @@ export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreA
   // compute internally from history (guarded — the fits can throw on
   // sparse data). buildCoachNotes already receives history.
   let recSignals = recoverySignals;
-  if (recSignals == null) { try { recSignals = recoveryCoachSignals(history); } catch (e) { recSignals = []; } }
+  if (recSignals == null) { try { recSignals = recoveryCoachSignals(history, { todayStr }); } catch (e) { recSignals = []; } }
   const candidates = [
     adherenceNote(history, todayStr),
     volumeRampNote(history, todayStr),

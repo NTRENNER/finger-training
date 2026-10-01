@@ -19,7 +19,7 @@ test.each([
   saveLS(LS_HISTORY_KEY,rows);
   const {result}=renderHook(()=>useRepHistory({user:null}));
   const before=computeDensityLadder(result.current.history,'Micro','power_strength');
-  expect(before.loadByHand.L).toBe(Math.round(11 / multiplier * 10) / 10);
+  expect(before.loadByHand.L).toBe(11); // a recorded discount is not measured extra capacity
   const freshBefore=[...result.current.freshMap.values()].map(r=>r.fresh);
   for(const rating of [10,3,null]) {
     await act(async()=>result.current.updateSessionCooked('s1',rating));

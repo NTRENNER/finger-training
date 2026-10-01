@@ -16,10 +16,10 @@ function Score({ title, score, unit, factor = 1, candidateLabel = 'Candidate' })
     <div style={{ color: C.muted, marginBottom: 8 }}>{score.current.days} training days · {score.current.observations} holds</div>
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', minWidth: 340, textAlign: 'left', fontSize: 14, borderCollapse: 'collapse' }}>
-        <thead><tr><th scope="col">Error</th><th scope="col">Current</th><th scope="col">{candidateLabel}</th></tr></thead>
+        <thead><tr><th scope="col">Error</th><th scope="col">Current</th>{candidateLabel && <th scope="col">{candidateLabel}</th>}</tr></thead>
         <tbody>{[['Typical', 'mae'], ['Larger misses', 'rmse'], ['Bias', 'bias']].map(([name, key]) =>
           <tr key={key}><th scope="row" style={{ fontWeight: 400, padding: '6px 4px 6px 0' }}>{name}</th>
-            <td>{fmt(score.current[key])}</td><td>{fmt(score.candidate[key])}</td></tr>)}</tbody>
+            <td>{fmt(score.current[key])}</td>{candidateLabel && <td>{fmt(score.candidate[key])}</td>}</tr>)}</tbody>
       </table>
     </div>
   </section>;
@@ -51,7 +51,7 @@ function DiagnosticBreakdowns({ report, unit, factor }) {
     </select>
     {Object.entries(report.diagnostics[measure][dimension]).map(([key, score]) =>
       <Score key={key} title={labels[key] || key} score={score} unit={['force', 'adaptiveForce'].includes(measure) ? unit : 's'}
-        factor={['force', 'adaptiveForce'].includes(measure) ? factor : 1} candidateLabel={['force', 'plannedForce', 'adaptiveForce', 'adaptivePlanned'].includes(measure) ? 'Candidate' : 'Population'} />)}
+        factor={['force', 'adaptiveForce'].includes(measure) ? factor : 1} candidateLabel={['force', 'plannedForce'].includes(measure) ? null : ['adaptiveForce', 'adaptivePlanned'].includes(measure) ? 'Established + recent' : 'Population'} />)}
     {!Object.keys(report.diagnostics[measure][dimension]).length && <p>No comparable saved forecasts in this group yet.</p>}
   </details>;
 }
@@ -64,7 +64,7 @@ function PrescriptionStages({ rows, unit, factor }) {
       The final planned load is the workout you actually chose, including progression and any selected fatigue adjustment.
       These are separate calculations; the experimental estimate does not set your load.</p>
     {!rows.length ? <p>No comparable saved opening forecasts yet.</p> : <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', textAlign: 'left', fontSize: 13, borderSpacing: 8 }}>
+      <table style={{ width: '100%', minWidth: 580, textAlign: 'left', fontSize: 13, borderSpacing: 8 }}>
         <caption style={{ textAlign: 'left' }}>Latest 20 opening holds · {unit}</caption>
         <thead><tr>{['Workout', 'Target', 'Established', 'Recent change', 'Candidate after limits', 'Final planned']
           .map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
@@ -110,21 +110,21 @@ export function PredictionAccuracyCard({ history, activities, unit = 'lbs' }) {
     <div style={{ color: C.muted, fontSize: 13 }}>All grips and both hands · Each day counts once · Recommendations stay unchanged</div>
     <details style={{ marginTop: 14 }}>
       <summary style={{ cursor: 'pointer', padding: '8px 0' }}>See the comparison</summary>
-      <p style={{ color: C.muted, lineHeight: 1.5 }}>We compare the current capacity curve with a candidate fitted to opening holds.
-        Both use the same prior history and anchoring rules. A review checks each grip and duration before any change is made.</p>
+      <p style={{ color: C.muted, lineHeight: 1.5 }}>The current curve already uses eligible opening holds. Its former opening-only competitor is retired because it became the same model.
+        The distinct established-ability + recent-performance comparison below remains experimental. A review checks each grip and duration before any change is made.</p>
       <p style={{ color: C.muted, fontSize: 13 }}>These checks cover standard single-domain sessions. Chaos Machine (Beta) and peak tests use separate measurements.</p>
       {!report.days && <p>No comparable opening holds saved yet. Recording starts with new standard sessions;
         older workouts still train the models. Each curve needs at least five prior training days.</p>}
-      <Score title="Force at the time you held" score={report.force} unit={unit} factor={factor} />
+      <Score title="Force at the time you held" score={report.force} candidateLabel={null} unit={unit} factor={factor} />
       <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>This checks the saved curves at your eventual hold duration, including valid overshoots.
         It is a comparison after the hold, not an advance prediction of its duration.</p>
-      {report.days >= REVIEW_DAYS && <Score title="Most recent 10 training days" score={report.lastTenDays} unit={unit} factor={factor} />}
-      {Object.entries(report.byGrip).map(([grip, score]) => <Score key={grip} title={grip} score={score} unit={unit} factor={factor} />)}
+      {report.days >= REVIEW_DAYS && <Score title="Most recent 10 training days" score={report.lastTenDays} candidateLabel={null} unit={unit} factor={factor} />}
+      {Object.entries(report.byGrip).map(([grip, score]) => <Score key={grip} title={grip} score={score} candidateLabel={null} unit={unit} factor={factor} />)}
       <details style={{ marginTop: 16 }}><summary style={{ cursor: 'pointer' }}>By planned domain</summary>
-        {Object.entries(report.byDomain).map(([domain, score]) => <Score key={domain} title={labels[domain] || domain} score={score} unit={unit} factor={factor} />)}
+        {Object.entries(report.byDomain).map(([domain, score]) => <Score key={domain} title={labels[domain] || domain} score={score} candidateLabel={null} unit={unit} factor={factor} />)}
         <p style={{ color: C.muted, fontSize: 13 }}>Grouped by the planned session. The review download also separates the durations actually held.</p>
       </details>
-      <Score title="Advance hold-time estimates" score={report.plannedForce} unit="s" />
+      <Score title="Advance hold-time estimates" score={report.plannedForce} candidateLabel={null} unit="s" />
       <p style={{ color: C.muted, fontSize: 13 }}>Only holds within 10% of the planned force enter this check.
         These estimates use the capacity curves; load limits and the rep ladder are separate.</p>
       <details style={{ marginTop: 16 }}>

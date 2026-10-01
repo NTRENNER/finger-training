@@ -20,12 +20,9 @@ import { startingHandForDay, otherHand, handOrderMetadata } from '../model/handO
 //   switch_hands  — Both-mode prompt to swap to the other hand
 //   done          — SessionSummaryView is rendered
 //
-// Multi-set machinery removed (May 2026, curve-trust commit C):
-// every session is one set of N hangs. The user trains a single set
-// to failure, end of session. The legacy `between_sets` phase, the
-// numSets / setRestTime config fields, and currentSet bookkeeping
-// are gone. set_num is kept on rep records (always 1 going forward)
-// for backward compat with the Supabase schema and existing data.
+// One set is the ordinary recommendation. Voluntary additional sets can
+// follow from the summary; set_num identifies them without admitting them
+// to fresh-capacity fitting or ordinary ladder advancement.
 //
 // Multi-set machinery removed in commit C; alternating-hand mode
 // (interleave L↔R within a set, restTime ≥ targetTime trigger)
@@ -145,6 +142,7 @@ export function useSessionRunner({
   // not state: it must not retrigger effects and is only read once.
   const preSessionHistoryRef = useRef(null);
   const sessionAdjustmentRef = useRef(null);
+  const sessionPrescriptionRef = useRef({});
   const mixedModelsRef = useRef({});
   const [sessionStartedAt, setSessionStartedAt] = useState("");
   // Session-anchored local date (YYYY-MM-DD), captured once at
@@ -241,6 +239,7 @@ export function useSessionRunner({
     if ((override && override.grip) || cfg.mixedDomainPlan || cfg.peakTest) setConfig(cfg);
     const sid = uid();
     const rw = {};
+    const originalLoads = {};
     // Cookedness scale-down at the published fixed rate. 1.0 when
     // cooked is null/0 — see model/cookedScaling.js.
     const adjustment = sessionAdjustment(cfg.cooked, cfg.adjustLoadForFatigue === true);
@@ -261,8 +260,18 @@ export function useSessionRunner({
               { freshMap, threeExpPriors });
             return p ? p.value : estimateRefWeight(history, h, cfg.grip, cfg.targetTime);
           })();
+      originalLoads[h] = base;
       rw[h] = base != null ? base * fatigueMod : base;
     });
+    // Freeze what this ordinary session intended before any outcomes arrive.
+    // Optional sets retain the same plan; edits to actual reps cannot rewrite it.
+    sessionPrescriptionRef.current = !cfg.mixedDomainPlan && !cfg.peakTest
+      ? Object.fromEntries(['L', 'R'].map(h => [h, {
+        version: 1, target_duration_s: cfg.targetTime, reps_per_set: cfg.repsPerSet,
+        rest_s: cfg.restTime, hand_mode: cfg.hand,
+        load_kg: Math.round((rw[h] || 0) * 10) / 10,
+        ...(originalLoads[h] > 0 ? { base_load_kg: originalLoads[h] } : {}),
+      }])) : {};
     // Anchor the session's local date ONCE, here at start. Reused for
     // daily_state and stamped on every rep so the whole session stays
     // on the day it began even if it runs past local midnight.
@@ -363,7 +372,7 @@ export function useSessionRunner({
   }, [phase]);
 
   // ── Handle rep completion ─────────────────────────────────
-  const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null, failureValid = true, endReason = "muscular_failure", forceRecording = null, startedAtMs = null, endedAtMs = null, loadProvenance = null }) => {
+  const handleRepDone = useCallback(({ actualTime, avgForce, peakForce, failed = false, manualLoadKg = null, failureValid = true, endReason = "muscular_failure", forceRecording = null, startedAtMs = null, endedAtMs = null, loadProvenance = null, endSession = false }) => {
     if (config.peakTest) return; // PeakTestView owns peak-only recording and alternating rounds.
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
@@ -405,6 +414,9 @@ export function useSessionRunner({
       ...(currentRep > 0 ? { capacity_eligible: false } : {}),
     } : { ...forceRecording };
     recordedForce.hand_order = handOrderMetadata(firstHandRef.current, sessionDate || today());
+    if (!mixed && sessionPrescriptionRef.current[effectiveHand]) {
+      recordedForce.session_prescription = { ...sessionPrescriptionRef.current[effectiveHand] };
+    }
     const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {
       // Real UUID, not uid(): pushRep re-stamps non-UUID ids into the
@@ -512,15 +524,17 @@ export function useSessionRunner({
     });
     setSessionReps(reps => [...reps, repRecord]);
     addReps([repRecord]);
+    if (endSession) {
+      finishSession([...sessionReps, repRecord]);
+      return;
+    }
 
     // (Runtime fatigue accumulator removed — was dead state, no view
     // consumed the value. The historical pipeline handles all fatigue
     // analysis via effectiveLoad → freshMap → three-exp fit.)
 
-    // Single-set model (curve-trust commit C). All set-completion /
-    // between-sets logic has been removed — every session is one set
-    // of N hangs; when reps fill the set, the session ends (or
-    // switches to the other hand in Both-mode).
+    // Finish the current set, or switch hands in Both-mode. The completed
+    // summary can start a voluntary extra set with this same prescription.
     //
     // Alternating-hand interleaving (the legacy altMode) was removed
     // in the follow-up — with the flat 20s rest the efficiency gain

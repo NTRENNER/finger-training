@@ -212,23 +212,16 @@ describe("computeDensityLadder", () => {
     expect(out.basis.date).toBe("2026-06-05");
   });
 
-  test("cooked sessions pin the FRESH-EQUIVALENT load (no compounding scale-down)", () => {
-    // Fixed manual scaling (July 2026): a session recorded at cooked 5
-    // ran at fresh × capacityMultiplier(5). The ladder must
-    // divide that back out, or consecutive cooked sessions would
-    // ratchet the pin downward (each pin inheriting the previous
-    // discount, then getting discounted again). Assert against
-    // capacityMultiplier itself so the test tracks the fixed rate.
-    const mult = capacityMultiplier(5);
-    const fresh = 60;
-    const recorded = fresh * mult;
+  test("an old reduced-load session does not manufacture fresh capacity or advance", () => {
+    const recorded = 60 * capacityMultiplier(5);
     const hist = session({
       id: "s1", date: "2026-06-01", T: 40, loadKg: recorded,
       times: { L: [40, 24, 16, 12] }, cooked: 5,
     });
     const out = computeDensityLadder(hist, "Crusher", "power");
-    expect(out.loadByHand.L).toBeCloseTo(fresh, 0);   // de-cooked back to fresh-equivalent
-    expect(out.loadByHand.L).toBeCloseTo(recorded / capacityMultiplier(5), 0);
+    expect(out.loadByHand.L).toBe(recorded);
+    expect(out.decision).toBe("repeat");
+    expect(out.reps).toBe(4);
   });
 
   test("a one-hand manual override pins THAT hand's actual load, not the suggestion", () => {
@@ -386,7 +379,7 @@ describe("re-pin guard + engine bounds", () => {
       actual_time_s: 203, manual_load_kg: 30, prescribed_load_kg: 22,
       rep_num: 1, set_num: 1, failed: false, session_cooked: null,
     };
-    const hist = [...measured, manual];
+    const hist = [...measured, ...[1, 2, 3, 4].map(rep_num => ({ ...manual, id: `man${rep_num}`, rep_num }))];
     const out = computeDensityLadder(hist, "Crusher", "endurance");
     expect(out).not.toBeNull();
     const ceil = enduranceCeilingKg(hist, "L", "Crusher", 200);

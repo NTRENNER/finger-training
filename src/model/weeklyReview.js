@@ -168,7 +168,7 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
     .sort((a, b) => b.days - a.days);
 
   // Recovery — the marquee honesty signal.
-  let recovery = { level: "green", label: null, guidanceAction: null };
+  let recovery = { level: "unknown", label: null, guidanceAction: null };
   try {
     const ds = deloadStatus(history, workoutSessions, { today: refDate, activities });
     let guidanceAction = null;
@@ -177,7 +177,7 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
       guidanceAction = g ? g.action : null;
     }
     recovery = { level: ds.level, label: ds.label, guidanceAction };
-  } catch (e) { /* leave green */ }
+  } catch (e) { /* leave unknown: missing computation is not reassuring evidence */ }
 
   const finger = {
     daysThisWeek: distinctDates(weekReps),
@@ -233,7 +233,7 @@ export function assembleReview(signals) {
   } else if (recovery.level === "yellow") {
     concerns.push({ kind: "concern", text: recovery.guidanceAction
       ? `${recovery.label}. ${recovery.guidanceAction}`
-      : `${recovery.label}. Keep it light until recovery reads green.` });
+      : `${recovery.label}. Consider less hard work and reassess with a comparable first set when you feel ready.` });
   }
   for (const g of finger.staleGrips.slice(0, 2)) {
     concerns.push({ kind: "concern", text: `${g.grip} has gone quiet — ${g.days} days since you last trained it. Worth a session before the curve drifts.` });
@@ -251,7 +251,7 @@ export function assembleReview(signals) {
   const activityStr = parts.length ? parts.join(", ") : "nothing logged";
   const lighter = finger.daysPerWeekBaseline >= 1 && fd < finger.daysPerWeekBaseline * LOW_WEEK_FRAC;
   if (lighter && recovery.level === "green") {
-    info.push({ kind: "info", text: `A lighter week (${activityStr}) — and your recovery's green, so it reads as good rest, not lost ground.` });
+    info.push({ kind: "info", text: `A lighter week (${activityStr}). Recent comparable sets stayed within your recorded recovery range.` });
   } else {
     info.push({ kind: "info", text: `This week: ${activityStr}.` });
   }
@@ -562,18 +562,14 @@ export function assembleCheckIn(signals) {
   }
   const digest = assembleReview(signals);
   const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates } = signals;
-  const recovery = signals.recovery || { level: "green", label: null };
+  const recovery = signals.recovery || { level: "unknown", label: null };
 
   // ── Recovery × volume cross-reference (July 2026, per Nathan) ──
   // "Recovery softening" and "volume is well under your norm"
   // are the SAME story told twice: the athlete already eased up. When
-  // both fire, merge them into one line that credits the lighter week
-  // (busy stretch or intentional deload — either way the right
-  // response) and then branches on what recovery says NOW:
-  //   green  → the deload banked; frame it as a platform to advance
-  //            (lands in WHAT'S MOVING, not stuck).
-  //   yellow → right direction, not done — hold light until green.
-  //   red    → the rest hasn't caught up — extend it.
+  // both fire, describe the lower volume alongside the recorded first-set
+  // evidence. Lower volume alone does not measure restored capacity; old
+  // residuals cannot tell us whether rest has worked.
   // With no volume drop, the recovery concern passes through verbatim.
   const rampDrop = (behaviorNotes || []).find(n => n.key === "ramp-drop");
   const dropPct = rampDrop && Number.isFinite(rampDrop.ratio)
@@ -581,18 +577,19 @@ export function assembleCheckIn(signals) {
   const volumeRead = dropPct != null
     ? (dropPct <= 5 ? "near zero" : `~${dropPct}% of your monthly norm`)
     : null;
-  const mergedRecoveryVolume = rampDrop && recovery.level !== "green" && recovery.label
+  const recoveryConcern = recovery.level === 'red' || recovery.level === 'yellow';
+  const mergedRecoveryVolume = rampDrop && recoveryConcern && recovery.label
     ? (recovery.level === "red"
-      ? `Recovery is still down despite volume falling to ${volumeRead} this week. Extend the deload: easy sessions only until the trend turns.`
-      : `Recovery was softening, but volume was already ${volumeRead} this week. That's the right response; keep it light until recovery turns green, then advance fresh.`)
+      ? `Volume fell to ${volumeRead} this week. Earlier comparable sets were below the expected recovery range; reduced volume alone cannot tell us whether you have recovered. Reassess when you feel ready.`
+      : `Volume was already ${volumeRead} this week. Keep the earlier recovery signal in context and reassess with a comparable first set when you feel ready.`)
     : null;
-  const deloadBanked = rampDrop && recovery.level === "green"
-    ? `Volume fell to ${volumeRead} this week and recovery reads green — that's a banked deload, not lost ground. Advance while you're fresh.`
+  const reducedVolumeWithinRange = rampDrop && recovery.level === "green"
+    ? `Volume fell to ${volumeRead} this week. Recent comparable sets stayed within your recorded recovery range; use that alongside how you feel when planning the next session.`
     : null;
-  const compactRecoveryVolume = rampDrop && recovery.level !== "green" && recovery.label
+  const compactRecoveryVolume = rampDrop && recoveryConcern && recovery.label
     ? (recovery.level === "red"
-      ? `Recovery still down despite volume falling to ${volumeRead} this week. Extend the deload until the trend turns.`
-      : `Recovery softening — volume was already ${volumeRead} this week. Keep it light until recovery turns green.`)
+      ? `Volume fell to ${volumeRead}. Earlier sets were below expected; reassess when you feel ready.`
+      : `Volume was already ${volumeRead}. Reassess the earlier recovery signal when you feel ready.`)
     : null;
   const compactPoints = compactRecoveryVolume
     ? digest.points.map(p =>
@@ -630,7 +627,7 @@ export function assembleCheckIn(signals) {
     if (dir >= 0.05) moving.push(`You're outlasting targets more: opening-rep hold ratio ${perf.ratioPrev} → ${perf.ratioNow} over the last month — the curve amplitude is lifting.`);
   }
   if (perf && perf.overshoots >= 3) moving.push(`${perf.overshoots} reps beat their target by 40%+ this month — the engine will chase those with heavier prescriptions.`);
-  if (deloadBanked) moving.push(deloadBanked);
+  if (reducedVolumeWithinRange) moving.push(reducedVolumeWithinRange);
 
   // WHAT'S STUCK OR MISSING — digest concerns + behavior (workload
   // ramp / adherence) + stale zones + falling ratio.
@@ -656,10 +653,10 @@ export function assembleCheckIn(signals) {
       return t;
     });
   // The raw ramp-drop note is consumed by the merge (yellow/red) or the
-  // banked-deload line in WHAT'S MOVING (green) — never shown verbatim
+  // within-range context in WHAT'S MOVING (green) — never shown verbatim
   // alongside either.
   for (const n of behaviorNotes || []) {
-    if (rampDrop && n === rampDrop && (mergedRecoveryVolume || deloadBanked)) continue;
+    if (rampDrop && n === rampDrop && (mergedRecoveryVolume || reducedVolumeWithinRange)) continue;
     stuck.push(n.text);
   }
   for (const sz of (staleZones || []).slice(0, 3)) {

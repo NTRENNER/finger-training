@@ -149,20 +149,22 @@ describe("weekly deload plan", () => {
     expect(fingerSessionsThisWeek(hist, "2026-05-20")).toBe(2);
   });
 
-  test("deloadPlan: strong = 1 session + skip A + 2 climb days; mild = cap 2", () => {
-    expect(deloadPlan("strong")).toMatchObject({ fingerCap: 1, skipWorkout: "A", climbDays: 2 });
-    expect(deloadPlan("mild")).toMatchObject({ fingerCap: 2, skipWorkout: null });
+  test("deloadPlan suggests reducing usual volume without inventing a weekly schedule", () => {
+    expect(deloadPlan("strong")).toEqual({ reduceVolume: true, avoidExtraSets: true, reviewOtherTraining: true });
+    expect(deloadPlan("mild")).toEqual({ reduceVolume: true, avoidExtraSets: true, reviewOtherTraining: false });
     expect(deloadPlan("none")).toBeNull();
   });
 
-  test("buildDeloadGuidance: strong names skip-A + climb cut + session count", () => {
+  test("buildDeloadGuidance names actual training days and offers reassessment", () => {
     const hist = sess("Crusher", "L", "2026-05-20", 30, 28);
     const g = buildDeloadGuidance("strong", hist, { today: "2026-05-20" });
     expect(g.severity).toBe("strong");
     expect(g.fingerDoneThisWeek).toBe(1);
-    expect(g.action).toMatch(/skip Workout A/i);
-    expect(g.action).toMatch(/climbing days/i);
-    expect(g.action).toMatch(/cut volume, not intensity/i);
+    expect(g.fingerTrainingDaysThisWeek).toBe(1);
+    expect(g.action).toMatch(/1 finger-training day recorded/i);
+    expect(g.action).toMatch(/relative to your usual week/i);
+    expect(g.action).toMatch(/Reassess with a comparable first set/i);
+    expect(g.action).not.toMatch(/skip Workout A|from 3|limit finger training to 1 session/i);
   });
 
   test("buildDeloadGuidance: null severity → null", () => {
@@ -246,19 +248,19 @@ test('stale healthy grip cannot veto current declines', () => {
  expect(computeDeload([...current,...stale],[],{today:TODAY}).severity).toBe('mild');
  expect(computeDeload([...current,...stale],[],{today:TODAY}).signals.gripGaps.Prime).toBeUndefined();
 });
-test.each(['2026-05-07', '2026-05-05', '2026-04-29', '2026-01-01'])(
-  'a grip trained today stays current regardless of prior session date %s', prior => {
+test.each([['2026-05-07', true], ['2026-05-06', true], ['2026-05-05', false], ['2026-01-01', false]])(
+  'the complete recent window starting %s must be current', (prior, current) => {
     const h = [prior, TODAY].flatMap(d => sess('Crusher', 'L', d, 30, 10));
-    expect(recentGapHeldOut(h, 'Crusher', TODAY, 2)).toMatchObject({n:2, lastDate:TODAY});
+    expect(Boolean(recentGapHeldOut(h, 'Crusher', TODAY, 2))).toBe(current);
   }
 );
-test('yesterday remains recent even when the prior session was weeks earlier', () => {
+test('yesterday cannot revive a prior session from before a long break', () => {
   const h = ['2026-04-30', '2026-05-19'].flatMap(d => sess('Crusher', 'L', d, 30, 10));
-  expect(recentGapHeldOut(h, 'Crusher', TODAY, 2)).toMatchObject({lastDate:'2026-05-19'});
+  expect(recentGapHeldOut(h, 'Crusher', TODAY, 2)).toBeNull();
 });
 test.each([['2026-05-06', true], ['2026-05-05', false]])(
-  'latest qualifying session %s controls the 14-day boundary', (last, current) => {
-    const h = ['2026-04-01', last].flatMap(d => sess('Crusher', 'L', d, 30, 10));
+  'oldest qualifying day %s controls the 14-day boundary', (first, current) => {
+    const h = [first, '2026-05-19'].flatMap(d => sess('Crusher', 'L', d, 30, 10));
     expect(Boolean(recentGapHeldOut(h, 'Crusher', TODAY, 2))).toBe(current);
   }
 );
@@ -266,14 +268,14 @@ test('a future session cannot make old evidence current', () => {
   const h = ['2026-04-01', '2026-04-22', '2026-05-21'].flatMap(d => sess('Crusher', 'L', d, 30, 10));
   expect(recentGapHeldOut(h, 'Crusher', TODAY, 2)).toBeNull();
 });
-test('less-frequent declining grips still contribute to systemic concern and a strong deload', () => {
+test('a grip with only one current comparison cannot establish cross-grip concern', () => {
   const h = [...fatiguedRecent('Micro'),
     ...['2026-04-08', '2026-04-29', TODAY].flatMap(d => sess('Crusher', 'L', d, 30, 10))];
   const result = computeDeload(h, liftSpike, {today:TODAY});
-  expect(result).toMatchObject({deload:true, severity:'strong', state:'systemic_concern'});
-  expect(result.signals.crossGripDown).toBe(true);
-  expect(result.signals.gripGaps.Crusher.lastDate).toBe(TODAY);
-  expect(deloadStatus(h, liftSpike, {today:TODAY}).level).toBe('red');
+  expect(result).toMatchObject({deload:false, severity:'none', state:'local_concern'});
+  expect(result.signals.crossGripDown).toBe(false);
+  expect(result.signals.gripGaps.Crusher).toBeUndefined();
+  expect(deloadStatus(h, liftSpike, {today:TODAY}).level).toBe('yellow');
 });
 test('one trained grip has a useful local concern without a systemic claim', () => {
  const r=deloadStatus(fatiguedRecent('Micro'),[],{today:TODAY});

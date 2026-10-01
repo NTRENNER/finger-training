@@ -1,5 +1,6 @@
 // src/lib/supabase.js
 import { createClient } from "@supabase/supabase-js";
+import { createOwnedFetch } from './ownedRequest.js';
 
 const url = process.env.REACT_APP_SUPABASE_URL;
 const key = process.env.REACT_APP_SUPABASE_ANON_KEY;
@@ -24,4 +25,6 @@ const fakeClient = {
   },
 };
 
-export const supabase = (url && key) ? createClient(url, key) : fakeClient;
+export const supabase = (url && key)
+  ? createClient(url, key, { global: { fetch: createOwnedFetch(url) } })
+  : fakeClient;

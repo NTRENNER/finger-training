@@ -12,80 +12,9 @@
 // localStorage under LS_QUEUE_KEY and replayed on the next online
 // auth-ready cycle (App's reconcile path).
 //
-// SQL schemas (run once in the Supabase SQL editor):
-//
-//   CREATE TABLE workout_sessions (
-//     id text PRIMARY KEY,
-//     date text, workout text, session_number integer,
-//     was_recommended boolean,
-//     exercises jsonb,
-//     created_at timestamptz DEFAULT now()
-//   );
-//   ALTER TABLE workout_sessions ENABLE ROW LEVEL SECURITY;
-//   CREATE POLICY "auth_all" ON workout_sessions
-//     FOR ALL USING (auth.uid() IS NOT NULL);
-//
-// For existing tables (added later — run once in the Supabase SQL
-// editor; safe to re-run because of IF NOT EXISTS):
-//   ALTER TABLE workout_sessions
-//     ADD COLUMN IF NOT EXISTS was_recommended boolean;
-//   ALTER TABLE reps
-//     ADD COLUMN IF NOT EXISTS perceived_rpe integer;
-//
-// `perceived_rpe` was the per-rep stamp for the legacy per-zone gain
-// learner. Column preserved on `reps` for historical reads; always
-// null on new writes. Cookedness now lives in reps.session_cooked and
-// daily_state.cooked, both written only by the user.
-//
-// `was_recommended` carries the WorkoutTab rotation signal across
-// devices. WorkoutTab derives "next workout" from the synced log,
-// counting only sessions where this flag is true (or null, treated
-// as true for legacy rows). Without the column, two devices see
-// the same set of sessions but drift on rotation when the user
-// occasionally picks off-rotation.
-//
-//   CREATE TABLE reps (
-//     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-//     created_at timestamptz DEFAULT now(),
-//     date text, grip text, hand text,
-//     target_duration integer,
-//     prescribed_load_kg real,  -- program-suggested kg load (set on every write)
-//     manual_load_kg real,      -- user-entered actual kg for non-Tindeq sessions (nullable)
-//     weight_kg real,           -- LEGACY: equivalent to prescribed_load_kg, kept for safety
-//     actual_time_s real,
-//     avg_force_kg real, peak_force_kg real,
-//     set_num integer, rep_num integer,
-//     rest_s integer, session_id text,
-//     failed boolean DEFAULT false
-//   );
-//   ALTER TABLE reps ENABLE ROW LEVEL SECURITY;
-//   CREATE POLICY "auth_all" ON reps
-//     FOR ALL USING (auth.uid() IS NOT NULL);
-//
-//   CREATE TABLE body_weights (
-//     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-//     date        text NOT NULL UNIQUE,
-//     kg          real NOT NULL,
-//     created_at  timestamptz DEFAULT now()
-//   );
-//   ALTER TABLE body_weights ENABLE ROW LEVEL SECURITY;
-//   CREATE POLICY "auth_all" ON body_weights
-//     FOR ALL USING (auth.uid() IS NOT NULL);
-//   CREATE INDEX body_weights_date_idx ON body_weights (date DESC);
-//
-//   CREATE TABLE activities (
-//     id          text PRIMARY KEY,
-//     type        text NOT NULL,
-//     date        text NOT NULL,
-//     discipline  text, venue text, grade text, ascent text,
-//     wall        text, rpe integer, attempts integer,
-//     created_at  timestamptz DEFAULT now()
-//   );
-//   ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
-//   CREATE POLICY "auth_all" ON activities
-//     FOR ALL USING (auth.uid() IS NOT NULL);
-//   CREATE INDEX activities_date_idx ON activities (date DESC);
-//   CREATE INDEX activities_type_idx ON activities (type);
+// Database schema and ownership policies live in supabase/migrations.
+// Every cloud request is bound to the frozen page owner by the client fetch
+// boundary, including RPC calls and direct mutations outside this module.
 
 import { supabase } from "./supabase.js";
 import {
@@ -98,17 +27,17 @@ import { today } from "../util.js";
 // authenticated push end up here and are flushed on the next sync.
 export const LS_QUEUE_KEY = "ft_push_queue";
 
-// Fetch the current user's id from the live Supabase auth session.
-// Returns null if not signed in (caller bails out of the push). All
-// per-row inserts call this and attach the returned id as user_id
-// so RLS WITH CHECK passes and the row is correctly attributed.
-// Server-side, each table also has DEFAULT auth.uid() on user_id —
-// belt and suspenders, but the explicit field avoids a round-trip
-// surprise if the default ever gets dropped.
+// Return only the authenticated owner of this page's data. Never relabel an
+// old page's pending work with whichever account authenticated most recently.
+export function ownsLocalSession(ownerId = getStorageUserId()) {
+  return Boolean(ownerId) && getStorageUserId() === ownerId && readRawLastUser() === ownerId;
+}
 async function currentUserId() {
+  const ownerId = getStorageUserId();
+  if (!ownsLocalSession(ownerId)) return null;
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    return user?.id ?? null;
+    return user?.id === ownerId && ownsLocalSession(ownerId) ? ownerId : null;
   } catch (e) {
     return null;
   }
@@ -189,8 +118,10 @@ export async function deleteWorkoutSession(id) {
     // synced table is the cross-device authority; ordering it before
     // the delete means a crash between the two calls leaves a tombstone
     // and a soon-to-be-filtered row, not a resurrectable orphan.
-    await pushWorkoutSessionTombstones([id]);
-    const { error } = await supabase.from("workout_sessions").delete().eq("id", id);
+    if (!await pushWorkoutSessionTombstones([id])) return false;
+    const userId = await currentUserId();
+    if (!userId) return false;
+    const { error } = await supabase.from("workout_sessions").delete().eq("user_id", userId).eq("id", id);
     if (error) { console.warn("Supabase workout delete:", error.message); return false; }
     return true;
   } catch (e) {
@@ -441,6 +372,8 @@ export async function flushQueue() {
 }
 
 async function flushQueueOnce() {
+  const owner = getStorageUserId();
+  if (!ownsLocalSession(owner)) return 0;
   const q = loadLS(LS_QUEUE_KEY) || [];
   if (q.length === 0) return 0;
   const compositeKey = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
@@ -451,6 +384,7 @@ async function flushQueueOnce() {
     fetchRepSlotTombstoneKeys(),
     fetchSessionTombstoneIds(),
   ]);
+  if (!ownsLocalSession(owner)) return 0;
   const idTombs = new Set([
     ...(loadLS(LS_REP_DELETED_KEY) || []),
     ...(cloudIdTombs || []),
@@ -464,6 +398,7 @@ async function flushQueueOnce() {
   let flushed = 0;
   let dropped = 0;
   for (const rep of q) {
+    if (!ownsLocalSession(owner)) return flushed;
     // Pre-flight tombstone gate. Treats matches as "successfully
     // processed" — drop from queue, don't retry, don't push.
     if ((rep.id && idTombs.has(rep.id))
@@ -474,6 +409,7 @@ async function flushQueueOnce() {
       continue;
     }
     const result = await pushRep(rep);
+    if (!ownsLocalSession(owner)) return flushed;
     if (result === "ok") {
       if (rep.id) processed.add(rep.id);
       flushed++;
@@ -485,6 +421,7 @@ async function flushQueueOnce() {
     }
     // result === "error" → leave in queue for next flush
   }
+  if (!ownsLocalSession(owner)) return flushed;
   const fresh = loadLS(LS_QUEUE_KEY) || [];
   const remaining = fresh.filter(r => !(r.id && processed.has(r.id)));
   saveLS(LS_QUEUE_KEY, remaining);
@@ -560,28 +497,34 @@ let updateFlushInFlight = false;
 export async function flushUpdateQueue() {
   if (updateFlushInFlight) return 0;
   updateFlushInFlight = true;
+  const owner = getStorageUserId();
   try {
+    if (!ownsLocalSession(owner)) return 0;
     const q = loadLS(LS_UPDATE_QUEUE_KEY) || [];
     if (q.length === 0) return 0;
     const done = new Set();
     for (const e of q) {
       try {
+        if (await currentUserId() !== owner) return done.size;
         if (e.kind === "rep") {
           const { error } = await supabase.from("reps")
-            .update(e.updates).eq("id", e.id);
+            .update(e.updates).eq("user_id", owner).eq("id", e.id);
+          if (!ownsLocalSession(owner)) return done.size;
           if (!error) done.add(updateTargetKey(e));
         } else if (e.kind === "session") {
           const { error } = await supabase.from("reps")
-            .update(e.updates).eq("session_id", e.sessionKey);
+            .update(e.updates).eq("user_id", owner).eq("session_id", e.sessionKey);
+          if (!ownsLocalSession(owner)) return done.size;
           if (!error) done.add(updateTargetKey(e));
         }
       } catch {
         // Network-level failure — keep the entry for the next flush.
       }
     }
-    if (done.size > 0) {
+    if (done.size > 0 && ownsLocalSession(owner)) {
       const fresh = loadLS(LS_UPDATE_QUEUE_KEY) || [];
-      saveLS(LS_UPDATE_QUEUE_KEY, fresh.filter(e => !done.has(updateTargetKey(e))));
+      saveLS(LS_UPDATE_QUEUE_KEY, fresh.filter(e => !done.has(updateTargetKey(e))
+        || JSON.stringify(e) !== JSON.stringify(q.find(sent => updateTargetKey(sent) === updateTargetKey(e)))));
     }
     return done.size;
   } finally {
@@ -761,12 +704,12 @@ export async function fetchUserSettings() {
 // migrations/repairs.
 export async function pushUserSettings(settings) {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.id) return false;
+    const userId = await currentUserId();
+    if (!userId) return false;
     const { error } = await supabase
       .from("user_settings")
       .upsert({
-        user_id: user.id,
+        user_id: userId,
         settings,
         updated_at: new Date().toISOString(),
       }, { onConflict: "user_id" });
@@ -785,8 +728,8 @@ export async function pushUserSettings(settings) {
 export async function pushUserSettingsPatch(patch) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) return false;
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.id) return false;
+    const userId = await currentUserId();
+    if (!userId) return false;
     const { error } = await supabase.rpc("update_user_settings_patch", { patch });
     if (error) { console.warn("Supabase settings patch:", error.message); return false; }
     return true;
@@ -815,14 +758,16 @@ let settingsPatchFlushPromise = null;
 export function flushUserSettingsPatch() {
   if (settingsPatchFlushPromise) return settingsPatchFlushPromise;
 
+  const owner = getStorageUserId();
   settingsPatchFlushPromise = (async () => {
     while (true) {
+      if (!ownsLocalSession(owner)) return false;
       const queued = loadLS(LS_USER_SETTINGS_PATCH_KEY);
       if (!queued || typeof queued !== "object" || Array.isArray(queued)
           || Object.keys(queued).length === 0) return true;
 
       const ok = await pushUserSettingsPatch(queued);
-      if (!ok) return false;
+      if (!ok || !ownsLocalSession(owner)) return false;
 
       const fresh = loadLS(LS_USER_SETTINGS_PATCH_KEY);
       if (!fresh || typeof fresh !== "object" || Array.isArray(fresh)) return true;
@@ -1035,8 +980,10 @@ export async function deleteActivityCloud(id) {
     // device that still holds this activity locally re-pushes it on
     // its next reconcile backfill ("local-only entry" by id), making
     // delete-resurrection deterministic, not rare.
-    await pushActivityTombstones([id]);
-    const { error } = await supabase.from("activities").delete().eq("id", id);
+    if (!await pushActivityTombstones([id])) return false;
+    const userId = await currentUserId();
+    if (!userId) return false;
+    const { error } = await supabase.from("activities").delete().eq("user_id", userId).eq("id", id);
     if (error) { console.warn("Supabase activity delete:", error.message); return false; }
     return true;
   } catch (e) {

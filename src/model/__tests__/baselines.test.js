@@ -11,7 +11,6 @@ import {
 } from "../baselines.js";
 import { buildThreeExpPriors, predForceThreeExp } from "../threeExp.js";
 import { freshFitReps } from "../load.js";
-import { capacityMultiplier } from "../cookedScaling.js";
 
 const r = (over) => ({
   grip: "Crusher", hand: "L", date: "2026-04-20",
@@ -170,12 +169,7 @@ describe("baseline prior is LEAK-FREE (does not pull baseline toward future stre
 });
 
 describe("fresh-equivalent basis (freshEq opt on the estimate builders)", () => {
-  // July 2026 (fixed manual scaling): cookedness scales loads again at
-  // a fixed published rate (see cookedScaling.capacityMultiplier),
-  // so the freshEq path de-cooks by exactly that multiplier. An
-  // all-cooked history therefore fits a curve that is the raw curve
-  // scaled up by 1/mult — bounded (mult >= 0.75), never the old
-  // exp(-beta*cooked) runaway.
+  // Compatibility options must not inflate measured force from fatigue reports.
   const cookedHistory = (cooked) => [
     r({ target_duration: 10,  actual_time_s: 10,  avg_force_kg: 50, session_cooked: cooked }),
     r({ target_duration: 45,  actual_time_s: 45,  avg_force_kg: 30, session_cooked: cooked }),
@@ -189,15 +183,14 @@ describe("fresh-equivalent basis (freshEq opt on the estimate builders)", () => 
     expect(buildGripEstimates(history, null, { freshEq: false })).toEqual(raw);
   });
 
-  test("all-cooked history: fresh-eq curve is the raw curve scaled by 1/mult", () => {
+  test("fatigue context leaves the estimated curve at measured force", () => {
     const history = cookedHistory(5);
     const raw   = buildGripEstimates(history, null);
     const fresh = buildGripEstimates(history, null, { freshEq: true });
     expect(raw.Crusher).toBeDefined();
     expect(fresh.Crusher).toBeDefined();
-    const mult = capacityMultiplier(5); // 0.875 — fixed rate, model-independent
     raw.Crusher.forEach((amp, i) => {
-      expect(fresh.Crusher[i]).toBeCloseTo(amp / mult, 6);
+      expect(fresh.Crusher[i]).toBeCloseTo(amp, 6);
     });
   });
 
@@ -210,13 +203,12 @@ describe("fresh-equivalent basis (freshEq opt on the estimate builders)", () => 
     }
   });
 
-  test("per-hand variant: freshEq de-cooks by the same fixed multiplier", () => {
+  test("per-hand estimates also preserve actual measured force", () => {
     const history = cookedHistory(5);
     const raw   = buildPerHandGripEstimates(history, null);
     const fresh = buildPerHandGripEstimates(history, null, { freshEq: true });
-    const mult = capacityMultiplier(5);
     raw["Crusher|L"].forEach((amp, i) => {
-      expect(fresh["Crusher|L"][i]).toBeCloseTo(amp / mult, 6);
+      expect(fresh["Crusher|L"][i]).toBeCloseTo(amp, 6);
     });
   });
 });

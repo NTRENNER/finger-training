@@ -4,7 +4,10 @@ import { isPeakTestRep } from './peakForce.js';
 
 import { isCapacityEvidenceRep } from "./forceRecording.js";
 import { isShortfall } from "./prescription.js";
-import { buildForecastSeries, buildPhysModel } from "./repCurveData.js";
+import { buildPhysModel } from "./repCurveData.js";
+import { predictRepTimes } from "./fatigue.js";
+import { progressionSetEvidence } from "./progressionEvidence.js";
+import { RECOVERY_LOAD_RATIO } from "./recoveryEvidence.js";
 import { effectiveLoad, isFirstSetRep } from "./load.js";
 import { computeDensityLadder, LADDER_MIN_REPS } from "./densityLadder.js";
 import { zoneOf } from "./zones.js";
@@ -89,12 +92,15 @@ export function assessAdditionalSetNeed({ history = [], sessionReps = [], config
       || openers.some(r => isShortfall(Number(r.actual_time_s), Number(r.target_duration)))) {
       plateau = false; break;
     }
-    // Setup, rest and intended duration must match; otherwise the sessions
-    // ask different questions even when the opening load is the same.
+    const evidence = sets.map(set => progressionSetEvidence(set));
+    if (evidence.some(e => !e.complete)) { plateau = false; break; }
+    // Setup and intended duration must match. Ordinary reaction delay is
+    // welcome; large rest extensions change the comparison. Use measured
+    // release-to-start intervals with a five-second/25% comparison tolerance.
     if (openers.some(r => (r.setup_id ?? null) !== (openers[0].setup_id ?? null)
       || Number(r.target_duration) !== Number(openers[0].target_duration))
-      || sets.some(set => set.some((r, i) => i > 0
-        && Number(r.rest_s) !== Number(sets[0][i].rest_s)))) {
+      || evidence.some(e => e.rests.some((rest, i) =>
+        Math.abs(rest - evidence[0].rests[i]) > Math.max(5, evidence[0].rests[i] * .25)))) {
       plateau = false; break;
     }
     const stable = (values, tolerance) => values.every(v => Number.isFinite(v) && v > 0)
@@ -144,9 +150,16 @@ export function recommendAnotherSet({ history = [], sessionReps = [], config, se
     if (!(first > 0)) return null;
     if (setNum === 1 && isShortfall(first, config.targetTime)) return null;
     if (setNum > 1) {
-      const firstSetOpener = sessionReps
-        .filter(r => (r.set_num ?? 1) === 1 && r.hand === hand)
-        .sort((a, b) => (a.rep_num ?? 0) - (b.rep_num ?? 0))[0];
+      const firstSet = sessionReps.filter(r => (r.set_num ?? 1) === 1 && r.hand === hand);
+      const firstSetEvidence = progressionSetEvidence(firstSet, {
+        expectedCount: Number(config.repsPerSet), plannedRest: config.restTime,
+      });
+      if (!firstSetEvidence.complete) return null;
+      const firstSetOpener = firstSetEvidence.reps[0];
+      // Retention at a substantially different load is not evidence that the
+      // original dose was tolerated. The athlete may still choose more work.
+      const openingLoads = [effectiveLoad(firstSetOpener), effectiveLoad(reps[0])];
+      if (Math.max(...openingLoads) / Math.min(...openingLoads) > RECOVERY_LOAD_RATIO) return null;
       const fresh = Number(firstSetOpener?.actual_time_s);
       if (!(fresh > 0)) return null;
       const retention = first / fresh;
@@ -154,15 +167,19 @@ export function recommendAnotherSet({ history = [], sessionReps = [], config, se
       openerRetentionByHand.push(retention);
     }
 
-    const forecast = buildForecastSeries({
+    const evidence = progressionSetEvidence(reps, {
+      expectedCount: Number(config.repsPerSet), plannedRest: config.restTime,
+    });
+    if (!evidence.complete) return null;
+    const forecast = predictRepTimes({
       numReps: reps.length,
       firstRepTime: first,
-      restSeconds: Number(config.restTime) >= 0 ? Number(config.restTime) : 20,
+      restIntervals: evidence.rests,
       physModel: buildPhysModel(priorHistory, hand, config.grip),
     });
     if (forecast.length !== reps.length) return null;
     const ratios = reps.slice(1).map((r, i) => {
-      const predicted = Number(forecast[i + 1]?.t);
+      const predicted = Number(forecast[i + 1]);
       return predicted > 0 ? Number(r.actual_time_s) / predicted : null;
     }).filter(Number.isFinite);
     if (ratios.length < ADD_SET_MIN_REPS - 1) return null;

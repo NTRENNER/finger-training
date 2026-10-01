@@ -57,10 +57,8 @@ export const COOKED_MAX = 10;
 
 // The published rate. A straight reduction per cooked point, floored
 // so a slider at 10 cannot prescribe below 75% of fresh capacity.
-// Chosen in July 2026: it cannot run away, the UI label shows exactly
-// the multiplier applied, and the de-cook side (buildFreshLoadMap
-// dividing it back out for the curve fit) is bounded at 1/0.75 = 1.33×,
-// far inside the MAX_FRESH_INFLATION = 3 guard.
+// This changes the planned stimulus only. Neither fitting nor progress
+// estimates divide observed force by this choice to manufacture fresh ability.
 export const COOKED_SCALE_PER_POINT = 0.025;  // -2.5% per cooked point
 export const COOKED_SCALE_FLOOR     = 0.75;   // never below -25% (cooked 10)
 

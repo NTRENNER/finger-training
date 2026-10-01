@@ -15,7 +15,7 @@ import {
   demonstratedCapacityKg,
 } from "../prescription.js";
 import { buildThreeExpPriors } from "../threeExp.js";
-import { capacityMultiplier } from "../cookedScaling.js";
+import { sessionAdjustment } from "../cookedScaling.js";
 
 // ─────────────────────────────────────────────────────────────
 // effectiveLoad / loadedWeight / repKey
@@ -194,11 +194,8 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     expect(freshLoadFor({ avg_force_kg: 30 }, null)).toBe(30);
   });
 
-  test("an explicit legacy session rating retains bounded compensation", () => {
-    // Same rep on two different dates — one tagged cooked, one fresh.
-    // Fixed manual scaling: the cooked rep's load divides by
-    // capacityMultiplier (beta-independent), recovering the
-    // fresh-equivalent the curve fit should see.
+  test("a legacy session rating is context, not measured capacity suppression", () => {
+    // Identical observations remain identical even when ratings differ.
     const history = [
       { id: "fresh", hand: "L", grip: "Crusher",
         session_id: "s_fresh", set_num: 1, rep_num: 1,
@@ -213,12 +210,12 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     const map = buildFreshLoadMap(history, { cookedByDate });
     expect(map.get("id:fresh").fresh).toBeCloseTo(25, 4);
     expect(map.get("id:cooked").fresh)
-      .toBeCloseTo(25 / capacityMultiplier(10), 4); // 25/0.75
+      .toBeCloseTo(25, 4);
     // The old runaway (exp(-0.5*10) -> 148x) is structurally impossible:
     expect(map.get("id:cooked").fresh).toBeLessThanOrEqual(25 * 3); // MAX_FRESH_INFLATION
   });
 
-  test("only the explicit legacy session rating supplies compensation", () => {
+  test("neither a session nor day rating changes the measured load", () => {
     const history = [
       { id: "morning", hand: "L", grip: "Crusher",
         session_id: "s_morning", set_num: 1, rep_num: 1,
@@ -231,9 +228,9 @@ describe("buildFreshLoadMap & freshLoadFor", () => {
     ];
     const cookedByDate = { "2026-05-02": 8 };
     const map = buildFreshLoadMap(history, { cookedByDate });
-    // morning: per-session override (cooked 2) wins over the day value.
+    // Ratings never add force to an observed hold.
     expect(map.get("id:morning").fresh)
-      .toBeCloseTo(25 / capacityMultiplier(2), 4);
+      .toBeCloseTo(25, 4);
     // Evening is ambiguous; the day rating cannot establish an adjustment.
     expect(map.get("id:evening").fresh)
       .toBeCloseTo(25, 4);
@@ -934,4 +931,14 @@ describe("demonstrated-capacity floor", () => {
     expect(p.capacityFloorKg).toBeNull();
     expect(p.capacityFloored).toBe(false);
   });
+});
+
+
+test('choosing a lighter prescription cannot inflate identical measured capacity', () => {
+  const row = { id: 'choice', hand: 'L', grip: 'Micro', session_id: 'choice', date: '2026-10-01',
+    set_num: 1, rep_num: 1, target_duration: 40, actual_time_s: 40, avg_force_kg: 40, rest_s: 20 };
+  for (const adjusted of [false, true]) {
+    const rep = { ...row, session_adjustment: sessionAdjustment(8, adjusted) };
+    expect(buildFreshLoadMap([rep]).get('id:choice').fresh).toBe(40);
+  }
 });

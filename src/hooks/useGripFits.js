@@ -27,8 +27,8 @@
 //     perHandGripBaselines: { [`${grip}|${hand}`]: { date, amps } },
 //     gripImprovement:      { [grip]: { ...zoneDeltas, total, baselineDate } },
 //     gripImprovementFresh / perHandGripImprovementFresh:
-//                           same shapes, current fits de-cooked to
-//                           fresh-equivalent loads (Curve Improvement
+//                           same shapes, compatibility aliases for
+//                           measured loads (Curve Improvement
 //                           basis toggle) vs the SAME frozen baselines,
 //     handAsymmetry:        [{ grip, L, R, stronger, weaker, asymPct }],
 //   }
@@ -211,12 +211,9 @@ export function useGripFits({
     [gripBaselines, grip3xEstimates]
   );
 
-  // FRESH-EQUIVALENT current fits + improvement (June 2026, Curve
-  // Improvement basis toggle). Same builders, but each rep's load is
-  // de-cooked via the per-grip β model before fitting, so cooked-day
-  // sessions don't read as phantom regressions. Baselines stay the
-  // SAME frozen/pinned maps as the raw comparison — only the "now"
-  // side changes basis.
+  // Compatibility aliases for older improvement views. Both variants now use
+  // measured force; a fatigue report or chosen discount cannot manufacture
+  // strength. Stable-capacity smoothing belongs to its separate trend model.
   const grip3xEstimatesFresh = useMemo(
     () => buildGripEstimates(history, threeExpPriors, { freshEq: true }),
     [history, threeExpPriors]

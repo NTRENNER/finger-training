@@ -1,6 +1,5 @@
 import { firstTrainingSessionRows } from "./firstSessionEvidence.js";
 import { isPeakTestRep } from './peakForce.js';
-import { isCapacityEvidenceRep } from "./forceRecording.js";
 import { isMixedDomainRep } from './mixedDomain.js';
 // ─────────────────────────────────────────────────────────────
 // DENSITY LADDER — rep-count progression at constant load
@@ -45,14 +44,10 @@ import { isMixedDomainRep } from './mixedDomain.js';
 //     (peak-force ceiling + endurance-tail ceiling), so the pin path
 //     can never exceed the physics the engine enforces.
 //
-// COOKEDNESS NORMALIZATION: recorded prescribed loads are post-
-// cooked-scale-down (the runner multiplies exp(-β·cooked) before
-// stamping). Pinning that raw value would compound the scale-down
-// across consecutive cooked sessions (each pin inherits the previous
-// discount, then gets discounted again). So the ladder returns the
-// FRESH-EQUIVALENT load — recorded ÷ exp(-β·cooked_then) — and the
-// display/runner applies TODAY'S multiplier on top, same as every
-// other load surface.
+// A reduced session retains its explicit base plan, when saved, without
+// claiming the reduction measured a physiological capacity loss. Measured
+// force is never divided by the cooked multiplier and discounted work does
+// not advance a fresh-load rung. Legacy rows retain their actual measured load.
 
 import { zoneOf } from "./zones.js";
 import { prescribedLoad, effectiveLoad, isFirstSetRep } from "./load.js";
@@ -64,7 +59,9 @@ import { loadBounds, isShortfall, SHORTFALL_TOL } from "./prescription.js";
 // Personal recovery-model forecast (July 2026 — see the COLLAPSE
 // DOWN-STEP comment below). repCurveData imports fatigue/recoveryFit/
 // zones only, so this dependency is acyclic too.
-import { buildPhysModel, buildForecastSeries } from "./repCurveData.js";
+import { buildPhysModel } from "./repCurveData.js";
+import { predictRepTimes } from "./fatigue.js";
+import { progressionSetEvidence, recordedSessionPrescription } from "./progressionEvidence.js";
 
 export const LADDER_MIN_REPS = 4;
 export const LADDER_MAX_REPS = 6;
@@ -129,17 +126,18 @@ function sessionConformance(historyBefore, hand, grip, reps) {
   let physModel = null;
   try { physModel = buildPhysModel(historyBefore, hand, grip); } catch (e) { physModel = null; }
   if (!physModel) return null;
-  const rest = Number(rep1.rest_s) > 0 ? Number(rep1.rest_s) : 20;
-  const fc = buildForecastSeries({
+  const evidence = progressionSetEvidence(reps);
+  if (!evidence.complete) return null;
+  const fc = predictRepTimes({
     numReps: reps.length,
     firstRepTime: Number(rep1.actual_time_s),
-    restSeconds: rest,
+    restIntervals: evidence.rests,
     physModel,
   });
   if (!fc || fc.length !== reps.length) return null;
   const ratios = [];
   for (let i = 1; i < reps.length; i++) {
-    const f = fc[i] ? fc[i].t : 0;
+    const f = fc[i] || 0;
     const a = Number(reps[i].actual_time_s);
     if (f > 0 && a > 0) ratios.push(a / f);
   }
@@ -159,7 +157,6 @@ function latestSessionInZone(history, grip, zoneKey) {
     // volume-tolerance evidence only: they cannot invalidate, down-step, or
     // otherwise change the next set-1 prescription.
     if (!isFirstSetRep(r)) continue;
-    if (!(r.actual_time_s > 0)) continue;
     if (!r.target_duration || zoneOf(r.target_duration) !== zoneKey) continue;
     const key = r.session_id || r.date || "unknown";
     if (!groups.has(key)) groups.set(key, []);
@@ -177,7 +174,7 @@ function latestSessionInZone(history, grip, zoneKey) {
       best = { reps, date, started };
     }
   }
-  return best?.reps.every(isCapacityEvidenceRep) ? best : null;
+  return best;
 }
 
 // Compute the ladder prescription for (grip, zoneKey) from history.
@@ -186,10 +183,10 @@ function latestSessionInZone(history, grip, zoneKey) {
 //   {
 //     T,            // pinned target duration (the previous session's)
 //     reps,         // rep count to prescribe next
-//     loadByHand,   // { L?, R? } fresh-equivalent kg (see header)
+//     loadByHand,   // { L?, R? } observed or explicitly retained base targets
 //     decision,     // "advance" | "repeat" | "step_load" | "down_step"
 //                   //   | "recalibrate" | "incomplete"
-//     previousLoadByHand, // all prior fresh-equivalent loads
+//     previousLoadByHand, // prior targets before a ladder change
 //     basis: {      // receipts for the Why line
 //       date, prevReps, gateSec, firstRepTargetSec,
 //       firstRepSec, firstRepSecByHand,
@@ -205,30 +202,16 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   const sess = latestSessionInZone(firstTrainingSessionRows(history), grip, zoneKey);
   if (!sess) return null;
 
-  // Per-hand rep sequences from the session's FIRST set, sorted by rep
-  // number. latestSessionInZone already excludes optional sets. set_num
-  // remains part of the grouping (July 2026 — same bug
-  // class the recovery fit fixed): rep_num restarts per set, so pooling
-  // all of a hand's reps made a 2×4 session read as prevReps = 8
-  // (> LADDER_MAX_REPS) with an interleaved [r1,r1,r2,r2,…] order whose
-  // “last rep” was an arbitrary tie-break — the gate could read the
-  // wrong rep and the ladder could emit a spurious +5% step_load. The
-  // gate, rung, pin, completeness check, and collapse check must all read
-  // the same fresh set. Sets 2-5 are interpreted only by the optional-set
-  // tolerance model; expected fatigue there cannot penalize set 1 next time.
-  const byHandSet = {};
+  // Every progression receipt comes from the same first set. Optional sets
+  // were removed by latestSessionInZone; they cannot replace a missing opener
+  // or mask an interrupted first-set slot.
+  const byHand = {};
   for (const r of sess.reps) {
     const h = r.hand === "R" ? "R" : "L";
-    const setNum = r.set_num ?? 1;
-    const sets = (byHandSet[h] = byHandSet[h] || new Map());
-    if (!sets.has(setNum)) sets.set(setNum, []);
-    sets.get(setNum).push(r);
+    (byHand[h] ||= []).push(r);
   }
-  const byHand = {};
-  for (const [h, sets] of Object.entries(byHandSet)) {
-    const lastSetNum = Math.max(...sets.keys());
-    byHand[h] = sets.get(lastSetNum)
-      .sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1));
+  for (const reps of Object.values(byHand)) {
+    reps.sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1));
   }
 
   // The session's protocol T — every rep shares it; read off rep 1.
@@ -260,26 +243,31 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       missingHands.push(h);
       continue;
     }
-    const firstSetNum = Math.min(...byHandSet[h].keys());
-    const first = [...byHandSet[h].get(firstSetNum)]
-      .sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1))[0];
+    const first = reps[0];
     const last = reps[reps.length - 1];
     firstRepSecByHand[h] = Number(first.actual_time_s) || 0;
     lastRepSecByHand[h] = Number(last.actual_time_s) || 0;
   }
-  // Rung base = set 1's rep count. Adding an optional set must not cost a
-  // rep next session.
-  const firstSetCountByHand = {};
-  for (const h of requiredHands) {
-    const sets = byHandSet[h];
-    if (!sets || sets.size === 0) continue;
-    firstSetCountByHand[h] = (sets.get(Math.min(...sets.keys())) || []).length;
-  }
-  const presentCounts = Object.values(firstSetCountByHand).filter(n => n > 0);
-  const prevReps = presentCounts.length > 0 ? Math.max(...presentCounts) : 0;
+  const presentCounts = Object.values(repCountByHand).filter(n => n > 0);
+  const evidenceByHand = Object.fromEntries(requiredHands.map(h => {
+    const reps = byHand[h] || [];
+    const plan = reps.map(recordedSessionPrescription).find(Boolean);
+    return [h, progressionSetEvidence(reps, { expectedCount: plan?.reps_per_set ?? Math.max(LADDER_MIN_REPS, reps.length) })];
+  }));
   const unevenRepCounts = new Set(presentCounts).size > 1;
-  const incomplete = missingHands.length > 0 || unevenRepCounts;
-  const shortfallHands = requiredHands.filter(h =>
+  const incomplete = missingHands.length > 0 || unevenRepCounts
+    || requiredHands.some(h => !evidenceByHand[h].complete);
+  const historyBefore = (history || []).filter(r => r && r.date && r.date < sess.date);
+  // An incomplete attempt consumes its turn but cannot re-award the prior
+  // success or erase its rung. New rows freeze the attempted count; for old
+  // partial rows the prior earned prescription is the best available receipt.
+  const priorLadder = incomplete ? computeDensityLadder(historyBefore, grip, zoneKey, opts) : null;
+  const plannedCounts = sess.reps.map(recordedSessionPrescription).filter(Boolean).map(p => p.reps_per_set);
+  const prevReps = plannedCounts.length ? Math.max(...plannedCounts)
+    : Math.max(0, ...presentCounts, ...(incomplete && priorLadder ? [priorLadder.reps] : []));
+  const adjustedSession = sess.reps.some(r => recordedAdjustment(r).multiplier < 1);
+  const restoredPlanByHand = {};
+  const shortfallHands = incomplete || adjustedSession ? [] : requiredHands.filter(h =>
     firstRepSecByHand[h] != null && isShortfall(firstRepSecByHand[h], T)
   );
   const firstRepSecValues = Object.values(firstRepSecByHand);
@@ -292,16 +280,15 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
     : 0;
   const gatePassed = lastRepSec >= gateSec;
 
-  // Fresh-equivalent pinned load per hand (see header). ACTUAL load
+  // Observed pinned load per hand (see header). ACTUAL load
   // first (effectiveLoad: Tindeq-measured ?? manual override ??
   // prescribed) — "same weight" means the weight the user actually
   // held, not the one the card proposed. June 2026: a user who
   // overrides the suggestion upward and sustains it would otherwise
   // get the OLD lower weight re-pinned next session, silently
   // undoing the override. Prescribed remains the fallback for rows
-  // with no recorded actual. De-cooked by the capacity multiplier
-  // that was active when the rep was stamped (session_cooked; 1.0
-  // when absent or no β model).
+  // with no recorded actual. An explicitly saved base plan can be restored
+  // after a discounted session, without claiming unmeasured extra capacity.
   // RE-PIN GUARD (July 2026). "Same weight, more reps" presupposes the
   // weight was ABSORBED — rep 1 (the fresh rep) actually reached its
   // target. Without this guard the ladder re-pinned a failed session's
@@ -324,18 +311,23 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   for (const h of requiredHands) {
     const reps = byHand[h] || [];
     if (reps.length === 0) continue;
-    const firstSetNum = Math.min(...byHandSet[h].keys());
-    const freshRep1 = [...byHandSet[h].get(firstSetNum)]
-      .sort((a, b) => (a.rep_num ?? 1) - (b.rep_num ?? 1))[0];
+    const freshRep1 = reps[0];
     // Pin set 1's load. This used to read the LAST set's opener, which was
     // the same rep whenever every set shared a prescribed load — and a
     // different, lighter one the moment optional sets existed.
     const recorded = effectiveLoad(freshRep1) || prescribedLoad(freshRep1);
     if (!(recorded > 0)) continue;
-    // Rating edits and "keep recommended load" must not raise this pin.
-    const thenMult = recordedAdjustment(freshRep1).multiplier;
-    previousLoadByHand[h] = round1(thenMult > 0 ? recorded / thenMult : recorded);
-    if (isShortfall(freshRep1.actual_time_s, T)) {
+    // Keep observations separate from a known pre-adjustment plan.
+    const plan = reps.map(recordedSessionPrescription).find(Boolean);
+    const base = plan?.base_load_kg;
+    const canRestore = adjustedSession && Number.isFinite(base) && base > 0 && base < 200;
+    const retained = incomplete
+      ? (canRestore ? base : plan?.load_kg) ?? priorLadder?.loadByHand?.[h]
+        ?? priorLadder?.previousLoadByHand?.[h] ?? prescribedLoad(freshRep1) ?? recorded
+      : canRestore ? base : recorded;
+    previousLoadByHand[h] = round1(retained > 0 ? retained : recorded);
+    if (canRestore) restoredPlanByHand[h] = base;
+    if (!incomplete && !adjustedSession && isShortfall(freshRep1.actual_time_s, T)) {
       droppedByHand[h] = round1(Number(freshRep1.actual_time_s) || 0);
     }
   }
@@ -348,9 +340,13 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   // session whose opener was fine. The model is fit on history
   // strictly before the judged session (leak-free, same as the
   // backtest), and a collapsed hand pins 10% lighter.
-  const historyBefore = (history || []).filter(r => r && r.date && r.date < sess.date);
+  // Missing hands keep an established prior target when available.
+  for (const h of missingHands) {
+    const retained = priorLadder?.loadByHand?.[h] ?? priorLadder?.previousLoadByHand?.[h];
+    if (retained > 0) { previousLoadByHand[h] = retained; loadByHand[h] = retained; }
+  }
   const collapseByHand = {};
-  for (const h of Object.keys(loadByHand)) {
+  for (const h of incomplete || adjustedSession ? [] : Object.keys(loadByHand)) {
     const C = sessionConformance(historyBefore, h, grip, byHand[h]);
     if (C != null && C < LADDER_COLLAPSE_TOL) {
       const from = loadByHand[h];
@@ -373,6 +369,10 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
     reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
   } else if (incomplete) {
     decision = "incomplete";
+    reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
+  } else if (adjustedSession) {
+    // An easier chosen target is not proof of the same gain at the base load.
+    decision = "repeat";
     reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
   } else if (collapsed) {
     decision = "down_step";
@@ -443,11 +443,16 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       shortfallHands,
       repCountByHand,
       unevenRepCounts,
+      evidenceByHand: Object.fromEntries(requiredHands.map(h => [h, {
+        reason: evidenceByHand[h].reason, restBasis: evidenceByHand[h].restBasis,
+      }])),
+      adjustedSession,
+      restoredPlanByHand,
     },
   };
 }
 
-// Resolve the actual fresh-equivalent loads for the next session.
+// Resolve the base targets for the next session (before today's elective reduction).
 // Normal ladder hands keep their pins. Recalibrating hands use the
 // newly-fitted curve at the pinned T, with a guaranteed 5% reduction
 // if that fit would otherwise repeat or raise the known-too-high load.

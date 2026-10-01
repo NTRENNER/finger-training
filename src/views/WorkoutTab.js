@@ -187,7 +187,7 @@ export function WorkoutTab({
   const activeWorkout = SUPPORT_WORKOUTS[activeId];
 
   // Deload-week nudge — set on the Setup tab when the user accepts a
-  // deload. During the week, suggest skipping the heavy day (A) and
+  // deload. During the week, suggest reducing hard support work and
   // keeping any session light. Read-only here; ending the week happens
   // on the banner that started it.
   // Live read (was a per-render loadLS parse) — SetupView's banner
@@ -721,7 +721,7 @@ export function WorkoutTab({
               fontSize: 12.5, color: C.text, lineHeight: 1.5,
             }}>
               <span style={{ color: C.orange, fontWeight: 700, letterSpacing: 0.4 }}>DELOAD WEEK</span>
-              {` · skip Workout A this week — take a rest day or keep the session light. Cut volume, not the loads you do hit.`}
+              {` · consider less hard support work than usual and avoid optional extra sets. Choose exercises and loads that fit how you feel and your climbing plans.`}
             </div>
           )}
           <Card style={{ padding: "20px 18px" }}>

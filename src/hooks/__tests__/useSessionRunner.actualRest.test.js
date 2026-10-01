@@ -63,3 +63,16 @@ test('missing physical release preserves the hold but cannot fabricate subsequen
  expect(addReps.mock.calls[0][0][0]).toMatchObject({actual_time_s:10,failure_valid:true,rep_timing:{ended_at_ms:null}});
  expect(addReps.mock.calls[1][0][0].rep_timing.rest_before_s).toBeNull();
 });
+
+test('twenty planned seconds, pulling at twenty-two, and target acquisition at twenty-four preserve distinct intervals',()=>{
+ const {hook,addReps}=setup();
+ act(()=>hook.result.current.handleRepDone({actualTime:10,avgForce:25,startedAtMs:90000,endedAtMs:100000,
+   forceRecording:{recording_stop_reason:'release',activity:{started_at_ms:90000,ended_at_ms:100000,duration_s:10}}}));
+ act(()=>hook.result.current.handleRestDone());
+ act(()=>hook.result.current.handleRepDone({actualTime:8,avgForce:25,startedAtMs:124000,endedAtMs:132000,
+   forceRecording:{basis:'target_acquired',acquisition_s:2,recording_stop_reason:'release',
+     activity:{started_at_ms:122000,ended_at_ms:132000,duration_s:10}}}));
+ expect(addReps.mock.calls[1][0][0]).toMatchObject({rest_s:20,actual_time_s:8,
+   rep_timing:{rest_before_s:22,started_at_ms:122000,ended_at_ms:132000},
+   force_recording:{acquisition_s:2,activity:{duration_s:10}}});
+});

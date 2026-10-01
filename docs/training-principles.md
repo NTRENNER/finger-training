@@ -8,6 +8,19 @@ confidence in the measurement. Training exposure is not fresh-capacity evidence.
 Missing information stays unknown. A skipped set is not a failed repetition.
 A manual exercise/domain choice remains available. Keep the finger 4–5–6 ladder.
 
+The outcome is sustained improvement in measured finger performance while
+supporting climbing. Prediction accuracy helps choose a useful target; it does
+not establish that the training dose maximizes gains. More exhaustion, more
+time under tension, a smoother curve, or a smaller forecast error is not by
+itself evidence of a better training program. Preserve athlete choice and
+compare benefits alongside time, recovery cost, and climbing quality.
+
+An interrupted attempt retains its earned rung and known target. Progression
+requires the complete original sequence at comparable loads; measured rest is
+used without punishing ordinary reaction or target-acquisition delay. A chosen
+load reduction is not proof of lost physiological capacity. See
+[Progression evidence](progression-evidence.md).
+
 ## Support workouts
 
 Save the original exercise prescription alongside completed sets and optional
@@ -70,6 +83,38 @@ the actual per-hold decision without rewriting history. The protocol fields,
 readiness rules, and fallback behavior are specified in
 [Chaos Machine](whole-curve-beta.md#loads-aimed-at-target-times).
 
+Reaching every later target duration may increase the dose compared with
+holding fixed loads while duration falls with fatigue. Adaptive target
+attainment remains a protocol choice to evaluate, not proof of superior
+adaptation. A dose experiment should replace planned ordinary work rather
+than silently add work; see the proposed
+[training-dose experiment](research/training-dose-experiment.md).
+
+## Recovery and independent evidence
+
+Sustained recovery comparisons use the first set of the first recorded training
+session for each local date, grip and hand. Establish order before discarding
+invalid or incompatible measurements, so a prior Chaos session or interrupted
+attempt does not promote a later fatigued set. Both hands and repeat sessions
+on the same date are one independent day. Later work remains visible in
+descriptive recovery, workload, and short-term performance.
+
+The deload assessment requires two comparable dates, both within 14 days;
+personal calibration fits and scores the same first-set context. These are
+explicit evidence policies, not validated physiological thresholds. A repeated
+decline in comparable first sets can still raise a concern. Missing, ambiguous,
+or stale evidence is unknown, and one grip's data cannot establish the condition
+of unmeasured grips. The weekly coaching companion uses the same context and
+requires its complete three-date smoothing window to remain current.
+
+Use recovery residuals as approximate observations alongside how the athlete
+feels and the training they did. Rest alone does not update the measured signal
+or demonstrate that capacity has recovered. Avoid a requirement to wait for
+green: reassess with comparable work when the athlete feels ready. Suggest
+reducing hard work relative to their usual routine and avoiding extra sets;
+do not invent a fixed climbing schedule, impose a one-session finger week,
+or automatically remove a particular support workout.
+
 ## Climbing analysis
 
 Completed climbing output counts each logged completion once, including repeats.
@@ -119,7 +164,7 @@ separate upper-bound evidence; they do not consume the training opener.
 
 Only that eligible first session's first set can advance or recalibrate the
 4–5–6 ladder. Its later reps still determine the earned rung. Later sets and
-sessions remain recorded for workload, recovery and short-term performance.
+sessions remain recorded for workload, descriptive recovery and short-term performance.
 Manual selection of an alternate domain remains available.
 
 Use saved session start or measured start times, never upload order or IDs.

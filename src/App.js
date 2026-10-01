@@ -598,7 +598,8 @@ export default function App() {
           onClose={() => setPhase("idle")} /></PageFrame>
       </div>}
       {/* Train tab */}
-      {tab === 0 && (() => {
+      <div hidden={tab !== 0}>
+      {(tab === 0 || phase !== 'idle') && (() => {
         if (phase === "idle") {
           const tindeqConnectCard = (
             <div style={{ padding: "0 2px 14px" }}>
@@ -673,6 +674,7 @@ export default function App() {
                 session={{ config: activeRepConfig, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
                 onRepDone={handleRepDone}
                 onAbort={handleAbort}
+                visible={tab === 0}
                 tindeq={tindeq}
                 unit={unit}
                 history={history}
@@ -685,6 +687,7 @@ export default function App() {
               session={{ config: activeRepConfig, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
               onRepDone={handleRepDone}
               onAbort={handleAbort}
+              visible={tab === 0}
               tindeq={tindeq}
               autoStart={phase === "rep_active"}
               unit={unit}
@@ -732,6 +735,7 @@ export default function App() {
 
         return null;
       })()}
+      </div>
 
       {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
       <div hidden={tab !== 2}>

@@ -2,7 +2,6 @@ import { buildPredictionModels, preparePrediction, completePrediction, predictio
   summarizePredictions, predictionFingerprint } from '../predictionTracking.js';
 import { buildFreshLoadMap, prescription, repKey } from '../prescription.js';
 import { buildThreeExpPriors, predForceThreeExp } from '../threeExp.js';
-import { freshFitReps } from '../load.js';
 import { recoveryRows, RECOVERY_ROW_SHAPES } from '../../testHelpers/recoveryRows.js';
 
 const history = () => Array.from({ length: 8 }, (_, i) => recoveryRows('legacy', {
@@ -21,19 +20,14 @@ function record(models, rep, prefix = []) {
     prediction_check: completePrediction(prepare(models, prefix), prefix, rep) } };
 }
 
-test('snapshots expose the exact live fit; candidate changes fit points only', () => {
+test('snapshots preserve the incumbent and explicitly retire its duplicate', () => {
   const { rows, options, models } = setup();
   const current = prescription(rows, 'L', 'Crusher', 30, options);
   expect(models.current.status).toBe('ready');
-  expect(models.candidate.status).toBe('ready');
+  expect(models.candidate).toMatchObject({ status: 'retired', reason: 'fresh_openers_are_now_incumbent' });
   expect(models.current.planned_recommendation_kg).toBe(current.value);
   expect(predForceThreeExp(models.current.amps, 30)).toBeCloseTo(current.potential, 0);
   expect(models.current.scale).toBe(current.scale);
-  const freshKeys = new Set(freshFitReps(rows).map(repKey));
-  const candidateMap = new Map([...options.freshMap].map(([k, v]) => [k,
-    { ...v, capacityEligible: v.capacityEligible !== false && freshKeys.has(k) }]));
-  const candidate = prescription(rows, 'L', 'Crusher', 30, { ...options, freshMap: candidateMap });
-  expect(models.candidate.planned_recommendation_kg).toBe(candidate.value);
   expect(models.current.duration_basis).toBe('legacy_elapsed');
   expect(options.freshMap.get(repKey(rows[1])).capacityEligible).not.toBe(false);
 });
@@ -198,4 +192,17 @@ test('research distinguishes earlier same-day work from unknown order without ch
   expect(after.diagnostics.force.trainingContext.after_training.current.observations).toBe(1);
   const unknown = summarizePredictions([{ ...earlier, session_started_at: undefined }, r]);
   expect(unknown.observations.force[0].trainingContext).toBe('unknown');
+});
+
+
+test('retired candidate produces no counterfeit paired accuracy while genuine challenger remains scored', () => {
+  const { models } = setup();
+  const rep = record(models, recoveryRows('measured')[0]);
+  const report = summarizePredictions([rep]);
+  expect(report.force.current.observations).toBe(1);
+  expect(report.force.candidate.observations).toBe(0);
+  expect(report.force.candidate.mae).toBeNull();
+  expect(models.adaptive.status).toBe('ready');
+  expect(report.adaptive.force.candidate.observations).toBe(1);
+  expect(rep.force_recording.prediction_check.comparison.candidate).toBeNull();
 });

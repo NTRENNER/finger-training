@@ -167,7 +167,9 @@ test('second workout rep shows its timer and completes after release during the 
   packet([[23000, 20], [23500, 20], [24000, 20], [24500, 20]]);
   // This harness owns the device hook outside Workout; mirror App's updated props.
   view.rerender(<Workout />);
-  expect(screen.getByText('0s')).toBeInTheDocument();
+  // The live timer uses the acquired interval on the device clock. The
+  // external-hook harness rerenders explicitly after the coalesced UI update.
+  await waitFor(() => { view.rerender(<Workout />); expect(screen.getByText('1.5s')).toBeInTheDocument(); });
   expect(screen.getByRole('button', { name: 'Rep interrupted' })).toBeInTheDocument();
   packet([[25000, 0], [25500, 0], [26000, 0]]);
   expect(done).toHaveBeenCalledTimes(2);

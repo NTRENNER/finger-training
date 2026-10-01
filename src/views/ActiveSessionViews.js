@@ -12,8 +12,8 @@ import { MIXED_DOMAIN_LABELS, isMixedDomainRep, mixedDomainMetadata } from '../m
 // reps, the switch-hands prompt in Both-mode, and the post-session
 // summary. Plus the auto-detect Tindeq-driven flow
 // (AutoRepSessionView) that replaces ActiveSessionView when BLE
-// is connected. Sessions are single-set under the curve-trust
-// flow; the between-sets and alt-hand-switch transitions are gone.
+// is connected. One set is recommended; optional extra sets start
+// from the completed-set summary without a mandatory between-set timer.
 //
 // Coupling to App.js is only via props:
 //   session    — { config, currentRep,
@@ -161,15 +161,17 @@ function UnloadedZeroCheck({ tindeq }) {
 }
 
 function ForceLossNotice({ state }) {
-  if (!state || state.status === 'holding') return null;
+  if (!state || (state.status === 'holding' && state.pendingEndTs == null)) return null;
   return <p role="status" style={{ color: C.yellow, fontSize: 22, fontWeight: 700 }}>
-    {state.status === 'complete' ? 'Rep complete — release the handle' : 'Force dipped — return to a steady hold'}
+    {state.status === 'complete' ? 'Rep complete — release the handle' : 'Checking force dip — return to a steady hold. Time resumes if it recovers.'}
   </p>;
 }
 
 function creditedSeconds(state, elapsed) {
-  return state?.status === 'complete' && state.startTs != null
-    ? Math.max(0, (state.endTs - state.startTs) / 1000).toFixed(1) : elapsed;
+  if (!state) return elapsed;
+  if (state.startTs == null) return '0.0';
+  const end = state.status === 'complete' ? state.endTs : state.pendingEndTs ?? state.observedTs;
+  return Number.isFinite(end) ? Math.max(0, (end - state.startTs) / 1000).toFixed(1) : '0.0';
 }
 
 function RepDots({ total, done, current }) {
@@ -247,13 +249,13 @@ export function ManualOffsetPrompt({ onChoose }) {
 // session but clears when a new session starts (fresh sessionId).
 let _overrideBySession = { sessionId: null, byHand: {} };
 
-export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, unit = "lbs", history = [] }) {
+export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoStart = false, visible = true, unit = "lbs", history = [] }) {
   const { config, currentSet = 1, currentRep, activeHand, sessionReps = [] } = session;
 
   // repPhase: 'ready' (show Start button, first rep only)
   //           'countdown' (3-2-1)
   //           'active' (rep in progress)
-  const [repPhase,     setRepPhase]    = useState(autoStart ? "active" : "ready");
+  const [repPhase,     setRepPhase]    = useState(autoStart && visible ? "active" : "ready");
   const [countdown,    setCountdown]   = useState(3);
   const [elapsed,      setElapsed]     = useState(0);
   // Raw display-unit string, NOT kg. The input used to round-trip
@@ -307,8 +309,14 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
 
   const [startError, setStartError] = useState(null);
   const usedDeviceRef = useRef(false);
+  const startAttemptRef = useRef(0);
+  const endingRef = useRef(false);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   // Actually start recording the rep
   const startRep = useCallback(async () => {
+    if (!visibleRef.current || endingRef.current || startTimeRef.current != null) return;
+    const attempt = ++startAttemptRef.current;
     usedDeviceRef.current = tindeq.connected;
     setElapsed(0);
     startTimeRef.current = Date.now();
@@ -317,39 +325,48 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     if (tindeq.connected) {
       try {
         if (await tindeq.tare() === false) throw new Error("Tare failed");
+        if (attempt !== startAttemptRef.current || !visibleRef.current) return;
         await tindeq.startMeasuring();
       } catch {
+        if (attempt !== startAttemptRef.current) return;
         startTimeRef.current = null;
         setRepPhase("ready");
         setStartError("Tindeq could not start. Reconnect and try this rep again.");
         return;
       }
     }
-    timerRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-    }, 100);
   }, [tindeq]);
 
-  // Auto-start on mount when autoStart=true
+  // A hidden session may finish its rest, but cannot start a manual pull.
   useEffect(() => {
-    if (autoStart) { startRep(); }
+    if (autoStart && visible) startRep();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [autoStart, visible]);
+
+  useEffect(() => {
+    if (repPhase !== 'active') return;
+    timerRef.current = setInterval(() => {
+      if (startTimeRef.current != null) setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 100);
+    return () => clearInterval(timerRef.current);
+  }, [repPhase]);
 
   // 3-2-1 countdown
   useEffect(() => {
-    if (repPhase !== "countdown") return;
+    if (repPhase !== "countdown" || !visible) return;
     if (countdown <= 0) { startRep(); return; }
     const t = setTimeout(() => setCountdown(c => c - 1), 1000);
     return () => clearTimeout(t);
-  }, [repPhase, countdown, startRep]);
+  }, [repPhase, countdown, startRep, visible]);
 
   // Tracks whether this rep was ended by auto-failure (vs manual tap).
   const autoFailedRef = useRef(false);
 
   // End rep — called by manual tap (failed=false) or auto-failure (failed=true).
-  const endRep = useCallback(async (interrupted = false) => {
-    if (!startTimeRef.current) return;
+  const endRep = useCallback(async (interrupted = false, endSession = false) => {
+    if (startTimeRef.current == null) return;
+    startAttemptRef.current++;
+    endingRef.current = true;
     const failed = autoFailedRef.current;
     autoFailedRef.current = false;
     clearInterval(timerRef.current);
@@ -357,14 +374,14 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     const endedAtMs = Date.now();
     const actualTime = (endedAtMs - startedAtMs) / 1000;
     startTimeRef.current = null;
-    setRepPhase("ready");
+    setRepPhase("finishing");
     // Use the completed measurement; manual reps must not reuse stale BLE stats.
     let avgForce = null;
     let peakForce = null;
     let measurement = {};
     if (usedDeviceRef.current) {
       const stats = await tindeq.stopMeasuring();
-      measurement = finalizeDeviceActivity(stats, startedAtMs, endedAtMs, !tindeq.connected);
+      measurement = finalizeDeviceActivity(stats, startedAtMs, endedAtMs, interrupted === true || !tindeq.connected);
       avgForce = stats.avgForce;
       peakForce = stats.peakForce;
     }
@@ -376,8 +393,14 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     onRepDone({ actualTime, avgForce, peakForce, failed, startedAtMs, endedAtMs, ...measurement,
       failureValid: interrupted === true ? false : (measurement.failureValid ?? true),
       endReason: interrupted === true ? "interrupted" : (measurement.endReason ?? "muscular_failure"),
-      manualLoadKg: manualKgRef.current });
+      manualLoadKg: manualKgRef.current, endSession });
   }, [tindeq, onRepDone]);
+
+  useEffect(() => {
+    if (visible) return;
+    if (startTimeRef.current != null) endRep(true);
+    else if (repPhase === 'countdown') { setRepPhase('ready'); setCountdown(3); }
+  }, [visible, endRep, repPhase]);
 
   // Wire auto-failure → endRep for the duration of an active rep only.
   // Cleanup nulls the callback whenever phase changes or the component unmounts,
@@ -411,8 +434,8 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
 
   // Keep the Tindeq hook's target ref in sync so auto-failure uses the right threshold
   useEffect(() => {
-    tindeq.targetKgRef.current = repPhase === "active" ? targetKg : null;
-  }, [tindeq, repPhase, targetKg]);
+    if (visible) tindeq.targetKgRef.current = repPhase === "active" ? targetKg : null;
+  }, [tindeq.targetKgRef, repPhase, targetKg, visible]);
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
@@ -426,7 +449,11 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
               : config.hand === "L" ? "Left" : "Right"}
           </div>
         </div>
-        <Btn small color={C.red} onClick={onAbort}>End Session</Btn>
+        <Btn small color={C.red} onClick={() => {
+          if (endingRef.current) return;
+          if (startTimeRef.current != null) endRep(true, true);
+          else onAbort();
+        }} disabled={repPhase === "finishing"}>End Session</Btn>
       </div>
 
       {startError && <p role="alert" style={{ color: C.red }}>{startError}</p>}
@@ -458,7 +485,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       {repPhase === "active" && (
         <Card>
           <ForceLossNotice state={tindeq.forceLoss} />
-          <BigTimer seconds={Number(creditedSeconds(tindeq.forceLoss, elapsed))} targetSeconds={config.targetTime} running={tindeq.forceLoss?.status !== 'complete'} referenceOnly={!!config.mixedDomainPlan} />
+          <BigTimer seconds={Number(creditedSeconds(tindeq.forceLoss, elapsed))} targetSeconds={config.targetTime} running={tindeq.forceLoss?.status !== 'complete' && tindeq.forceLoss?.pendingEndTs == null} referenceOnly={!!config.mixedDomainPlan} />
           {tindeq.connected ? (
             <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />
           ) : (
@@ -640,10 +667,8 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
   }, [remaining, releaseBlocked]);
 
   const pct = remaining / restSeconds;
-  // Single-set model (curve-trust commit C): no more "set complete"
-  // language — the session ends when the rep counter hits the
-  // configured count (handled by useSessionRunner). Rest is always
-  // between reps within the single set.
+  // This timer is only between pulls within the current set. Optional
+  // extra sets start from the summary without a prescribed rest timer.
   const isLastRepInSet = repNum >= repsPerSet;
 
   return (
@@ -994,7 +1019,7 @@ export function SessionSummaryView({
 
 // ──────────────────────────────────────────────────────────────
 
-export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit = "lbs", history = [] }) {
+export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visible = true, unit = "lbs", history = [] }) {
   const { config, currentSet = 1, currentRep, activeHand, refWeights, sessionReps = [] } = session;
   const handLabel = config.hand === "Both"
     ? (activeHand === "L" ? "Left Hand" : "Right Hand")
@@ -1015,9 +1040,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   // Keep Tindeq's target ref in sync so the force gauge & auto-fail threshold
   // reflect the program recommendation during the rep.
   useEffect(() => {
-    tindeq.targetKgRef.current = suggestedKg;
-    return () => { tindeq.targetKgRef.current = null; };
-  }, [tindeq, suggestedKg]);
+    if (visible) tindeq.targetKgRef.current = suggestedKg;
+  }, [tindeq.targetKgRef, suggestedKg, visible]);
 
   const [startError, setStartError] = useState(null);
   const [streamAttempt, setStreamAttempt] = useState(0);
@@ -1032,6 +1056,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   // this is the auto-flow equivalent. Starts true — no rep is armed
   // until handleRepStart runs.
   const repEndedRef = useRef(true);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   const handleRepEnd = useCallback((stats) => {
     if (repEndedRef.current) return;  // already ended — ignore until next rep arms
@@ -1041,8 +1067,16 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
     setElapsed(0);
     const completed = finalizeDeviceActivity(stats, startTimeRef.current ?? Date.now(), Date.now());
     startTimeRef.current = null;
-    onRepDone({ ...completed, failed: false });
+    onRepDone({ ...completed, failed: false, endSession: stats.endSession === true });
   }, [onRepDone]);
+
+  const finishAttempt = useCallback(({ endSession = false, targetNotReached = false } = {}) => {
+    if (repEndedRef.current) { if (endSession) onAbort(); return; }
+    handleRepEnd({ ...tindeq.endRepAndRequireRelease({ requireZero: targetNotReached }),
+      failureValid: false, endReason: targetNotReached ? 'target_not_reached' : 'interrupted', endSession });
+  }, [handleRepEnd, onAbort, tindeq]);
+  const finishAttemptRef = useRef(finishAttempt);
+  finishAttemptRef.current = finishAttempt;
 
   const handleRepStart = useCallback(() => {
     repEndedRef.current = false;  // re-arm the end guard for this rep
@@ -1055,7 +1089,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
   }, []);
 
   useEffect(() => {
-    if (!tindeq.connected) return;
+    if (!tindeq.connected || !visible) return;
+    tindeq.targetKgRef.current = suggestedKg;
     let disposed = false;
     setStartError(null);
     Promise.resolve(tindeq.startAutoDetect(handleRepStart, handleRepEnd)).catch(() => {
@@ -1063,13 +1098,18 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
     });
     return () => {
       disposed = true;
+      // Navigation is an explicit interruption. StrictMode's visible replay
+      // must not save a fake attempt or duplicate a completed one.
+      if (!visibleRef.current && !repEndedRef.current) finishAttemptRef.current();
+      tindeq.targetKgRef.current = null;
       Promise.resolve(tindeq.stopAutoDetect({ observeRelease: repEndedRef.current })).catch(() => {});
       clearInterval(timerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tindeq.connected, streamAttempt]); // re-arm after reconnect or an explicit retry
+  }, [tindeq.connected, streamAttempt, visible]); // re-arm only on the visible training tab
 
-  const targetReached = !config.mixedDomainPlan && elapsed >= config.targetTime;
+  const holdSeconds = Number(creditedSeconds(tindeq.forceLoss, elapsed));
+  const targetReached = !config.mixedDomainPlan && holdSeconds >= config.targetTime;
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
@@ -1079,7 +1119,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
         <div>
           <div style={{ fontSize: 18, fontWeight: 700 }}>{config.grip} · {handLabel}</div>
         </div>
-        <Btn small color={C.red} onClick={onAbort}>End Session</Btn>
+        <Btn small color={C.red} onClick={() => finishAttempt({ endSession: true })}>End Session</Btn>
       </div>
 
       <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
@@ -1091,9 +1131,11 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
         <p>{startError}</p>
         <Btn onClick={() => setStreamAttempt(attempt => attempt + 1)}>Retry Tindeq</Btn>
       </div>}
-      {repActive && <Btn onClick={() => handleRepEnd({
-        ...tindeq.endRepAndRequireRelease(), failureValid: false, endReason: "interrupted",
-      })}>Rep interrupted</Btn>}
+      {repActive && <Btn onClick={() => finishAttempt()}>Rep interrupted</Btn>}
+      {repActive && suggestedKg > 0 && tindeq.forceLoss?.startTs == null && <div>
+        <p>The target has not been reached. You can finish this attempt and choose a manageable target.</p>
+        <Btn onClick={() => finishAttempt({ targetNotReached: true })}>Finish attempt — target not reached</Btn>
+      </div>}
 
       {/* Status card first — the big hold timer must never scroll
           below the fold mid-rep. Live charts moved below the force
@@ -1108,7 +1150,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, unit =
               color: targetReached ? C.green : C.blue,
               fontVariantNumeric: "tabular-nums",
             }}>
-              {creditedSeconds(tindeq.forceLoss, elapsed)}s
+              {holdSeconds.toFixed(1)}s
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
               {config.mixedDomainPlan ? 'Fresh reference' : 'target'} {config.targetTime}s

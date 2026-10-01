@@ -4,18 +4,17 @@ import { isPeakMeasurement } from './peakTest.js';
 // ──────────────────────────────────────────────────────────────
 // Recovery comparisons can suggest reduced training; they do not establish
 // systemic fatigue, injury risk, or readiness in the absence of current data.
-import { buildRecoveryTrend } from "./recoveryDynamics.js";
+import { buildRecoveryReadinessTrend, recoveryReadinessHistory } from "./recoveryDynamics.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 import { sessionFatigueDetail } from "./climbingFatigue.js";
 
-// Sustained: cross-grip recovery must be down over at least this many
-// of each grip's most-recent finger sessions. 2 keeps a single rough
-// day from firing while still catching a real run.
+// Sustained: compare first-session, first-set recovery on distinct training
+// dates. Two sessions or two hands on one rough day are still one observation.
 export const DELOAD_MIN_SESSIONS = 2;
 
 // Provisional absolute recovery-gap threshold until there is enough
-// held-out history to estimate the athlete's usual two-session average.
+// held-out history to estimate the athlete's usual two-date average.
 export const DELOAD_GAP_TRIGGER = 0.15;
 export const DELOAD_GAP_TRIGGER_SD = 1.0;
 export const DELOAD_BASELINE_MIN_SESSIONS = 6; // independent dates per half
@@ -26,8 +25,8 @@ export const DELOAD_BASELINE_MIN_SD = 0.05;
 // tiny changes into alarms. It is a policy floor, not a measured SD.
 export const DELOAD_MIN_MEANINGFUL_GAP = 0.10;
 
-// Detraining guard: if the most recent finger session on/before the
-// evaluation date is older than this, current recovery is unknown.
+// Recency guard: the entire judged window must fall within this many days
+// of the evaluation date; older evidence leaves current recovery unknown.
 export const DELOAD_STALE_DAYS = 14;
 
 // Lifting acute-vs-chronic windows (days) + the completed-set rate
@@ -61,9 +60,8 @@ export const DELOAD_CLIMB_MIN_ACUTE_LOAD = 20;
 
 const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 
-// Dates where the recovery gauge has enough cross-grip history to be
-// meaningful. Once two grips each have `minSessions` gap-bearing sessions,
-// every subsequent recovery session is a useful checkpoint. `today` is
+// Dates where at least one grip has `minSessions` independent recovery
+// dates. Every subsequent comparable date is a useful checkpoint. `today` is
 // appended as the live endpoint so the slider can return to "Now" even
 // when the last finger session was several days ago.
 export function recoveryStatusDates(history, opts = {}) {
@@ -77,7 +75,7 @@ export function recoveryStatusDates(history, opts = {}) {
   const datesByGrip = new Map();
   const dateUnion = new Set();
   for (const grip of grips) {
-    const dates = buildRecoveryTrend(history, grip, { physModel: null })
+    const dates = buildRecoveryReadinessTrend(history.filter(r => r?.date && (!today || r.date <= today)), grip, { physModel: null })
       .map(row => row.date)
       .filter(date => date && (!today || date <= today));
     datesByGrip.set(grip, dates);
@@ -180,28 +178,31 @@ function climbingSpike(loadByDate, today) {
   return { acuteLoad: Math.round(acute * 10) / 10, chronicLoad: Math.round(chronic * 10) / 10, ratio, spike };
 }
 
-// Mean recovery gap for a grip over its last `n` finger sessions
+// Mean recovery gap for a grip over its last `n` independent training dates
 // on/before `today`, scored HELD-OUT: personal recovery taus are fit
 // ONLY on that grip's sessions BEFORE this recent window, then the recent
 // `n` are scored as out-of-sample. Without this, the very sessions being
 // evaluated pulled the tau fit toward their own recovery (worst on sparse
 // grips), partly masking a real dip — the look-ahead leakage the offline
 // validation avoids but production used to have. Null when fewer than `n`
-// gap-bearing sessions exist on/before `today`.
+// comparable gap-bearing dates exist within the current evidence window.
 export function recentGapHeldOut(history, grip, today, n) {
-  // Sessions that can carry a gap (>=2 timed reps), oldest→newest. No
-  // physModel needed just to enumerate the dates.
-  const sessions = buildRecoveryTrend(history, grip, { physModel: null })
+  // Use the same first-session/set context for fitting, baseline and the
+  // judged window. Later work stays in the descriptive recovery history.
+  const scopedHistory = recoveryReadinessHistory((history || [])
+    .filter(r => r?.date && r.date <= today));
+  const sessions = buildRecoveryReadinessTrend(scopedHistory, grip, { physModel: null })
     .filter(r => r.date && r.date <= today);
   if (sessions.length < n) return null;
-  // Recency belongs to the latest qualifying session, not the window span.
-  if (daysBetween(sessions[sessions.length - 1].date, today) > DELOAD_STALE_DAYS) return null;
   const recent = sessions.slice(-n);
+  // A new session does not make an old pre-break result current. The whole
+  // window must be recent before it can support a sustained current concern.
+  if (daysBetween(recent[0].date, today) > DELOAD_STALE_DAYS) return null;
   const cutoff = recent[0].date;                    // earliest of the window
-  const baseline = history.filter(r => r.grip === grip && r.date && r.date < cutoff);
+  const baseline = scopedHistory.filter(r => r.grip === grip && r.date < cutoff);
   const physModel = physModelFromTaus(computePersonalRecoveryTausForGrip(baseline, grip));
-  const scored = buildRecoveryTrend(history, grip, { physModel })
-    .filter(r => r.date && r.date <= today && Number.isFinite(r.gapAtTarget));
+  const scored = buildRecoveryReadinessTrend(scopedHistory, grip, { physModel })
+    .filter(r => r.date && r.date >= cutoff && r.date <= today && Number.isFinite(r.gapAtTarget));
   if (scored.length < n) return null;
   const last = scored.slice(-n);
   const mean = last.reduce((s, r) => s + r.gapAtTarget, 0) / last.length;
@@ -212,9 +213,9 @@ export function recentGapHeldOut(history, grip, today, n) {
   let baselineStats = null;
   if (dates.length >= 2 * DELOAD_BASELINE_MIN_SESSIONS) {
     const split = dates[Math.floor(dates.length / 2)];
-    const older = history.filter(r => r.grip === grip && r.date && r.date < split);
+    const older = scopedHistory.filter(r => r.grip === grip && r.date < split);
     const basePhys = physModelFromTaus(computePersonalRecoveryTausForGrip(older, grip));
-    const evaluation = buildRecoveryTrend(history, grip, { physModel: basePhys })
+    const evaluation = buildRecoveryReadinessTrend(scopedHistory, grip, { physModel: basePhys })
       .filter(r => r.date && r.date >= split && r.date < cutoff && Number.isFinite(r.gapAtTarget));
     const independentDates = new Set(evaluation.map(r => r.date)).size;
     const vals = evaluation.map(r => r.gapAtTarget);
@@ -237,6 +238,8 @@ export function recentGapHeldOut(history, grip, today, n) {
   const center = weight * (baselineStats?.mean ?? 0);
   const distance = (1 - weight) * DELOAD_GAP_TRIGGER + weight * personalDistance;
   return { mean, n: last.length, lastDate: last[last.length - 1].date,
+    independentDates: last.length, firstDate: last[0].date,
+    evidenceScope: 'first_session_first_set',
     confidence: last.some(r => r.confidence === "historical_estimate") ? "historical_estimate" : "measured",
     baseline: baselineStats, center, distance, threshold: center - distance,
     assessment: weight >= 1 ? "personalized" : "provisional",
@@ -302,7 +305,7 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
 
   if (!signals.crossGripDown) {
     const why = downGrips.length > 0
-      ? `Recovery is below the expected range in ${downGrips.join(", ")}. Consider an easier session. We cannot tell yet whether this is limited to ${downGrips.length === 1 ? "that grip" : "those grips"} or reflects broader fatigue.`
+      ? `Comparable first sets were below the expected recovery range in ${downGrips.join(", ")}. Consider reducing hard work and reassess alongside how you feel. We cannot tell yet whether this is limited to ${downGrips.length === 1 ? "that grip" : "those grips"} or reflects broader fatigue.`
       : "Observed recovery is within your normal range for the currently measured grips.";
     return none(why, signals, downGrips.length > 0 ? "local_concern" : "normal");
   }
@@ -321,8 +324,8 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   if (lifting.spike) loadParts.push(`lifting volume is ${lifting.ratio.toFixed(1)}× your 4-week average`);
   if (climbing.spike) loadParts.push(`climbing load is ${climbing.ratio.toFixed(1)}× your 4-week average`);
   const why = loadParts.length > 0
-    ? `Between-rep recovery is below your own normal on every measured grip over the last ${minSessions} sessions (${gapStr}), and ${loadParts.join(", and ")}. Signs of accumulating systemic fatigue — consider an easier finger session and trimming the load that spiked.`
-    : `Between-rep recovery is below your own normal on every measured grip over the last ${minSessions} sessions (${gapStr}). An early fatigue signal — consider a lighter finger session.`;
+    ? `Between-rep recovery was below the expected range on every measured grip across the last ${minSessions} comparable training days (${gapStr}), and ${loadParts.join(", and ")}. Consider reducing hard finger work and trimming the load that spiked. This comparison does not establish your readiness today.`
+    : `Between-rep recovery was below the expected range on every measured grip across the last ${minSessions} comparable training days (${gapStr}). Consider reducing hard work and reassess alongside how you feel.`;
 
   return { deload: true, severity, state: "systemic_concern", signals, why };
 }
@@ -394,17 +397,14 @@ export function deloadStatus(history, workoutSessions = [], opts = {}) {
 // ──────────────────────────────────────────────────────────────
 // WEEKLY DELOAD PLAN
 // ──────────────────────────────────────────────────────────────
-// A deload is a WEEK-scoped intervention, not a per-session tweak. The
-// plan cuts VOLUME ~50% (Climb Strong's deload heuristic) while keeping
-// the loads you do hit near-normal — the recovery comes from less
-// volume, not from making sessions easy (that would also detrain). So
-// the plan caps sessions/days rather than scaling prescribed loads.
+// A deload week is an optional volume-reduction reminder. A recovery residual
+// does not identify an exact dose or the athlete's climbing schedule.
 
 export const DELOAD_WEEK_DAYS = 7;
 
 // Distinct finger-training days within the 7 days ending at `today`.
-// A lightweight weekly-session counter so the reminder can say
-// "you've done N this week" (the app has no weekly session target).
+// This exported name is retained for compatibility; it counts days,
+// not sessions. The app has no fixed weekly finger-training target.
 export function fingerSessionsThisWeek(history, today) {
   if (!Array.isArray(history) || !today) return 0;
   const dates = new Set();
@@ -416,12 +416,12 @@ export function fingerSessionsThisWeek(history, today) {
   return dates.size;
 }
 
-// Weekly volume prescription for a deload, by severity. Strong = a full
-// deload week (one finger session, skip the heavy lifting day "A", drop
-// a climbing day). Mild = a soft cap, no skips. Null when no deload.
+// Relative volume guidance. Recovery does not identify an exact session
+// count or which climbing/lifting day to remove. Null when no deload.
 export function deloadPlan(severity) {
-  if (severity === "strong") return { fingerCap: 1, skipWorkout: "A", climbDays: 2, climbFrom: 3 };
-  if (severity === "mild")   return { fingerCap: 2, skipWorkout: null, climbDays: null, climbFrom: null };
+  if (severity === "strong" || severity === "mild") {
+    return { reduceVolume: true, avoidExtraSets: true, reviewOtherTraining: severity === "strong" };
+  }
   return null;
 }
 
@@ -434,8 +434,9 @@ export function buildDeloadGuidance(severity, history, opts = {}) {
   const datesAsc = (history || []).filter(r => r.date).map(r => r.date).sort();
   const today = opts.today || datesAsc[datesAsc.length - 1] || null;
   const done = today ? fingerSessionsThisWeek(history, today) : 0;
+  const recorded = `${done} finger-training day${done === 1 ? '' : 's'} recorded in the last 7 days.`;
   const action = severity === "strong"
-    ? `This week: limit finger training to ${plan.fingerCap} session (you've done ${done} so far), skip Workout ${plan.skipWorkout}, and drop to ${plan.climbDays} climbing days from ${plan.climbFrom}. Keep the loads you do hit near-normal — cut volume, not intensity.`
-    : `Keep it light this week — no more than ${plan.fingerCap} hard finger sessions (you've done ${done} so far) and hold off adding lifting or climbing volume.`;
-  return { severity, plan, fingerDoneThisWeek: done, action };
+    ? `Reduce hard finger work relative to your usual week, skip optional extra sets, and review recent lifting and climbing load. Protect the climbing sessions that matter to you. ${recorded} Reassess with a comparable first set when you feel ready; a green gauge is not required.`
+    : `Consider less hard finger work than usual and hold off adding sets or other training volume. ${recorded} Reassess with a comparable first set when you feel ready; past results do not confirm today's recovery.`;
+  return { severity, plan, fingerTrainingDaysThisWeek: done, fingerDoneThisWeek: done, action };
 }

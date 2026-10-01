@@ -11,7 +11,7 @@ const snapshot = (rating, multiplier) => ({version:1, reported_cooked:rating, ap
 test("untouched evening session does not inherit a morning rating", () => {
   const history=[rep("morning",10,snapshot(10,0.75)),rep("evening",null,snapshot(null,1))];
   const map=buildFreshLoadMap(history,{cookedByDate:{"2026-09-16":10}});
-  expect(map.get(repKey(history[0])).fresh).toBeCloseTo(25/0.75);
+  expect(map.get(repKey(history[0])).fresh).toBe(25);
   expect(map.get(repKey(history[1])).fresh).toBe(25);
 });
 test("a later rating edit cannot rewrite the adjustment used at session start", () => {
@@ -56,13 +56,14 @@ test("small dips on a constant baseline are ignored, sustained large dips are de
   expect(gripIsDown(recentGapHeldOut(withDip(15),"Micro",asOf,2))).toBe(true);
 });
 test("same-day duplicates cannot cross the fit boundary or inflate independent evidence", () => {
-  const h=recoveryHistory();
-  const duplicate=h.filter(r=>r.date===h[28].date).map(r=>({...r,id:r.id+'dup',session_id:r.session_id+'dup'}));
+  const h=recoveryHistory().map(r=>({...r,session_started_at:r.date+'T08:00:00Z'}));
+  const duplicate=h.filter(r=>r.date===h[28].date).map(r=>({...r,id:r.id+'dup',session_id:r.session_id+'dup',session_started_at:r.date+'T18:00:00Z'}));
   const original=recentGapHeldOut(h,"Micro",h.at(-1).date,2);
   const g=recentGapHeldOut([...h,...duplicate],"Micro",h.at(-1).date,2);
   expect(g.baseline.splitDate).toBe(original.baseline.splitDate);
   expect(g.baseline.independentDates).toBe(original.baseline.independentDates);
-  expect(g.baseline.sessionCount).toBe(original.baseline.sessionCount+1);
+  expect(g.baseline.sessionCount).toBe(original.baseline.sessionCount);
+  expect(g).toEqual(original);
 });
 test("no future leakage; repeated calls and moving the reference date alone keep calibration", () => {
   const h=recoveryHistory(); const asOf=h.at(-1).date;

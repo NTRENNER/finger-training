@@ -50,7 +50,7 @@ test('interrupted activity retains its load but cannot fit, anchor, or advance',
   expect(demonstratedCapacityKg([rep], 'L', 'Crusher', 40)).toBeNull();
   expect(prescription([rep], 'L', 'Crusher', 40)).toEqual(prescription([], 'L', 'Crusher', 40));
   const reps = [40, 24, 16, 12].map((t, i) => ({...rep, actual_time_s: t, rep_num: i + 1, failure_valid: i !== 2}));
-  expect(computeDensityLadder(reps, 'Crusher', 'power')).toBeNull();
+  expect(computeDensityLadder(reps, 'Crusher', 'power')).toMatchObject({ decision: 'incomplete', reps: 4, loadByHand: { L: 20 } });
   expect(computePersonalRecoveryTausForGrip(reps, 'Crusher')).toBeNull();
 });
 test('legacy failure records retain their existing eligibility', () => {

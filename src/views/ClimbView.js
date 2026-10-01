@@ -161,8 +161,8 @@ export function ClimbView({
   const recent = climbs.slice(0, RECENT_LIMIT);
 
   // Deload-week reminder — set on the Setup tab when the user accepts a
-  // deload. During a strong week the plan drops climbing from 3 → 2
-  // days, so surface that here with a live count. Read-only.
+  // deload. Reflect the athlete's chosen lighter week without inventing
+  // their usual climbing frequency. Read-only.
   const dw = loadLS(LS_DELOAD_WEEK_KEY) || null;
   const dwDay = dw?.start
     ? Math.round((new Date(today()) - new Date(dw.start)) / 86400000) + 1
@@ -188,7 +188,7 @@ export function ClimbView({
           fontSize: 12.5, color: C.text, lineHeight: 1.5,
         }}>
           <span style={{ color: C.orange, fontWeight: 700, letterSpacing: 0.4 }}>DELOAD WEEK</span>
-          {` · aim for ${2} climbing days this week instead of 3 (you've climbed ${climbDaysThisWeek} so far). Keep intensity, cut volume.`}
+          {` · consider less hard climbing than usual and protect the sessions that matter to you. You've recorded ${climbDaysThisWeek} climbing day${climbDaysThisWeek === 1 ? '' : 's'} in the last 7 days. Reassess alongside how you feel.`}
         </div>
       )}
 

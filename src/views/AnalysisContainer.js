@@ -55,7 +55,7 @@ export function AnalysisContainer(props) {
     onSavePinnedPerHandBaselines = () => {},
     baselinePinReady = true,
     // Per-grip fatigue β model — feeds the Curve Improvement card's
-    // Fresh-eq basis (de-cooked current fits) via useGripFits.
+    // Measured-force estimates via useGripFits (legacy freshEq aliases).
     // WorkoutAnalysisView (lifts) props
     defaultWorkouts,
     // ClimbingAnalysisView (climbs) props — pyramid pins synced via App

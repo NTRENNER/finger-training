@@ -126,3 +126,27 @@ test("sensor two-second summary survives rep saving independently of the instant
   expect(saved.peak_force_kg).toBe(80);
   expect(sustainedMaxKg(saved)).toBeCloseTo(20.3);
 });
+
+test('ordinary planned dose is immutable across actual overpulls, session edits and optional sets', () => {
+  const { hook, addReps } = setup();
+  act(() => hook.result.current.startSession({ ...cfg, repsPerSet: 4,
+    targetTime: 160, restTime: 20, plannedLoadByHand: { L: 20 },
+    cooked: 8, adjustLoadForFatigue: true }));
+  const snapshot = { version: 1, reps_per_set: 4, target_duration_s: 160,
+    rest_s: 20, load_kg: 16, base_load_kg: 20, hand_mode: 'L' };
+  // Retrospective/config changes and pulling heavier cannot rewrite the intended dose.
+  act(() => hook.result.current.setConfig(c => ({ ...c, cooked: 0, restTime: 30, targetTime: 220 })));
+  for (let rep = 0; rep < 4; rep++) {
+    act(() => hook.result.current.handleRepDone({ actualTime: 120, avgForce: 25, peakForce: 28 }));
+    if (rep < 3) act(() => hook.result.current.handleRestDone());
+  }
+  expect(hook.result.current.phase).toBe('done');
+  act(() => hook.result.current.handleNextSet());
+  act(() => hook.result.current.handleRepDone({ actualTime: 30, avgForce: 15, failureValid: false, endReason: 'interrupted' }));
+  const rows = addReps.mock.calls.flatMap(call => call[0]);
+  expect(rows).toHaveLength(5);
+  expect(rows[4].set_num).toBe(2);
+  for (const rep of rows) expect(rep.force_recording.session_prescription).toEqual(snapshot);
+  rows[0].force_recording.session_prescription.reps_per_set = 99;
+  expect(rows[1].force_recording.session_prescription).toEqual(snapshot);
+});

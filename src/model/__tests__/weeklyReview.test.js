@@ -62,7 +62,8 @@ describe("assembleReview", () => {
     expect(r.headline).toMatch(/eye on recovery/i);
     const concern = r.points.find(p => p.kind === "concern").text;
     expect(concern).toMatch(/softening/i);
-    expect(concern).toMatch(/Keep it light until recovery reads green/i);
+    expect(concern).toMatch(/reassess with a comparable first set when you feel ready/i);
+    expect(concern).not.toMatch(/until.*green/i);
   });
 
   test("stale grip surfaces as a concern", () => {
@@ -72,10 +73,11 @@ describe("assembleReview", () => {
     expect(c.text).toMatch(/20 days/);
   });
 
-  test("a lighter but recovered week is framed as good rest, not a concern", () => {
+  test("a lighter week describes observed sets without claiming recovery clearance", () => {
     const r = assembleReview(makeSignals({ finger: { daysThisWeek: 1, daysPerWeekBaseline: 4 }, recovery: { level: "green", label: "Fresh" } }));
     const infoLine = r.points.find(p => p.kind === "info");
-    expect(infoLine.text).toMatch(/good rest/i);
+    expect(infoLine.text).toMatch(/Recent comparable sets stayed within your recorded recovery range/i);
+    expect(infoLine.text).not.toMatch(/fresh|good rest|recovered/i);
     expect(r.points.some(p => p.kind === "concern")).toBe(false);
   });
 

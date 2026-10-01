@@ -1,5 +1,6 @@
 import { compareSessionOrder } from "./sessionOrder.js";
 import { recoveryEvidence } from "./recoveryEvidence.js";
+import { firstSessionEvidence } from "./firstSessionEvidence.js";
 // ───────────────────────────────────────────────────────────────
 // RECOVERY DYNAMICS — between-rep capacity restoration
 // ───────────────────────────────────────────────────────────────
@@ -163,8 +164,8 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
   // only by (session, hand) paired SOME set's rep 1 with SOME other
   // set's rep N (insertion-order dependent, not stable after cloud
   // sync re-orders rows) — corrupting the observed/predicted gap that
-  // feeds the deload detector. Per-set gaps from the same session
-  // still average into one datapoint via the bySession pass below.
+  // feeds recovery comparisons. This descriptive series retains every set;
+  // readiness callers apply their first-session/set filter separately.
   const groups = new Map();
   for (const r of history) {
     if (r.grip !== grip) continue;
@@ -234,6 +235,40 @@ export function buildRecoveryTrend(history, grip, { physModel = null } = {}) {
     .sort(compareSessionOrder);
 }
 
+// Readiness compares the same context on independent days. Establish session
+// order before rejecting invalid recordings or mixed protocols: an interrupted
+// first workout or Chaos session cannot promote later fatigued work. The full
+// buildRecoveryTrend above remains available for descriptive within-day work.
+export function recoveryReadinessHistory(history = []) {
+  const sessionRole = firstSessionEvidence(history);
+  const firstRoles = new Set(['first_session', 'only_recorded_session', 'legacy_single_session']);
+  return (history || []).filter(r => r && Number(r.set_num ?? 1) === 1
+    && firstRoles.has(sessionRole(r)));
+}
+
+// The two hands are observations from one training day, not two independent
+// recovery checks. Different first-session IDs for the hands still get one
+// day-level vote. Mixed/invalid first sets are rejected by recoveryEvidence.
+export function buildRecoveryReadinessTrend(history, grip, opts = {}) {
+  const sessions = buildRecoveryTrend(recoveryReadinessHistory(history), grip, opts);
+  const days = new Map();
+  for (const session of sessions) {
+    if (!session.date) continue;
+    if (!days.has(session.date)) days.set(session.date, []);
+    days.get(session.date).push(session);
+  }
+  const average = (rows, key) => {
+    const values = rows.map(r => r[key]).filter(Number.isFinite);
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  };
+  return [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, rows]) => ({
+    date, sessionCount: rows.length,
+    evidenceWeight: Math.min(...rows.map(r => r.evidenceWeight)),
+    confidence: rows.some(r => r.confidence === 'historical_estimate') ? 'historical_estimate' : 'measured',
+    observedAtTarget: average(rows, 'observedAtTarget'), gapAtTarget: average(rows, 'gapAtTarget'),
+  }));
+}
+
 // Add 3-session rolling-mean columns to a trend series so the chart
 // can render dots (raw) + smoothed trend lines, same pattern as
 // CapacityTrajectoryCard. Smooths both observedAtTarget and
@@ -268,7 +303,7 @@ export function withRollingMean(trend, window = 3) {
 // that, so most on-track sessions fell "outside" it. ±0.15 ≈ one
 // smoothed-gap sigma for the better-behaved grip.
 //
-// NOTE: the DELOAD detector does NOT read this. It reads a 2-session
+// NOTE: the DELOAD detector does NOT read this. It reads a 2-date
 // mean (a different, noisier statistic) and has its own DELOAD_GAP_TRIGGER
 // in deload.js. Don't collapse the two — they're calibrated separately.
 export const GAP_NOISE_BAND = 0.15;
@@ -277,33 +312,38 @@ export const GAP_NOISE_BAND = 0.15;
 // ───────────────────────────────────────────────────────────────
 // COACHING SIGNALS — compact per-grip recovery read for coachNotes
 // ───────────────────────────────────────────────────────────────
-// The DeloadGauge consumes the same recovery gap but only CROSS-grip
-// (it fires when EVERY grip is down), so it can't catch a single grip
-// slipping and it never reassures. This distills, per grip, the two
-// things the coaching layer needs: the recent smoothed model gap
+// A descriptive per-grip companion to the held-out deload assessment.
+// Use the same first-session/set context and independent dates. It reports
+// the recent smoothed model gap
 // (percentage points — negative = recovering worse than predicted) and
 // how far the smoothed recovery FRACTION has drifted over the last
 // `window` points. Self-contained (builds its own per-grip physModel)
 // so the caller just passes history.
-export const RECOVERY_COACH_MIN_POINTS = 4;   // need this many recovery datapoints to speak up
+export const RECOVERY_COACH_MIN_POINTS = 4;   // independent dates
 export const RECOVERY_TREND_WINDOW     = 3;   // smoothed now vs this many points back
+export const RECOVERY_COACH_STALE_DAYS = 14;
 
 export function recoveryCoachSignals(history, {
   minPoints = RECOVERY_COACH_MIN_POINTS,
   window = RECOVERY_TREND_WINDOW,
+  todayStr = null,
 } = {}) {
   if (!Array.isArray(history) || history.length === 0) return [];
-  const grips = [...new Set(history.map(r => r && r.grip).filter(Boolean))];
+  const ref = todayStr || history.map(r => r?.date).filter(Boolean).sort().at(-1);
+  const scopedHistory = recoveryReadinessHistory(history.filter(r => r?.date && r.date <= ref));
+  const grips = [...new Set(scopedHistory.map(r => r.grip).filter(Boolean))];
   const out = [];
   for (const grip of grips) {
     // Seed the physModel with whichever hand actually has reps for this
     // grip; recovery taus are grip-level so the hand barely moves the gap.
-    const hand = history.some(r => r.grip === grip && r.hand === "R" && Number(r.actual_time_s) > 0) ? "R" : "L";
+    const hand = scopedHistory.some(r => r.grip === grip && r.hand === "R" && Number(r.actual_time_s) > 0) ? "R" : "L";
     let physModel = null;
-    try { physModel = buildPhysModel(history, hand, grip); } catch (e) { physModel = null; }
-    const trend = withRollingMean(buildRecoveryTrend(history, grip, { physModel }), window);
+    try { physModel = buildPhysModel(scopedHistory, hand, grip); } catch (e) { physModel = null; }
+    const trend = withRollingMean(buildRecoveryReadinessTrend(scopedHistory, grip, { physModel }), window);
     const recPts = trend.filter(r => Number.isFinite(r.observedSmoothed));
     if (recPts.length < minPoints) continue;
+    const oldestRecent = recPts.slice(-window)[0];
+    if ((Date.parse(ref) - Date.parse(oldestRecent.date)) / 86400000 > RECOVERY_COACH_STALE_DAYS) continue;
     const last  = recPts[recPts.length - 1];
     const prior = recPts[Math.max(0, recPts.length - 1 - window)];
     const recentGapPct = Number.isFinite(last.gapSmoothed) ? Math.round(last.gapSmoothed * 100) : null;

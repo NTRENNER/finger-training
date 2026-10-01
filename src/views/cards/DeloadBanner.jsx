@@ -9,8 +9,8 @@
 //     the plan + a live finger-session counter, with "End early".
 //
 // Detect → explain → PROPOSE → (on accept) a week-scoped REMINDER. It
-// caps volume via guidance, not by silently scaling prescribed loads —
-// the recovery comes from less volume, not easier sessions. Renders
+// suggests reducing usual volume without inventing a weekly schedule or
+// silently scaling prescribed loads. Renders
 // null when there's nothing to show.
 
 import React, { useState } from "react";

@@ -38,7 +38,8 @@ export function createTargetFailureDetector(targetKg) {
   const snapshot = (details = true) => {
     const live = { startTs, endTs: result?.endTs ?? null, confirmedTs: result?.confirmedTs ?? null,
       status: result ? 'complete' : belowSince !== null ? 'recovering' : 'holding', boundaryKg: boundary };
-    if (!details) return live;
+    // The provisional cutoff is live-only: credit resumes if this dip recovers.
+    if (!details) return { ...live, pendingEndTs: result ? null : belowSince };
     const offset = ts => ts == null || startTs == null ? null : Math.round(ts - startTs);
     return { ...live, version: 2, time_basis: 'acquisition_offset_ms',
       startTs: startTs == null ? null : 0, endTs: offset(live.endTs), confirmedTs: offset(live.confirmedTs),

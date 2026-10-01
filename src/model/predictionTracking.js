@@ -1,8 +1,7 @@
 import { trainingDayContext } from './trainingDayContext.js';
 // Prospective, versioned experiments. This module never supplies a training
 // recommendation. Models are frozen at session start, predictions before holds.
-import { prescription, buildFreshLoadMap, repKey } from './prescription.js';
-import { freshFitReps } from './load.js';
+import { prescription, buildFreshLoadMap } from './prescription.js';
 import { THREE_EXP_TAUS, predForceThreeExp, buildThreeExpPriors } from './threeExp.js';
 import { buildPhysModel } from './repCurveData.js';
 import { PHYS_MODEL_DEFAULT, predictRepTimes } from './fatigue.js';
@@ -11,7 +10,7 @@ import { ymdLocal } from '../util.js';
 import { buildAdaptiveShadow, adaptiveShadowForce, adaptiveShadowTime,
   ADAPTIVE_PREDICTION_EXPERIMENT } from './adaptivePrediction.js';
 
-export const PREDICTION_EXPERIMENT = 'first-session-openers-v3';
+export const PREDICTION_EXPERIMENT = 'measured-capacity-v4';
 export const REVIEW_DAYS = 10;
 const KEY = 'prediction_check';
 const positive = n => Number.isFinite(n) && n > 0;
@@ -42,8 +41,9 @@ function curve(result) {
     planned_recommendation_kg: result.value, source: result.source };
 }
 
-// Same pre-session history/prior/anchor/bounds; only the candidate's fit points
-// change. No evaluation outcome enters either fit. Clone to detach mutable refs.
+// Frozen incumbent calibration plus the distinct established/recent challenger.
+// The old fresh-only competitor became identical to the incumbent and is retired.
+// No evaluation outcome enters a fit. Clone to detach mutable references.
 export function buildPredictionModels(history, grip, hand, target, options = {}) {
   try {
     // Every competitor gets the same strict prior-day history. Rebuild derived
@@ -52,12 +52,9 @@ export function buildPredictionModels(history, grip, hand, target, options = {})
     history = history.filter(r => r.date && r.date < historyBefore);
     const freshMap = buildFreshLoadMap(history);
     const threeExpPriors = buildThreeExpPriors(history);
-    const keys = new Set(freshFitReps(history).map(repKey));
-    const candidateMap = new Map([...freshMap].map(([key, value]) => [key,
-      { ...value, capacityEligible: value.capacityEligible !== false && keys.has(key) }]));
     const opts = { ...options, referenceDate: historyBefore, freshMap, threeExpPriors, captureCurve: true };
     const current = curve(prescription(history, hand, grip, target, opts));
-    const candidate = curve(prescription(history, hand, grip, target, { ...opts, freshMap: candidateMap }));
+    const candidate = { status: 'retired', reason: 'fresh_openers_are_now_incumbent' };
     const personal = buildPhysModel(history, hand, grip);
     const adaptive = buildAdaptiveShadow(history, hand, grip, target,
       historyBefore);
@@ -163,8 +160,7 @@ function completePredictionWithModels(prepared, prefix, rep) {
   if (!validMeasured(rep)) return { ...result, comparison: unavailable('unmeasured_or_interrupted') };
   if (prepared.kind === 'capacity') {
     const currentT = observedInterval(rep, prepared.models.current);
-    const candidateT = observedInterval(rep, prepared.models.candidate);
-    if (!positive(currentT) || currentT !== candidateT) {
+    if (!positive(currentT)) {
       return { ...result, comparison: unavailable('missing_or_incompatible_curve') };
     }
     const adaptiveT = observedInterval(rep, prepared.models.adaptive);
@@ -179,7 +175,7 @@ function completePredictionWithModels(prepared, prefix, rep) {
     return { ...result, adaptive_comparison: adaptiveComparison,
       comparison: { status: 'recorded', actual: rep.avg_force_kg,
       observed_s: currentT, current: forceAt(prepared.models.current, currentT),
-      candidate: forceAt(prepared.models.candidate, currentT),
+      candidate: null, // Retired duplicate, never score the incumbent against itself.
       // At-eventual-duration is a conditional check, not an advance forecast.
       kind: 'force_at_observed_duration',
       planned_matches: sameLoad(rep.avg_force_kg, prepared.planned_load_kg) } };
@@ -250,7 +246,8 @@ export function summarizePredictions(history) {
       skip('edited_or_missing_record'); continue;
     }
     const c = p.comparison;
-    if (c?.status !== 'recorded' || !Number.isFinite(c.current) || !Number.isFinite(c.candidate)) {
+    if (c?.status !== 'recorded' || !Number.isFinite(c.current)
+      || (p.kind === 'recovery' && !Number.isFinite(c.candidate))) {
       skip(c?.reason || 'unavailable'); continue;
     }
     const row = { id: r.id, date: r.date, grip: r.grip, hand: r.hand, domain: zoneOf(r.target_duration),
@@ -294,7 +291,8 @@ export function summarizePredictions(history) {
         adaptivePlanned.push({ ...adaptiveRow, actual: a.observed_s, ...p.adaptive_planned });
     }
     const candidate = p.kind === 'capacity' ? p.planned?.candidate : p.planned?.population;
-    if (c.planned_matches && Number.isFinite(p.planned?.current) && Number.isFinite(candidate)) {
+    if (c.planned_matches && Number.isFinite(p.planned?.current)
+      && (p.kind === 'capacity' || Number.isFinite(candidate))) {
       (p.kind === 'capacity' ? plannedForce : plannedRecovery).push({ ...row,
         actual: c.observed_s ?? c.actual, current: p.planned.current, candidate });
     }
@@ -307,7 +305,7 @@ export function summarizePredictions(history) {
   const breakdown = rows => Object.fromEntries(['grip', 'hand', 'domain', 'rep', 'restBand', 'basis', 'priorDaysBand', 'trainingContext']
     .map(key => [key, Object.fromEntries([...new Set(rows.map(r => r[key]))].map(value =>
       [value, scores(rows.filter(r => r[key] === value))]))]));
-  return { experiment: PREDICTION_EXPERIMENT, status: 'review_required_before_any_model_change',
+  return { experiment: PREDICTION_EXPERIMENT, retiredComparison: 'fresh_openers_are_now_incumbent', status: 'review_required_before_any_model_change',
     dates, days: dates.length, checkpoints: Math.floor(dates.length / REVIEW_DAYS),
     daysToNextCheckpoint: REVIEW_DAYS - dates.length % REVIEW_DAYS,
     diagnostics: { force: breakdown(force), recovery: breakdown(recovery),

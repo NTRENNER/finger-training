@@ -109,3 +109,36 @@ and recovered excursions. Arrays are bounded while recording, not just at save.
 confirmation; their summaries are not a raw trace for threshold replay. The live
 UI snapshot retains device-clock timestamps and excludes arrays. Historical
 version-1 details are left unchanged; this provenance is not research cache data.
+
+## Live hold clock, interrupted exits and planned dose
+
+The targeted hold clock now uses the same device timestamps as the credited
+measurement. It stays at zero while acquiring the target and pauses at the
+provisional cutoff while checking a force dip. Sustained recovery restores the
+whole interval and resumes the clock; confirmed loss freezes it at that cutoff.
+A near-zero release also pauses immediately, before its confirmation delay. It does not count the
+initial force ramp as hold time or keep advancing during a stalled sensor stream.
+Untargeted peak/warmup protocols and manually timed pulls keep their own clocks.
+
+Planned rest, measured unloaded rest, and acquisition are separate. For example,
+with 20 seconds planned rest, beginning to pull at 22 seconds and acquiring target
+at 24 seconds records 22 seconds of rest plus 2 seconds of acquisition. The ramp is
+activity, not rest; taking those normal extra seconds is not itself a failure.
+
+Ending a session during a pull saves that attempt before completing the session.
+Leaving the training tab saves it as interrupted activity and stops its recorder.
+Returning cannot silently resume the old pull. These exits do not establish a
+capacity failure, but their measured activity and independently valid two-second
+maximum remain recorded. StrictMode effect replay does not create an interruption.
+
+A pull that never acquires the target can be ended with **Finish attempt — target
+not reached**, even if an unloaded attachment keeps measured force above the normal
+release threshold. It saves activity-only evidence and requires an unloaded zero
+check before another pull. Neither a timeout nor this explicit action invents a
+muscular-failure endpoint.
+
+Ordinary sessions preserve their initial dose in
+`force_recording.session_prescription` (version 1): target duration, planned pulls,
+planned rest, per-hand prescribed load, hand mode, and the unadjusted base load when
+known. Each saved row carries a copy; interrupted attempts and optional sets retain
+the plan. Measured overpulls or later changes to a fatigue rating cannot rewrite it.

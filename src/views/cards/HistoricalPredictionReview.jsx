@@ -9,16 +9,16 @@ const pretty = n => n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 
 function ReplayScores({ name, scores, unit }) {
   if (!scores) return null;
-  const a = scores.currentCapacity, b = scores.candidateCapacity;
+  const a = scores.currentCapacity;
   const factor = unit === 'lbs' ? 2.2046226218 : 1;
   const fmt = n => n == null ? '—' : `${(n * factor).toFixed(1)} ${unit}`;
   return <div style={{ marginTop: 16 }}>
     <strong>{name}</strong>
     <div style={{ color: C.muted, fontSize: 13, margin: '6px 0' }}>{a.trainingDays} days · {a.observations} opening holds</div>
     <table style={{ width: '100%', textAlign: 'left', fontSize: 14 }}>
-      <thead><tr><th>Error</th><th>Current</th><th>Candidate</th></tr></thead>
+      <thead><tr><th>Error</th><th>Current</th></tr></thead>
       <tbody>{[['Typical', 'mae'], ['Larger misses', 'rmse'], ['Bias', 'bias']].map(([label, k]) =>
-        <tr key={k}><th scope="row" style={{ fontWeight: 400, padding: '5px 0' }}>{label}</th><td>{fmt(a[k])}</td><td>{fmt(b[k])}</td></tr>)}</tbody>
+        <tr key={k}><th scope="row" style={{ fontWeight: 400, padding: '5px 0' }}>{label}</th><td>{fmt(a[k])}</td></tr>)}</tbody>
     </table>
   </div>;
 }
@@ -93,11 +93,11 @@ export function HistoricalPredictionReview({ history, activities, unit }) {
           {' '}Older records may have estimated loads or uncertain endings; the download separates them from explicit measured failures.</p>
       </details>
       <details style={{ marginTop: 18 }}><summary style={{ cursor: 'pointer', fontWeight: 700 }}>Models replayed on earlier workouts</summary>
-        <p style={{ color: C.muted }}>Both models use strictly earlier training days. We check the saved duration and force against each reconstructed capacity curve.
-          The candidate fits opening holds only. This is a historical test, not the original forecast shown at the time.</p>
-        <ReplayScores name="Capacity curves" scores={report.replay.force.capacityCurves.all.matched.candidateCapacity} unit={unit} />
+        <p style={{ color: C.muted }}>The current model is replayed using strictly earlier training days. Its old opening-only competitor is retired because both now use that evidence.
+          The established + recent challenger is evaluated separately. This replay reconstructs a curve; it is not the original forecast shown at the time.</p>
+        <ReplayScores name="Capacity curves" scores={report.replay.force.capacityCurves.all.available} unit={unit} />
         {Object.entries(report.replay.force.capacityCurves.byGrip).map(([grip, scores]) =>
-          <ReplayScores key={grip} name={grip} scores={scores.matched.candidateCapacity} unit={unit} />)}
+          <ReplayScores key={grip} name={grip} scores={scores.available} unit={unit} />)}
         <p style={{ color: C.muted, fontSize: 13 }}>Typical = mean absolute error; larger misses = root mean square error; bias = predicted minus actual.
           Each day has equal weight. A small overall gain can hide worse predictions for one grip.
           The download also includes bounded load recommendations, duration groups and recovery comparisons.</p>

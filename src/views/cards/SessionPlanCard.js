@@ -426,7 +426,7 @@ export function SessionPlanCard({
     if (ladder.decision === "incomplete") {
       const detail = lb.missingHands.length > 0
         ? `missing ${lb.missingHands.join("/")}`
-        : "uneven rep counts";
+        : lb.unevenRepCounts ? "uneven rep counts" : "measurements were not comparable";
       return `ladder: last workout incomplete (${detail}) → repeat ${ladder.reps} reps, no advance (${loadStr} ${unit})${suffix}`;
     }
     if (ladder.decision === "down_step") {
@@ -436,6 +436,10 @@ export function SessionPlanCard({
       // the claim is inspectable.
       const worstC = Math.min(...Object.values(lb.collapseByHand || {}).map(c => c.C));
       return `ladder: last session's reps 2+ decayed to ${Math.round(worstC * 100)}% of your recovery model's forecast → −${Math.round(LADDER_COLLAPSE_STEP_FRAC * 100)}% load (${loadStr} ${unit}), same ${ladder.reps} reps until it's absorbed${suffix}`;
+    }
+    if (lb.adjustedSession) {
+      const restored = Object.keys(lb.restoredPlanByHand || {}).length > 0;
+      return `ladder: last workout used an adjusted load → repeat ${ladder.reps} reps${restored ? " at the saved base target" : " at the recorded target"} (${loadStr} ${unit}), no advance${suffix}`;
     }
     if (ladder.decision === "advance") {
       return `ladder: last rep ${lb.lastRepSec}s ≥ ${lb.gateSec}s gate → ${ladder.reps} reps, same load (${loadStr} ${unit})${suffix}`;

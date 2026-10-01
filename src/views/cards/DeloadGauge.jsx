@@ -110,10 +110,10 @@ export function DeloadGauge({
         <div style={{ fontSize: 12.5, fontWeight: 700, color }}>{label}</div>
       </div>
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
-        An approximate recovery trend from your recorded sets. Consider it alongside how you feel and your recent training.
+        An approximate recovery trend from comparable first sets on separate training days. Consider it alongside how you feel and your recent training.
         Gray = insufficient current evidence; green = observed recovery within range; yellow = recovery
         softening, ease up soon; red = deload recommended. Intentionally slow
-        to move — it won't react to a single rough session.
+        to move — repeated sessions on one day do not establish a sustained decline. Rest alone does not update the measurement.
       </div>
 
       {haveSignal && provisional && <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>

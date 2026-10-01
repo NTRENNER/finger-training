@@ -27,10 +27,9 @@ import { recordCapacityForce as recordForce } from "../model/forceRecording.js";
 //      sample) so the view doesn't have to read peak before the
 //      next rep resets it.
 //
-// Auto-fail: if the measured force drops below the hybrid threshold
-// (see AUTOFAIL_ABS_SAG_KG below) for >1.5 s during a manual rep,
-// autoFailCallbackRef fires so the view can end the rep and mark it
-// as failed without user input.
+// Targeted manual and automatic reps share the targetFailure detector.
+// Confirmed loss fixes the capacity endpoint; physical release ends activity.
+// See docs/rep-force-loss.md for acquisition, recovery and release timings.
 //
 // No app-layer keepalive: the OS/link layer already keeps BLE alive,
 // and writing CMD_TARE every 25 s (which we used to do) actually
@@ -89,97 +88,9 @@ export function parseTindeqPacket(dataView, onSample) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// PLATEAU-TRIMMED AVERAGE
-// ─────────────────────────────────────────────────────────────
-// Replaces the running 0.85×target gate with a rep-end plateau
-// detector. Works identically with or without a target, since the
-// threshold floats with what the user actually held rather than what
-// they were prescribed.
-//
-//   1. Find rep-peak (max kg).
-//   2. Plateau threshold = 0.80 × peak. Ramp-up and release-tail
-//      samples sit below this; the steady hold sits above.
-//   3. Find first plateau-eligible sample → window start.
-//      Skip an additional PLATEAU_LEAD_IN_MS to swallow the curl-up
-//      from threshold-cross to a fully stable hold.
-//   4. Find last plateau-eligible sample → window end. Trim back
-//      PLATEAU_TAIL_MS to clip the brief release decay between
-//      "first dip" and the auto-detect end threshold.
-//   5. Average the surviving window. Fallback chain (in order):
-//        a. Plateau-trimmed mean (the steady hold between lead-in
-//           and tail trim).
-//        b. Raw mean of all positive samples — when the trim window
-//           collapses (rep too short, or never settled into a real
-//           plateau), the unfiltered mean is still a reasonable
-//           central tendency for the rep. Includes ramp-up and
-//           release samples, but those are bounded by the rep's own
-//           decay shape so the average won't be wildly inflated.
-//        c. Peak as a last resort — only if there are no positive
-//           samples at all (effectively never; a plateau-eligible
-//           rep always has positive force at peak time).
-//      The intermediate (b) step matters for short / ugly reps —
-//      jumping straight from plateau to peak overstates sustained
-//      force on a 2-second hold where the trim window swallows the
-//      entire signal.
-//
-// All three conditions where the older 0.85×target gate fell short
-// are now handled uniformly:
-//   * No-target / manual sessions get plateau detection too.
-//   * Below-target attempts (user can't sustain prescribed load)
-//     produce a meaningful average instead of falling back to peak.
-//   * The release tail (samples between 0.85×target and AD_END_KG)
-//     no longer drags the mean down on long reps.
-const PLATEAU_THRESHOLD_FRAC = 0.80; // fraction of rep-peak considered "on the plateau"
-const PLATEAU_LEAD_IN_MS     = 500;  // skip the first 0.5s after entering the plateau
-const PLATEAU_TAIL_MS        = 200;  // drop the last 0.2s before the final plateau-edge sample
+// Force and time are recorded over matching device-clock intervals by
+// recordCapacityForce; the obsolete peak-relative plateau helper is removed.
 export const AUTO_RELEASE_CONFIRM_MS = 1000;
-
-// Raw mean of all positive samples — fallback (b) in the chain above.
-// Used when the plateau trim collapses to an empty window (short or
-// ugly reps). Better than peak because peak is a single sample;
-// raw mean still reflects the rep's central tendency even when the
-// trim heuristics can't isolate a clean steady-hold region.
-function rawPositiveMean(samples) {
-  let sum = 0, count = 0;
-  for (const s of samples) {
-    if (s.kg > 0) { sum += s.kg; count += 1; }
-  }
-  return count > 0 ? sum / count : 0;
-}
-
-export function computePlateauAvg(samples) {
-  if (!samples || samples.length === 0) return 0;
-  let peak = 0;
-  for (const s of samples) if (s.kg > peak) peak = s.kg;
-  if (peak <= 0) return 0;
-  const threshold = peak * PLATEAU_THRESHOLD_FRAC;
-  let firstIdx = -1, lastIdx = -1;
-  for (let i = 0; i < samples.length; i++) {
-    if (samples[i].kg >= threshold) {
-      if (firstIdx === -1) firstIdx = i;
-      lastIdx = i;
-    }
-  }
-  // Fallback chain — see header comment for the rationale.
-  if (firstIdx === -1) return rawPositiveMean(samples) || peak;
-  const startTs = samples[firstIdx].ts + PLATEAU_LEAD_IN_MS;
-  const endTs   = samples[lastIdx].ts  - PLATEAU_TAIL_MS;
-  let sum = 0, count = 0;
-  for (let i = firstIdx; i <= lastIdx; i++) {
-    const s = samples[i];
-    if (s.ts >= startTs && s.ts <= endTs && s.kg >= threshold) {
-      sum += s.kg;
-      count += 1;
-    }
-  }
-  if (count > 0) return sum / count;
-  // Plateau window collapsed — fall back to raw positive mean before
-  // peak. For short/ugly reps this preserves the central tendency
-  // instead of overstating sustained force with a single max sample.
-  const raw = rawPositiveMean(samples);
-  return raw > 0 ? raw : peak;
-}
 
 // ─────────────────────────────────────────────────────────────
 // useTindeq() — React hook wrapper around the BLE GATT API
@@ -198,11 +109,19 @@ export function useTindeq() {
   const [bleError,      setBleError]      = useState(null);
   const [forceLoss, setForceLoss] = useState(null);
   const forceLossStatusRef = useRef(null);
-  const publishForceLoss = useCallback(detector => {
+  const latestForceLossRef = useRef(null);
+  const publishForceLoss = useCallback((detector, observedTs = null, releaseTs = null) => {
     const state = detector?.snapshot(false);
-    if (state?.status !== forceLossStatusRef.current) {
-      forceLossStatusRef.current = state?.status ?? null;
-      setForceLoss(state ?? null);
+    const pendingEndTs = state && releaseTs != null
+      ? Math.min(state.pendingEndTs ?? releaseTs, releaseTs) : state?.pendingEndTs;
+    const next = state ? { ...state, observedTs, pendingEndTs } : null;
+    latestForceLossRef.current = next;
+    // Acquisition changes the credited clock even while status stays holding.
+    // Device-time ticks ride the existing coalesced force-display update.
+    const signature = next ? `${next.status}|${next.startTs}|${next.endTs}|${next.pendingEndTs}` : null;
+    if (signature !== forceLossStatusRef.current) {
+      forceLossStatusRef.current = signature;
+      setForceLoss(next);
     }
   }, []);
   const [battery, setBattery] = useState(emptyBattery);
@@ -232,6 +151,7 @@ export function useTindeq() {
   const flushUi = useCallback(() => {
     rafRef.current = 0;
     setForce(latestKgRef.current);
+    setForceLoss(latestForceLossRef.current);
     setPeak(peakRef.current);
     const c = countRef.current, adC = adCountRef.current;
     if (adC > 0)     setAvgForce(adSumRef.current / adC);
@@ -479,11 +399,11 @@ export function useTindeq() {
 
       if (measuringRef.current) {
         const failure = manualTargetDetectorRef.current?.({ kg, ts: now });
-        publishForceLoss(manualTargetDetectorRef.current);
         if (kg < manualReleaseKgRef.current) {
           if (belowSinceRef.current === null) belowSinceRef.current = now;
           else if (now - belowSinceRef.current >= AD_END_MS) autoFailCallbackRef.current?.();
         } else belowSinceRef.current = null;
+        publishForceLoss(manualTargetDetectorRef.current, now, belowSinceRef.current);
         if (measuringRef.current && !manualBackstopRef.current && failure
             && now - failure.confirmedTs >= RELEASE_BACKSTOP_POLICY.after_confirmation_ms) {
           manualBackstopRef.current = true;
@@ -506,10 +426,11 @@ export function useTindeq() {
             const thresholds = repDetectionThresholds(adEndOnTargetDropRef.current ? targetKgRef.current : null);
             if (!(kg >= thresholds.startKg)) return;
             adReleaseKgRef.current = thresholds.releaseKg;
-            targetDetectorRef.current = adEndOnTargetDropRef.current
+            targetDetectorRef.current = adEndOnTargetDropRef.current && targetKgRef.current > 0
               ? createTargetFailureDetector(targetKgRef.current) : null;
             publishForceLoss(null);
             targetDetectorRef.current?.({ kg, ts: now });
+            publishForceLoss(targetDetectorRef.current, now);
             adActiveRef.current    = true;
             adStartTimeRef.current = now;
             // Start the force and time interval at the same sample.
@@ -527,10 +448,10 @@ export function useTindeq() {
           adSumRef.current += kg;
           adCountRef.current += 1;
           const failure = targetDetectorRef.current?.({ kg, ts: now });
-          publishForceLoss(targetDetectorRef.current);
           if (kg < adReleaseKgRef.current) {
             if (adBelowRef.current === null) adBelowRef.current = now;
           } else adBelowRef.current = null;
+          publishForceLoss(targetDetectorRef.current, now, adBelowRef.current);
           const released = adBelowRef.current !== null && now - adBelowRef.current >= AD_END_MS;
           const backstop = !released && failure && now - failure.confirmedTs >= RELEASE_BACKSTOP_POLICY.after_confirmation_ms;
           if (released || backstop) {
@@ -711,7 +632,7 @@ export function useTindeq() {
     measurementInterruptedRef.current = false;
     manualBackstopRef.current = false;
     lastPacketAtRef.current = Date.now();
-    manualTargetDetectorRef.current = createTargetFailureDetector(targetKgRef.current);
+    manualTargetDetectorRef.current = targetKgRef.current > 0 ? createTargetFailureDetector(targetKgRef.current) : null;
     manualReleaseKgRef.current = repDetectionThresholds(targetKgRef.current).releaseKg;
     publishForceLoss(null);
     peakRef.current      = 0;  setPeak(0);
@@ -835,7 +756,7 @@ export function useTindeq() {
   // same { actualTime, avgForce, peakForce } shape as the natural
   // rep-end callback so the caller can record the rep if it wants
   // (the warmup doesn't, but the contract stays consistent).
-  const endRepAndRequireRelease = useCallback(() => {
+  const endRepAndRequireRelease = useCallback(({ requireZero = false } = {}) => {
     const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current,
           forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'manual_stop'));
     const { actualTime, avgForce: avg } = stats;
@@ -847,8 +768,9 @@ export function useTindeq() {
     adSamplesRef.current    = [];
     adBelowRef.current      = null;
     markAwaitingRelease(true);
+    if (requireZero) requireReleaseCheck();
     return { ...stats, actualTime, avgForce: avg, peakForce: peakF };
-  }, [recordWithBattery, markAwaitingRelease]);
+  }, [recordWithBattery, markAwaitingRelease, requireReleaseCheck]);
 
   const stopAutoDetect = useCallback(async ({ observeRelease = false } = {}) => {
     cancelReleaseWatch();

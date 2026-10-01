@@ -229,7 +229,9 @@ export function buildFreshLoadMap(history, opts = {}) {
       // fatigued the user was at this point in the set.
       let fresh = af > 0 && load > 0 ? load / af : load;
       const adjustment = recordedAdjustment(r, cookedByDate);
-      fresh /= adjustment.multiplier;
+      // The selected discount is a prescription choice, not a measured loss
+      // of physiological capacity. Preserve it as context; never divide it
+      // out of observed force. Within-set recovery remains a separate estimate.
       // Bound the fresh-equivalent load (see MAX_FRESH_INFLATION).
       const cappedFresh = load > 0
         ? Math.min(fresh, load * MAX_FRESH_INFLATION, SANE_MAX_KG)

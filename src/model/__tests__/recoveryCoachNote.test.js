@@ -38,6 +38,30 @@ describe("recoveryCoachSignals", () => {
     expect(recoveryCoachSignals([])).toEqual([]);
     expect(recoveryCoachSignals(null)).toEqual([]);
   });
+
+  test("later depleted sessions and extra sets cannot change the sustained coaching signal", () => {
+    const hist = ['2026-06-01', '2026-06-03', '2026-06-05', '2026-06-07', '2026-06-09']
+      .flatMap(date => sess(`${date}-am`, date, 30, 0.9)
+        .map(r => ({ ...r, session_started_at: `${date}T08:00:00Z` })));
+    const extra = hist.filter(r => r.rep_num === 1).flatMap(r => [
+      ...sess(`${r.date}-pm`, r.date, 30, 0.1)
+        .map(rep => ({ ...rep, session_started_at: `${r.date}T18:00:00Z` })),
+      ...sess(r.session_id, r.date, 30, 0.1)
+        .map(rep => ({ ...rep, session_started_at: r.session_started_at, set_num: 2 })),
+    ]);
+    const before = recoveryCoachSignals(hist, { todayStr: '2026-06-09' });
+    expect(before).toHaveLength(1);
+    expect(recoveryCoachSignals([...hist, ...extra], { todayStr: '2026-06-09' })).toEqual(before);
+  });
+
+  test("requires the complete smoothed evidence window to remain current", () => {
+    const hist = ['2026-06-01', '2026-06-03', '2026-06-05', '2026-06-07', '2026-06-09']
+      .flatMap(date => sess(date, date, 30, 0.3));
+    expect(recoveryCoachSignals(hist, { todayStr: '2026-06-19' })).toHaveLength(1);
+    expect(recoveryCoachSignals(hist, { todayStr: '2026-06-20' })).toEqual([]);
+    expect(buildCoachNotes(hist, { todayStr: '2026-07-01' })
+      .some(n => n.key === 'recovery-warn' || n.key === 'recovery-ok')).toBe(false);
+  });
 });
 
 // ── recoveryNote + buildCoachNotes wiring ─────────
@@ -80,6 +104,11 @@ describe("recoveryNote", () => {
     expect(recoveryNote([{ grip: "Micro", recentGapPct: -3, recoveryDeltaPct: -2, nPoints: 8 }])).toBeNull();
     expect(recoveryNote([])).toBeNull();
     expect(recoveryNote(null)).toBeNull();
+  });
+
+  test("a declining observation without a model comparison does not imply recovery is tracking it", () => {
+    expect(recoveryNote([{ grip: 'Micro', recentGapPct: null, recoveryDeltaPct: -20, nPoints: 8 }])).toBeNull();
+    expect(recoveryNote([{ grip: 'Micro', recentGapPct: 50, recoveryDeltaPct: -20, nPoints: 8 }])).toBeNull();
   });
 
   test("band + decline thresholds are exported and sane", () => {

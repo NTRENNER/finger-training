@@ -158,14 +158,14 @@ describe("assembleCheckIn", () => {
     const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
     s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
     const out = assembleCheckIn(s);
-    const compact = out.points.find(p => p.kind === "concern" && /Recovery softening/.test(p.text));
-    const merged = out.sections.stuck.find(t => /volume was already/.test(t));
+    const compact = out.points.find(p => p.kind === "concern" && /Volume was already/.test(p.text));
+    const merged = out.sections.stuck.find(t => /Volume was already/.test(t));
     expect(compact).toBeTruthy();
-    expect(compact.text).toMatch(/volume was already/);
-    expect(compact.text).toMatch(/Keep it light until recovery turns green/);
+    expect(compact.text).toMatch(/Volume was already/);
+    expect(compact.text).toMatch(/Reassess.*when you feel ready/);
     expect(merged).toBeTruthy();
-    expect(merged).toMatch(/right response/);
-    expect(merged).toMatch(/advance fresh/);
+    expect(merged).toMatch(/earlier recovery signal/);
+    expect(merged).not.toMatch(/until.*green|advance fresh/);
     // Neither original line survives alongside the merge.
     expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
     expect(out.sections.stuck.some(t => /ease up soon/.test(t))).toBe(false);
@@ -177,27 +177,28 @@ describe("assembleCheckIn", () => {
     s.behaviorNotes = [{ key: "ramp-drop", ratio: 0, text: "raw ramp-drop note" }];
     const out = assembleCheckIn(s);
 
-    expect(out.points.find(p => p.kind === "concern").text).toMatch(/volume was already near zero/);
-    expect(out.sections.stuck.join(" ")).toMatch(/volume was already near zero/);
+    expect(out.points.find(p => p.kind === "concern").text).toMatch(/Volume was already near zero/);
+    expect(out.sections.stuck.join(" ")).toMatch(/Volume was already near zero/);
     expect([...out.points.map(p => p.text), ...out.sections.stuck].join(" ")).not.toMatch(/~0%/);
   });
 
-  test("red recovery + light week says to extend the deload", () => {
+  test("red recovery + light week calls for reassessment rather than waiting for green", () => {
     const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
     s.recovery = { level: "red", label: "Recovery is down", guidanceAction: null };
     const out = assembleCheckIn(s);
-    const merged = out.sections.stuck.find(t => /despite volume falling/.test(t));
+    const merged = out.sections.stuck.find(t => /Volume fell/.test(t));
     expect(merged).toBeTruthy();
-    expect(merged).toMatch(/Extend the deload/);
+    expect(merged).toMatch(/reduced volume alone cannot tell us whether you have recovered/);
+    expect(merged).not.toMatch(/Extend the deload|until the trend/);
     expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
   });
 
-  test("green recovery + light week reads as a banked deload in WHAT'S MOVING", () => {
+  test("green recovery + light week describes the observed range without readiness clearance", () => {
     const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
     s.recovery = { level: "green", label: null, guidanceAction: null };
     const out = assembleCheckIn(s);
-    expect(out.sections.moving.some(t => /banked deload/.test(t))).toBe(true);
-    expect(out.sections.moving.join(" ")).toMatch(/Advance while you're fresh/);
+    expect(out.sections.moving.some(t => /recorded recovery range/.test(t))).toBe(true);
+    expect(out.sections.moving.join(" ")).not.toMatch(/banked deload|Advance while you're fresh/);
     // The raw drop note is consumed, not duplicated into stuck.
     expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
   });
@@ -212,8 +213,16 @@ describe("assembleCheckIn", () => {
     const s = gatherCheckInSignals(hist, [], [], { refDate: REF });
     s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
     const out = assembleCheckIn(s);
-    expect(out.sections.stuck.some(t => /Keep it light until recovery reads green/.test(t))).toBe(true);
+    expect(out.sections.stuck.some(t => /reassess with a comparable first set/.test(t))).toBe(true);
     expect(out.sections.stuck.some(t => /volume was already/.test(t))).toBe(false);
+  });
+
+  test("unknown recovery plus lower volume does not become a softening or recovery claim", () => {
+    const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
+    s.recovery = { level: "unknown", label: "Not enough recent data", guidanceAction: null };
+    const out = assembleCheckIn(s);
+    const text = [...out.points.map(p => p.text), ...out.sections.stuck, ...out.sections.moving].join(' ');
+    expect(text).not.toMatch(/Recovery softening|recovered|banked deload|until.*green|earlier recovery signal/i);
   });
 
   test("behavior notes (volume ramp / adherence) land in stuck", () => {
