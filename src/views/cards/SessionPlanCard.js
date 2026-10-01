@@ -1,3 +1,4 @@
+import { detectPlateaus } from '../../model/plateau.js';
 import { betaEligibility, BETA_ELIGIBILITY_DESCRIPTION } from '../../model/betaEligibility.js';
 import { markUncertainDomainTimes, progressionLabel } from '../../model/domainTargetConsistency.js';
 import { startingHandForDay } from '../../model/handOrder.js';
@@ -45,7 +46,7 @@ import { trainingPurpose } from "../../model/trainingPurpose.js";
 import React, { useEffect, useMemo, useState } from "react";
 import "./SessionPlanCard.css";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.js";
+import { Card, Btn } from "../../ui/components.js";
 import { fmtW } from "../../ui/format.js";
 import { ZONE_KEYS, TRAINING_ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
@@ -168,6 +169,8 @@ export function SessionPlanCard({
   const [volumeOverride, setVolumeOverride] = useState(null);
   const [volumeSetupOpen, setVolumeSetupOpen] = useState(false);
   const [volumeGrips, setVolumeGrips] = useState(() => grip ? [grip] : []);
+  const [plateauDismissed, setPlateauDismissed] = useState(false);
+  const [plateauAccepted, setPlateauAccepted] = useState(false);
   const [volumeBusy, setVolumeBusy] = useState(false);
   const [volumeError, setVolumeError] = useState(null);
   // Why-line Details expander (July 2026) — receipts and secondary
@@ -181,6 +184,8 @@ export function SessionPlanCard({
   // Reset the override when the grip changes — a Crusher pick shouldn't
   // carry into Micro silently.
   useEffect(() => {
+    setPlateauDismissed(false);
+    setPlateauAccepted(false);
     setOverrideZone(null);
     setMixedRequested(false);
     setMixedOpening(null);
@@ -284,6 +289,10 @@ export function SessionPlanCard({
   const readinessDate = today();
   const betaAccess = useMemo(() => betaEligibility(history, readinessDate), [history, readinessDate]);
   const betasAvailable = volumeReady && betaAccess.eligible;
+  const plateauReport = useMemo(() => betasAvailable ? detectPlateaus({ history, activities, asOf: readinessDate,
+    experiments: volumeExperiment ? { [volumeExperiment.id]: volumeExperiment } : {} }) : null,
+    [betasAvailable, history, activities, readinessDate, volumeExperiment]);
+  const plateauSuggestion = plateauReport?.byGrip.find(g => g.grip === grip && g.recommendation === 'consider_volume_beta');
   const mixedEnabled = betasAvailable && mixedRequested && !!mixedPlan;
   const volumeStatus = volumeExperiment ? volumeExperimentStatus(volumeExperiment, readinessDate) : null;
   const volumePlan = useMemo(() => volumeSessionPlan(volumeExperiment, grip, readinessDate),
@@ -302,6 +311,7 @@ export function SessionPlanCard({
 
   const changeVolume = async enabled => {
     if (enabled && !betasAvailable) return;
+    setPlateauAccepted(false);
     setVolumeError(null);
     if (!volumeExperiment || volumeFinished) {
       setVolumeSetupOpen(enabled);
@@ -326,7 +336,7 @@ export function SessionPlanCard({
     setVolumeBusy(true);
     setVolumeError(null);
     try {
-      const saved = await onStartVolumeExperiment?.({ grips: volumeGrips });
+      const saved = await onStartVolumeExperiment?.({ grips: volumeGrips, ...(plateauAccepted ? { trigger: 'plateau_prompt' } : {}) });
       if (saved === false) throw new Error('Volume plan was not saved.');
       setMixedRequested(false);
       setVolumeOverride(null);
@@ -592,7 +602,8 @@ export function SessionPlanCard({
             {!betaAccess.hasThreeMonths && ' Three months of training history is not established yet.'}
           </>}
         </p>}
-        <Toggle label="Chaos Machine (Beta)" checked={mixedEnabled} disabled={!betasAvailable || !mixedPlan || volumeBusy}
+        {betasAvailable && <>
+        <Toggle label="Chaos Machine (Beta)" checked={mixedEnabled} description="Five different loads in one session. Try a different training structure while keeping it separate from a volume experiment." disabled={!betasAvailable || !mixedPlan || volumeBusy}
           onChange={enabled => {
             setMixedRequested(enabled);
             if (enabled) { setVolumeOverride(false); setVolumeSetupOpen(false); }
@@ -601,8 +612,17 @@ export function SessionPlanCard({
           onChange={changeVolume}
           description={!betasAvailable ? undefined
             : !volumeEligible ? 'Complete the initial measurements first. Volume Beta uses ordinary training sessions, not peak tests or boundary measurements.'
-            : volumeStatus === 'active' && volumeEnabled ? 'Turn off to pause your six-week plan.'
-            : !volumeExperiment ? 'Optional six-week trial of two sets per hand.' : undefined} />
+            : volumeStatus === 'active' && volumeEnabled ? 'Two sets per hand to test additional volume. Turn off to pause your six-week plan.'
+            : 'Optional six-week trial of two sets per hand to test whether extra volume helps when progress stalls.'} />
+        </>}
+        {betasAvailable && plateauSuggestion && volumeEligible && !mixedEnabled && !volumeSetupOpen && !plateauDismissed && <section aria-label="Plateau experiment suggestion" style={{ margin: '16px 0' }}>
+          <strong>Progress may have slowed in some duration ranges.</strong>
+          <p>Comparable opening holds on both hands have stayed similar across several weeks of steady training. An optional six-week Volume Beta can help you test whether a second set helps.</p>
+          <p style={{ color: C.muted }}>Only try additional volume if fatigue and climbing quality are manageable. Keep Chaos Machine separate so the result is easier to interpret.</p>
+          <Btn small onClick={() => { setPlateauAccepted(true); setVolumeGrips([grip]); setVolumeSetupOpen(true); }}>Review Volume Beta</Btn>{' '}
+          <Btn small color={C.border} onClick={() => setPlateauDismissed(true)}>Not now</Btn>{' '}
+          <a href="/research" style={{ color: C.blue }}>See the evidence</a>
+        </section>}
         {betasAvailable && volumeSetupOpen && <VolumeBetaEnrollment grips={availableGrips} selectedGrips={volumeGrips}
           onGripsChange={setVolumeGrips} onStart={startVolume} onCancel={() => { setVolumeSetupOpen(false); setVolumeError(null); }}
           busy={volumeBusy} error={volumeError} />}

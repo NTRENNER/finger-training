@@ -63,3 +63,16 @@ test.each([{ reviewWeek: 0 }, { reviewWeek: 7 }, { statusOnly: true, reviewWeek:
   'invalid mutation options %j cannot write any settings key', options => {
     expect(volumeExperimentPatch({ ...plan(), reviews: { 1: { notes: 'Okay' } } }, options)).toEqual({});
   });
+
+test('frozen plateau enrollment evidence survives sync, pause and review updates', () => {
+  const entryEvidence = { version: 1, asOf: '2026-10-01', source: 'plateau_prompt', byGrip: [
+    { grip: 'Micro', recommendation: 'consider_volume_beta', cells: [] } ] };
+  const e = createVolumeExperiment({ id: 'trial', grips: ['Micro'], startDate: '2026-10-01', entryEvidence });
+  entryEvidence.byGrip[0].recommendation = 'changed';
+  expect(e.entryEvidence.byGrip[0].recommendation).toBe('consider_volume_beta');
+  const settings = { ...volumeExperimentPatch(e),
+    ...volumeExperimentPatch({ ...e, status: 'paused' }, { statusOnly: true }),
+    ...volumeExperimentPatch({ ...e, reviews: { 1: { notes: 'Climbing feels good.' } } }, { reviewWeek: 1 }) };
+  expect(volumeExperimentsFromSettings(settings).trial.entryEvidence).toEqual(e.entryEvidence);
+  expect(restoreVolumeExperiments({ trial: e }).trial.entryEvidence).toEqual(e.entryEvidence);
+});

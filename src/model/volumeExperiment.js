@@ -40,7 +40,7 @@ const matching = (point, benchmark) => sameBasis(point, benchmark)
 // Preserve original force and timing bases. Converting acquisition time back
 // to legacy elapsed time cannot undo a detector change, so this experiment
 // deliberately does not use the converted freshFitReps output.
-function openingPoints(history, from, through) {
+export function volumeOpeningPoints(history, from, through) {
   const rows = asRows(history).filter(r => r && validDate(r.date) && r.date >= from && r.date <= through);
   const first = firstSessionEvidence(rows);
   const byDay = new Map();
@@ -80,7 +80,7 @@ function openingPoints(history, from, through) {
 export function buildVolumeBaseline({ history = [], grips = [], startDate = today() } = {}) {
   if (!validDate(startDate)) throw new Error('A valid experiment start date is required.');
   const windowStart = shift(startDate, -DAYS), windowEnd = shift(startDate, -1);
-  const candidates = openingPoints(history, windowStart, windowEnd);
+  const candidates = volumeOpeningPoints(history, windowStart, windowEnd);
   const selected = [...new Set(grips)].filter(grip => GRIPS.includes(grip));
   const byHand = selected.flatMap(grip => HANDS.map(hand => {
     const rows = candidates.filter(p => p.grip === grip && p.hand === hand);
@@ -99,14 +99,15 @@ export function buildVolumeBaseline({ history = [], grips = [], startDate = toda
 }
 
 export function createVolumeExperiment({ history = [], grips = [], startDate = today(), id = uuid(),
-  createdAt = new Date().toISOString() } = {}) {
+  createdAt = new Date().toISOString(), entryEvidence = null } = {}) {
   const selected = [...new Set(grips)].filter(grip => GRIPS.includes(grip));
   if (!validDate(startDate) || !validTimestamp(createdAt) || !selected.length || typeof id !== 'string' || !id.trim())
     throw new Error('Choose a grip and a valid experiment start date.');
   return freeze({ id, version: 1, startDate, endDate: shift(startDate, DAYS - 1), createdAt,
     grips: selected, weeks: 6, days: DAYS, weeklyGoal: 3, goalSessionsPerGrip: 18,
     sets: 2, restSeconds: 300, status: 'active',
-    baseline: buildVolumeBaseline({ history, grips: selected, startDate }) });
+    baseline: buildVolumeBaseline({ history, grips: selected, startDate }),
+    ...(entryEvidence ? { entryEvidence: clone(entryEvidence) } : {}) });
 }
 
 // Additional review notes and lifecycle timestamps are permitted. Protocol
@@ -119,6 +120,10 @@ export function isValidVolumeExperiment(e) {
     || !Array.isArray(e.grips) || !e.grips.length || new Set(e.grips).size !== e.grips.length
     || e.grips.some(g => !GRIPS.includes(g)) || e.weeks !== 6 || e.days !== DAYS
     || e.weeklyGoal !== 3 || e.goalSessionsPerGrip !== 18 || e.sets !== 2 || e.restSeconds !== 300) return false;
+  if (e.entryEvidence != null && (e.entryEvidence.version !== 1 || !validDate(e.entryEvidence.asOf)
+    || e.entryEvidence.asOf !== e.startDate || !['voluntary', 'plateau_prompt'].includes(e.entryEvidence.source)
+    || !Array.isArray(e.entryEvidence.byGrip) || e.entryEvidence.byGrip.length > 3
+    || JSON.stringify(e.entryEvidence).length > 40000)) return false;
   const b = e.baseline;
   if (!b || b.windowStart !== shift(e.startDate, -DAYS) || b.windowEnd !== shift(e.startDate, -1)
     || b.loadTolerance !== LOAD_TOLERANCE || !Array.isArray(b.byHand) || b.byHand.length !== e.grips.length * 2) return false;
@@ -252,7 +257,7 @@ export function volumeComparison(experiment, history = [], date = today()) {
   const through = date < experiment.endDate ? date : experiment.endDate;
   // Establish the first-session boundary on ALL work, then require the
   // experiment tag. A later beta session can never replace an earlier opener.
-  const points = openingPoints(history, experiment.startDate, through);
+  const points = volumeOpeningPoints(history, experiment.startDate, through);
   const taggedIds = new Set(asRows(history).filter(r => tagged(r, experiment)).map(r => r.id));
   return { byHand: experiment.baseline.byHand.map(baseline => {
     const matches = baseline.loadKg > 0 ? points.filter(p => p.grip === baseline.grip && p.hand === baseline.hand

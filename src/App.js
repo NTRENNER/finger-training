@@ -1,3 +1,4 @@
+import { detectPlateaus, plateauEnrollmentEvidence } from './model/plateau.js';
 import { betaEligibility } from './model/betaEligibility.js';
 import { ResearchView } from "./views/ResearchView.jsx";
 import { PeakTestView } from './views/PeakTestView.jsx';
@@ -335,13 +336,15 @@ export default function App() {
       - Number(['active', 'paused'].includes(volumeExperimentStatus(a, today())))
       || (b.createdAt || b.startDate).localeCompare(a.createdAt || a.startDate)
       || b.id.localeCompare(a.id))[0] || null;
-  const startVolumeExperiment = ({ grips }) => {
+  const startVolumeExperiment = ({ grips, trigger }) => {
     if (!volumeReady || !betaEligibility(history, today()).eligible || Object.values(volumeExperiments || {}).some(plan =>
       ['active', 'paused'].includes(volumeExperimentStatus(plan, today())))) return false;
     const selected = [...new Set(grips || [])].filter(grip => GRIP_PRESETS.includes(grip));
     if (!selected.length) return false;
     const plan = createVolumeExperiment({ history, grips: selected, startDate: today(),
-      id: uuid(), createdAt: new Date().toISOString() });
+      id: uuid(), createdAt: new Date().toISOString(),
+      entryEvidence: plateauEnrollmentEvidence(detectPlateaus({ history, activities, asOf: today(),
+        experiments: volumeExperiments }), selected, trigger) });
     return saveVolumeExperiment(plan);
   };
   const changeVolumeStatus = status => {

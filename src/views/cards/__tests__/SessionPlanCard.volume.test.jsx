@@ -1,3 +1,6 @@
+import { detectPlateaus } from '../../../model/plateau.js';
+jest.mock('../../../model/plateau.js', () => ({ detectPlateaus: jest.fn(() => ({ byGrip: [] })) }));
+beforeEach(() => detectPlateaus.mockReturnValue({ byGrip: [] }));
 import { betaEligibility } from '../../../model/betaEligibility.js';
 jest.mock('../../../model/betaEligibility.js', () => ({ ...jest.requireActual('../../../model/betaEligibility.js'), betaEligibility: jest.fn(() => ({ eligible: true })) }));
 beforeEach(() => betaEligibility.mockReturnValue({ eligible: true }));
@@ -221,7 +224,7 @@ test('unresolved history or settings cannot enroll or apply a two-set plan', () 
   const apply = jest.fn();
   render(<SessionPlanCard {...props} volumeExperiment={newExperiment()} volumeReady={false}
     onVolumeExperimentStatusChange={jest.fn()} onApplyPlan={apply} />);
-  expect(volumeSwitch()).toBeDisabled();
+  expect(screen.queryByRole('switch', { name: 'Volume (Beta)' })).not.toBeInTheDocument();
   expect(lastPlan(apply).volumePlan).toBeNull();
   expect(screen.getByText(/training history and plan are still loading/)).toBeInTheDocument();
 });
@@ -242,11 +245,9 @@ test('both betas stay locked without consistent history even with an existing ac
   const apply = jest.fn(), start = jest.fn();
   render(<SessionPlanCard {...props} volumeExperiment={newExperiment()} onStartVolumeExperiment={start}
     onVolumeExperimentStatusChange={jest.fn()} onApplyPlan={apply} />);
-  expect(volumeSwitch()).toBeDisabled();
-  expect(chaosSwitch()).toBeDisabled();
-  expect(volumeSwitch()).not.toBeChecked();
+  expect(screen.queryByRole('switch', { name: 'Volume (Beta)' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('switch', { name: 'Chaos Machine (Beta)' })).not.toBeInTheDocument();
   expect(screen.getByText(/Betas unlock after three calendar months/)).toBeInTheDocument();
-  fireEvent.click(volumeSwitch());
   expect(start).not.toHaveBeenCalled();
   expect(lastPlan(apply)).toMatchObject({ volumePlan: null, mixedDomainPlan: null });
   expect(screen.getByRole('link', { name: 'Research' })).toBeInTheDocument();
@@ -258,12 +259,39 @@ test('loss of eligibility removes a selected beta from the applied plan', () => 
   expect(lastPlan(apply).mixedDomainPlan).not.toBeNull();
   betaEligibility.mockReturnValue({ eligible: false, qualifyingWeeks: 9, hasThreeMonths: true });
   view.rerender(<SessionPlanCard {...props} history={[{}]} onApplyPlan={apply} />);
-  expect(chaosSwitch()).not.toBeChecked();
-  expect(chaosSwitch()).toBeDisabled();
+  expect(screen.queryByRole('switch', { name: 'Chaos Machine (Beta)' })).not.toBeInTheDocument();
   expect(lastPlan(apply).mixedDomainPlan).toBeNull();
 });
 test('both betas wait for account history loading to finish', () => {
   render(<SessionPlanCard {...props} volumeReady={false} />);
-  expect(volumeSwitch()).toBeDisabled();
-  expect(chaosSwitch()).toBeDisabled();
+  expect(screen.queryByRole('switch', { name: 'Volume (Beta)' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('switch', { name: 'Chaos Machine (Beta)' })).not.toBeInTheDocument();
+});
+
+test('eligible users see purpose descriptions without a plateau prompt', () => {
+  render(<SessionPlanCard {...props} onStartVolumeExperiment={jest.fn()} />);
+  expect(volumeSwitch()).toBeEnabled();
+  expect(chaosSwitch()).toBeEnabled();
+  expect(screen.getByText(/Five different loads in one session/)).toBeInTheDocument();
+  expect(screen.getByText(/test whether extra volume helps when progress stalls/)).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Plateau experiment suggestion' })).not.toBeInTheDocument();
+});
+test('plateau invitation opens optional setup and records its source only after explicit start', async () => {
+  detectPlateaus.mockReturnValue({ byGrip: [{ grip: 'Micro', recommendation: 'consider_volume_beta' }] });
+  const start = jest.fn().mockReturnValue(true);
+  render(<SessionPlanCard {...props} onStartVolumeExperiment={start} />);
+  expect(screen.getByRole('region', { name: 'Plateau experiment suggestion' })).toBeInTheDocument();
+  expect(volumeSwitch()).not.toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Review Volume Beta' }));
+  expect(start).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Start Volume Beta' }));
+  await waitFor(() => expect(start).toHaveBeenCalledWith({ grips: ['Micro'], trigger: 'plateau_prompt' }));
+});
+test('dismissing an invitation retains manual beta access', () => {
+  detectPlateaus.mockReturnValue({ byGrip: [{ grip: 'Micro', recommendation: 'consider_volume_beta' }] });
+  render(<SessionPlanCard {...props} onStartVolumeExperiment={jest.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+  expect(screen.queryByRole('region', { name: 'Plateau experiment suggestion' })).not.toBeInTheDocument();
+  expect(volumeSwitch()).toBeEnabled();
+  expect(chaosSwitch()).toBeEnabled();
 });

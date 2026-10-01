@@ -10,9 +10,9 @@ const validWeek = week => Number.isInteger(week) && week >= 1 && week <= 6;
 
 function basePlan(experiment) {
   const { id, version, startDate, endDate, createdAt, grips, weeks, days, weeklyGoal,
-    goalSessionsPerGrip, sets, restSeconds, baseline } = experiment;
+    goalSessionsPerGrip, sets, restSeconds, baseline, entryEvidence } = experiment;
   return { id, version, startDate, endDate, createdAt, grips, weeks, days, weeklyGoal,
-    goalSessionsPerGrip, sets, restSeconds, status: 'active', baseline };
+    goalSessionsPerGrip, sets, restSeconds, status: 'active', baseline, ...(entryEvidence ? { entryEvidence } : {}) };
 }
 
 function reviewValue(value) {

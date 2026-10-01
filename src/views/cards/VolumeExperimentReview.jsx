@@ -68,6 +68,12 @@ function ExperimentReport({ experiment, history, activities, unit, onSave, ready
   };
   return <>
     <p style={{ color: C.muted }}>{experiment.startDate} through {experiment.endDate} · {finished ? 'Finished' : progress.status === 'paused' ? 'Paused' : `Week ${progress.week} of 6`}</p>
+    {experiment.entryEvidence && <details>
+      <summary>Why this experiment started</summary>
+      <p>{experiment.entryEvidence.source === 'plateau_prompt' ? 'You opened setup from a plateau invitation.' : 'You chose the experiment yourself.'} Screening saved on {experiment.entryEvidence.asOf}.</p>
+      {experiment.entryEvidence.byGrip.map(g => <p key={g.grip}>{g.grip}: {g.recommendation === 'consider_volume_beta' ? 'Possible persistent plateau; optional volume trial suggested.' : 'Plateau criteria were not met at enrollment.'}</p>)}
+      <p>The original screening evidence is preserved in the downloaded review. This is a personal comparison, not proof of a volume effect.</p>
+    </details>}
     <p>Two sets per hand · three sessions per week for each grip · five-minute rest target for each hand between sets.</p>
     {progress.byGrip.map(row => <div key={row.grip} style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 12 }}>
       <b>{row.grip}: {row.completed} of {row.goal} two-set sessions</b>

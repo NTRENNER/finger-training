@@ -1,3 +1,4 @@
+import { PlateauReview } from './cards/PlateauReview.jsx';
 import React from 'react';
 import { PageFrame, Btn } from '../ui/components.js';
 import { CardBoundary } from '../ui/ErrorBoundary.jsx';
@@ -23,7 +24,9 @@ export function ResearchView({ history, activities, unit, signedIn, historySynce
     </div>}
     {signedIn && !historySynced
       ? <p role="status" style={{ color: C.muted }}>Loading your synced history…</p>
-      : <><CardBoundary name="Volume Beta review">
+      : <><CardBoundary name="Plateau review">
+          <PlateauReview history={history} activities={activities} experiments={volumeExperiments} unit={unit} />
+        </CardBoundary><CardBoundary name="Volume Beta review">
           <VolumeExperimentReview experiments={volumeExperiments} history={history} activities={activities}
             unit={unit} onSave={onSaveVolumeExperiment} ready={volumeReady} />
         </CardBoundary><CardBoundary name="Prediction accuracy">
