@@ -1,3 +1,4 @@
+import { betaEligibility, BETA_ELIGIBILITY_DESCRIPTION } from '../../model/betaEligibility.js';
 import { markUncertainDomainTimes, progressionLabel } from '../../model/domainTargetConsistency.js';
 import { startingHandForDay } from '../../model/handOrder.js';
 import { trainingPurpose } from "../../model/trainingPurpose.js";
@@ -280,24 +281,27 @@ export function SessionPlanCard({
       R: r.R == null ? null : r.R / loadMultiplier }));
     return makeMixedDomainPlan(freshRows, opening, expectedHands);
   }, [curveRows, mixedOpening, expectedHands, recommendedZone, loadMultiplier, rec]);
-  const mixedEnabled = mixedRequested && !!mixedPlan;
   const readinessDate = today();
+  const betaAccess = useMemo(() => betaEligibility(history, readinessDate), [history, readinessDate]);
+  const betasAvailable = volumeReady && betaAccess.eligible;
+  const mixedEnabled = betasAvailable && mixedRequested && !!mixedPlan;
   const volumeStatus = volumeExperiment ? volumeExperimentStatus(volumeExperiment, readinessDate) : null;
   const volumePlan = useMemo(() => volumeSessionPlan(volumeExperiment, grip, readinessDate),
     [volumeExperiment, grip, readinessDate]);
   const volumeReport = useMemo(() => volumeExperiment ? volumeProgress(volumeExperiment, history, readinessDate) : null,
     [volumeExperiment, history, readinessDate]);
   const volumeEligible = !isPeakTest && !rec?.boundaryProbe && TRAINING_ZONE_KEYS.includes(activeZone);
-  const volumeEnabled = volumeReady && volumeEligible && !mixedEnabled && !!volumePlan && volumeOverride !== false;
+  const volumeEnabled = betasAvailable && volumeEligible && !mixedEnabled && !!volumePlan && volumeOverride !== false;
   const volumeFinished = volumeStatus === 'completed' || volumeStatus === 'ended';
   const volumeGripIncluded = !volumeExperiment || volumeExperiment.grips?.includes(grip);
-  const canSetupAnotherVolume = volumeReady && !volumeBusy && volumeEligible && !!onStartVolumeExperiment;
-  const canChangeVolume = volumeReady && !volumeBusy && (!volumeFinished || volumeSetupOpen)
+  const canSetupAnotherVolume = betasAvailable && !volumeBusy && volumeEligible && !!onStartVolumeExperiment;
+  const canChangeVolume = betasAvailable && !volumeBusy && (!volumeFinished || volumeSetupOpen)
     && (volumeFinished ? !!onStartVolumeExperiment : volumeGripIncluded
       && (volumeExperiment ? !!onVolumeExperimentStatusChange : !!onStartVolumeExperiment))
     && (volumeEligible || volumeEnabled);
 
   const changeVolume = async enabled => {
+    if (enabled && !betasAvailable) return;
     setVolumeError(null);
     if (!volumeExperiment || volumeFinished) {
       setVolumeSetupOpen(enabled);
@@ -318,7 +322,7 @@ export function SessionPlanCard({
   };
 
   const startVolume = async () => {
-    if (!volumeGrips.length || volumeBusy || !volumeReady || !volumeEligible) return;
+    if (!volumeGrips.length || volumeBusy || !betasAvailable || !volumeEligible) return;
     setVolumeBusy(true);
     setVolumeError(null);
     try {
@@ -582,18 +586,24 @@ export function SessionPlanCard({
       {plannerHeader}
 
       <div className="session-beta-options">
-        <Toggle label="Chaos Machine (Beta)" checked={mixedEnabled} disabled={!mixedPlan || volumeBusy}
+        {!betasAvailable && <p style={{ color: C.muted }}>
+          {!volumeReady ? 'Your training history and plan are still loading.' : <>
+            {BETA_ELIGIBILITY_DESCRIPTION} {betaAccess.qualifyingWeeks} of 10 qualifying weeks recorded.
+            {!betaAccess.hasThreeMonths && ' Three months of training history is not established yet.'}
+          </>}
+        </p>}
+        <Toggle label="Chaos Machine (Beta)" checked={mixedEnabled} disabled={!betasAvailable || !mixedPlan || volumeBusy}
           onChange={enabled => {
             setMixedRequested(enabled);
             if (enabled) { setVolumeOverride(false); setVolumeSetupOpen(false); }
           }} />
-        <Toggle label="Volume (Beta)" checked={volumeEnabled || volumeSetupOpen} disabled={!canChangeVolume}
+        <Toggle label="Volume (Beta)" checked={volumeEnabled || (betasAvailable && volumeSetupOpen)} disabled={!canChangeVolume}
           onChange={changeVolume}
-          description={!volumeReady ? 'Your training history and plan are still loading.'
+          description={!betasAvailable ? undefined
             : !volumeEligible ? 'Complete the initial measurements first. Volume Beta uses ordinary training sessions, not peak tests or boundary measurements.'
             : volumeStatus === 'active' && volumeEnabled ? 'Turn off to pause your six-week plan.'
             : !volumeExperiment ? 'Optional six-week trial of two sets per hand.' : undefined} />
-        {volumeSetupOpen && <VolumeBetaEnrollment grips={availableGrips} selectedGrips={volumeGrips}
+        {betasAvailable && volumeSetupOpen && <VolumeBetaEnrollment grips={availableGrips} selectedGrips={volumeGrips}
           onGripsChange={setVolumeGrips} onStart={startVolume} onCancel={() => { setVolumeSetupOpen(false); setVolumeError(null); }}
           busy={volumeBusy} error={volumeError} />}
         <VolumeBetaSummary experiment={volumeExperiment} progress={volumeReport} status={volumeStatus}
@@ -607,7 +617,7 @@ export function SessionPlanCard({
           }} canSetupAnother={canSetupAnotherVolume} />
         {!volumeSetupOpen && volumeError && <p role="alert" style={{ color: C.orange }}>{volumeError}</p>}
       </div>
-      {!mixedPlan && <p style={{ color: C.muted }}>The beta needs a load estimate in all five domains for each selected hand. Complete the initial sessions first.</p>}
+      {betasAvailable && !mixedPlan && <p style={{ color: C.muted }}>The beta needs a load estimate in all five domains for each selected hand. Complete the initial sessions first.</p>}
       {mixedEnabled && <MixedDomainPlan goalConfig={GOAL_CONFIG} plan={mixedPlan} readiness={mixedReadiness} hands={expectedHands} unit={unit}
         multiplier={loadMultiplier} onOpeningChange={setMixedOpening} />}
 

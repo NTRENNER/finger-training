@@ -43,3 +43,11 @@ Review progress together with climbing quality, fatigue and time cost. This pilo
 ## Persistence
 
 The existing account-scoped local cache and settings patch queue store plans. Cloud settings use an immutable `volume_beta_plan_<id>` record plus separate lifecycle and per-week review keys, so a stale weekly review cannot overwrite a pause and separate experiments/weeks do not erase each other. Activation requires a durable retry-queue write. No database schema migration is needed, and the trial is not enabled for any user until explicit enrollment.
+
+## Beta access (Chaos Machine and Volume)
+
+Both betas require three calendar months of recorded finger-training history and at least two distinct training days in 10 of the most recent 13 complete rolling seven-day windows, ending yesterday. This permits three lighter/missed weeks and does not impose a streak. The calendar-month anniversary clamps to the last day of shorter months. Today's unfinished day does not affect eligibility until tomorrow.
+
+Attendance is per user across Micro, Crusher and Prime: hands, extra sets and multiple sessions/grips on the same date count once. Positive recorded training work counts even when an interruption prevents use in the predictive curve. Peak-only measurements, seed artifacts, invalid dates, future entries and empty records do not count. This is an access rule, not evidence that added volume is beneficial or that the curve is accurate.
+
+The setup shows locked switches with the rule and qualifying-week count. Existing domain-measurement requirements still apply. Access is recalculated from the current account's history, including after inactivity, and checked again when starting a beta workout and enrolling/resuming Volume. An ongoing workout is not interrupted when eligibility changes. Existing experiment dates, recorded workouts and research reports are preserved; pausing and ending a plan remain available in Research. No schema migration or automatic enrollment is required.

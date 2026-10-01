@@ -1,3 +1,6 @@
+import { betaEligibility } from '../../../model/betaEligibility.js';
+jest.mock('../../../model/betaEligibility.js', () => ({ ...jest.requireActual('../../../model/betaEligibility.js'), betaEligibility: jest.fn(() => ({ eligible: true })) }));
+beforeEach(() => betaEligibility.mockReturnValue({ eligible: true }));
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { SessionPlanCard } from '../SessionPlanCard.js';

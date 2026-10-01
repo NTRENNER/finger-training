@@ -1,3 +1,6 @@
+import { betaEligibility } from '../../../model/betaEligibility.js';
+jest.mock('../../../model/betaEligibility.js', () => ({ ...jest.requireActual('../../../model/betaEligibility.js'), betaEligibility: jest.fn(() => ({ eligible: true })) }));
+beforeEach(() => betaEligibility.mockReturnValue({ eligible: true }));
 import React, { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SessionPlanCard } from '../SessionPlanCard.js';
@@ -232,4 +235,35 @@ test.each(['rejected', 'false'])('an enrollment save failure (%s) leaves setup r
   expect(await screen.findByRole('alert')).toHaveTextContent('Could not start Volume Beta');
   expect(screen.getByRole('button', { name: 'Start Volume Beta' })).not.toBeDisabled();
   expect(lastPlan(apply).volumePlan).toBeNull();
+});
+
+test('both betas stay locked without consistent history even with an existing active experiment', () => {
+  betaEligibility.mockImplementation(jest.requireActual('../../../model/betaEligibility.js').betaEligibility);
+  const apply = jest.fn(), start = jest.fn();
+  render(<SessionPlanCard {...props} volumeExperiment={newExperiment()} onStartVolumeExperiment={start}
+    onVolumeExperimentStatusChange={jest.fn()} onApplyPlan={apply} />);
+  expect(volumeSwitch()).toBeDisabled();
+  expect(chaosSwitch()).toBeDisabled();
+  expect(volumeSwitch()).not.toBeChecked();
+  expect(screen.getByText(/Betas unlock after three calendar months/)).toBeInTheDocument();
+  fireEvent.click(volumeSwitch());
+  expect(start).not.toHaveBeenCalled();
+  expect(lastPlan(apply)).toMatchObject({ volumePlan: null, mixedDomainPlan: null });
+  expect(screen.getByRole('link', { name: 'Research' })).toBeInTheDocument();
+});
+test('loss of eligibility removes a selected beta from the applied plan', () => {
+  const apply = jest.fn();
+  const view = render(<SessionPlanCard {...props} onApplyPlan={apply} />);
+  fireEvent.click(chaosSwitch());
+  expect(lastPlan(apply).mixedDomainPlan).not.toBeNull();
+  betaEligibility.mockReturnValue({ eligible: false, qualifyingWeeks: 9, hasThreeMonths: true });
+  view.rerender(<SessionPlanCard {...props} history={[{}]} onApplyPlan={apply} />);
+  expect(chaosSwitch()).not.toBeChecked();
+  expect(chaosSwitch()).toBeDisabled();
+  expect(lastPlan(apply).mixedDomainPlan).toBeNull();
+});
+test('both betas wait for account history loading to finish', () => {
+  render(<SessionPlanCard {...props} volumeReady={false} />);
+  expect(volumeSwitch()).toBeDisabled();
+  expect(chaosSwitch()).toBeDisabled();
 });

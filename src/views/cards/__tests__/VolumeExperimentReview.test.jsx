@@ -38,3 +38,14 @@ test('ending is explicit and completed plans remain reviewable', () => {
   expect(screen.queryByRole('button', { name: 'End plan' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Download Volume review' })).toBeInTheDocument();
 });
+
+test('research cannot resume an ineligible plan but can retain reviews and end it', () => {
+  const experiment = { ...plan(), status: 'paused' }, save = jest.fn();
+  render(<VolumeExperimentReview experiments={{ trial: experiment }} onSave={save} date="2026-10-10" />);
+  expect(screen.getByRole('button', { name: 'Resume plan' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Resume plan' }));
+  expect(save).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Download Volume review' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'End plan' })).toBeEnabled();
+  expect(screen.getByText(/Betas unlock after three calendar months/)).toBeInTheDocument();
+});

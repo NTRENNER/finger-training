@@ -1,3 +1,4 @@
+import { betaEligibility } from '../model/betaEligibility.js';
 import { startingHandForDay, otherHand, handOrderMetadata } from '../model/handOrder.js';
 // ──────────────────────────────────────────────────────────────
 // useSessionRunner — in-workout finite state machine
@@ -231,6 +232,8 @@ export function useSessionRunner({
   const startSession = useCallback((override) => {
     let cfg = (override && override.grip) ? override : config;
     const startedDay = today();
+    // Recheck at start: an old preview or restored config cannot bypass access.
+    if ((cfg.mixedDomainPlan || cfg.volumePlan) && !betaEligibility(history, startedDay).eligible) return false;
     const volumePlan = !cfg.mixedDomainPlan && !cfg.peakTest
       ? snapshotVolumePlan(cfg.volumePlan, startedDay) : null;
     cfg = { ...cfg, volumePlan };

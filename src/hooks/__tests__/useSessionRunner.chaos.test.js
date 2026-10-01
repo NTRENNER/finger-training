@@ -1,3 +1,5 @@
+// Protocol tests assume enrollment eligibility; access is covered separately.
+jest.mock('../../model/betaEligibility.js', () => ({ betaEligibility: () => ({ eligible: true }) }));
 import { act, renderHook } from '@testing-library/react';
 import { useSessionRunner } from '../useSessionRunner.js';
 import { makeMixedDomainPlan, MIXED_DOMAIN_ZONES } from '../../model/mixedDomain.js';

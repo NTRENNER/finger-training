@@ -1,3 +1,4 @@
+import { betaEligibility, BETA_ELIGIBILITY_DESCRIPTION } from '../../model/betaEligibility.js';
 import React, { useMemo, useState } from 'react';
 import { Card, Btn } from '../../ui/components.js';
 import { C } from '../../ui/theme.js';
@@ -44,12 +45,14 @@ function ExperimentReport({ experiment, history, activities, unit, onSave, ready
   const [reviewWeek, setReviewWeek] = useState(Math.max(1, progress.week));
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const access = useMemo(() => betaEligibility(history, date), [history, date]);
   const finished = ['completed', 'ended'].includes(progress.status);
   const taggedRows = useMemo(() => history.filter(r => r.force_recording?.volume_beta?.experiment_id === experiment.id), [history, experiment.id]);
   const rests = taggedRows.filter(r => r.set_num === 2 && r.rep_num === 1)
     .map(r => r.rep_timing?.rest_before_s).filter(s => Number.isFinite(s) && s >= 0);
   const load = kg => `${toDisp(kg, unit).toFixed(1)} ${unit}`;
   const changeStatus = status => {
+    if (status === 'active' && !access.eligible) return;
     const saved = onSave?.({ ...experiment, status, updatedAt: new Date().toISOString() }, { statusOnly: true });
     setSaveError(saved === false ? 'Could not save this plan change. Please try again.' : '');
     if (saved !== false) setConfirmEnd(false);
@@ -105,9 +108,10 @@ function ExperimentReport({ experiment, history, activities, unit, onSave, ready
     </details>
     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
       <Btn small onClick={download}>Download Volume review</Btn>
-      {!finished && <Btn small disabled={!ready || !onSave} color={C.border} onClick={() => changeStatus(progress.status === 'paused' ? 'active' : 'paused')}>{progress.status === 'paused' ? 'Resume plan' : 'Pause plan'}</Btn>}
+      {!finished && <Btn small disabled={!ready || !onSave || (progress.status === 'paused' && !access.eligible)} color={C.border} onClick={() => changeStatus(progress.status === 'paused' ? 'active' : 'paused')}>{progress.status === 'paused' ? 'Resume plan' : 'Pause plan'}</Btn>}
       {!finished && <Btn small color={C.border} disabled={!ready || !onSave} onClick={() => setConfirmEnd(true)}>End plan</Btn>}
     </div>
+    {!finished && !access.eligible && <p style={{ color: C.muted }}>{BETA_ELIGIBILITY_DESCRIPTION} Your recorded results remain available.</p>}
     {saveError && <p role="alert">{saveError}</p>}
     {!finished && <p style={{ color: C.muted, fontSize: 13 }}>Pausing keeps the original end date. You can finish a training day after one set whenever needed.</p>}
     {confirmEnd && !finished && <div role="group" aria-label="End Volume Beta" style={{ marginTop: 16 }}>
