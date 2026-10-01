@@ -454,63 +454,80 @@ export function capLoad(v, peakCapKg, absMax = SANE_MAX_KG) {
   return v > ceil ? ceil : v;
 }
 
-// Peak references retain the existing lookback and strictly-before-date
-// replay boundaries. Unlike fresh curve fitting, an independently verified
-// higher two-second force may come from any set or session.
-// Existing instantaneous-peak history retains its meaning. New recordings
-// require their measured two-second window; their single-sample spikes cannot
-// raise this bound. Ordinary work can RAISE a known maximum, but a submaximal
-// workout by itself must not establish a falsely low maximum-force cap.
-function qualifyingPeakReference(history, hand, grip, referenceDate, cutoff = '') {
-  const firstRows = new Set(firstTrainingSessionRows(history));
-  let best = null;
-  for (const r of history) {
-    if (!r || r.hand !== hand || r.grip !== grip || !r.date || r.date < cutoff
-      || (referenceDate && r.date >= referenceDate) || isSeedArtifactRep(r)) continue;
-    const target = Number(r.target_duration);
-    if (Number.isFinite(target) && target > PEAK_MAX_PROTOCOL_T) continue;
-    let kg;
-    if (Object.prototype.hasOwnProperty.call(r.force_recording || {}, 'sustained_max')) {
-      kg = sustainedMaxKg(r);
-    } else {
-      if (!firstRows.has(r) || !(isCapacityEvidenceRep(r) || isValidPeakMeasurement(r))
-        || !isFirstSetRep(r) || (!isValidPeakMeasurement(r) && Number(r.rep_num ?? 1) !== 1)) continue;
-      kg = sane(r.peak_force_kg);
-    }
-    if (kg != null && (best == null || kg > best)) best = kg;
-  }
-  return best;
+// Peak safeguards and two-second records have distinct units of meaning.
+// The 0.95 allowance belongs ONLY to instantaneous peaks. A verified two-
+// second demonstration can raise that ceiling at its measured value; it is
+// not discounted again and is never inserted into the failure curve.
+const peakScope = (r, hand, grip, referenceDate, cutoff) => r && r.hand === hand && r.grip === grip
+  && r.date && r.date >= cutoff && (!referenceDate || r.date < referenceDate) && !isSeedArtifactRep(r);
+const maxIntent = r => !(Number(r.target_duration) > PEAK_MAX_PROTOCOL_T);
+
+function validInstantaneousReference(r) {
+  const recording = r.force_recording;
+  if (recording?.signal_quality === 'incomplete' || recording?.activity?.signal_quality === 'incomplete'
+    || ['interrupted', 'equipment_interruption', 'target_not_reached'].includes(r.end_reason)) return false;
+  // A completed peak test has its own validity contract. Ordinary legacy
+  // peaks retain the opening-rep / first-set guards against incidental spikes.
+  // Session order is irrelevant to an otherwise valid maximum measurement.
+  return isValidPeakMeasurement(r) || (isCapacityEvidenceRep(r) && isFirstSetRep(r)
+    && Number(r.rep_num ?? 1) === 1);
 }
 
-function peakReferenceWithDemonstratedRecords(history, hand, grip, referenceDate, cutoff = '') {
+function qualifyingPeakReferences(history, hand, grip, referenceDate, cutoff = '') {
+  let instantaneousKg = null, sustainedKg = null;
+  for (const r of history) {
+    if (!peakScope(r, hand, grip, referenceDate, cutoff) || !maxIntent(r)) continue;
+    const instantaneous = validInstantaneousReference(r) ? sane(r.peak_force_kg) : null;
+    const sustained = sustainedMaxKg(r);
+    if (instantaneous != null) instantaneousKg = Math.max(instantaneousKg ?? 0, instantaneous);
+    if (sustained != null) sustainedKg = Math.max(sustainedKg ?? 0, sustained);
+  }
+  return { instantaneousKg, sustainedKg };
+}
+
+const referenceKg = ({ instantaneousKg, sustainedKg }) =>
+  instantaneousKg == null && sustainedKg == null ? null : Math.max(instantaneousKg ?? 0, sustainedKg ?? 0);
+
+function peakReferencesWithDemonstratedRecords(history, hand, grip, referenceDate, cutoff = '') {
   if (!history) return null;
-  let best = qualifyingPeakReference(history, hand, grip, referenceDate, cutoff);
-  const established = best ?? qualifyingPeakReference(history, hand, grip, referenceDate);
+  const refs = qualifyingPeakReferences(history, hand, grip, referenceDate, cutoff);
+  const established = referenceKg(refs)
+    ?? referenceKg(qualifyingPeakReferences(history, hand, grip, referenceDate));
   if (established == null) return null;
   for (const r of history) {
-    if (!r || r.hand !== hand || r.grip !== grip || !r.date || r.date < cutoff
-      || (referenceDate && r.date >= referenceDate)) continue;
+    if (!peakScope(r, hand, grip, referenceDate, cutoff)) continue;
     const kg = sustainedMaxKg(r);
-    if (kg != null && kg >= established && (best == null || kg > best)) best = kg;
+    // A submaximal session may raise a known max, not establish a falsely low
+    // one. All sets/sessions qualify for this independently validated window.
+    if (kg != null && kg >= established) refs.sustainedKg = Math.max(refs.sustainedKg ?? 0, kg);
   }
-  return best;
+  const kg = referenceKg(refs);
+  if (kg == null) return null;
+  const instantaneousCap = refs.instantaneousKg == null ? null : refs.instantaneousKg * PEAK_CAP_FRACTION;
+  const capBasis = refs.sustainedKg != null && (instantaneousCap == null || refs.sustainedKg > instantaneousCap)
+    ? 'two_second_average' : 'instantaneous_peak';
+  const capKg = Math.round(Math.max(instantaneousCap ?? 0, refs.sustainedKg ?? 0) * 10) / 10;
+  return { kg, ...refs, capKg, capBasis };
+}
+
+function peakCutoff(referenceDate) {
+  const refMs = referenceDate ? new Date(`${referenceDate}T00:00:00`).getTime() : Date.now();
+  return ymdLocal(new Date(refMs - PEAK_CAP_LOOKBACK_DAYS * 86400 * 1000));
 }
 
 export function recentBestPeakKg(history, hand, grip, referenceDate = null) {
-  const refMs = referenceDate ? new Date(`${referenceDate}T00:00:00`).getTime() : Date.now();
-  const cutoff = ymdLocal(new Date(refMs - PEAK_CAP_LOOKBACK_DAYS * 86400 * 1000));
-  return peakReferenceWithDemonstratedRecords(history, hand, grip, referenceDate, cutoff);
+  return peakReferencesWithDemonstratedRecords(history, hand, grip, referenceDate, peakCutoff(referenceDate))?.kg ?? null;
 }
 
 export function historicalBestPeakKg(history, hand, grip, referenceDate = null) {
-  return peakReferenceWithDemonstratedRecords(history, hand, grip, referenceDate);
+  return peakReferencesWithDemonstratedRecords(history, hand, grip, referenceDate)?.kg ?? null;
 }
 
 export function bestAvailablePeakMeasurement(history, hand, grip, referenceDate = null) {
-  const recent = recentBestPeakKg(history, hand, grip, referenceDate);
-  if (recent != null) return { kg: recent, stale: false };
-  const historical = historicalBestPeakKg(history, hand, grip, referenceDate);
-  return historical != null ? { kg: historical, stale: true } : null;
+  const recent = peakReferencesWithDemonstratedRecords(history, hand, grip, referenceDate, peakCutoff(referenceDate));
+  if (recent) return { ...recent, stale: false };
+  const historical = peakReferencesWithDemonstratedRecords(history, hand, grip, referenceDate);
+  return historical ? { ...historical, stale: true } : null;
 }
 
 // Best load the user has DEMONSTRABLY sustained for a hold of
@@ -650,12 +667,12 @@ export function demonstratedCapacityKg(
 // whether the endurance ceiling (not the peak cap) is what bound v.
 export function loadBounds(history, hand, grip, targetDuration, opts = {}) {
   const { referenceDate = null, enduranceCeiling = true } = opts;
-  history = firstTrainingSessionRows(history || []);
   const peakMeasurement = bestAvailablePeakMeasurement(history, hand, grip, referenceDate);
-  const bestPeakKg = peakMeasurement?.kg ?? null;
-  const peakCapKg = bestPeakKg != null
-    ? Math.round(bestPeakKg * PEAK_CAP_FRACTION * 10) / 10
-    : null;
+  const peakCapKg = peakMeasurement?.capKg ?? null;
+  const peakCapBasis = peakMeasurement?.capBasis ?? null;
+  // Preserve the caller's reconciled capacity interval, but never use its
+  // first-session-only subset to decide which peak safeguards are available.
+  history = opts.capacityHistory ?? firstTrainingSessionRows(history || []);
   const peakCapStale = peakMeasurement?.stale === true;
   // Endurance ceiling scope: only within the data-supported range (see
   // the block comment at the prescription() call site below).
@@ -681,7 +698,7 @@ export function loadBounds(history, hand, grip, targetDuration, opts = {}) {
     return Math.min(base, ec);
   };
   const wasEnduranceCeiled = (v) => endCeilKg != null && capValue(v) < capBase(v) - 1e-9;
-  return { peakCapKg, peakCapStale, floorKg, endCeilKg, capBase, capValue, wasEnduranceCeiled };
+  return { peakCapKg, peakCapStale, peakCapBasis, floorKg, endCeilKg, capBase, capValue, wasEnduranceCeiled };
 }
 
 export function prescription(history, hand, grip, targetDuration, opts = {}) {
@@ -801,8 +818,8 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
   //
   // All three live in loadBounds() (shared with the density-ladder pin).
   const {
-    peakCapKg, peakCapStale, floorKg, endCeilKg, capValue, wasEnduranceCeiled,
-  } = loadBounds(capacityHistory, hand, grip, targetDuration, { referenceDate, enduranceCeiling });
+    peakCapKg, peakCapStale, peakCapBasis, floorKg, endCeilKg, capValue, wasEnduranceCeiled,
+  } = loadBounds(history, hand, grip, targetDuration, { referenceDate, enduranceCeiling, capacityHistory });
 
   // Try the three-exp curve fit. Requires a per-grip prior to anchor
   // the shrinkage; without one, small-N fits collapse onto degenerate
@@ -905,6 +922,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
           source,
           peakCapKg,
           peakCapStale,
+          peakCapBasis,
           peakCapped:      value < rawRounded,   // ceiling bit
           capacityFloorKg: floorKg,
           capacityFloored: value > rawRounded,   // floor lifted it above the curve
@@ -951,6 +969,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
       source:      "anchored-linear",
       peakCapKg,
       peakCapStale,
+      peakCapBasis,
       peakCapped:      value < v,
       capacityFloorKg: floorKg,
       capacityFloored: value > v,
@@ -975,6 +994,7 @@ export function prescription(history, hand, grip, targetDuration, opts = {}) {
       source:      "historical",
       peakCapKg,
       peakCapStale,
+      peakCapBasis,
       peakCapped:      value < hv,
       capacityFloorKg: floorKg,
       capacityFloored: value > hv,

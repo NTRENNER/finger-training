@@ -87,12 +87,29 @@ including later sessions, extra sets, and fatigued Chaos Machine holds. Lower
 results never erase a record. Peak Test summaries show both measurements.
 Historical peaks cannot be converted into two-second records without raw samples.
 
-New max-intent recordings use the verified two-second value for the prescription
-peak reference; a single-sample spike cannot raise it. A higher verified window
-in any other workout may raise an established peak reference. Routine submaximal
-work alone does not impose a falsely low maximum-force cap. Existing legacy
-peak references and the recent/historical lookup policy remain compatible.
-Grip, hand and retrospective date boundaries still apply. This updates the
-upper bound, not a whole-curve multiplier, and never inserts an invented
-(2 seconds, force) failure point. Fresh session eligibility and the 4–5–6 ladder
-are unchanged. No database migration or historical rewrite is needed.
+Prescription safeguards retain **separate instantaneous and two-second
+references**, rather than mixing them into one force value before discounting.
+The existing 0.95 allowance applies only to a valid max-intent instantaneous
+peak. A qualifying two-second demonstration may raise the ceiling to its full
+measured value; no additional percentage or invented failure point is applied.
+For example, 62 kg instantaneous / 56 kg over two seconds gives a 58.9 kg ceiling
+whether the two-second field exists, is unavailable, or predates the feature.
+A 60 kg verified two-second demonstration can raise that ceiling to 60 kg.
+This is a bound on model extrapolation, not a prescription to use that force.
+
+A missing two-second window does not invalidate an independently valid
+instantaneous peak. Incomplete/interrupted recordings cannot supply that
+instantaneous fallback. An intact two-second window retains its own quality
+contract even if a later interruption invalidates the full recording.
+Ordinary instantaneous references retain first-set/opening-rep and max-intent
+requirements, but unknown or later session order cannot erase those safeguards.
+Any verified two-second window can raise an established maximum, including
+later sets and Chaos Machine holds. Routine submaximal work alone cannot create
+a falsely low max-force ceiling. Peak caps read the complete dated history;
+fresh fitting, capacity floors, endurance bounds and the 4–5–6 ladder retain
+their separate eligibility rules and reconciled recording intervals.
+
+References expose instantaneousKg, sustainedKg, capKg and capBasis. The overload
+ceiling uses the larger measured force, while the base prescription uses capKg.
+Grip, hand, strictly-before-date replay boundaries and recent/historical fallback
+remain explicit. Historical records and two-second PRs are never rewritten.

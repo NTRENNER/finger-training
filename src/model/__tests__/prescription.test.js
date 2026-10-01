@@ -761,7 +761,7 @@ describe("peak-force ceiling", () => {
     expect(recentBestPeakKg(history, "L", "Crusher")).toBeNull();
     expect(historicalBestPeakKg(history, "L", "Crusher")).toBe(76);
     expect(bestAvailablePeakMeasurement(history, "L", "Crusher"))
-      .toEqual({ kg: 76, stale: true });
+      .toMatchObject({ kg: 76, stale: true, capKg: 72.2, capBasis: "instantaneous_peak" });
   });
 
   test("caps short-duration curve extrapolation at PEAK_CAP_FRACTION × best peak", () => {

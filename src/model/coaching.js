@@ -936,15 +936,9 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   const oFactor = overload ? overloadFactor(best.T) : 1;
   best.overloadFactor = oFactor;
 
-  // Absolute ceiling AFTER overload: the user's recent measured
-  // instantaneous peak for this (hand, grip). prescription() already
-  // caps its value at PEAK_CAP_FRACTION × peak; the overload bump may
-  // push past that fraction (that's the point of overload — failure a
-  // hair beyond current capacity) but never past the full peak itself.
-  // No isometric hold can exceed instantaneous max, so prescribing
-  // above it is just a guaranteed unattainable target (see the
-  // 2026-06-08 94.1 kg case in prescription.js). Null for manual
-  // histories → no cap.
+  // After overload, never exceed the larger valid instantaneous peak or
+  // demonstrated two-second force. The base prescription separately applies
+  // the 0.95 instantaneous allowance, without discounting two-second records.
   const capPeak = (hand, v) => {
     if (v == null) return v;
     const peak = bestAvailablePeakMeasurement(history, hand, grip)?.kg ?? null;

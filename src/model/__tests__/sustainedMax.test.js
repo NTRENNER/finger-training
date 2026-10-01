@@ -78,7 +78,8 @@ test('a timed peak test preserves both measures without becoming a failure obser
   expect(r.peak_force_kg).toBe(80);
   expect(sustainedMaxKg(r)).toBeCloseTo(40.2);
   expect(freshFitReps([r])).toEqual([]);
-  expect(recentBestPeakKg([r], 'L', 'Micro', '2026-09-30')).toBeCloseTo(40.2);
+  expect(bestAvailablePeakMeasurement([r], 'L', 'Micro', '2026-09-30'))
+    .toMatchObject({ instantaneousKg: 80, sustainedKg: 40.2, capKg: 76, capBasis: 'instantaneous_peak' });
 });
 
 test('later sets and fatigued Chaos holds raise observed records but stay out of the fresh curve', () => {
@@ -101,8 +102,8 @@ test('new ordinary evidence only raises established caps and never leaks across 
 
 test('low recent ordinary work cannot replace an older strong peak; exceeding it refreshes the bound', () => {
   const old = { ...legacy, date: '2026-01-01' };
-  expect(bestAvailablePeakMeasurement([old, row(20)], 'L', 'Micro', '2026-09-30')).toEqual({ kg: 30, stale: true });
-  expect(bestAvailablePeakMeasurement([old, row(40)], 'L', 'Micro', '2026-09-30')).toEqual({ kg: 40, stale: false });
+  expect(bestAvailablePeakMeasurement([old, row(20)], 'L', 'Micro', '2026-09-30')).toMatchObject({ kg: 30, stale: true });
+  expect(bestAvailablePeakMeasurement([old, row(40)], 'L', 'Micro', '2026-09-30')).toMatchObject({ kg: 40, stale: false });
 });
 
 test('no fabricated legacy windows, and a new short spike cannot fall back to instantaneous peak', () => {
