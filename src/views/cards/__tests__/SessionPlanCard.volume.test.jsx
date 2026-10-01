@@ -252,7 +252,7 @@ test('both betas stay locked without consistent history even with an existing ac
   expect(lastPlan(apply)).toMatchObject({ volumePlan: null, mixedDomainPlan: null });
   expect(screen.getByRole('link', { name: 'Research' })).toBeInTheDocument();
 });
-test('loss of eligibility removes a selected beta from the applied plan', () => {
+test('deleting qualifying history removes a selected beta from the applied plan', () => {
   const apply = jest.fn();
   const view = render(<SessionPlanCard {...props} onApplyPlan={apply} />);
   fireEvent.click(chaosSwitch());
@@ -261,6 +261,19 @@ test('loss of eligibility removes a selected beta from the applied plan', () => 
   view.rerender(<SessionPlanCard {...props} history={[{}]} onApplyPlan={apply} />);
   expect(screen.queryByRole('switch', { name: 'Chaos Machine (Beta)' })).not.toBeInTheDocument();
   expect(lastPlan(apply).mixedDomainPlan).toBeNull();
+});
+test('historically consistent training keeps both toggles visible after a break without inviting more volume', () => {
+  betaEligibility.mockImplementation(jest.requireActual('../../../model/betaEligibility.js').betaEligibility);
+  const history = Array.from({ length: 13 }, (_, w) => [0, 3].map(offset => ({
+    date: new Date(Date.parse('2026-04-20') + (w * 7 + offset) * 86400000).toISOString().slice(0, 10),
+    grip: 'Micro', hand: 'L', target_duration: 30, actual_time_s: 30, avg_force_kg: 20, peak_force_kg: 22,
+  }))).flat();
+  const detect = jest.requireActual('../../../model/plateau.js').detectPlateaus;
+  detectPlateaus.mockImplementation(detect);
+  render(<SessionPlanCard {...props} history={history} onStartVolumeExperiment={jest.fn()} />);
+  expect(volumeSwitch()).not.toBeChecked();
+  expect(chaosSwitch()).not.toBeChecked();
+  expect(screen.queryByRole('button', { name: 'Review Volume Beta' })).not.toBeInTheDocument();
 });
 test('both betas wait for account history loading to finish', () => {
   render(<SessionPlanCard {...props} volumeReady={false} />);

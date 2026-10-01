@@ -622,7 +622,7 @@ export function SessionPlanCard({
       <div className="session-beta-options">
         {!betasAvailable && <p style={{ color: C.muted }}>
           {!volumeReady ? 'Your training history and plan are still loading.' : <>
-            {BETA_ELIGIBILITY_DESCRIPTION} {betaAccess.qualifyingWeeks} of 10 qualifying weeks recorded.
+            {BETA_ELIGIBILITY_DESCRIPTION} Best 13-week period: {betaAccess.qualifyingWeeks} of 10 qualifying weeks recorded.
             {!betaAccess.hasThreeMonths && ' Three months of training history is not established yet.'}
           </>}
         </p>}

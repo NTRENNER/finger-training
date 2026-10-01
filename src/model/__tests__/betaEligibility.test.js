@@ -10,7 +10,7 @@ test('requires three calendar months AND ten weeks with two distinct training da
   expect(betaEligibility(consistent(), asOf)).toMatchObject({ eligible: true, qualifyingWeeks: 10, hasThreeMonths: true });
   expect(betaEligibility(consistent().slice(1), asOf)).toMatchObject({ eligible: false, hasThreeMonths: false });
   expect(betaEligibility([row('2020-01-01')], asOf).eligible).toBe(false);
-  expect(betaEligibility(consistent().filter(r => r.date !== shift(1)), asOf)).toMatchObject({ eligible: false, qualifyingWeeks: 9 });
+  expect(betaEligibility(consistent().filter(r => ![shift(1), shift(4)].includes(r.date)), asOf)).toMatchObject({ eligible: false, qualifyingWeeks: 9 });
 });
 test('extra hands, grips, sets and sessions cannot inflate attendance', () => {
   const rows = Array.from({ length: 13 }, (_, i) => row(shift(i * 7 + 1)));
@@ -40,6 +40,30 @@ test('three-month anniversary clamps at month end and rolling weeks use dates ac
   expect(betaEligibility([row('2026-03-01')], '2026-05-31').hasThreeMonths).toBe(false);
   expect(betaEligibility([row('2026-03-07'), row('2026-03-08')], '2026-03-10').weeklyDays[0]).toBe(2);
 });
-test('eligibility expires with inactivity; saved experiment metadata cannot substitute for attendance', () => {
-  expect(betaEligibility(consistent(), '2027-01-01').eligible).toBe(false);
+test('earned eligibility survives travel, reduced frequency and a long break', () => {
+  for (const date of ['2026-11-01', '2027-01-01', '2030-01-01']) {
+    expect(betaEligibility(consistent(), date)).toMatchObject({ eligible: true, qualifyingWeeks: 10 });
+  }
+  expect(betaEligibility(consistent(), '2027-01-01').recentQualifyingWeeks).toBe(0);
+});
+test('account changes and deleted history cannot inherit an earned unlock', () => {
+  expect(betaEligibility(consistent(), asOf).eligible).toBe(true);
+  expect(betaEligibility([], asOf).eligible).toBe(false);
+  expect(betaEligibility(consistent().filter(r => ![shift(1), shift(4)].includes(r.date)), asOf).eligible).toBe(false);
+});
+test('sporadic weeks spread over years cannot add up to a consistent 13-week period', () => {
+  const rows = Array.from({ length: 12 }, (_, month) =>
+    [row(`2025-${String(month + 1).padStart(2, '0')}-01`), row(`2025-${String(month + 1).padStart(2, '0')}-03`)]).flat();
+  expect(betaEligibility(rows, asOf).eligible).toBe(false);
+});
+test('historical window search matches daily replay across arbitrary week boundaries', () => {
+  const rows = Array.from({ length: 180 }, (_, n) => n).filter(n => n % 11 < 3 || n % 17 === 0).map(n => row(shift(n + 1)));
+  const dates = [...new Set(rows.map(r => Date.parse(r.date)))];
+  let best = 0;
+  for (let end = Math.min(...dates) + DAY; end <= Date.parse(asOf); end += DAY) {
+    const weeks = Array.from({ length: 13 }, (_, w) =>
+      dates.filter(d => d >= end - (w + 1) * 7 * DAY && d < end - w * 7 * DAY).length);
+    best = Math.max(best, weeks.filter(n => n >= 2).length);
+  }
+  expect(betaEligibility(rows, asOf).qualifyingWeeks).toBe(best);
 });
