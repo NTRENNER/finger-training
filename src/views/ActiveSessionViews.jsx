@@ -13,7 +13,8 @@ import { MIXED_DOMAIN_LABELS, isMixedDomainRep, mixedDomainMetadata } from '../m
 // summary. Plus the auto-detect Tindeq-driven flow
 // (AutoRepSessionView) that replaces ActiveSessionView when BLE
 // is connected. One set is recommended; optional extra sets start
-// from the completed-set summary without a mandatory between-set timer.
+// automatically after a five-minute break when selected at setup. Unplanned
+// additions remain available from the completed-set summary.
 //
 // Coupling to App.js is only via props:
 //   session    — { config, currentRep,
@@ -835,10 +836,11 @@ export function SwitchHandsView({ onReady, activeHand = "R" }) {
   );
 }
 
-// The same hand rests while the other hand trains. This clock starts at the
-// last physical release, not when this view mounts, and never starts a rep.
+// Selected sets rest after the final hand; legacy optional Chaos additions
+// use a same-hand clock. Both start from physical release, never mounting,
+// and reaching zero never starts a rep.
 export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
-  source = 'estimated_transition', setNumber = 2, onReady, onFinish, tindeq }) {
+  source = 'estimated_transition', setNumber = 2, fullSetBreak = false, onReady, onFinish, tindeq }) {
   const [mountedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const [extraSeconds, setExtraSeconds] = useState(0);
@@ -862,7 +864,8 @@ export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
       <div style={{ fontSize: 64, fontWeight: 900, color: remaining ? C.blue : C.green }} aria-live="off">
         {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')}
       </div>
-      <p style={{ color: C.muted }}>Five minutes for this hand. Time spent training your other hand counts.</p>
+      <p style={{ color: C.muted }}>{fullSetBreak ? 'Five-minute break between sets. Start when you are ready.'
+        : 'Five minutes for this hand. Time spent training your other hand counts.'}</p>
       {source === 'estimated_transition' && <p style={{ color: C.muted }}>
         Rest is estimated from when the last hold was recorded because its release time was not captured.
       </p>}

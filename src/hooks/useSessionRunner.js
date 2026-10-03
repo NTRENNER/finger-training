@@ -19,7 +19,7 @@ import { startingHandForDay, otherHand, handOrderMetadata } from '../model/handO
 //   rep_active    — rep in progress
 //   resting       — countdown between reps
 //   switch_hands  — Both-mode prompt to swap to the other hand
-//   between_sets  — selected/Chaos extra sets' same-hand rest, explicit ready
+//   between_sets  — break before the next set, explicit ready
 //   done          — SessionSummaryView is rendered
 //
 // One set is the ordinary recommendation. Voluntary additional sets can
@@ -364,6 +364,34 @@ export function useSessionRunner({
     setPhase("done");
   }, [config, history]);
 
+  const beginSetRest = useCallback((hand, fullSetBreak = false) => {
+    const activity = lastActivityByHandRef.current;
+    const origin = fullSetBreak
+      ? Object.values(activity).reduce((last, item) => !last || item.transitionAtMs > last.transitionAtMs ? item : last, null)
+      : activity[hand];
+    setSetRestStartedAtMs(origin?.releaseAtMs ?? origin?.transitionAtMs ?? Date.now());
+    setSetRestSource(origin?.source ?? 'estimated_transition');
+    setSetRestSeconds(volumePlanRef.current?.rest_s ?? 300);
+    setSetRestHand(hand);
+    setPhase('between_sets');
+  }, []);
+
+  // Selecting multiple sets is already the athlete's decision to continue.
+  // Queue the next set after both hands finish, with a full break measured
+  // from the final hand's release. Never re-arm a rep until the rest is left.
+  const queueNextSet = useCallback(() => {
+    const nextHand = config.hand === 'Both' ? firstHandRef.current : config.hand;
+    setCurrentSet(currentSet + 1);
+    setCurrentRep(0);
+    setActiveHand(nextHand);
+    setLastRepResult(null);
+    setLeveledUp(false);
+    setSetOpeningRestS(300);
+    if (volumePlanRef.current || mixed || config.plannedSets > 1) {
+      beginSetRest(nextHand, config.plannedSets > 1);
+    } else setPhase(tindeqConnected ? 'rep_ready' : 'rep_active');
+  }, [config.hand, config.plannedSets, currentSet, mixed, tindeqConnected, beginSetRest]);
+
   // Duplicate-event lock (June 2026 audit): a double-tapped Done
   // button or a doubled Tindeq release event called handleRepDone
   // twice for one physical rep. Each call minted a fresh UUID, so the
@@ -439,11 +467,12 @@ export function useSessionRunner({
     } : { ...forceRecording };
     recordedForce.workout_plan = { version: 1, sets: config.plannedSets,
       source: volumePlanRef.current ? 'volume_beta' : 'user_selected',
+      ...(config.plannedSets > 1 ? { rest_policy: 'full_set_break' } : {}),
       ...(betweenSet ? { between_set_rest: { planned_s: volumePlanRef.current || mixed || config.plannedSets > 1 ? 300 : null,
         actual_s: restBefore, source: setRestOrigin?.source ?? 'unknown' } } : {}) };
     recordedForce.hand_order = handOrderMetadata(firstHandRef.current, sessionDate || today());
     if (volumePlanRef.current) {
-      recordedForce.volume_beta = { ...volumePlanRef.current,
+      recordedForce.volume_beta = { ...volumePlanRef.current, rest_policy: 'full_set_break',
         ...(betweenSet ? { between_set_rest: {
           planned_s: volumePlanRef.current.rest_s, actual_s: restBefore,
           source: setRestOrigin?.source ?? 'unknown',
@@ -601,14 +630,19 @@ export function useSessionRunner({
         setActiveHand(otherHand(firstHandRef.current));
         setPhase("switch_hands");
       } else {
-        finishSession([...sessionReps, repRecord]);
+        const allReps = [...sessionReps, repRecord];
+        const moreSelected = !config.peakTest && currentSet < config.plannedSets
+          && isSetComplete({ sessionReps: allReps, config, setNum: currentSet })
+          && (!volumePlanRef.current || isVolumeSetComplete(allReps, config, currentSet));
+        if (moreSelected) queueNextSet();
+        else finishSession(allReps);
       }
     } else {
       setCurrentRep(nextRep);
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentSet, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected, mixed, currentStep, mixedPrediction, mixedPrefix, regularPrediction]);
+  }, [config, currentSet, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected, mixed, currentStep, mixedPrediction, mixedPrefix, regularPrediction, queueNextSet]);
 
   const handleRestDone = useCallback(() => {
     repDoneLockRef.current = false;   // next rep armed — accept its completion
@@ -618,18 +652,9 @@ export function useSessionRunner({
     setPhase(tindeqConnected || mixed ? "rep_ready" : "rep_active");
   }, [tindeqConnected, mixed]);
 
-  const beginSetRest = useCallback(hand => {
-    const origin = lastActivityByHandRef.current[hand];
-    setSetRestStartedAtMs(origin?.releaseAtMs ?? origin?.transitionAtMs ?? Date.now());
-    setSetRestSource(origin?.source ?? 'estimated_transition');
-    setSetRestSeconds(volumePlanRef.current?.rest_s ?? 300);
-    setSetRestHand(hand);
-    setPhase('between_sets');
-  }, []);
-
   const handleSwitchHandsReady = useCallback(() => {
     if (phase !== 'switch_hands') return;
-    if (currentSet > 1 && (volumePlanRef.current || mixed || config.plannedSets > 1)) beginSetRest(activeHand);
+    if (currentSet > 1 && mixed && config.plannedSets <= 1) beginSetRest(activeHand);
     else setPhase('rep_ready');
   }, [phase, currentSet, activeHand, beginSetRest, mixed, config.plannedSets]);
 
@@ -645,29 +670,25 @@ export function useSessionRunner({
   // One set is the complete recommendation. Extra sets are voluntary,
   // launched from the completed-set summary, and deliberately have no
   // mandatory between-set timer for legacy unplanned ordinary additions.
-  // Selected multi-set workouts and Chaos share an optional five-minute rest.
+  // Selected sets have already queued automatically; this handles additions
+  // and an explicitly resumed completed-set summary.
   const handleNextSet = useCallback(() => {
     if (config.peakTest || phase !== "done" || currentSet >= MAX_OPTIONAL_SETS) return;
     if (mixed && !isSetComplete({ sessionReps, config, setNum: currentSet })) return;
     const volume = volumePlanRef.current;
     if (volume && (currentSet !== 1 || !isVolumeSetComplete(sessionReps, config, 1))) return;
-    // Two queued taps must not turn the beta's planned second set into a third.
-    if (volume) setCurrentSet(2);
-    else setCurrentSet(currentSet + 1);
-    setCurrentRep(0);
-    setActiveHand(config.hand === "Both" ? firstHandRef.current : config.hand);
-    setLastRepResult(null);
-    setLeveledUp(false);
-    repDoneLockRef.current = false;
-    setSetOpeningRestS(300);
-    if (volume || mixed || config.plannedSets > 1) beginSetRest(config.hand === 'Both' ? firstHandRef.current : config.hand);
-    else setPhase(tindeqConnected ? "rep_ready" : "rep_active");
-  }, [phase, currentSet, config, tindeqConnected, mixed, sessionReps, beginSetRest]);
+    queueNextSet();
+  }, [phase, currentSet, config, mixed, sessionReps, queueNextSet]);
 
   const handleAbort = useCallback(() => {
+    // A queued set has no recorded work yet. Summarize the completed set,
+    // so finishing during rest cannot count or skip a phantom second set.
+    if (phase === 'between_sets' && !sessionReps.some(r => r.set_num === currentSet)) {
+      setCurrentSet(Math.max(1, currentSet - 1));
+    }
     if (sessionReps.length > 0) finishSession(sessionReps);
     else setPhase("idle");
-  }, [sessionReps, finishSession]);
+  }, [phase, currentSet, sessionReps, finishSession]);
 
   // Normal sets retain their load; beta refWeights already points to the next hold.
   const nextWeight = useMemo(() => {

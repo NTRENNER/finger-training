@@ -14,7 +14,7 @@ Volume Beta is an optional personal six-week trial of two ordinary sets per sele
 
 ## Rest and measurement
 
-The between-set rest target is five minutes **per hand**, measured from that hand's last activity release to its next pull. Other-hand training counts toward this interval. Both hands get their own rest check before their second set. Reaching zero never starts a hold automatically. Athletes can start when ready, extend the rest, or finish the day; actual rest is preserved without a compliance penalty.
+Selected multi-set workouts automatically open a full five-minute break after the last hand finishes each set, when another selected set remains. There is no summary-page Continue tap and no second rest screen at the hand switch within the following set. A one-hand workout starts the break after that hand finishes. Reaching zero never starts a hold automatically. Athletes can start when ready, extend the rest, or finish the day; actual rest is preserved without a compliance penalty.
 
 A confirmed physical release supplies the rest origin, not the earlier credited force-failure endpoint. Manual stop taps are identified as manual timing. If release was not observed, the timer starts conservatively from when the hold was recorded; this estimate is marked separately and never saved as measured rest. Set-two opening holds save planned and actual/estimated rest context in `force_recording.volume_beta.between_set_rest` and the existing `rep_timing` fields.
 
@@ -70,6 +70,17 @@ Validation: synthetic tests cover genuine flat patterns, growth, decline, noise,
 
 ## Independent workout set selection
 
-Users can choose one to five sets per hand before an ordinary workout, without meeting beta eligibility or enrolling in research. Eligible Chaos users have the same selector. One remains the default. Selected multi-set workouts use an optional five-minute same-hand rest between sets, with explicit continuation and the ability to stop early. Normal load targets and the earned 4–5–6 holds remain unchanged.
+Users can choose one to five sets per hand before an ordinary workout, without meeting beta eligibility or enrolling in research. Eligible Chaos users have the same selector. One remains the default. Selected multi-set workouts automatically show a full five-minute break between completed sets, with explicit readiness to start the next set and the ability to stop early. Normal load targets and the earned 4–5–6 holds remain unchanged.
 
 An active Volume Beta applies its fixed two-set plan. Changing the set selector opts this workout out of the study without pausing or ending enrollment. Merely choosing two sets never enrolls a user. Independent workouts carry `force_recording.workout_plan` (selected sets, selection source, and later-set opening rest), not `volume_beta`; the latter is reserved for enrolled protocol workouts. Later sets remain excluded from fresh fitting and ladder advancement.
+
+
+### Rest-policy provenance
+
+New selected multi-set records carry `rest_policy: full_set_break` in
+`workout_plan` (and `volume_beta` when enrolled). Earlier recordings used a
+same-hand countdown that credited the opposite hand's training time. The
+existing actual/estimated rest fields still measure each hand's own release
+to next pull, including opposite-hand work, so researchers retain the real
+recovery interval across this protocol change. Invalid or incomplete Volume
+Beta sets still stop for review rather than automatically proceeding.

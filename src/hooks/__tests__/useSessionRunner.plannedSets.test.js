@@ -54,13 +54,11 @@ function threeSets(mixed) {
     expect(view.result.current.activeHand).toBe(first);
     handSet(view);
     act(() => view.result.current.handleSwitchHandsReady());
-    expect(view.result.current.phase).toBe(set > 1 ? 'between_sets' : 'rep_ready');
-    if (set > 1) {
-      act(() => view.result.current.handleSetRestDone());
-    }
+    expect(view.result.current.phase).toBe('rep_ready');
     handSet(view);
-    expect(view.result.current.phase).toBe('done');
+    expect(view.result.current.phase).toBe(set < 3 ? 'between_sets' : 'done');
     if (set < 3) {
+      expect(view.result.current.setRestStartedAtMs).toBe(Date.now());
       act(() => { view.result.current.handleNextSet(); view.result.current.handleNextSet(); });
       const next = view.result.current;
       transitions.push({ currentSet: next.currentSet, phase: next.phase, setRestSeconds: next.setRestSeconds });
@@ -115,4 +113,44 @@ test('interrupted Chaos work remains in the next set prefix instead of resetting
   expect(view.result.current.activeRepConfig.mixedLoadAdjustment).toMatchObject({ status: 'unavailable', reason: 'unmeasured_or_interrupted_prefix' });
   pull(view);
   expect(view.result.current.sessionReps.at(-1).force_recording.session_protocol.load_mode).toBe('reference_fallback');
+});
+
+
+test('finishing during the automatic break saves only completed work', () => {
+  const view = setup(false, true, 'L');
+  handSet(view);
+  expect(view.result.current.phase).toBe('between_sets');
+  act(() => view.result.current.handleAbort());
+  expect(view.result.current).toMatchObject({phase:'done',currentSet:1});
+  expect(view.result.current.sessionReps).toHaveLength(4);
+  expect(view.result.current.sessionReps.every(r=>r.set_num===1)).toBe(true);
+});
+
+test('duplicate final-rep events cannot skip or populate the next selected set', () => {
+  const view = setup(false, true, 'L');
+  for(let i=0;i<3;i++) {pull(view);act(()=>view.result.current.handleRestDone());}
+  const count = view.result.current.sessionReps.length;
+  act(() => {
+    view.result.current.handleRepDone({actualTime:10,avgForce:20});
+    view.result.current.handleRepDone({actualTime:10,avgForce:20});
+  });
+  expect(view.result.current).toMatchObject({currentSet:2,currentRep:0,phase:'between_sets'});
+  expect(view.result.current.sessionReps).toHaveLength(count+1);
+});
+
+test('ending a selected workout early never queues another set', () => {
+  const view=setup(false,true,'L');
+  act(()=>view.result.current.handleRepDone({actualTime:10,avgForce:20,endSession:true}));
+  expect(view.result.current).toMatchObject({phase:'done',currentSet:1});
+});
+
+
+test('resuming after finishing during a selected break keeps the same next set and rest origin', () => {
+  const view=setup(false);
+  handSet(view);act(()=>view.result.current.handleSwitchHandsReady());handSet(view);
+  const origin=view.result.current.setRestStartedAtMs;
+  act(()=>view.result.current.handleAbort());
+  advanceClock(30000);
+  act(()=>view.result.current.handleNextSet());
+  expect(view.result.current).toMatchObject({phase:'between_sets',currentSet:2,setRestStartedAtMs:origin});
 });

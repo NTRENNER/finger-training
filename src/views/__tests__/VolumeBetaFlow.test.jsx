@@ -90,3 +90,15 @@ test('later rest screens display the actual set number', () => {
   expect(screen.getByRole('heading', { name: 'Rest before set 3' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Start set 3' })).toBeInTheDocument();
 });
+
+
+test('selected sets display a full break without counting the other hand toward it', () => {
+  const ready=jest.fn();
+  render(<BetweenSetRestView startedAtMs={1000000} fullSetBreak hand="L" onReady={ready} />);
+  expect(screen.getByText('5:00')).toBeInTheDocument();
+  expect(screen.getByText(/Five-minute break between sets/)).toBeInTheDocument();
+  expect(screen.queryByText(/Time spent training your other hand counts/)).not.toBeInTheDocument();
+  act(()=>jest.advanceTimersByTime(300000));
+  expect(screen.getByText('0:00')).toBeInTheDocument();
+  expect(ready).not.toHaveBeenCalled();
+});

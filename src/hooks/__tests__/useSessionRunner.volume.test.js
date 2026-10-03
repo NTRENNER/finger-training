@@ -42,7 +42,7 @@ function firstSet(view) {
   }
 }
 
-test.each([true, false])('five-minute same-hand clocks count other-hand work and require ready (device=%s)', connected => {
+test.each([true, false])('a full five-minute break starts automatically after both hands and requires ready (device=%s)', connected => {
   const view = setup({ connected });
   const first = view.result.current.activeHand, second = first === 'L' ? 'R' : 'L';
   handSet(view);
@@ -50,31 +50,31 @@ test.each([true, false])('five-minute same-hand clocks count other-hand work and
   act(() => view.result.current.handleSwitchHandsReady());
   handSet(view);
   const secondRelease = Date.now();
-  expect(view.result.current.phase).toBe('done');
+  expect(view.result.current.phase).toBe('between_sets');
   act(() => view.result.current.handleNextSet());
   expect(view.result.current).toMatchObject({ phase: 'between_sets', currentSet: 2,
-    activeHand: first, setRestHand: first, setRestSeconds: 300, setRestStartedAtMs: firstRelease,
+    activeHand: first, setRestHand: first, setRestSeconds: 300, setRestStartedAtMs: secondRelease,
     setRestSource: connected ? 'device_release' : 'manual_tap' });
-  // Other-hand work already supplied 100 seconds for the first hand.
-  advanceClock(200000);
+  // The full break starts after the second hand, while real per-hand rest
+  // still includes the 100 seconds spent training the opposite hand.
+  expect(secondRelease - firstRelease).toBe(100000);
+  advanceClock(300000);
   expect(view.result.current.phase).toBe('between_sets');
   act(() => view.result.current.handleSetRestDone());
   expect(view.result.current.phase).toBe('rep_ready');
   handSet(view);
   expect(view.result.current.phase).toBe('switch_hands');
   act(() => view.result.current.handleSwitchHandsReady());
-  expect(view.result.current).toMatchObject({ phase: 'between_sets', activeHand: second,
-    setRestHand: second, setRestStartedAtMs: secondRelease });
-  act(() => view.result.current.handleSetRestDone());
+  expect(view.result.current).toMatchObject({ phase: 'rep_ready', activeHand: second });
   expect(view.result.current.phase).toBe('rep_ready');
   handSet(view);
   const rows = view.result.current.sessionReps;
   expect(rows).toHaveLength(16);
   for (const hand of [first, second]) {
     const opener = rows.find(r => r.hand === hand && r.set_num === 2 && r.rep_num === 1);
-    expect(opener).toMatchObject({ rest_s: 20, rep_timing: { rest_before_s: 300, rest_planned_s: 300 },
+    expect(opener).toMatchObject({ rest_s: 20, rep_timing: { rest_before_s: 400, rest_planned_s: 300 },
       force_recording: { volume_beta: { experiment_id: 'pilot-1', sets: 2,
-        between_set_rest: { planned_s: 300, actual_s: 300 } } } });
+        between_set_rest: { planned_s: 300, actual_s: 400 } } } });
     expect(rows.filter(r => r.hand === hand).every(r => r.prescribed_load_kg === (hand === 'L' ? 20 : 22))).toBe(true);
   }
   expect(rows.every(r => r.force_recording.volume_beta.experiment_id === 'pilot-1')).toBe(true);

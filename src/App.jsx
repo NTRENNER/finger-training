@@ -737,7 +737,7 @@ export default function App() {
 
         if (phase === 'between_sets') {
           return <BetweenSetRestView key={`${currentSet}-${setRestHand}`} setNumber={currentSet} startedAtMs={setRestStartedAtMs} restSeconds={setRestSeconds}
-            hand={setRestHand} source={setRestSource} onReady={handleSetRestDone}
+            hand={setRestHand} source={setRestSource} fullSetBreak={config.plannedSets > 1} onReady={handleSetRestDone}
             onFinish={handleAbort} tindeq={tindeq} />;
         }
 

@@ -621,7 +621,7 @@ export function SessionPlanCard({
         <p style={{ color: C.muted, marginBottom: 0 }}>
           {volumeEnabled ? 'Your Volume Beta plan uses two sets. Changing this selection makes this workout independent of the study.'
             : 'Your choice for this workout. Extra sets do not enroll you in the six-week Volume Beta. You can finish early.'}
-          {(volumeEnabled || selectedSets > 1) && ' Allow five minutes per hand between sets; start when ready.'}
+          {(volumeEnabled || selectedSets > 1) && ' A five-minute rest starts automatically between sets; start the next set when ready.'}
         </p>
       </div>}
 
