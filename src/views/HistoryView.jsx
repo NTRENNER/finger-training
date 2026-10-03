@@ -1063,10 +1063,11 @@ export function HistoryView({
                 const handLetter = r.hand === "L" ? "L" : r.hand === "R" ? "R" : null;
                 const handColor  = r.hand === "L" ? C.blue : r.hand === "R" ? C.orange : C.muted;
                 return (
-                  <div key={j} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 0 }}>
+                  <div key={j} style={{ position: "relative", width: "100%", minWidth: 0 }}>
                     <div
                       onClick={() => repEditMode === cardKey && !isRepEditing && openRepEdit(cardKey, j, r)}
                       style={{
+                        width: "100%", boxSizing: "border-box", overflowWrap: "anywhere",
                         padding: "4px 10px", borderRadius: 8, fontSize: 12,
                         background: isRepEditing ? C.blue + "33" : beta ? C.bg : passed ? "#1a2f1a" : "#2f1a1a",
                         border: `1px solid ${isRepEditing ? C.blue : beta ? C.border : passed ? C.green : C.red}`,
@@ -1118,14 +1119,14 @@ export function HistoryView({
                 const orphans = sortedReps.filter(r => r.hand !== "L" && r.hand !== "R");
                 return (
                   <div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                       {["L", "R"].map(handKey => (
-                        <div key={handKey}>
+                        <div key={handKey} style={{ minWidth: 0 }}>
                           <div style={{
                             fontSize: 10, fontWeight: 700, letterSpacing: 1,
                             color: handKey === "L" ? C.blue : C.orange, marginBottom: 6,
                           }}>{handKey === "L" ? "LEFT" : "RIGHT"}</div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                             {sortedReps.map((r, j) => r.hand === handKey ? renderChip(r, j) : null)}
                           </div>
                         </div>
@@ -1136,7 +1137,7 @@ export function HistoryView({
                         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: C.muted, marginBottom: 6 }}>
                           UNASSIGNED HAND ({orphans.length}) · open the rep editor to set L or R
                         </div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
                           {sortedReps.map((r, j) => r.hand !== "L" && r.hand !== "R" ? renderChip(r, j) : null)}
                         </div>
                       </div>
@@ -1145,7 +1146,7 @@ export function HistoryView({
                 );
               }
               return (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
                   {sortedReps.map((r, j) => renderChip(r, j))}
                 </div>
               );
