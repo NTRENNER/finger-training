@@ -157,9 +157,10 @@ export function CurveCoverageCard({ history = [], grip = "", handView = "pooled"
   if (attentionGrips.length === 0) return null;
 
   return (
-    <Card style={{ marginBottom: 16 }}>
+    <details style={{ marginBottom: 16 }}>
+      <summary style={{ cursor: "pointer", fontSize: 14, color: C.muted, padding: "10px 0" }}>Training &amp; measurements</summary>
+      <Card>
       <div style={{ marginBottom: attentionGrips.length > 1 ? 0 : 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Training & measurements</div>
         <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
           Training exposure and fresh-curve evidence are different
           {handView !== "pooled" && ` · ${handView === "L" ? "left" : "right"} hand`}
@@ -179,6 +180,7 @@ export function CurveCoverageCard({ history = [], grip = "", handView = "pooled"
           showGrip={!grip}
         />
       ))}
-    </Card>
+      </Card>
+    </details>
   );
 }

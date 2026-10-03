@@ -1,5 +1,6 @@
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { CurveCoverageCard } from "../CurveCoverageCard.jsx";
 
 const rep = (date, actual_time_s, over = {}) => ({
@@ -28,7 +29,11 @@ test("shows exposure separately even when opening measurements are current", () 
 
   render(<CurveCoverageCard history={history} />);
   expect(screen.getByText("Training & measurements")).toBeInTheDocument();
-  expect(screen.getByRole("columnheader", { name: "Opening measurement" })).toBeInTheDocument();
+  expect(screen.getByText("Opening measurement")).not.toBeVisible();
+  userEvent.click(screen.getByText("Training & measurements"));
+  expect(screen.getByText("Opening measurement")).toBeVisible();
+  userEvent.click(screen.getByText("Training & measurements"));
+  expect(screen.getByText("Opening measurement")).not.toBeVisible();
   expect(screen.queryByText(/1 stale/)).not.toBeInTheDocument();
 });
 

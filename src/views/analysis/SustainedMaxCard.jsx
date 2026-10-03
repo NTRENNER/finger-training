@@ -58,7 +58,7 @@ export function SustainedMaxCard({ history = [], unit = 'lbs', normalizeOn = fal
             <line x1="0" y1="6" x2="40" y2="6" stroke="currentColor" strokeWidth="2.5"
               strokeDasharray={r.hand === 'R' ? '6 4' : undefined} />
           </svg>
-          {r.grip} · {r.hand === 'L' ? 'Left hand (solid)' : 'Right hand (dashed)'}
+          {r.grip}: {r.hand === 'L' ? 'Left hand' : 'Right hand'}
         </span>)}
       </div>
     </> : <p style={{ color: C.muted }}>No qualifying holds yet.</p>}
