@@ -1,8 +1,9 @@
+import { displayedRepTime } from "../model/pullMeasurement.js";
 import { mixedAdjustmentText } from '../model/mixedLoadPrescription.js';
 import { HandCue } from './cards/HandCue.jsx';
 import { TindeqBattery, InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { finalizeDeviceActivity } from "../model/forceRecording.js";
-import { evidenceLabel } from "../model/forceRecording.js";
+import { RepResultDetails } from "./cards/RepResultDetails.jsx";
 import { MIXED_DOMAIN_LABELS, isMixedDomainRep, mixedDomainMetadata } from '../model/mixedDomain.js';
 // ──────────────────────────────────────────────────────────────
 // ACTIVE-SESSION VIEWS
@@ -173,9 +174,10 @@ function ForceLossNotice({ state }) {
 
 function creditedSeconds(state, elapsed) {
   if (!state) return elapsed;
-  if (state.startTs == null) return '0.0';
+  const start = Object.hasOwn(state, 'pullStartTs') ? state.pullStartTs : state.startTs;
+  if (start == null) return '0.0';
   const end = state.status === 'complete' ? state.endTs : state.pendingEndTs ?? state.observedTs;
-  return Number.isFinite(end) ? Math.max(0, (end - state.startTs) / 1000).toFixed(1) : '0.0';
+  return Number.isFinite(end) ? Math.max(0, (end - start) / 1000).toFixed(1) : '0.0';
 }
 
 function RepDots({ total, done, current }) {
@@ -722,22 +724,14 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
       {lastRep && (
         <Card>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Last rep result</div>
-          <p>{evidenceLabel({ failure_valid: lastRep.failureValid,
-            force_recording: lastRep.forceRecording, load_provenance: lastRep.loadProvenance })}.</p>
-          {lastRep.endReason === "equipment_interruption" && <InterruptedBatteryNote battery={lastRep.forceRecording?.battery} />}
-          {lastRep.restBefore != null && <p>Actual rest before this rep: {lastRep.restBefore.toFixed(1)}s.</p>}
-          {lastRep.forceRecording?.plateau?.duration_s > 0 && <p>
-            Strong phase: {fmtW(lastRep.forceRecording.plateau.avg_force_kg, unit)} {unit} for {lastRep.forceRecording.plateau.duration_s.toFixed(1)}s.
-          </p>}
-          <p>{lastRep.forceRecording?.duration_basis === "elapsed_activity_estimate" ? "Elapsed activity time estimated; no measured hold duration available." : lastRep.avgForce > 0 ? `${fmtW(lastRep.avgForce, unit)} ${unit} time-weighted average over ${lastRep.actualTime.toFixed(1)}s.` : "Manually timed effort."}</p>
           <div style={{ display: "flex", gap: 32 }}>
             <div>
               <Label>Time</Label>
               <span style={{
                 fontSize: 28, fontWeight: 700,
-                color: nextDomain ? C.text : lastRep.actualTime >= lastRep.targetTime ? C.green : C.red,
+                color: nextDomain ? C.text : displayedRepTime(lastRep.actualTime, lastRep.forceRecording) >= lastRep.targetTime ? C.green : C.red,
               }}>
-                {Math.round(lastRep.actualTime)}s
+                {Math.round(displayedRepTime(lastRep.actualTime, lastRep.forceRecording))}s
               </span>
               <div style={{ fontSize: 11, color: C.muted }}>{nextDomain ? 'fresh reference' : 'target'} {lastRep.targetTime}s</div>
             </div>
@@ -758,6 +752,15 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
               </div>
             )}
           </div>
+          <RepResultDetails rep={{ failure_valid: lastRep.failureValid, end_reason: lastRep.endReason,
+            force_recording: lastRep.forceRecording, load_provenance: lastRep.loadProvenance }}>
+            {lastRep.endReason === "equipment_interruption" && <InterruptedBatteryNote battery={lastRep.forceRecording?.battery} />}
+            {lastRep.restBefore != null && <p>Actual rest before this rep: {lastRep.restBefore.toFixed(1)}s.</p>}
+            {lastRep.forceRecording?.plateau?.duration_s > 0 && <p>
+              Strong phase: {fmtW(lastRep.forceRecording.plateau.avg_force_kg, unit)} {unit} for {lastRep.forceRecording.plateau.duration_s.toFixed(1)}s.
+            </p>}
+            <p>{lastRep.forceRecording?.duration_basis === "elapsed_activity_estimate" ? "Elapsed activity time estimated; no measured hold duration available." : lastRep.avgForce > 0 ? `${fmtW(lastRep.avgForce, unit)} ${unit} time-weighted average over ${lastRep.actualTime.toFixed(1)}s.` : "Manually timed effort."}</p>
+          </RepResultDetails>
         </Card>
       )}
 
@@ -1016,12 +1019,13 @@ export function SessionSummaryView({
                 <tr key={r.id || `${r.hand}-${r.rep_num}`} style={{ borderTop: `1px solid ${C.border}` }}>
                   <td style={{ padding: "6px 0" }}>{r.hand} {r.rep_num}
                     {isMixedDomainRep(r) && <div>{MIXED_DOMAIN_LABELS[mixedDomainMetadata(r).zone]}</div>}
-                    <div style={{ fontSize: 11 }}>{evidenceLabel(r)}</div>
-                    {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
+                    <RepResultDetails rep={r}>
+                      {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
+                    </RepResultDetails>
                   </td>
                   <td style={{ textAlign: "right" }}>{fmtW(prescribedLoad(r), unit)} {unit}</td>
-                  <td style={{ textAlign: "right", color: isMixedDomainRep(r) ? C.text : r.actual_time_s >= r.target_duration ? C.green : C.red }}>
-                    {fmtTime(r.actual_time_s)}
+                  <td style={{ textAlign: "right", color: isMixedDomainRep(r) ? C.text : displayedRepTime(r.actual_time_s, r.force_recording) >= r.target_duration ? C.green : C.red }}>
+                    {fmtTime(displayedRepTime(r.actual_time_s, r.force_recording))}
                   </td>
                   {hasForce && (
                     <td style={{ textAlign: "right", color: C.green }}>

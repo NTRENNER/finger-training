@@ -1,3 +1,4 @@
+import { createPullMeasurement } from "../model/pullMeasurement.js";
 import { createTargetFailureDetector, RELEASE_BACKSTOP_POLICY, repDetectionThresholds } from "../model/targetFailure.js";
 import { recordCapacityForce as recordForce } from "../model/forceRecording.js";
 // ─────────────────────────────────────────────────────────────
@@ -119,11 +120,12 @@ export function useTindeq() {
     const state = detector?.snapshot(false);
     const pendingEndTs = state && releaseTs != null
       ? Math.min(state.pendingEndTs ?? releaseTs, releaseTs) : state?.pendingEndTs;
-    const next = state ? { ...state, observedTs, pendingEndTs } : null;
+    const measurement = detector === targetDetectorRef.current ? autoPullRef.current : manualPullRef.current;
+    const next = state ? { ...state, observedTs, pendingEndTs, pullStartTs: measurement?.pullStartTs ?? null } : null;
     latestForceLossRef.current = next;
     // Acquisition changes the credited clock even while status stays holding.
     // Device-time ticks ride the existing coalesced force-display update.
-    const signature = next ? `${next.status}|${next.startTs}|${next.endTs}|${next.pendingEndTs}` : null;
+    const signature = next ? `${next.status}|${next.pullStartTs}|${next.startTs}|${next.endTs}|${next.pendingEndTs}` : null;
     if (signature !== forceLossStatusRef.current) {
       forceLossStatusRef.current = signature;
       setForceLoss(next);
@@ -137,7 +139,13 @@ export function useTindeq() {
     setBattery(batteryRef.current);
   }, []);
   const recordWithBattery = useCallback((...args) => {
-    const stats = recordForce(...args);
+    const [samples, endTs, targetKg, decision] = args;
+    // Only ordinary targeted holds adopt this convention; peak tests and
+    // timed warmups retain their own acquisition and timing protocols.
+    const measurement = samples === adSamplesRef.current ? autoPullRef.current : manualPullRef.current;
+    const stats = recordForce(samples, endTs, targetKg, decision && measurement ? {
+      ...decision, averageStartTs: measurement.averageStartTs, pullStartTs: measurement.pullStartTs,
+    } : decision);
     return { ...stats, forceRecording: { ...stats.forceRecording,
       battery: { ...batteryRef.current }, transport: { ...transportRef.current } } };
   }, []);
@@ -158,9 +166,12 @@ export function useTindeq() {
     setForce(latestKgRef.current);
     setForceLoss(latestForceLossRef.current);
     setPeak(peakRef.current);
-    const c = countRef.current, adC = adCountRef.current;
-    if (adC > 0)     setAvgForce(adSumRef.current / adC);
-    else if (c > 0)  setAvgForce(sumRef.current / c);
+    const measurement = adActiveRef.current ? autoPullRef.current : measuringRef.current ? manualPullRef.current : null;
+    if (measurement) {
+      const state = latestForceLossRef.current;
+      const end = state?.status === 'complete' ? state.endTs : state?.pendingEndTs ?? state?.observedTs;
+      setAvgForce(measurement.average(end ?? undefined));
+    }
   }, []);
   const scheduleUiFlush = useCallback(() => {
     if (rafRef.current) return;  // one flush per frame
@@ -213,8 +224,7 @@ export function useTindeq() {
   const disconnectHandlerRef = useRef(null);
   const reconnectingRef     = useRef(false);  // guard against concurrent reconnects
   const peakRef             = useRef(0);
-  const sumRef              = useRef(0);   // running sum for live avg display
-  const countRef            = useRef(0);   // sample count for live avg display
+  const manualPullRef = useRef(null);
   const samplesRef          = useRef([]);  // raw {kg, ts} buffer for full-effort integration
   const belowSinceRef       = useRef(null);
   const measuringRef        = useRef(false);
@@ -229,8 +239,7 @@ export function useTindeq() {
   const adOnEndRef      = useRef(null);   // ({actualTime, avgForce}) => void — called when rep ends
   const adActiveRef     = useRef(false);  // true while a rep is in progress
   const adStartTimeRef  = useRef(null);   // device milliseconds when pull began
-  const adSumRef        = useRef(0);      // running sum for live avg display
-  const adCountRef      = useRef(0);      // sample count for live avg display
+  const autoPullRef = useRef(null);
   const adSamplesRef    = useRef([]);     // raw {kg, ts} buffer for full-effort integration
   const deviceClockRef = useRef({ raw: null, elapsed: 0 });
   const lastPacketAtRef = useRef(null);
@@ -307,9 +316,8 @@ export function useTindeq() {
 
   // ── Packet handler — defined once, reused across reconnects ──
   //
-  // AVERAGE = PLATEAU-TRIMMED MEAN (May 2026)
-  // Use device time for every sample. The display includes all work;
-  // the saved measurement integrates the same complete effort interval.
+  // Device time drives the pull clock and the time-weighted average.
+  // Targeted averages latch at the first target crossing; later dips still count.
   const handlePacket = useCallback((evt) => {
     const data = evt.target.value;
     if (!data?.byteLength) return;
@@ -407,8 +415,7 @@ export function useTindeq() {
       if (measuringRef.current) {
         // Keep the full force trace, including below-target work.
         samplesRef.current.push({ kg, ts: now, at });
-        sumRef.current += kg;
-        countRef.current += 1;
+        manualPullRef.current?.push({ kg, ts: now });
       }
 
       if (measuringRef.current) {
@@ -444,13 +451,13 @@ export function useTindeq() {
               ? createTargetFailureDetector(targetKgRef.current) : null;
             publishForceLoss(null);
             targetDetectorRef.current?.({ kg, ts: now });
-            publishForceLoss(targetDetectorRef.current, now);
             transportRef.current = { version: 1 };
             adActiveRef.current    = true;
             adStartTimeRef.current = now;
-            // Start the force and time interval at the same sample.
-            adSumRef.current       = 0;
-            adCountRef.current     = 0;
+            autoPullRef.current = createPullMeasurement(targetDetectorRef.current ? targetKgRef.current : null);
+            autoPullRef.current.push({ kg, ts: now });
+            publishForceLoss(targetDetectorRef.current, now);
+            setAvgForce(null);
             adSamplesRef.current   = [{ kg, ts: now, at }];
             adBelowRef.current     = null;
             peakRef.current = kg;
@@ -460,8 +467,7 @@ export function useTindeq() {
         } else {
           // Include weaker work and transient fluctuations.
           adSamplesRef.current.push({ kg, ts: now, at });
-          adSumRef.current += kg;
-          adCountRef.current += 1;
+          autoPullRef.current?.push({ kg, ts: now });
           const failure = targetDetectorRef.current?.({ kg, ts: now });
           if (kg < adReleaseKgRef.current) {
             if (adBelowRef.current === null) adBelowRef.current = now;
@@ -485,8 +491,8 @@ export function useTindeq() {
             const cb = adOnEndRef.current;
             adActiveRef.current = false;
             adStartTimeRef.current = null;
-            adSumRef.current = 0;
-            adCountRef.current = 0;
+            setAvgForce(stats.avgForce);
+            autoPullRef.current = null;
             adSamplesRef.current = [];
             adBelowRef.current = null;
             cb?.(stats);
@@ -683,10 +689,10 @@ export function useTindeq() {
     lastPacketAtRef.current = Date.now();
     manualTargetDetectorRef.current = targetKgRef.current > 0 ? createTargetFailureDetector(targetKgRef.current) : null;
     manualReleaseKgRef.current = repDetectionThresholds(targetKgRef.current).releaseKg;
-    publishForceLoss(null);
     peakRef.current      = 0;  setPeak(0);
-    sumRef.current       = 0;
-    countRef.current     = 0;  setAvgForce(0);
+    manualPullRef.current = createPullMeasurement(targetKgRef.current);
+    publishForceLoss(manualTargetDetectorRef.current);
+    setAvgForce(null);
     samplesRef.current   = [];
     latestKgRef.current = 0;
     setForce(0);
@@ -726,8 +732,7 @@ export function useTindeq() {
     // running avg over this rep's samples and overwrites the
     // measured value.
     cancelUiFlush();
-    sumRef.current = 0;
-    countRef.current = 0;
+    manualPullRef.current = null;
     setAvgForce(avg);
     return { ...stats, avgForce: avg, peakForce: peakF };
   }, [cancelUiFlush, recordWithBattery, writeCommand]);
@@ -785,8 +790,8 @@ export function useTindeq() {
     targetDetectorRef.current = null;
     adActiveRef.current    = false;
     adStartTimeRef.current = null;
-    adSumRef.current       = 0;
-    adCountRef.current     = 0;
+    autoPullRef.current = null;
+    setAvgForce(null);
     adSamplesRef.current   = [];
     adBelowRef.current     = null;
     await writeCommand(CMD_START);
@@ -815,8 +820,8 @@ export function useTindeq() {
     const peakF = peakRef.current;
     adActiveRef.current     = false;
     adStartTimeRef.current  = null;
-    adSumRef.current        = 0;
-    adCountRef.current      = 0;
+    autoPullRef.current = null;
+    setAvgForce(avg);
     adSamplesRef.current    = [];
     adBelowRef.current      = null;
     markAwaitingRelease(true);

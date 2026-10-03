@@ -52,14 +52,16 @@ test('beta sensor flow arms each domain load and does not finish at the referenc
   expect(tindeq.targetKgRef.current).toBe(15);
   expect(screen.getByText(/Fatigued hold/)).toBeInTheDocument();
 });
-test('rest explains force, time, and validity', () => {
+test('rest keeps technical measurement details collapsed', () => {
   render(<RestView lastRep={{actualTime: 30, avgForce: 17.5, failureValid: false, targetTime: 40}} restSeconds={20} repNum={1} repsPerSet={4} unit="kg" onRestDone={() => {}} />);
-  expect(screen.getByText(/17.5 kg time-weighted average over 30.0s/)).toBeInTheDocument();
-  expect(screen.getByText(/Interrupted — activity only/)).toBeInTheDocument();
+  expect(screen.getByText(/17.5 kg time-weighted average over 30.0s/)).not.toBeVisible();
+  expect(screen.getByText('Interrupted')).toBeVisible();
+  expect(screen.getByText(/Interrupted — activity only/)).not.toBeVisible();
 });
 test('final rep retains its interruption status in session summary', () => {
   render(<SessionSummaryView config={config} reps={[{rep_num: 1, set_num: 1, actual_time_s: 12, avg_force_kg: 18, failure_valid: false}]} onDone={() => {}} />);
-  expect(screen.getByText(/Interrupted — activity only/)).toBeInTheDocument();
+  expect(screen.getByText('Interrupted')).toBeVisible();
+  expect(screen.getByText(/Interrupted — activity only/)).not.toBeVisible();
 });
 
 test('an aborted partial set is not described as complete', () => {
@@ -121,4 +123,29 @@ test('confirmed force loss freezes the displayed credit and asks for release bef
   act(()=>jest.advanceTimersByTime(5000));
   expect(screen.getByText('10.0s')).toBeInTheDocument();
   expect(onRepDone).not.toHaveBeenCalled();
+});
+
+
+test('live clock includes the ramp and freezes at the same end when loss confirms', () => {
+  let start;
+  const tindeq = { targetKgRef: {}, connected: true, force: 20, avgForce: 20, peak: 20,
+    startAutoDetect: callback => { start = callback; }, stopAutoDetect: jest.fn() };
+  const view = render(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()} tindeq={tindeq} />);
+  act(() => start());
+  view.rerender(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()}
+    tindeq={{ ...tindeq, forceLoss: { status: 'holding', pullStartTs: 1000, startTs: null, observedTs: 2500 } }} />);
+  expect(screen.getByText('1.5s')).toBeVisible();
+  view.rerender(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()}
+    tindeq={{ ...tindeq, forceLoss: { status: 'complete', pullStartTs: 1000, startTs: 4000, endTs: 31000 } }} />);
+  expect(screen.getByText('30.0s')).toBeVisible();
+});
+
+test('rest shows pull time while keeping matched averaging duration in Details', () => {
+  render(<RestView lastRep={{ actualTime: 27, avgForce: 20, targetTime: 30, failureValid: true,
+    forceRecording: { pull_duration_s: 30 } }} restSeconds={20} repNum={1} repsPerSet={4} unit="kg" onRestDone={jest.fn()} />);
+  expect(screen.getByText('30s')).toBeVisible();
+  const detail = screen.getByText(/20.0 kg time-weighted average over 27.0s/);
+  expect(detail).not.toBeVisible();
+  fireEvent.click(screen.getByText('Details'));
+  expect(detail).toBeVisible();
 });

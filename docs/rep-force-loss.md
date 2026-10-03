@@ -35,10 +35,21 @@ intended release; it ends the rep. The athlete can always mark a rep interrupted
 
 ## Stored measurements
 
-New targeted recordings use force-recording version 4 and failure-policy version 8.
+New targeted recordings use force-recording version 5 and failure-policy version 8.
 Existing records are not rewritten.
 
-- `actual_time_s` and average force cover acquisition through credited end.
+- The displayed pull time includes the initial ramp, beginning at detected pulling
+  and ending at the credited endpoint. `pull_duration_s` preserves this clock.
+- Average force starts at the first sample reaching or exceeding the target.
+  It is time-weighted and includes subsequent overshoots, undershoots and recovered
+  dips. The same interval supplies the live and saved average; it is not a filter
+  that discards below-target samples. Before target crossing, the average is blank.
+- `actual_time_s` and average force retain a matched first-target-crossing through
+  credited-end interval internally. `ramp_duration_s` / `acquisition_s` preserve
+  the ramp separately. Existing historical interval normalization is unchanged.
+- A pull that never reaches the target retains its activity, without claiming a
+  target-acquired average or capacity observation. A brief target spike does not
+  bypass the existing sustained acquisition requirement in the failure detector.
 - `activity` covers the full force-time integral from initial pull through physical
   release, including acquisition and the weaker tail. This feeds activity/fatigue.
 - `credited_end_at_ms` explicitly preserves the capacity endpoint.
@@ -56,7 +67,9 @@ Existing records are not rewritten.
   including when loss had already been confirmed but release was not observed.
 
 The historical `target_acquired` basis identifier remains for compatibility;
-`acquisition_basis: sustained_tolerance_band` identifies the new acquisition rule.
+`acquisition_basis: first_target_crossing` identifies the averaging window in v5.
+The failure detector still uses sustained tolerance-band acquisition and its existing
+loss/recovery rules; this change does not make brief dips end a rep sooner.
 Legacy interval conversion still adds only acquisition time, never the weaker tail.
 Policy changes can alter credited duration; past and current records are not claimed
 byte-for-byte equivalent.
@@ -113,11 +126,11 @@ version-1 details are left unchanged; this provenance is not research cache data
 ## Live hold clock, interrupted exits and planned dose
 
 The targeted hold clock now uses the same device timestamps as the credited
-measurement. It stays at zero while acquiring the target and pauses at the
-provisional cutoff while checking a force dip. Sustained recovery restores the
+endpoint. It starts at detected pulling, includes the ramp to target, and pauses at
+the provisional cutoff while checking a force dip. Sustained recovery restores the
 whole interval and resumes the clock; confirmed loss freezes it at that cutoff.
-A near-zero release also pauses immediately, before its confirmation delay. It does not count the
-initial force ramp as hold time or keep advancing during a stalled sensor stream.
+A near-zero release also pauses immediately, before its confirmation delay. It does not keep advancing during a stalled sensor stream. Rest results, session
+summaries and History show the same ramp-inclusive pull time for new recordings.
 Untargeted peak/warmup protocols and manually timed pulls keep their own clocks.
 
 Planned rest, measured unloaded rest, and acquisition are separate. For example,
@@ -142,3 +155,11 @@ Ordinary sessions preserve their initial dose in
 planned rest, per-hand prescribed load, hand mode, and the unadjusted base load when
 known. Each saved row carries a copy; interrupted attempts and optional sets retain
 the plan. Measured overpulls or later changes to a fatigue rating cannot rewrite it.
+
+
+## Concise rep results
+
+History, the rest screen and session summaries show the result first. Evidence
+classification, averaging method, actual rest, force variation and interruption
+battery diagnostics remain under a collapsed Details disclosure. Interrupted pulls
+retain a brief visible status. No recorded diagnostic fields are removed.

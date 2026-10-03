@@ -1,7 +1,8 @@
+import { displayedRepTime, editedRepTime } from "../model/pullMeasurement.js";
 import { isPeakMeasurement, isValidPeakMeasurement } from '../model/peakTest.js';
 import { isPeakTestRep } from '../model/peakForce.js';
 import { InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
-import { evidenceLabel } from "../model/forceRecording.js";
+import { RepResultDetails } from "./cards/RepResultDetails.jsx";
 import { isMixedDomainRep, mixedDomainMetadata, MIXED_DOMAIN_LABELS } from '../model/mixedDomain.js';
 // ──────────────────────────────────────────────────────────────
 // HISTORY VIEW
@@ -167,7 +168,7 @@ export function HistoryView({
     setAddingRep(null);
     setEditingRep({ sessKey, repIdx, rep });
     setEditRepLoad(String(fmt1(toDisp(effectiveLoad(rep), unit))));
-    setEditRepTime(String(rep.actual_time_s));
+    setEditRepTime(String(displayedRepTime(rep.actual_time_s, rep.force_recording)));
     setEditRepHand(rep.hand === "L" || rep.hand === "R" ? rep.hand : null);
     setEditRepRest(rep.rest_s != null ? String(rep.rest_s) : "");
   };
@@ -183,7 +184,7 @@ export function HistoryView({
     // required (it's the rep's identity); load is optional — when
     // blank or non-positive we simply leave the existing load intact.
     if (!Number.isFinite(newTime) || newTime <= 0) return;
-    const updates = { actual_time_s: newTime };
+    const updates = editedRepTime(editingRep.rep, newTime);
     // Schema split (late May 2026). The "Load" field in the editor
     // means "what actually happened" — for Tindeq reps that's the
     // measured average force; for non-Tindeq reps that's the user's
@@ -1052,7 +1053,7 @@ export function HistoryView({
               const renderChip = (r, j) => {
                 const isRepEditing = editingRep?.sessKey === cardKey && editingRep?.repIdx === j;
                 const peakTest = isPeakMeasurement(r);
-                const passed = peakTest ? isValidPeakMeasurement(r) : r.actual_time_s >= r.target_duration;
+                const passed = peakTest ? isValidPeakMeasurement(r) : displayedRepTime(r.actual_time_s, r.force_recording) >= r.target_duration;
                 const beta = isMixedDomainRep(r);
                 // Per-rep hand letter — same color scheme as the F-D
                 // chart's L/R dots (L=blue, R=orange). Always shown,
@@ -1079,27 +1080,19 @@ export function HistoryView({
                           {handLetter}
                         </span>
                       )}
-                      <b>{fmtW(peakTest ? r.peak_force_kg : effectiveLoad(r), unit)}{unit}{peakTest ? " peak" : ""}</b> · {fmtTime(r.actual_time_s)}
+                      <b>{fmtW(peakTest ? r.peak_force_kg : effectiveLoad(r), unit)}{unit}{peakTest ? " peak" : ""}</b> · {fmtTime(displayedRepTime(r.actual_time_s, r.force_recording))}
                       {beta && <span> · {MIXED_DOMAIN_LABELS[mixedDomainMetadata(r).zone]}</span>}
-                      <span> · {evidenceLabel(r)}</span>
-                      {!peakTest && r.force_recording?.version >= 1 && <span> · Time-weighted average</span>}
-                      {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
-                      <div>{r.rep_timing?.rest_before_s != null
-                        ? `Actual rest before rep: ${r.rep_timing.rest_before_s.toFixed(1)}s`
-                        : "Actual rest not recorded"} · {peakTest ? "Rest between rounds" : "Planned rest"}: {r.rest_s ?? 20}s</div>
-                      {!peakTest && r.force_recording?.plateau?.duration_s > 0 && <div>
-                        Strong phase: {fmtW(r.force_recording.plateau.avg_force_kg, unit)} {unit} for {r.force_recording.plateau.duration_s.toFixed(1)}s
-                        · Force variation: {Math.round((r.force_recording.force_cv || 0) * 100)}%
-                      </div>}
-                      {/* Rest interval — small muted suffix so it's
-                          visible at a glance for verifying edits and
-                          spotting protocol drift, without crowding
-                          the load+time pair that's the primary signal. */}
-                      {r.rest_s != null && (
-                        <span style={{ color: C.muted, marginLeft: 6, fontSize: 11 }}>
-                          · {r.rest_s}s rest
-                        </span>
-                      )}
+                      <RepResultDetails rep={r}>
+                        {!peakTest && r.force_recording?.version >= 1 && <div>Time-weighted average</div>}
+                        {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
+                        <div>{r.rep_timing?.rest_before_s != null
+                          ? `Actual rest before rep: ${r.rep_timing.rest_before_s.toFixed(1)}s`
+                          : "Actual rest not recorded"} · {peakTest ? "Rest between rounds" : "Planned rest"}: {r.rest_s ?? 20}s</div>
+                        {!peakTest && r.force_recording?.plateau?.duration_s > 0 && <div>
+                          Strong phase: {fmtW(r.force_recording.plateau.avg_force_kg, unit)} {unit} for {r.force_recording.plateau.duration_s.toFixed(1)}s
+                          · Force variation: {Math.round((r.force_recording.force_cv || 0) * 100)}%
+                        </div>}
+                      </RepResultDetails>
                     </div>
                     {repEditMode === cardKey && (
                       <button

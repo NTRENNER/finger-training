@@ -265,7 +265,7 @@ test('confirmed loss freezes hold time, records weaker work until release, and t
 });
 test.each([2.5,25])('a two-second adjustment at target %s survives; zero release ends after one second', async target => {
   const {packet,onEnd,view}=await setup(target);
-  feed(packet,0,9000,ms=>ms>=3000&&ms<5000?target*.7:target*.98);
+  feed(packet,0,9000,ms=>ms===0?target:ms>=3000&&ms<5000?target*.7:target*.98);
   expect(onEnd).not.toHaveBeenCalled();
   expect(view.result.current.forceLoss.status).toBe('holding');
   feed(packet,9100,10000,()=>0);
@@ -287,7 +287,7 @@ test('manually started sensor reps use the same loss and release decisions', asy
   const onFailure=jest.fn();
   await act(async()=>{await view.result.current.stopAutoDetect();
     view.result.current.setAutoFailCallback(onFailure);await view.result.current.startMeasuring();});
-  feed(packet,0,9000,ms=>ms<3000?2.4:1.8);
+  feed(packet,0,9000,ms=>ms===0?2.5:ms<3000?2.4:1.8);
   expect(view.result.current.forceLoss.status).toBe('complete');
   expect(onFailure).not.toHaveBeenCalled();
   feed(packet,9100,10100,()=>0);
@@ -509,4 +509,51 @@ test('unmount cancels a pending reconnect', async () => {
   view.unmount();
   await act(async () => { jest.advanceTimersByTime(5500); });
   expect(connect).not.toHaveBeenCalled();
+});
+
+
+test('spring ramp counts on the pull clock, but not in live or saved average', async () => {
+  const { view, packet, onEnd } = await setup(20);
+  // Two seconds to target, one-second overshoot, then steady with a brief dip.
+  feed(packet, 0, 2900, ms => ms < 2000 ? 4 + ms / 125 : 22);
+  act(() => jest.advanceTimersByTime(20));
+  expect(view.result.current.forceLoss).toMatchObject({ pullStartTs: 0, observedTs: 2900 });
+  expect(view.result.current.avgForce).toBeCloseTo(22);
+  feed(packet, 3000, 9900, ms => ms >= 6000 && ms < 6500 ? 18 : 20);
+  packet([[10000, 0]]);
+  act(() => jest.advanceTimersByTime(20));
+  const liveAverage = view.result.current.avgForce;
+  expect(liveAverage).toBeCloseTo(20.125);
+  feed(packet, 10100, 11000, () => 0);
+  const stats = onEnd.mock.calls[0][0];
+  expect(stats).toMatchObject({ actualTime: 8, avgForce: liveAverage, failureValid: true,
+    forceRecording: { version: 5, pull_duration_s: 10, ramp_duration_s: 2,
+      averaging_basis: 'first_target_crossing', activity: { duration_s: 10 } } });
+});
+
+test('live average waits for target and never treats ramp-only pulling as capacity', async () => {
+  const { view, packet, onEnd } = await setup(20);
+  feed(packet, 0, 2900, () => 15);
+  act(() => jest.advanceTimersByTime(20));
+  expect(view.result.current.avgForce).toBeNull();
+  expect(view.result.current.forceLoss).toMatchObject({ pullStartTs: 0, startTs: null });
+  feed(packet, 3000, 4000, () => 0);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({ avgForce: null, failureValid: false,
+    endReason: 'target_not_reached', forceRecording: { pull_duration_s: 3,
+      activity: { avg_force_kg: 15, duration_s: 3 } } });
+});
+
+test('manual sensor pull excludes waiting before pulling and saves the same split intervals', async () => {
+  const { view, packet } = await setup(20);
+  await act(async () => { await view.result.current.stopAutoDetect(); await view.result.current.startMeasuring(); });
+  feed(packet, 0, 900, () => 0);
+  feed(packet, 1000, 9900, ms => ms < 3000 ? 4 + (ms - 1000) / 125 : 20);
+  packet([[10000, 0]]);
+  act(() => jest.advanceTimersByTime(20));
+  expect(view.result.current.forceLoss).toMatchObject({ pullStartTs: 1000 });
+  expect(view.result.current.avgForce).toBeCloseTo(20);
+  let stats;
+  await act(async () => { stats = await view.result.current.stopMeasuring(); });
+  expect(stats).toMatchObject({ actualTime: 7, avgForce: 20,
+    forceRecording: { pull_duration_s: 9, ramp_duration_s: 2 } });
 });

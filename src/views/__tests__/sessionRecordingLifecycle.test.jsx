@@ -141,24 +141,24 @@ test('an unsuccessful acquisition can be explicitly finished above the release t
   expect(current.runner.phase).toBe('resting');
 });
 
-test('device hold clock starts at target acquisition, includes recovered dips, and matches the saved hold', async () => {
+test('device hold clock includes the ramp, includes recovered dips, and matches the saved hold', async () => {
   await start();
   feed(0, 1900, () => 4);
-  expect(screen.getByText('0.0s')).toBeInTheDocument();
+  expect(screen.getByText('1.9s')).toBeInTheDocument();
   feed(2000, 4900, () => 20);
-  expect(screen.getByText('2.9s')).toBeInTheDocument();
+  expect(screen.getByText('4.9s')).toBeInTheDocument();
   feed(5000, 5900, () => 16);
-  expect(screen.getByText('3.2s')).toBeInTheDocument();
+  expect(screen.getByText('5.2s')).toBeInTheDocument();
   expect(screen.getByText(/Checking force dip/)).toBeInTheDocument();
   feed(6000, 7000, () => 20);
-  expect(screen.getByText('5.0s')).toBeInTheDocument();
+  expect(screen.getByText('7.0s')).toBeInTheDocument();
   expect(screen.queryByText(/Checking force dip/)).not.toBeInTheDocument();
   expect(saved).not.toHaveBeenCalled();
   feed(7100, 9900, () => 20);
   feed(10000, 11100, () => 0);
   expect(saved).toHaveBeenCalledTimes(1);
   expect(saved.mock.calls[0][0][0]).toMatchObject({ actual_time_s: 8, failure_valid: true,
-    force_recording: { acquisition_s: 2, activity: { duration_s: 10 } } });
+    force_recording: { acquisition_s: 2, pull_duration_s: 10, activity: { duration_s: 10 } } });
 });
 
 test('a pending dip holds the credited clock at the same cutoff saved after early release', async () => {

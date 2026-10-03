@@ -110,16 +110,29 @@ export function evidenceLabel(rep) {
 export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, targetKg = null, decision = null) {
   endTs = decision?.endTs ?? endTs;
   const activityEnd = decision?.activityEndTs ?? endTs;
-  const activity = recordForce(samples, activityEnd, targetKg);
+  const separateRamp = decision && Object.hasOwn(decision, 'averageStartTs');
+  const activitySamples = separateRamp && decision.pullStartTs != null
+    ? samples.filter(s => s.ts >= decision.pullStartTs) : samples;
+  const activity = recordForce(activitySamples, activityEnd, targetKg);
   if (!(targetKg > 0)) return activity;
+  const averageStart = separateRamp ? decision.averageStartTs : decision?.startTs;
+  const pullDuration = separateRamp && decision.pullStartTs != null
+    ? Math.max(0, (endTs - decision.pullStartTs) / 1000) : null;
   const first = decision
-    ? samples.findIndex(s => decision.startTs != null && s.ts >= decision.startTs && s.ts <= endTs)
+    ? samples.findIndex(s => averageStart != null && s.ts >= averageStart && s.ts <= endTs)
     : samples.findIndex(s => s.ts <= endTs && s.kg >= targetKg);
-  if (first < 0) return { ...activity, ...(decision ? { failureValid: false, endReason: 'target_not_reached',
-    forceRecording: { ...activity.forceRecording, capacity_eligible: false, failure_policy: TARGET_FAILURE_POLICY,
+  if (first < 0) return { ...activity, ...(separateRamp ? { avgForce: null } : {}),
+    ...(decision ? { failureValid: false,
+    endReason: decision.stopReason === 'equipment_interruption' ? 'equipment_interruption' : 'target_not_reached',
+    forceRecording: { ...activity.forceRecording, ...(separateRamp ? { pull_duration_s: pullDuration,
+      averaging_basis: 'first_target_crossing', activity: { duration_s: activity.actualTime,
+        avg_force_kg: activity.avgForce, impulse_kg_s: activity.forceRecording.impulse_kg_s,
+        started_at_ms: activity.startedAtMs, ended_at_ms: activity.endedAtMs } } : {}),
+      capacity_eligible: false, failure_policy: TARGET_FAILURE_POLICY,
       recording_stop_reason: decision.stopReason, capacity_end_reason: 'target_not_reached' } } : {}) };
   const capacity = recordForce(samples.slice(first), endTs, decision ? null : targetKg);
-  const eligible = capacity.failureValid && activity.forceRecording.signal_quality === 'complete'
+  const eligible = capacity.failureValid && (!decision || decision.startTs != null)
+    && activity.forceRecording.signal_quality === 'complete'
     && decision?.stopReason !== 'equipment_interruption';
   let inBandMs = 0, unloadMs = 0;
   for (let i = first; i < samples.length - 1 && samples[i].ts < endTs; i++) {
@@ -133,12 +146,15 @@ export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, target
   const continuous = !decision || unloadMs < TARGET_FAILURE_POLICY.maximum_recovered_unload_ms;
   return { ...capacity, peakForce: activity.peakForce,
     failureValid: eligible,
-    endReason: !eligible ? 'equipment_interruption' : decision?.reason === 'sustained_force_loss'
+    endReason: !eligible ? (decision && decision.startTs == null && decision.stopReason !== 'equipment_interruption'
+      ? 'target_not_reached' : 'equipment_interruption') : decision?.reason === 'sustained_force_loss'
       ? 'target_force_failure' : capacity.endReason,
-    forceRecording: { ...capacity.forceRecording, version: decision ? 4 : 3, basis: 'target_acquired',
+    forceRecording: { ...capacity.forceRecording, version: separateRamp ? 5 : decision ? 4 : 3, basis: 'target_acquired',
+      ...(separateRamp ? { pull_duration_s: pullDuration, averaging_basis: 'first_target_crossing',
+        ramp_duration_s: decision.pullStartTs == null ? null : (samples[first].ts - decision.pullStartTs) / 1000 } : {}),
       target_kg: targetKg, capacity_eligible: eligible && continuous,
       sustained_max: activity.forceRecording.sustained_max,
-      ...(decision ? { failure_policy: TARGET_FAILURE_POLICY, acquisition_basis: 'sustained_tolerance_band',
+      ...(decision ? { failure_policy: TARGET_FAILURE_POLICY, acquisition_basis: separateRamp ? 'first_target_crossing' : 'sustained_tolerance_band',
         recording_stop_reason: decision.stopReason, capacity_end_reason: decision.reason,
         credited_end_at_ms: capacity.endedAtMs,
         target_band_time_s: inBandMs / 1000, target_band_fraction: capacity.actualTime > 0 ? inBandMs / (capacity.actualTime * 1000) : 0,
@@ -151,7 +167,7 @@ export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, target
         started_at_ms: activity.startedAtMs, ended_at_ms: releaseUnknown ? null : activity.endedAtMs,
         ...(releaseUnknown ? { endpoint_quality: 'release_not_observed', observed_until_at_ms: activity.endedAtMs } : {}),
         signal_quality: activity.forceRecording.signal_quality },
-      acquisition_s: (samples[first].ts - samples[0].ts) / 1000 } };
+      acquisition_s: (samples[first].ts - (separateRamp ? decision.pullStartTs ?? samples[0].ts : samples[0].ts)) / 1000 } };
 }
 
 // Sensor duration wins when available. An empty stream is elapsed activity,

@@ -104,7 +104,7 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>{emphasizePeak ? 'Peak force' : 'Average weight'}</div>
           <div style={{ fontSize: "clamp(32px, 9vw, 44px)", fontWeight: 800, lineHeight: 1.1, color: C.green, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-            {fmtW(emphasizePeak ? peak : avg, unit)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
+            {!emphasizePeak && avg == null ? "—" : fmtW(emphasizePeak ? peak : avg, unit)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
           </div>
         </div>
         <span style={{ fontSize: 12 }}>{emphasizePeak ? 'Avg' : 'Max'}: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(emphasizePeak ? avg : peak, unit)}</b></span>
@@ -113,7 +113,7 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
           as a faint white marker. */}
       <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
         <div style={{ position: "absolute", height: "100%", width: `${fPct * 100}%`, background: barColor, borderRadius: 6, transition: "width 0.05s" }} />
-        <div style={{ position: "absolute", top: 0, bottom: 0, left: `${avgPct * 100}%`, width: 3, background: C.green }} />
+        {avg != null && <div style={{ position: "absolute", top: 0, bottom: 0, left: `${avgPct * 100}%`, width: 3, background: C.green }} />}
         {tgtPct != null && (
           <div style={{ position: "absolute", top: 0, bottom: 0, left: `${tgtPct * 100}%`, width: 2, background: "#ffffff60" }} />
         )}
