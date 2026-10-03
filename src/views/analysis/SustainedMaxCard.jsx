@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { historicalForceRecords, historicalForceTimeline } from '../../model/historicalForceRecords.js';
 import { Card } from '../../ui/components.jsx';
 import { C } from '../../ui/theme.js';
@@ -44,13 +44,22 @@ export function SustainedMaxCard({ history = [], unit = 'lbs', normalizeOn = fal
                 const record = item.payload[`record${String(item.dataKey).replace('series', '')}`];
                 return [`${fmt1(value)} ${unit} · ${fmt1(record.durationS)}s · ${record.date}`, name];
               }} />
-            <Legend />
             {records.map((r, index) => <Line key={`${r.grip}-${r.hand}`} dataKey={`series${index}`}
-              name={`${r.grip} ${r.hand}`} stroke={GRIP_COLORS[r.grip] || C.blue}
+              name={`${r.grip} · ${r.hand === 'L' ? 'Left hand' : 'Right hand'}`} stroke={GRIP_COLORS[r.grip] || C.blue}
               strokeDasharray={r.hand === 'R' ? '6 4' : undefined} strokeWidth={2.5}
               type="stepAfter" dot={timeline.length === 1 ? { r: 4 } : false} activeDot={{ r: 4 }} isAnimationActive={false} />)}
           </LineChart>
         </ResponsiveContainer>
+      </div>
+      <div aria-label="Chart legend" style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '8px 20px', marginTop: 8 }}>
+        {records.map(r => <span key={`${r.grip}-${r.hand}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: GRIP_COLORS[r.grip] || C.blue }}>
+          <svg width="40" height="12" aria-hidden="true" style={{ flexShrink: 0 }}>
+            <line x1="0" y1="6" x2="40" y2="6" stroke="currentColor" strokeWidth="2.5"
+              strokeDasharray={r.hand === 'R' ? '6 4' : undefined} />
+          </svg>
+          {r.grip} · {r.hand === 'L' ? 'Left hand (solid)' : 'Right hand (dashed)'}
+        </span>)}
       </div>
     </> : <p style={{ color: C.muted }}>No qualifying holds yet.</p>}
   </Card>;
