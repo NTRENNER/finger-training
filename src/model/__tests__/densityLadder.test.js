@@ -570,3 +570,29 @@ describe("resolveDensityLadderLoads", () => {
       .toEqual({ L: 58.8, R: 54 });
   });
 });
+
+
+describe('valid opener recalibration survives later recording problems', () => {
+  const make = () => session({id:'partial',date:'2026-10-02',T:160,loadKg:7.8,
+    times:{L:[111.7,32.9,14.7,31.3,24.1],R:[122.4,34.3,26.4,32.2,24.4]}}).map(r=>({...r,force_recording:{session_prescription:{version:1,reps_per_set:5,target_duration_s:160,load_kg:7.8}}}));
+  test('both valid openers lower targets without advancing five reps', () => {
+    const history=make();
+    for (const r of history) if(r.rep_num===3) r.failure_valid=false;
+    const ladder=computeDensityLadder(history,'Crusher','strength_endurance');
+    expect(ladder).toMatchObject({decision:'recalibrate',T:160,reps:5,
+      basis:{incomplete:true,shortfallHands:['L','R']}});
+    expect(resolveDensityLadderLoads(ladder,{L:6.7,R:7.2})).toEqual({L:6.7,R:7.2});
+  });
+  test.each(['invalid','missing','duplicate','nominal'])('%s opener cannot recalibrate its hand', kind => {
+    let history=make();
+    const first=history.find(r=>r.hand==='L'&&r.rep_num===1);
+    if(kind==='invalid') first.failure_valid=false;
+    if(kind==='missing') history=history.filter(r=>r!==first);
+    if(kind==='duplicate') history.push({...first,id:'duplicate'});
+    if(kind==='nominal') first.load_provenance='nominal_setting';
+    const ladder=computeDensityLadder(history,'Crusher','strength_endurance');
+    expect(ladder.basis.shortfallHands).toEqual(['R']);
+    expect(ladder.loadByHand.L).toBeGreaterThan(0);
+    expect(ladder.reps).toBe(5);
+  });
+});

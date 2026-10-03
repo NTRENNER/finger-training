@@ -178,3 +178,22 @@ test('second workout rep shows its timer and completes after release during the 
   expect(collisions()).toBe(0);
   view.unmount();
 });
+
+
+test('workout screen keeps the current rep armed through reconnect state changes', async () => {
+  const { hook, writes, packet } = await setup();
+  const onRepDone = jest.fn();
+  const draw = extra => <AutoRepSessionView session={session} tindeq={{...hook.result.current,...extra}}
+    onRepDone={onRepDone} onAbort={()=>{}} />;
+  const view = render(draw({}));
+  await waitFor(()=>expect(writes).toEqual([CMD_START[0]]));
+  packet([[0,20],[500,20],[1000,20]]);
+  view.rerender(draw({connected:false,reconnecting:true,signalRecovering:true}));
+  expect(screen.getByRole('status')).toHaveTextContent('Waiting for the Tindeq signal');
+  expect(writes).toEqual([CMD_START[0]]);
+  view.rerender(draw({connected:true,reconnecting:false,signalRecovering:false}));
+  expect(writes).toEqual([CMD_START[0]]);
+  packet([[1500,20],[2000,20],[2500,0],[3000,0],[3500,0]]);
+  expect(onRepDone).toHaveBeenCalledTimes(1);
+  expect(onRepDone.mock.calls[0][0]).toMatchObject({failureValid:true,actualTime:2.5});
+});

@@ -91,6 +91,9 @@ export function parseTindeqPacket(dataView, onSample) {
 // Force and time are recorded over matching device-clock intervals by
 // recordCapacityForce; the obsolete peak-relative plateau helper is removed.
 export const AUTO_RELEASE_CONFIRM_MS = 1000;
+// Delivery can pause without losing device samples. Allow catch-up before
+// ending a rep, but never interpolate a missing interval in device time.
+export const STREAM_RECOVERY_MS = 5000;
 
 // ─────────────────────────────────────────────────────────────
 // useTindeq() — React hook wrapper around the BLE GATT API
@@ -107,6 +110,8 @@ export function useTindeq() {
   const [peak,          setPeak]          = useState(0);
   const [avgForce,      setAvgForce]      = useState(0);
   const [bleError,      setBleError]      = useState(null);
+  const [signalRecovering, setSignalRecovering] = useState(false);
+  const transportRef = useRef({ version: 1 });
   const [forceLoss, setForceLoss] = useState(null);
   const forceLossStatusRef = useRef(null);
   const latestForceLossRef = useRef(null);
@@ -134,7 +139,7 @@ export function useTindeq() {
   const recordWithBattery = useCallback((...args) => {
     const stats = recordForce(...args);
     return { ...stats, forceRecording: { ...stats.forceRecording,
-      battery: { ...batteryRef.current } } };
+      battery: { ...batteryRef.current }, transport: { ...transportRef.current } } };
   }, []);
 
   // ── UI flush coalescing (added 2026-07-01) ──────────────
@@ -332,6 +337,11 @@ export function useTindeq() {
     // Battery messages and malformed packets cannot keep a stalled force
     // stream alive or alter device timing / force integration.
     if (!packetSamples.length) return;
+    if ((adActiveRef.current || measuringRef.current) && lastPacketAtRef.current != null) {
+      transportRef.current.max_delivery_gap_ms = Math.max(transportRef.current.max_delivery_gap_ms || 0,
+        Date.now() - lastPacketAtRef.current);
+    }
+    setSignalRecovering(false);
     lastPacketAtRef.current = Date.now();
     const packetLastTs = packetSamples.at(-1)?.ts;
     packetSamples.forEach(({ kg, ts }) => {
@@ -341,6 +351,10 @@ export function useTindeq() {
       clock.elapsed += delta / 1000;
       clock.raw = ts;
       const now = clock.elapsed;
+      if ((measuringRef.current || adActiveRef.current) && delta > 1000000) {
+        transportRef.current.interruption = 'device_sample_gap';
+        transportRef.current.device_gap_ms = delta / 1000;
+      }
       if (measuringRef.current && samplesRef.current.length && delta > 1000000) {
         measurementInterruptedRef.current = true;
         autoFailCallbackRef.current?.();
@@ -431,6 +445,7 @@ export function useTindeq() {
             publishForceLoss(null);
             targetDetectorRef.current?.({ kg, ts: now });
             publishForceLoss(targetDetectorRef.current, now);
+            transportRef.current = { version: 1 };
             adActiveRef.current    = true;
             adStartTimeRef.current = now;
             // Start the force and time interval at the same sample.
@@ -483,12 +498,23 @@ export function useTindeq() {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      if (measuringRef.current && lastPacketAtRef.current != null && Date.now() - lastPacketAtRef.current > 1500) {
+      if ((!measuringRef.current && !adActiveRef.current) || lastPacketAtRef.current == null
+          || (measurementInterruptedRef.current && !adActiveRef.current)) return;
+      const silence = Date.now() - lastPacketAtRef.current;
+      if (silence <= 1500) return;
+      setSignalRecovering(true);
+      // Timed warmups advance on a wall-clock deadline, so they must pause
+      // promptly rather than run that clock through an unobserved interval.
+      const grace = adActiveRef.current && !adEndOnTargetDropRef.current ? 1500 : STREAM_RECOVERY_MS;
+      if (silence <= grace) return;
+      transportRef.current.interruption = 'stream_timeout';
+      transportRef.current.silence_ms = silence;
+      setSignalRecovering(false);
+      if (measuringRef.current && !measurementInterruptedRef.current) {
         measurementInterruptedRef.current = true;
         autoFailCallbackRef.current?.();
       }
-      if (!adActiveRef.current || lastPacketAtRef.current == null
-          || Date.now() - lastPacketAtRef.current <= 1500) return;
+      if (!adActiveRef.current) return;
       const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current,
           forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'equipment_interruption'));
       adActiveRef.current = false;
@@ -516,11 +542,12 @@ export function useTindeq() {
     packetHandlerRef.current = handlePacket;
     dataC.addEventListener("characteristicvaluechanged", handlePacket);
     dataCharRef.current = dataC;
-    updateBattery(emptyBattery());
+    // Preserve the active rep's battery receipt across a reconnect.
+    if (!measuringRef.current && !adActiveRef.current) updateBattery(emptyBattery());
     await dataC.startNotifications();
     if (!measuringRef.current && !adActiveRef.current) await readBatteryOnConnect();
     // If a rep was in progress when we dropped, restart the measurement stream
-    if (measuringRef.current) {
+    if (measuringRef.current || adOnStartRef.current || adOnEndRef.current) {
       await ctrlRef.current.writeValue(CMD_START);
     }
   }), [enqueueGatt, handlePacket, readBatteryOnConnect, updateBattery]);
@@ -546,33 +573,53 @@ export function useTindeq() {
       // Aggressive retry loops can poison the adapter state on Android —
       // if this one try fails, surface a clean error and let the user reconnect.
       const onDisconnected = async () => {
+        if (reconnectingRef.current) return;
         connectionGenerationRef.current += 1;
         zeroGenerationRef.current++;
         clearTimeout(zeroTimerRef.current);
         zeroingRef.current = false; setZeroing(false);
         zeroSamplesRef.current = false; zeroBelowRef.current = null;
         ctrlRef.current = null;
-        if (measuringRef.current) {
-          measurementInterruptedRef.current = true;
-          autoFailCallbackRef.current?.();
-        }
-        if (adActiveRef.current) {
+        if (adActiveRef.current && !adEndOnTargetDropRef.current) {
+          transportRef.current.interruption = 'disconnect';
           const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current,
-          forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'equipment_interruption'));
+            forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'equipment_interruption'));
           adActiveRef.current = false;
           markAwaitingRelease(true);
-          adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
+          adOnEndRef.current?.({ ...stats, failureValid: false, endReason: 'equipment_interruption' });
           adSamplesRef.current = [];
         }
+        // Keep the rep and callbacks through one bounded reconnect attempt.
+        // Returning device timestamps must still prove continuous coverage;
+        // otherwise the gap handler saves the observed effort as interrupted.
+        if (measuringRef.current || adActiveRef.current) {
+          transportRef.current.disconnect_count = (transportRef.current.disconnect_count || 0) + 1;
+          setSignalRecovering(true);
+        }
         setConnected(false);
-        if (reconnectingRef.current) return;
         reconnectingRef.current = true;
         setReconnecting(true);
+        const generation = connectionGenerationRef.current;
         await new Promise(r => setTimeout(r, 1500));
+        if (generation !== connectionGenerationRef.current || device !== deviceRef.current) return;
         try {
           await setupGatt(device);
           setConnected(true);
         } catch {
+          transportRef.current.interruption = 'reconnect_failed';
+          if (measuringRef.current && !measurementInterruptedRef.current) {
+            measurementInterruptedRef.current = true;
+            autoFailCallbackRef.current?.();
+          }
+          if (adActiveRef.current) {
+            const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current,
+              forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'equipment_interruption'));
+            adActiveRef.current = false;
+            markAwaitingRelease(true);
+            adOnEndRef.current?.({ ...stats, failureValid: false, endReason: 'equipment_interruption' });
+            adSamplesRef.current = [];
+          }
+          setSignalRecovering(false);
           setBleError("Connection lost — tap Connect Tindeq to reconnect.");
         } finally {
           setReconnecting(false);
@@ -629,6 +676,8 @@ export function useTindeq() {
   const startMeasuring = useCallback(async () => {
     if (releaseCheckRef.current || zeroingRef.current) throw new Error('Release and zero the handle before starting another rep.');
     cancelReleaseWatch();
+    transportRef.current = { version: 1 };
+    setSignalRecovering(false);
     measurementInterruptedRef.current = false;
     manualBackstopRef.current = false;
     lastPacketAtRef.current = Date.now();
@@ -654,6 +703,8 @@ export function useTindeq() {
   // Return force, matched device duration, and measurement validity together.
   const stopMeasuring = useCallback(async () => {
     measuringRef.current = false;
+    if (reconnectingRef.current || (lastPacketAtRef.current != null && Date.now() - lastPacketAtRef.current > 1500)) measurementInterruptedRef.current = true;
+    setSignalRecovering(false);
     const detector = manualTargetDetectorRef.current;
     const activityEndTs = manualBackstopRef.current ? samplesRef.current.at(-1)?.ts
       : belowSinceRef.current ?? samplesRef.current.at(-1)?.ts;
@@ -727,6 +778,7 @@ export function useTindeq() {
   const startAutoDetect = useCallback(async (onRepStart, onRepEnd, { endOnTargetDrop = true } = {}) => {
     cancelReleaseWatch();
     const generation = ++adStreamGenerationRef.current;
+    setSignalRecovering(false);
     adOnStartRef.current = null;
     adOnEndRef.current = null;
     adEndOnTargetDropRef.current = endOnTargetDrop;
@@ -775,6 +827,7 @@ export function useTindeq() {
   const stopAutoDetect = useCallback(async ({ observeRelease = false } = {}) => {
     cancelReleaseWatch();
     const generation = ++adStreamGenerationRef.current;
+    setSignalRecovering(false);
     adOnStartRef.current = null;
     adOnEndRef.current   = null;
     adActiveRef.current  = false;
@@ -793,5 +846,5 @@ export function useTindeq() {
     if (ctrlRef.current) await writeCommand(CMD_STOP);
   }, [writeCommand, cancelReleaseWatch]);
 
-  return { connected, reconnecting, force, peak, avgForce, bleError, battery, awaitingRelease, forceLoss, releaseCheckRequired, zeroing, zeroForNextRep, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
+  return { connected, reconnecting, signalRecovering, force, peak, avgForce, bleError, battery, awaitingRelease, forceLoss, releaseCheckRequired, zeroing, zeroForNextRep, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
 }

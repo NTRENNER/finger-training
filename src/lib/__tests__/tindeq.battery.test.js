@@ -99,7 +99,7 @@ test("battery warnings cannot keep a silent force stream alive", async () => {
   const end = jest.fn();
   await act(async () => view.result.current.startAutoDetect(jest.fn(), end));
   packet([[0, 20], [500, 20]]);
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 11; i++) {
     act(() => jest.advanceTimersByTime(500)); emit([4, 0]);
   }
   expect(end).toHaveBeenCalledTimes(1);
@@ -114,10 +114,13 @@ test("disconnect snapshots are immutable and reconnect requests a fresh reading"
   await act(async () => view.result.current.startAutoDetect(jest.fn(), end));
   packet([[0, 20], [500, 20]]);
   disconnect();
+  await act(async () => { jest.advanceTimersByTime(1500); });
+  await act(async () => { jest.advanceTimersByTime(4000); });
   const saved = end.mock.calls[0][0];
   expect(saved).toMatchObject({ endReason: "equipment_interruption", failureValid: false,
     forceRecording: { battery: { voltage_mv: 2750, low_battery_warning: true } } });
   await act(async () => { jest.advanceTimersByTime(1500); });
+  await act(async () => { await view.result.current.stopAutoDetect(); await view.result.current.connect(); });
   battery(3050);
   expect(view.result.current.battery).toMatchObject({ voltage_mv: 3050, low_battery_warning: false });
   expect(saved.forceRecording.battery.voltage_mv).toBe(2750);

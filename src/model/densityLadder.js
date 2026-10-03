@@ -49,6 +49,7 @@ import { isMixedDomainRep } from './mixedDomain.js';
 // force is never divided by the cooked multiplier and discounted work does
 // not advance a fresh-load rung. Legacy rows retain their actual measured load.
 
+import { isCapacityEvidenceRep } from "./forceRecording.js";
 import { zoneOf } from "./zones.js";
 import { prescribedLoad, effectiveLoad, isFirstSetRep } from "./load.js";
 import { recordedAdjustment } from "./cookedScaling.js";
@@ -271,9 +272,15 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
     : Math.max(0, ...presentCounts, ...(incomplete && priorLadder ? [priorLadder.reps] : []));
   const adjustedSession = sess.reps.some(r => recordedAdjustment(r).multiplier < 1);
   const restoredPlanByHand = {};
-  const shortfallHands = incomplete || adjustedSession ? [] : requiredHands.filter(h =>
-    firstRepSecByHand[h] != null && isShortfall(firstRepSecByHand[h], T)
-  );
+  // A later interrupted rep blocks advancement, not a valid opener's load
+  // correction. Never substitute rep 2, a duplicate opener, or an estimate.
+  const shortfallHands = adjustedSession ? [] : requiredHands.filter(h => {
+    const openers = (byHand[h] || []).filter(r => Number(r.rep_num ?? 1) === 1);
+    const opener = openers[0];
+    return openers.length === 1 && isCapacityEvidenceRep(opener)
+      && Number(opener.actual_time_s) > 0 && effectiveLoad(opener) > 0
+      && isShortfall(opener.actual_time_s, T);
+  });
   const firstRepSecValues = Object.values(firstRepSecByHand);
   const firstRepSec = firstRepSecValues.length > 0
     ? Math.min(...firstRepSecValues)
@@ -331,7 +338,7 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       : canRestore ? base : recorded;
     previousLoadByHand[h] = round1(retained > 0 ? retained : recorded);
     if (canRestore) restoredPlanByHand[h] = base;
-    if (!incomplete && !adjustedSession && isShortfall(freshRep1.actual_time_s, T)) {
+    if (shortfallHands.includes(h)) {
       droppedByHand[h] = round1(Number(freshRep1.actual_time_s) || 0);
     }
   }
@@ -447,6 +454,7 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       shortfallHands,
       repCountByHand,
       unevenRepCounts,
+      incomplete,
       evidenceByHand: Object.fromEntries(requiredHands.map(h => [h, {
         reason: evidenceByHand[h].reason, restBasis: evidenceByHand[h].restBasis,
       }])),

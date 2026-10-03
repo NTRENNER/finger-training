@@ -63,3 +63,29 @@ including during an in-flight stream-start command. Rest samples cannot start
 or save reps. If release has not been observed, the next workout screen asks
 the athlete to fully release rather than silently showing “Pull to begin.”
 The release requirement is preserved; it is never cleared merely by time passing.
+
+
+### Brief signal interruptions
+
+During failure-based training, a force-stream delivery pause shows a waiting message after 1.5 seconds and
+allows up to five seconds for samples to return. A Bluetooth disconnect keeps
+an active rep through one reconnect attempt and restarts the automatic stream.
+The workout screen keeps its current detector instead of re-arming a new rep.
+Buffered samples with continuous device timestamps can finish the same valid
+rep. The grace period does not add hold time: integration still uses device
+samples, and a device-time gap greater than one second or a clock reset ends
+the observed effort as interrupted. No missing force is interpolated. Timeout
+or failed reconnect saves the observed effort once and requires release before
+another rep. This cannot retroactively recover earlier missing samples. Timed warmups retain
+the prompt 1.5-second interruption behavior so their wall-clock timer cannot
+complete a hold during this longer recovery window.
+
+A bounded `force_recording.transport` receipt records maximum delivery delay,
+disconnect count, and (when applicable) device gap, timeout, or failed reconnect.
+This distinguishes software delivery stalls from actual missing samples in
+future audits; neither alone diagnoses battery failure.
+
+A valid first-set opening hold can recalibrate the next load even if a later
+rep was interrupted. Incomplete sets still cannot advance the earned rep count.
+A missing, duplicated, invalid, or nominal-load opener cannot lower its hand's
+load through this rule. Later sessions and additional sets remain excluded.

@@ -461,6 +461,9 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
 
       {startError && <p role="alert" style={{ color: C.red }}>{startError}</p>}
       <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
+      {tindeq.signalRecovering && <div role="status" style={{ color: C.orange }}>
+        Waiting for the Tindeq signal. Your recorded effort is being kept.
+      </div>}
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <MixedHoldInfo config={config} currentRep={currentRep} />
       <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
@@ -1145,8 +1148,10 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
     }, 100);
   }, []);
 
+  // Keep the same detector/callbacks while the hook tries a brief reconnect.
+  const streamAvailable = tindeq.connected || tindeq.reconnecting;
   useEffect(() => {
-    if (!tindeq.connected || !visible) return;
+    if (!streamAvailable || !visible) return;
     tindeq.targetKgRef.current = suggestedKg;
     let disposed = false;
     setStartError(null);
@@ -1163,7 +1168,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
       clearInterval(timerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tindeq.connected, streamAttempt, visible]); // re-arm only on the visible training tab
+  }, [streamAvailable, streamAttempt, visible]); // re-arm only on the visible training tab
 
   const holdSeconds = Number(creditedSeconds(tindeq.forceLoss, elapsed));
   const targetReached = !config.mixedDomainPlan && holdSeconds >= config.targetTime;
@@ -1180,6 +1185,9 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
       </div>
 
       <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
+      {tindeq.signalRecovering && <div role="status" style={{ color: C.orange }}>
+        Waiting for the Tindeq signal. Your recorded effort is being kept.
+      </div>}
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <MixedHoldInfo config={config} currentRep={currentRep} />
       <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
