@@ -375,7 +375,7 @@ export function WorkoutHistoryView({
         return (
           <Card key={origIdx} style={{ marginBottom: 10 }}>
             {/* Session header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
               <div>
                 <span style={{ fontWeight: 700, fontSize: 15 }}>
                   {isMobility ? (wkDef.name || "Climbing Mobility") : `Workout ${session.workout}`}
@@ -384,7 +384,7 @@ export function WorkoutHistoryView({
                   <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>{wkDef.name}</span>
                 )}
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 {session.sessionNumber && !isEditing && (
                   <span style={{ fontSize: 11, color: C.muted }}>#{session.sessionNumber}</span>
                 )}
@@ -401,14 +401,14 @@ export function WorkoutHistoryView({
                 {!isEditing && confirmDeleteId !== session.id && (
                   <button
                     onClick={() => beginEdit(origIdx, session)}
-                    style={{ background: "none", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
+                    style={{ background: "none", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", padding: 8, minWidth: 44, minHeight: 44, borderRadius: 8, lineHeight: 1 }}
                     title="Edit session"
                   >✏️</button>
                 )}
                 {!isEditing && confirmDeleteId !== session.id && (
                   <button
                     onClick={() => setConfirmDeleteId(session.id)}
-                    style={{ background: "none", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
+                    style={{ background: "none", border: "none", color: C.muted, fontSize: 13, cursor: "pointer", padding: 8, minWidth: 44, minHeight: 44, borderRadius: 8, lineHeight: 1 }}
                     title="Delete session"
                   >🗑</button>
                 )}

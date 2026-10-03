@@ -1,3 +1,4 @@
+import { CHART } from '../../ui/chartStyles.js';
 // ─────────────────────────────────────────────────────────────
 // CAPACITY CHART CARD — whole-curve capacity trajectory
 // ─────────────────────────────────────────────────────────────
@@ -172,14 +173,14 @@ export function CapacityTrajectoryCard({
             label={{ value: "Date", position: "insideBottom", offset: -18, fill: C.muted, fontSize: 11 }} />
           <ReferenceLine y={0} yAxisId="pct" stroke={C.muted} strokeWidth={2}
             label={{ value: "baseline", position: "insideRight", fill: C.muted, fontSize: 10 }} />
-          <YAxis yAxisId="pct" tick={{ fill: C.muted, fontSize: 11 }} width={48} unit="%"
+          <YAxis yAxisId="pct" tick={CHART.tick} width={48} unit="%"
             label={{ value: "vs baseline", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 11 }} />
           {/* Hidden axis for the climbing-load strip: domain 0–40 keeps
               a 10/10 climbing day inside the bottom quarter of the
               chart so the bars never collide with the % lines. */}
           <YAxis yAxisId="climb" hide domain={[0, 40]} />
           <Tooltip
-            contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
+            contentStyle={CHART.tooltip}
             formatter={(val, name) => name === "climbing load"
               ? [val == null ? "—" : `${val}/10`, name]
               : [val == null ? "—" : `${val >= 0 ? "+" : ""}${val}%`, name]}

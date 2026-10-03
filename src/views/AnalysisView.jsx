@@ -38,7 +38,7 @@ import React, { useMemo, useState } from "react";
 // (May 2026 BACKLOG #156). AnalysisView no longer renders any chart
 // directly — child cards own their own chart machinery.
 import { C } from "../ui/theme.js";
-import { Card } from "../ui/components.jsx";
+import { Card, Disclosure } from "../ui/components.jsx";
 import { CardBoundary } from "../ui/ErrorBoundary.jsx";
 import { bwOnDate, toDisp, forceOverBW } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
@@ -765,8 +765,7 @@ export function AnalysisView({
         </CardBoundary>
 
         <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} normalizeOn={normalizationActive} />
-        <details style={{ marginBottom: 16 }}>
-          <summary style={{ cursor: "pointer", fontSize: 14, color: C.muted, padding: "10px 0" }}>Overall curve summary</summary>
+        <Disclosure title="Overall curve summary">
           <CardBoundary name="Whole-Curve Capacity">
             <CapacityTrajectoryCard
             capacityHistoryByGrip={capacityHistoryByGrip}
@@ -775,7 +774,7 @@ export function AnalysisView({
             handView={handView}
           />
           </CardBoundary>
-        </details>
+        </Disclosure>
 
       </>)}
 

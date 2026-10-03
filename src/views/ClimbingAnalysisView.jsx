@@ -1,3 +1,4 @@
+import { CHART } from '../ui/chartStyles.js';
 // ──────────────────────────────────────────────────────────────
 // CLIMBING ANALYSIS VIEW
 // ──────────────────────────────────────────────────────────────
@@ -524,11 +525,11 @@ export function ClimbingAnalysisView({
             <ResponsiveContainer width="100%" height={200}>
               <ComposedChart data={sessionVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
                 <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }}
+                <XAxis dataKey="date" tick={CHART.tick}
                   angle={-30} textAnchor="end" interval="preserveStartEnd" />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={32} allowDecimals={false} />
+                <YAxis tick={CHART.tick} width={32} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
+                  contentStyle={CHART.tooltip}
                   formatter={(v, name) => [v, name === "trend" ? "trend" : "v-sum"]}
                 />
                 <Bar dataKey="boulder"
@@ -559,11 +560,11 @@ export function ClimbingAnalysisView({
             <ResponsiveContainer width="100%" height={200}>
               <ComposedChart data={routeVolume.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
                 <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }}
+                <XAxis dataKey="date" tick={CHART.tick}
                   angle={-30} textAnchor="end" interval="preserveStartEnd" />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={32} />
+                <YAxis tick={CHART.tick} width={32} />
                 <Tooltip
-                  contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
+                  contentStyle={CHART.tooltip}
                   formatter={(v, name) => [v, name === "trend" ? "trend" : "afa v-sum"]}
                 />
                 <Bar dataKey="route"
@@ -793,12 +794,12 @@ export function ClimbingAnalysisView({
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={hardestSend.rows} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
                 <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-                <XAxis dataKey="week" tick={{ fill: C.muted, fontSize: 10 }}
+                <XAxis dataKey="week" tick={CHART.tick}
                   angle={-30} textAnchor="end" interval="preserveStartEnd" />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={36}
+                <YAxis tick={CHART.tick} width={36}
                   label={{ value: "rank", angle: -90, position: "insideLeft", fill: C.muted, fontSize: 10 }} />
                 <Tooltip
-                  contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
+                  contentStyle={CHART.tooltip}
                   formatter={(v, name, ctx) => {
                     const disc = name.replace("_rank", "");
                     const grade = ctx?.payload?.[`${disc}_grade`];

@@ -8,10 +8,10 @@ import { VolumeExperimentReview } from './cards/VolumeExperimentReview.jsx';
 
 export function ResearchView({ history, activities, unit, signedIn, historySynced, onOpenSettings,
   volumeExperiments = {}, onSaveVolumeExperiment, volumeReady = true }) {
-  return <PageFrame style={{ padding: '24px 16px' }}>
+  return <PageFrame style={{ padding: '20px 16px' }}>
     <header style={{ marginBottom: 24 }}>
       <div style={{ color: C.purple, fontSize: 13, fontWeight: 700 }}>BETA · RESEARCH</div>
-      <h1 style={{ margin: '8px 0 12px' }}>Training research</h1>
+      <h1 style={{ margin: '8px 0 12px', fontSize: 26 }}>Training research</h1>
       <p style={{ color: C.muted, lineHeight: 1.5 }}>
         Review your training experiments, compare saved predictions with recorded workouts,
         and evaluate candidate models. These comparisons do not change your prescribed loads.

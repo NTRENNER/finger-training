@@ -32,3 +32,19 @@ test('older strong holds remain prominent when exact two-second recording starte
   expect(screen.getByRole('heading', {name: 'Best max of at least 2s'})).toBeInTheDocument();
   expect(screen.getByRole('img', {name: /All-time best force history/})).toBeInTheDocument();
 });
+
+
+test('bodyweight scale selects the relative best and labels the chart in the same units', () => {
+  const history = [
+    {...row('L',60),date:'2026-09-01'},
+    {...row('L',65),date:'2026-09-30'},
+  ];
+  const {rerender} = render(<SustainedMaxCard history={history} unit="kg" normalizeOn bodyWeight={80}
+    bwLog={[{date:'2026-09-01',kg:60},{date:'2026-09-30',kg:80}]} />);
+  expect(screen.getByText('1.00 × BW')).toBeInTheDocument();
+  expect(screen.getByText('2026-09-01 · 2.0s')).toBeInTheDocument();
+  expect(screen.getByRole('img', {name:/history in × BW/})).toBeInTheDocument();
+  rerender(<SustainedMaxCard history={history} unit="kg" />);
+  expect(screen.getByText('65.0 kg')).toBeInTheDocument();
+  expect(screen.getByRole('img', {name:/history in kg/})).toBeInTheDocument();
+});

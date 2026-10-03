@@ -56,7 +56,7 @@ export function Btn({ children, onClick, color = C.blue, disabled, style, small 
         background: disabled ? C.border : color,
         color: "#fff", border: "none", borderRadius: 8,
         padding: small ? "6px 14px" : "10px 22px",
-        fontSize: small ? 13 : 15, fontWeight: 600,
+        fontSize: small ? 13 : 15, fontWeight: 600, fontFamily: "inherit", minHeight: 44,
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.5 : 1,
         transition: "opacity 0.15s",
@@ -119,4 +119,16 @@ export function Sect({ title, children }) {
       {children}
     </div>
   );
+}
+
+
+export function CardTitle({ children, style }) {
+  return <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, lineHeight: 1.4, ...style }}>{children}</h3>;
+}
+
+export function Disclosure({ title, children, style }) {
+  return <details style={{ marginBottom: 16, ...style }}>
+    <summary style={{ cursor: 'pointer', fontSize: 14, color: C.muted, padding: '12px 0', lineHeight: '20px' }}>{title}</summary>
+    {children}
+  </details>;
 }

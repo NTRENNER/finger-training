@@ -49,8 +49,8 @@ async function setup({ peak = false } = {}) {
     return visible && <WarmupView visible={tabVisible} history={[]} wLog={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} addReps={addReps} />;
   }
   const view = render(<Harness />);
-  expect(screen.getByRole("checkbox", { name: "Include Peak Test today" })).not.toBeChecked();
-  if (peak) fireEvent.click(screen.getByRole("checkbox", { name: "Include Peak Test today" }));
+  expect(screen.getByRole("switch", { name: "Include Peak Test today" })).not.toBeChecked();
+  if (peak) fireEvent.click(screen.getByRole("switch", { name: "Include Peak Test today" }));
   await act(async () => { await hook.connect(); });
   fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
   await waitFor(() => expect(commands).toContain(CMD_START[0]));

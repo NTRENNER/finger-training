@@ -1,3 +1,4 @@
+import { CHART } from '../../ui/chartStyles.js';
 import { isCapacityEvidenceRep, comparableCapacityHistory } from "../../model/forceRecording.js";
 // ─────────────────────────────────────────────────────────────
 // ForceDurationCard — the F-D scatter + 3-exp curve + asymmetry rows
@@ -236,12 +237,12 @@ export function ForceDurationCard({
             type="number" dataKey="x"
             domain={[0, maxDur + 10]}
             label={{ value: "Duration (s)", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
-            tick={{ fill: C.muted, fontSize: 11 }}
+            tick={CHART.tick}
           />
           <YAxis
             type="number"
             domain={[0, Math.ceil(maxForceRel * 1.15 / (useRel ? 0.1 : 10)) * (useRel ? 0.1 : 10)]}
-            tick={{ fill: C.muted, fontSize: 11 }}
+            tick={CHART.tick}
             unit={useRel ? "" : ` ${unit}`}
             width={42}
           />

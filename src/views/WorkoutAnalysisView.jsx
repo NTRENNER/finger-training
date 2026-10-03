@@ -1,3 +1,4 @@
+import { CHART } from '../ui/chartStyles.js';
 // ─────────────────────────────────────────────────────────────
 // WORKOUT ANALYSIS (LIFTS) VIEW
 // ─────────────────────────────────────────────────────────────
@@ -136,7 +137,7 @@ function RepsExerciseCard({ ex, series }) {
             <XAxis
               dataKey="date"
               stroke={C.muted}
-              tick={{ fontSize: 10, fill: C.muted }}
+              tick={CHART.tick}
               tickFormatter={(d) => d?.slice(5) || ""}
             />
             <YAxis
@@ -146,7 +147,7 @@ function RepsExerciseCard({ ex, series }) {
               allowDecimals={false}
             />
             <Tooltip
-              contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
+              contentStyle={CHART.tooltip}
               labelStyle={{ color: C.muted }}
               formatter={(value, name, entry) => [
                 `${value} reps${entry?.payload?.variant ? ` · ${entry.payload.variant}` : ""}`,
@@ -244,7 +245,7 @@ function ExerciseCard({ ex, series, unit, normalizeOn }) {
             <XAxis
               dataKey="date"
               stroke={C.muted}
-              tick={{ fontSize: 10, fill: C.muted }}
+              tick={CHART.tick}
               tickFormatter={(d) => d?.slice(5) || ""}  // MM-DD
             />
             <YAxis
@@ -261,7 +262,7 @@ function ExerciseCard({ ex, series, unit, normalizeOn }) {
               width={42}
             />
             <Tooltip
-              contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
+              contentStyle={CHART.tooltip}
               labelStyle={{ color: C.muted }}
               formatter={(value, name) => {
                 if (name === "Top weight") return [`${value} ${dispUnit}`, name];

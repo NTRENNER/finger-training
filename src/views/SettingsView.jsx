@@ -76,7 +76,7 @@ CREATE POLICY "auth_all" ON reps
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
-      <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>Settings</h2>
+      <h2 style={{ margin: "0 0 20px", fontSize: 26 }}>Settings</h2>
 
       <Card>
         <Sect title="Units">

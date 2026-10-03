@@ -1,3 +1,4 @@
+import { CHART } from '../../ui/chartStyles.js';
 import React from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from "recharts";
 import { C } from "../../ui/theme.js";
@@ -91,10 +92,10 @@ export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange }) 
     {rows.some(row => row.seconds != null || row.measured != null) && <ResponsiveContainer width="100%" height={210}>
       <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 10, left: 0 }}>
         <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-        <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} interval="preserveStartEnd" minTickGap={30}
+        <XAxis dataKey="date" tick={CHART.tick} interval="preserveStartEnd" minTickGap={30}
           tickFormatter={value => new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })} />
-        <YAxis unit="s" width={48} tick={{ fill: C.muted, fontSize: 11 }} />
-        <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }} formatter={(value, name) => [`${fmt1(Number(value))}s`, name]} />
+        <YAxis unit="s" width={48} tick={CHART.tick} />
+        <Tooltip contentStyle={CHART.tooltip} formatter={(value, name) => [`${fmt1(Number(value))}s`, name]} />
         {before != null && <ReferenceLine y={before} stroke={C.muted} strokeDasharray="4 4" />}
         <Line dataKey="seconds" name="Estimated hold time" stroke={C.purple} strokeWidth={3} strokeDasharray="5 3" dot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />
         <Line dataKey="measured" name="Longest recorded hold" stroke="none" dot={{ r: 4, fill: C.green, stroke: C.green }} activeDot={{ r: 6 }} connectNulls={false} isAnimationActive={false} />
@@ -137,10 +138,10 @@ export function WeightHistoryView({ overlay, date, unit, reps, zone, onShowSessi
       <ResponsiveContainer width="100%" height={210}>
         <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 10, left: 0 }}>
           <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-          <XAxis dataKey="date" interval="preserveStartEnd" minTickGap={30} tick={{ fill: C.muted, fontSize: 11 }}
+          <XAxis dataKey="date" interval="preserveStartEnd" minTickGap={30} tick={CHART.tick}
             tickFormatter={value => new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })} />
-          <YAxis width={64} unit={` ${unit}`} tick={{ fill: C.muted, fontSize: 11 }} />
-          <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, color: C.text }}
+          <YAxis width={64} unit={` ${unit}`} tick={CHART.tick} />
+          <Tooltip contentStyle={CHART.tooltip}
             formatter={(value, name) => [`${fmt1(Number(value))} ${unit}`, name]} />
           <ReferenceLine y={toDisp(comparison.before, unit)} stroke={C.muted} strokeDasharray="4 4" />
           <Line dataKey="force" name={`Estimated weight at ${duration}s`} stroke={domain.color} strokeWidth={3} strokeDasharray="5 3" dot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />

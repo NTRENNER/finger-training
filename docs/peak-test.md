@@ -89,8 +89,10 @@ Every headline shows the original date and duration. Older hold averages are
 never converted into synthetic two-second windows. A full-history step chart
 tracks the running record for each grip and hand, with solid left-hand and
 dashed right-hand lines. Tooltips retain the producing record date and duration.
-The chart uses absolute force in the selected unit, including when headline
-values are normalized to bodyweight.
+The chart and headline use the same selected scale: absolute force or bodyweight
+ratio. Relative records rank each eligible measurement using bodyweight on its
+recorded date (falling back to the current bodyweight when no log exists). A new
+absolute record does not lower a better historical relative record.
 This avoids presenting a recently introduced measurement as a lifetime limit.
 Instantaneous peaks remain in workout history. Later sessions, extra sets,
 and fatigued Chaos Machine holds can set records. Lower results never erase a

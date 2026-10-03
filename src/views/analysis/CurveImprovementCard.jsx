@@ -1,3 +1,4 @@
+import { CHART } from '../../ui/chartStyles.js';
 // ─────────────────────────────────────────────────────────────
 // CurveImprovementCard — per-grip Δ% + force-curve overlay + slider
 // ─────────────────────────────────────────────────────────────
@@ -334,17 +335,17 @@ function OverlayChart({
       <LineChart data={samples} margin={{ top: 6, right: 14, bottom: 26, left: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
         <XAxis type="number" dataKey="x" domain={[tMin, tMax]}
-          tick={{ fill: C.muted, fontSize: 11 }}
+          tick={CHART.tick}
           label={{ value: "Duration (s)", position: "insideBottom", offset: -14, fill: C.muted, fontSize: 11 }}
         />
         <YAxis
           domain={yDomain}
-          tick={{ fill: C.muted, fontSize: 11 }}
+          tick={CHART.tick}
           width={64}
           unit={normalizeOn ? "" : ` ${unit}`}
         />
         <Tooltip
-          contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
+          contentStyle={CHART.tooltip}
           formatter={(val, name) => [
             val == null
               ? "—"

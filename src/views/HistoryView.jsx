@@ -498,13 +498,13 @@ export function HistoryView({
         <Card style={{ marginBottom: 16, background: "#0d1f0d" }}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: C.green }}>New session</div>
           {/* Date */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
             <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Date</span>
             <input type="date" value={newSessDate} onChange={e => setNewSessDate(e.target.value)}
               style={{ flex: 1, minWidth: 0, background: C.border, border: "none", borderRadius: 6, padding: "4px 8px", color: C.text, fontSize: 13 }} />
           </div>
           {/* Grip */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
             <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Grip</span>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: 1 }}>
               {gripPresets.map(g => (
@@ -520,7 +520,7 @@ export function HistoryView({
             </div>
           </div>
           {/* Zone */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
             <span style={{ fontSize: 12, color: C.muted, width: 40 }}>Zone</span>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, minWidth: 0 }}>
               {TARGET_OPTIONS.map(o => (
@@ -757,7 +757,7 @@ export function HistoryView({
         const multipleSets = sess.reps.some(r => Number(r.set_num ?? 1) > 1);
         return (
           <Card key={cardKey} style={{ marginBottom: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
               <div>
                 <b>{sess.grip}</b>
                 <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>
@@ -772,7 +772,7 @@ export function HistoryView({
                   {sess.reps.some(r => r.force_recording?.volume_beta?.id === 'volume_beta') && ' · Volume (Beta)'}
                 </span>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12, color: C.muted }}>
                   {sess.date}{sess.reps[0]?.session_started_at ? " · " + fmtClock(sess.reps[0].session_started_at) : ""}
                   {(() => {
@@ -798,7 +798,7 @@ export function HistoryView({
                       style={{
                         background: "none", border: "none",
                         color: notes[sessKey] ? C.yellow : C.muted,
-                        fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+                        fontSize: 13, cursor: "pointer", padding: 8, minWidth: 44, minHeight: 44, borderRadius: 8, lineHeight: 1,
                       }}
                       title={notes[sessKey] ? "View/edit note" : "Add note"}
                     >📝</button>
@@ -812,7 +812,7 @@ export function HistoryView({
                       closeRepEdit();
                     }} style={{
                       background: "none", border: "none", color: C.muted,
-                      fontSize: 13, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+                      fontSize: 13, cursor: "pointer", padding: 8, minWidth: 44, minHeight: 44, borderRadius: 8, lineHeight: 1,
                     }} title="Edit session & reps">✏️</button>
                     {/* Trash → native confirm dialog. The previous inline
                         two-step (tap trash, then tap red Delete) had both
@@ -841,7 +841,7 @@ export function HistoryView({
                       }
                     }} style={{
                       background: "none", border: "none", color: C.muted,
-                      fontSize: 14, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+                      fontSize: 14, cursor: "pointer", padding: 8, minWidth: 44, minHeight: 44, borderRadius: 8, lineHeight: 1,
                     }} title="Delete session">🗑</button>
                   </>
                 )}

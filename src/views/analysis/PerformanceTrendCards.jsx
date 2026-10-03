@@ -1,6 +1,8 @@
+import { ChartLegend } from '../../ui/ChartLegend.jsx';
+import { CHART } from '../../ui/chartStyles.js';
 import React,{useMemo,useState} from 'react';
 import {ResponsiveContainer,ComposedChart,Line,Bar,XAxis,YAxis,Tooltip,CartesianGrid,ReferenceLine} from 'recharts';
-import {Card} from '../../ui/components.jsx';
+import {Card,CardTitle,Disclosure} from '../../ui/components.jsx';
 import {C} from '../../ui/theme.js';
 import {GRIP_COLORS} from '../../ui/grip-colors.js';
 import {DateRangeSlider,normalizeHistoryWindow} from '../../ui/DateRangeSlider.jsx';
@@ -19,41 +21,44 @@ export function PerformanceTrendCards({history,grips,handView='pooled',activitie
     climbLoad:suggestCookedFromClimbs(activities,r.date)?.cooked??null})),[rows,start,end,activities]);
   const laterHolds=visible.reduce((sum,r)=>sum+grips.reduce((n,g)=>n+(r[`${g}_laterHolds`]||0),0),0);
   const ready=grips.filter(g=>rows.some(r=>Number.isFinite(r[`${g}_long`])));
-  if (!rows.length) return <Card style={{marginBottom:16}}><h3>Performance trends</h3><p style={{color:C.muted}}>More training dates needed. Trends appear after five eligible training dates per hand. For a single hand, select Left or Right above.</p></Card>;
-  const chart=(kind)=>!visible.some(r=>grips.some(g=>Number.isFinite(r[`${g}_${kind}`])))?<p style={{color:C.muted}}>No comparable points in this date range.</p>:<ResponsiveContainer width="100%" height={270}>
-    <ComposedChart data={visible} margin={{top:12,right:16,bottom:10,left:0}}>
+  if (!rows.length) return <Card style={{marginBottom:16}}><CardTitle>Performance trends</CardTitle><p style={{color:C.muted}}>More training dates needed. Trends appear after five eligible training dates per hand. For a single hand, select Left or Right above.</p></Card>;
+  const chart=(kind)=>!visible.some(r=>grips.some(g=>Number.isFinite(r[`${g}_${kind}`])))?<p style={{color:C.muted}}>No comparable points in this date range.</p>:<ResponsiveContainer width="100%" height={CHART.height}>
+    <ComposedChart data={visible} margin={CHART.margin}>
       <CartesianGrid stroke={C.border} strokeDasharray="3 3"/>
-      <XAxis type="number" dataKey="timestamp" domain={['dataMin','dataMax']} scale="time" tickFormatter={fmtDate} tick={{fill:C.muted,fontSize:11}} minTickGap={32}/>
-      <YAxis yAxisId="trend" unit="%" width={58} tickFormatter={v=>Number(v.toFixed(1))} tick={{fill:C.muted,fontSize:11}} domain={kind==='short'?([lo,hi])=>{const span=Math.max(5,Math.abs(lo||0),Math.abs(hi||0));return [-Math.ceil(span),Math.ceil(span)];}:([lo,hi])=>[Math.min(-5,(lo||0)-1),Math.max(5,(hi||0)+1)]}/>
+      <XAxis type="number" dataKey="timestamp" domain={['dataMin','dataMax']} scale="time" tickFormatter={fmtDate} tick={CHART.tick} minTickGap={32}/>
+      <YAxis yAxisId="trend" unit="%" width={58} tickFormatter={v=>Number(v.toFixed(1))} tick={CHART.tick} domain={kind==='short'?([lo,hi])=>{const span=Math.max(5,Math.abs(lo||0),Math.abs(hi||0));return [-Math.ceil(span),Math.ceil(span)];}:([lo,hi])=>[Math.min(-5,(lo||0)-1),Math.max(5,(hi||0)+1)]}/>
       <YAxis yAxisId="climb" domain={[0,40]} orientation="right" width={0} hide/>
       <ReferenceLine yAxisId="trend" y={0} stroke={C.muted} strokeDasharray="5 5"/>
-      <Tooltip labelFormatter={ts=>new Date(ts).toISOString().slice(0,10)} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8}}
+      <Tooltip labelFormatter={ts=>new Date(ts).toISOString().slice(0,10)} contentStyle={CHART.tooltip}
         formatter={(v,name)=>[name==='Climbing load'?`${v}/10`:`${v>=0?'+':''}${Number(v).toFixed(1)}%`,name]}/>
       <Bar yAxisId="climb" dataKey="climbLoad" name="Climbing load" fill={C.orange} opacity={.4} barSize={6} isAnimationActive={false}/>
       {grips.map(g=><Line key={g} yAxisId="trend" dataKey={`${g}_${kind}`} name={g} stroke={GRIP_COLORS[g]||C.blue}
         strokeWidth={kind==='long'?3:2} dot={{r:3}} connectNulls type="linear" isAnimationActive={false}/>)}
     </ComposedChart>
   </ResponsiveContainer>;
+  const legend = <ChartLegend items={[...grips.map(g=>({label:g,color:GRIP_COLORS[g]||C.blue})),
+    {label:'Climbing load (0–10)',color:C.orange,kind:'bar'}]} />;
   return <section aria-label="Performance trends">
     <Card style={{marginBottom:16}}>
-      <h3 style={{marginTop:0}}>Long-term performance trend</h3>
-      <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>{grips.map(g=><span key={g} style={{color:GRIP_COLORS[g]||C.blue}}>━ {g}</span>)}<span style={{color:C.orange}}>▮ Climbing load (0–10)</span></div>
+      <CardTitle>Long-term performance trend</CardTitle>
+
       <p style={{color:C.muted,lineHeight:1.5}}>Estimated whole-curve capacity, relative to your first established estimate. Each point uses the training recorded by that date.</p>
       {trendModel!=='original'&&<p style={{color:C.muted,fontSize:13}}>Sessions after earlier finger training that day receive less weight, including training on another grip.</p>}
       {trendModel==='contextRobust'&&<p style={{color:C.yellow}}>Research preview: unusually high and low results also have reduced influence. This additional smoothing is experimental.</p>}
       {normalizeOn&&<p style={{color:C.muted,fontSize:13}}>These performance trends use measured force. The bodyweight toggle applies to the other curve charts.</p>}
       {!ready.length?<p>More data needed to compare both hands. Try a single-hand view.</p>:chart('long')}
+      {legend}
       <DateRangeSlider dates={dates} start={start} end={end} onChange={(a,b)=>setWindow([dates[a],dates[b]])}/>
-      <details style={{marginTop:16}}><summary style={{cursor:'pointer',padding:'12px 0'}}>Chart details</summary>
+      <Disclosure title="Chart details" style={{marginTop:16,marginBottom:0}}>
         <p style={{color:C.muted,lineHeight:1.5}}>The longer trend uses a 90-day half-life: older training gradually receives less weight. Both-hand capacity weights the two hands equally. These are experimental, unadjusted-for-bodyweight estimates; they do not change your workout recommendations. Thinly tested durations remain uncertain.</p>
         <p style={{color:C.muted}}>Orange bars show estimated climbing load around each training date, including the previous day. Their separate scale is 0–10, with 10 filling the bottom quarter of the chart. Read the bars against that scale, not the percentage axis. They give context, not proof of what caused a change.</p>
-      </details>
+      </Disclosure>
     </Card>
-    <Card style={{marginBottom:16}}><h3 style={{marginTop:0}}>Short-term performance trend</h3>
+    <Card style={{marginBottom:16}}><CardTitle>Short-term performance trend</CardTitle>
       <p style={{color:C.muted,lineHeight:1.5}}>How opening holds compared with the curve estimated before that day, at the same hold duration. Above zero means more force than expected; below means less. This is variation, not a recovery diagnosis.</p>
       {laterHolds>0&&<p style={{color:C.muted,fontSize:13}}>{laterHolds} opening holds in this date range followed earlier finger training that day. These results may reflect accumulated fatigue; they remain part of the short-term chart.</p>}
       {chart('short')}
-      <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>{grips.map(g=><span key={g} style={{color:GRIP_COLORS[g]||C.blue}}>━ {g}</span>)}<span style={{color:C.orange}}>▮ Climbing load (0–10)</span></div>
+      {legend}
       <p style={{color:C.muted,fontSize:13}}>Both charts show {dates[start]} through {dates[end]}. Only eligible opening holds within previously measured durations are compared. Same-day results cannot alter that day’s expected curve.</p>
     </Card>
   </section>;

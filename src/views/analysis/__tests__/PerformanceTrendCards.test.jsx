@@ -44,5 +44,5 @@ test('deleting dates in a selected window keeps charts and both handles usable',
  screen.getAllByTestId('trend-chart').forEach(chart=>expect(chart).toHaveAttribute('data-dates','2026-08-04,2026-08-05'));
  fireEvent.change(screen.getByRole('slider',{name:'Start date'}),{target:{value:0}});
  expect(screen.getByText('Showing 5 of 5 training dates')).toBeInTheDocument();
- expect(screen.getAllByText('▮ Climbing load (0–10)')).toHaveLength(2);
+ expect(screen.getAllByText('Climbing load (0–10)')).toHaveLength(2);
 });

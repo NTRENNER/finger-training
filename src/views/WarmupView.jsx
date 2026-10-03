@@ -1,3 +1,4 @@
+import { Toggle } from '../ui/Toggle.jsx';
 import { PeakTestView } from './PeakTestView.jsx';
 import { TindeqBattery } from "./cards/TindeqBattery.jsx";
 // ─────────────────────────────────────────────────────────────
@@ -448,10 +449,7 @@ export function WarmupView({ visible = true, history, wLog, bodyWeightKg, tindeq
           {modePill("boulder", "🪨 Bouldering", "Progressive holds and five short maximum-effort pulls.")}
           {modePill("route", "🧗 Routes", "Progressive holds and a longer Micro hold for routes.")}
         </div>
-        <label style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }}>
-          <input type="checkbox" checked={includePeakTest} onChange={e => setIncludePeakTest(e.target.checked)} />
-          Include Peak Test today
-        </label>
+        <Toggle label="Include Peak Test today" checked={includePeakTest} onChange={setIncludePeakTest} />
         {includePeakTest && <p style={{ color: C.muted }}>Three 3-second pulls per hand, alternating hands. Rest 60 seconds between rounds. Replaces the maximal block; only the test measurements are saved.</p>}
         <div style={{ marginBottom: 16 }}>
           {steps.map((s, i) => (

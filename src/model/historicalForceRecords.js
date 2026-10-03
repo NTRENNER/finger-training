@@ -3,12 +3,13 @@ import { isValidFailureRep, loadProvenance } from './forceRecording.js';
 import { isValidPeakMeasurement } from './peakTest.js';
 import { sustainedMaxKg } from './sustainedMax.js';
 
-const better = (candidate, previous) => !previous || candidate.kg > previous.kg
-  || (candidate.kg === previous.kg && candidate.date < previous.date);
-
 // Display-only records. Older hold averages keep their actual duration and
 // provenance; they are never fabricated into two-second windows or model data.
-export function historicalForceRecords(history = []) {
+export function historicalForceRecords(history = [], valueForRecord = record => record.kg) {
+  // Rank in the displayed scale, so relative records and their chart agree.
+  // This callback is display-only and never changes saved force measurements.
+  const better = (candidate, previous) => !previous || valueForRecord(candidate) > valueForRecord(previous)
+    || (valueForRecord(candidate) === valueForRecord(previous) && candidate.date < previous.date);
   const records = new Map();
   for (const rep of history) {
     if (!rep?.grip || !['L', 'R'].includes(rep.hand) || !rep.date || isSeedArtifactRep(rep)) continue;

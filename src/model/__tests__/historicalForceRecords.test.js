@@ -74,3 +74,14 @@ test('unqualified early training remains on the axis without inventing a max', (
   expect(timeline[1].series0).toBe(40);
   expect(historicalForceTimeline([])).toEqual([]);
 });
+
+
+test('relative records rank by bodyweight ratio and never fall when absolute force sets a new high', () => {
+  const rows = [hold(60, {date:'2026-04-01'}), hold(65, {date:'2026-05-01'}), hold(70, {date:'2026-06-01'})];
+  const bw = {'2026-04-01':60,'2026-05-01':80,'2026-06-01':65};
+  const relative = record => record.kg / bw[record.date];
+  const records = historicalForceRecords(rows, relative);
+  expect(records[0].best.kg).toBe(70);
+  expect(historicalForceTimeline(records).map(p => relative(p.record0))).toEqual([1,1,70/65]);
+  expect(historicalForceRecords(rows)[0].progress.map(p=>p.best.kg)).toEqual([60,65,70]);
+});

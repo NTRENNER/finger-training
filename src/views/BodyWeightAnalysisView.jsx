@@ -1,3 +1,4 @@
+import { CHART } from '../ui/chartStyles.js';
 // ─────────────────────────────────────────────────────────────
 // BODYWEIGHT ANALYSIS VIEW
 // ─────────────────────────────────────────────────────────────
@@ -201,12 +202,12 @@ export function BodyWeightAnalysisView({ unit = "lbs" }) {
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={chartData} margin={{ top: 6, right: 14, bottom: 24, left: 0 }}>
                 <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-                <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }}
+                <XAxis dataKey="date" tick={CHART.tick}
                   angle={-30} textAnchor="end" interval="preserveStartEnd" />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} width={42}
+                <YAxis tick={CHART.tick} width={42}
                   domain={["auto", "auto"]} unit={` ${unit}`} />
                 <Tooltip
-                  contentStyle={{ background: C.bg, border: `1px solid ${C.border}`, fontSize: 12 }}
+                  contentStyle={CHART.tooltip}
                   labelFormatter={(label, payload) => payload?.[0]?.payload?.isoDate || label}
                   formatter={(value, name) => [`${value} ${unit}`, name === "raw" ? "Raw" : "7-day avg"]}
                 />

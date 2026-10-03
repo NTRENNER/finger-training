@@ -3,7 +3,7 @@
 
 import React, { useMemo } from "react";
 import { C } from "../../ui/theme.js";
-import { Card } from "../../ui/components.jsx";
+import { Card, Disclosure } from "../../ui/components.jsx";
 import { ZONE_KEYS, ZONE6 } from "../../model/zones.js";
 import { trainingExposure } from "../../model/trainingExposure.js";
 import { ymdLocal } from "../../util.js";
@@ -157,8 +157,7 @@ export function CurveCoverageCard({ history = [], grip = "", handView = "pooled"
   if (attentionGrips.length === 0) return null;
 
   return (
-    <details style={{ marginBottom: 16 }}>
-      <summary style={{ cursor: "pointer", fontSize: 14, color: C.muted, padding: "10px 0" }}>Training &amp; measurements</summary>
+    <Disclosure title="Training & measurements">
       <Card>
       <div style={{ marginBottom: attentionGrips.length > 1 ? 0 : 12 }}>
         <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
@@ -181,6 +180,6 @@ export function CurveCoverageCard({ history = [], grip = "", handView = "pooled"
         />
       ))}
       </Card>
-    </details>
+    </Disclosure>
   );
 }
