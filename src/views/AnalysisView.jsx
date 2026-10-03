@@ -695,7 +695,7 @@ export function AnalysisView({
       />
 
 
-      {peakRecordHistory.length > 0 && <CardBoundary name="Best two-second force">
+      {peakRecordHistory.length > 0 && <CardBoundary name="Best max of at least 2s">
         <SustainedMaxCard history={peakRecordHistory} unit={unit} normalizeOn={normalizationActive}
           bodyWeight={bodyWeight} bwLog={bwLog} />
       </CardBoundary>}

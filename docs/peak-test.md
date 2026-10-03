@@ -81,10 +81,21 @@ this small summary is stored, not sample arrays. An intact window may establish
 a record even when a later interruption makes the full rep unsuitable for
 failure fitting. The window does not certify the rest of that recording.
 
-Analysis shows best two-second force separately for each grip and hand, above
-the force-duration chart. Instantaneous peaks remain in workout history. Every recorded hold is eligible,
-including later sessions, extra sets, and fatigued Chaos Machine holds. Lower
-results never erase a record. Peak Test summaries show both measurements.
+Analysis shows **Best max of at least 2s** for each grip and hand, above the
+force-duration chart. The headline searches all available history for the
+highest recorded average over at least two seconds: either an intact measured
+hold average with its original duration, or a verified two-second window.
+Every headline shows the original date and duration. Older hold averages are
+never converted into synthetic two-second windows. A full-history step chart
+tracks the running record for each grip and hand, with solid left-hand and
+dashed right-hand lines. Tooltips retain the producing record date and duration.
+The chart uses absolute force in the selected unit, including when headline
+values are normalized to bodyweight.
+This avoids presenting a recently introduced measurement as a lifetime limit.
+Instantaneous peaks remain in workout history. Later sessions, extra sets,
+and fatigued Chaos Machine holds can set records. Lower results never erase a
+record. Peak Test summaries retain their separate measurements. This display
+change does not alter prescription caps, failure-curve fitting, or stored rows.
 Historical peaks cannot be converted into two-second records without raw samples.
 
 Prescription safeguards retain **separate instantaneous and two-second

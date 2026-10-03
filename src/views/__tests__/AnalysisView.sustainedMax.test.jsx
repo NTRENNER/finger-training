@@ -12,7 +12,7 @@ const peak = (grip, hand, kg) => peakMeasurementRecord({
 });
 test('the active finger Analysis page exposes sustained records and honors grip and hand filters', () => {
   render(<AnalysisView history={[peak('Micro', 'L', 20), peak('Micro', 'R', 25), peak('Crusher', 'L', 40)]} unit="kg" />);
-  expect(screen.getByRole('heading', { name: 'Best two-second force' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Best max of at least 2s' })).toBeInTheDocument();
   expect(screen.getByText('Micro · Left hand')).toBeInTheDocument();
   expect(screen.getByText('Micro · Right hand')).toBeInTheDocument();
   expect(screen.getByText('Crusher · Left hand')).toBeInTheDocument();
