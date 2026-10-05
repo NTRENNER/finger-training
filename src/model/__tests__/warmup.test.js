@@ -33,17 +33,20 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
     expect(generateWarmupProtocol({ history: [], wLog: [], bodyWeightKg: BW }).ok).toBe(false);
   });
 
-  test("boulder protocol has perfusion, a strength ladder, BORK, pullups", () => {
+  test("boulder protocol has perfusion, ends after two strength ramps", () => {
     const p = generateWarmupProtocol({ history, wLog: [], bodyWeightKg: BW, mode: "boulder" });
     expect(p.ok).toBe(true);
     const ids = p.steps.map(s => s.id);
     expect(ids).toContain("perfusion-crusher-easy");
     expect(ids.some(id => id.startsWith("ladder-"))).toBe(true);
-    expect(ids).toContain("bork-micro");
-    expect(ids).toContain("pullup-finisher");
-    // Boulder ladder has 3 rungs topping near-max (88%).
+    expect(ids).not.toContain("bork-micro");
+    expect(ids).not.toContain("pullup-finisher");
+    expect(p.steps.at(-1).id).toBe("ladder-micro-1");
+    expect(p.steps.every(s => s.type === "hang")).toBe(true);
+    // Keep the two heavier rungs, ending at the existing 88% reference.
     const rungs = p.steps.filter(s => s.id.startsWith("ladder-"));
-    expect(rungs.length).toBe(3);
+    expect(rungs.length).toBe(2);
+    expect(rungs.map(r => r.targetSec)).toEqual([8, 7]);
   });
 
   test("route protocol: longer perfusion, lower-topping ladder, no BORK", () => {
@@ -51,7 +54,9 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
     const ids = p.steps.map(s => s.id);
     expect(ids).not.toContain("bork-micro");
     const rungs = p.steps.filter(s => s.id.startsWith("ladder-"));
-    expect(rungs.length).toBe(2);          // route tops lower, fewer rungs
+    expect(rungs.length).toBe(2);
+    expect(p.steps.at(-1)).toBe(rungs.at(-1));
+    expect(p.steps.some(s => s.type === "pullup")).toBe(false);
   });
 
   test("ladder loads are two-handed (~1.9× the one-hand % of MVC)", () => {
@@ -77,11 +82,7 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
     expect(easy.targetLoadKg).toBeGreaterThan(24);
   });
 
-  test("BORK reference MVC is two-handed", () => {
-    const p = generateWarmupProtocol({ history, wLog: [], bodyWeightKg: BW, mode: "boulder" });
-    const bork = p.steps.find(s => s.id === "bork-micro");
-    expect(bork.referenceMvcKg).toBeCloseTo(p.mvcSource.microKg * BILATERAL_FACTOR, 1);
-  });
+
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -133,12 +134,14 @@ describe("getRecentMaxPullups — id migration", () => {
 });
 
 
-test.each(['boulder','route'])('optional peak block preserves %s ramp and replaces rather than stacks maximal work', mode => {
+test.each(['boulder','route'])('optional Peak Test follows the %s ramps as the only maximal block', mode => {
   const base = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode});
   const peak = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode,includePeakTest:true});
-  expect(base.steps.some(s=>s.type==='peak_test')).toBe(false);
+  expect(base.steps.every(s=>s.type==='hang')).toBe(true);
+  expect(base.steps.at(-1).id).toBe('ladder-micro-1');
   expect(peak.steps.filter(s=>s.type==='peak_test')).toHaveLength(1);
   expect(peak.steps.some(s=>s.type==='bork')).toBe(false);
   expect(peak.steps.filter(s=>s.type==='hang')).toEqual(base.steps.filter(s=>s.type==='hang'));
   expect(peak.steps.find(s=>s.type==='peak_test').restAfterSec).toBe(0);
+  expect(peak.steps.at(-1).type).toBe('peak_test');
 });

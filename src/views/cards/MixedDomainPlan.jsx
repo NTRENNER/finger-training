@@ -10,7 +10,7 @@ export function MixedDomainPlan({ plan, sets = 1, readiness, hands, unit, multip
   return <section aria-label="Chaos Machine beta plan" style={{ marginBottom: 20 }}>
     <p style={{ fontSize: 16, lineHeight: 1.5 }}>Five holds per hand in each set. A different target weight each hold. Rest 30 seconds between holds.</p>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>
-      Where your measured history supports it, later target weights are adjusted for earlier pulls and rest, then fixed for each hold.
+      Later target weights account for earlier pulls and rest, then stay fixed for each hold. Outside your measured duration range, the reduction is approximate.
       Incomplete measurements during this session can also prevent an adjustment.
     </p>
     {readiness?.status === 'ready' ? <p style={{ color: C.muted, lineHeight: 1.5 }}>
@@ -50,11 +50,12 @@ export function MixedDomainPlan({ plan, sets = 1, readiness, hands, unit, multip
               </strong>
               <div style={{ color: C.muted, fontSize: 12, marginTop: 6 }}>
                 {i === 0 ? 'First hold · Fresh reference' : readiness?.byHand?.[hand]?.[i]?.status === 'ready'
-                  ? 'Reference · adjustment estimated before this hold' : 'Reference target · adjustment unavailable'}
+                  ? 'Reference · adjustment estimated before this hold' : readiness?.byHand?.[hand]?.[i]?.status === 'limited'
+                    ? 'Reference · approximate reduction before this hold' : 'Reference target · adjustment unavailable'}
               </div>
               {i > 0 && readiness?.byHand?.[hand]?.[i]?.status !== 'ready' && <p style={{ color: C.muted, fontSize: 12, margin: '6px 0 0' }}>
                 {readiness?.byHand?.[hand]?.[i]?.reason === 'outside_measured_duration_range'
-                  ? 'This duration is outside the measured range for this hand.'
+                  ? 'This duration is outside the measured range for this hand. The load can still be reduced; hold time is uncertain.'
                   : 'More measured history is needed for this hand.'}
               </p>}
             </li>;

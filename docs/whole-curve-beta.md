@@ -135,22 +135,29 @@ not increase a reference load on this experimental model's advice.
 When the user elects a cookedness reduction, the frozen model's amplitudes and
 the original-load ceilings each receive that multiplier once. This is recorded
 as `readiness_multiplier`; it is an explicit assumption, not measured readiness.
-The current session never refits that model. Each new session builds a snapshot
+The current session never refits that historical model. Each new session builds a snapshot
 from the accumulated eligible history. There is no automatic parameter tuning.
 
 The rest screen shows the chosen next load and its adjustment/fallback status.
 It stays fixed through the next pull, including if the athlete waits longer;
 longer-than-planned rest is recorded and evaluated afterward. An interrupted or
-unmeasured prefix, missing actual rest, insufficient history, or target outside
-the fitted duration coverage falls back to the original load with an explicit
-message. Manual overrides remain available. Low/unusable estimates also fall
+unmeasured prefix, missing actual rest, or insufficient history falls back to
+the original load with an explicit message. Outside fitted duration coverage,
+version 3 discounts the existing domain reference using the measured work/rest
+state and session correction, without extrapolating an absolute curve load.
+This is `adjusted_reference`, with `uncertain_hold_target`; it is not scored as
+a supported target-time prediction. Before pulling, the automatic sensor screen
+lets the athlete enter a different target for that hold. The chosen target drives
+acquisition, averaging and failure detection and is stored as `manual_load_kg`;
+the program's original load stays in `prescribed_load_kg`. Target changes are
+locked during a pull. Pulling lighter alone does not redefine the target. Low/unusable estimates also fall
 back rather than displaying zero. Estimates remain approximate, including the
 existing legacy elapsed-time versus target-acquired timing distinction.
 
 Before starting, the preview checks adjustment support separately for each hand
 and later hold duration, using the same measured-history requirements and duration
-bounds as the runner. Each unsupported hold is labeled as a reference target,
-with the reason (insufficient history or outside that hand's measured range).
+bounds as the runner. A duration outside that hand's range is labeled as an
+approximate reduction, while missing models remain adjustment-unavailable.
 A usable reference load still permits training; it does not establish adjustment
 readiness. The runner also checks measured work and rest as the session proceeds.
 
@@ -169,10 +176,10 @@ from the actual decision for each hold:
 
 - `requested_load_mode`: `adaptive_targets` or legacy `fixed_references`.
 - `load_mode`: `opening_reference` for an adaptive opener, `adaptive_targets`
-  for an adjusted or ceiling-capped decision, `reference_fallback` when a later
+  for an adjusted, approximate-reference, or ceiling-capped decision, `reference_fallback` when a later
   adjustment is unavailable, or `fixed_references` for a legacy fixed plan.
 - `duration_reference`: `approximate_hold_target` only for an adjusted or
-  ceiling-capped decision; otherwise `fresh_load_reference`.
+  ceiling-capped decision; `uncertain_hold_target` for a discounted reference outside coverage; otherwise `fresh_load_reference`.
 - `adjustment_status`: `opening_hold`, `adjusted`, `capped_at_original`,
   `unavailable`, or `not_requested`. `adjustment_reason` records why a requested
   later adjustment fell back.
@@ -205,3 +212,41 @@ The setup set selector is independent of research enrollment. It starts at one a
 Adaptive prescriptions retain all preceding measured work on that hand across sets. The first hold of a later set is a fatigued hold, not a fresh reference. Its next-rest estimate uses the elapsed interval when the user leaves the between-set rest screen, then stays fixed through that pull. Actual release-to-start rest is saved separately. Unknown releases remain unknown; incomplete prefixes still fall back explicitly. Subsequent holds use the ordinary planned 30-second rest. Frozen curve models are never refitted from this session.
 
 Set and rep numbers identify each hold independently. Later sets cannot fit fresh capacity, advance the ordinary ladder, or enroll in Volume Beta. Mixed-load prediction review includes later-set openers as fatigued observations and groups sets separately while retaining session-level weighting.
+
+
+## Session feedback and goal attainment (October 2026)
+
+Adaptive forecasts now use version 3 (adjustment version 2), separated from older
+forecasts in research. The historical source model remains frozen. For each
+hand independently, usable completed failures inside measured duration coverage
+can lower a session-only force multiplier by observed force / pre-hold predicted
+force at the observed duration. The multiplier never rises above 1 or falls
+below 0.5. Observations below 5 seconds do not calibrate this envelope.
+
+Goal attainment is separate from measurement validity. A 118-second pull against
+160 seconds is **missed**, even when the recording is usable evidence. The goal
+uses the visible pull clock, including the ramp; matched force-duration data
+keeps its existing basis. Every usable miss supplies a downward response for the
+next target: the prior multiplier times max(0.9, pull time / target time), bounded
+below at 0.5, combined with the envelope correction by taking the lower value.
+This 10%-per-miss limit is an experimental control rule, not a physiological
+conversion of duration into load. The next load is also capped at least one
+0.1 kg increment below its original reference (minimum 0.1 kg), preventing
+rounding from leaving a missed-target adjustment unchanged. These reductions
+are relative to the next domain's reference, not necessarily the previous
+hold's absolute load. Planned recovery still contributes to that next load.
+
+New adaptive reps save `session_protocol.target_outcome` as met, missed, or
+unconfirmed, and the legacy failed flag reflects missed targets. `failure_valid`
+continues to mean usable failure evidence; marking a missed goal does not discard
+its measurement. Interruptions and unknown releases still cannot fabricate
+complete work/rest evidence. No existing workouts are rewritten. Manually
+changed targets are retained in diagnostics but do not score as execution of the
+original forecast. Approximate-reference targets do not score target-time error.
+
+Replaying the October 5 Micro right-hand opener (118.1s matched time, 118.54s
+visible pull time at 7.2 kg; next goal 220s with 30s rest) selects 3.8 kg instead
+of the prior 6.3 kg unchanged fallback. The model's maximum measured duration was
+181.77s, so this is explicitly an uncertain hold-time estimate, not proof that
+3.8 kg will last 220s. Automated tests establish the control and recording
+behavior; prospective workouts must establish predictive accuracy.

@@ -508,8 +508,8 @@ export const LS_CLIMBING_HISTORY_FILTERS_KEY = "ft_climbing_history_filters";
 // project anchor.
 export const LS_PYRAMID_PROJECT_KEY = "ft_pyramid_project";
 
-// Adaptive warmup mode — "boulder" (perfusion + BORK potentiation)
-// or "route" (perfusion only, longer holds). The WarmupView surfaces
+// Adaptive warmup mode — "boulder" (perfusion + heavier ramps)
+// or "route" (longer perfusion + lighter ramps). The WarmupView surfaces
 // a pill toggle on the preview screen; this LS key remembers the
 // last choice so it persists across sessions on the same device.
 // Unset / unrecognized values default to "boulder" in the view.

@@ -1,3 +1,4 @@
+import { displayedRepTime } from '../model/pullMeasurement.js';
 import { betaEligibility } from '../model/betaEligibility.js';
 import { startingHandForDay, otherHand, handOrderMetadata } from '../model/handOrder.js';
 // ──────────────────────────────────────────────────────────────
@@ -457,11 +458,16 @@ export function useSessionRunner({
     const provenance = loadProvenance || (avgForce > 0 ? "measured_force"
       : manualLoadKg > 0 ? "nominal_setting" : "prescription_only");
     const repTargetTime = currentStep?.targetTime ?? config.targetTime;
-    const derivedFailed = mixed && currentRep > 0 ? false : failed || isShortfall(roundedActual, repTargetTime);
+    const adaptiveTargetOutcome = mixed && config.mixedDomainPlan.adjustLoads
+      ? failureValid ? displayedRepTime(adjTime, forceRecording) >= repTargetTime ? 'met' : 'missed' : 'unconfirmed'
+      : null;
+    const derivedFailed = adaptiveTargetOutcome ? adaptiveTargetOutcome === 'missed'
+      : mixed && currentRep > 0 ? false : failed || isShortfall(roundedActual, repTargetTime);
     const recordedForce = mixed ? { ...forceRecording,
       session_protocol: { id: MIXED_DOMAIN_ID, version: config.mixedDomainPlan.version, zone: currentStep.zone,
         opening_zone: config.mixedDomainPlan.steps[0].zone, position: currentRep + 1,
         role: currentSet === 1 && currentRep === 0 ? 'opening_hold' : 'fatigued_hold',
+        ...(adaptiveTargetOutcome ? { target_outcome: adaptiveTargetOutcome } : {}),
         ...mixedLoadProtocolFields(config.mixedDomainPlan.adjustLoads, mixedPrediction?.adjustment, (currentSet - 1) * 5 + currentRep + 1) },
       ...(currentSet > 1 || currentRep > 0 ? { capacity_eligible: false } : {}),
     } : { ...forceRecording };

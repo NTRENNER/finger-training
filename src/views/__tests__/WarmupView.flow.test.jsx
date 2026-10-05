@@ -8,12 +8,10 @@ jest.mock("../../model/warmup.js", () => ({ generateWarmupProtocol: jest.fn() })
 
 const hang = (id, grip, targetLoadKg) => ({ id, grip, targetLoadKg, type: "hang", targetSec: 2, restAfterSec: 2,
   title: `Two-Handed ${grip}`, intensityLabel: id });
-const protocol = { ok: true, bodyWeightLbs: 160, pullupSource: { sourceText: "test" }, steps: [
+const protocol = { ok: true, bodyWeightLbs: 160, steps: [
   hang("Easy hold", "Crusher", 20), hang("Moderate hold", "Crusher", 25),
   hang("Small edge", "Micro", 10), hang("Strength ramp", "Micro", 15),
-  { id: "bork", grip: "Micro", type: "bork", title: "Micro primer", intensityLabel: "5 short pulls",
-    reps: 5, holdSec: 2, restBetweenSec: 2, restAfterSec: 2, referenceMvcKg: 25 },
-  { id: "pullup", type: "pullup", title: "Pullup Finisher", targetReps: 2, sets: 2, restAfterSec: 2 },
+  hang("Final strength ramp", "Micro", 18),
 ] };
 
 beforeEach(() => {
@@ -80,7 +78,7 @@ test("first timed hold, rest release, and the next pull use one uninterrupted se
   expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
   expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0]]);
   rest();
-  expect(screen.getByText("Warm-up · Step 2 of 6")).toBeInTheDocument();
+  expect(screen.getByText("Warm-up · Step 2 of 5")).toBeInTheDocument();
   expect(screen.getByText("25.0 kg")).toBeInTheDocument();
   expect(screen.getByRole("timer", { name: "Ready" })).toBeInTheDocument();
   // No extra zero sample after rest: release was already observed during rest.
@@ -89,10 +87,10 @@ test("first timed hold, rest release, and the next pull use one uninterrupted se
   expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0]]);
 });
 
-test("complete sequence retains stage layout, shows every primer rep, then both pullup sets", async () => {
-  const { hold, rest, commands } = await setup();
+test("complete sequence retains stage layout and finishes after the second strength ramp", async () => {
+  const { hold, rest, commands, addReps } = await setup();
   const completeStep = step => {
-    expect(screen.getByText(`Warm-up · Step ${step} of 6`)).toBeInTheDocument();
+    expect(screen.getByText(`Warm-up · Step ${step} of 5`)).toBeInTheDocument();
     expect(screen.getByText("Target weight")).toBeInTheDocument();
     hold(30, 2000); rest();
   };
@@ -103,31 +101,15 @@ test("complete sequence retains stage layout, shows every primer rep, then both 
   expect(screen.queryByRole("timer")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   completeStep(3); completeStep(4);
-  const followingStages = [];
-  for (let rep = 1; rep <= 5; rep++) {
-    expect(screen.getByText(`Micro · Rep ${rep} of 5`)).toBeInTheDocument();
-    expect(screen.queryByText("Target weight")).not.toBeInTheDocument();
-    hold(30, 2000);
-    expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
-    followingStages.push({
-      nextRep: screen.queryByText(`Rep ${rep + 1} of 5 · 2s maximum effort`) !== null,
-      finisher: screen.queryByText("Pullup Finisher") !== null,
-    });
-    rest();
-  }
-  expect(followingStages).toEqual([
-    ...Array.from({ length: 4 }, () => ({ nextRep: true, finisher: false })),
-    { nextRep: false, finisher: true },
-  ]);
+  expect(screen.getByText("Warm-up · Step 5 of 5")).toBeInTheDocument();
+  expect(screen.getByText("Final strength ramp")).toBeInTheDocument();
+  expect(screen.getByText("18.0 kg")).toBeInTheDocument();
+  hold(30, 2000);
+  expect(screen.queryByText("Pullup Finisher")).not.toBeInTheDocument();
+  expect(screen.queryByRole("timer", { name: "Rest" })).not.toBeInTheDocument();
   await waitFor(() => expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0], CMD_STOP[0]]));
-  expect(screen.getByText("Set 1 of 2")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "+1 rep" }));
-  fireEvent.click(screen.getByRole("button", { name: "Set done" }));
-  expect(screen.getByText("Set 2 of 2 · 2 pullups")).toBeInTheDocument();
-  act(() => jest.advanceTimersByTime(2000));
-  expect(screen.getByText("Set 2 of 2")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
   expect(screen.getByText(/Warm-up complete/)).toBeInTheDocument();
+  expect(addReps).not.toHaveBeenCalled();
 });
 
 test("pulling during rest cannot shorten it or pre-start the next rep", async () => {
@@ -145,7 +127,7 @@ test("missing sensor samples pause the same rep rather than count a completed wa
   hold(25, 100);
   act(() => jest.advanceTimersByTime(2000));
   expect(screen.getByText("Warm-up paused")).toBeInTheDocument();
-  expect(screen.getByText("Warm-up · Step 1 of 6")).toBeInTheDocument();
+  expect(screen.getByText("Warm-up · Step 1 of 5")).toBeInTheDocument();
   expect(screen.queryByRole("timer", { name: "Rest" })).not.toBeInTheDocument();
   send(0);
   fireEvent.click(screen.getByRole("button", { name: "Retry rep" }));
@@ -166,12 +148,11 @@ test("skipping an active hold still requires release and leaving warm-up stops t
 });
 
 
-test('optional Peak Test replaces the maximal block, saves only its pulls, then returns to warmup', async () => {
+test('optional Peak Test saves only its pulls, then completes warmup', async () => {
   generateWarmupProtocol.mockImplementation(({ includePeakTest }) => ({ ...protocol, steps: [
     hang('Two handed', 'Micro', 10),
     ...(includePeakTest ? [{ id: 'peak', type: 'peak_test', grip: 'Micro', title: 'Micro Peak Test', restAfterSec: 0 }]
       : [protocol.steps[4]]),
-    protocol.steps[5],
   ] }));
   const { hold, send, rest, addReps, commands } = await setup({ peak: true });
   hold(20, 2000); rest();
@@ -184,8 +165,8 @@ test('optional Peak Test replaces the maximal block, saves only its pulls, then 
   }
   expect(addReps).toHaveBeenCalledTimes(6);
   expect(addReps.mock.calls.flatMap(c=>c[0]).every(r=>r.force_recording.session_protocol.source==='warmup')).toBe(true);
-  fireEvent.click(screen.getByRole('button',{name:'Continue warm-up'}));
-  expect(screen.getByText('Pullup Finisher')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Finish warm-up'}));
+  expect(screen.getByText(/Warm-up complete/)).toBeInTheDocument();
   expect(screen.queryByRole('timer',{name:'Rest'})).not.toBeInTheDocument();
 });
 
@@ -197,7 +178,7 @@ test("tab navigation preserves warmup rest and cannot record hidden pulls", asyn
   await act(async()=>h.leaveTab());
   act(()=>jest.advanceTimersByTime(5000));
   await act(async()=>h.returnTab());
-  expect(screen.getByText("Warm-up · Step 2 of 6")).toBeInTheDocument();
+  expect(screen.getByText("Warm-up · Step 2 of 5")).toBeInTheDocument();
   h.send(0);h.hold(25,500);
   expect(screen.getByRole("timer",{name:"Hold time"})).toBeInTheDocument();
 });

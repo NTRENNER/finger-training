@@ -73,3 +73,19 @@ test('readiness applies once and does not affect the legacy fixed-reference beta
  view.unmount();
  }
 });
+
+
+test.each([118, 159.9, 160, 170])('a %ss hold has a separate target outcome; each miss lowers the next reference', seconds => {
+ const view=renderHook(()=>useSessionRunner({history:fresh(),addReps:jest.fn(),tindeqConnected:true}));
+ const planned = makeMixedDomainPlan(MIXED_DOMAIN_ZONES.map(key=>({key,
+  L:predForceThreeExp([18,15,25],ZONE_REF_T[key]),R:predForceThreeExp([18,15,25],ZONE_REF_T[key])
+ })), 'strength_endurance', ['L','R']);
+ act(()=>view.result.current.startSession({grip:'Micro',hand:'L',mixedDomainPlan:planned}));
+ finish(view,seconds,1000000);
+ const recorded=view.result.current.sessionReps[0];
+ expect(recorded.failure_valid).toBe(true);
+ expect(recorded.failed).toBe(seconds<160);
+ expect(recorded.force_recording.session_protocol.target_outcome).toBe(seconds<160?'missed':'met');
+ expect(view.result.current.refWeights.L).toBeLessThan(planned.steps[1].loadByHand.L);
+ expect(view.result.current.activeRepConfig.mixedLoadAdjustment.missed_target_rep_ids).toEqual(seconds<160?[recorded.id]:[]);
+});

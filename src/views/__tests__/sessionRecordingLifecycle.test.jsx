@@ -188,3 +188,26 @@ test.each(['end', 'navigate'])('a manual active pull is saved when leaving by %s
   expect(saved.mock.calls[0][0][0]).toMatchObject({ failure_valid: false, end_reason: 'interrupted', actual_time_s: 5 });
   expect(current.runner.phase).toBe(action === 'end' ? 'done' : 'resting');
 });
+
+
+test('a chosen lower target controls the real sensor detector and preserves the original prescription', async () => {
+  await start();
+  fireEvent.click(screen.getByText('Adjust target weight'));
+  fireEvent.change(screen.getByRole('spinbutton', {name:'Target weight (lbs)'}), {target:{value:'22.0462'}});
+  expect(current.tindeq.targetKgRef.current).toBeCloseTo(10, 4);
+  // The ramp remains on the clock, with averages starting at the chosen target.
+  feed(0, 1900, () => 4);
+  feed(2000, 26000, () => 10.1);
+  expect(saved).not.toHaveBeenCalled(); // no false original-target failure/backstop
+  expect(screen.queryByText('Adjust target weight')).not.toBeInTheDocument();
+  feed(26100, 27300, () => 0);
+  const rep = saved.mock.calls[0][0][0];
+  expect(saved).toHaveBeenCalledTimes(1);
+  expect(rep).toMatchObject({ prescribed_load_kg:20, manual_load_kg:10, failure_valid:true });
+  expect(rep.force_recording.target_kg).toBeCloseTo(10,4);
+  expect(rep.avg_force_kg).toBeCloseTo(10.1,1);
+  expect(rep.force_recording.pull_duration_s).toBeGreaterThan(26);
+  expect(rep.end_reason).not.toBe('equipment_interruption');
+  await act(async () => current.runner.handleRestDone());
+  expect(current.tindeq.targetKgRef.current).toBe(20); // chosen target belongs to this hold
+});

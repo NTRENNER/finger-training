@@ -1,6 +1,6 @@
 import { trainingDayContext } from './trainingDayContext.js';
-// Shadow experiment only. Nothing in this module changes prescribed loads,
-// failure detection, capacity eligibility or the regular ladder.
+// Shared experimental fatigue model for shadow forecasts and Chaos targets.
+// Session feedback never changes capacity eligibility or the regular ladder.
 import { freshFitReps } from './load.js';
 import { fitThreeExpAmps, predForceThreeExp, THREE_EXP_TAUS } from './threeExp.js';
 import { PHYS_MODEL_DEFAULT } from './fatigue.js';
@@ -12,10 +12,11 @@ const KEYS = ['fast', 'medium', 'slow'];
 const finitePositive = x => Number.isFinite(x) && x > 0;
 const validLoad = x => finitePositive(x) && x < 200;
 const round = x => Math.round(x * 1000) / 1000;
-const fingerprint = r => JSON.stringify([r.hand, r.grip, r.rep_num, r.session_id, r.actual_time_s,
+const fingerprint = (r, sessionFeedback = false) => JSON.stringify([r.hand, r.grip, r.rep_num, r.session_id, r.actual_time_s,
   r.avg_force_kg, r.failure_valid, r.end_reason, r.load_provenance, r.rep_timing,
   Object.fromEntries(Object.entries(r.force_recording || {}).filter(([k]) => k !== 'mixed_load_prediction')),
-  ...(Number(r.set_num ?? 1) > 1 ? [r.set_num] : [])]);
+  ...(Number(r.set_num ?? 1) > 1 ? [r.set_num] : []),
+  ...(sessionFeedback ? [{ target_duration: r.target_duration }] : [])]);
 const sessionKey = r => r.session_id || r.session_started_at || r.date;
 const unavailable = reason => ({ status: 'unavailable', reason });
 
@@ -64,10 +65,10 @@ export function consumeMixedHold(model, state, impulseKgS) {
 export function recoverMixedState(model, state, seconds) {
   return state.map((v, i) => 1 - (1 - v) * Math.exp(-seconds / model.recovery_taus[i]));
 }
-export function mixedHoldTime(model, state, loadKg) {
+export function mixedHoldTime(model, state, loadKg, loadScale = 1) {
   if (model?.status !== 'ready' || !validLoad(loadKg)) return unavailable('invalid_load_or_model');
   const availability = state.reduce((sum, v, i) => sum + v * model.weights[i], 0);
-  const force = t => availability * predForceThreeExp(model.amps, t, model.curve_taus);
+  const force = t => loadScale * availability * predForceThreeExp(model.amps, t, model.curve_taus);
   if (force(0) <= loadKg) return { status: 'above_available_force', seconds: 0 };
   if (force(600) >= loadKg) return { status: 'beyond_horizon', seconds: null };
   let lo = 0, hi = 600;
@@ -94,9 +95,10 @@ function usableActivity(rep) {
 
 // Prefix consists ONLY of completed holds from this hand/session. Missing
 // rest or interrupted effort stops the chain; it never silently becomes fresh.
-export function mixedStateBefore(model, prefix, restBeforeS) {
+export function mixedStateBefore(model, prefix, restBeforeS, sessionFeedback = false) {
   if (model?.status !== 'ready') return unavailable(model?.reason || 'no_model');
-  let state = [1, 1, 1];
+  let state = [1, 1, 1], loadScale = 1;
+  const missedTargets = [];
   for (let i = 0; i < prefix.length; i++) {
     const r = prefix[i];
     if (!isMixedDomainRep(r) || r.hand !== model.hand || r.grip !== model.grip
@@ -108,23 +110,49 @@ export function mixedStateBefore(model, prefix, restBeforeS) {
     }
     const activity = usableActivity(r);
     if (!activity) return unavailable('unmeasured_or_interrupted_prefix');
+    // Session-local downward correction from valid failures. Compare actual
+    // force at actual duration with the pre-hold envelope, not target-time
+    // percentages. This never refits the historical curve or transfers hands.
+    // Ignore brief/noisy and unsupported durations; bound this experimental
+    // correction at 50% and never let one good hold raise subsequent loads.
+    const priorScale = loadScale;
+    const pullSeconds = r.force_recording?.pull_duration_s ?? r.actual_time_s;
+    const missedTarget = sessionFeedback && finitePositive(r.target_duration) && pullSeconds < r.target_duration;
+    let observed = r.actual_time_s;
+    if (model.duration_basis === 'legacy_elapsed' && r.force_recording?.basis === 'target_acquired') {
+      observed += Number.isFinite(r.force_recording.acquisition_s) ? r.force_recording.acquisition_s : 0;
+    }
+    if (sessionFeedback && observed >= Math.max(5, model.min_duration_s)
+        && observed <= model.max_duration_s) {
+      const availability = state.reduce((sum, v, j) => sum + v * model.weights[j], 0);
+      const expected = availability * predForceThreeExp(model.amps, observed, model.curve_taus);
+      if (finitePositive(expected)) loadScale = Math.min(loadScale, Math.max(0.5, r.avg_force_kg / expected));
+    }
+    if (missedTarget) {
+      missedTargets.push(r.id);
+      // A missed goal must reduce later targets even when an optimistic or
+      // mismatched curve would suggest otherwise. This bounded response is an
+      // experimental control rule, not a physiological time-to-load conversion.
+      loadScale = Math.min(loadScale, Math.max(0.5, priorScale * Math.max(0.9, pullSeconds / r.target_duration)));
+    }
     state = consumeMixedHold(model, state, activity.impulse_kg_s);
   }
   if (prefix.length) {
     if (!Number.isFinite(restBeforeS) || restBeforeS < 0) return unavailable('missing_actual_rest');
     state = recoverMixedState(model, state, restBeforeS);
   }
-  return { status: 'ready', state };
+  return { status: 'ready', state, loadScale, missedTargets };
 }
 
 // Created while preparing the hold. Uses the planned rest before this hold;
 // the prefix has the actual force, duration and rest already recorded.
-export function prepareMixedPrediction(model, prefix, loadKg, plannedRestS) {
-  const before = mixedStateBefore(model, prefix, plannedRestS);
-  return { version: MIXED_PREDICTION_VERSION, mode: 'shadow', model,
-    prior_rep_ids: prefix.map(r => r.id), prior_fingerprints: prefix.map(fingerprint), load_kg: loadKg,
+export function prepareMixedPrediction(model, prefix, loadKg, plannedRestS, sessionFeedback = false) {
+  const before = mixedStateBefore(model, prefix, plannedRestS, sessionFeedback);
+  return { version: sessionFeedback ? 3 : MIXED_PREDICTION_VERSION, mode: 'shadow', model,
+    ...(sessionFeedback ? { session_feedback: { version: 1, minimum_scale: 0.5, maximum_miss_reduction: 0.1 } } : {}),
+    prior_rep_ids: prefix.map(r => r.id), prior_fingerprints: prefix.map(r => fingerprint(r, sessionFeedback)), load_kg: loadKg,
     rest_s: prefix.length ? plannedRestS : 0, rest_basis: 'planned_next_rest',
-    prediction: before.status === 'ready' ? mixedHoldTime(model, before.state, loadKg) : before,
+    prediction: before.status === 'ready' ? mixedHoldTime(model, before.state, loadKg, before.loadScale) : before,
     fresh_only: mixedHoldTime(model, [1, 1, 1], loadKg) };
 }
 
@@ -139,7 +167,7 @@ export function completeMixedPrediction(prepared, prefix, rep) {
   } };
   if (!usableActivity(rep)) return { ...result, comparison: unavailable('unmeasured_or_interrupted_hold') };
   const model = prepared.model;
-  const before = mixedStateBefore(model, prefix, rep.rep_timing?.rest_before_s);
+  const before = mixedStateBefore(model, prefix, rep.rep_timing?.rest_before_s, prepared.session_feedback?.version === 1);
   if (before.status !== 'ready') return { ...result, comparison: before };
   let observed = rep.actual_time_s;
   if (model.duration_basis === 'legacy_elapsed' && rep.force_recording?.basis === 'target_acquired') {
@@ -149,13 +177,14 @@ export function completeMixedPrediction(prepared, prefix, rep) {
   } else if (model.duration_basis === 'target_acquired' && rep.force_recording?.basis !== 'target_acquired') {
     return { ...result, comparison: unavailable('incompatible_duration_basis') };
   }
-  const conditional = mixedHoldTime(model, before.state, rep.avg_force_kg);
+  const conditional = mixedHoldTime(model, before.state, rep.avg_force_kg, before.loadScale);
   const fresh = mixedHoldTime(model, [1, 1, 1], rep.avg_force_kg);
   return { ...result, comparison: { status: 'recorded', kind: 'actual_load_and_rest_diagnostic',
     observed_s: observed, conditional, fresh_only: fresh,
     // Loose matching is only for reporting the original planned scenario.
     // All valid measured overshoots still enter the separate conditional check.
-    planned_scenario_matches: Math.abs(rep.avg_force_kg / prepared.load_kg - 1) <= .10
+    planned_scenario_matches: (!finitePositive(rep.manual_load_kg) || Math.abs(rep.manual_load_kg - prepared.load_kg) < .001)
+      && Math.abs(rep.avg_force_kg / prepared.load_kg - 1) <= .10
       && (!prefix.length || Math.abs(rep.rep_timing.rest_before_s - prepared.rest_s) <= 2) } };
 }
 
@@ -187,7 +216,7 @@ export function summarizeMixedPredictions(history) {
     if (conflicts.has(r.id)) { exclude('conflicting_copy'); continue; }
     if (seen.has(key)) continue;
     seen.add(key);
-    if (p.prior_rep_ids?.some((id, i) => conflicts.has(id) || !byId.has(id) || !sameFingerprint(fingerprint(byId.get(id)), p.prior_fingerprints?.[i]))) {
+    if (p.prior_rep_ids?.some((id, i) => conflicts.has(id) || !byId.has(id) || !sameFingerprint(fingerprint(byId.get(id), p.session_feedback?.version === 1), p.prior_fingerprints?.[i]))) {
       exclude('edited_or_missing_prefix'); continue;
     }
     const o = p.observation;

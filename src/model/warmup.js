@@ -4,11 +4,11 @@ import { isValidFailureRep, isCapacityEvidenceRep, isNominalPrescriptionRep } fr
 // ─────────────────────────────────────────────────────────────
 //
 // Builds a personalized warm-up protocol on demand from the user's
-// per-grip three-exp force curves + bodyweight + recent pullup max.
+// per-grip three-exp force curves + bodyweight.
 //
 // Two modes:
-//   - 'boulder' (default): perfusion + BORK potentiation primer
-//   - 'route':             perfusion only, longer holds
+//   - 'boulder' (default): perfusion + two heavier strength ramps
+//   - 'route':             longer perfusion + two lighter strength ramps
 //
 // Sports-science skeleton:
 //   - Perfusion phase: sustained sub-failure holds anchored to F(60s),
@@ -21,21 +21,9 @@ import { isValidFailureRep, isCapacityEvidenceRep, isNominalPrescriptionRep } fr
 //     protocol (60% × peak) was actually a near-failure load for the
 //     60s step — quietly defeating its own warmup goal.
 //
-//   - BORK potentiation (boulder mode only, last step before pullups):
-//     5 reps of brief (~5s) MAX voluntary contractions on the Micro
-//     gripper, 45s rest between. Classical Post-Activation
-//     Potentiation: short heavy stimulus → enhanced motor unit
-//     recruitment + CNS facilitation in a 4-10 minute window.
-//     Micro (not Crusher) because the small-edge crimp pattern is
-//     what climbing demands; PAP transfers best when the primer
-//     matches the target movement. No target load — the user just
-//     pulls hard for each rep. First rep typically hits below peak;
-//     reps 3-5 ride the potentiation curve upward.
-//
-//   Route mode skips BORK (the potentiation window fades faster than
-//   the perfusion benefit, and route climbing rewards endurance
-//   prep more than CNS priming) and stretches the Micro perfusion
-//   hold to 60s for a deeper endurance-system warmup.
+//   Both modes finish after two strength ramps, with an optional
+//   single-handed Peak Test as the only maximum-effort block.
+//   Route mode extends the Micro perfusion hold to 60s.
 //
 // Tindeq-driven design: each hang step prescribes a target LOAD (in kg)
 // derived from the curve at a fixed reference time, and a target HOLD
@@ -57,12 +45,10 @@ import { isValidFailureRep, isCapacityEvidenceRep, isNominalPrescriptionRep } fr
 //     % of F(60s)). failFrac lookup is clamped to [10,220]s — no
 //     extrapolation into the unreliable tail.
 //   - A progressive STRENGTH LADDER (short ~7-8s holds at rising % of
-//     MVC) bridges perfusion up toward the near-max BORK, so intensity
+//     MVC) bridges perfusion toward heavier loads, so intensity
 //     ramps instead of jumping off a cliff. Boulder tops near-max; route
 //     stops lower.
 //   - Rests are scaled by the user's personal recovery taus.
-//   - BORK has no target — display the two-handed max reference, capture
-//     peak.
 
 import {
   fitThreeExpAmps,
@@ -271,29 +257,20 @@ function getRecentPeakMVC(history, grip, daysOld = 90) {
  *
  * @param {Object} args
  * @param {Array}  args.history       - finger-training rep history (App-level)
- * @param {Array}  args.wLog          - workout log array (Lifts data)
  * @param {number} args.bodyWeightKg  - user's bodyweight in kg
  * @param {'boulder'|'route'} [args.mode='boulder'] - what climbing you're warming up FOR
  * @returns {Object} { ok, reason?, mode, bodyWeightKg, bodyWeightLbs,
- *                     mvcSource, perfusionSource, pullupSource, steps[] }
+ *                     mvcSource, perfusionSource, steps[] }
  *
  * Hang step shape:
  *   { id, title, intensityLabel, type: 'hang',
  *     grip, targetLoadKg, targetSec, restAfterSec, description }
  *
- * BORK step shape (boulder mode only, last hang step before pullups):
- *   { id, title, intensityLabel, type: 'bork',
- *     grip,                  - "Micro"
- *     reps,                  - 5
- *     holdSec,               - 5 (each rep)
- *     restBetweenSec,        - 45 (between reps)
- *     restAfterSec,
- *     description }
+ * Optional final Peak Test step:
+ *   { id, title, intensityLabel, type: 'peak_test', grip, restAfterSec: 0 }
  *
- * Pullup finisher step:
- *   { id, title, type: 'pullup', targetReps, sets, restAfterSec, description }
  */
-export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "boulder", includePeakTest = false }) {
+export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder", includePeakTest = false }) {
   if (!bodyWeightKg || bodyWeightKg <= 0) {
     return {
       ok: false,
@@ -315,7 +292,6 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
   // Preserve the warmup ramp's existing reference: peaks from regular
   // training, falling back to the curve. Dedicated maximum tests are a
   // different protocol and must not silently raise all warmup rungs.
-  // BORK also displays this reference, but has no required target load.
   const crusherPeak = getRecentPeakMVC(history, "Crusher");
   const microPeak   = getRecentPeakMVC(history, "Micro");
   const crusherMVC  = crusherPeak ?? targetLoadFromCurve(crusherAmps, 30, 1.0);
@@ -394,7 +370,7 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
   // ── Progressive strength ladder ──
   // The missing on-ramp: short (~7-8s) holds at rising % of MVC, on the
   // climbing-specific grip, bridging perfusion (~45% effort) up toward
-  // the near-max BORK that follows. Graded loading prepares the pulleys
+  // heavier loads. Graded loading prepares the pulleys
   // and ramps motor-unit recruitment; short holds + long rests add
   // readiness with minimal fatigue. Boulder tops near-max; route stops
   // lower (endurance prep doesn't need a max recruitment ramp). Anchored
@@ -404,7 +380,7 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
   if (ladderMVC) {
     const rungs = isRoute
       ? [{ pct: 0.60, sec: 8 }, { pct: 0.72, sec: 8 }]
-      : [{ pct: 0.60, sec: 8 }, { pct: 0.75, sec: 8 }, { pct: 0.88, sec: 7 }];
+      : [{ pct: 0.75, sec: 8 }, { pct: 0.88, sec: 7 }];
     rungs.forEach((rung, i) => {
       steps.push({
         id: `ladder-${ladderGrip.toLowerCase()}-${i}`,
@@ -421,81 +397,14 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
     });
   }
 
-  // ── BORK potentiation (boulder mode only) ──
-  // Now the TOP of a ramp rather than a cold cliff. 5 reps of brief
-  // max-effort pulls on the Micro, no target — pull as hard as possible
-  // ~5s, rest, repeat. PAP window opens 4-10 min later: that's the climb.
-  // referenceMvcKg is two-handed (display ballpark on the gauge).
+  // Optional single-handed Peak Test follows the two-handed ramps.
   if (includePeakTest) {
     steps.push({ id: 'peak-test', title: `${ladderGrip} Peak Test`, type: 'peak_test',
       grip: ladderGrip, intensityLabel: 'Single-handed · 3 rounds · 3s pulls · 60s between rounds',
       restAfterSec: 0 });
-  } else if (!isRoute && microMVC) {
-    steps.push({
-      id: "bork-micro",
-      title: "Micro BORK (potentiation primer)",
-      intensityLabel: "5 × ~5s MVC",
-      type: "bork",
-      grip: "Micro",
-      reps: 5,
-      holdSec: 5,
-      restBetweenSec: 45,
-      restAfterSec: restForGrip(60, "Micro", personalTaus),
-      // Two-handed max reference for the gauge display. BORK has no
-      // target line — the user just pulls max each rep.
-      referenceMvcKg: twoHand(microMVC),
-      description:
-        "Pull as hard as you can for ~5 seconds, rest 45s, repeat 5 times. No target — full effort each rep. CNS primer for hard climbing.",
-    });
   }
 
-  // ── Step 4: Pullup finisher ──
-  // Reps = 40% of estimated UNWEIGHTED max (Epley-converted from your
-  // recent weighted-pullup session if applicable) with a floor of 2.
-  // Default to 5 if no recent pullup data within 30 days.
   const bodyWeightLbs = Math.round(bodyWeightKg * 2.20462 * 10) / 10;
-  const pullupMatch = getRecentMaxPullups(wLog, { daysOld: 30, bodyWeightLbs });
-  const unweightedMax = pullupMatch?.unweightedReps ?? null;
-  const pullupAge = pullupMatch?.ageDays ?? null;
-  const pullupStrict = pullupMatch?.strict ?? false;
-  const sourceWeight = pullupMatch?.sourceWeightLbs ?? 0;
-  const sourceReps = pullupMatch?.sourceReps ?? null;
-
-  const targetReps = unweightedMax
-    ? Math.max(2, Math.round(unweightedMax * 0.4))
-    : 5;
-
-  // Compose the source text for the UI. Show the original weighted set
-  // plus the Epley-derived unweighted estimate so the user can see how
-  // we got the number.
-  let pullupSourceText;
-  if (unweightedMax) {
-    const ageText = pullupAge === 0 ? "today"
-                  : pullupAge === 1 ? "1 day ago"
-                  : `${pullupAge} days ago`;
-    const sourceText = sourceWeight > 0
-      ? `${sourceReps} reps × +${sourceWeight} lbs ${ageText} → ~${unweightedMax} unweighted`
-      : `${sourceReps} reps unweighted ${ageText}`;
-    pullupSourceText = pullupStrict
-      ? sourceText
-      : `${sourceText} (sets not marked done)`;
-  } else {
-    pullupSourceText = "no recent data — using default 5";
-  }
-
-  steps.push({
-    id: "pullup-finisher",
-    title: "Pullup Finisher",
-    intensityLabel: unweightedMax
-      ? `${targetReps} reps × 2 sets · 40% of ~${unweightedMax} unweighted`
-      : `${targetReps} reps × 2 sets · default (no recent pullup data)`,
-    type: "pullup",
-    targetReps,
-    sets: 2,
-    restAfterSec: 60,
-    description:
-      "Heart rate up, lats engaged, full prep. No Tindeq needed — just count reps. Two sets at 40% of your estimated unweighted max.",
-  });
 
   return {
     ok: true,
@@ -506,8 +415,7 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
     mvcSource: {
       // "peak" = derived from peak_force_kg in recent reps (preferred).
       // "curve" = fell back to F(30s) on the three-exp curve.
-      // Reference for the BORK step's display number — BORK has no
-      // target, but the user sees the expected ballpark MVC.
+      // Single-hand references used to set the two-handed ramp loads.
       crusher: crusherSource,
       micro: microSource,
       crusherKg: crusherMVC,
@@ -518,14 +426,6 @@ export function generateWarmupProtocol({ history, wLog, bodyWeightKg, mode = "bo
       // capacity that anchors the perfusion intensities.
       crusherF60Kg: crusherF60,
       microF60Kg: microF60,
-    },
-    pullupSource: {
-      count: unweightedMax,
-      ageDays: pullupAge,
-      strict: pullupStrict,
-      sourceWeightLbs: sourceWeight,
-      sourceReps,
-      sourceText: pullupSourceText,
     },
     steps,
   };

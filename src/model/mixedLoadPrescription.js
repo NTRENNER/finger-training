@@ -5,8 +5,9 @@ import { buildMixedLoadModel, mixedStateBefore, prepareMixedPrediction } from '.
 // support for every duration. Setup cannot predict future recording quality.
 export function mixedTargetReadiness(model, targetTime) {
   if (model?.status !== 'ready') return { status: 'unavailable', reason: model?.reason || 'insufficient_fresh_history' };
-  if (!Number.isFinite(targetTime) || targetTime < model.min_duration_s || targetTime > model.max_duration_s) {
-    return { status: 'unavailable', reason: 'outside_measured_duration_range' };
+  if (!Number.isFinite(targetTime) || targetTime <= 0 || targetTime > 600) return { status: 'unavailable', reason: 'invalid_target_duration' };
+  if (targetTime < model.min_duration_s || targetTime > model.max_duration_s) {
+    return { status: 'limited', reason: 'outside_measured_duration_range' };
   }
   return { status: 'ready' };
 }
@@ -19,20 +20,22 @@ export function mixedPlanReadiness(history, grip, hands, plan, asOf) {
   }));
   const later = Object.values(byHand).flat().filter(s => s.status !== 'opening_hold');
   const ready = later.filter(s => s.status === 'ready').length;
-  return { byHand, status: ready === later.length ? 'ready' : ready ? 'partial' : 'unavailable' };
+  const limited = later.some(s => s.status === 'limited');
+  return { byHand, status: ready === later.length ? 'ready' : ready || limited ? 'partial' : 'unavailable' };
 }
 
 // Keep requested policy separate from the actual decision for this hold.
 export function mixedLoadProtocolFields(requested, adjustment, position) {
   const status = !requested ? 'not_requested' : position === 1 ? 'opening_hold' : adjustment?.status || 'unavailable';
-  const applied = ['adjusted', 'capped_at_original'].includes(status);
+  const timed = ['adjusted', 'capped_at_original'].includes(status);
+  const applied = timed || status === 'adjusted_reference';
   return {
     requested_load_mode: requested ? 'adaptive_targets' : 'fixed_references',
     load_mode: !requested ? 'fixed_references' : position === 1 ? 'opening_reference'
       : applied ? 'adaptive_targets' : 'reference_fallback',
-    duration_reference: applied ? 'approximate_hold_target' : 'fresh_load_reference',
+    duration_reference: timed ? 'approximate_hold_target' : status === 'adjusted_reference' ? 'uncertain_hold_target' : 'fresh_load_reference',
     adjustment_status: status,
-    ...(requested && position > 1 && !applied ? { adjustment_reason: adjustment?.reason || 'unavailable' } : {}),
+    ...(requested && position > 1 && (!applied || status === 'adjusted_reference') ? { adjustment_reason: adjustment?.reason || 'unavailable' } : {}),
   };
 }
 
@@ -48,28 +51,38 @@ export function mixedReadinessModel(model, multiplier = 1) {
 export function prepareAdaptiveMixedPrediction(model, prefix, { baselineKg, targetTime, plannedRestS }) {
   const baseline = Math.round(baselineKg * 10) / 10;
   let load = baseline;
-  const adjustment = { version: 1, status: 'opening_hold', target_s: targetTime,
+  const adjustment = { version: 2, status: 'opening_hold', target_s: targetTime,
     original_load_kg: baseline, rest_basis: 'planned_next_rest' };
   if (prefix.length) {
-    const before = mixedStateBefore(model, prefix, plannedRestS);
+    const before = mixedStateBefore(model, prefix, plannedRestS, true);
     let reason = before.status !== 'ready' ? before.reason : null;
-    if (!reason) reason = mixedTargetReadiness(model, targetTime).reason;
+    const coverage = mixedTargetReadiness(model, targetTime);
+    if (!reason && coverage.status === 'unavailable') reason = coverage.reason;
+    const limited = coverage.status === 'limited';
     if (!reason) {
       const availability = before.state.reduce((sum, v, i) => sum + v * model.weights[i], 0);
-      const candidate = availability * predForceThreeExp(model.amps, targetTime, model.curve_taus);
+      // Outside duration coverage, discount the existing reference instead of
+      // extrapolating the curve or leaving a fresh load unchanged after work.
+      const freshLoad = limited ? baseline : predForceThreeExp(model.amps, targetTime, model.curve_taus);
+      const candidate = before.loadScale * availability * freshLoad;
       if (!Number.isFinite(candidate) || candidate < 0.1 || !(baseline > 0)) {
         reason = 'unusable_load_estimate';
       } else {
         // Do not increase a planned load based on an unvalidated fatigue model.
-        load = Math.min(baseline, Math.round(candidate * 10) / 10);
-        adjustment.status = candidate > baseline ? 'capped_at_original' : 'adjusted';
+        const ceiling = before.missedTargets.length ? Math.max(0.1, Math.round((baseline - 0.1) * 10) / 10) : baseline;
+        load = Math.min(ceiling, Math.round(candidate * 10) / 10);
+        adjustment.status = limited ? 'adjusted_reference' : candidate > baseline && !before.missedTargets.length ? 'capped_at_original' : 'adjusted';
+        if (limited) adjustment.reason = coverage.reason;
+        adjustment.session_load_scale = before.loadScale;
+        adjustment.missed_target_rep_ids = before.missedTargets;
+        adjustment.availability = availability;
         adjustment.unrounded_load_kg = candidate;
       }
     }
     if (reason) Object.assign(adjustment, { status: 'unavailable', reason });
   }
   adjustment.selected_load_kg = load;
-  return { ...prepareMixedPrediction(model, prefix, load, plannedRestS),
+  return { ...prepareMixedPrediction(model, prefix, load, plannedRestS, true),
     mode: 'adaptive_targets', adjustment };
 }
 
@@ -85,6 +98,7 @@ export function mixedAdjustmentText(adjustment) {
     }[adjustment.reason] || 'The available measurements do not support an updated target yet.';
     return `${reason} Automatic target adjustment is unavailable. Showing the original target weight; it may not match the target time after earlier holds.`;
   }
+  if (adjustment.status === 'adjusted_reference') return 'New target weight accounts for earlier holds and rest. Hold time is uncertain beyond your measured range; release at failure.';
   if (adjustment.status === 'capped_at_original') return `Target weight unchanged. You may hold longer than ${adjustment.target_s}s.`;
   return `New target weight aims for about ${adjustment.target_s}s after the planned rest. Pull steadily at this target until failure; the time is an estimate.`;
 }

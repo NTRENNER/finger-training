@@ -15,8 +15,9 @@ user's next pull, so additional recovery is always possible. Single-hand tests
 use three attempts and two rests. Tindeq is required for a measured peak.
 
 In warmup, “Include Peak Test today” is off on every new warmup. When selected,
-it replaces the BORK maximal block after the normal two-handed ramp. Route
-warmup also supports this optional block after its ramp. Normal warmup holds
+it follows the two two-handed strength ramps in either climbing mode. BORK
+and the pull-up finisher have been removed. With Peak Test off, the warmup
+finishes after the second ramp. Normal warmup holds
 remain timed and unsaved. Users see the same hand cue as training. The shared
 Peak Test flow saves each attempt, shows each hand's best valid result, and
 lets the user continue with no forced rest after the last round.

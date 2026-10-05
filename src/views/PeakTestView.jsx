@@ -128,7 +128,7 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
         {h === 'L' ? 'Left' : 'Right'} best two-second force: {bestSustained(h) ? `${fmtW(bestSustained(h), unit)} ${unit}` : 'No verified two-second measurement'}
       </p>)}
       <p>Continue whenever you feel ready.</p>
-      <Btn onClick={onClose}>{source === 'warmup' ? 'Continue warm-up' : 'Done'}</Btn>
+      <Btn onClick={onClose}>{source === 'warmup' ? 'Finish warm-up' : 'Done'}</Btn>
     </Card> : <>
       <Card style={{ textAlign: 'center', padding: '32px 16px' }}>
         <div style={{ color: C.muted, marginBottom: 12 }}>Round {round + 1} of {PEAK_ROUNDS}</div>

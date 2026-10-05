@@ -134,6 +134,20 @@ test('a prediction of zero is scored as an error, not hidden as missing data', (
   expect(report.groups['v2|all']).toMatchObject({ sessions: 1, holds: 1, conditional_mae_s: 20 });
 });
 
+test('session feedback forecasts detect edits to the prior goal without changing legacy fingerprints', () => {
+  for (const feedback of [false, true]) {
+    const first = { ...rep(), target_duration: 160 };
+    const second = rep(2, 15, 70);
+    const prepared = prepareMixedPrediction(model(), [first], 15, 30, feedback);
+    second.force_recording.mixed_load_prediction = completeMixedPrediction(prepared, [first], second);
+    expect(summarizeMixedPredictions([first, second]).excluded.edited_or_missing_prefix).toBeUndefined();
+    first.target_duration = 30;
+    const report = summarizeMixedPredictions([first, second]);
+    expect(report.excluded.edited_or_missing_prefix ?? 0).toBe(feedback ? 1 : 0);
+    expect(report.groups['v2|all']?.holds ?? 0).toBe(feedback ? 0 : 1);
+  }
+});
+
 test('session-weighted evaluation does not let a workout with more holds dominate', () => {
   const m = model(), first = saved(m, [], rep());
   const second = saved(m, [first], rep(2, 15, 70));

@@ -733,7 +733,7 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
               }}>
                 {Math.round(displayedRepTime(lastRep.actualTime, lastRep.forceRecording))}s
               </span>
-              <div style={{ fontSize: 11, color: C.muted }}>{nextDomain ? 'fresh reference' : 'target'} {lastRep.targetTime}s</div>
+              <div style={{ fontSize: 11, color: C.muted }}>{nextDomain && !lastRep.forceRecording?.session_protocol?.target_outcome ? 'fresh reference' : 'target'} {lastRep.targetTime}s</div>
             </div>
             {lastRep.avgForce > 0 && (
               <div>
@@ -752,6 +752,9 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
               </div>
             )}
           </div>
+          {['met', 'missed'].includes(lastRep.forceRecording?.session_protocol?.target_outcome) && <p style={{ color: lastRep.forceRecording.session_protocol.target_outcome === 'met' ? C.green : C.orange }}>
+            {lastRep.forceRecording.session_protocol.target_outcome === 'met' ? 'Target met' : 'Target missed'}
+          </p>}
           <RepResultDetails rep={{ failure_valid: lastRep.failureValid, end_reason: lastRep.endReason,
             force_recording: lastRep.forceRecording, load_provenance: lastRep.loadProvenance }}>
             {lastRep.endReason === "equipment_interruption" && <InterruptedBatteryNote battery={lastRep.forceRecording?.battery} />}
@@ -1104,11 +1107,22 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
     [refWeights, activeHand]
   );
 
+  // Explicit pre-pull selection; never infer a new target from sagging force.
+  // The program prescription stays intact, while the chosen target controls
+  // acquisition, averaging and force-loss detection for this attempt.
+  const [targetInput, setTargetInput] = useState('');
+  const inputKg = fromDisp(Number(targetInput), unit);
+  const manualKg = targetInput.trim() && Number.isFinite(inputKg) && inputKg > 0 && inputKg < 200 ? inputKg : null;
+  const targetKg = manualKg ?? suggestedKg;
+  const chosenTargetRef = useRef(null);
+  chosenTargetRef.current = manualKg;
+  const repManualKgRef = useRef(null);
+
   // Keep Tindeq's target ref in sync so the force gauge & auto-fail threshold
-  // reflect the program recommendation during the rep.
+  // reflect the explicitly chosen target during the rep.
   useEffect(() => {
-    if (visible) tindeq.targetKgRef.current = suggestedKg;
-  }, [tindeq.targetKgRef, suggestedKg, visible]);
+    if (visible) tindeq.targetKgRef.current = targetKg;
+  }, [tindeq.targetKgRef, targetKg, visible]);
 
   const [startError, setStartError] = useState(null);
   const [streamAttempt, setStreamAttempt] = useState(0);
@@ -1134,7 +1148,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
     setElapsed(0);
     const completed = finalizeDeviceActivity(stats, startTimeRef.current ?? Date.now(), Date.now());
     startTimeRef.current = null;
-    onRepDone({ ...completed, failed: false, endSession: stats.endSession === true });
+    onRepDone({ ...completed, manualLoadKg: repManualKgRef.current, failed: false, endSession: stats.endSession === true });
   }, [onRepDone]);
 
   const finishAttempt = useCallback(({ endSession = false, targetNotReached = false } = {}) => {
@@ -1146,6 +1160,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
   finishAttemptRef.current = finishAttempt;
 
   const handleRepStart = useCallback(() => {
+    repManualKgRef.current = chosenTargetRef.current;
     repEndedRef.current = false;  // re-arm the end guard for this rep
     startTimeRef.current = Date.now();
     setRepActive(true);
@@ -1159,7 +1174,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
   const streamAvailable = tindeq.connected || tindeq.reconnecting;
   useEffect(() => {
     if (!streamAvailable || !visible) return;
-    tindeq.targetKgRef.current = suggestedKg;
+    tindeq.targetKgRef.current = targetKg;
     let disposed = false;
     setStartError(null);
     Promise.resolve(tindeq.startAutoDetect(handleRepStart, handleRepEnd)).catch(() => {
@@ -1178,7 +1193,9 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
   }, [streamAvailable, streamAttempt, visible]); // re-arm only on the visible training tab
 
   const holdSeconds = Number(creditedSeconds(tindeq.forceLoss, elapsed));
-  const targetReached = !config.mixedDomainPlan && holdSeconds >= config.targetTime;
+  const targetReached = holdSeconds >= config.targetTime;
+  const timeLabel = config.mixedDomainPlan && !['adjusted', 'capped_at_original', 'adjusted_reference'].includes(config.mixedLoadAdjustment?.status)
+    ? 'Fresh reference' : 'Target';
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
@@ -1198,13 +1215,13 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <MixedHoldInfo config={config} currentRep={currentRep} />
       <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
-      {suggestedKg > 0 && <p>Brief force adjustments are allowed. A sustained loss of force ends the hold; release the handle to begin rest.</p>}
+      {targetKg > 0 && <p>Brief force adjustments are allowed. A sustained loss of force ends the hold; release the handle to begin rest.</p>}
       {startError && <div role="alert" style={{ color: C.red }}>
         <p>{startError}</p>
         <Btn onClick={() => setStreamAttempt(attempt => attempt + 1)}>Retry Tindeq</Btn>
       </div>}
       {repActive && <Btn onClick={() => finishAttempt()}>Rep interrupted</Btn>}
-      {repActive && suggestedKg > 0 && tindeq.forceLoss?.startTs == null && <div>
+      {repActive && targetKg > 0 && tindeq.forceLoss?.startTs == null && <div>
         <p>The target has not been reached. You can finish this attempt and choose a manageable target.</p>
         <Btn onClick={() => finishAttempt({ targetNotReached: true })}>Finish attempt — target not reached</Btn>
       </div>}
@@ -1225,8 +1242,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
               {holdSeconds.toFixed(1)}s
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
-              {config.mixedDomainPlan ? 'Fresh reference' : 'target'} {config.targetTime}s
-              {targetReached && tindeq.forceLoss?.status !== 'complete' && <span style={{ color: C.green, marginLeft: 8 }}>Target reached — keep pulling to failure</span>}
+              {timeLabel} {config.targetTime}s
+              {targetReached && !config.mixedDomainPlan && tindeq.forceLoss?.status !== 'complete' && <span style={{ color: C.green, marginLeft: 8 }}>Target reached — keep pulling to failure</span>}
             </div>
           </>
         ) : (
@@ -1238,14 +1255,14 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
               fontSize: 11, color: C.muted, letterSpacing: 1.2,
               textTransform: "uppercase", marginBottom: 2,
             }}>
-              Program target
+              {manualKg != null ? "Your target" : "Program target"}
             </div>
             <div style={{
               fontSize: 44, fontWeight: 900, color: C.blue,
               lineHeight: 1, marginBottom: 14,
               fontVariantNumeric: "tabular-nums",
             }}>
-              {suggestedKg != null ? `${fmtW(suggestedKg, unit)} ${unit}` : "—"}
+              {targetKg != null ? `${fmtW(targetKg, unit)} ${unit}` : "—"}
             </div>
 
             <div style={{ fontSize: 40, marginBottom: 8 }}>⬇</div>
@@ -1253,12 +1270,25 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
               {tindeq.releaseCheckRequired || tindeq.zeroing ? "Release and zero the handle before your next pull" : tindeq.awaitingRelease ? "Release the handle fully before your next pull" : `Pull to begin rep ${currentRep + 1}`}
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
-              {config.mixedDomainPlan ? 'Fresh reference' : 'Target'}: <strong>{config.targetTime}s</strong> · Release when done
+              {timeLabel}: <strong>{config.targetTime}s</strong> · Release when done
             </div>
           </>
         )}
       </Card>
 
+      {!repActive && <details style={{ marginTop: 12 }}>
+        <summary style={{ cursor: 'pointer', color: C.blue }}>Adjust target weight</summary>
+        <label style={{ display: 'block', marginTop: 12 }}>
+          Target weight ({unit})
+          <input type="number" min="0" step="any" inputMode="decimal"
+            value={targetInput} placeholder={suggestedKg != null ? fmtW(suggestedKg, unit) : ''}
+            onChange={e => { if (repEndedRef.current) setTargetInput(e.target.value); }}
+            style={{ display: 'block', width: '100%', boxSizing: 'border-box', marginTop: 6,
+              padding: 12, borderRadius: 8, background: C.bg, color: C.text, border: `1px solid ${C.border}`, fontSize: 18 }} />
+        </label>
+        <p style={{ color: C.muted }}>Choose before pulling. This target applies to this hold; the original recommendation is kept in your history.</p>
+        {manualKg != null && <Btn small onClick={() => setTargetInput('')}>Use program target</Btn>}
+      </details>}
       {!repActive && <UnloadedZeroCheck tindeq={tindeq} />}
 
       {/* Live force */}
@@ -1268,7 +1298,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
             force={tindeq.force}
             avg={tindeq.avgForce}
             peak={tindeq.peak}
-            targetKg={suggestedKg}
+            targetKg={targetKg}
             unit={unit}
           />
         </Card>

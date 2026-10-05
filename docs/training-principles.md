@@ -75,8 +75,10 @@ unchanged while the separate exposure record becomes available for evaluation.
 ## Chaos Machine
 
 Automatic adjustment is part of the optional Chaos Machine. Setup checks support
-per hand and later hold duration; unsupported holds remain available at clearly
-labeled reference targets. Only a fully supported preview shows the conditional
+per hand and later hold duration. Durations outside measured coverage use a
+labeled approximate reduction of the reference load; missing models still fall
+back explicitly. Usable missed targets lower the next target for that hand,
+with goal attainment kept separate from measurement validity. Only a fully supported preview shows the conditional
 time if all targets are reached. During the session, adjustments also require
 usable measurements and rest. Saved records distinguish requested policy from
 the actual per-hold decision without rewriting history. The protocol fields,
