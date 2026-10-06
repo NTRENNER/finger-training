@@ -1,3 +1,4 @@
+import { markWorkoutPending, syncWorkoutSessions } from '../lib/workoutSync.js';
 import { persistHistory } from '../lib/historyPersistence.js';
 // ─────────────────────────────────────────────────────────────
 // useRepHistory — rep-log state + cloud reconcile + CRUD
@@ -33,15 +34,12 @@ import { supabase } from "../lib/supabase.js";
 import {
   loadLS, saveLS,
   LS_HISTORY_KEY, LS_REP_DELETED_KEY,
-  LS_WORKOUT_LOG_KEY, LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
 } from "../lib/storage.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
   pushRepTombstones, fetchRepTombstoneIds,
   pushRepSlotTombstones, fetchRepSlotTombstoneKeys,
   fetchSessionTombstoneIds,
-  pushWorkoutSession, fetchWorkoutSessions,
-  fetchWorkoutSessionTombstoneIds,
   enqueueRepUpdate, applyPendingUpdates, flushUpdateQueue,
   LS_QUEUE_KEY,
 } from "../lib/sync.js";
@@ -428,136 +426,17 @@ export function useRepHistory({
 
   }, [user, syncSignal]);
 
-  // ── Workout-session sync ────────────────────────────────────
-  // Lives here (rather than in a separate hook) because it shares
-  // the same auth-driven sync lifecycle as the rep reconcile. Same
-  // pattern: on sign-in, fetch the cloud's workout_sessions, merge
-  // anything new into LS_WORKOUT_LOG_KEY (skipping tombstoned ids),
-  // and push any local-only sessions up.
-  const markSynced = (id) => {
-    if (!id) return;
-    const s = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
-    s.add(id);
-    saveLS(LS_WORKOUT_SYNCED_KEY, [...s]);
-  };
-
-  // Push any local workout sessions whose id isn't marked synced.
-  // Sister-helper to flushQueue for reps — workout sessions don't have
-  // their own persistent retry queue (unlike reps), so we piggyback on
-  // every save attempt to retry stragglers. Returns the number of
-  // sessions successfully pushed during this call (mostly diagnostic).
-  const flushUnsyncedWorkoutSessions = useCallback(async () => {
-    if (!user) return 0;
-    const local = loadLS(LS_WORKOUT_LOG_KEY) || [];
-    const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
-    const deleted = new Set(loadLS(LS_WORKOUT_DELETED_KEY) || []);
-    let pushed = 0;
-    let touched = false;
-    for (const s of local) {
-      if (!s?.id) continue;
-      if (synced.has(s.id)) continue;
-      if (deleted.has(s.id)) continue;
-      const ok = await pushWorkoutSession(s);
-      if (ok) { synced.add(s.id); pushed++; touched = true; }
-    }
-    if (touched) saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
-    return pushed;
+  // Refresh existing workouts as well as new ones. Pending edits stay local
+  // until their exact contents have been acknowledged by the server.
+  const handleWorkoutSessionSaved = useCallback(async (session) => {
+    markWorkoutPending(session?.id);
+    if (user) await syncWorkoutSessions(user.id);
   }, [user]);
 
-  // Push the just-saved session, then opportunistically retry any older
-  // unsynced ones. Before this retry, a single failed push (network
-  // blip, transient auth, etc.) would orphan the session in localStorage
-  // until the next sign-in event re-ran the reconcile useEffect — long
-  // enough that the rotation pointer would drift between devices.
-  // Reps don't have this problem because their failed pushes hit
-  // enqueueReps/flushQueue. Workout sessions piggyback on saves instead.
-  const handleWorkoutSessionSaved = useCallback(async (session) => {
-    if (!user) return;
-    const ok = await pushWorkoutSession(session);
-    if (ok) markSynced(session.id);
-    await flushUnsyncedWorkoutSessions();
-  }, [user, flushUnsyncedWorkoutSessions]);
-
-  // Retry on tab refocus + network online. Both are cheap "we might
-  // have just come back from being unreachable" signals — exactly when
-  // a queued push deserves another shot. The reconcile useEffect below
-  // already covers the sign-in path.
-  //
-  // Both handlers are named (not anonymous arrows) so the cleanup
-  // can pass the same reference to removeEventListener. An earlier
-  // version used an inline arrow on visibilitychange and silently
-  // accumulated a new listener on every user transition.
   useEffect(() => {
-    if (!user) return;
-    const retry = () => { flushUnsyncedWorkoutSessions(); };
-    const onVisible = () => {
-      if (document.visibilityState === "visible") retry();
-    };
-    window.addEventListener("online", retry);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("online", retry);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [user, flushUnsyncedWorkoutSessions]);
-
-  useEffect(() => {
-    if (!user) return;
-    fetchWorkoutSessions().then(async (remote) => {
-      const local = loadLS(LS_WORKOUT_LOG_KEY) || [];
-
-      // Mark all remote sessions as synced
-      const remoteIds = new Set((remote || []).map(s => s.id).filter(Boolean));
-      const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
-      remoteIds.forEach(id => synced.add(id));
-
-      // Union the per-device tombstone set with the SYNCED
-      // workout_session_tombstones table. The per-device set only
-      // protects the device the delete happened on; every other
-      // device saw the session "missing from cloud" and re-pushed it
-      // below — the deterministic delete-resurrection bug that
-      // rep_tombstones fixed for reps. Mirror the cloud set into LS
-      // so subsequent saves/flushes see the union without refetching.
-      // (null = fetch error → fall back to local-only, same
-      // convention as the rep tombstone fetches.)
-      const cloudDeleted = await fetchWorkoutSessionTombstoneIds();
-      const deletedIds = new Set([
-        ...(loadLS(LS_WORKOUT_DELETED_KEY) || []),
-        ...(cloudDeleted || []),
-      ]);
-      if (cloudDeleted && cloudDeleted.length > 0) {
-        saveLS(LS_WORKOUT_DELETED_KEY, [...deletedIds]);
-      }
-
-      // Merge any remote sessions not yet in local, skipping tombstoned
-      // deletions. Also SCRUB tombstoned sessions already sitting in
-      // local (deleted on another device) — without this they linger
-      // in this device's log forever.
-      const localIds = new Set(local.map(s => s.id).filter(Boolean));
-      const localScrubbed = local.filter(s => !(s.id && deletedIds.has(s.id)));
-      const merged = [...localScrubbed, ...(remote || []).filter(s => !localIds.has(s.id) && !deletedIds.has(s.id))];
-      if (merged.length !== local.length) saveLS(LS_WORKOUT_LOG_KEY, merged);
-
-      // ── One-time migration: push local sessions missing from Supabase ──
-      // Assign IDs to old sessions that never got one, then push all unsynced
-      let changed = false;
-      const genId = () => { try { return crypto.randomUUID(); } catch { return `ws_${Date.now()}_${Math.random().toString(36).slice(2,9)}`; } };
-      const toMigrate = merged.map(s => {
-        if (!s.id) { changed = true; return { ...s, id: genId() }; }
-        return s;
-      });
-      if (changed) saveLS(LS_WORKOUT_LOG_KEY, toMigrate);
-
-      for (const s of toMigrate) {
-        if (!remoteIds.has(s.id) && !deletedIds.has(s.id)) {
-          const ok = await pushWorkoutSession(s);
-          if (ok) synced.add(s.id);
-        }
-      }
-
-      saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
+    if (user) syncWorkoutSessions(user.id).catch(error => {
+      console.warn("Workout sync:", error?.message);
     });
-
   }, [user, syncSignal]);
 
   // ── CRUD ────────────────────────────────────────────────────

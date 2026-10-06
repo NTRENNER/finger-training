@@ -1,3 +1,4 @@
+import { markWorkoutPending, syncWorkoutSessions } from '../lib/workoutSync.js';
 // ─────────────────────────────────────────────────────────────
 // WORKOUT TAB
 // ─────────────────────────────────────────────────────────────
@@ -56,7 +57,7 @@ import {
 } from "../lib/storage.js";
 import { DELOAD_WEEK_DAYS } from "../model/deload.js";
 import {
-  pushWorkoutSession, deleteWorkoutSession,
+  deleteWorkoutSession,
 } from "../lib/sync.js";
 import {
   DEFAULT_TRIP, weeksToTrip, tripCountdown,
@@ -124,9 +125,8 @@ export function WorkoutTab({
   // second run (remount) finds no "D" sessions left and no-ops before
   // touching the cloud. The re-push goes through pushWorkoutSession's
   // id-keyed upsert, so a device that already migrated makes it a
-  // harmless no-op. Failures are logged by the sync helper and don't
-  // block the UI — the local rewrite already landed, so history reads
-  // correctly immediately; cloud reconciles whenever sync next succeeds.
+  // harmless no-op. Mark migrated rows pending so a failed upload is
+  // retried; the local rewrite is available immediately.
   const dToCMigrationRan = useRef(false);
   useEffect(() => {
     if (dToCMigrationRan.current) return;
@@ -139,9 +139,10 @@ export function WorkoutTab({
     saveLS(LS_WORKOUT_LOG_KEY, migrated);
     for (let i = 0; i < raw.length; i++) {
       if (raw[i]?.workoutId === "D") {
-        pushWorkoutSession(migrated[i]).catch(() => {});
+        markWorkoutPending(migrated[i].id);
       }
     }
+    syncWorkoutSessions().catch(() => {});
   }, []);
   // pickedId: null means "follow recommendation"; otherwise an
   // explicit workout selection.

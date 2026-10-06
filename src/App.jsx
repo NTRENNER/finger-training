@@ -1,3 +1,4 @@
+import { syncWorkoutSessions } from './lib/workoutSync.js';
 import { detectPlateaus, plateauEnrollmentEvidence } from './model/plateau.js';
 import { betaEligibility } from './model/betaEligibility.js';
 import { ResearchView } from "./views/ResearchView.jsx";
@@ -34,8 +35,6 @@ import { AnalysisContainer } from "./views/AnalysisContainer.jsx";
 import {
   loadLS, saveLS, getStorageUserId,
   LS_HISTORY_KEY, LS_REP_DELETED_KEY,
-  LS_WORKOUT_LOG_KEY,
-  LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
 } from "./lib/storage.js";
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
@@ -57,7 +56,7 @@ import { usePendingSyncCount } from "./hooks/usePendingSyncCount.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue, LS_QUEUE_KEY,
   fetchRepTombstoneIds, fetchRepSlotTombstoneKeys, fetchSessionTombstoneIds,
-  fetchWorkoutSessions, deleteWorkoutSession,
+  deleteWorkoutSession,
 } from "./lib/sync.js";
 
 // Model layer — pure JS, testable in isolation. See src/model/*.js.
@@ -465,26 +464,8 @@ export default function App() {
         }
       }
 
-      // Workout sessions — merge into localStorage (skipping tombstoned
-      // ids). These saveLS calls notify the reactive layer (see
-      // storage.js), so every mounted useLSValue subscriber — the
-      // Workout tab, workout history, heatmap, analysis views —
-      // re-renders with the merged log immediately. This used to end
-      // in a delayed window.location.reload() because views only read
-      // LS on mount; the reload is gone (it also nuked any in-progress
-      // session state).
-      const remote = await fetchWorkoutSessions();
-      if (remote) {
-        const local      = loadLS(LS_WORKOUT_LOG_KEY) || [];
-        const localIds   = new Set(local.map(s => s.id).filter(Boolean));
-        const deletedIds = new Set(loadLS(LS_WORKOUT_DELETED_KEY) || []);
-        const additions  = remote.filter(s => !localIds.has(s.id) && !deletedIds.has(s.id));
-        if (additions.length > 0) {
-          saveLS(LS_WORKOUT_LOG_KEY, [...local, ...additions]);
-        }
-        const synced = new Set(loadLS(LS_WORKOUT_SYNCED_KEY) || []);
-        remote.forEach(s => s.id && synced.add(s.id));
-        saveLS(LS_WORKOUT_SYNCED_KEY, [...synced]);
+      if (!await syncWorkoutSessions(user.id)) {
+        throw new Error("Workout sync is still pending");
       }
 
       setLastPulledAt(Date.now());
@@ -612,7 +593,7 @@ export default function App() {
           <span>
             {!isOnline
               ? `Offline. Changes stay on this device${pendingSyncCount > 0 ? ` (${pendingSyncCount} waiting)` : ""} and sync when connected.`
-              : `${pendingSyncCount} change${pendingSyncCount !== 1 ? "s are" : " is"} waiting to sync.${user ? " Retrying…" : " Sign in to sync."}`}
+              : `${pendingSyncCount} change${pendingSyncCount !== 1 ? "s are" : " is"} waiting to sync.${user ? " Saved on this device." : " Sign in to sync."}`}
           </span>
           {user && isOnline && pendingSyncCount > 0 && (
             <button onClick={retrySync} style={{

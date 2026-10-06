@@ -32,10 +32,15 @@ export function useConnectivity() {
       retryTimer = null;
     };
 
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && readOnlineState()) handleOnline();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
     return () => {
       clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
