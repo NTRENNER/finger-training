@@ -1,3 +1,4 @@
+import { fetchAllUserRows } from './fetchAllUserRows.js';
 // ─────────────────────────────────────────────────────────────
 // SUPABASE SYNC HELPERS
 // ─────────────────────────────────────────────────────────────
@@ -79,11 +80,9 @@ export async function pushWorkoutSession(session) {
 }
 
 export async function fetchWorkoutSessions() {
-  const { data, error } = await supabase
-    .from("workout_sessions")
-    .select("*")
-    .order("date", { ascending: false });
-  if (error) { console.warn("Supabase workout fetch:", error.message); return null; }
+  const data = await fetchAllUserRows('workout_sessions');
+  if (!data) return null;
+  data.sort((a, b) => String(b.date).localeCompare(String(a.date)));
   return (data || []).map(s => ({
     id:              s.id,
     date:            s.date,
@@ -536,9 +535,9 @@ export async function flushUpdateQueue() {
 // Defensive defaults so a row with a missing field doesn't crash
 // downstream model code that expects numbers.
 export async function fetchReps() {
-  const { data, error } = await supabase
-    .from("reps").select("*").order("date", { ascending: false });
-  if (error) { console.warn("Supabase fetch:", error.message); return null; }
+  const data = await fetchAllUserRows('reps');
+  if (!data) return null;
+  data.sort((a, b) => String(b.date).localeCompare(String(a.date)));
   return (data || []).map(r => ({
     id: r.id, date: r.date ?? today(),
     grip: r.grip ?? "", hand: r.hand ?? "L",

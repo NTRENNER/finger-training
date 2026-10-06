@@ -7,7 +7,8 @@ import { buildPredictionModels, preparePrediction, completePrediction, summarize
 import { buildThreeExpPriors } from '../../model/threeExp.js';
 import { recoveryRows } from '../../testHelpers/recoveryRows.js';
 const mockOrder = jest.fn();
-jest.mock('../supabase.js', () => ({supabase: {from: () => ({select: () => ({order: (...args) => mockOrder(...args)})})}}));
+jest.mock('../fetchAllUserRows.js', () => ({ fetchAllUserRows: async () => (await mockOrder()).data }));
+jest.mock('../supabase.js', () => ({ supabase: {} }));
 
 test('regular forecast and scores survive the actual rep cloud mapping', async () => {
   const history = Array.from({ length: 6 }, (_, i) => recoveryRows('legacy', {
