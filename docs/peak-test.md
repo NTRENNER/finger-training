@@ -14,13 +14,30 @@ requires release before another can begin. After rest the app waits for the
 user's next pull, so additional recovery is always possible. Single-hand tests
 use three attempts and two rests. Tindeq is required for a measured peak.
 
-In warmup, “Include Peak Test today” is off on every new warmup. When selected,
-it follows the two two-handed strength ramps in either climbing mode. BORK
+In warmup, separate “Crusher Max Test” and “Micro Max Test” toggles are off on
+every new warmup. Either or both can be selected for grips with warmup data.
+Selected tests follow the two two-handed strength ramps in either climbing mode.
+The grip already attached is tested first; a swap prompt precedes the other test.
+Each grip receives its own three rounds and saved test session. The tests share
+the day's starting-hand order. BORK
 and the pull-up finisher have been removed. With Peak Test off, the warmup
 finishes after the second ramp. Normal warmup holds
 remain timed and unsaved. Users see the same hand cue as training. The shared
 Peak Test flow saves each attempt, shows each hand's best valid result, and
 lets the user continue with no forced rest after the last round.
+
+During each attempt the active hand's previous best Max is shown, using the
+same all-history, at-least-two-second record calculation as Analysis. That
+reference is frozen when the grip's test opens; newly saved attempts appear
+in the separate current-test results rather than replacing “previous best.”
+No qualifying history displays “No previous max.”
+
+Boulder retains two short strength ramps, explicitly labeled 1 of 2 and 2 of 2,
+after the longer warmup holds. Crusher has 45s and 30s holds; Micro has a 45s
+hold followed by 8s and 7s ramps. Route mode uses 45s/45s Crusher holds and
+a 45s Micro hold followed by two 8s ramps. Rests remain scaled per grip from
+the existing recovery estimate. Thus elapsed time can differ by grip without
+indicating that Micro requires more minutes of continuous pulling.
 
 New tests use force_recording.session_protocol version 2 with id peak_test,
 source warmup/standalone, capacity_eligible false, peak_valid, failure_valid

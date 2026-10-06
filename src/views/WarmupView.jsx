@@ -8,7 +8,7 @@ import { TindeqBattery } from "./cards/TindeqBattery.jsx";
 // src/model/warmup.js. Two protocol modes:
 //
 //   - boulder: perfusion holds and two heavier strength ramps
-//   - route: longer Micro perfusion hold and two lighter strength ramps
+//   - route: 45s perfusion holds and two lighter strength ramps
 // Both modes optionally finish with a single-handed Peak Test.
 //
 // The preview screen offers a pill toggle between modes; selection
@@ -88,11 +88,12 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     saveLS(LS_WARMUP_MODE_KEY, next);
   };
 
-  const [includePeakTest, setIncludePeakTest] = useState(false);
+  const [peakTestGrips, setPeakTestGrips] = useState([]);
+  const includePeakTest = peakTestGrips.length > 0;
   const [frozenProtocol, setFrozenProtocol] = useState(null);
   const previewProtocol = useMemo(
-    () => generateWarmupProtocol({ history, bodyWeightKg, mode, includePeakTest }),
-    [history, bodyWeightKg, mode, includePeakTest]
+    () => generateWarmupProtocol({ history, bodyWeightKg, mode, peakTestGrips }),
+    [history, bodyWeightKg, mode, peakTestGrips]
   );
 
   const protocol = frozenProtocol || previewProtocol;
@@ -266,17 +267,11 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
       changePhase("done");
       return;
     }
-    if (step.type === "hang") {
-      // If switching from one grip to another (e.g. Crusher → Micro),
-      // insert a swap-prompt before arming so the user has time to
-      // change which gripper the Tindeq is mounted on.
-      const prevStep = steps[idx - 1];
-      const prevGrip = prevStep?.type === "hang" ? prevStep.grip : null;
-      if (prevGrip && prevGrip !== step.grip) {
-        changePhase("swap-prompt");
-      } else {
-        changePhase("hang-armed");
-      }
+    const prevGrip = steps[idx - 1]?.grip;
+    if (prevGrip && prevGrip !== step.grip) {
+      changePhase("swap-prompt");
+    } else if (step.type === "hang") {
+      changePhase("hang-armed");
     } else if (step.type === "peak_test") {
       changePhase("peak-test");
     }
@@ -316,8 +311,8 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   }
 
   function confirmSwap() {
-    // After swap-prompt, move on into the hang for the new grip.
-    changePhase("hang-armed");
+    // The new grip may begin a two-handed hold or its single-hand test.
+    changePhase(currentStep.type === "peak_test" ? "peak-test" : "hang-armed");
   }
 
   // ── RENDER: PREVIEW ──
@@ -355,8 +350,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         </div>
         <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
           Timed two-handed holds, progressing from lighter to heavier loads.
-          {includePeakTest && " Includes a single-handed Peak Test after the ramps."}
-          {mode === "route" && " Includes a longer Micro hold to prepare for routes."}
+          {includePeakTest && " Includes your selected single-handed Peak Tests after the ramps."}
           {" Connect the Crusher first; you'll be prompted to swap to the Micro mid-warmup."}
         </div>
         {protocol.estimatedGrips?.length > 0 && <p role="status" style={{ color: C.yellow }}>
@@ -366,9 +360,11 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
             Persists to LS_WARMUP_MODE_KEY. */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           {modePill("boulder", "🪨 Bouldering", "Progressive holds and two strength ramps.")}
-          {modePill("route", "🧗 Routes", "Progressive holds and a longer Micro hold for routes.")}
+          {modePill("route", "🧗 Routes", "Progressive holds and two lighter strength ramps.")}
         </div>
-        <Toggle label="Include Peak Test today" checked={includePeakTest} onChange={setIncludePeakTest} />
+        {['Crusher', 'Micro'].map(grip => <Toggle key={grip} label={`${grip} Max Test`}
+          checked={peakTestGrips.includes(grip)} disabled={!protocol.availablePeakGrips?.includes(grip)}
+          onChange={checked => setPeakTestGrips(grips => checked ? [...grips, grip] : grips.filter(g => g !== grip))} />)}
         {includePeakTest && <p style={{ color: C.muted }}>Three 3-second pulls per hand, alternating hands. Rest 60 seconds between rounds. Only the test measurements are saved.</p>}
         <div style={{ marginBottom: 16 }}>
           {steps.map((s, i) => (
@@ -460,8 +456,9 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   }
 
   if (phase === 'peak-test') {
-    return <PeakTestView visible={visible} grip={currentStep.grip} history={history} tindeq={tindeq}
-      addReps={addReps} unit={unit} source="warmup" onClose={advanceToNextStep} />;
+    return <PeakTestView key={currentStep.id} visible={visible} grip={currentStep.grip} history={history} tindeq={tindeq}
+      addReps={addReps} unit={unit} source="warmup" onClose={advanceToNextStep}
+      completionLabel={stepIdx < steps.length - 1 ? 'Continue warm-up' : 'Finish warm-up'} />;
   }
 
   // ── RENDER: NEEDS-TINDEQ (fallback for mid-warmup disconnect) ──
@@ -477,7 +474,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     );
   }
 
-  const stageDetail = `${currentStep?.grip} · Both hands`;
+  const stageDetail = `${currentStep?.grip} · ${currentStep?.type === 'peak_test' ? 'Single-handed' : 'Both hands'}`;
   const stage = children => <WarmupStage step={currentStep} index={stepIdx} total={steps.length} detail={stageDetail}><TindeqBattery battery={tindeq?.battery} connected={tindeq?.connected} warningOnly />{children}</WarmupStage>;
   const actions = (primary, skip = true) => <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 16 }}>
     {primary}

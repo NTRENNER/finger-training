@@ -8,14 +8,14 @@ import { isValidFailureRep, isCapacityEvidenceRep, isNominalPrescriptionRep } fr
 //
 // Two modes:
 //   - 'boulder' (default): perfusion + two heavier strength ramps
-//   - 'route':             longer perfusion + two lighter strength ramps
+//   - 'route':             45s perfusion holds + two lighter strength ramps
 //
 // Sports-science skeleton:
 //   - Perfusion phase: sustained sub-failure holds anchored to F(60s),
 //     not peak. F(60s) is what the user can hold for ~60s before
 //     failing — their "second rep" sustainable level. Intensities at
 //     70-80% of F(60s) sit well below failure for the prescribed
-//     hold (30-60s), so the climber finishes each rep with margin.
+//     hold (30-45s), so the climber finishes each rep with margin.
 //     Raises tissue temp, increases blood flow, mobilizes glycogen
 //     WITHOUT fatiguing the contractile machinery. The earlier
 //     protocol (60% × peak) was actually a near-failure load for the
@@ -23,7 +23,7 @@ import { isValidFailureRep, isCapacityEvidenceRep, isNominalPrescriptionRep } fr
 //
 //   Both modes finish after two strength ramps, with an optional
 //   single-handed Peak Test as the only maximum-effort block.
-//   Route mode extends the Micro perfusion hold to 60s.
+//   Both modes use a 45s long hold for each grip.
 //
 // Tindeq-driven design: each hang step prescribes a target LOAD (in kg)
 // derived from the curve at a fixed reference time, and a target HOLD
@@ -266,11 +266,13 @@ function getRecentPeakMVC(history, grip, daysOld = 90) {
  *   { id, title, intensityLabel, type: 'hang',
  *     grip, targetLoadKg, targetSec, restAfterSec, description }
  *
- * Optional final Peak Test step:
+ * @param {string[]} [args.peakTestGrips=[]] - independently selected Crusher/Micro tests
+ *
+ * Optional final Peak Test steps:
  *   { id, title, intensityLabel, type: 'peak_test', grip, restAfterSec: 0 }
  *
  */
-export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder", includePeakTest = false }) {
+export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder", peakTestGrips = [] }) {
   if (!bodyWeightKg || bodyWeightKg <= 0) {
     return {
       ok: false,
@@ -358,12 +360,10 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
       intensityLabel: "Perfusion · ~50% effort",
       type: "hang",
       grip: "Micro",
-      targetLoadKg: Math.max(1, twoHand(marginLoadOneHand(microAmps, isRoute ? 60 : 40, 0.50))),
-      targetSec: isRoute ? 60 : 40,
+      targetLoadKg: Math.max(1, twoHand(marginLoadOneHand(microAmps, 45, 0.50))),
+      targetSec: 45,
       restAfterSec: restForGrip(60, "Micro", personalTaus),
-      description: isRoute
-        ? "Swap the Tindeq to the Micro gripper. Longer hold on the small edge to warm the climbing-specific finger position for sustained climbing."
-        : "Swap the Tindeq to the Micro gripper. Warms the climbing-specific finger position before the strength ramp.",
+      description: "Swap the Tindeq to the Micro gripper. Warms the climbing-specific finger position before the strength ramp.",
     });
   }
 
@@ -384,7 +384,7 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
     rungs.forEach((rung, i) => {
       steps.push({
         id: `ladder-${ladderGrip.toLowerCase()}-${i}`,
-        title: `Two-Handed ${ladderGrip} · ramp`,
+        title: `Two-Handed ${ladderGrip} · ramp ${i + 1} of ${rungs.length}`,
         intensityLabel: `Strength ramp · ${Math.round(rung.pct * 100)}% MVC`,
         type: "hang",
         grip: ladderGrip,
@@ -397,11 +397,13 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
     });
   }
 
-  // Optional single-handed Peak Test follows the two-handed ramps.
-  if (includePeakTest) {
-    steps.push({ id: 'peak-test', title: `${ladderGrip} Peak Test`, type: 'peak_test',
-      grip: ladderGrip, intensityLabel: 'Single-handed · 3 rounds · 3s pulls · 60s between rounds',
-      restAfterSec: 0 });
+  // Test the grip already attached first, then swap once if both are selected.
+  // Only offer tests for grips included in this warmup.
+  const availablePeakGrips = microAmps ? ['Crusher', 'Micro'] : ['Crusher'];
+  const testOrder = [ladderGrip, ...availablePeakGrips.filter(grip => grip !== ladderGrip)];
+  for (const grip of testOrder.filter(grip => peakTestGrips.includes(grip))) {
+    steps.push({ id: `peak-test-${grip.toLowerCase()}`, title: `${grip} Peak Test`, type: 'peak_test',
+      grip, intensityLabel: 'Single-handed · 3 rounds · 3s pulls · 60s between rounds', restAfterSec: 0 });
   }
 
   const bodyWeightLbs = Math.round(bodyWeightKg * 2.20462 * 10) / 10;
@@ -409,6 +411,7 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
   return {
     ok: true,
     estimatedGrips,
+    availablePeakGrips,
     mode,
     bodyWeightKg,
     bodyWeightLbs,

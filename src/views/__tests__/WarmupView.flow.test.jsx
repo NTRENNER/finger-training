@@ -8,7 +8,7 @@ jest.mock("../../model/warmup.js", () => ({ generateWarmupProtocol: jest.fn() })
 
 const hang = (id, grip, targetLoadKg) => ({ id, grip, targetLoadKg, type: "hang", targetSec: 2, restAfterSec: 2,
   title: `Two-Handed ${grip}`, intensityLabel: id });
-const protocol = { ok: true, bodyWeightLbs: 160, steps: [
+const protocol = { ok: true, bodyWeightLbs: 160, availablePeakGrips: ['Crusher', 'Micro'], steps: [
   hang("Easy hold", "Crusher", 20), hang("Moderate hold", "Crusher", 25),
   hang("Small edge", "Micro", 10), hang("Strength ramp", "Micro", 15),
   hang("Final strength ramp", "Micro", 18),
@@ -23,7 +23,7 @@ afterEach(() => { jest.useRealTimers(); delete navigator.bluetooth; });
 
 // Real sensor hook and real warm-up view. Only the physical BLE transport
 // and generated durations are substituted so an entire sequence is fast.
-async function setup({ peak = false } = {}) {
+async function setup({ peak = false, crusherPeak = false } = {}) {
   let listener, hook;
   let streaming = false;
   const commands = [];
@@ -47,8 +47,10 @@ async function setup({ peak = false } = {}) {
     return visible && <WarmupView visible={tabVisible} history={[]} wLog={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} addReps={addReps} />;
   }
   const view = render(<Harness />);
-  expect(screen.getByRole("switch", { name: "Include Peak Test today" })).not.toBeChecked();
-  if (peak) fireEvent.click(screen.getByRole("switch", { name: "Include Peak Test today" }));
+  expect(screen.getByRole("switch", { name: "Micro Max Test" })).not.toBeChecked();
+  expect(screen.getByRole("switch", { name: "Crusher Max Test" })).not.toBeChecked();
+  if (crusherPeak) fireEvent.click(screen.getByRole("switch", { name: "Crusher Max Test" }));
+  if (peak) fireEvent.click(screen.getByRole("switch", { name: "Micro Max Test" }));
   await act(async () => { await hook.connect(); });
   fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
   await waitFor(() => expect(commands).toContain(CMD_START[0]));
@@ -149,9 +151,9 @@ test("skipping an active hold still requires release and leaving warm-up stops t
 
 
 test('optional Peak Test saves only its pulls, then completes warmup', async () => {
-  generateWarmupProtocol.mockImplementation(({ includePeakTest }) => ({ ...protocol, steps: [
+  generateWarmupProtocol.mockImplementation(({ peakTestGrips }) => ({ ...protocol, steps: [
     hang('Two handed', 'Micro', 10),
-    ...(includePeakTest ? [{ id: 'peak', type: 'peak_test', grip: 'Micro', title: 'Micro Peak Test', restAfterSec: 0 }]
+    ...(peakTestGrips.includes('Micro') ? [{ id: 'peak', type: 'peak_test', grip: 'Micro', title: 'Micro Peak Test', restAfterSec: 0 }]
       : [protocol.steps[4]]),
   ] }));
   const { hold, send, rest, addReps, commands } = await setup({ peak: true });
@@ -181,4 +183,38 @@ test("tab navigation preserves warmup rest and cannot record hidden pulls", asyn
   expect(screen.getByText("Warm-up · Step 2 of 5")).toBeInTheDocument();
   h.send(0);h.hold(25,500);
   expect(screen.getByRole("timer",{name:"Hold time"})).toBeInTheDocument();
+});
+
+test('both selected max tests save separate grips and sessions with a swap between them', async () => {
+  generateWarmupProtocol.mockImplementation(({ peakTestGrips }) => ({ ...protocol, steps: [
+    hang('Two handed', 'Micro', 10),
+    ...['Micro', 'Crusher'].filter(grip => peakTestGrips.includes(grip)).map(grip => ({
+      id: `peak-${grip}`, type: 'peak_test', grip, title: `${grip} Peak Test`, restAfterSec: 0,
+    })),
+  ] }));
+  const h = await setup({ peak: true, crusherPeak: true });
+  h.hold(20, 2000); h.rest();
+  await waitFor(() => expect(h.commands.filter(command => command === CMD_START[0])).toHaveLength(2));
+  const finishTest = () => {
+    for (let round = 0; round < 3; round++) {
+      h.hold(30, 3100); h.send(0); h.hold(32, 3100); h.send(0);
+      if (round < 2) act(() => jest.advanceTimersByTime(61000));
+    }
+  };
+  finishTest();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue warm-up' }));
+  expect(screen.getByText('Swap to Crusher')).toBeInTheDocument();
+  expect(h.addReps).toHaveBeenCalledTimes(6);
+  fireEvent.click(screen.getByRole('button', { name: 'Continue', exact: true }));
+  await waitFor(() => expect(h.commands.filter(command => command === CMD_START[0])).toHaveLength(3));
+  expect(screen.getByText('Crusher · Peak Test')).toBeInTheDocument();
+  expect(screen.getByText('Round 1 of 3')).toBeInTheDocument();
+  finishTest();
+  expect(h.addReps).toHaveBeenCalledTimes(12);
+  const rows = h.addReps.mock.calls.flatMap(c => c[0]);
+  expect(rows.map(r => r.grip)).toEqual([...Array(6).fill('Micro'), ...Array(6).fill('Crusher')]);
+  expect(new Set(rows.map(r => r.session_id)).size).toBe(2);
+  expect(rows.slice(0, 6).map(r => r.hand)).toEqual(rows.slice(6).map(r => r.hand));
+  fireEvent.click(screen.getByRole('button', { name: 'Finish warm-up' }));
+  expect(screen.getByText(/Warm-up complete/)).toBeInTheDocument();
 });

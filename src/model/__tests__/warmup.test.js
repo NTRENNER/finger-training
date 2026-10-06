@@ -49,7 +49,7 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
     expect(rungs.map(r => r.targetSec)).toEqual([8, 7]);
   });
 
-  test("route protocol: longer perfusion, lower-topping ladder, no BORK", () => {
+  test("route protocol: 45s perfusion, lower-topping ladder, no BORK", () => {
     const p = generateWarmupProtocol({ history, wLog: [], bodyWeightKg: BW, mode: "route" });
     const ids = p.steps.map(s => s.id);
     expect(ids).not.toContain("bork-micro");
@@ -136,7 +136,7 @@ describe("getRecentMaxPullups — id migration", () => {
 
 test.each(['boulder','route'])('optional Peak Test follows the %s ramps as the only maximal block', mode => {
   const base = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode});
-  const peak = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode,includePeakTest:true});
+  const peak = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode,peakTestGrips:['Micro']});
   expect(base.steps.every(s=>s.type==='hang')).toBe(true);
   expect(base.steps.at(-1).id).toBe('ladder-micro-1');
   expect(peak.steps.filter(s=>s.type==='peak_test')).toHaveLength(1);
@@ -144,4 +144,37 @@ test.each(['boulder','route'])('optional Peak Test follows the %s ramps as the o
   expect(peak.steps.filter(s=>s.type==='hang')).toEqual(base.steps.filter(s=>s.type==='hang'));
   expect(peak.steps.find(s=>s.type==='peak_test').restAfterSec).toBe(0);
   expect(peak.steps.at(-1).type).toBe('peak_test');
+});
+
+
+test.each([[], ['Crusher'], ['Micro'], ['Crusher', 'Micro']].map(peakTestGrips => ({ peakTestGrips })))('peak tests can be selected independently: $peakTestGrips', ({ peakTestGrips }) => {
+  const p = generateWarmupProtocol({ history, bodyWeightKg: BW, mode: 'boulder', peakTestGrips });
+  expect(p.steps.filter(s => s.type === 'peak_test').map(s => s.grip))
+    .toEqual(['Micro', 'Crusher'].filter(grip => peakTestGrips.includes(grip)));
+  expect(p.steps.filter(s => s.id.startsWith('ladder-'))).toHaveLength(2);
+  expect(new Set(p.steps.map(s => s.id)).size).toBe(p.steps.length);
+});
+
+test('Crusher-only history supports its max test and two Boulder ramps', () => {
+  const p = generateWarmupProtocol({ history: history.filter(r => r.grip === 'Crusher'), bodyWeightKg: BW,
+    mode: 'boulder', peakTestGrips: ['Crusher', 'Micro'] });
+  expect(p.availablePeakGrips).toEqual(['Crusher']);
+  expect(p.steps.filter(s => s.type === 'peak_test').map(s => s.grip)).toEqual(['Crusher']);
+  expect(p.steps.filter(s => s.id.startsWith('ladder-'))).toHaveLength(2);
+});
+
+
+test('both modes use 45s long holds and calculate the Micro load for that duration', () => {
+  const boulder = generateWarmupProtocol({ history, bodyWeightKg: BW, mode: 'boulder' });
+  const route = generateWarmupProtocol({ history, bodyWeightKg: BW, mode: 'route' });
+  for (const p of [boulder, route]) {
+    expect(p.steps.find(s => s.id === 'perfusion-crusher-easy').targetSec).toBe(45);
+    const micro = p.steps.find(s => s.id === 'perfusion-micro');
+    expect(micro.targetSec).toBe(45);
+    expect(micro.targetLoadKg).toBeGreaterThan(0);
+  }
+  expect(boulder.steps.find(s => s.id === 'perfusion-micro').targetLoadKg)
+    .toBe(route.steps.find(s => s.id === 'perfusion-micro').targetLoadKg);
+  expect(boulder.steps.find(s => s.id === 'perfusion-crusher-hard').targetSec).toBe(30);
+  expect(route.steps.find(s => s.id === 'perfusion-crusher-hard').targetSec).toBe(45);
 });

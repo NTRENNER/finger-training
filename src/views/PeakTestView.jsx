@@ -1,4 +1,5 @@
 import { sustainedMaxKg } from '../model/sustainedMax.js';
+import { historicalForceRecords } from '../model/historicalForceRecords.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { Card, Btn } from '../ui/components.jsx';
 import { C } from '../ui/theme.js';
@@ -14,11 +15,13 @@ import { TindeqBattery } from './cards/TindeqBattery.jsx';
 // Shared complete protocol for the standalone test and the optional warmup block.
 // Keep one sensor stream alive through hand changes/rest to observe releases.
 export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addReps,
-  source = 'standalone', onClose, unit = 'lbs', visible = true }) {
+  source = 'standalone', onClose, unit = 'lbs', visible = true, completionLabel }) {
   const [context] = useState(() => {
     const date = today();
     const first = hand === 'Both' ? startingHandForDay(history, date) : hand;
-    return { date, first, hands: hand === 'Both' ? [first, otherHand(first)] : [hand],
+    const previousBests = Object.fromEntries(historicalForceRecords(history)
+      .filter(record => record.grip === grip).map(record => [record.hand, record.best.kg]));
+    return { date, first, hands: hand === 'Both' ? [first, otherHand(first)] : [hand], previousBests,
       sessionId: uuid(), startedAt: nowISO() };
   });
   const [state, setState] = useState({ phase: 'ready', index: 0, rows: [], elapsed: 0 });
@@ -128,7 +131,7 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
         {h === 'L' ? 'Left' : 'Right'} best two-second force: {bestSustained(h) ? `${fmtW(bestSustained(h), unit)} ${unit}` : 'No verified two-second measurement'}
       </p>)}
       <p>Continue whenever you feel ready.</p>
-      <Btn onClick={onClose}>{source === 'warmup' ? 'Finish warm-up' : 'Done'}</Btn>
+      <Btn onClick={onClose}>{completionLabel || (source === 'warmup' ? 'Finish warm-up' : 'Done')}</Btn>
     </Card> : <>
       <Card style={{ textAlign: 'center', padding: '32px 16px' }}>
         <div style={{ color: C.muted, marginBottom: 12 }}>Round {round + 1} of {PEAK_ROUNDS}</div>
@@ -138,6 +141,9 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
           <p>Next: {activeHand === 'L' ? 'Left' : 'Right'} hand. Take longer if you need it.</p>
         </> : <>
           <HandCue hand={activeHand} />
+          <p style={{ color: C.muted }}>Previous best Max: <b style={{ color: C.blue }}>
+            {context.previousBests[activeHand] ? `${fmtW(context.previousBests[activeHand], unit)} ${unit}` : 'No previous max'}
+          </b></p>
           {state.phase === 'active'
             ? <div role="timer" aria-label="Peak pull" style={{ fontSize: 96, fontWeight: 900, color: C.blue }}>{state.elapsed.toFixed(1)}s</div>
             : <div style={{ fontSize: 22, fontWeight: 700 }}>Pull to begin</div>}

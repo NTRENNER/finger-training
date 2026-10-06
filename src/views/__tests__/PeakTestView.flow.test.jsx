@@ -126,3 +126,25 @@ test('browsing another tab preserves the round, session id, results and rest dea
   expect(h.addReps).toHaveBeenCalledTimes(3);
   expect(new Set(h.addReps.mock.calls.map(c=>c[0][0].session_id)).size).toBe(1);
 });
+
+test('previous best follows the active hand and stays fixed when a new maximum is pulled', async () => {
+  const previous = (hand, kg, extra = {}) => ({ grip: 'Micro', hand, date: '2026-09-24',
+    actual_time_s: 3, avg_force_kg: kg, load_provenance: 'measured_force', failure_valid: true, ...extra });
+  const h = await setup([
+    previous('L', 20), previous('R', 24),
+    previous('L', 90, { grip: 'Crusher' }),
+    previous('L', 95, { actual_time_s: 1.9 }),
+    previous('R', 99, { failure_valid: false }),
+  ]);
+  expect(screen.getByText(/Previous best Max:/)).toHaveTextContent('20.0 kg');
+  h.hold(30, 3100); h.send(0);
+  expect(screen.getByText(/Previous best Max:/)).toHaveTextContent('24.0 kg');
+  h.hold(32, 3100); h.send(0);
+  act(() => jest.advanceTimersByTime(61000));
+  expect(screen.getByText(/Previous best Max:/)).toHaveTextContent('20.0 kg');
+});
+
+test('peak test does not invent a previous maximum when there is no history', async () => {
+  await setup();
+  expect(screen.getByText('No previous max')).toBeInTheDocument();
+});
