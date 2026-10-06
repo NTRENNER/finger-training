@@ -4,22 +4,32 @@ import { ResearchView } from '../ResearchView.jsx';
 import { createHistoricalReviewWorker } from '../../model/historicalWorkerClient.js';
 import { evaluateHistorical } from '../../model/historicalEvaluation.js';
 import { recoveryRows } from '../../testHelpers/recoveryRows.js';
-import { buildPerformanceTrends } from '../../model/performanceTrends.js';
+import { buildPerformanceTrendAnalysis } from '../../model/performanceTrendEvidence.js';
 import { suggestCookedFromClimbs } from '../../model/climbingFatigue.js';
 jest.mock('../../model/historicalWorkerClient.js', () => ({ createHistoricalReviewWorker: jest.fn() }));
-jest.mock('../../model/performanceTrends.js', () => ({ buildPerformanceTrends: jest.fn(), DEFAULT_PERFORMANCE_TREND_MODEL: 'contextOnly' }));
+jest.mock('../../model/performanceTrendEvidence.js', () => ({
+  ...jest.requireActual('../../model/performanceTrendEvidence.js'),
+  buildPerformanceTrendAnalysis: jest.fn(),
+}));
 jest.mock('recharts', () => {
   const React = require('react');
   const Wrap = ({ children }) => <div>{children}</div>;
   return { ResponsiveContainer: Wrap,
     ComposedChart: ({ data }) => <div data-testid="research-chart-data">{JSON.stringify(data)}</div>,
-    Line: () => null, Bar: () => null, XAxis: () => null, YAxis: () => null,
+    Line: () => null, Scatter: () => null, Bar: () => null, XAxis: () => null, YAxis: () => null,
     Tooltip: () => null, CartesianGrid: () => null, ReferenceLine: () => null };
 });
 
 test('Research passes climbing records through the review into both charts and refreshes the overlay', async () => {
   const date = '2026-08-20';
-  buildPerformanceTrends.mockReturnValue([{ date, timestamp: Date.parse(date), Crusher_long: 2, Crusher_short: -1 }]);
+  buildPerformanceTrendAnalysis.mockReturnValue({
+    rows: [{ date, timestamp: Date.parse(date), Crusher_long: 2, Crusher_short: -1 }],
+    observations: [{
+      id: 'crusher-opening-hold', date, timestamp: Date.parse(date), grip: 'Crusher', hand: 'L',
+      duration: 30, durationBand: 'short', force: 10, expectedForce: 12.5, deviation: -20,
+      context: 'unknown', earlierGrips: [],
+    }],
+  });
   const history = recoveryRows('measured');
   const activities = [{ type: 'climbing', date, rpe: 9 }];
   const worker = { postMessage: jest.fn(), terminate: jest.fn() };
@@ -38,6 +48,8 @@ test('Research passes climbing records through the review into both charts and r
   const expected = suggestCookedFromClimbs(activities, date).cooked;
   expect(expected).toBeGreaterThan(0);
   expect(values()).toEqual([expected, expected]);
+  expect(screen.getByText('22.0 lbs')).toBeInTheDocument();
+  expect(screen.getByText('27.6 lbs')).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Research trend model'), { target: { value: 'original' } });
   expect(values()).toEqual([expected, expected]);
   view.rerender(<ResearchView {...props} activities={[]} />);
