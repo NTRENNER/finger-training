@@ -22,3 +22,9 @@ test('selected hand is respected and stale history shows uncertainty',()=>{
  rerender(<MeasuredProgressSection history={history} grips={['Micro']} today="2027-01-01" />);
  expect(screen.getAllByText(/Not enough recent, comparable sessions/)).toHaveLength(1);
 });
+test('limited evidence shows the comparable sample count without calling a decline',()=>{
+ render(<MeasuredProgressSection history={history.slice(0,5)} grips={['Micro']} hands={['L']} today="2026-09-10" />);
+ expect(screen.getByText(/largest available comparison group has 5 of the six sessions needed/)).toBeInTheDocument();
+ expect(screen.getByText(/cannot yet establish an increase or a decrease/)).toBeInTheDocument();
+ expect(screen.queryByText(/— Lower recently/)).not.toBeInTheDocument();
+});

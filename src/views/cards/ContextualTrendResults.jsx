@@ -36,6 +36,6 @@ export function ContextualTrendResults({report,history,activities,unit}) {
     <label style={{display:'flex',gap:8,alignItems:'center',minHeight:44,marginTop:12}}><input type="checkbox" checked={preview} onChange={e=>setPreview(e.target.checked)}/>Compare trend charts</label>
     {preview&&<><label style={{display:'block',marginBottom:16}}>Trend model <select aria-label="Research trend model" value={model} onChange={e=>setModel(e.target.value)} style={{maxWidth:'100%',minHeight:44,background:C.bg,color:C.text}}>
       {Object.entries(names).map(([key,name])=><option key={key} value={key}>{name}</option>)}</select></label>
-      <PerformanceTrendCards key={model} history={history} activities={activities} grips={grips} trendModel={model}/></>}
+      <PerformanceTrendCards key={model} history={history} activities={activities} grips={grips} trendModel={model} unit={unit}/></>}
   </details>;
 }

@@ -1,0 +1,275 @@
+.performance-trends {
+  min-width: 0;
+}
+
+.performance-trends p {
+  line-height: 1.55;
+}
+
+.performance-trends .trend-intro {
+  color: #8b949e;
+  font-size: 13px;
+  margin: 0 0 14px;
+}
+
+.trend-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.trend-summary {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #0d1117;
+}
+
+.trend-summary h4 {
+  font-size: 13px;
+  margin: 0 0 4px;
+}
+
+.trend-summary-date,
+.trend-small {
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.trend-summary-values {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.trend-summary-values dt {
+  color: #8b949e;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.trend-summary-values dd {
+  margin: 4px 0 0;
+  font-size: 24px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-summary-values time {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #8b949e;
+}
+
+.trend-support-label {
+  color: #e3b341;
+  font-size: 11px;
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+.trend-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.trend-filter {
+  display: flex;
+  flex: 1 1 180px;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.trend-filter select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px;
+  background: #0d1117;
+  color: #e6edf3;
+  font: inherit;
+}
+
+.trend-filter select:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 3px;
+}
+
+.trend-subsection {
+  border-top: 1px solid #30363d;
+  margin-top: 20px;
+  padding-top: 16px;
+}
+
+.trend-subsection h4,
+.trend-evidence h4 {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.trend-duration-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-duration-table caption {
+  text-align: left;
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 0 0 10px;
+}
+
+.trend-duration-table th,
+.trend-duration-table td {
+  text-align: right;
+  padding: 9px 4px;
+  border-bottom: 1px solid #30363d;
+  overflow-wrap: anywhere;
+}
+
+.trend-duration-table th:first-child {
+  text-align: left;
+  width: 19%;
+  padding-left: 0;
+}
+
+.trend-duration-table tbody th {
+  color: #8b949e;
+  font-weight: 400;
+}
+
+.trend-duration-table .trend-limited {
+  display: block;
+  margin-top: 3px;
+  color: #e3b341;
+  font-size: 10px;
+}
+
+.trend-context-note {
+  padding: 10px 12px;
+  background: #0d1117;
+  border-left: 2px solid #8b949e;
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 14px 0;
+}
+
+.trend-point-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 0;
+  margin: 10px 0;
+  list-style: none;
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.trend-point-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.trend-point-legend svg {
+  flex-shrink: 0;
+}
+
+.trend-evidence {
+  border-top: 1px solid #30363d;
+  padding-top: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.trend-evidence ul {
+  padding-left: 18px;
+  line-height: 1.6;
+}
+
+.trend-point-details {
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.trend-point-details h4 {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.trend-point-details dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 8px 0;
+}
+
+.trend-point-details dt {
+  color: #8b949e;
+}
+
+.trend-point-details dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-point-details p {
+  margin: 8px 0 0;
+  color: #8b949e;
+}
+
+.trend-chart {
+  min-width: 0;
+  width: 100%;
+}
+
+.trend-point-chart {
+  position: relative;
+}
+
+.trend-hover-details {
+  position: absolute;
+  right: 0;
+  top: 8px;
+  width: min(300px, 100%);
+  z-index: 5;
+  pointer-events: none;
+}
+
+@media (max-width: 420px) {
+  .trend-summary-grid {
+    gap: 10px;
+  }
+
+  .trend-summary-values dd {
+    font-size: 22px;
+  }
+
+  .trend-duration-table th,
+  .trend-duration-table td {
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+}

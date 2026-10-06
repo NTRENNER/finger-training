@@ -729,16 +729,6 @@ export function AnalysisView({
         </CardBoundary>
         <CardBoundary name="Curve Improvement">
         <CurveImprovementCard
-          measuredProgress={
-            <CardBoundary name="Measured progress">
-              <MeasuredProgressSection
-                history={history}
-                grips={selGrip ? [selGrip] : grips}
-                hands={handView === "pooled" ? ["L", "R"] : [handView]}
-                unit={unit}
-              />
-            </CardBoundary>
-          }
           improvement={improvement}
           gripImprovement={gripImprovement}
           grip3xEstimates={grip3xEstimates}
@@ -764,7 +754,17 @@ export function AnalysisView({
         />
         </CardBoundary>
 
-        <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} normalizeOn={normalizationActive} />
+        <CardBoundary name="Measured progress">
+          <MeasuredProgressSection
+            history={history}
+            grips={scopedGrips}
+            hands={handView === "pooled" ? ["L", "R"] : [handView]}
+            unit={unit}
+          />
+        </CardBoundary>
+        <CardBoundary name="Performance trends">
+          <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} normalizeOn={normalizationActive} unit={unit} />
+        </CardBoundary>
         <Disclosure title="Overall curve summary">
           <CardBoundary name="Whole-Curve Capacity">
             <CapacityTrajectoryCard
