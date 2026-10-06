@@ -36,32 +36,6 @@ function ScopeRow({ label, children }) {
   );
 }
 
-function AttentionBadge({ count }) {
-  if (!(count > 0)) return null;
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        minWidth: 16,
-        height: 16,
-        marginLeft: 5,
-        padding: "0 4px",
-        borderRadius: 8,
-        background: C.bg,
-        color: C.orange,
-        fontSize: 9,
-        fontWeight: 800,
-        boxSizing: "border-box",
-      }}
-    >
-      {count}
-    </span>
-  );
-}
-
 export function AnalysisScopeToolbar({
   grips = [],
   grip = "",
@@ -71,12 +45,8 @@ export function AnalysisScopeToolbar({
   normalizeOn = false,
   onNormalizeChange,
   canNormalize = false,
-  attentionCounts = {},
 }) {
   if (grips.length === 0 && !canNormalize) return null;
-
-  const allAttention = Object.values(attentionCounts)
-    .reduce((sum, count) => sum + (Number(count) || 0), 0);
 
   return (
     <div role="group" aria-label="Analysis scope">
@@ -87,26 +57,21 @@ export function AnalysisScopeToolbar({
               <button
                 type="button"
                 aria-pressed={!grip}
-                aria-label={`All Grips${allAttention > 0 ? `, ${allAttention} coverage items` : ""}`}
                 onClick={() => onGripChange?.("")}
                 style={pillStyle(!grip, C.orange)}
               >
                 All Grips
-                <AttentionBadge count={allAttention} />
               </button>
               {grips.map(item => {
-                const count = attentionCounts[item] || 0;
                 return (
                   <button
                     key={item}
                     type="button"
                     aria-pressed={grip === item}
-                    aria-label={`${item}${count > 0 ? `, ${count} coverage items` : ""}`}
                     onClick={() => onGripChange?.(item)}
                     style={pillStyle(grip === item, GRIP_COLORS[item] || C.orange)}
                   >
                     {item}
-                    <AttentionBadge count={count} />
                   </button>
                 );
               })}

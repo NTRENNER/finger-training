@@ -59,7 +59,6 @@ import { freshFitReps } from "../model/load.js";
 import { buildForceDurationGripScope } from "../model/analysisScope.js";
 import {
   CurveCoverageCard,
-  curveCoverageAttentionByGrip,
 } from "./analysis/CurveCoverageCard.jsx";
 // EnduranceCeilingCard dropped May 2026 — the F(180s)/F(5s) ratio is
 // invariant to proportional strength gains (so it reads "NEEDS WORK"
@@ -566,18 +565,6 @@ export function AnalysisView({
   // by date). See src/hooks/useHistoryOverlay.js for the per-memo notes.
   const continuousProgress = useContinuousProgress({history,grips,pinnedGripBaselines,pinnedPerHandBaselines});
 
-  const coverageAttentionByGrip = useMemo(
-    () => curveCoverageAttentionByGrip(history, { handView }),
-    [history, handView]
-  );
-  const coverageAttentionCounts = useMemo(
-    () => Object.fromEntries(
-      Object.entries(coverageAttentionByGrip)
-        .map(([grip, value]) => [grip, value.attentionZones.length])
-    ),
-    [coverageAttentionByGrip]
-  );
-
   // (overlayActiveGrip / overlayDates / overlayLast / overlayNowI
   // moved into ForceCurvesOverlayCard — only that card consumed them.
   // ScatterTooltip likewise moved into ForceDurationCard.)
@@ -691,7 +678,6 @@ export function AnalysisView({
         normalizeOn={normalizeOn}
         onNormalizeChange={setNormalizePreference}
         canNormalize={bodyWeight > 0}
-        attentionCounts={coverageAttentionCounts}
       />
 
 

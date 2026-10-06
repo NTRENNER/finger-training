@@ -16,7 +16,6 @@ function Harness() {
       normalizeOn={normalizeOn}
       onNormalizeChange={setNormalizeOn}
       canNormalize
-      attentionCounts={{ Crusher: 2 }}
     />
   );
 }
@@ -25,11 +24,11 @@ test("one scope controls grip, hand, and scale", () => {
   render(<Harness />);
 
   const crusher = screen.getByRole("button", {
-    name: "Crusher, 2 coverage items",
+    name: "Crusher",
   });
   fireEvent.click(crusher);
   expect(crusher).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", { name: "All Grips, 2 coverage items" }))
+  expect(screen.getByRole("button", { name: "All Grips" }))
     .toHaveAttribute("aria-pressed", "false");
 
   fireEvent.click(screen.getByRole("button", { name: "Right" }));
