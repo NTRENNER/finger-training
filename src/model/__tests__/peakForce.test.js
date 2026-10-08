@@ -262,3 +262,21 @@ test('interrupted Peak Test cannot reset its measurement reminder', () => {
   const interrupted = { ...rep('Micro', '2026-09-24', 5, 30, 5), failure_valid: false };
   expect(maxTestStaleness([interrupted], '2026-09-24').lastDate).toBeNull();
 });
+
+
+test('warmup peak records compare unrounded values across protocol types', () => {
+  const warmup = (grip, hand, peak) => ({ ...rep(grip, '2026-10-07', 3, peak, 3), hand,
+    failure_valid: false, end_reason: 'peak_test_complete',
+    force_recording: { peak_valid: true, capacity_eligible: false,
+      session_protocol: { id: 'peak_test', version: 2, source: 'warmup' } } });
+  const rows = [rep('Crusher', '2026-05-24', 11.2, 76.9, 10),
+    { ...rep('Crusher', '2026-04-29', 6.7, 73.4), hand: 'R' },
+    rep('Micro', '2026-08-03', 4, 27.8, 3),
+    warmup('Crusher', 'R', 73.3774), warmup('Micro', 'R', 28.5535)];
+  const trend = buildPeakForceTrend(rows);
+  expect(trend.rows.at(-1)).toMatchObject({ Crusher_newPr: null, Micro_newPr: 28.6 });
+  const right = buildPeakForceTrend(rows.filter(r => r.hand === 'R'));
+  expect(right.rows.at(-1).Crusher).toBe(73.4);
+  expect(right.rows.at(-1).Crusher_newPr).toBeNull();
+  expect(right.best.Crusher.date).toBe('2026-04-29');
+});

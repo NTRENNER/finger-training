@@ -162,7 +162,7 @@ test('optional Peak Test saves only its pulls, then completes warmup', async () 
   expect(screen.getByText('🤚 Left Hand')).toBeInTheDocument();
   expect(addReps).not.toHaveBeenCalled();
   for(let round=0;round<3;round++) {
-    for(let h=0;h<2;h++) { hold(30,3100); send(0); }
+    for(let h=0;h<2;h++) { fireEvent.click(screen.getByRole('button', { name: /Ready for .* pull/ })); hold(30,3100); send(0); }
     if(round<2) act(() => jest.advanceTimersByTime(61000));
   }
   expect(addReps).toHaveBeenCalledTimes(6);
@@ -197,7 +197,10 @@ test('both selected max tests save separate grips and sessions with a swap betwe
   await waitFor(() => expect(h.commands.filter(command => command === CMD_START[0])).toHaveLength(2));
   const finishTest = () => {
     for (let round = 0; round < 3; round++) {
-      h.hold(30, 3100); h.send(0); h.hold(32, 3100); h.send(0);
+      fireEvent.click(screen.getByRole('button', { name: /Ready for .* pull/ }));
+      h.hold(30, 3100); h.send(0);
+      fireEvent.click(screen.getByRole('button', { name: /Ready for .* pull/ }));
+      h.hold(32, 3100); h.send(0);
       if (round < 2) act(() => jest.advanceTimersByTime(61000));
     }
   };

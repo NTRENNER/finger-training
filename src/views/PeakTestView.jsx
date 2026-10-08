@@ -1,5 +1,6 @@
 import { sustainedMaxKg } from '../model/sustainedMax.js';
 import { historicalForceRecords } from '../model/historicalForceRecords.js';
+import { buildPeakForceTrend } from '../model/peakForce.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { Card, Btn } from '../ui/components.jsx';
 import { C } from '../ui/theme.js';
@@ -19,12 +20,14 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
   const [context] = useState(() => {
     const date = today();
     const first = hand === 'Both' ? startingHandForDay(history, date) : hand;
-    const previousBests = Object.fromEntries(historicalForceRecords(history)
+    const previousSustainedBests = Object.fromEntries(historicalForceRecords(history)
       .filter(record => record.grip === grip).map(record => [record.hand, record.best.kg]));
-    return { date, first, hands: hand === 'Both' ? [first, otherHand(first)] : [hand], previousBests,
+    const previousBests = Object.fromEntries(['L', 'R'].map(h => [h,
+      buildPeakForceTrend(history.filter(r => r.grip === grip && r.hand === h), { roundDigits: 5 })?.best[grip]?.kg]));
+    return { date, first, hands: hand === 'Both' ? [first, otherHand(first)] : [hand], previousBests, previousSustainedBests,
       sessionId: uuid(), startedAt: nowISO() };
   });
-  const [state, setState] = useState({ phase: 'ready', index: 0, rows: [], elapsed: 0 });
+  const [state, setState] = useState({ phase: 'ready', armed: false, index: 0, rows: [], elapsed: 0 });
   const live = useRef(state);
   const transition = next => { live.current = next; setState(next); };
   const startRef = useRef(null);
@@ -53,11 +56,13 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
     const next = current.index + 1;
     const phase = next >= total ? 'done' : next % context.hands.length === 0 ? 'rest' : 'ready';
     deadlineRef.current = phase === 'rest' ? Date.now() + PEAK_ROUND_REST_S * 1000 : null;
-    transition({ phase, index: next, rows, elapsed: phase === 'rest' ? PEAK_ROUND_REST_S : 0 });
+    transition({ phase, armed: false, index: next, rows, elapsed: phase === 'rest' ? PEAK_ROUND_REST_S : 0 });
   }
   callbacks.current = {
     start: () => {
-      if (live.current.phase !== 'ready') { tindeq.endRepAndRequireRelease(); return; }
+      // Handling the grip can cross the generic 4 kg detection threshold.
+      // Only an explicitly armed attempt may consume this hand's slot.
+      if (live.current.phase !== 'ready' || !live.current.armed) { tindeq.endRepAndRequireRelease(); return; }
       startRef.current = Date.now();
       transition({ ...live.current, phase: 'active', elapsed: 0 });
     },
@@ -141,12 +146,19 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
           <p>Next: {activeHand === 'L' ? 'Left' : 'Right'} hand. Take longer if you need it.</p>
         </> : <>
           <HandCue hand={activeHand} />
-          <p style={{ color: C.muted }}>Previous best Max: <b style={{ color: C.blue }}>
-            {context.previousBests[activeHand] ? `${fmtW(context.previousBests[activeHand], unit)} ${unit}` : 'No previous max'}
+          <p style={{ color: C.muted }}>Previous instantaneous peak: <b style={{ color: C.blue }}>
+            {context.previousBests[activeHand] ? `${fmtW(context.previousBests[activeHand], unit)} ${unit}` : 'No previous peak'}
+          </b></p>
+          <p style={{ color: C.muted }}>Previous best force held at least 2s: <b>
+            {context.previousSustainedBests[activeHand] ? `${fmtW(context.previousSustainedBests[activeHand], unit)} ${unit}` : 'No previous sustained max'}
           </b></p>
           {state.phase === 'active'
             ? <div role="timer" aria-label="Peak pull" style={{ fontSize: 96, fontWeight: 900, color: C.blue }}>{state.elapsed.toFixed(1)}s</div>
-            : <div style={{ fontSize: 22, fontWeight: 700 }}>Pull to begin</div>}
+            : state.armed ? <div style={{ fontSize: 22, fontWeight: 700 }}>Pull to begin</div>
+              : state.phase === 'ready' && <Btn disabled={!tindeq?.connected} onClick={() => transition({ ...live.current, armed: true })}>
+                Ready for {activeHand === 'L' ? 'left' : 'right'} pull
+              </Btn>}
+          {state.phase === 'ready' && !state.armed && <p>Get the grip in position, release, then tap Ready for this hand.</p>}
           <p>Build force smoothly. Pull as hard as you can for {PEAK_HOLD_S} seconds, then release.</p>
           <p style={{ color: C.muted }}>No target weight. Measures peak force, not time to failure.</p>
         </>}
