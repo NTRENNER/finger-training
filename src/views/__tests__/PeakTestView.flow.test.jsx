@@ -46,7 +46,11 @@ async function setup(history = []) {
     }
   };
   const rest = () => { hold(0, 2000); };
-  const arm = () => fireEvent.click(screen.getByRole('button', { name: /Ready for .* pull/ }));
+  // armed-click gate removed — the peak test now auto-arms after each
+  // rest; a pull alone starts the attempt. Keep `arm` as a no-op so
+  // the test flow reads the same as before and new behavior is proved
+  // by the sensor callbacks alone.
+  const arm = () => {};
   const pull = (kg, ms) => { arm(); hold(kg, ms); };
   return { ...view, leaveTab: () => view.rerender(<Harness tabVisible={false} />), returnTab: () => view.rerender(<Harness />), hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, pull, arm, rest, commands, onClose, addReps, disconnect: () => act(() => { onDisconnect(); }) };
 }
@@ -61,7 +65,7 @@ test.each(['L', 'R'])('six real sensor pulls alternate from %s, with exactly two
       hold(10, 100); send(0);
       act(() => jest.advanceTimersByTime(61000));
       expect(screen.queryByRole('timer', { name: 'Rest' })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Ready for .* pull/ })).toBeInTheDocument();
+      expect(screen.getByText('Pull to begin')).toBeInTheDocument();
       act(() => jest.advanceTimersByTime(10000));
       expect(addReps).toHaveBeenCalledTimes((round + 1) * 2);
   }
@@ -151,24 +155,13 @@ test('peak test does not invent a previous maximum when there is no history', as
   expect(screen.getByText('No previous peak')).toBeInTheDocument();
 });
 
-test('equipment handling cannot consume a hand slot until Ready is tapped', async () => {
-  const h = await setup();
-  // Reproduce the low-force first Crusher slot, then a strong pull during setup.
-  h.hold(4.77, 3200); h.send(0);
-  h.hold(72, 3200); h.send(0);
-  expect(h.addReps).not.toHaveBeenCalled();
-  expect(screen.getByText('🤚 Left Hand')).toBeInTheDocument();
-  h.pull(71, 3100); h.send(0);
-  expect(h.addReps).toHaveBeenCalledTimes(1);
-  expect(h.addReps.mock.calls[0][0][0]).toMatchObject({ hand: 'L', rep_num: 1, peak_force_kg: 71 });
-  // Hand changes require their own Ready tap as well.
-  h.hold(16, 3200); h.send(0);
-  expect(h.addReps).toHaveBeenCalledTimes(1);
-  expect(screen.getByText('✋ Right Hand')).toBeInTheDocument();
-  h.pull(73, 3100);
-  expect(h.addReps).toHaveBeenCalledTimes(2);
-  expect(h.addReps.mock.calls[1][0][0].hand).toBe('R');
-});
+// The old "equipment handling cannot consume a hand slot until Ready
+// is tapped" invariant was removed intentionally — the Ready click
+// gate was dropped per user request. Handling during the ACTIVE 'ready'
+// phase may consume a slot, which is an accepted trade-off; the user
+// discards it via the Rep interrupted button. The rest-phase gating
+// invariant (above, in the main round-trip test) still holds, enforced
+// by callbacks.start's phase !== 'ready' check.
 
 test('previous peak and sustained benchmarks remain distinct', async () => {
   await setup([{ grip: 'Micro', hand: 'L', date: '2026-09-24', actual_time_s: 4.1,

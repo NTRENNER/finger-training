@@ -1,6 +1,7 @@
 import { Toggle } from '../ui/Toggle.jsx';
 import { PeakTestView } from './PeakTestView.jsx';
 import { TindeqBattery } from "./cards/TindeqBattery.jsx";
+import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from "./forceProtection.jsx";
 // ─────────────────────────────────────────────────────────────
 // ADAPTIVE WARM-UP VIEW (Tindeq-driven)
 // ─────────────────────────────────────────────────────────────
@@ -99,7 +100,10 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   const protocol = frozenProtocol || previewProtocol;
 
   // ── State machine ──
-  const [phase, setPhase] = useState("preview"); // preview|needs-tindeq|swap-prompt|hang-armed|hang-active|rest|done
+  // swap-prompt was removed: the "swap to the other gripper" affordance
+  // is now a persistent banner over hang-armed, cleared when the user
+  // starts their next pull. No click required to resume.
+  const [phase, setPhase] = useState("preview"); // preview|needs-tindeq|hang-armed|hang-active|rest|interrupted|peak-test|done
   const phaseRef = useRef(phase);
   const changePhase = (next) => {
     // BLE callbacks may arrive together before React renders. Transition
@@ -108,6 +112,10 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     setPhase(next);
   };
   const [stepIdx, setStepIdx] = useState(0);
+  // Pending gripper-swap banner: set when enterStep lands on a step whose
+  // grip differs from the previous step's; cleared the moment the user
+  // starts their next pull (onRepStart). No tap gate.
+  const [swapPending, setSwapPending] = useState(false);
   // Each warmup hang is a single two-handed pull (titles literally
   // say "Two-Handed Crusher" / "Two-Handed Micro"). An earlier version
   // tracked activeHand and alternated L → R within a step; that's
@@ -151,11 +159,11 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         const ms = Date.now() - startTimeRef.current;
         const secs = Math.floor(ms / 1000);
         setElapsed(secs);
-        // Auto-advance once we've held to target. Check on the
-        // millisecond clock (not `secs`) so a tick that lands a
-        // hair past target still fires — setInterval drift can
-        // skip a 1s boundary otherwise.
-        if (targetSec > 0 && ms >= targetSec * 1000) {
+        // Auto-advance based on CREDITED time — brief force dips (dog-
+        // eared grip, BLE blip) are forgiven by the shared forceProtection
+        // helper, so an unintentional slip doesn't rob the hold of time.
+        const credited = Number(creditedSeconds(tindeq?.forceLoss, secs));
+        if (targetSec > 0 && credited >= targetSec) {
           clearInterval(tickRef.current);
           tickRef.current = null;
           if (tindeq?.endRepAndRequireRelease) {
@@ -190,7 +198,12 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   const onRepStartRef = useRef(null);
   const onRepEndRef = useRef(null);
   onRepStartRef.current = () => {
-    if (phaseRef.current === "hang-armed") changePhase("hang-active");
+    if (phaseRef.current === "hang-armed") {
+      // The user has started pulling — the gripper-swap banner (if any)
+      // is now resolved; the hang itself proves the swap happened.
+      if (swapPending) setSwapPending(false);
+      changePhase("hang-active");
+    }
     else tindeq?.endRepAndRequireRelease?.(); // handling gear/rest is not a rep
   };
   onRepEndRef.current = (stats) => {
@@ -201,7 +214,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     }
     handleHangComplete();
   };
-  const inSensorPhase = ["hang-armed", "hang-active", "rest", "swap-prompt", "interrupted"].includes(phase)
+  const inSensorPhase = ["hang-armed", "hang-active", "rest", "interrupted"].includes(phase)
     && currentStep?.type === "hang";
   useEffect(() => {
     if (!visible || !tindeq?.connected || !inSensorPhase) return;
@@ -268,9 +281,23 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
       return;
     }
     const prevGrip = steps[idx - 1]?.grip;
-    if (prevGrip && prevGrip !== step.grip) {
-      changePhase("swap-prompt");
-    } else if (step.type === "hang") {
+    const gripChanged = Boolean(prevGrip && prevGrip !== step.grip);
+    // Grip change: flag a persistent banner (no click gate); the next
+    // pull implicitly confirms the swap happened and clears the flag.
+    // Also mark the sensor "awaiting release" so handling the gripper
+    // during the swap (brief force spikes as the Tindeq is unscrewed /
+    // screwed in) does NOT trigger a hang — only a pull after the
+    // gripper settles to unloaded can register.
+    setSwapPending(gripChanged);
+    // Hang steps: force an awaiting-release on grip change so brief
+    // handling spikes (unscrewing / screwing in the Tindeq) can't
+    // register as a pull. Peak-test steps rely on their own phase
+    // gating (callbacks.start checks phase === 'ready'), so forcing
+    // a release there would needlessly block the first real pull.
+    if (gripChanged && step.type === "hang" && tindeq?.endRepAndRequireRelease) {
+      tindeq.endRepAndRequireRelease();
+    }
+    if (step.type === "hang") {
       changePhase("hang-armed");
     } else if (step.type === "peak_test") {
       changePhase("peak-test");
@@ -308,11 +335,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   function skipStep() {
     tindeq?.endRepAndRequireRelease?.();
     advanceToNextStep();
-  }
-
-  function confirmSwap() {
-    // The new grip may begin a two-handed hold or its single-hand test.
-    changePhase(currentStep.type === "peak_test" ? "peak-test" : "hang-armed");
   }
 
   // ── RENDER: PREVIEW ──
@@ -486,15 +508,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     <Btn onClick={() => tindeq?.connect?.()} disabled={tindeq?.reconnecting}>Connect Tindeq</Btn>
   </div>;
 
-  if (phase === "swap-prompt") {
-    return stage(<>
-      <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Swap to {currentStep.grip}</div>
-      <p style={{ color: C.muted }}>Attach the Tindeq to the {currentStep.grip} gripper. Release the load, then tap Continue.</p>
-      {connectionNotice}
-      {actions(<Btn onClick={confirmSwap} color={C.green} disabled={!tindeq?.connected}>Continue</Btn>, false)}
-    </>);
-  }
-
   if (phase === "interrupted") {
     return stage(<>
       <div role="status" style={{ color: C.yellow, fontSize: 18, fontWeight: 700 }}>Warm-up paused</div>
@@ -507,11 +520,22 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   if (phase === "hang-armed" || phase === "hang-active") {
     const target = currentStep.targetSec;
     const active = phase === "hang-active";
+    const credited = active ? Number(creditedSeconds(tindeq?.forceLoss, elapsed)) : 0;
     return stage(<>
+      {swapPending && !active && (
+        <div role="status" style={{
+          background: C.card, border: `1px solid ${C.purple}`, borderRadius: 10,
+          padding: "10px 14px", color: C.text, fontSize: 14,
+        }}>
+          Swap the Tindeq to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then pull — the hang starts automatically.
+        </div>
+      )}
+      <SignalRecoveringNotice recovering={tindeq?.signalRecovering} />
       <div style={{ fontSize: 15, textAlign: "center", color: C.text }}>
         {active ? "Hold until the timer finishes, then release." : "Pull to begin. The timer starts automatically."}
       </div>
-      <WarmupTime seconds={active ? elapsed : 0} label={active ? "Hold time" : "Ready"} target={target} />
+      <WarmupTime seconds={active ? credited : 0} label={active ? "Hold time" : "Ready"} target={target} />
+      {active && <ForceLossNotice state={tindeq?.forceLoss} />}
       {connectionNotice}
       <ForceGauge
         force={tindeq?.force || 0}

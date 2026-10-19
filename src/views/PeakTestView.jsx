@@ -12,6 +12,7 @@ import { finalizeDeviceActivity } from '../model/forceRecording.js';
 import { HandCue } from './cards/HandCue.jsx';
 import { ForceGauge } from './cards/LiveForceCard.jsx';
 import { TindeqBattery } from './cards/TindeqBattery.jsx';
+import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from './forceProtection.jsx';
 
 // Shared complete protocol for the standalone test and the optional warmup block.
 // Keep one sensor stream alive through hand changes/rest to observe releases.
@@ -27,7 +28,12 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
     return { date, first, hands: hand === 'Both' ? [first, otherHand(first)] : [hand], previousBests, previousSustainedBests,
       sessionId: uuid(), startedAt: nowISO() };
   });
-  const [state, setState] = useState({ phase: 'ready', armed: false, index: 0, rows: [], elapsed: 0 });
+  // armed defaults to TRUE for both the first attempt and every post-rest
+  // transition — the Ready-tap gate was removed per user request so a
+  // peak-test attempt begins the moment force crosses the auto-detect
+  // threshold. The `armed` field is preserved for defensive gating in
+  // callbacks.current.start but is no longer gated behind a UI click.
+  const [state, setState] = useState({ phase: 'ready', armed: true, index: 0, rows: [], elapsed: 0 });
   const live = useRef(state);
   const transition = next => { live.current = next; setState(next); };
   const startRef = useRef(null);
@@ -56,7 +62,7 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
     const next = current.index + 1;
     const phase = next >= total ? 'done' : next % context.hands.length === 0 ? 'rest' : 'ready';
     deadlineRef.current = phase === 'rest' ? Date.now() + PEAK_ROUND_REST_S * 1000 : null;
-    transition({ phase, armed: false, index: next, rows, elapsed: phase === 'rest' ? PEAK_ROUND_REST_S : 0 });
+    transition({ phase, armed: true, index: next, rows, elapsed: phase === 'rest' ? PEAK_ROUND_REST_S : 0 });
   }
   callbacks.current = {
     start: () => {
@@ -95,13 +101,16 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
     const timer = setInterval(() => {
       const current = live.current;
       if (current.phase === 'active') {
-        const seconds = (Date.now() - startRef.current) / 1000;
+        const rawSeconds = (Date.now() - startRef.current) / 1000;
+        // Credit only the time held above the dip threshold so a brief
+        // slip during a 3-second peak pull doesn't poison the duration.
+        const seconds = Number(creditedSeconds(tindeq?.forceLoss, rawSeconds));
         if (seconds >= PEAK_HOLD_S) {
           callbacks.current.complete(tindeq.endRepAndRequireRelease());
         } else transition({ ...current, elapsed: seconds });
       } else if (current.phase === 'rest') {
         const remaining = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
-        transition({ ...current, elapsed: remaining, phase: remaining ? 'rest' : 'ready' });
+        transition({ ...current, elapsed: remaining, phase: remaining ? 'rest' : 'ready', armed: remaining ? current.armed : true });
       }
     }, 100);
     return () => clearInterval(timer);
@@ -154,16 +163,15 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
           </b></p>
           {state.phase === 'active'
             ? <div role="timer" aria-label="Peak pull" style={{ fontSize: 96, fontWeight: 900, color: C.blue }}>{state.elapsed.toFixed(1)}s</div>
-            : state.armed ? <div style={{ fontSize: 22, fontWeight: 700 }}>Pull to begin</div>
-              : state.phase === 'ready' && <Btn disabled={!tindeq?.connected} onClick={() => transition({ ...live.current, armed: true })}>
-                Ready for {activeHand === 'L' ? 'left' : 'right'} pull
-              </Btn>}
-          {state.phase === 'ready' && !state.armed && <p>Get the grip in position, release, then tap Ready for this hand.</p>}
+            : <div style={{ fontSize: 22, fontWeight: 700 }}>Pull to begin</div>}
+          {state.phase === 'ready' && <p style={{ color: C.muted }}>Position the grip and release before pulling — the attempt starts automatically.</p>}
+          {state.phase === 'active' && <ForceLossNotice state={tindeq?.forceLoss} />}
+          <SignalRecoveringNotice recovering={tindeq?.signalRecovering} />
           <p>Build force smoothly. Pull as hard as you can for {PEAK_HOLD_S} seconds, then release.</p>
           <p style={{ color: C.muted }}>No target weight. Measures peak force, not time to failure.</p>
         </>}
         {state.phase === 'error' && <div role="alert"><p>Could not start the sensor. Release the handle and retry.</p>
-          <Btn onClick={() => { transition({ ...live.current, phase: 'ready' }); setRetry(n => n + 1); }}>Retry sensor</Btn></div>}
+          <Btn onClick={() => { transition({ ...live.current, phase: 'ready', armed: true }); setRetry(n => n + 1); }}>Retry sensor</Btn></div>}
         {!tindeq?.connected && <><p>Connect the Tindeq to measure your peak.</p><Btn onClick={() => tindeq?.connect?.()}>Connect Tindeq</Btn></>}
         {state.phase === 'active' && <Btn onClick={() => callbacks.current.complete({
           ...tindeq.endRepAndRequireRelease(), endReason: 'interrupted', failureValid: false,
