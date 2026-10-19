@@ -5,6 +5,7 @@ import { TindeqBattery, InterruptedBatteryNote } from "./cards/TindeqBattery.jsx
 import { finalizeDeviceActivity } from "../model/forceRecording.js";
 import { RepResultDetails } from "./cards/RepResultDetails.jsx";
 import { MIXED_DOMAIN_LABELS, isMixedDomainRep, mixedDomainMetadata } from '../model/mixedDomain.js';
+import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from "./forceProtection.jsx";
 // ──────────────────────────────────────────────────────────────
 // ACTIVE-SESSION VIEWS
 // ──────────────────────────────────────────────────────────────
@@ -163,21 +164,6 @@ function UnloadedZeroCheck({ tindeq }) {
     </Btn>
     {tindeq.bleError && <p role="alert">{tindeq.bleError}</p>}
   </div>;
-}
-
-function ForceLossNotice({ state }) {
-  if (!state || (state.status === 'holding' && state.pendingEndTs == null)) return null;
-  return <p role="status" style={{ color: C.yellow, fontSize: 22, fontWeight: 700 }}>
-    {state.status === 'complete' ? 'Rep complete — release the handle' : 'Checking force dip — return to a steady hold. Time resumes if it recovers.'}
-  </p>;
-}
-
-function creditedSeconds(state, elapsed) {
-  if (!state) return elapsed;
-  const start = Object.hasOwn(state, 'pullStartTs') ? state.pullStartTs : state.startTs;
-  if (start == null) return '0.0';
-  const end = state.status === 'complete' ? state.endTs : state.pendingEndTs ?? state.observedTs;
-  return Number.isFinite(end) ? Math.max(0, (end - start) / 1000).toFixed(1) : '0.0';
 }
 
 function RepDots({ total, done, current }) {

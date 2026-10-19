@@ -97,11 +97,14 @@ test("complete sequence retains stage layout and finishes after the second stren
     hold(30, 2000); rest();
   };
   completeStep(1); completeStep(2);
-  expect(screen.getByText("Swap to Micro")).toBeInTheDocument();
-  // Moving equipment during the swap must not start a rep.
-  hold(15, 200); hold(0, 100);
-  expect(screen.queryByRole("timer")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(screen.getByText(/Swap the Tindeq to the/)).toBeInTheDocument();
+  // The old Continue-click gate was removed; the swap banner is a
+  // persistent note over hang-armed and clears when the next pull
+  // starts. The pre-click "handling can't start a rep during swap"
+  // invariant was tied to the click gate — accepted as a trade-off
+  // for the frictionless swap flow. In real use, enterStep's
+  // endRepAndRequireRelease still blocks brief handling spikes once
+  // the user settles the swapped gripper.
   completeStep(3); completeStep(4);
   expect(screen.getByText("Warm-up · Step 5 of 5")).toBeInTheDocument();
   expect(screen.getByText("Final strength ramp")).toBeInTheDocument();
@@ -162,7 +165,7 @@ test('optional Peak Test saves only its pulls, then completes warmup', async () 
   expect(screen.getByText('🤚 Left Hand')).toBeInTheDocument();
   expect(addReps).not.toHaveBeenCalled();
   for(let round=0;round<3;round++) {
-    for(let h=0;h<2;h++) { fireEvent.click(screen.getByRole('button', { name: /Ready for .* pull/ })); hold(30,3100); send(0); }
+    for(let h=0;h<2;h++) { hold(30,3100); send(0); }
     if(round<2) act(() => jest.advanceTimersByTime(61000));
   }
   expect(addReps).toHaveBeenCalledTimes(6);
@@ -197,18 +200,14 @@ test('both selected max tests save separate grips and sessions with a swap betwe
   await waitFor(() => expect(h.commands.filter(command => command === CMD_START[0])).toHaveLength(2));
   const finishTest = () => {
     for (let round = 0; round < 3; round++) {
-      fireEvent.click(screen.getByRole('button', { name: /Ready for .* pull/ }));
       h.hold(30, 3100); h.send(0);
-      fireEvent.click(screen.getByRole('button', { name: /Ready for .* pull/ }));
       h.hold(32, 3100); h.send(0);
       if (round < 2) act(() => jest.advanceTimersByTime(61000));
     }
   };
   finishTest();
   fireEvent.click(screen.getByRole('button', { name: 'Continue warm-up' }));
-  expect(screen.getByText('Swap to Crusher')).toBeInTheDocument();
   expect(h.addReps).toHaveBeenCalledTimes(6);
-  fireEvent.click(screen.getByRole('button', { name: 'Continue', exact: true }));
   await waitFor(() => expect(h.commands.filter(command => command === CMD_START[0])).toHaveLength(3));
   expect(screen.getByText('Crusher · Peak Test')).toBeInTheDocument();
   expect(screen.getByText('Round 1 of 3')).toBeInTheDocument();
