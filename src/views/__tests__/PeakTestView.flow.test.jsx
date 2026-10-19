@@ -46,13 +46,16 @@ async function setup(history = []) {
     }
   };
   const rest = () => { hold(0, 2000); };
-  // armed-click gate removed — the peak test now auto-arms after each
-  // rest; a pull alone starts the attempt. Keep `arm` as a no-op so
-  // the test flow reads the same as before and new behavior is proved
-  // by the sensor callbacks alone.
   const arm = () => {};
-  const pull = (kg, ms) => { arm(); hold(kg, ms); };
-  return { ...view, leaveTab: () => view.rerender(<Harness tabVisible={false} />), returnTab: () => view.rerender(<Harness />), hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, pull, arm, rest, commands, onClose, addReps, disconnect: () => act(() => { onDisconnect(); }) };
+  // A full pull: force rise + a natural release+settle long enough
+  // for the hook's AUTO_RELEASE_CONFIRM_MS (1s) release detection to
+  // fire. The 3s auto-cutoff was removed, so pulls now end only on
+  // release.
+  const pull = (kg, ms) => { arm(); hold(kg, ms); hold(0, 1200); };
+  // Used by the disconnect-mid-attempt test which needs phase=active
+  // when the disconnect fires. The regular `pull` ends with a release.
+  const pullNoRelease = (kg, ms) => { arm(); hold(kg, ms); };
+  return { ...view, leaveTab: () => view.rerender(<Harness tabVisible={false} />), returnTab: () => view.rerender(<Harness />), hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, pull, pullNoRelease, arm, rest, commands, onClose, addReps, disconnect: () => act(() => { onDisconnect(); }) };
 }
 
 test.each(['L', 'R'])('six real sensor pulls alternate from %s, with exactly two rests and no countdown start', async first => {
@@ -72,12 +75,14 @@ test.each(['L', 'R'])('six real sensor pulls alternate from %s, with exactly two
   for (let round = 0; round < 3; round++) {
     for (const h of order) {
       expect(screen.getByText(h === 'L' ? '🤚 Left Hand' : '✋ Right Hand')).toBeInTheDocument();
-      arm(); hold(h === 'L' ? 25 : 30, 3100);
+      // The 3s auto-cutoff was removed; a natural release ends the
+      // pull. hold(0, 1200) is the release+settle (AUTO_RELEASE_CONFIRM_MS
+      // = 1s). The old "continued force cannot start the next hand"
+      // sub-check was predicated on auto-complete immediately followed
+      // by continued force, which no longer happens — pulls are always
+      // user-released.
+      arm(); hold(h === 'L' ? 25 : 30, 3100); hold(0, 1200);
       expect(addReps).toHaveBeenCalledTimes(round * 2 + order.indexOf(h) + 1);
-      // Continued force cannot start the next hand before a real release.
-      hold(32, 400);
-      expect(addReps).toHaveBeenCalledTimes(round * 2 + order.indexOf(h) + 1);
-      send(0);
     }
     if (round < 2) checkRestBetweenRounds(round);
   }
@@ -92,22 +97,27 @@ test.each(['L', 'R'])('six real sensor pulls alternate from %s, with exactly two
   expect(commands.filter(c => c === CMD_START[0])).toHaveLength(1);
 });
 
-test('interrupted pull is preserved without setting a peak and switches to the other hand', async () => {
-  const { pull, addReps } = await setup();
-  pull(30, 1200);
-  fireEvent.click(screen.getByRole('button', { name: 'Rep interrupted' }));
+test('Retry rep discards the active attempt and keeps the slot', async () => {
+  const { pullNoRelease, hold, send, addReps } = await setup();
+  pullNoRelease(30, 1200);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry rep' }));
+  // No row recorded — the attempt was discarded.
+  expect(addReps).not.toHaveBeenCalled();
+  // Slot unchanged: still showing round 1 and the first hand's cue.
+  expect(screen.getByText('Round 1 of 3')).toBeInTheDocument();
+  // Re-attempt the same slot: release+settle (so the hook clears
+  // its awaiting-release guard), then a real pull completes a rep.
+  send(0); hold(0, 1500);
+  hold(50, 3100); hold(0, 1200);
+  expect(addReps).toHaveBeenCalledTimes(1);
   const r = addReps.mock.calls[0][0][0];
-  expect(r.actual_time_s).toBeGreaterThan(0);
-  expect(isValidPeakMeasurement(r)).toBe(false);
-  expect(r.failure_valid).toBe(false);
-  expect(screen.getByText('✋ Right Hand')).toBeInTheDocument();
-  expect(screen.getByText('Best so far · L: — · R: —')).toBeInTheDocument();
+  expect(r.rep_num).toBe(1); // first slot — the retry didn't consume it
 });
 
 
 test('dropped link retains elapsed activity but cannot contribute a peak', async () => {
-  const { pull, disconnect, addReps } = await setup();
-  pull(30,1200);
+  const { pullNoRelease, disconnect, addReps } = await setup();
+  pullNoRelease(30,1200);
   disconnect();
   expect(addReps).toHaveBeenCalledTimes(1);
   const r=addReps.mock.calls[0][0][0];
@@ -159,7 +169,7 @@ test('peak test does not invent a previous maximum when there is no history', as
 // is tapped" invariant was removed intentionally — the Ready click
 // gate was dropped per user request. Handling during the ACTIVE 'ready'
 // phase may consume a slot, which is an accepted trade-off; the user
-// discards it via the Rep interrupted button. The rest-phase gating
+// discards it via the Retry rep button. The rest-phase gating
 // invariant (above, in the main round-trip test) still holds, enforced
 // by callbacks.start's phase !== 'ready' check.
 
