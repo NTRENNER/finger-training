@@ -7,7 +7,7 @@ import { C } from '../ui/theme.js';
 import { fmtW } from '../ui/format.js';
 import { today, nowISO, uuid } from '../util.js';
 import { startingHandForDay, otherHand } from '../model/handOrder.js';
-import { PEAK_HOLD_S, PEAK_ROUNDS, PEAK_ROUND_REST_S, peakMeasurementRecord, isValidPeakMeasurement } from '../model/peakTest.js';
+import { PEAK_ROUNDS, PEAK_ROUND_REST_S, peakMeasurementRecord, isValidPeakMeasurement } from '../model/peakTest.js';
 import { finalizeDeviceActivity } from '../model/forceRecording.js';
 import { HandCue } from './cards/HandCue.jsx';
 import { ForceGauge } from './cards/LiveForceCard.jsx';
@@ -103,11 +103,14 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
       if (current.phase === 'active') {
         const rawSeconds = (Date.now() - startRef.current) / 1000;
         // Credit only the time held above the dip threshold so a brief
-        // slip during a 3-second peak pull doesn't poison the duration.
+        // slip doesn't poison the duration. No hard auto-cutoff: the
+        // user ramps up to peak and releases when done; onRepEnd
+        // (release detection) ends the attempt naturally. PEAK_HOLD_S
+        // still gates validity in isValidPeakMeasurement — releases
+        // before that threshold are marked invalid, but the clock
+        // never forces an early end on the user.
         const seconds = Number(creditedSeconds(tindeq?.forceLoss, rawSeconds));
-        if (seconds >= PEAK_HOLD_S) {
-          callbacks.current.complete(tindeq.endRepAndRequireRelease());
-        } else transition({ ...current, elapsed: seconds });
+        transition({ ...current, elapsed: seconds });
       } else if (current.phase === 'rest') {
         const remaining = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
         transition({ ...current, elapsed: remaining, phase: remaining ? 'rest' : 'ready', armed: remaining ? current.armed : true });
@@ -116,6 +119,19 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Discard the active attempt and reset to 'ready' for the SAME
+  // slot (index unchanged, no row recorded). Called from the
+  // "Retry rep" button when the user wants another shot at the same
+  // hand without burning a slot. The hook is told to require a
+  // release before the next pull-start, so an in-progress force
+  // doesn't immediately re-trigger onRepStart.
+  const retryRep = () => {
+    if (live.current.phase !== 'active') return;
+    tindeq?.endRepAndRequireRelease?.();
+    startRef.current = null;
+    transition({ ...live.current, phase: 'ready', armed: true, elapsed: 0 });
+  };
 
   const endEarly = () => {
     if (live.current.phase === 'active') callbacks.current.complete({
@@ -167,15 +183,13 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
           {state.phase === 'ready' && <p style={{ color: C.muted }}>Position the grip and release before pulling — the attempt starts automatically.</p>}
           {state.phase === 'active' && <ForceLossNotice state={tindeq?.forceLoss} />}
           <SignalRecoveringNotice recovering={tindeq?.signalRecovering} />
-          <p>Build force smoothly. Pull as hard as you can for {PEAK_HOLD_S} seconds, then release.</p>
-          <p style={{ color: C.muted }}>No target weight. Measures peak force, not time to failure.</p>
+          <p>Build force smoothly. Pull as hard as you can, then release when you've reached your max.</p>
+          <p style={{ color: C.muted }}>No target weight or time cap. Measures peak force, not time to failure.</p>
         </>}
         {state.phase === 'error' && <div role="alert"><p>Could not start the sensor. Release the handle and retry.</p>
           <Btn onClick={() => { transition({ ...live.current, phase: 'ready', armed: true }); setRetry(n => n + 1); }}>Retry sensor</Btn></div>}
         {!tindeq?.connected && <><p>Connect the Tindeq to measure your peak.</p><Btn onClick={() => tindeq?.connect?.()}>Connect Tindeq</Btn></>}
-        {state.phase === 'active' && <Btn onClick={() => callbacks.current.complete({
-          ...tindeq.endRepAndRequireRelease(), endReason: 'interrupted', failureValid: false,
-        })}>Rep interrupted</Btn>}
+        {state.phase === 'active' && <Btn color={C.yellow} onClick={retryRep}>Retry rep</Btn>}
       </Card>
       <Card style={{ marginTop: 12 }}><ForceGauge force={tindeq?.force || 0} emphasizePeak
         avg={state.phase === 'active' ? tindeq?.avgForce || 0 : 0}
