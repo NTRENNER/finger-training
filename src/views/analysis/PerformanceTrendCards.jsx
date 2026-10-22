@@ -11,7 +11,7 @@ import { C } from '../../ui/theme.js';
 import { GRIP_COLORS } from '../../ui/grip-colors.js';
 import { DateRangeSlider, normalizeHistoryWindow } from '../../ui/DateRangeSlider.jsx';
 import { DEFAULT_PERFORMANCE_TREND_MODEL } from '../../model/performanceTrends.js';
-import { buildPerformanceTrendAnalysis, DEFAULT_BASELINE_MIN_OBSERVATIONS } from '../../model/performanceTrendEvidence.js';
+import { buildPerformanceTrendAnalysis } from '../../model/performanceTrendEvidence.js';
 import { suggestCookedFromClimbs } from '../../model/climbingFatigue.js';
 import {
   BAND_LABELS, CONTEXT_LABELS, CapacitySummaries, DurationBreakdown,
@@ -44,14 +44,13 @@ function CapacityTooltip({ active, payload, label, unit }) {
 export function PerformanceTrendCards({
   history = EMPTY, grips = EMPTY, handView = 'pooled', activities = EMPTY,
   normalizeOn = false, trendModel = DEFAULT_PERFORMANCE_TREND_MODEL, unit = 'kg',
-  minimumBaselineObservations = DEFAULT_BASELINE_MIN_OBSERVATIONS,
 }) {
   const selectedGrips = grips || EMPTY;
   // Refit only when source history or model scope changes. Date and point
   // filters expose a view of the historical estimates; they never rebase them.
   const analysis = useMemo(
-    () => buildPerformanceTrendAnalysis(history, selectedGrips, handView, { model: trendModel, minimumBaselineObservations }),
-    [history, selectedGrips, handView, trendModel, minimumBaselineObservations],
+    () => buildPerformanceTrendAnalysis(history, selectedGrips, handView, { model: trendModel }),
+    [history, selectedGrips, handView, trendModel],
   );
   const rows = analysis.rows || EMPTY;
   const observations = analysis.observations || EMPTY;
@@ -102,8 +101,8 @@ export function PerformanceTrendCards({
     <Card style={cardStyle}>
       <CardTitle>Estimated Capacity Over Time</CardTitle>
       <p className="trend-intro">More training dates needed. A first estimate needs five eligible training dates per selected hand. Both-hand estimates require a curve for each hand. Try Left or Right above if only one hand has enough history.</p>
-      <CapacitySummaries summaries={summaries} unit={unit} minimumBaselineObservations={minimumBaselineObservations} />
-      <p className="trend-small">Curve Improvement remains establishing until enough qualifying observations and duration coverage are available. Missing estimates do not indicate declining performance.</p>
+      <CapacitySummaries summaries={summaries} unit={unit} />
+      <p className="trend-small">Curve Improvement remains establishing until every duration domain has two qualifying opening holds per selected hand. Missing estimates do not indicate declining performance.</p>
     </Card>
     <Card style={cardStyle}>
       <CardTitle>Recent Performance vs Expected</CardTitle>
@@ -115,7 +114,7 @@ export function PerformanceTrendCards({
     <Card style={cardStyle}>
       <CardTitle>Estimated Capacity Over Time</CardTitle>
       <p className="trend-intro">Tracks changes in your underlying modeled force–duration ability rather than day-to-day session readiness. Dashed lines show each established baseline; summary percentages show long-term gain from that baseline.</p>
-      <CapacitySummaries summaries={summaries} unit={unit} minimumBaselineObservations={minimumBaselineObservations} />
+      <CapacitySummaries summaries={summaries} unit={unit} />
       <p className="trend-small">The highest estimate is the highest whole-curve score reached by each grip’s latest shown date, including dates before the shown range.</p>
       {hasLong ? <div className="trend-chart" role="img" aria-label="Estimated Capacity and established baseline, by date and grip">
         <ResponsiveContainer width="100%" height={CHART.height}>
@@ -142,7 +141,7 @@ export function PerformanceTrendCards({
       <DurationBreakdown summaries={summaries} />
       <CapacityEvidenceDetails summaries={summaries} />
       <Disclosure title="How to read the estimates" style={{ marginTop: 8, marginBottom: 0 }}>
-        <p className="trend-small">Each date uses the training recorded by that date. Older training gradually receives less weight with a 90-day half-life. Both-hand capacity weights the hands equally. Baseline maturation is an evidence policy, not a statistical confidence or recovery test. It requires the configured hold count per selected hand, at least six dates and local support at all six reference durations, and the gate must clear on two consecutive qualifying dates — a one-off coverage coincidence does not establish the baseline. The confirming date's estimate is then frozen for comparison.</p>
+        <p className="trend-small">Each date uses the training recorded by that date. Older training gradually receives less weight with a 90-day half-life. Both-hand capacity weights the hands equally. Baseline maturation is an evidence policy, not a statistical confidence or recovery test. It requires two qualifying opening holds in each of the six actual-duration domains for every selected hand. The estimate freezes as soon as the final domain reaches its second point.</p>
         {trendModel !== 'original' && <p className="trend-small">Sessions after earlier finger training that day receive less weight, including training on another grip. This does not correct for climbing or accumulated fatigue.</p>}
         {trendModel === 'contextRobust' && <p style={{ color: C.yellow, fontSize: 12 }}>Research preview: unusually high and low results also have reduced influence. This additional smoothing is experimental.</p>}
         <p className="trend-small">Orange bars show estimated load from logged climbing on that date and the previous day, on a separate 0–10 scale. A score of 10 fills the bottom quarter of the chart. Same-day climbing may have happened before or after finger training.</p>

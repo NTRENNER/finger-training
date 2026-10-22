@@ -62,7 +62,7 @@ test('explicit stop requires release before another rep can start', async () => 
   expect(stats.actualTime).toBe(0.5);
   packet([[600, 20], [700, 20]]);
   expect(onStart).toHaveBeenCalledTimes(1);
-  packet([[800, 0], [900, 20]]);
+  packet([[800, 0], [1300, 0], [1800, 0], [1900, 20]]);
   expect(onStart).toHaveBeenCalledTimes(2);
 });
 test('a sub-second release dip does not end the rep', async () => {
@@ -110,7 +110,7 @@ test('timed warmups tolerate target crossings until the timer ends the rep', asy
   act(() => { view.result.current.endRepAndRequireRelease(); });
   packet([[10100, 26], [10200, 26]]);
   expect(onStart).toHaveBeenCalledTimes(1);
-  packet([[10300, 0], [10400, 26]]);
+  packet([[10300, 0], [10800, 0], [11300, 0], [11400, 26]]);
   expect(onStart).toHaveBeenCalledTimes(2);
 });
 
@@ -193,11 +193,11 @@ test('rest release watching is bounded and cannot stop a newer rep stream', asyn
   packet([[4000, 25]]);
   expect(nextStart).not.toHaveBeenCalled();
   expect(view.result.current.awaitingRelease).toBe(true);
-  packet([[4500, 0]]);
+  packet([[4500, 0], [5000, 0], [5500, 0]]);
   expect(view.result.current.awaitingRelease).toBe(false);
   await act(async () => { jest.advanceTimersByTime(2000); });
   expect(commands.at(-1)).toBe(CMD_START[0]);
-  packet([[5000, 25]]);
+  packet([[5600, 25]]);
   expect(nextStart).toHaveBeenCalledTimes(1);
 });
 
@@ -221,10 +221,10 @@ test('a release sample before restart callbacks arm still clears the previous ga
   const nextStart = jest.fn();
   await act(async () => {
     const pending = view.result.current.startAutoDetect(nextStart, jest.fn());
-    packet([[3500, 0]]); // arrives while START is awaiting its GATT write
+    packet([[3500, 0], [4000, 0], [4500, 0]]); // arrives while START is awaiting its GATT write
     await pending;
   });
-  packet([[4000, 25]]);
+  packet([[5000, 25]]);
   expect(nextStart).toHaveBeenCalledTimes(1);
 });
 
@@ -239,6 +239,58 @@ test('a 1.5 second force adjustment recovers without ending the rep, then full r
   packet([[5500, 0]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({ actualTime: 4.5, failureValid: true });
+});
+
+test('a sustained distinct unload ends at its onset even when residual load never reaches zero', async () => {
+  const { packet, onEnd } = await setup(25);
+  packet([[0, 25], [500, 25], [1000, 25], [1500, 25],
+    [2000, 5], [2500, 4.5], [2999, 5], [3000, 5]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({
+    actualTime: 2,
+    failureValid: true,
+    forceRecording: {
+      recording_stop_reason: 'release',
+      release_detection: {
+        version: 1,
+        method: 'distinct_unload',
+        residual_force_kg: 5,
+        pre_unload_force_kg: 25,
+        confirmation_ms: 1000,
+      },
+    },
+  });
+});
+
+test.each([5, 6])('a %s kg rep ends cleanly on a sustained 2 kg residual load', async target => {
+  const { packet, onEnd } = await setup(target);
+  packet([[0, target], [500, target], [1000, target], [1500, target],
+    [2000, 2], [2500, 2], [2999, 2], [3000, 2]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({
+    actualTime: 2,
+    failureValid: true,
+    endReason: 'muscular_failure',
+    forceRecording: {
+      recording_stop_reason: 'release',
+      capacity_end_reason: 'release',
+      release_detection: { method: 'distinct_unload', residual_force_kg: 2 },
+    },
+  });
+});
+
+test.each([5, 6])('a sustained force loss at %s kg is still identified after the recovery window', async target => {
+  const { view, packet, onEnd } = await setup(target);
+  for (let ms = 0; ms <= 7000; ms += 100) packet([[ms, ms < 2000 ? target : target * .7]]);
+  expect(view.result.current.forceLoss).toMatchObject({ status: 'complete' });
+  expect(onEnd).not.toHaveBeenCalled();
+  packet([[7100, 0], [7600, 0], [8100, 0]]);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({
+    failureValid: true,
+    endReason: 'target_force_failure',
+    forceRecording: { capacity_end_reason: 'sustained_force_loss' },
+  });
 });
 
 
@@ -257,13 +309,13 @@ test('confirmed loss freezes hold time, records weaker work until release, and t
   expect(stats.actualTime).toBeGreaterThanOrEqual(3);
   expect(stats.actualTime).toBeLessThan(3.4);
   expect(stats).toMatchObject({failureValid:true,endReason:'target_force_failure',
-    forceRecording:{failure_policy:{version:9},recording_stop_reason:'release',
+    forceRecording:{failure_policy:{version:11},recording_stop_reason:'release',
       capacity_end_reason:'sustained_force_loss',activity:{duration_s:9.1}}});
   feed(packet,10200,11000,()=>25);
   expect(onStart).toHaveBeenCalledTimes(2);
   expect(onEnd).toHaveBeenCalledTimes(1);
 });
-test.each([2.5,25])('a two-second adjustment at target %s survives; zero release ends after one second', async target => {
+test.each([2.5,5,6,25])('a two-second adjustment at target %s survives; zero release ends after one second', async target => {
   const {packet,onEnd,view}=await setup(target);
   feed(packet,0,9000,ms=>ms===0?target:ms>=3000&&ms<5000?target*.7:target*.98);
   expect(onEnd).not.toHaveBeenCalled();
@@ -273,7 +325,7 @@ test.each([2.5,25])('a two-second adjustment at target %s survives; zero release
   packet([[10100,0]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:9.1,failureValid:true,
-    forceRecording:{capacity_end_reason:'release',failure_policy:{version:9}}});
+    forceRecording:{capacity_end_reason:'release',failure_policy:{version:11}}});
 });
 test('repeated short good pulses do not erase an ongoing loss in the live detector', async () => {
   const {packet,view,onEnd}=await setup(20);

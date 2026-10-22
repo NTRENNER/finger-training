@@ -23,7 +23,7 @@ export function formatTrendPercent(value) {
 const durationText = value => Number.isFinite(value) ? `${Number(value.toFixed(1))} s` : 'Unknown';
 const supportCount = evidence => evidence?.referenceSupport?.filter(item => item.status === 'supported').length ?? 0;
 
-export function CapacitySummaries({ summaries, unit = 'kg', minimumBaselineObservations = 100 }) {
+export function CapacitySummaries({ summaries, unit = 'kg' }) {
   return <div className="trend-summary-grid">
     {summaries.map(({ grip, latest, sessionPerformance, sessionDate, hasHistoricalEstimate }) => {
       const evidence = latest?.evidence;
@@ -45,8 +45,8 @@ export function CapacitySummaries({ summaries, unit = 'kg', minimumBaselineObser
             <dd>{maturation?.ready ? formatTrendPercent(maturation.improvement) : 'Establishing baseline'}</dd>
             {maturation?.ready
               ? <p className="trend-small">Since established baseline · <time dateTime={maturation.date}>{maturation.date}</time></p>
-              : maturation ? <p className="trend-small">{maturation.qualifyingObservations} / {maturation.minimumObservations} qualifying observations per selected hand · {maturation.supportedDurations} / 6 supported durations · {maturation.qualifyingDates} / {maturation.requiredQualifyingDates} qualifying dates</p>
-                : <p className="trend-small">Awaiting a modeled estimate. Requires {minimumBaselineObservations} qualifying observations per selected hand, duration coverage, and two consecutive qualifying dates.</p>}
+              : maturation ? <p className="trend-small">{maturation.supportedDomains} / {maturation.totalDomains} domains have {maturation.requiredPointsPerDomain} qualifying points per selected hand</p>
+                : <p className="trend-small">Awaiting a modeled estimate. Requires two qualifying opening holds in each of the six duration domains per selected hand.</p>}
             <p className="trend-small">Long-term gain in modeled capacity from an established baseline.</p>
           </div>
           <div><dt>Session Performance</dt><dd>{Number.isFinite(sessionPerformance) ? `${formatTrendPercent(sessionPerformance)} vs expected` : '—'}</dd>

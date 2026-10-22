@@ -25,6 +25,7 @@ afterEach(() => { jest.useRealTimers(); delete navigator.bluetooth; });
 // and generated durations are substituted so an entire sequence is fast.
 async function setup({ peak = false, crusherPeak = false } = {}) {
   let listener, hook;
+  let lastSampleMs = null;
   let streaming = false;
   const commands = [];
   const data = { addEventListener: (_, cb) => { listener = cb; }, removeEventListener: jest.fn(),
@@ -56,9 +57,11 @@ async function setup({ peak = false, crusherPeak = false } = {}) {
   await waitFor(() => expect(commands).toContain(CMD_START[0]));
   const send = kg => {
     if (!streaming) return;
+    const sampleMs = lastSampleMs == null ? Date.now() : Math.max(Date.now(), lastSampleMs + 1);
+    lastSampleMs = sampleMs;
     const value = new DataView(new ArrayBuffer(10));
     value.setUint8(0, 1); value.setUint8(1, 8);
-    value.setFloat32(2, kg, true); value.setUint32(6, (Date.now() * 1000) >>> 0, true);
+    value.setFloat32(2, kg, true); value.setUint32(6, (sampleMs * 1000) >>> 0, true);
     act(() => listener({ target: { value } }));
   };
   const hold = (kg, ms) => {
@@ -89,11 +92,32 @@ test("first timed hold, rest release, and the next pull use one uninterrupted se
   expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0]]);
 });
 
+test('a warm-up started without a sensor stays manual after reconnect and ignores stale force-loss state', () => {
+  const startAutoDetect = jest.fn();
+  const targetKgRef = { current: null };
+  const baseTindeq = { connected: false, reconnecting: false, targetKgRef, startAutoDetect,
+    stopAutoDetect: jest.fn(), forceLoss: { status: 'recovering', pendingEndTs: 0 } };
+  const props = { visible: true, history: [], wLog: [], bodyWeightKg: 73, unit: 'kg',
+    onClose: jest.fn(), addReps: jest.fn() };
+  const view = render(<WarmupView {...props} tindeq={baseTindeq} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Start', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start hang' }));
+  act(() => jest.advanceTimersByTime(500));
+  view.rerender(<WarmupView {...props} tindeq={{ ...baseTindeq, connected: true }} />);
+  act(() => jest.advanceTimersByTime(1700));
+  expect(screen.getByRole('timer', { name: 'Rest' })).toBeInTheDocument();
+  expect(startAutoDetect).not.toHaveBeenCalled();
+  expect(screen.queryByText('Connect the Tindeq to continue.')).not.toBeInTheDocument();
+});
+
 test("complete sequence retains stage layout and finishes after the second strength ramp", async () => {
   const { hold, rest, commands, addReps } = await setup();
   const completeStep = step => {
     expect(screen.getByText(`Warm-up · Step ${step} of 5`)).toBeInTheDocument();
     expect(screen.getByText("Target weight")).toBeInTheDocument();
+    // A grip change deliberately re-arms release detection. Represent the
+    // unloaded settling time that occurs while the athlete swaps equipment.
+    hold(0, 1200);
     hold(30, 2000); rest();
   };
   completeStep(1); completeStep(2);
@@ -123,30 +147,30 @@ test("pulling during rest cannot shorten it or pre-start the next rep", async ()
   expect(screen.getByRole("timer", { name: "Ready" })).toBeInTheDocument();
   hold(30, 500);
   expect(screen.getByRole("timer", { name: "Ready" })).toBeInTheDocument();
-  send(0); hold(30, 200);
+  hold(0, 1200); hold(30, 200);
   expect(screen.getByRole("timer", { name: "Hold time" })).toBeInTheDocument();
 });
 
 test("missing sensor samples pause the same rep rather than count a completed warm-up", async () => {
-  const { hold, send } = await setup();
+  const { hold } = await setup();
   hold(25, 100);
   act(() => jest.advanceTimersByTime(2000));
   expect(screen.getByText("Warm-up paused")).toBeInTheDocument();
   expect(screen.getByText("Warm-up · Step 1 of 5")).toBeInTheDocument();
   expect(screen.queryByRole("timer", { name: "Rest" })).not.toBeInTheDocument();
-  send(0);
+  hold(0, 1200);
   fireEvent.click(screen.getByRole("button", { name: "Retry rep" }));
   hold(25, 2000);
   expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
 });
 
 test("skipping an active hold still requires release and leaving warm-up stops the stream", async () => {
-  const { hold, send, commands, hideWarmup } = await setup();
+  const { hold, commands, hideWarmup } = await setup();
   hold(25, 500);
   fireEvent.click(screen.getByRole("button", { name: "Skip step" }));
   hold(25, 500);
   expect(screen.getByRole("timer", { name: "Ready" })).toBeInTheDocument();
-  send(0); hold(25, 2000);
+  hold(0, 1200); hold(25, 2000);
   expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
   hideWarmup();
   await waitFor(() => expect(commands).toEqual([CMD_BATTERY[0], CMD_START[0], CMD_STOP[0]]));
@@ -184,7 +208,7 @@ test("tab navigation preserves warmup rest and cannot record hidden pulls", asyn
   act(()=>jest.advanceTimersByTime(5000));
   await act(async()=>h.returnTab());
   expect(screen.getByText("Warm-up · Step 2 of 5")).toBeInTheDocument();
-  h.send(0);h.hold(25,500);
+  h.hold(0,1200);h.hold(25,500);
   expect(screen.getByRole("timer",{name:"Hold time"})).toBeInTheDocument();
 });
 

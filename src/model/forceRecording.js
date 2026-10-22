@@ -156,6 +156,15 @@ export function recordCapacityForce(samples, endTs = samples?.at(-1)?.ts, target
       sustained_max: activity.forceRecording.sustained_max,
       ...(decision ? { failure_policy: TARGET_FAILURE_POLICY, acquisition_basis: separateRamp ? 'first_target_crossing' : 'sustained_tolerance_band',
         recording_stop_reason: decision.stopReason, capacity_end_reason: decision.reason,
+        ...(decision.releaseDetection ? { release_detection: {
+          version: 1, method: decision.releaseDetection.method,
+          residual_force_kg: decision.releaseDetection.residualKg,
+          pre_unload_force_kg: decision.releaseDetection.recentHighKg,
+          threshold_kg: decision.releaseDetection.thresholdKg,
+          confirmation_ms: decision.releaseDetection.confirmedTs - decision.releaseDetection.startTs,
+          onset_offset_s: decision.pullStartTs == null ? null
+            : (decision.releaseDetection.startTs - decision.pullStartTs) / 1000,
+        } } : {}),
         credited_end_at_ms: capacity.endedAtMs,
         target_band_time_s: inBandMs / 1000, target_band_fraction: capacity.actualTime > 0 ? inBandMs / (capacity.actualTime * 1000) : 0,
         continuity: continuous ? 'continuous' : 'intermittent',

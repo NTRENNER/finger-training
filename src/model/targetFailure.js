@@ -1,7 +1,7 @@
 // Engineering tolerances, not a physiological diagnosis. Device timestamps
 // drive every window so batched Bluetooth notifications behave identically.
 export const TARGET_FAILURE_POLICY = Object.freeze({
-  version: 9, below_target_fraction: 0.93, confirmation_ms: 4000,
+  version: 11, below_target_fraction: 0.93, confirmation_ms: 4000,
   smoothing_ms: 300, recovery_ms: 750, acquisition_ms: 300,
   maximum_recovered_unload_ms: 300,
   // Release = force dropped below release_fraction of target (so 10% means
@@ -9,6 +9,10 @@ export const TARGET_FAILURE_POLICY = Object.freeze({
   // tiny targets where 10% would fall below the handle's own weight — the
   // user may be holding the device rather than fully letting go.
   release_confirmation_ms: 1000, release_fraction: 0.10, release_floor_kg: 0.5,
+  start_release_hysteresis_kg: 0.5,
+  release_unloaded_fraction: 0.20, release_recent_high_ms: 750,
+  release_low_load_fraction: 0.40, release_low_load_ceiling_kg: 2,
+  release_minimum_drop_kg: 1,
   minimum_drop_kg: 0.45359237, maximum_drop_fraction: 0.20,
 });
 
@@ -28,8 +32,55 @@ export function targetFailureBoundary(targetKg) {
 export function repDetectionThresholds(targetKg) {
   const target = Number(targetKg);
   if (!(target > 0) || !Number.isFinite(target)) return { startKg: 4, releaseKg: 3 };
-  return { startKg: Math.min(4, target * 0.8),
-    releaseKg: Math.max(TARGET_FAILURE_POLICY.release_floor_kg, target * TARGET_FAILURE_POLICY.release_fraction) };
+  const releaseKg = Math.max(TARGET_FAILURE_POLICY.release_floor_kg,
+    target * TARGET_FAILURE_POLICY.release_fraction);
+  const hysteresisKg = Math.min(TARGET_FAILURE_POLICY.start_release_hysteresis_kg, target * 0.1);
+  const startKg = Math.max(Math.min(4, target * 0.8), releaseKg + hysteresisKg);
+  return { startKg, releaseKg };
+}
+
+// Physical release is either conventionally low force or a clearly distinct
+// unload: force falls abruptly from a recent working level into the unloaded
+// band and stays there for the normal one-second confirmation. Ordinarily that
+// band is <=20% of working force. For low-load work it can widen to 40%, but
+// never above 2 kg, because the device or attachment can carry a meaningful
+// share of a 5–6 kg prescription while resting on the floor.
+export function createReleaseDetector(releaseKg) {
+  const absoluteThreshold = Number.isFinite(releaseKg) && releaseKg > 0 ? releaseKg : 3;
+  let previousTs = null, recent = [], candidate = null, result = null;
+  const detect = ({ ts, kg }) => {
+    if (result || !Number.isFinite(ts) || !Number.isFinite(kg) || (previousTs != null && ts <= previousTs)) return result;
+    previousTs = ts;
+    const cutoff = ts - TARGET_FAILURE_POLICY.release_recent_high_ms;
+    recent = recent.filter(sample => sample.ts >= cutoff);
+    const recentHigh = recent.length ? Math.max(...recent.map(sample => sample.kg)) : null;
+    const absolute = kg < absoluteThreshold;
+    const distinctCeiling = recentHigh == null ? absoluteThreshold : Math.max(absoluteThreshold,
+      recentHigh * TARGET_FAILURE_POLICY.release_unloaded_fraction,
+      Math.min(TARGET_FAILURE_POLICY.release_low_load_ceiling_kg,
+        recentHigh * TARGET_FAILURE_POLICY.release_low_load_fraction));
+    const distinct = recentHigh != null
+      && recentHigh - kg >= TARGET_FAILURE_POLICY.release_minimum_drop_kg
+      && kg <= distinctCeiling;
+    if (!candidate && (absolute || distinct)) {
+      candidate = { startTs: ts, method: absolute ? 'low_force' : 'distinct_unload',
+        ceilingKg: absolute ? absoluteThreshold : distinctCeiling,
+        recentHighKg: recentHigh };
+    } else if (candidate && kg > candidate.ceilingKg) {
+      candidate = null;
+    }
+    recent.push({ ts, kg });
+    if (candidate && ts - candidate.startTs >= TARGET_FAILURE_POLICY.release_confirmation_ms) {
+      result = { released: true, startTs: candidate.startTs, confirmedTs: ts,
+        method: candidate.method, residualKg: kg, recentHighKg: candidate.recentHighKg,
+        thresholdKg: candidate.ceilingKg };
+    }
+    return result;
+  };
+  detect.snapshot = () => ({ pendingStartTs: candidate?.startTs ?? null,
+    method: candidate?.method ?? null, thresholdKg: candidate?.ceilingKg ?? absoluteThreshold,
+    result });
+  return detect;
 }
 
 export function createTargetFailureDetector(targetKg) {

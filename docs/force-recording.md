@@ -4,12 +4,15 @@ Target time determines the prescribed load. The athlete maintains that load unti
 
 ## Target-loss policy
 
-Current targeted training uses [force-loss policy 8](rep-force-loss.md): a 300 ms
+Current targeted training uses [force-loss policy 11](rep-force-loss.md): a 300 ms
 smoothed force signal, four seconds to recover from a partial drop, and a 750 ms
 steady return to clear it. A sustained hold within tolerance acquires the rep;
 exact-target spikes are not required. The tolerance remains the larger of 7% or
-1 lb, bounded at 20% for very light targets. A near-zero release confirms after one
-second. Timed warmups and peak-test protocols retain their own existing behavior.
+1 lb, bounded at 20% for very light targets. Release confirms after one second at
+the normal low-force threshold or after a distinct unload to no more than 20% of
+the recent working force. For low-load work, that band can widen to 40% but is
+capped at 2 kg, so a clearly released device may retain residual load.
+Timed warmups and peak-test protocols retain their own existing behavior.
 
 Confirmed loss freezes credited time and asks the athlete to release. Recording
 continues until release so the weaker tail remains activity and cannot become rest.

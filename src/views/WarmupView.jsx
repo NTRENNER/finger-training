@@ -128,6 +128,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   // flip mid-run even if the Tindeq comes online — a user who started
   // without a sensor shouldn't suddenly see BLE take over.
   const [manualMode, setManualMode] = useState(false);
+  const manualModeRef = useRef(false);
   const tickRef = useRef(null);
   const startTimeRef = useRef(null);
 
@@ -167,11 +168,11 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         // Auto-advance based on CREDITED time — brief force dips (dog-
         // eared grip, BLE blip) are forgiven by the shared forceProtection
         // helper, so an unintentional slip doesn't rob the hold of time.
-        const credited = Number(creditedSeconds(tindeq?.forceLoss, secs));
+        const credited = manualModeRef.current ? secs : Number(creditedSeconds(tindeq?.forceLoss, secs));
         if (targetSec > 0 && credited >= targetSec) {
           clearInterval(tickRef.current);
           tickRef.current = null;
-          if (tindeq?.endRepAndRequireRelease) {
+          if (!manualModeRef.current && tindeq?.endRepAndRequireRelease) {
             tindeq.endRepAndRequireRelease();
           }
           handleHangComplete();
@@ -222,7 +223,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   const inSensorPhase = ["hang-armed", "hang-active", "rest", "interrupted"].includes(phase)
     && currentStep?.type === "hang";
   useEffect(() => {
-    if (!visible || !tindeq?.connected || !inSensorPhase) return;
+    if (manualMode || !visible || !tindeq?.connected || !inSensorPhase) return;
     let disposed = false;
     Promise.resolve(tindeq.startAutoDetect(
       () => onRepStartRef.current?.(),
@@ -236,11 +237,11 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     };
     // The hook's methods are stable; changing phase/step must not restart BLE.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, inSensorPhase, tindeq?.connected]);
+  }, [visible, inSensorPhase, tindeq?.connected, manualMode]);
 
   useEffect(() => {
-    if (visible && tindeq && inSensorPhase) tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
-  }, [visible, tindeq, inSensorPhase, currentStep]);
+    if (visible && tindeq && inSensorPhase && !manualMode) tindeq.targetKgRef.current = currentStep?.targetLoadKg ?? null;
+  }, [visible, tindeq, inSensorPhase, currentStep, manualMode]);
 
   useEffect(() => {
     // Only trip "interrupted" on sensor loss when the run is sensor-driven.
@@ -274,13 +275,15 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   // separate L then R reps per step; that's been removed — one pull,
   // one hold, advance to rest.
   function startProtocol() {
-    setManualMode(!tindeq?.connected);
+    const manual = !tindeq?.connected;
+    manualModeRef.current = manual;
+    setManualMode(manual);
     setFrozenProtocol(previewProtocol);
     setStepIdx(0);
-    enterStep(0);
+    enterStep(0, manual);
   }
 
-  function enterStep(idx) {
+  function enterStep(idx, manual = manualModeRef.current) {
     const step = steps[idx];
     if (!step) {
       changePhase("done");
@@ -289,9 +292,9 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     // Peak-force measurement needs a sensor. In manual mode we silently
     // skip past peak-test steps — the warm-up still gets its hangs; the
     // peak-test block just can't produce a number without the Tindeq.
-    if (step.type === "peak_test" && manualMode) {
+    if (step.type === "peak_test" && manual) {
       setStepIdx(idx + 1);
-      enterStep(idx + 1);
+      enterStep(idx + 1, manual);
       return;
     }
     const prevGrip = steps[idx - 1]?.grip;
@@ -308,7 +311,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     // register as a pull. Peak-test steps rely on their own phase
     // gating (callbacks.start checks phase === 'ready'), so forcing
     // a release there would needlessly block the first real pull.
-    if (gripChanged && step.type === "hang" && tindeq?.endRepAndRequireRelease) {
+    if (!manual && gripChanged && step.type === "hang" && tindeq?.endRepAndRequireRelease) {
       tindeq.endRepAndRequireRelease();
     }
     if (step.type === "hang") {
@@ -347,7 +350,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   }
 
   function skipStep() {
-    tindeq?.endRepAndRequireRelease?.();
+    if (!manualModeRef.current) tindeq?.endRepAndRequireRelease?.();
     advanceToNextStep();
   }
 
@@ -520,7 +523,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   if (phase === "hang-armed" || phase === "hang-active") {
     const target = currentStep.targetSec;
     const active = phase === "hang-active";
-    const credited = active ? Number(creditedSeconds(tindeq?.forceLoss, elapsed)) : 0;
+    const credited = active ? (manualMode ? elapsed : Number(creditedSeconds(tindeq?.forceLoss, elapsed))) : 0;
     const swapCopy = manualMode
       ? <>Swap to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then tap Start hang.</>
       : <>Swap the Tindeq to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then pull — the hang starts automatically.</>;
@@ -567,7 +570,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         {nextStep && <div>Up next: <b style={{ color: C.text }}>{nextStep.title}</b></div>}
         {nextStep?.type === "hang" && <div style={{ fontSize: 22, fontWeight: 700, color: C.blue }}>{fmtW(nextStep.targetLoadKg, unit)} {unit} · {nextStep.targetSec}s</div>}
       </div>
-      {connectionNotice}
+      {!manualMode && connectionNotice}
       {actions(<Btn onClick={advanceFromRest}>Skip rest</Btn>, false)}
     </>);
   }

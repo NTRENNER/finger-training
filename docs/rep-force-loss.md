@@ -1,7 +1,7 @@
-# Rep force loss and physical release (policy 8)
+# Rep force loss and physical release (policy 11)
 
 A brief partial adjustment can recover. A sustained loss ends the credited hold.
-A near-zero release finishes the recording and advances to rest. These are separate
+A confirmed unload finishes the recording and advances to rest. These are separate
 endpoints: weaker pulling after a loss is work, never rest.
 
 ## Live behavior
@@ -16,9 +16,14 @@ endpoints: weaker pulling after a loss is work, never rest.
   reset it. A 1–2 second partial dip followed by a steady return continues the rep.
 - Confirmed loss freezes credited time at the smoothed crossing and shows
   “Rep complete — release the handle.” Further recovery cannot reopen that hold.
-- Recording continues until a full second below min(0.5 kg, 10% of target).
-  Backdate physical release to the first sample in that sustained near-zero run.
-  Near-zero releases use this shorter confirmation, not the partial-dip grace.
+- Recording continues until a full second below the normal low-force threshold
+  (the larger of 0.5 kg and 10% of target), or after a distinct unload to no more
+  than 20% of the immediately preceding working force. For low-load work, the
+  unloaded band may widen to 40% but never above 2 kg, accounting for the device
+  or attachment resting under residual load. A distinct unload must drop at least
+  1 kg and can settle above zero, as when the device rests on the floor.
+  Backdate physical release to the first sample in the sustained unload. Release
+  uses this shorter confirmation, not the partial-dip grace.
 - Rest starts after confirmed physical release. Its measured start is the release
   onset, not the earlier force-loss cutoff. The visible countdown also credits
   release-confirmation and render delay; a 20-second rest normally opens at 19
@@ -35,7 +40,7 @@ intended release; it ends the rep. The athlete can always mark a rep interrupted
 
 ## Stored measurements
 
-New targeted recordings use force-recording version 5 and failure-policy version 8.
+New targeted recordings use force-recording version 5 and failure-policy version 11.
 Existing records are not rewritten.
 
 - The displayed pull time includes the initial ramp, beginning at detected pulling
@@ -60,6 +65,9 @@ Existing records are not rewritten.
   These audit this policy; they are not a raw trace for arbitrary threshold replay.
 - `recording_stop_reason` distinguishes release, manual stop and equipment loss.
   `capacity_end_reason` distinguishes release from sustained force loss.
+- `release_detection` records whether the endpoint came from low force or a distinct
+  unload, plus the residual force, preceding working force, threshold, onset, and
+  confirmation interval.
 - A cumulative 300 ms or more of recovered near-zero unloading marks the credited
   interval intermittent and excludes continuous-capacity learning. It stays visible
   as activity, without prematurely ending the live rep.
@@ -74,7 +82,7 @@ Legacy interval conversion still adds only acquisition time, never the weaker ta
 Policy changes can alter credited duration; past and current records are not claimed
 byte-for-byte equivalent.
 
-A new policy-8 confirmed target loss can weaken a demonstrated-capacity floor under
+A new policy-11 confirmed target loss can weaken a demonstrated-capacity floor under
 exactly the same existing load/duration/session requirements as a release failure,
 but only with measured release and eligible capacity. Older target-loss rows retain
 their conservative treatment. The 4–5–6 progression itself is unchanged.
@@ -82,7 +90,7 @@ their conservative treatment. The 4–5–6 progression itself is unchanged.
 ## Missing-release backstop and unloaded zero check
 
 Release-backstop policy 1 stops a targeted sensor recording 15 seconds **after
-confirmed force loss** if near-zero release has not been observed. It does not
+confirmed force loss** if a confirmed unload has not been observed. It does not
 shorten the four-second partial-dip window. A normal confirmed release wins if it
 arrives at the deadline. No acquired/confirmed loss means no backstop; warmup and
 peak protocols that opt out of target-drop detection keep their existing behavior.
@@ -129,7 +137,7 @@ The targeted hold clock now uses the same device timestamps as the credited
 endpoint. It starts at detected pulling, includes the ramp to target, and pauses at
 the provisional cutoff while checking a force dip. Sustained recovery restores the
 whole interval and resumes the clock; confirmed loss freezes it at that cutoff.
-A near-zero release also pauses immediately, before its confirmation delay. It does not keep advancing during a stalled sensor stream. Rest results, session
+A pending unload also pauses immediately, before its confirmation delay. It does not keep advancing during a stalled sensor stream. Rest results, session
 summaries and History show the same ramp-inclusive pull time for new recordings.
 Untargeted peak/warmup protocols and manually timed pulls keep their own clocks.
 

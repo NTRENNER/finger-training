@@ -8,6 +8,7 @@ beforeEach(() => { jest.useFakeTimers().setSystemTime(new Date(2026, 8, 24, 12))
 afterEach(() => { jest.useRealTimers(); delete navigator.bluetooth; });
 async function setup(history = []) {
   let listener, hook, onDisconnect;
+  let lastSampleMs = null;
   let streaming = false;
   const commands = [];
   const data = { addEventListener: (_, cb) => { listener = cb; }, removeEventListener: jest.fn(),
@@ -34,9 +35,11 @@ async function setup(history = []) {
 
   const send = kg => {
     if (!streaming) return;
+    const sampleMs = lastSampleMs == null ? Date.now() : Math.max(Date.now(), lastSampleMs + 1);
+    lastSampleMs = sampleMs;
     const value = new DataView(new ArrayBuffer(10));
     value.setUint8(0, 1); value.setUint8(1, 8);
-    value.setFloat32(2, kg, true); value.setUint32(6, (Date.now() * 1000) >>> 0, true);
+    value.setFloat32(2, kg, true); value.setUint32(6, (sampleMs * 1000) >>> 0, true);
     act(() => listener({ target: { value } }));
   };
   const hold = (kg, ms) => {
@@ -59,12 +62,12 @@ async function setup(history = []) {
 }
 
 test('six real sensor pulls alternate from L, with exactly two rests and no countdown start', async () => {
-  const { hold, send, arm, addReps, commands } = await setup([]);
+  const { hold, arm, addReps, commands } = await setup([]);
   const order = ['L', 'R'];
   function checkRestBetweenRounds(round) {
       expect(screen.getByRole('timer', { name: 'Rest' })).toBeInTheDocument();
       // Handling equipment during rest cannot record another pull.
-      hold(10, 100); send(0);
+      hold(10, 100); hold(0, 1200);
       act(() => jest.advanceTimersByTime(61000));
       expect(screen.queryByRole('timer', { name: 'Rest' })).not.toBeInTheDocument();
       expect(screen.getByText('Pull to begin')).toBeInTheDocument();
@@ -162,6 +165,8 @@ test('previous best follows the active hand and stays fixed when a new maximum i
 test('peak test does not invent a previous maximum when there is no history', async () => {
   await setup();
   expect(screen.getByText('No previous peak')).toBeInTheDocument();
+  expect(screen.queryByText('Target weight')).not.toBeInTheDocument();
+  expect(screen.getByText(/No target weight or time cap/)).toBeInTheDocument();
 });
 
 // The old "equipment handling cannot consume a hand slot until Ready

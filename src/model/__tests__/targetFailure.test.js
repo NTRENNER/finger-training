@@ -1,4 +1,4 @@
-import { createTargetFailureDetector, repDetectionThresholds } from '../targetFailure.js';
+import { createReleaseDetector, createTargetFailureDetector, repDetectionThresholds } from '../targetFailure.js';
 import { recordCapacityForce } from '../forceRecording.js';
 const lb = .45359237;
 const trace = (seconds, fn, step = 10) => Array.from({length: seconds * 1000 / step + 1}, (_, i) => ({ts:i*step, kg:fn(i*step/1000), at:100000+i*step}));
@@ -65,7 +65,7 @@ test('release stops at physical release, excluding its confirmation delay', () =
   const decision = {...detector.finish(5000),activityEndTs:5000,stopReason:'release',summary:detector.snapshot()};
   expect(decision).toMatchObject({endTs:5000,reason:'release'});
   expect(recordCapacityForce(samples, decision.endTs, 25, decision)).toMatchObject({actualTime:5,avgForce:25,
-    forceRecording:{failure_policy:{version:9},recording_stop_reason:'release',capacity_end_reason:'release'}});
+    forceRecording:{failure_policy:{version:11},recording_stop_reason:'release',capacity_end_reason:'release'}});
 });
 test('sag tail is physical activity but not credited hold time or rest', () => {
   const samples = trace(12, t => t < 5 ? 25 : t < 11 ? 20 : 0);
@@ -105,7 +105,43 @@ test('targeted release scales with target above a floor; untargeted warmups keep
   // the handle's own weight. The user may hold the device after a release.
   expect(repDetectionThresholds(25)).toEqual({startKg:4,releaseKg:2.5});
   expect(repDetectionThresholds(2.5)).toEqual({startKg:2,releaseKg:.5});
+  expect(repDetectionThresholds(50)).toEqual({startKg:5.5,releaseKg:5});
+  expect(repDetectionThresholds(77)).toEqual({startKg:8.2,releaseKg:7.7});
   expect(repDetectionThresholds(null)).toEqual({startKg:4,releaseKg:3});
+});
+test.each([.75, 2.5, 25, 40, 50, 77, 150])('target %s always starts above its release threshold', target => {
+  const { startKg, releaseKg } = repDetectionThresholds(target);
+  expect(startKg).toBeGreaterThan(releaseKg);
+});
+test('release accepts a sustained residual-load plateau after a distinct unload', () => {
+  const detector = createReleaseDetector(2.5);
+  expect(detector({ ts: 0, kg: 25 })).toBeNull();
+  expect(detector({ ts: 500, kg: 5 })).toBeNull();
+  expect(detector({ ts: 1000, kg: 4.5 })).toBeNull();
+  expect(detector({ ts: 1499, kg: 5 })).toBeNull();
+  expect(detector({ ts: 1500, kg: 5 })).toMatchObject({
+    released: true, startTs: 500, confirmedTs: 1500, method: 'distinct_unload', residualKg: 5,
+  });
+});
+test.each([[5, 2], [6, 2]])('release accepts a %s kg hold resting at a %s kg device load', (workingKg, residualKg) => {
+  const detector = createReleaseDetector(Math.max(.5, workingKg * .1));
+  expect(detector({ ts: 0, kg: workingKg })).toBeNull();
+  expect(detector({ ts: 500, kg: residualKg })).toBeNull();
+  expect(detector({ ts: 1000, kg: residualKg })).toBeNull();
+  expect(detector({ ts: 1500, kg: residualKg })).toMatchObject({
+    released: true, startTs: 500, confirmedTs: 1500, method: 'distinct_unload', residualKg,
+  });
+});
+test('gradual fatigue and brief unloading do not count as release', () => {
+  const gradual = createReleaseDetector(2.5);
+  [25, 21, 17, 13, 9, 6].forEach((kg, index) => gradual({ ts: index * 500, kg }));
+  expect(gradual.snapshot().result).toBeNull();
+  const brief = createReleaseDetector(2.5);
+  expect(brief({ ts: 0, kg: 25 })).toBeNull();
+  expect(brief({ ts: 500, kg: 5 })).toBeNull();
+  expect(brief({ ts: 1000, kg: 20 })).toBeNull();
+  expect(brief({ ts: 2000, kg: 20 })).toBeNull();
+  expect(brief.snapshot().result).toBeNull();
 });
 test('audit runs cover acquisition through the last evaluated sample without gaps',()=>{
   const {detector}=run(trace(15,t=>t>=5&&t<7?20:25),25);

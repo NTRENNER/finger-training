@@ -1,9 +1,9 @@
 import React from 'react';
-import { act, render, fireEvent, screen } from '@testing-library/react';
+import { act, render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { AutoRepSessionView, ActiveSessionView, RestView, SessionSummaryView } from '../ActiveSessionViews.jsx';
 jest.mock('../cards/RepCurveChart.jsx', () => ({ RepCurveChart: () => null }));
 jest.mock('../cards/RecoveryChart.jsx', () => ({ RecoveryChart: () => null }));
-jest.mock('../cards/LiveForceCard.jsx', () => ({ BigTimer: () => null, ForceGauge: () => null }));
+jest.mock('../cards/LiveForceCard.jsx', () => ({ BigTimer: () => null, ForceGauge: () => <div data-testid="force-gauge" /> }));
 const config = { grip: 'Micro', hand: 'L', repsPerSet: 4, targetTime: 40, restTime: 20 };
 const session = { config, currentRep: 0, sessionId: 'interruption', activeHand: 'L', refWeights: {L: 20}, sessionReps: [] };
 beforeEach(() => jest.useFakeTimers());
@@ -21,6 +21,21 @@ test('one interrupt action saves the auto rep once with explicit invalidity', ()
   act(() => end({actualTime: 12, avgForce: 18}));
   expect(onRepDone).toHaveBeenCalledTimes(1);
 });
+test('redoing an automatic rep requires release and zero before re-arming without duplicating the live gauge', () => {
+  let start;
+  const onRepDone = jest.fn();
+  const endRepAndRequireRelease = jest.fn();
+  const tindeq = { targetKgRef: {}, startAutoDetect: a => { start = a; }, stopAutoDetect: jest.fn(),
+    endRepAndRequireRelease, connected: true, force: 18, avgForce: 18, peak: 20,
+    forceLoss: { status: 'recovering' } };
+  render(<AutoRepSessionView session={session} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={tindeq} />);
+  act(() => start());
+  expect(screen.getAllByTestId('force-gauge')).toHaveLength(1);
+  act(() => jest.advanceTimersByTime(2100));
+  fireEvent.click(screen.getByRole('button', { name: 'Redo rep' }));
+  expect(endRepAndRequireRelease).toHaveBeenCalledWith({ requireZero: true });
+  expect(onRepDone).not.toHaveBeenCalled();
+});
 test('manual interruption does not reuse stale sensor averages', () => {
   const onRepDone = jest.fn();
   const tindeq = { connected: false, avgForce: 99, peak: 100, targetKgRef: {}, setAutoFailCallback: jest.fn() };
@@ -29,6 +44,22 @@ test('manual interruption does not reuse stale sensor averages', () => {
   for (let i = 0; i < 4; i++) act(() => jest.advanceTimersByTime(1000));
   fireEvent.click(screen.getByRole('button', {name: 'Rep interrupted'}));
   expect(onRepDone).toHaveBeenCalledWith(expect.objectContaining({avgForce: null, peakForce: null, failureValid: false}));
+});
+test('redoing a manually started sensor rep also requires release and zero', async () => {
+  const onRepDone = jest.fn();
+  const endRepAndRequireRelease = jest.fn();
+  const tindeq = { connected: true, force: 18, avgForce: 18, peak: 20, targetKgRef: {},
+    forceLoss: { status: 'recovering' }, setAutoFailCallback: jest.fn(), tare: jest.fn(async () => true),
+    startMeasuring: jest.fn(async () => {}), stopMeasuring: jest.fn(async () => ({ avgForce: 18, peakForce: 20 })),
+    endRepAndRequireRelease };
+  render(<ActiveSessionView session={session} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={tindeq} />);
+  fireEvent.click(screen.getByRole('button', { name: /Start Rep/ }));
+  for (let i = 0; i < 4; i++) await act(async () => { jest.advanceTimersByTime(1000); });
+  act(() => jest.advanceTimersByTime(2100));
+  fireEvent.click(screen.getByRole('button', { name: 'Redo rep' }));
+  await waitFor(() => expect(endRepAndRequireRelease).toHaveBeenCalledWith({ requireZero: true }));
+  expect(tindeq.stopMeasuring).toHaveBeenCalledTimes(1);
+  expect(onRepDone).not.toHaveBeenCalled();
 });
 
 test('beta sensor flow arms each domain load and does not finish at the reference time', () => {

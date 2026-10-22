@@ -1,27 +1,19 @@
 // Evidence annotations for the descriptive performance charts. This module
 // never changes the force observations, fitted curves, starting reference,
 // prescriptions, or existing long/short percentages. A separate presentation
-// baseline matures only when the configured evidence gate is met.
+// baseline matures only when the fixed domain-coverage gate is met.
 import { buildPerformanceTrends, DEFAULT_PERFORMANCE_TREND_MODEL } from './performanceTrends.js';
 import { fitEstablishedTrend, TREND_EXPERIMENT } from './capacityTrendFit.js';
 import { fitContextualTrend } from './contextualTrendFit.js';
 import { trainingDayContext } from './trainingDayContext.js';
 import { loadProvenance } from './forceRecording.js';
 import { computeBalancedCurveScore, predForceThreeExp } from './threeExp.js';
-import { ZONE_REF_T } from './zones.js';
+import { ZONE_KEYS, ZONE_REF_T, zoneOf } from './zones.js';
 
-export const DEFAULT_BASELINE_MIN_OBSERVATIONS = 100;
-// A single qualifying date can be a coincidence of duration coverage — a
-// mix of hold lengths that happened to span the six reference durations on
-// one day. Requiring the gate to clear on two consecutive trend-build dates
-// before the baseline freezes rules that out: the user has to meet the
-// evidence bar on the follow-up date too. A failure in between resets the
-// pending candidate, so the baseline only locks in on sustained coverage.
-export const REQUIRED_QUALIFYING_DATES = 2;
-
-export function baselineObservationThreshold(value) {
-  return Number.isInteger(value) && value > 0 ? value : DEFAULT_BASELINE_MIN_OBSERVATIONS;
-}
+// The comparison baseline freezes as soon as every force-duration domain has
+// two qualifying opening holds for every selected hand. Extra observations in
+// one domain or hand cannot compensate for a missing observation elsewhere.
+export const BASELINE_POINTS_PER_DOMAIN = 2;
 
 export const PERFORMANCE_REFERENCE_DURATIONS = Object.freeze(Object.values(ZONE_REF_T));
 export const PERFORMANCE_DURATION_BANDS = Object.freeze([
@@ -144,6 +136,25 @@ function evidenceFor(snapshot) {
   };
 }
 
+function baselineDomainCoverage(snapshot) {
+  const perHand = snapshot.hands.map(hand => {
+    const counts = Object.fromEntries(ZONE_KEYS.map(zone => [zone, 0]));
+    for (const row of snapshot.eligible) {
+      if (row.hand !== hand) continue;
+      const zone = zoneOf(row.actual_time_s);
+      if (zone in counts) counts[zone] += 1;
+    }
+    return { hand, counts };
+  });
+  const domains = ZONE_KEYS.map(zone => {
+    const hands = perHand.map(item => ({ hand: item.hand, count: item.counts[zone] }));
+    return { zone, count: Math.min(...hands.map(item => item.count)), perHand: hands };
+  });
+  const supportedDomains = domains.filter(item => item.count >= BASELINE_POINTS_PER_DOMAIN).length;
+  return { ready: supportedDomains === ZONE_KEYS.length, supportedDomains,
+    totalDomains: ZONE_KEYS.length, requiredPointsPerDomain: BASELINE_POINTS_PER_DOMAIN, domains };
+}
+
 function baselineStability(snapshot, evidence, model) {
   const dates = distinctDates(snapshot.eligible);
   // At the usual first-qualifying reference, at least one hand has exactly
@@ -228,13 +239,8 @@ function observationFor({ rep, expectedForce, deviation, context }) {
 // this wrapper only annotates them. There is intentionally no activities or
 // fatigue-correction argument. Climbing context belongs beside the readings.
 export function buildPerformanceTrendAnalysis(history, grips, hand = 'pooled',
-  { model = DEFAULT_PERFORMANCE_TREND_MODEL, minimumBaselineObservations = DEFAULT_BASELINE_MIN_OBSERVATIONS } = {}) {
-  const minimum = baselineObservationThreshold(minimumBaselineObservations);
+  { model = DEFAULT_PERFORMANCE_TREND_MODEL } = {}) {
   const establishedBaselines = new Map(), scoreHistory = new Map();
-  // qualifyingStreaks[grip] = count of consecutive qualifying dates seen so
-  // far for that grip. Promoted to establishedBaselines once it hits
-  // REQUIRED_QUALIFYING_DATES; reset to 0 the moment a snapshot fails the gate.
-  const qualifyingStreaks = new Map();
   const baselines = new Map(), peaks = new Map(), annotations = new Map();
   const observations = [];
   const rows = buildPerformanceTrends(history, grips, hand, { model, onEvidence: snapshot => {
@@ -250,21 +256,11 @@ export function buildPerformanceTrendAnalysis(history, grips, hand = 'pooled',
       peaks.set(snapshot.grip, { date: snapshot.date, score: snapshot.score, forces, evidence: currentEvidence });
     }
     const baseline = baselines.get(snapshot.grip), peak = peaks.get(snapshot.grip);
-    // Count qualifying measured holds per hand. The weaker-evidence hand
-    // controls pooled maturation; extra observations on one hand cannot hatch it.
-    const qualifyingObservations = Math.min(...currentEvidence.perHand.map(item => item.eligibleHolds));
-    const qualifiesNow = qualifyingObservations >= minimum
-      && currentEvidence.status === 'supported'
-      && currentEvidence.perHand.every(item => item.eligibleDates > TREND_EXPERIMENT.minPriorDays);
-    if (!establishedBaselines.has(snapshot.grip)) {
-      const streak = qualifiesNow ? (qualifyingStreaks.get(snapshot.grip) ?? 0) + 1 : 0;
-      qualifyingStreaks.set(snapshot.grip, streak);
-      if (streak >= REQUIRED_QUALIFYING_DATES) {
-        establishedBaselines.set(snapshot.grip, { date: snapshot.date, score: snapshot.score });
-      }
+    const domainCoverage = baselineDomainCoverage(snapshot);
+    if (!establishedBaselines.has(snapshot.grip) && domainCoverage.ready) {
+      establishedBaselines.set(snapshot.grip, { date: snapshot.date, score: snapshot.score });
     }
     const established = establishedBaselines.get(snapshot.grip);
-    const qualifyingDates = established ? REQUIRED_QUALIFYING_DATES : (qualifyingStreaks.get(snapshot.grip) ?? 0);
     const scores = scoreHistory.get(snapshot.grip) || [];
     const cutoff = Date.parse(snapshot.date) - 90 * 86400000;
     const prior90 = scores.findLast(item => Date.parse(item.date) <= cutoff);
@@ -276,9 +272,11 @@ export function buildPerformanceTrendAnalysis(history, grips, hand = 'pooled',
       change90Days: prior90 ? 100 * (snapshot.score / prior90.score - 1) : null,
       change90ReferenceDate: prior90?.date ?? null,
       maturation: {
-        ready: !!established, qualifyingObservations, minimumObservations: minimum,
-        supportedDurations: currentEvidence.referenceSupport.filter(item => item.status === 'supported').length,
-        qualifyingDates, requiredQualifyingDates: REQUIRED_QUALIFYING_DATES,
+        ready: !!established,
+        supportedDomains: domainCoverage.supportedDomains,
+        totalDomains: domainCoverage.totalDomains,
+        requiredPointsPerDomain: domainCoverage.requiredPointsPerDomain,
+        domainCounts: domainCoverage.domains,
         date: established?.date ?? null, score: established?.score ?? null,
         improvement: established ? 100 * (snapshot.score / established.score - 1) : null,
       },

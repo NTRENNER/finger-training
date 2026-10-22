@@ -452,6 +452,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     autoFailedRef.current = false;
     if (usedDeviceRef.current) {
       try { await tindeq.stopMeasuring(); } catch { /* discarding anyway */ }
+      tindeq.endRepAndRequireRelease?.({ requireZero: true });
     }
     endingRef.current = false;
     setRepPhase("ready");
@@ -1259,12 +1260,13 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
   const redoRep = useCallback(() => {
     if (repEndedRef.current) return;
     repEndedRef.current = true;
+    tindeq.endRepAndRequireRelease?.({ requireZero: true });
     clearInterval(timerRef.current);
     setRepActive(false);
     setElapsed(0);
     startTimeRef.current = null;
     setStreamAttempt(attempt => attempt + 1);
-  }, []);
+  }, [tindeq]);
 
   const interruptPrompt = useInterruptPrompt(tindeq, repActive);
 
@@ -1352,7 +1354,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
       {!repActive && <UnloadedZeroCheck tindeq={tindeq} />}
 
       {/* Live force */}
-      {tindeq.connected && (
+      {!repActive && tindeq.connected && (
         <Card style={{ marginTop: 12 }}>
           <ForceGauge
             force={tindeq.force}

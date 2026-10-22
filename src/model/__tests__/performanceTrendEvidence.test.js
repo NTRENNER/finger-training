@@ -3,7 +3,7 @@ import { fitContextualTrend } from '../contextualTrendFit.js';
 import { predForceThreeExp } from '../threeExp.js';
 import {
   buildPerformanceTrendAnalysis, performanceDurationBand,
-  PERFORMANCE_REFERENCE_DURATIONS, PERFORMANCE_EVIDENCE_POLICY, baselineObservationThreshold,
+  PERFORMANCE_REFERENCE_DURATIONS, PERFORMANCE_EVIDENCE_POLICY, BASELINE_POINTS_PER_DOMAIN,
 } from '../performanceTrendEvidence.js';
 
 const date = index => new Date(Date.UTC(2026, 0, 1 + index * 3)).toISOString().slice(0, 10);
@@ -146,49 +146,46 @@ test.each([[0, null], [5, 'short'], [45, 'short'], [45.1, 'medium'], [120, 'medi
 );
 
 
-test('maturation is causal, freezes after two consecutive qualifying dates, and retains legacy calculations', () => {
+test('maturation freezes as soon as every domain has two qualifying points per selected hand', () => {
   const records = history(24);
-  const options = { minimumBaselineObservations: 14 };
-  const result = buildPerformanceTrendAnalysis(records, ['Crusher'], 'pooled', options);
+  const result = buildPerformanceTrendAnalysis(records, ['Crusher'], 'pooled');
   const mature = result.rows.find(point => point.Crusher_evidence.maturation.ready);
   expect(mature).toBeDefined();
-  // Minimum crosses at 14 holds per hand; the baseline freezes on the next
-  // qualifying date (one more hold per hand), confirming the first was not
-  // a one-off coverage coincidence.
-  expect(mature.Crusher_evidence.maturation.qualifyingObservations).toBe(15);
-  expect(mature.Crusher_evidence.maturation.qualifyingDates).toBe(2);
-  expect(mature.Crusher_evidence.maturation.requiredQualifyingDates).toBe(2);
+  expect(mature.date).toBe(date(11));
+  expect(mature.Crusher_evidence.maturation).toMatchObject({
+    supportedDomains: 6, totalDomains: 6, requiredPointsPerDomain: 2,
+  });
+  expect(mature.Crusher_evidence.maturation.domainCounts.every(domain => domain.count === 2)).toBe(true);
   expect(mature.Crusher_evidence.maturation.improvement).toBe(0);
   const before = result.rows.filter(point => point.date < mature.date);
   expect(before.every(point => !point.Crusher_evidence.maturation.ready && point.Crusher_evidence.maturation.improvement === null)).toBe(true);
-  // Exactly one date should sit at qualifyingDates === 1 — the first clear
-  // immediately before the mature point confirms it.
-  const pending = before.filter(point => point.Crusher_evidence.maturation.qualifyingDates === 1);
-  expect(pending).toHaveLength(1);
-  expect(pending[0].date).toBe(result.rows[result.rows.indexOf(mature) - 1].date);
+  expect(before.at(-1).Crusher_evidence.maturation.supportedDomains).toBe(5);
   result.rows.filter(point => point.date >= mature.date).forEach(point => {
     const evidence = point.Crusher_evidence;
     expect(evidence.maturation.date).toBe(mature.date);
     expect(evidence.maturation.score).toBe(mature.Crusher_evidence.score);
     expect(evidence.maturation.improvement).toBeCloseTo(100 * (evidence.score / evidence.maturation.score - 1));
   });
-  const prefix = buildPerformanceTrendAnalysis(records.filter(item => item.date <= mature.date), ['Crusher'], 'pooled', options);
+  const prefix = buildPerformanceTrendAnalysis(records.filter(item => item.date <= mature.date), ['Crusher'], 'pooled');
   expect(result.rows.filter(point => point.date <= mature.date)).toEqual(prefix.rows);
   expect(withoutEvidence(result.rows)).toEqual(buildPerformanceTrends(records, ['Crusher']));
+  expect(BASELINE_POINTS_PER_DOMAIN).toBe(2);
 });
 
-test('default threshold and duration support block early hatching; pooled hands mature independently', () => {
-  expect(buildPerformanceTrendAnalysis(history(), ['Crusher']).rows.every(point => !point.Crusher_evidence.maturation.ready)).toBe(true);
+test('extra points in covered domains cannot compensate for a missing second point', () => {
   const narrow = history(24).map(item => ({ ...item, actual_time_s: 30, target_duration: 30 }));
-  expect(buildPerformanceTrendAnalysis(narrow, ['Crusher'], 'L', { minimumBaselineObservations: 6 }).rows.every(point => !point.Crusher_evidence.maturation.ready)).toBe(true);
-  const imbalanced = history(24).filter(item => item.hand === 'L' || item.date <= date(9));
-  const options = { minimumBaselineObservations: 14 };
-  expect(buildPerformanceTrendAnalysis(imbalanced, ['Crusher'], 'L', options).rows.some(point => point.Crusher_evidence.maturation.ready)).toBe(true);
-  expect(buildPerformanceTrendAnalysis(imbalanced, ['Crusher'], 'pooled', options).rows.every(point => !point.Crusher_evidence.maturation.ready)).toBe(true);
+  const latest = buildPerformanceTrendAnalysis(narrow, ['Crusher'], 'L').rows.at(-1).Crusher_evidence.maturation;
+  expect(latest).toMatchObject({ ready: false, supportedDomains: 1, totalDomains: 6 });
+  expect(latest.domainCounts.find(domain => domain.zone === 'power').count).toBe(24);
 });
 
-test.each([0, -1, 2.5, '10', NaN, undefined])('invalid threshold %s falls back to 100', value => {
-  expect(baselineObservationThreshold(value)).toBe(100);
+test('single-hand maturation does not let sparse data from the other hand pass a pooled baseline', () => {
+  const imbalanced = history(12).filter(item => item.hand === 'L' || item.date <= date(5));
+  expect(buildPerformanceTrendAnalysis(imbalanced, ['Crusher'], 'L').rows.some(point => point.Crusher_evidence.maturation.ready)).toBe(true);
+  const pooled = buildPerformanceTrendAnalysis(imbalanced, ['Crusher'], 'pooled');
+  expect(pooled.rows.every(point => !point.Crusher_evidence.maturation.ready)).toBe(true);
+  const latest = pooled.rows.at(-1).Crusher_evidence.maturation;
+  expect(latest.domainCounts.every(domain => domain.perHand.find(item => item.hand === 'R').count === 1)).toBe(true);
 });
 
 test('90-day comparison uses an earlier estimate and never publishes it with insufficient history', () => {

@@ -83,14 +83,14 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
 
   return (
     <div style={{ marginTop: 8 }}>
-      {/* Target weight always visible — it's a prescription, not a
-          measurement, so it exists even without a connected sensor. */}
-      <div style={{ textAlign: "center", marginBottom: liveActive ? 16 : 8 }}>
+      {/* A target is optional: Peak Test intentionally has no prescribed
+          weight, while training and warm-up callers always provide one. */}
+      {Number.isFinite(targetKg) && <div style={{ textAlign: "center", marginBottom: liveActive ? 16 : 8 }}>
         <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>Target weight</div>
         <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1, color: C.blue, fontVariantNumeric: "tabular-nums" }}>
           {fmtW(targetKg, unit)} {unit}
         </div>
-      </div>
+      </div>}
 
       {/* Live measurement block — only renders with a real sample so the
           card doesn't take up vertical space on dashes when no sensor

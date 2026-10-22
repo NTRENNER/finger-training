@@ -6,7 +6,6 @@ import { buildPerformanceTrendAnalysis } from '../../../model/performanceTrendEv
 
 jest.mock('../../../model/performanceTrendEvidence.js', () => ({
   buildPerformanceTrendAnalysis: jest.fn(),
-  DEFAULT_BASELINE_MIN_OBSERVATIONS: 100,
   PERFORMANCE_REFERENCE_DURATIONS: [5, 30, 70, 115, 160, 220],
   DURATION_BAND_LABELS: { short: 'Short (≤45 s)', medium: 'Medium (>45–120 s)', long: 'Long (>120 s)' },
 }));
@@ -55,7 +54,8 @@ function makeAnalysis(scores = [100, 110, 120, 116, 112, 110]) {
       date, timestamp: Date.parse(date), Micro_long: score - 100, Micro_short: index - 3,
       Micro_evidence: {
         date, score,
-        maturation: { ready: true, date: '2026-08-01', score: 100, improvement: score - 100, qualifyingObservations: 100, minimumObservations: 100, supportedDurations: 6 },
+        maturation: { ready: true, date: '2026-08-01', score: 100, improvement: score - 100,
+          supportedDomains: 6, totalDomains: 6, requiredPointsPerDomain: 2 },
         baselineDate: '2026-08-01', baselineScore: 100,
         peakDate: `2026-08-0${peak + 1}`, peakScore: scores[peak], changeFromPeak: (score / scores[peak] - 1) * 100,
         referenceForces: durations.map(duration => ({
@@ -96,7 +96,7 @@ test('separates current capacity, baseline gain and session residual', () => {
 test('both charts share the date window without refitting and use the latest visible date for summaries', () => {
   render(<PerformanceTrendCards history={history} grips={grips} />);
   expect(screen.getAllByTestId('trend-chart')).toHaveLength(2);
-  expect(buildPerformanceTrendAnalysis).toHaveBeenCalledWith(history, grips, 'pooled', { model: 'contextOnly', minimumBaselineObservations: 100 });
+  expect(buildPerformanceTrendAnalysis).toHaveBeenCalledWith(history, grips, 'pooled', { model: 'contextOnly' });
   fireEvent.change(screen.getByRole('slider', { name: 'Start date' }), { target: { value: 2 } });
   fireEvent.change(screen.getByRole('slider', { name: 'End date' }), { target: { value: 4 } });
   screen.getAllByTestId('trend-chart').forEach(chart => expect(chart).toHaveAttribute('data-dates', '2026-08-03,2026-08-04,2026-08-05'));
@@ -260,12 +260,13 @@ test('tooltip and hold details respect display units and do not call unknown ses
 
 test('pending baseline hatches and hides authoritative gain while preserving capacity and residual', () => {
   const analysis = makeAnalysis();
-  analysis.rows.forEach(row => { row.Micro_evidence.maturation = { ready: false, qualifyingObservations: 43, minimumObservations: 100, supportedDurations: 4, improvement: null }; });
+  analysis.rows.forEach(row => { row.Micro_evidence.maturation = { ready: false, supportedDomains: 4,
+    totalDomains: 6, requiredPointsPerDomain: 2, improvement: null }; });
   buildPerformanceTrendAnalysis.mockReturnValue(analysis);
   render(<PerformanceTrendCards history={history} grips={grips} />);
   const summary = screen.getByRole('region', { name: 'Micro capacity summary' });
   expect(within(summary).getByRole('group', { name: 'Curve Improvement summary' })).toHaveClass('trend-hatching');
-  expect(within(summary).getByText(/43 \/ 100 qualifying observations/)).toBeInTheDocument();
+  expect(within(summary).getByText(/4 \/ 6 domains have 2 qualifying points per selected hand/)).toBeInTheDocument();
   expect(within(summary).queryByText('+10.0%')).not.toBeInTheDocument();
   expect(within(summary).getByText('110.0 kg')).toBeInTheDocument();
   expect(screen.getByTestId('reference-line')).toHaveAttribute('data-value', '0');
@@ -273,8 +274,8 @@ test('pending baseline hatches and hides authoritative gain while preserving cap
   expect(screen.getAllByTestId('connected-trend').map(item => item.dataset.key)).toEqual(['Micro_capacity', 'Micro_baseline']);
 });
 
-test('supports pounds and forwards a configured maturation threshold', () => {
-  render(<PerformanceTrendCards history={history} grips={grips} unit="lbs" minimumBaselineObservations={50} />);
+test('supports pounds without changing the fixed maturation policy', () => {
+  render(<PerformanceTrendCards history={history} grips={grips} unit="lbs" />);
   expect(within(screen.getByRole('region', { name: 'Micro capacity summary' })).getByText('242.5 lbs')).toBeInTheDocument();
-  expect(buildPerformanceTrendAnalysis).toHaveBeenCalledWith(history, grips, 'pooled', { model: 'contextOnly', minimumBaselineObservations: 50 });
+  expect(buildPerformanceTrendAnalysis).toHaveBeenCalledWith(history, grips, 'pooled', { model: 'contextOnly' });
 });
