@@ -5,10 +5,10 @@ import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/force
 // ──────────────────────────────────────────────────────────────
 // The "Analysis" tab. Top-to-bottom render order:
 //
-//   1. Peak Force — instantaneous observed ceiling, when available.
-//   2. Recorded pulls and current curve — always visible with reps.
-//   3. Recent Performance vs Expected — calibrated pre-session comparison.
-//   4. Curve Improvement — modeled progress plus first/latest measured openings.
+//   1. Curve Improvement — modeled progress plus measured evidence.
+//   2. Recent Performance vs Expected — calibrated pre-session comparison.
+//   3. Peak Force — instantaneous observed ceiling, when available.
+//   4. Recorded pulls and current curve — always visible with reps.
 //   5. Overall curve summary — optional whole-curve trajectory.
 //   6. Curve Coverage — only when sampled data needs attention.
 //
@@ -672,6 +672,38 @@ export function AnalysisView({
       />
 
 
+      {reps.length > 0 && <>
+        <CardBoundary name="Curve Improvement">
+          <CurveImprovementCard
+            improvement={improvement}
+            gripImprovement={gripImprovement}
+            grip3xEstimates={grip3xEstimates}
+            gripBaselines={gripBaselines}
+            global3xBaseline={global3xBaseline}
+            selGrip={selGrip}
+            grips={scopedGrips}
+            history={history}
+            historyOverlay={continuousProgress.historyOverlay}
+            maxDur={maxDur}
+            unit={unit}
+            normalizeOn={normalizationActive}
+            bodyWeight={bodyWeight}
+            bwLog={bwLog}
+            handView={handView}
+            perHandGripImprovement={perHandGripImprovement}
+            perHandGripBaselines={perHandGripBaselines}
+            perHandGripEstimates={perHandGripEstimates}
+            {...continuousProgress}
+            comparisonHistory={continuousProgress.displayHistory}
+            gripImprovementFresh={gripImprovementFresh}
+            perHandGripImprovementFresh={perHandGripImprovementFresh}
+          />
+        </CardBoundary>
+        <CardBoundary name="Performance trends">
+          <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} unit={unit} />
+        </CardBoundary>
+      </>}
+
       {peakRecordHistory.length > 0 && <CardBoundary name="Peak force">
         <PeakForceCard history={peakRecordHistory} unit={unit} grip={selGrip} handView={handView}
           normalizeOn={normalizationActive} bodyWeight={bodyWeight} bwLog={bwLog} />
@@ -703,35 +735,6 @@ export function AnalysisView({
             threeExpPriors={threeExpPriors}
             handleDotClick={handleDotClick}
           />
-        </CardBoundary>
-        <CardBoundary name="Performance trends">
-          <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} unit={unit} />
-        </CardBoundary>
-        <CardBoundary name="Curve Improvement">
-        <CurveImprovementCard
-          improvement={improvement}
-          gripImprovement={gripImprovement}
-          grip3xEstimates={grip3xEstimates}
-          gripBaselines={gripBaselines}
-          global3xBaseline={global3xBaseline}
-          selGrip={selGrip}
-          grips={scopedGrips}
-          history={history}
-          historyOverlay={continuousProgress.historyOverlay}
-          maxDur={maxDur}
-          unit={unit}
-          normalizeOn={normalizationActive}
-          bodyWeight={bodyWeight}
-          bwLog={bwLog}
-          handView={handView}
-          perHandGripImprovement={perHandGripImprovement}
-          perHandGripBaselines={perHandGripBaselines}
-          perHandGripEstimates={perHandGripEstimates}
-          {...continuousProgress}
-          comparisonHistory={continuousProgress.displayHistory}
-          gripImprovementFresh={gripImprovementFresh}
-          perHandGripImprovementFresh={perHandGripImprovementFresh}
-        />
         </CardBoundary>
 
         <Disclosure title="Overall curve summary">

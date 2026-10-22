@@ -16,4 +16,4 @@ Validation covers analytical inverse solutions, all six reference durations, unc
 
 ## Analysis layout
 
-Peak Force appears first, followed by Recorded Pulls and Current Curve, Recent Performance vs Expected, and Curve Improvement. Recovery Status and Estimated Capacity Over Time are removed from Analysis. Recovery still informs workout recommendations and weekly coaching without occupying a standalone chart.
+Curve Improvement appears immediately below the analysis scope controls, followed by Recent Performance vs Expected, Peak Force, and Recorded Pulls and Current Curve. Recovery Status and Estimated Capacity Over Time are removed from Analysis. Recovery still informs workout recommendations and weekly coaching without occupying a standalone chart.
