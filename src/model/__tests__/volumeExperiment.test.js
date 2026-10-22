@@ -7,7 +7,7 @@ const row = (date = '2026-09-20', extra = {}) => ({
   avg_force_kg: 10, peak_force_kg: 12, actual_time_s: 150, failure_valid: true,
   end_reason: 'muscular_failure', load_provenance: 'measured_force',
   force_recording: { version: 4, basis: 'target_acquired', capacity_eligible: true,
-    failure_policy: { version: 8 }, signal_quality: 'complete' }, ...extra,
+    failure_policy: { version: 9 }, signal_quality: 'complete' }, ...extra,
 });
 const create = (history = [], extra = {}) => createVolumeExperiment({ history, grips: ['Micro'],
   startDate: '2026-10-01', id: 'experiment-1', createdAt: '2026-10-01T08:00:00Z', ...extra });
@@ -76,9 +76,9 @@ test('baseline includes only the previous 42 days and is immune to future record
   expect(baseline(e).loadKg).toBe(10);
   expect(baseline(e).provisional).toBe(false);
   history[3].avg_force_kg = 30;
-  history[3].force_recording.failure_policy.version = 9;
+  history[3].force_recording.failure_policy.version = 99;
   expect(baseline(e).points.at(-1).forceKg).toBe(10);
-  expect(baseline(e).points.at(-1).policy.version).toBe(8);
+  expect(baseline(e).points.at(-1).policy.version).toBe(9);
 });
 
 test('benchmark tolerance remains fixed to latest actual force rather than drifting across matches', () => {
@@ -207,7 +207,7 @@ test.each(['basis', 'recording-version', 'policy', 'setup', 'load'])(
     const e = create([row()]), r = tagged(e);
     if (mismatch === 'basis') r.force_recording.basis = 'legacy_elapsed';
     if (mismatch === 'recording-version') r.force_recording.version = 3;
-    if (mismatch === 'policy') r.force_recording.failure_policy.version = 9;
+    if (mismatch === 'policy') r.force_recording.failure_policy.version = 99;
     if (mismatch === 'setup') r.setup_id = 'different-edge';
     if (mismatch === 'load') r.avg_force_kg = 10.31;
     expect(comparison(e, [r])).toMatchObject({ points: [], changeSeconds: null, status: 'no_matches' });

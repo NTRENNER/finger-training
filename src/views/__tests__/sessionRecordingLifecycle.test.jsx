@@ -130,7 +130,10 @@ test('navigating before a pull and ending a session before a pull do not invent 
 test('an unsuccessful acquisition can be explicitly finished with Rep interrupted', async () => {
   await start();
   feed(0, 4000, () => 17);
-  feed(4100, 8000, () => .8);
+  // 2.5 kg stays above the release floor (max(0.5, 20 * 0.10) = 2 kg) so the
+  // rep doesn't auto-end on release; the test wants the explicit interrupt
+  // click to be the thing that saves the rep.
+  feed(4100, 8000, () => 2.5);
   expect(saved).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Rep interrupted' }));
   expect(saved).toHaveBeenCalledTimes(1);

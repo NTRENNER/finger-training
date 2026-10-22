@@ -76,7 +76,7 @@ test('later evidence cannot rewrite an early reference, historical peak, recordi
   const records = history();
   const before = buildPerformanceTrendAnalysis(records, ['Crusher']);
   const extra = ['L', 'R'].map(hand => row(30, hand, { factor: 1.8,
-    force_recording: { version: 5, signal_quality: 'complete', capacity_eligible: true, failure_policy: { version: 8 } } }));
+    force_recording: { version: 5, signal_quality: 'complete', capacity_eligible: true, failure_policy: { version: 9 } } }));
   const after = buildPerformanceTrendAnalysis([...records, ...extra], ['Crusher']);
   expect(after.rows.filter(item => item.date < date(30))).toEqual(before.rows);
   expect(after.observations.filter(item => item.date < date(30))).toEqual(before.observations);

@@ -257,7 +257,7 @@ test('confirmed loss freezes hold time, records weaker work until release, and t
   expect(stats.actualTime).toBeGreaterThanOrEqual(3);
   expect(stats.actualTime).toBeLessThan(3.4);
   expect(stats).toMatchObject({failureValid:true,endReason:'target_force_failure',
-    forceRecording:{failure_policy:{version:8},recording_stop_reason:'release',
+    forceRecording:{failure_policy:{version:9},recording_stop_reason:'release',
       capacity_end_reason:'sustained_force_loss',activity:{duration_s:9.1}}});
   feed(packet,10200,11000,()=>25);
   expect(onStart).toHaveBeenCalledTimes(2);
@@ -273,7 +273,7 @@ test.each([2.5,25])('a two-second adjustment at target %s survives; zero release
   packet([[10100,0]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:9.1,failureValid:true,
-    forceRecording:{capacity_end_reason:'release',failure_policy:{version:8}}});
+    forceRecording:{capacity_end_reason:'release',failure_policy:{version:9}}});
 });
 test('repeated short good pulses do not erase an ongoing loss in the live detector', async () => {
   const {packet,view,onEnd}=await setup(20);
@@ -322,9 +322,9 @@ test('training restores the new detector after a timed warmup', async () => {
 
 test('a confirmed loss with attachment offset saves once, preserves capacity, and requires zeroing', async () => {
  const {view,packet,onEnd,onStart}=await setup(20);
- feed(packet,0,21000,ms=>ms<3000?20:.8);
+ feed(packet,0,21000,ms=>ms<3000?20:5);
  expect(onEnd).not.toHaveBeenCalled();
- feed(packet,21100,24000,()=>.8);
+ feed(packet,21100,24000,()=>5);
  expect(onEnd).toHaveBeenCalledTimes(1);
  const stats=onEnd.mock.calls[0][0];
  expect(stats).toMatchObject({failureValid:true,forceRecording:{capacity_eligible:true,
@@ -342,7 +342,7 @@ test('a confirmed loss with attachment offset saves once, preserves capacity, an
 
 test('a physical release before the backstop keeps its measured endpoint',async()=>{
  const {view,packet,onEnd}=await setup(20);
- feed(packet,0,20000,ms=>ms<3000?20:.8);
+ feed(packet,0,20000,ms=>ms<3000?20:5);
  feed(packet,20100,21200,()=>0);
  expect(onEnd).toHaveBeenCalledTimes(1);
  expect(onEnd.mock.calls[0][0].forceRecording.recording_stop_reason).toBe('release');
@@ -356,7 +356,7 @@ test('zeroing is explicit, blocked during a pull, and needs fresh stable unloade
  feed(packet,0,1000,()=>20);
  await act(async()=>{expect(await view.result.current.zeroForNextRep()).toBe(false);});
  expect(commands).not.toContain(CMD_TARE[0]);
- feed(packet,1100,24000,ms=>ms<3000?20:.8);
+ feed(packet,1100,24000,ms=>ms<3000?20:5);
  await act(async()=>{expect(await view.result.current.zeroForNextRep()).toBe(true);});
  expect(commands).toContain(CMD_TARE[0]);
  feed(packet,24100,24500,()=>0);
@@ -371,7 +371,7 @@ test('zeroing is explicit, blocked during a pull, and needs fresh stable unloade
 test('unsuccessful zero verification remains blocked and can be retried',async()=>{
  const {view,packet,onStart}=await setup(20);
  await act(async()=>{await view.result.current.zeroForNextRep();});
- feed(packet,0,1000,()=>.8);
+ feed(packet,0,1000,()=>5);
  act(()=>jest.advanceTimersByTime(5000));
  expect(view.result.current.zeroing).toBe(false);
  expect(view.result.current.releaseCheckRequired).toBe(true);
@@ -389,7 +389,7 @@ test('manual sensor mode has the same bounded release backstop',async()=>{
  await act(async()=>{await view.result.current.stopAutoDetect();await view.result.current.startMeasuring();});
  const ended=jest.fn();
  act(()=>view.result.current.setAutoFailCallback(ended));
- feed(packet,0,24000,ms=>ms<3000?20:.8);
+ feed(packet,0,24000,ms=>ms<3000?20:5);
  expect(ended).toHaveBeenCalledTimes(1);
  let stats;await act(async()=>{stats=await view.result.current.stopMeasuring();});
  expect(stats).toMatchObject({failureValid:true,forceRecording:{capacity_eligible:true,recording_stop_reason:'release_not_observed'}});

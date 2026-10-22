@@ -1,10 +1,14 @@
 // Engineering tolerances, not a physiological diagnosis. Device timestamps
 // drive every window so batched Bluetooth notifications behave identically.
 export const TARGET_FAILURE_POLICY = Object.freeze({
-  version: 8, below_target_fraction: 0.93, confirmation_ms: 4000,
+  version: 9, below_target_fraction: 0.93, confirmation_ms: 4000,
   smoothing_ms: 300, recovery_ms: 750, acquisition_ms: 300,
   maximum_recovered_unload_ms: 300,
-  release_confirmation_ms: 1000, release_fraction: 0.10, release_max_kg: 0.5,
+  // Release = force dropped below release_fraction of target (so 10% means
+  // a 90%+ drop from target). release_floor_kg keeps the threshold sane for
+  // tiny targets where 10% would fall below the handle's own weight — the
+  // user may be holding the device rather than fully letting go.
+  release_confirmation_ms: 1000, release_fraction: 0.10, release_floor_kg: 0.5,
   minimum_drop_kg: 0.45359237, maximum_drop_fraction: 0.20,
 });
 
@@ -25,7 +29,7 @@ export function repDetectionThresholds(targetKg) {
   const target = Number(targetKg);
   if (!(target > 0) || !Number.isFinite(target)) return { startKg: 4, releaseKg: 3 };
   return { startKg: Math.min(4, target * 0.8),
-    releaseKg: Math.min(TARGET_FAILURE_POLICY.release_max_kg, target * TARGET_FAILURE_POLICY.release_fraction) };
+    releaseKg: Math.max(TARGET_FAILURE_POLICY.release_floor_kg, target * TARGET_FAILURE_POLICY.release_fraction) };
 }
 
 export function createTargetFailureDetector(targetKg) {

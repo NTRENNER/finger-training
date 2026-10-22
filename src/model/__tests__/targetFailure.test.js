@@ -65,7 +65,7 @@ test('release stops at physical release, excluding its confirmation delay', () =
   const decision = {...detector.finish(5000),activityEndTs:5000,stopReason:'release',summary:detector.snapshot()};
   expect(decision).toMatchObject({endTs:5000,reason:'release'});
   expect(recordCapacityForce(samples, decision.endTs, 25, decision)).toMatchObject({actualTime:5,avgForce:25,
-    forceRecording:{failure_policy:{version:8},recording_stop_reason:'release',capacity_end_reason:'release'}});
+    forceRecording:{failure_policy:{version:9},recording_stop_reason:'release',capacity_end_reason:'release'}});
 });
 test('sag tail is physical activity but not credited hold time or rest', () => {
   const samples = trace(12, t => t < 5 ? 25 : t < 11 ? 20 : 0);
@@ -100,9 +100,11 @@ test('light targets retain an absolute allowance bounded by 20 percent', () => {
 test.each([null, 0, -1, NaN, Infinity])('invalid target %s cannot create a failure', target => {
   expect(run(trace(8, t => t < 1 ? 20 : 0), target).result).toBeNull();
 });
-test('targeted release is near zero and untargeted warmups keep legacy thresholds', () => {
-  expect(repDetectionThresholds(25)).toEqual({startKg:4,releaseKg:.5});
-  expect(repDetectionThresholds(2.5)).toEqual({startKg:2,releaseKg:.25});
+test('targeted release scales with target above a floor; untargeted warmups keep legacy thresholds', () => {
+  // 10% of target, with a 0.5 kg floor so tiny targets don't fall under
+  // the handle's own weight. The user may hold the device after a release.
+  expect(repDetectionThresholds(25)).toEqual({startKg:4,releaseKg:2.5});
+  expect(repDetectionThresholds(2.5)).toEqual({startKg:2,releaseKg:.5});
   expect(repDetectionThresholds(null)).toEqual({startKg:4,releaseKg:3});
 });
 test('audit runs cover acquisition through the last evaluated sample without gaps',()=>{

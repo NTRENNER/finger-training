@@ -166,17 +166,21 @@ function UnloadedZeroCheck({ tindeq }) {
   </div>;
 }
 
-// Fires the interrupt prompt when BLE drops out or a force dip has been
-// observed long enough that the hold's integrity is in doubt. Debounced so
-// momentary blips don't nag; dismissed on Continue until the condition
-// genuinely clears, so pressing Continue won't immediately re-trigger while
-// the signal is still bad.
+// Fires the interrupt prompt when BLE drops out or a confirmed below-target
+// dip has been observed long enough that the hold's integrity is in doubt.
+// A completed release (force dropped below the release threshold for the
+// release-confirm window) auto-ends the rep instead of popping the modal,
+// so the prompt only shows for ambiguous mid-rep slips, not every clean
+// finish. Dismissed on Continue until the condition genuinely clears.
 function useInterruptPrompt(tindeq, active) {
   const [show, setShow] = useState(false);
   const dismissedRef = useRef(false);
-  const forceLoss = tindeq?.forceLoss;
-  const forceLossActive = forceLoss?.startTs != null && forceLoss?.status !== 'complete';
-  const trouble = active && (tindeq?.signalRecovering === true || forceLossActive);
+  // 'recovering' means force is currently BELOW the detector's boundary
+  // (93% of target) and hasn't recovered yet. 'holding' means force is at
+  // or above the boundary — overpulling and settling back to target stays
+  // in 'holding', so this doesn't fire for a smooth overshoot.
+  const dipActive = tindeq?.forceLoss?.status === 'recovering';
+  const trouble = active && (tindeq?.signalRecovering === true || dipActive);
   useEffect(() => {
     if (!trouble) {
       dismissedRef.current = false;
@@ -184,7 +188,9 @@ function useInterruptPrompt(tindeq, active) {
       return;
     }
     if (dismissedRef.current) return;
-    const t = setTimeout(() => setShow(true), 1500);
+    // Debounce longer than the detector's own recovery window so a brief
+    // slip that recovers never pops the modal — only a sustained dip does.
+    const t = setTimeout(() => setShow(true), 2000);
     return () => clearTimeout(t);
   }, [trouble]);
   const dismiss = useCallback(() => { dismissedRef.current = true; setShow(false); }, []);
