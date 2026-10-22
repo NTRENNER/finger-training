@@ -80,7 +80,7 @@ export function CapacityTrajectoryCard({
     <Card style={{ marginBottom: 16 }}>
       <div style={{ marginBottom: 4 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>
-          Whole-Curve Capacity — % vs baseline
+          Curve Improvement — legacy baseline history
           {normalizeOn && <span style={{ color: C.purple, fontSize: 12, marginLeft: 6 }}>· × BW</span>}
           {handView !== "pooled" && (
             <span style={{ color: handView === "R" ? C.orange : C.blue, fontSize: 12, marginLeft: 6 }}>
@@ -123,7 +123,7 @@ export function CapacityTrajectoryCard({
           ))}
           {rows.length === 0 && (
             <div>
-              The capacity line will appear automatically after the baseline is stable and two session dates can be compared.
+              The capacity line will appear automatically after the initial baseline is available and two session dates can be compared.
             </div>
           )}
         </div>
@@ -162,8 +162,8 @@ export function CapacityTrajectoryCard({
       )}
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>
         {normalizeOn
-          ? "Balanced capacity across the force-duration curve, normalized to bodyweight at each session date. Bold line is a 3-session rolling mean; dots are raw per-session estimates."
-          : "Balanced capacity across the force-duration curve, shown relative to each grip's baseline. Bold line is a 3-session rolling mean; dots are raw per-session estimates."}
+          ? "Balanced capacity across the force-duration curve, normalized to bodyweight at each session date. Bold line is a 3-session rolling mean; dots are individual fitted estimates."
+          : "Modeled curve change relative to the existing frozen training baseline. This fit and reference differ from the established trend baseline in the summary. Bold line is a 3-session rolling mean; dots are individual fitted estimates."}
         {hasClimb && " Orange bars along the bottom are climbing load around that session (same-day + decayed yesterday, 0–10) — read dips against them before calling a plateau."}
       </div>
       <ResponsiveContainer width="100%" height={hasClimb ? 230 : 200}>

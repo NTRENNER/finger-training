@@ -3,7 +3,7 @@ import { fitContextualTrend } from '../contextualTrendFit.js';
 import { predForceThreeExp } from '../threeExp.js';
 import {
   buildPerformanceTrendAnalysis, performanceDurationBand,
-  PERFORMANCE_REFERENCE_DURATIONS, PERFORMANCE_EVIDENCE_POLICY,
+  PERFORMANCE_REFERENCE_DURATIONS, PERFORMANCE_EVIDENCE_POLICY, baselineObservationThreshold,
 } from '../performanceTrendEvidence.js';
 
 const date = index => new Date(Date.UTC(2026, 0, 1 + index * 3)).toISOString().slice(0, 10);
@@ -144,3 +144,58 @@ test.each([[0, null], [5, 'short'], [45, 'short'], [45.1, 'medium'], [120, 'medi
     expect(performanceDurationBand(duration)).toBe(band);
   },
 );
+
+
+test('maturation is causal, freezes after two consecutive qualifying dates, and retains legacy calculations', () => {
+  const records = history(24);
+  const options = { minimumBaselineObservations: 14 };
+  const result = buildPerformanceTrendAnalysis(records, ['Crusher'], 'pooled', options);
+  const mature = result.rows.find(point => point.Crusher_evidence.maturation.ready);
+  expect(mature).toBeDefined();
+  // Minimum crosses at 14 holds per hand; the baseline freezes on the next
+  // qualifying date (one more hold per hand), confirming the first was not
+  // a one-off coverage coincidence.
+  expect(mature.Crusher_evidence.maturation.qualifyingObservations).toBe(15);
+  expect(mature.Crusher_evidence.maturation.qualifyingDates).toBe(2);
+  expect(mature.Crusher_evidence.maturation.requiredQualifyingDates).toBe(2);
+  expect(mature.Crusher_evidence.maturation.improvement).toBe(0);
+  const before = result.rows.filter(point => point.date < mature.date);
+  expect(before.every(point => !point.Crusher_evidence.maturation.ready && point.Crusher_evidence.maturation.improvement === null)).toBe(true);
+  // Exactly one date should sit at qualifyingDates === 1 — the first clear
+  // immediately before the mature point confirms it.
+  const pending = before.filter(point => point.Crusher_evidence.maturation.qualifyingDates === 1);
+  expect(pending).toHaveLength(1);
+  expect(pending[0].date).toBe(result.rows[result.rows.indexOf(mature) - 1].date);
+  result.rows.filter(point => point.date >= mature.date).forEach(point => {
+    const evidence = point.Crusher_evidence;
+    expect(evidence.maturation.date).toBe(mature.date);
+    expect(evidence.maturation.score).toBe(mature.Crusher_evidence.score);
+    expect(evidence.maturation.improvement).toBeCloseTo(100 * (evidence.score / evidence.maturation.score - 1));
+  });
+  const prefix = buildPerformanceTrendAnalysis(records.filter(item => item.date <= mature.date), ['Crusher'], 'pooled', options);
+  expect(result.rows.filter(point => point.date <= mature.date)).toEqual(prefix.rows);
+  expect(withoutEvidence(result.rows)).toEqual(buildPerformanceTrends(records, ['Crusher']));
+});
+
+test('default threshold and duration support block early hatching; pooled hands mature independently', () => {
+  expect(buildPerformanceTrendAnalysis(history(), ['Crusher']).rows.every(point => !point.Crusher_evidence.maturation.ready)).toBe(true);
+  const narrow = history(24).map(item => ({ ...item, actual_time_s: 30, target_duration: 30 }));
+  expect(buildPerformanceTrendAnalysis(narrow, ['Crusher'], 'L', { minimumBaselineObservations: 6 }).rows.every(point => !point.Crusher_evidence.maturation.ready)).toBe(true);
+  const imbalanced = history(24).filter(item => item.hand === 'L' || item.date <= date(9));
+  const options = { minimumBaselineObservations: 14 };
+  expect(buildPerformanceTrendAnalysis(imbalanced, ['Crusher'], 'L', options).rows.some(point => point.Crusher_evidence.maturation.ready)).toBe(true);
+  expect(buildPerformanceTrendAnalysis(imbalanced, ['Crusher'], 'pooled', options).rows.every(point => !point.Crusher_evidence.maturation.ready)).toBe(true);
+});
+
+test.each([0, -1, 2.5, '10', NaN, undefined])('invalid threshold %s falls back to 100', value => {
+  expect(baselineObservationThreshold(value)).toBe(100);
+});
+
+test('90-day comparison uses an earlier estimate and never publishes it with insufficient history', () => {
+  const result = buildPerformanceTrendAnalysis(history(40), ['Crusher'], 'L');
+  expect(result.rows[0].Crusher_evidence.change90Days).toBeNull();
+  const latest = result.rows.at(-1).Crusher_evidence;
+  const prior = result.rows.findLast(point => Date.parse(point.date) <= Date.parse(latest.date) - 90 * 86400000).Crusher_evidence;
+  expect(latest.change90ReferenceDate).toBe(prior.date);
+  expect(latest.change90Days).toBeCloseTo(100 * (latest.score / prior.score - 1));
+});

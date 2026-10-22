@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { C } from '../../ui/theme.js';
 import { Disclosure } from '../../ui/components.jsx';
 import { GRIP_COLORS } from '../../ui/grip-colors.js';
-import { fmtW } from '../../ui/format.js';
+import { fmtW, toDisp } from '../../ui/format.js';
 import { CHART } from '../../ui/chartStyles.js';
 import { PERFORMANCE_REFERENCE_DURATIONS, DURATION_BAND_LABELS } from '../../model/performanceTrendEvidence.js';
 
@@ -23,30 +23,39 @@ export function formatTrendPercent(value) {
 const durationText = value => Number.isFinite(value) ? `${Number(value.toFixed(1))} s` : 'Unknown';
 const supportCount = evidence => evidence?.referenceSupport?.filter(item => item.status === 'supported').length ?? 0;
 
-export function CapacitySummaries({ summaries }) {
+export function CapacitySummaries({ summaries, unit = 'kg', minimumBaselineObservations = 100 }) {
   return <div className="trend-summary-grid">
-    {summaries.map(({ grip, latest, hasHistoricalEstimate }) => <section key={grip} className="trend-summary" aria-label={`${grip} capacity summary`}>
-      <h4 style={{ color: GRIP_COLORS[grip] || C.blue }}>{grip}</h4>
-      {!latest ? <p className="trend-small">{hasHistoricalEstimate
-        ? 'No capacity estimate for this grip falls within the shown range.'
-        : 'A starting reference is not available for the selected hand view yet.'}</p> : <>
-        <div className="trend-summary-date">Latest shown estimate · <time dateTime={latest.date}>{latest.date}</time></div>
+    {summaries.map(({ grip, latest, sessionPerformance, sessionDate, hasHistoricalEstimate }) => {
+      const evidence = latest?.evidence;
+      const maturation = evidence?.maturation;
+      return <section key={grip} className="trend-summary" aria-label={`${grip} capacity summary`}>
+        <h4 style={{ color: GRIP_COLORS[grip] || C.blue }}>{grip}</h4>
+        {latest ? <div className="trend-summary-date">Latest shown estimate · <time dateTime={latest.date}>{latest.date}</time></div>
+          : <p className="trend-small">{hasHistoricalEstimate
+            ? 'No capacity estimate for this grip falls within the shown range.'
+            : 'More qualifying training dates are needed for this hand view.'}</p>}
         <dl className="trend-summary-values">
-          <div><dt>Since starting reference</dt><dd>{formatTrendPercent(latest.change)}
-            <time dateTime={latest.evidence.baselineDate}>{latest.evidence.baselineDate}</time>
-          </dd></div>
-          <div><dt>From highest estimate</dt><dd>{formatTrendPercent(latest.evidence.changeFromPeak)}
-            <time dateTime={latest.evidence.peakDate}>{latest.evidence.peakDate}</time>
-          </dd></div>
+          <div><dt>Estimated Capacity</dt><dd>{evidence ? `${toDisp(evidence.score, unit).toFixed(1)} ${unit}` : '—'}</dd>
+            <p className="trend-small">Your current modeled force–duration ability. Balanced force across six reference durations.</p>
+            {Number.isFinite(evidence?.change90Days) && <p className="trend-small" title={`Compared with the estimate on ${evidence.change90ReferenceDate}, at or before 90 days ago.`}>
+              {formatTrendPercent(evidence.change90Days)} over 90 days
+            </p>}
+          </div>
+          <div role="group" aria-label="Curve Improvement summary" className={maturation?.ready ? '' : 'trend-hatching'}><dt>Curve Improvement</dt>
+            <dd>{maturation?.ready ? formatTrendPercent(maturation.improvement) : 'Establishing baseline'}</dd>
+            {maturation?.ready
+              ? <p className="trend-small">Since established baseline · <time dateTime={maturation.date}>{maturation.date}</time></p>
+              : maturation ? <p className="trend-small">{maturation.qualifyingObservations} / {maturation.minimumObservations} qualifying observations per selected hand · {maturation.supportedDurations} / 6 supported durations · {maturation.qualifyingDates} / {maturation.requiredQualifyingDates} qualifying dates</p>
+                : <p className="trend-small">Awaiting a modeled estimate. Requires {minimumBaselineObservations} qualifying observations per selected hand, duration coverage, and two consecutive qualifying dates.</p>}
+            <p className="trend-small">Long-term gain in modeled capacity from an established baseline.</p>
+          </div>
+          <div><dt>Session Performance</dt><dd>{Number.isFinite(sessionPerformance) ? `${formatTrendPercent(sessionPerformance)} vs expected` : '—'}</dd>
+            <p className="trend-small">Latest comparable date{sessionDate ? ` · ${sessionDate}` : ' unavailable'}. Mean opening-hold performance relative to the prior model, with equal hand weighting.</p>
+          </div>
         </dl>
-        {latest.evidence.baselineEvidence?.status === 'provisional' && <div className="trend-support-label">
-          Starting reference: provisional
-        </div>}
-        {latest.evidence.currentEvidence?.status === 'limited' && <div className="trend-small">
-          Latest estimate: limited duration coverage
-        </div>}
-      </>}
-    </section>)}
+        {evidence?.currentEvidence?.status === 'limited' && <div className="trend-small">Latest estimate: limited duration coverage</div>}
+      </section>;
+    })}
   </div>;
 }
 
@@ -137,7 +146,7 @@ export function CapacityEvidenceDetails({ summaries }) {
   const available = summaries.filter(summary => summary.latest);
   if (!available.length) return null;
   return <Disclosure title="Starting reference and data coverage" style={{ marginTop: 8, marginBottom: 0 }}>
-    <p className="trend-small">The first fitted comparison starts after five eligible training dates per hand. That does not guarantee coverage across the full duration range. A provisional starting reference stays marked according to the evidence available when it was set.</p>
+    <p className="trend-small">Capacity estimates start after five eligible training dates per hand. The early reference below is a provisional diagnostic, separate from the established baseline used for Curve Improvement in the summary. Its sensitivity is not a confidence interval.</p>
     {available.map(({ grip, latest }) => <section key={grip} aria-label={`${grip} reference evidence`}>
       <h4 style={{ color: GRIP_COLORS[grip] || C.blue, marginBottom: 0, fontSize: 13 }}>{grip}</h4>
       <EvidenceDetails title="Starting reference" date={latest.evidence.baselineDate} evidence={latest.evidence.baselineEvidence} />

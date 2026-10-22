@@ -41,7 +41,7 @@
 
 .trend-summary-values {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   margin-top: 12px;
 }
@@ -273,3 +273,10 @@
     padding-left: 2px;
   }
 }
+
+.trend-hatching {
+  padding: 8px;
+  border-radius: 6px;
+  background: repeating-linear-gradient(135deg, transparent, transparent 7px, #8b949e12 7px, #8b949e12 9px);
+}
+.trend-hatching dd { font-size: 18px; }

@@ -650,7 +650,7 @@ export function CurveImprovementCard({
         {zoneHistoryModal}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>
-            Curve Improvement
+            Curve Improvement by Duration
             <span style={{ color: handView === "R" ? C.orange : C.blue, marginLeft: 8, fontSize: 12 }}>
               {handView === "R" ? "Right hand" : "Left hand"}
             </span>
@@ -663,6 +663,7 @@ export function CurveImprovementCard({
           Per-hand fits vs that hand's frozen baseline — half the data
           of the pooled view, so expect noisier numbers.
         </div>
+        <p style={{ fontSize: 12, color: C.muted }}>Long-term curve comparisons by duration use an earlier training baseline. The summary above begins tracking gain when its trend baseline matures, so these percentages can differ. Treat early comparisons as provisional.</p>
         <ComparisonModeSelector mode={comparisonMode} onChange={setComparisonMode} />
         {comparisonMode !== "time" && <BasisNote />}
         {entries.length > 0 ? entries.map(([grip, imp, ph], i, arr) => {
@@ -710,12 +711,13 @@ export function CurveImprovementCard({
       {zoneHistoryModal}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>
-          Curve Improvement
+          Curve Improvement by Duration
           {normalizeOn && (
             <span style={{ color: C.purple, marginLeft: 8, fontSize: 12 }}>· × BW</span>
           )}
         </div>
       </div>
+      <p style={{ fontSize: 12, color: C.muted }}>Long-term curve comparisons by duration use an earlier training baseline. The summary above begins tracking gain when its trend baseline matures, so these percentages can differ. Treat early comparisons as provisional.</p>
       <ComparisonModeSelector mode={comparisonMode} onChange={setComparisonMode} />
       {comparisonMode !== "time" && <BasisNote />}
 
@@ -760,7 +762,7 @@ export function CurveImprovementCard({
           </>
         ) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-            Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed a stable per-grip baseline. Until then the three-exp fit can't separate the fast / medium / slow components cleanly enough for the per-zone Δ% to be meaningful.
+            Need ≥5 failures across ≥3 target durations <i>per grip</i> to seed an initial per-grip baseline. Until then the three-exp fit can't separate the fast / medium / slow components cleanly enough for the per-zone Δ% to be meaningful.
           </div>
         )
       ) : displayGrip ? (

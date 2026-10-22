@@ -1,6 +1,7 @@
 // Evidence annotations for the descriptive performance charts. This module
 // never changes the force observations, fitted curves, starting reference,
-// prescriptions, or existing long/short percentages.
+// prescriptions, or existing long/short percentages. A separate presentation
+// baseline matures only when the configured evidence gate is met.
 import { buildPerformanceTrends, DEFAULT_PERFORMANCE_TREND_MODEL } from './performanceTrends.js';
 import { fitEstablishedTrend, TREND_EXPERIMENT } from './capacityTrendFit.js';
 import { fitContextualTrend } from './contextualTrendFit.js';
@@ -8,6 +9,19 @@ import { trainingDayContext } from './trainingDayContext.js';
 import { loadProvenance } from './forceRecording.js';
 import { computeBalancedCurveScore, predForceThreeExp } from './threeExp.js';
 import { ZONE_REF_T } from './zones.js';
+
+export const DEFAULT_BASELINE_MIN_OBSERVATIONS = 100;
+// A single qualifying date can be a coincidence of duration coverage — a
+// mix of hold lengths that happened to span the six reference durations on
+// one day. Requiring the gate to clear on two consecutive trend-build dates
+// before the baseline freezes rules that out: the user has to meet the
+// evidence bar on the follow-up date too. A failure in between resets the
+// pending candidate, so the baseline only locks in on sustained coverage.
+export const REQUIRED_QUALIFYING_DATES = 2;
+
+export function baselineObservationThreshold(value) {
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_BASELINE_MIN_OBSERVATIONS;
+}
 
 export const PERFORMANCE_REFERENCE_DURATIONS = Object.freeze(Object.values(ZONE_REF_T));
 export const PERFORMANCE_DURATION_BANDS = Object.freeze([
@@ -214,7 +228,13 @@ function observationFor({ rep, expectedForce, deviation, context }) {
 // this wrapper only annotates them. There is intentionally no activities or
 // fatigue-correction argument. Climbing context belongs beside the readings.
 export function buildPerformanceTrendAnalysis(history, grips, hand = 'pooled',
-  { model = DEFAULT_PERFORMANCE_TREND_MODEL } = {}) {
+  { model = DEFAULT_PERFORMANCE_TREND_MODEL, minimumBaselineObservations = DEFAULT_BASELINE_MIN_OBSERVATIONS } = {}) {
+  const minimum = baselineObservationThreshold(minimumBaselineObservations);
+  const establishedBaselines = new Map(), scoreHistory = new Map();
+  // qualifyingStreaks[grip] = count of consecutive qualifying dates seen so
+  // far for that grip. Promoted to establishedBaselines once it hits
+  // REQUIRED_QUALIFYING_DATES; reset to 0 the moment a snapshot fails the gate.
+  const qualifyingStreaks = new Map();
   const baselines = new Map(), peaks = new Map(), annotations = new Map();
   const observations = [];
   const rows = buildPerformanceTrends(history, grips, hand, { model, onEvidence: snapshot => {
@@ -230,9 +250,38 @@ export function buildPerformanceTrendAnalysis(history, grips, hand = 'pooled',
       peaks.set(snapshot.grip, { date: snapshot.date, score: snapshot.score, forces, evidence: currentEvidence });
     }
     const baseline = baselines.get(snapshot.grip), peak = peaks.get(snapshot.grip);
+    // Count qualifying measured holds per hand. The weaker-evidence hand
+    // controls pooled maturation; extra observations on one hand cannot hatch it.
+    const qualifyingObservations = Math.min(...currentEvidence.perHand.map(item => item.eligibleHolds));
+    const qualifiesNow = qualifyingObservations >= minimum
+      && currentEvidence.status === 'supported'
+      && currentEvidence.perHand.every(item => item.eligibleDates > TREND_EXPERIMENT.minPriorDays);
+    if (!establishedBaselines.has(snapshot.grip)) {
+      const streak = qualifiesNow ? (qualifyingStreaks.get(snapshot.grip) ?? 0) + 1 : 0;
+      qualifyingStreaks.set(snapshot.grip, streak);
+      if (streak >= REQUIRED_QUALIFYING_DATES) {
+        establishedBaselines.set(snapshot.grip, { date: snapshot.date, score: snapshot.score });
+      }
+    }
+    const established = establishedBaselines.get(snapshot.grip);
+    const qualifyingDates = established ? REQUIRED_QUALIFYING_DATES : (qualifyingStreaks.get(snapshot.grip) ?? 0);
+    const scores = scoreHistory.get(snapshot.grip) || [];
+    const cutoff = Date.parse(snapshot.date) - 90 * 86400000;
+    const prior90 = scores.findLast(item => Date.parse(item.date) <= cutoff);
+    scores.push({ date: snapshot.date, score: snapshot.score });
+    scoreHistory.set(snapshot.grip, scores);
     const detail = {
       date: snapshot.date,
       score: snapshot.score,
+      change90Days: prior90 ? 100 * (snapshot.score / prior90.score - 1) : null,
+      change90ReferenceDate: prior90?.date ?? null,
+      maturation: {
+        ready: !!established, qualifyingObservations, minimumObservations: minimum,
+        supportedDurations: currentEvidence.referenceSupport.filter(item => item.status === 'supported').length,
+        qualifyingDates, requiredQualifyingDates: REQUIRED_QUALIFYING_DATES,
+        date: established?.date ?? null, score: established?.score ?? null,
+        improvement: established ? 100 * (snapshot.score / established.score - 1) : null,
+      },
       baselineDate: baseline.date,
       baselineScore: baseline.score,
       peakDate: peak.date,
