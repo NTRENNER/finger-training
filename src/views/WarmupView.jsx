@@ -286,6 +286,14 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
       changePhase("done");
       return;
     }
+    // Peak-force measurement needs a sensor. In manual mode we silently
+    // skip past peak-test steps — the warm-up still gets its hangs; the
+    // peak-test block just can't produce a number without the Tindeq.
+    if (step.type === "peak_test" && manualMode) {
+      setStepIdx(idx + 1);
+      enterStep(idx + 1);
+      return;
+    }
     const prevGrip = steps[idx - 1]?.grip;
     const gripChanged = Boolean(prevGrip && prevGrip !== step.grip);
     // Grip change: flag a persistent banner (no click gate); the next
