@@ -159,7 +159,7 @@ test('optional Peak Test saves only its pulls, then completes warmup', async () 
     ...(peakTestGrips.includes('Micro') ? [{ id: 'peak', type: 'peak_test', grip: 'Micro', title: 'Micro Peak Test', restAfterSec: 0 }]
       : [protocol.steps[4]]),
   ] }));
-  const { hold, send, rest, addReps, commands } = await setup({ peak: true });
+  const { hold, rest, addReps, commands } = await setup({ peak: true });
   hold(20, 2000); rest();
   await waitFor(() => expect(commands.filter(command => command === CMD_START[0])).toHaveLength(2));
   expect(screen.getByText('🤚 Left Hand')).toBeInTheDocument();
