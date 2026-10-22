@@ -14,7 +14,7 @@ test('one interrupt action saves the auto rep once with explicit invalidity', ()
   const tindeq = { targetKgRef: {}, startAutoDetect: (a, b) => { start = a; end = b; }, stopAutoDetect: jest.fn(),
     endRepAndRequireRelease: () => ({actualTime: 12, avgForce: 18, peakForce: 22}), connected: true };
   render(<AutoRepSessionView session={session} onRepDone={onRepDone} onAbort={() => {}} tindeq={tindeq} />);
-  expect(screen.getByText(/Target time guides/)).toBeInTheDocument();
+  expect(screen.getByText(/Micro/)).toBeInTheDocument();
   act(() => start());
   fireEvent.click(screen.getByRole('button', {name: 'Rep interrupted'}));
   expect(onRepDone).toHaveBeenCalledWith(expect.objectContaining({actualTime: 12, avgForce: 18, failureValid: false, endReason: 'interrupted'}));
@@ -50,7 +50,7 @@ test('beta sensor flow arms each domain load and does not finish at the referenc
     config: { ...beta.config, goal: 'power_strength', targetTime: 70 } }}
     onRepDone={onRepDone} onAbort={() => {}} tindeq={tindeq} />);
   expect(tindeq.targetKgRef.current).toBe(15);
-  expect(screen.getByText(/Fatigued hold/)).toBeInTheDocument();
+  expect(screen.getByText(/Chaos Machine/)).toBeInTheDocument();
 });
 test('rest keeps technical measurement details collapsed', () => {
   render(<RestView lastRep={{actualTime: 30, avgForce: 17.5, failureValid: false, targetTime: 40}} restSeconds={20} repNum={1} repsPerSet={4} unit="kg" onRestDone={() => {}} />);
@@ -109,7 +109,7 @@ test('a pending release gate explains why the next pull cannot start', () => {
   expect(screen.queryByText('Pull to begin rep 1')).not.toBeInTheDocument();
 });
 
-test('confirmed force loss freezes the displayed credit and asks for release before advancing', () => {
+test('confirmed force loss freezes the displayed credit until release', () => {
   let start;
   const onRepDone=jest.fn();
   const tindeq={targetKgRef:{},connected:true,force:15,avgForce:20,peak:25,
@@ -118,7 +118,6 @@ test('confirmed force loss freezes the displayed credit and asks for release bef
   act(()=>start());
   view.rerender(<AutoRepSessionView session={session} onRepDone={onRepDone} onAbort={jest.fn()}
     tindeq={{...tindeq,forceLoss:{status:'complete',startTs:1000,endTs:11000}}}/>);
-  expect(screen.getByText('Rep complete — release the handle')).toBeInTheDocument();
   expect(screen.getByText('10.0s')).toBeInTheDocument();
   act(()=>jest.advanceTimersByTime(5000));
   expect(screen.getByText('10.0s')).toBeInTheDocument();

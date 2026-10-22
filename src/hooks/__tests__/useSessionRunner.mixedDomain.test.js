@@ -133,7 +133,7 @@ test('shadow forecasts persist for both hands while live history changes and loa
   try {
     const { view, addReps } = setup({ history });
     const firstModels = {}, openingPredictions = [];
-    for (const hand of ['R', 'L']) {
+    for (const hand of ['L', 'R']) {
       for (let i = 0; i < 5; i++) {
         complete(view, { startedAtMs: i * 60000, endedAtMs: i * 60000 + 25000 });
         const r = addReps.mock.calls.at(-1)[0][0];
@@ -153,12 +153,12 @@ test('shadow forecasts persist for both hands while live history changes and loa
         view.rerender();
         if (i < 4) act(() => view.result.current.handleRestDone());
       }
-      if (hand === 'R') act(() => view.result.current.setPhase('rep_ready'));
+      if (hand === 'L') act(() => view.result.current.setPhase('rep_ready'));
     }
     expect(openingPredictions).toHaveLength(2);
     for (const [prediction, fresh] of openingPredictions) expect(prediction).toEqual(fresh);
     const saved = JSON.parse(JSON.stringify(addReps.mock.calls.flatMap(c => c[0])));
-    expect(saved.map(r => r.prescribed_load_kg)).toEqual([27,35,31,23,19,22,30,26,18,14]);
+    expect(saved.map(r => r.prescribed_load_kg)).toEqual([22,30,26,18,14,27,35,31,23,19]);
     expect(summarizeMixedPredictions(saved).excluded.edited_since_prediction).toBeUndefined();
     expect(saved.filter(r => r.force_recording.capacity_eligible)).toHaveLength(2);
     // A new session gets a new snapshot and no previous hand's fatigue.

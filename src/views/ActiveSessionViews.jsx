@@ -35,6 +35,7 @@ import { C } from "../ui/theme.js";
 import { Card, Btn, Label, PageFrame } from "../ui/components.jsx";
 import { fmtW, fmtTime, fromDisp } from "../ui/format.js";
 import { BigTimer, ForceGauge } from "./cards/LiveForceCard.jsx";
+import { creditedSeconds } from "./forceProtection.jsx";
 
 import { suggestWeight, prescribedLoad } from "../model/prescription.js";
 import { levelTitle } from "../model/levels.js";
@@ -164,6 +165,52 @@ function UnloadedZeroCheck({ tindeq }) {
     </Btn>
     {tindeq.bleError && <p role="alert">{tindeq.bleError}</p>}
   </div>;
+}
+
+// Fires the interrupt prompt when BLE drops out or a force dip has been
+// observed long enough that the hold's integrity is in doubt. Debounced so
+// momentary blips don't nag; dismissed on Continue until the condition
+// genuinely clears, so pressing Continue won't immediately re-trigger while
+// the signal is still bad.
+function useInterruptPrompt(tindeq, active) {
+  const [show, setShow] = useState(false);
+  const dismissedRef = useRef(false);
+  const forceLoss = tindeq?.forceLoss;
+  const forceLossActive = forceLoss?.startTs != null && forceLoss?.status !== 'complete';
+  const trouble = active && (tindeq?.signalRecovering === true || forceLossActive);
+  useEffect(() => {
+    if (!trouble) {
+      dismissedRef.current = false;
+      setShow(false);
+      return;
+    }
+    if (dismissedRef.current) return;
+    const t = setTimeout(() => setShow(true), 1500);
+    return () => clearTimeout(t);
+  }, [trouble]);
+  const dismiss = useCallback(() => { dismissedRef.current = true; setShow(false); }, []);
+  return { show, dismiss };
+}
+
+function InterruptPrompt({ onContinue, onInterrupted, onRedo }) {
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Rep may have been interrupted" style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+    }}>
+      <div style={{
+        background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12,
+        padding: 20, maxWidth: 420, width: "100%", boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
+      }}>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>Rep may have been interrupted</div>
+        <div style={{ display: "grid", gap: 10 }}>
+          <Btn onClick={onContinue} color={C.green} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Continue</Btn>
+          <Btn onClick={onInterrupted} color={C.red} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Mark interrupted</Btn>
+          <Btn onClick={onRedo} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Redo rep</Btn>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RepDots({ total, done, current }) {
@@ -388,11 +435,31 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       manualLoadKg: manualKgRef.current, endSession });
   }, [tindeq, onRepDone]);
 
+  // Discard the current attempt without saving and re-arm this rep slot.
+  // Used when the interrupt prompt lets the user retry a rep that was
+  // disrupted (BLE blip, grip slip caught mid-hang) instead of saving a
+  // bad data point.
+  const redoRep = useCallback(async () => {
+    if (startTimeRef.current == null) return;
+    startAttemptRef.current++;
+    startTimeRef.current = null;
+    clearInterval(timerRef.current);
+    autoFailedRef.current = false;
+    if (usedDeviceRef.current) {
+      try { await tindeq.stopMeasuring(); } catch { /* discarding anyway */ }
+    }
+    endingRef.current = false;
+    setRepPhase("ready");
+    setElapsed(0);
+  }, [tindeq]);
+
   useEffect(() => {
     if (visible) return;
     if (startTimeRef.current != null) endRep(true);
     else if (repPhase === 'countdown') { setRepPhase('ready'); setCountdown(3); }
   }, [visible, endRep, repPhase]);
+
+  const interruptPrompt = useInterruptPrompt(tindeq, repPhase === "active");
 
   // Wire auto-failure → endRep for the duration of an active rep only.
   // Cleanup nulls the callback whenever phase changes or the component unmounts,
@@ -448,15 +515,10 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         }} disabled={repPhase === "finishing"}>End Session</Btn>
       </div>
 
-      {startError && <p role="alert" style={{ color: C.red }}>{startError}</p>}
+      {startError && repPhase === "ready" && <p role="alert" style={{ color: C.red }}>{startError}</p>}
       <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
-      {tindeq.signalRecovering && <div role="status" style={{ color: C.orange }}>
-        Waiting for the Tindeq signal. Your recorded effort is being kept.
-      </div>}
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <MixedHoldInfo config={config} currentRep={currentRep} />
-      <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
-
 
       {/* Phase cards (countdown / timer / ready) render FIRST so the
           timer never scrolls below the fold mid-rep — the live charts
@@ -479,15 +541,8 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       {/* Timer (shown during active rep) */}
       {repPhase === "active" && (
         <Card>
-          <ForceLossNotice state={tindeq.forceLoss} />
           <BigTimer seconds={Number(creditedSeconds(tindeq.forceLoss, elapsed))} targetSeconds={config.targetTime} running={tindeq.forceLoss?.status !== 'complete' && tindeq.forceLoss?.pendingEndTs == null} referenceOnly={!!config.mixedDomainPlan} />
-          {tindeq.connected ? (
-            <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />
-          ) : (
-            <div style={{ fontSize: 12, color: C.muted, textAlign: "center", marginTop: 8 }}>
-              No Tindeq — tap Done at muscular failure.
-            </div>
-          )}
+          {tindeq.connected && <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />}
         </Card>
       )}
 
@@ -580,6 +635,13 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
           sessionReps={sessionReps}
         />
       </div>
+      {interruptPrompt.show && (
+        <InterruptPrompt
+          onContinue={interruptPrompt.dismiss}
+          onInterrupted={() => { interruptPrompt.dismiss(); endRep(true); }}
+          onRedo={() => { interruptPrompt.dismiss(); redoRep(); }}
+        />
+      )}
     </PageFrame>
   );
 }
@@ -1137,10 +1199,13 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
     onRepDone({ ...completed, manualLoadKg: repManualKgRef.current, failed: false, endSession: stats.endSession === true });
   }, [onRepDone]);
 
-  const finishAttempt = useCallback(({ endSession = false, targetNotReached = false } = {}) => {
+  const finishAttempt = useCallback(({ endSession = false, explicit = false } = {}) => {
     if (repEndedRef.current) { if (endSession) onAbort(); return; }
-    handleRepEnd({ ...tindeq.endRepAndRequireRelease({ requireZero: targetNotReached }),
-      failureValid: false, endReason: targetNotReached ? 'target_not_reached' : 'interrupted', endSession });
+    // Explicit button-driven interruptions still hold the handle, so gate
+    // the next pull on a zero check. Implicit paths (tab navigation, End
+    // Session) assume the user physically released and skip the gate.
+    handleRepEnd({ ...tindeq.endRepAndRequireRelease({ requireZero: explicit }),
+      failureValid: false, endReason: 'interrupted', endSession });
   }, [handleRepEnd, onAbort, tindeq]);
   const finishAttemptRef = useRef(finishAttempt);
   finishAttemptRef.current = finishAttempt;
@@ -1179,9 +1244,24 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
   }, [streamAvailable, streamAttempt, visible]); // re-arm only on the visible training tab
 
   const holdSeconds = Number(creditedSeconds(tindeq.forceLoss, elapsed));
-  const targetReached = holdSeconds >= config.targetTime;
+  const timerRunning = tindeq.forceLoss?.status !== 'complete' && tindeq.forceLoss?.pendingEndTs == null;
   const timeLabel = config.mixedDomainPlan && !['adjusted', 'capped_at_original', 'adjusted_reference'].includes(config.mixedLoadAdjustment?.status)
     ? 'Fresh reference' : 'Target';
+
+  // Discard the current attempt without saving and re-arm. Bumping
+  // streamAttempt re-runs the detector effect; the end guard is set to
+  // true first so the cleanup doesn't synthesize a saved rep on the way out.
+  const redoRep = useCallback(() => {
+    if (repEndedRef.current) return;
+    repEndedRef.current = true;
+    clearInterval(timerRef.current);
+    setRepActive(false);
+    setElapsed(0);
+    startTimeRef.current = null;
+    setStreamAttempt(attempt => attempt + 1);
+  }, []);
+
+  const interruptPrompt = useInterruptPrompt(tindeq, repActive);
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
@@ -1195,22 +1275,13 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
       </div>
 
       <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
-      {tindeq.signalRecovering && <div role="status" style={{ color: C.orange }}>
-        Waiting for the Tindeq signal. Your recorded effort is being kept.
-      </div>}
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <MixedHoldInfo config={config} currentRep={currentRep} />
-      <p>Target time guides the prescribed load. Maintain the prescribed force until muscular failure.</p>
-      {targetKg > 0 && <p>Brief force adjustments are allowed. A sustained loss of force ends the hold; release the handle to begin rest.</p>}
-      {startError && <div role="alert" style={{ color: C.red }}>
+      {startError && !repActive && <div role="alert" style={{ color: C.red }}>
         <p>{startError}</p>
         <Btn onClick={() => setStreamAttempt(attempt => attempt + 1)}>Retry Tindeq</Btn>
       </div>}
-      {repActive && <Btn onClick={() => finishAttempt()}>Rep interrupted</Btn>}
-      {repActive && targetKg > 0 && tindeq.forceLoss?.startTs == null && <div>
-        <p>The target has not been reached. You can finish this attempt and choose a manageable target.</p>
-        <Btn onClick={() => finishAttempt({ targetNotReached: true })}>Finish attempt — target not reached</Btn>
-      </div>}
+      {repActive && <Btn onClick={() => finishAttempt({ explicit: true })}>Rep interrupted</Btn>}
 
       {/* Status card first — the big hold timer must never scroll
           below the fold mid-rep. Live charts moved below the force
@@ -1218,19 +1289,17 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
       <Card style={{ textAlign: "center", padding: "32px 16px", marginTop: 12 }}>
         {repActive ? (
           <>
-            <ForceLossNotice state={tindeq.forceLoss} />
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>{tindeq.forceLoss?.status === 'complete' ? 'Hold time recorded. Rest starts after release.' : 'Maintain a steady hold'}</div>
             <div style={{
               fontSize: 96, fontWeight: 900, lineHeight: 1,
-              color: targetReached ? C.green : C.blue,
+              color: timerRunning ? (holdSeconds >= config.targetTime && !config.mixedDomainPlan ? C.green : C.blue) : C.muted,
               fontVariantNumeric: "tabular-nums",
             }}>
               {holdSeconds.toFixed(1)}s
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
               {timeLabel} {config.targetTime}s
-              {targetReached && !config.mixedDomainPlan && tindeq.forceLoss?.status !== 'complete' && <span style={{ color: C.green, marginLeft: 8 }}>Target reached — keep pulling to failure</span>}
             </div>
+            {tindeq.connected && <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />}
           </>
         ) : (
           <>
@@ -1312,16 +1381,20 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
           sessionReps={sessionReps}
         />
       </div>
+      {interruptPrompt.show && (
+        <InterruptPrompt
+          onContinue={interruptPrompt.dismiss}
+          onInterrupted={() => { interruptPrompt.dismiss(); finishAttempt({ explicit: true }); }}
+          onRedo={() => { interruptPrompt.dismiss(); redoRep(); }}
+        />
+      )}
     </PageFrame>
   );
 }
 
-function MixedHoldInfo({ config, currentRep }) {
+function MixedHoldInfo({ config }) {
   if (!config.mixedDomainPlan) return null;
-  return <div style={{ marginTop: 12, fontSize: 18, lineHeight: 1.5 }}>
-    <strong>Chaos Machine (Beta) · {MIXED_DOMAIN_LABELS[config.goal]}</strong>
-    <div style={{ fontSize: 14, color: C.muted }}>{currentRep === 0
-      ? 'Opening hold. Maintain the target force until failure.'
-      : mixedAdjustmentText(config.mixedLoadAdjustment) || 'Fatigued hold. A shorter time is expected; there is no time to beat.'}</div>
+  return <div style={{ marginTop: 12, fontSize: 16, fontWeight: 700 }}>
+    Chaos Machine (Beta) · {MIXED_DOMAIN_LABELS[config.goal]}
   </div>;
 }

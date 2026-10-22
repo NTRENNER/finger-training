@@ -189,7 +189,6 @@ test('workout screen keeps the current rep armed through reconnect state changes
   await waitFor(()=>expect(writes).toEqual([CMD_START[0]]));
   packet([[0,20],[500,20],[1000,20]]);
   view.rerender(draw({connected:false,reconnecting:true,signalRecovering:true}));
-  expect(screen.getByRole('status')).toHaveTextContent('Waiting for the Tindeq signal');
   expect(writes).toEqual([CMD_START[0]]);
   view.rerender(draw({connected:true,reconnecting:false,signalRecovering:false}));
   expect(writes).toEqual([CMD_START[0]]);

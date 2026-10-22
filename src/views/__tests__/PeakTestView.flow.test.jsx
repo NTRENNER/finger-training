@@ -58,10 +58,9 @@ async function setup(history = []) {
   return { ...view, leaveTab: () => view.rerender(<Harness tabVisible={false} />), returnTab: () => view.rerender(<Harness />), hideWarmup: () => view.rerender(<Harness visible={false} />), send, hold, pull, pullNoRelease, arm, rest, commands, onClose, addReps, disconnect: () => act(() => { onDisconnect(); }) };
 }
 
-test.each(['L', 'R'])('six real sensor pulls alternate from %s, with exactly two rests and no countdown start', async first => {
-  const history = first === 'R' ? [{ date: '2026-09-20', hand: 'L', actual_time_s: 30 }] : [];
-  const { hold, send, arm, addReps, commands } = await setup(history);
-  const order = first === 'L' ? ['L','R'] : ['R','L'];
+test('six real sensor pulls alternate from L, with exactly two rests and no countdown start', async () => {
+  const { hold, send, arm, addReps, commands } = await setup([]);
+  const order = ['L', 'R'];
   function checkRestBetweenRounds(round) {
       expect(screen.getByRole('timer', { name: 'Rest' })).toBeInTheDocument();
       // Handling equipment during rest cannot record another pull.
@@ -91,7 +90,7 @@ test.each(['L', 'R'])('six real sensor pulls alternate from %s, with exactly two
   const rows = addReps.mock.calls.flatMap(c => c[0]);
   expect(rows.map(r => r.hand)).toEqual([...order,...order,...order]);
   expect(rows.every(isValidPeakMeasurement)).toBe(true);
-  expect(rows.every(r => r.force_recording.hand_order.first_hand === first)).toBe(true);
+  expect(rows.every(r => r.force_recording.hand_order.first_hand === 'L')).toBe(true);
   expect(rows.filter(r => r.rep_num > 1).every(r => r.rep_timing.rest_before_s >= 60)).toBe(true);
   expect(freshFitReps(rows)).toEqual([]);
   expect(commands.filter(c => c === CMD_START[0])).toHaveLength(1);

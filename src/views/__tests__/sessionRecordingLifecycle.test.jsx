@@ -127,15 +127,15 @@ test('navigating before a pull and ending a session before a pull do not invent 
   expect(current.runner.phase).toBe('idle');
 });
 
-test('an unsuccessful acquisition can be explicitly finished above the release threshold', async () => {
+test('an unsuccessful acquisition can be explicitly finished with Rep interrupted', async () => {
   await start();
   feed(0, 4000, () => 17);
   feed(4100, 8000, () => .8);
   expect(saved).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Finish attempt — target not reached' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Rep interrupted' }));
   expect(saved).toHaveBeenCalledTimes(1);
   const rep = saved.mock.calls[0][0][0];
-  expect(rep).toMatchObject({ failure_valid: false, end_reason: 'target_not_reached', force_recording: { capacity_eligible: false } });
+  expect(rep).toMatchObject({ failure_valid: false, end_reason: 'interrupted', force_recording: { capacity_eligible: false } });
   expect(isCapacityEvidenceRep(rep)).toBe(false);
   expect(current.tindeq.releaseCheckRequired).toBe(true);
   expect(current.runner.phase).toBe('resting');
@@ -149,10 +149,8 @@ test('device hold clock includes the ramp, includes recovered dips, and matches 
   expect(screen.getByText('4.9s')).toBeInTheDocument();
   feed(5000, 5900, () => 16);
   expect(screen.getByText('5.2s')).toBeInTheDocument();
-  expect(screen.getByText(/Checking force dip/)).toBeInTheDocument();
   feed(6000, 7000, () => 20);
   expect(screen.getByText('7.0s')).toBeInTheDocument();
-  expect(screen.queryByText(/Checking force dip/)).not.toBeInTheDocument();
   expect(saved).not.toHaveBeenCalled();
   feed(7100, 9900, () => 20);
   feed(10000, 11100, () => 0);
