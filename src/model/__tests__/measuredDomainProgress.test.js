@@ -18,10 +18,10 @@ const rep = (id, date, target, actual, force, extra = {}) => ({
   ...extra,
 });
 
-test("reports first and latest measured opening holds in each prescribed domain", () => {
+test("reports a fixed-duration comparison when opening times closely match", () => {
   const progress = buildMeasuredDomainProgress([
     rep("old", "2026-06-01", 30, 28, 12),
-    rep("new", "2026-07-01", 30, 36, 15),
+    rep("new", "2026-07-01", 30, 30, 15),
     rep("end", "2026-07-08", 220, 190, 8),
   ], { grip: "Micro", handView: "L" });
 
@@ -33,7 +33,13 @@ test("reports first and latest measured opening holds in each prescribed domain"
   expect(progress.domains.find(item => item.key === "power")).toMatchObject({
     sessions: 2,
     first: { date: "2026-06-01", forceKg: 12, durationS: 28 },
-    latest: { date: "2026-07-01", forceKg: 15, durationS: 36 },
+    latest: { date: "2026-07-01", forceKg: 15, durationS: 30 },
+    comparison: {
+      type: "fixed_duration",
+      anchorDurationS: 29,
+      earlier: { forceKg: 12, durationS: 28 },
+      latest: { forceKg: 15, durationS: 30 },
+    },
   });
   expect(progress.domains.find(item => item.key === "endurance")).toMatchObject({ sessions: 1 });
 });
@@ -57,4 +63,42 @@ test("excludes nominal and interrupted rows and honors the selected hand", () =>
   const domain = left.domains.find(item => item.key === "power_strength");
   expect(domain).toMatchObject({ sessions: 1, first: { forceKg: 10 }, latest: { forceKg: 10 } });
   expect(left.peak.latest.forceKg).toBe(15);
+});
+
+test("uses the latest similar-force repeat to compare hold time", () => {
+  const progress = buildMeasuredDomainProgress([
+    rep("old", "2026-06-01", 70, 62, 10),
+    rep("middle", "2026-07-01", 70, 80, 10.2),
+    rep("latest", "2026-08-01", 70, 92, 10.4),
+  ], { grip: "Micro", handView: "L" });
+
+  expect(progress.domains.find(item => item.key === "power_strength").comparison).toMatchObject({
+    type: "fixed_force",
+    anchorForceKg: 10.2,
+    earlier: { date: "2026-06-01", forceKg: 10, durationS: 62 },
+    latest: { date: "2026-08-01", forceKg: 10.4, durationS: 92 },
+  });
+});
+
+test("does not compare openings when both force and duration materially changed", () => {
+  const progress = buildMeasuredDomainProgress([
+    rep("old", "2026-06-01", 30, 45, 12),
+    rep("latest", "2026-07-01", 30, 3.3, 18),
+  ], { grip: "Micro", handView: "L" });
+
+  expect(progress.domains.find(item => item.key === "power").comparison).toBeNull();
+});
+
+test("uses a later comparable pair when the first opening never repeats", () => {
+  const progress = buildMeasuredDomainProgress([
+    rep("unmatched-first", "2026-05-01", 30, 45, 12),
+    rep("earlier-match", "2026-06-01", 30, 29, 15),
+    rep("latest-match", "2026-07-01", 30, 31, 18),
+  ], { grip: "Micro", handView: "L" });
+
+  expect(progress.domains.find(item => item.key === "power").comparison).toMatchObject({
+    type: "fixed_duration",
+    earlier: { date: "2026-06-01", forceKg: 15, durationS: 29 },
+    latest: { date: "2026-07-01", forceKg: 18, durationS: 31 },
+  });
 });

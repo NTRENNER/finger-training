@@ -79,7 +79,7 @@ test("puts first and latest measured openings inside each modeled tile", () => {
       selGrip={null}
       history={[
         measured("old", "2026-06-01", 28, 12, 17),
-        measured("new", "2026-07-01", 36, 15, 20),
+        measured("new", "2026-07-01", 30, 15, 20),
         rep(30, 40, 30, {
           id: "nominal",
           session_id: "nominal",
@@ -94,8 +94,9 @@ test("puts first and latest measured openings inside each modeled tile", () => {
     />
   );
 
-  expect(screen.getByText("First 12.0 kg · 28s")).toBeInTheDocument();
-  expect(screen.getByText("Latest 15.0 kg · 36s")).toBeInTheDocument();
+  expect(screen.getByText("Matched duration · ~29s")).toBeInTheDocument();
+  expect(screen.getByText("Earlier 12.0 kg · 28s")).toBeInTheDocument();
+  expect(screen.getByText("Latest match 15.0 kg · 30s")).toBeInTheDocument();
   expect(screen.getByText("Max · modeled 5s")).toBeInTheDocument();
   expect(screen.getByText("First 17.0 kg")).toBeInTheDocument();
   expect(screen.getByText("Best 20.0 kg")).toBeInTheDocument();
@@ -104,6 +105,74 @@ test("puts first and latest measured openings inside each modeled tile", () => {
   expect(screen.getByRole("dialog")).toHaveTextContent("2 sessions");
   expect(screen.getByText("15.0 kg")).toBeInTheDocument();
   expect(screen.queryByText("30.0 kg")).not.toBeInTheDocument();
+});
+
+test("does not present unlike measured openings as progress", () => {
+  const measured = (id, date, actual, force) => rep(30, actual, force, {
+    id,
+    session_id: id,
+    date,
+    peak_force_kg: force + 5,
+    failure_valid: true,
+    load_provenance: "measured_force",
+    force_recording: { capacity_eligible: true },
+  });
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{}}
+      grip3xEstimates={{ Crusher: [1, 1, 1] }}
+      gripBaselines={{}}
+      global3xBaseline={{ date: "2026-04-20", maxHoldS: 240 }}
+      selGrip={null}
+      history={[
+        measured("old", "2026-06-01", 45, 12),
+        measured("new", "2026-07-01", 3.3, 18),
+      ]}
+      unit="kg"
+    />
+  );
+
+  expect(screen.getByText("No like-for-like repeat yet")).toBeInTheDocument();
+  expect(screen.queryByText("Earlier 12.0 kg · 45s")).not.toBeInTheDocument();
+  expect(screen.queryByText("Latest match 18.0 kg · 3.3s")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Power measured opening history" })).toBeInTheDocument();
+});
+
+test("uses a labeled fixed-duration curve estimate when measured openings have no match", () => {
+  const measured = (id, date, actual, force) => rep(30, actual, force, {
+    id,
+    session_id: id,
+    date,
+    peak_force_kg: force + 5,
+    failure_valid: true,
+    load_provenance: "measured_force",
+    force_recording: { capacity_eligible: true },
+  });
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{}}
+      grip3xEstimates={{ Crusher: [14, 8, 4] }}
+      gripBaselines={{}}
+      global3xBaseline={{ date: "2026-04-20", maxHoldS: 240, amps: [10, 6, 3] }}
+      selGrip={null}
+      history={[
+        measured("old", "2026-06-01", 45, 12),
+        measured("new", "2026-07-01", 3.3, 18),
+      ]}
+      unit="kg"
+    />
+  );
+
+  expect(screen.getByText("Estimated · fixed 30s")).toBeInTheDocument();
+  expect(screen.getByText(/^Baseline \d+\.\d kg$/)).toBeInTheDocument();
+  expect(screen.getByText(/^Now \d+\.\d kg$/)).toBeInTheDocument();
+  expect(screen.queryByText("No like-for-like repeat yet")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Power measured opening history" })).toHaveAttribute(
+    "title",
+    "Calibrated curve estimate at 30 seconds; no like-for-like measured repeat yet"
+  );
 });
 
 test("opens the full peak-force trend from the Max measured strip", () => {

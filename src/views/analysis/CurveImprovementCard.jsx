@@ -173,6 +173,19 @@ function measuredResultText(result, unit, peak = false) {
   return `${force} · ${duration}s`;
 }
 
+function measuredComparisonLabel(comparison, unit) {
+  if (comparison?.type === "fixed_force") {
+    return `Matched force · ~${fmtW(comparison.anchorForceKg, unit)} ${unit}`;
+  }
+  if (comparison?.type === "fixed_duration") {
+    const duration = Number.isInteger(comparison.anchorDurationS)
+      ? comparison.anchorDurationS
+      : fmt1(comparison.anchorDurationS);
+    return `Matched duration · ~${duration}s`;
+  }
+  return "Opening hold · measured";
+}
+
 function measuredItemForZone(progress, zoneKey) {
   if (!progress) return null;
   if (zoneKey === "max_strength") return progress.peak;
@@ -267,24 +280,60 @@ function ImprovementRow({
               {modelContent}
             </div>
           );
-          const measuredAction = measured?.first && measured?.latest
-            ? peak ? onPeakSelect : onMeasuredSelect
+          const hasPeak = peak && measured?.first && measured?.latest;
+          const comparison = !peak ? measured?.comparison : null;
+          const estimatedFallback = !peak && measured?.sessions > 0 && !comparison
+            ? comparisons[z.key]
             : null;
-          const measuredContent = measured?.first && measured?.latest ? (
+          const measuredAction = hasPeak
+            ? onPeakSelect
+            : measured?.sessions > 0 ? onMeasuredSelect : null;
+          const measuredContent = hasPeak ? (
             <>
-              <span className="curve-improvement-measured-label">
-                {peak ? "Peak force · instantaneous" : "Opening hold · measured"}
-              </span>
+              <span className="curve-improvement-measured-label">Peak force · instantaneous</span>
               <span className="curve-improvement-measured-values">
-                <span>First {measuredResultText(measured.first, unit, peak)}</span>
+                <span>First {measuredResultText(measured.first, unit, true)}</span>
                 <span className="curve-improvement-measured-arrow" aria-hidden="true">→</span>
-                <span>{peak ? "Best " : "Latest "}{measuredResultText(measured.latest, unit, peak)}</span>
+                <span>Best {measuredResultText(measured.latest, unit, true)}</span>
               </span>
             </>
+          ) : comparison ? (
+            <>
+              <span className="curve-improvement-measured-label">
+                {measuredComparisonLabel(comparison, unit)}
+              </span>
+              <span className="curve-improvement-measured-values">
+                <span>Earlier {measuredResultText(comparison.earlier, unit)}</span>
+                <span className="curve-improvement-measured-arrow" aria-hidden="true">→</span>
+                <span>Latest match {measuredResultText(comparison.latest, unit)}</span>
+              </span>
+            </>
+          ) : estimatedFallback ? (
+            <>
+              <span className="curve-improvement-measured-label">
+                Estimated · fixed {estimatedFallback.duration}s
+              </span>
+              <span className="curve-improvement-measured-values">
+                <span>Baseline {fmtW(estimatedFallback.before, unit)} {unit}</span>
+                <span className="curve-improvement-measured-arrow" aria-hidden="true">→</span>
+                <span>Now {fmtW(estimatedFallback.now, unit)} {unit}</span>
+              </span>
+            </>
+          ) : measured?.sessions > 0 ? (
+            <>
+              <span className="curve-improvement-measured-label">Opening hold · measured</span>
+              <span className="curve-improvement-measured-empty">No like-for-like repeat yet</span>
+            </>
           ) : <span className="curve-improvement-measured-empty">No measured opening yet</span>;
-          const measuredTitle = measured?.first && measured?.latest
-            ? `${peak ? "First observed to current best" : "First to latest opening"}: ${measured.first.date} to ${measured.latest.date}`
-            : "No qualifying measured opening holds yet";
+          const measuredTitle = hasPeak
+            ? `First observed to current best: ${measured.first.date} to ${measured.latest.date}`
+            : comparison
+              ? `Like-for-like opening comparison: ${comparison.earlier.date} to ${comparison.latest.date}`
+              : estimatedFallback
+                ? `Calibrated curve estimate at ${estimatedFallback.duration} seconds; no like-for-like measured repeat yet`
+              : measured?.sessions > 0
+                ? "No later opening matches the first hold closely enough in force or duration"
+                : "No qualifying measured opening holds yet";
 
           return (
             <div key={z.key}

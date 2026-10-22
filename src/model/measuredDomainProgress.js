@@ -2,11 +2,70 @@ import { buildPeakForceTrend } from "./peakForce.js";
 import { buildZoneSessionHistory } from "./zoneSessionHistory.js";
 import { TRAINING_ZONE_KEYS, ZONE6 } from "./zones.js";
 
+const FORCE_MATCH_FRACTION = 0.05;
+const FORCE_MATCH_FLOOR_KG = 0.25;
+const DURATION_MATCH_FRACTION = 0.10;
+const DURATION_MATCH_FLOOR_S = 2;
+
 function firstPeakDate(trend, grip) {
   return trend?.rows?.find(row => Number.isFinite(row?.[grip]))?.date ?? null;
 }
 
-// First-to-latest measured observations for the five trained duration domains,
+function measuredResult(session) {
+  return session ? {
+    date: session.date,
+    forceKg: session.openingLoadKg,
+    durationS: session.openingActualS,
+  } : null;
+}
+
+// Find the newest observation that has a defensible older match, then use the
+// earliest such match to maximize the comparison span. One dimension must be
+// essentially unchanged: force within 5% (0.25 kg minimum) or duration within
+// 10% (2 s minimum). If neither condition is met, the observations describe
+// different tests and should not be presented as a progress comparison.
+export function buildLikeForLikeComparison(sessions) {
+  if (!Array.isArray(sessions) || sessions.length < 2) return null;
+  for (let latestIndex = 0; latestIndex < sessions.length - 1; latestIndex += 1) {
+    const latest = sessions[latestIndex];
+    const olderSessions = sessions.slice(latestIndex + 1).reverse();
+    for (const earlier of olderSessions) {
+      const forceTolerance = Math.max(
+        FORCE_MATCH_FLOOR_KG,
+        earlier.openingLoadKg * FORCE_MATCH_FRACTION
+      );
+      const durationTolerance = Math.max(
+        DURATION_MATCH_FLOOR_S,
+        earlier.openingActualS * DURATION_MATCH_FRACTION
+      );
+      const forceGap = Math.abs(latest.openingLoadKg - earlier.openingLoadKg);
+      const durationGap = Math.abs(latest.openingActualS - earlier.openingActualS);
+      const forceMatch = forceGap <= forceTolerance;
+      const durationMatch = durationGap <= durationTolerance;
+      if (!forceMatch && !durationMatch) continue;
+
+      const type = forceMatch && durationMatch
+        ? forceGap / forceTolerance <= durationGap / durationTolerance
+          ? "fixed_force"
+          : "fixed_duration"
+        : forceMatch ? "fixed_force" : "fixed_duration";
+      return {
+        type,
+        earlier: measuredResult(earlier),
+        latest: measuredResult(latest),
+        anchorForceKg: type === "fixed_force"
+          ? (earlier.openingLoadKg + latest.openingLoadKg) / 2
+          : null,
+        anchorDurationS: type === "fixed_duration"
+          ? (earlier.openingActualS + latest.openingActualS) / 2
+          : null,
+      };
+    }
+  }
+  return null;
+}
+
+// Like-for-like measured observations for the five trained duration domains,
 // plus instantaneous peak force. Nothing here is fitted or inferred.
 export function buildMeasuredDomainProgress(history, {
   grip,
@@ -44,8 +103,9 @@ export function buildMeasuredDomainProgress(history, {
       label: zone?.label || zoneKey,
       color: zone?.color,
       sessions: sessions.length,
-      first: first ? { date: first.date, forceKg: first.openingLoadKg, durationS: first.openingActualS } : null,
-      latest: latest ? { date: latest.date, forceKg: latest.openingLoadKg, durationS: latest.openingActualS } : null,
+      first: measuredResult(first),
+      latest: measuredResult(latest),
+      comparison: buildLikeForLikeComparison(sessions),
     };
   });
 
