@@ -19,12 +19,12 @@ export function buildMeasuredDomainProgress(history, {
     && (handView === "pooled" || rep.hand === handView));
   const peakTrend = buildPeakForceTrend(scoped, { roundDigits: 5 });
   const firstPeak = peakTrend?.firstBest?.[grip];
-  const latestPeak = peakTrend?.latest?.[grip];
-  const peak = firstPeak > 0 && latestPeak?.kg > 0 ? {
+  const bestPeak = peakTrend?.best?.[grip];
+  const peak = firstPeak > 0 && bestPeak?.kg > 0 ? {
     key: "peak_force",
     label: "Peak Force",
     first: { date: firstPeakDate(peakTrend, grip), forceKg: firstPeak },
-    latest: { date: latestPeak.date, forceKg: latestPeak.kg },
+    latest: { date: bestPeak.date, forceKg: bestPeak.kg },
     sessions: peakTrend.rows.filter(row => Number.isFinite(row?.[grip])).length,
   } : null;
 

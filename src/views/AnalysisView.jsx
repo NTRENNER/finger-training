@@ -1,6 +1,5 @@
 import { PeakForceCard } from './analysis/PeakForceCard.jsx';
 import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/forceRecording.js";
-import { MeasuredDomainProgressCard } from "./analysis/MeasuredDomainProgressCard.jsx";
 // ──────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
 // ──────────────────────────────────────────────────────────────
@@ -8,11 +7,10 @@ import { MeasuredDomainProgressCard } from "./analysis/MeasuredDomainProgressCar
 //
 //   1. Peak Force — instantaneous observed ceiling, when available.
 //   2. Recorded pulls and current curve — always visible with reps.
-//   3. Actual Progress by Domain — first vs latest measured results.
-//   4. Recent Performance vs Expected — calibrated pre-session comparison.
-//   5. Curve Improvement — modeled domain progress vs baseline.
-//   6. Overall curve summary — optional whole-curve trajectory.
-//   7. Curve Coverage — only when sampled data needs attention.
+//   3. Recent Performance vs Expected — calibrated pre-session comparison.
+//   4. Curve Improvement — modeled progress plus first/latest measured openings.
+//   5. Overall curve summary — optional whole-curve trajectory.
+//   6. Curve Coverage — only when sampled data needs attention.
 //
 // State comes in via props: history, freshMap (built in
 // useRepHistory), activities, bodyWeight. threeExpPriors are
@@ -705,10 +703,6 @@ export function AnalysisView({
             threeExpPriors={threeExpPriors}
             handleDotClick={handleDotClick}
           />
-        </CardBoundary>
-        <CardBoundary name="Actual Progress by Domain">
-          <MeasuredDomainProgressCard history={history} grips={scopedGrips}
-            handView={handView} unit={unit} />
         </CardBoundary>
         <CardBoundary name="Performance trends">
           <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} unit={unit} />

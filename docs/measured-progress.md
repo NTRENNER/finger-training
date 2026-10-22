@@ -2,19 +2,22 @@
 
 Analysis separates two questions that should not be conflated.
 
-## Actual Progress by Domain
+## Measured progress inside Curve Improvement
 
-This card compares the first and latest valid measured opening hold in each of
+Each Curve Improvement tile compares the first and latest valid measured opening hold in each of
 the five trained duration domains: Power, Power-Strength, Strength,
 Strength-Endurance, and Endurance. It displays the observed force and observed
-duration on both dates. Instantaneous Peak Force is the sixth row.
+duration on both dates beneath the modeled percentage or weight comparison.
+Instantaneous Peak Force is the sixth tile and is labeled separately from the
+modeled five-second Max value.
 
 Workouts are grouped by their prescribed domain, so an Endurance prescription
 remains in Endurance even when its achieved opening hold lands short or long.
 Pooled values average the available opening hands within each workout. Nominal
-loads, interrupted efforts, and fitted values are excluded. Each domain row
+loads, interrupted efforts, and fitted values are excluded. Each measured strip
 opens the same measured-only workout history used to calculate its first and
-latest values.
+latest values. The Peak Force strip instead opens the complete Peak Force trend
+and compares the first observed peak with the current all-time best.
 
 These comparisons are descriptive. They do not hold force or duration constant,
 adjust for fatigue, or claim causality. A heavier but shorter latest hold is

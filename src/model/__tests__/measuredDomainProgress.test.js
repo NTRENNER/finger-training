@@ -27,7 +27,7 @@ test("reports first and latest measured opening holds in each prescribed domain"
 
   expect(progress.peak).toMatchObject({
     first: { date: "2026-06-01", forceKg: 17 },
-    latest: { date: "2026-07-08", forceKg: 13 },
+    latest: { date: "2026-07-01", forceKg: 20 },
     sessions: 3,
   });
   expect(progress.domains.find(item => item.key === "power")).toMatchObject({

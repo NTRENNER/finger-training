@@ -4,10 +4,10 @@ import { CHART } from '../../ui/chartStyles.js';
 // ─────────────────────────────────────────────────────────────
 // One card, one block per grip. Each grip block shows:
 //   • header: grip name + "since <baselineDate>"
-//   • total Δ% + six clickable zone tiles (Max … End)
+//   • total Δ% + six zone tiles pairing modeled and measured progress
 //   • the baseline (dashed) vs Now (solid) force curve
 //   • a "Now" slider over that grip's post-baseline session dates
-//   • a zone-history modal comparing every matching workout
+//   • measured-history drill-downs for domain openings and Peak Force
 //
 // The slider drives BOTH the curve AND the tiles: scrubbing recomputes
 // every zone Δ% and the total for the selected date, so there's a single
@@ -39,7 +39,7 @@ import {
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.jsx";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
-import { bwOnDate, fmt1, toDisp } from "../../ui/format.js";
+import { bwOnDate, fmt1, fmtW, toDisp } from "../../ui/format.js";
 import { ZONE6, ZONE_REF_T } from "../../model/zones.js";
 import {
   buildGripImprovement,
@@ -54,7 +54,10 @@ import { predForceThreeExp } from "../../model/threeExp.js";
 import { forceComparison, comparisonReps, progressForce } from "../../model/curveComparison.js";
 import { ComparisonModeSelector, WeightTile, HoldTimeView, WeightHistoryView } from "./CurveComparisonViews.jsx";
 import { effectiveLoad, freshFitReps } from "../../model/load.js";
+import { buildMeasuredDomainProgress } from "../../model/measuredDomainProgress.js";
 import { ZoneSessionHistoryModal } from "./ZoneSessionHistoryModal.jsx";
+import { PeakForceHistoryModal } from "./PeakForceHistoryModal.jsx";
+import "./CurveImprovementCard.css";
 
 const scaleAmps = (amps, bw) =>
   Array.isArray(amps) && bw > 0 ? amps.map(value => value / bw) : amps;
@@ -162,6 +165,20 @@ function BasisNote() {
   );
 }
 
+function measuredResultText(result, unit, peak = false) {
+  if (!result) return "—";
+  const force = `${fmtW(result.forceKg, unit)} ${unit}`;
+  if (peak) return force;
+  const duration = Number.isInteger(result.durationS) ? result.durationS : fmt1(result.durationS);
+  return `${force} · ${duration}s`;
+}
+
+function measuredItemForZone(progress, zoneKey) {
+  if (!progress) return null;
+  if (zoneKey === "max_strength") return progress.peak;
+  return progress.domains.find(item => item.key === zoneKey) ?? null;
+}
+
 function staticOverlay(baseline, amps, history, grip, hand = null) {
   const reps = freshFitReps(history).filter(rep => rep.grip === grip && (!hand || rep.hand === hand));
   const date = latestDateForKey(history, hand ? `${grip}|${hand}` : grip) || baseline?.date;
@@ -175,10 +192,14 @@ function staticOverlay(baseline, amps, history, grip, hand = null) {
   };
 }
 
-function StaticGripTiles({ grip, imp, divider, onZoneSelect, selectedZoneKey, overlay, mode, unit, reps }) {
+function StaticGripTiles({
+  grip, imp, divider, onZoneSelect, onPeakSelect, selectedZoneKey,
+  overlay, mode, unit, reps, history, handView,
+}) {
   return <GripBlock grip={grip} overlay={overlay} staticImprovement={imp}
     divider={divider} onZoneSelect={onZoneSelect} selectedZoneKey={selectedZoneKey}
-    mode={mode} unit={unit} reps={reps} />;
+    onPeakSelect={onPeakSelect} mode={mode} unit={unit} reps={reps}
+    history={history} handView={handView} />;
 }
 
 // Total Δ% + the six zone tiles. Shared by every render path.
@@ -186,8 +207,11 @@ function ImprovementRow({
   label,
   imp,
   onZoneSelect = null,
+  onMeasuredSelect = null,
+  onPeakSelect = null,
   selectedZoneKey = null,
   mode = "percent", comparisons = {}, unit = "lbs", baselineDate = null, evidenceDates = null,
+  measuredProgress = null,
 }) {
   return (
     <div style={{ marginBottom: 10 }}>
@@ -202,7 +226,7 @@ function ImprovementRow({
           <div style={{ fontSize: 11, color: C.muted }}>total</div>
         </div>}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: mode === "weight" ? "repeat(auto-fit, minmax(max(130px, calc((100% - 12px) / 3)), 1fr))" : "repeat(3, minmax(0, 1fr))", gap: 6 }}>
+      <div className="curve-improvement-zone-grid">
         {ZONE6.map(z => {
           const val = imp[z.key];
           // val === null → this zone's reference duration is past what the
@@ -211,9 +235,13 @@ function ImprovementRow({
           // it's already excluded from the total.
           const unbaselined = mode === "weight" ? !comparisons[z.key] : val == null;
           const selected = selectedZoneKey === z.key;
-          const content = (
+          const measured = measuredItemForZone(measuredProgress, z.key);
+          const peak = z.key === "max_strength";
+          const modelContent = (
             <>
-              <div style={{ fontSize: 12, color: C.muted, marginBottom: 3 }}>{z.short}</div>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 3 }}>
+                {peak ? "Max · modeled 5s" : z.short}
+              </div>
               {mode === "weight" ? <WeightTile comparison={comparisons[z.key]} unit={unit} baselineDate={baselineDate} color={z.color} /> : unbaselined ? (
                 <div style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>new</div>
               ) : (
@@ -224,40 +252,60 @@ function ImprovementRow({
               {evidenceDates?.[z.key] && <div style={{fontSize:11,color:C.muted,marginTop:3}}>Evidence through {evidenceDates[z.key]}</div>}
             </>
           );
-          const style = {
-            width: "100%",
-            minHeight: 51,
-            background: selected ? `${z.color}18` : C.bg,
-            borderRadius: 8,
-            padding: "8px 6px",
-            textAlign: "center",
-            border: `1px solid ${selected ? z.color : `${z.color}30`}`,
-            opacity: unbaselined ? 0.5 : 1,
-            boxSizing: "border-box",
-          };
           const title = unbaselined
             ? "No baseline data — this zone wasn't trained when your baseline was set"
             : mode === "weight" ? `${z.label} weight progress` : `${z.label} session history`;
-
-          return onZoneSelect ? (
-            <button
-              key={z.key}
-              type="button"
-              onClick={() => onZoneSelect(z.key)}
+          const model = onZoneSelect ? (
+            <button type="button" onClick={() => onZoneSelect(z.key)}
+              className={`curve-improvement-model${unbaselined ? " is-unbaselined" : ""}`}
               aria-label={mode === "weight" ? `${z.label} weight progress` : `${z.label} session history`}
-              aria-pressed={selected}
-              title={title}
-              style={{
-                ...style,
-                color: C.text,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {content}
+              aria-pressed={selected} title={title}>
+              {modelContent}
             </button>
           ) : (
-            <div key={z.key} title={title} style={style}>{content}</div>
+            <div className={`curve-improvement-model${unbaselined ? " is-unbaselined" : ""}`} title={title}>
+              {modelContent}
+            </div>
+          );
+          const measuredAction = measured?.first && measured?.latest
+            ? peak ? onPeakSelect : onMeasuredSelect
+            : null;
+          const measuredContent = measured?.first && measured?.latest ? (
+            <>
+              <span className="curve-improvement-measured-label">
+                {peak ? "Peak force · instantaneous" : "Opening hold · measured"}
+              </span>
+              <span className="curve-improvement-measured-values">
+                <span>First {measuredResultText(measured.first, unit, peak)}</span>
+                <span className="curve-improvement-measured-arrow" aria-hidden="true">→</span>
+                <span>{peak ? "Best " : "Latest "}{measuredResultText(measured.latest, unit, peak)}</span>
+              </span>
+            </>
+          ) : <span className="curve-improvement-measured-empty">No measured opening yet</span>;
+          const measuredTitle = measured?.first && measured?.latest
+            ? `${peak ? "First observed to current best" : "First to latest opening"}: ${measured.first.date} to ${measured.latest.date}`
+            : "No qualifying measured opening holds yet";
+
+          return (
+            <div key={z.key}
+              className={`curve-improvement-zone-tile${selected ? " is-selected" : ""}`}
+              style={{
+                "--zone-color": z.color,
+                "--zone-border": `${z.color}30`,
+                "--zone-selected": `${z.color}18`,
+              }}>
+              {model}
+              {measuredAction ? (
+                <button type="button" className="curve-improvement-measured"
+                  onClick={() => measuredAction(z.key)}
+                  aria-label={peak ? `${z.label} peak force history` : `${z.label} measured opening history`}
+                  title={measuredTitle}>
+                  {measuredContent}
+                </button>
+              ) : (
+                <div className="curve-improvement-measured" title={measuredTitle}>{measuredContent}</div>
+              )}
+            </div>
           );
         })}
       </div>
@@ -376,6 +424,7 @@ function GripBlock({
   onZoneSelect = null,
   selectedZoneKey = null,
   mode = "percent", reps = [], staticImprovement = null,
+  history = [], handView = "pooled", onPeakSelect = null,
 }) {
   const [timeZone, setTimeZone] = useState("power");
   const [weightZone, setWeightZone] = useState("power");
@@ -385,6 +434,11 @@ function GripBlock({
   const nowDate = dates[idx];
   const nowAmps = overlay.ampsByDate.get(nowDate);
   const color = GRIP_COLORS[grip] || C.blue;
+  const measuredProgress = useMemo(() => buildMeasuredDomainProgress(history, {
+    grip,
+    handView,
+    throughDate: nowDate || null,
+  }), [history, grip, handView, nowDate]);
 
   // Per-zone baselines fill the long-hold "new" tiles once trained:
   // each such zone is measured from the first date its data reached that
@@ -432,7 +486,14 @@ function GripBlock({
           onZoneSelect={mode === "weight" ? setWeightZone : onZoneSelect
             ? zoneKey => onZoneSelect(grip, zoneKey, staticImprovement ? null : nowDate)
             : null}
+          onMeasuredSelect={onZoneSelect
+            ? zoneKey => onZoneSelect(grip, zoneKey, staticImprovement ? null : nowDate, true)
+            : null}
+          onPeakSelect={onPeakSelect
+            ? () => onPeakSelect(grip, staticImprovement ? null : nowDate)
+            : null}
           selectedZoneKey={mode === "weight" ? weightZone : selectedZoneKey}
+          measuredProgress={measuredProgress}
         />
       )}
 
@@ -512,10 +573,12 @@ export function CurveImprovementCard({
   // Per-grip "Now" slider index. null → latest date for that grip.
   const [nowIdxByGrip, setNowIdxByGrip] = useState({});
   const [zoneDetail, setZoneDetail] = useState(null);
+  const [peakDetail, setPeakDetail] = useState(null);
   const scrub = (grip, idx) => setNowIdxByGrip(prev => ({ ...prev, [grip]: idx }));
-  const openZoneDetail = (grip, zoneKey, throughDate = null) => {
-    setZoneDetail({ grip, zoneKey, throughDate });
+  const openZoneDetail = (grip, zoneKey, throughDate = null, measuredOnly = false) => {
+    setZoneDetail({ grip, zoneKey, throughDate, measuredOnly });
   };
+  const openPeakDetail = (grip, throughDate = null) => setPeakDetail({ grip, throughDate });
 
   const scaledData = useMemo(() => {
     if (!normalizeOn) {
@@ -611,8 +674,19 @@ export function CurveImprovementCard({
       zoneKey={zoneDetail.zoneKey}
       handView={handView}
       throughDate={zoneDetail.throughDate}
+      measuredOnly={zoneDetail.measuredOnly}
       unit={unit}
       onClose={() => setZoneDetail(null)}
+    />
+  ) : null;
+  const peakHistoryModal = peakDetail ? (
+    <PeakForceHistoryModal
+      history={history}
+      grip={peakDetail.grip}
+      handView={handView}
+      throughDate={peakDetail.throughDate}
+      unit={unit}
+      onClose={() => setPeakDetail(null)}
     />
   ) : null;
 
@@ -643,6 +717,7 @@ export function CurveImprovementCard({
     return (
       <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
         {zoneHistoryModal}
+        {peakHistoryModal}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>
             Curve Improvement by Duration
@@ -676,7 +751,10 @@ export function CurveImprovementCard({
                 onScrub={(g, idx) => scrub(`${g}|${handView}`, idx)}
                 divider={divider}
                 onZoneSelect={openZoneDetail}
+                onPeakSelect={openPeakDetail}
                 selectedZoneKey={selectedZoneKey}
+                history={history}
+                handView={handView}
               />
             );
           }
@@ -686,7 +764,10 @@ export function CurveImprovementCard({
               overlay={staticOverlay(perHandGripBaselines[`${grip}|${handView}`], perHandGripEstimates[`${grip}|${handView}`], history, grip, handView)}
               divider={divider}
               onZoneSelect={openZoneDetail}
+              onPeakSelect={openPeakDetail}
               selectedZoneKey={selectedZoneKey}
+              history={history}
+              handView={handView}
             />
           );
         }) : (
@@ -703,6 +784,7 @@ export function CurveImprovementCard({
   return (
     <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
       {zoneHistoryModal}
+      {peakHistoryModal}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>
           Curve Improvement by Duration
@@ -727,7 +809,10 @@ export function CurveImprovementCard({
                     unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
                     nowIdx={nowIdxByGrip[grip]} onScrub={scrub} divider={divider}
                     onZoneSelect={openZoneDetail}
+                    onPeakSelect={openPeakDetail}
                     selectedZoneKey={zoneDetail?.grip === grip ? zoneDetail.zoneKey : null}
+                    history={history}
+                    handView={handView}
                   />
                 );
               }
@@ -741,7 +826,10 @@ export function CurveImprovementCard({
                   imp={imp}
                   divider={divider}
                   onZoneSelect={openZoneDetail}
+                  onPeakSelect={openPeakDetail}
                   selectedZoneKey={zoneDetail?.grip === grip ? zoneDetail.zoneKey : null}
+                  history={history}
+                  handView={handView}
                 />
               );
             })}
@@ -766,7 +854,10 @@ export function CurveImprovementCard({
             unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
             nowIdx={nowIdxByGrip[displayGrip]} onScrub={scrub} divider={false}
             onZoneSelect={openZoneDetail}
+            onPeakSelect={openPeakDetail}
             selectedZoneKey={zoneDetail?.grip === displayGrip ? zoneDetail.zoneKey : null}
+            history={history}
+            handView={handView}
           />
         ) : (
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
@@ -789,7 +880,10 @@ export function CurveImprovementCard({
             overlay={staticOverlay(global3xBaseline, grip3xEstimates[fallbackGrip], history, fallbackGrip)}
             imp={gateGlobalImprovement(scaledData.improvement, global3xBaseline?.maxHoldS ?? null)}
             onZoneSelect={fallbackGrip ? openZoneDetail : null}
+            onPeakSelect={fallbackGrip ? openPeakDetail : null}
             selectedZoneKey={zoneDetail?.grip === fallbackGrip ? zoneDetail.zoneKey : null}
+            history={history}
+            handView={handView}
           />
         </>
       ) : null}

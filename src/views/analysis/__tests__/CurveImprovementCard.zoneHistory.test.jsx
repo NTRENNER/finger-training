@@ -59,6 +59,79 @@ test("opens the selected zone's session history from a global tile", () => {
   expect(screen.getByText("230 / 220s")).toBeInTheDocument();
 });
 
+test("puts first and latest measured openings inside each modeled tile", () => {
+  const measured = (id, date, actual, force, peak) => rep(30, actual, force, {
+    id,
+    session_id: id,
+    date,
+    peak_force_kg: peak,
+    failure_valid: true,
+    load_provenance: "measured_force",
+    force_recording: { capacity_eligible: true },
+  });
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{}}
+      grip3xEstimates={{ Crusher: [1, 1, 1] }}
+      gripBaselines={{}}
+      global3xBaseline={{ date: "2026-04-20", maxHoldS: 240 }}
+      selGrip={null}
+      history={[
+        measured("old", "2026-06-01", 28, 12, 17),
+        measured("new", "2026-07-01", 36, 15, 20),
+        rep(30, 40, 30, {
+          id: "nominal",
+          session_id: "nominal",
+          date: "2026-07-08",
+          avg_force_kg: null,
+          peak_force_kg: null,
+          prescribed_load_kg: 30,
+          load_provenance: "nominal_setting",
+        }),
+      ]}
+      unit="kg"
+    />
+  );
+
+  expect(screen.getByText("First 12.0 kg · 28s")).toBeInTheDocument();
+  expect(screen.getByText("Latest 15.0 kg · 36s")).toBeInTheDocument();
+  expect(screen.getByText("Max · modeled 5s")).toBeInTheDocument();
+  expect(screen.getByText("First 17.0 kg")).toBeInTheDocument();
+  expect(screen.getByText("Best 20.0 kg")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Power measured opening history" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("2 sessions");
+  expect(screen.getByText("15.0 kg")).toBeInTheDocument();
+  expect(screen.queryByText("30.0 kg")).not.toBeInTheDocument();
+});
+
+test("opens the full peak-force trend from the Max measured strip", () => {
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{}}
+      grip3xEstimates={{ Crusher: [1, 1, 1] }}
+      gripBaselines={{}}
+      global3xBaseline={{ date: "2026-04-20", maxHoldS: 240 }}
+      selGrip={null}
+      history={[rep(30, 28, 12, {
+        id: "peak",
+        session_id: "peak",
+        peak_force_kg: 18,
+        failure_valid: true,
+        load_provenance: "measured_force",
+        force_recording: { capacity_eligible: true },
+      })]}
+      unit="kg"
+    />
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Max Strength peak force history" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("Peak Force history");
+  expect(screen.getByRole("dialog")).toHaveTextContent("Peak force — max strength over time");
+});
+
 test("uses the active hand when opening a per-hand tile", () => {
   render(
     <CurveImprovementCard

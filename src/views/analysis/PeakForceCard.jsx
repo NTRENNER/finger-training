@@ -123,6 +123,7 @@ export function PeakForceCard({
   normalizeOn = false,
   bodyWeight = null,
   bwLog = [],
+  embedded = false,
 }) {
   const gripHistory = useMemo(
     () => history.filter(rep => !grip || rep?.grip === grip),
@@ -244,7 +245,12 @@ export function PeakForceCard({
 
   return (
     <section aria-label="Peak force history">
-    <Card style={{ marginBottom: 16 }}>
+    <Card style={embedded ? {
+      marginBottom: 0,
+      padding: "8px 4px 4px",
+      border: "none",
+      background: "transparent",
+    } : { marginBottom: 16 }}>
       <div style={{ marginBottom: 4 }}>
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, flex: "1 1 190px", minWidth: 0 }}>

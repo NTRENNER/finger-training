@@ -1,0 +1,107 @@
+.curve-improvement-zone-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.curve-improvement-zone-tile {
+  min-width: 0;
+  overflow: hidden;
+  background: #0d1117;
+  border: 1px solid var(--zone-border);
+  border-radius: 8px;
+}
+
+.curve-improvement-zone-tile.is-selected {
+  background: var(--zone-selected);
+  border-color: var(--zone-color);
+}
+
+.curve-improvement-model,
+.curve-improvement-measured {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  color: inherit;
+  font-family: inherit;
+}
+
+.curve-improvement-model {
+  min-height: 54px;
+  padding: 8px 6px;
+  background: transparent;
+  text-align: center;
+}
+
+button.curve-improvement-model,
+button.curve-improvement-measured {
+  cursor: pointer;
+}
+
+.curve-improvement-model.is-unbaselined {
+  opacity: .5;
+}
+
+.curve-improvement-measured {
+  min-height: 52px;
+  padding: 7px 8px 8px;
+  background: rgba(255, 255, 255, .018);
+  border-top: 1px solid #30363d;
+  text-align: left;
+}
+
+.curve-improvement-measured:hover,
+.curve-improvement-model:hover {
+  background: rgba(255, 255, 255, .04);
+}
+
+.curve-improvement-model:focus-visible,
+.curve-improvement-measured:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid #58a6ff;
+  outline-offset: -2px;
+}
+
+.curve-improvement-measured-label {
+  display: block;
+  color: #8b949e;
+  font-size: 9px;
+  line-height: 1.25;
+  margin-bottom: 4px;
+}
+
+.curve-improvement-measured-values {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: #e6edf3;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.curve-improvement-measured-values span:not(.curve-improvement-measured-arrow) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.curve-improvement-measured-arrow {
+  color: #8b949e;
+  font-weight: 400;
+}
+
+.curve-improvement-measured-empty {
+  color: #8b949e;
+  font-size: 9px;
+  font-style: italic;
+  line-height: 1.3;
+}
+
+@media (max-width: 680px) {
+  .curve-improvement-zone-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
