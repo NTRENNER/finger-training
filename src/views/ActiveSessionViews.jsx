@@ -5,7 +5,7 @@ import { TindeqBattery, InterruptedBatteryNote } from "./cards/TindeqBattery.jsx
 import { finalizeDeviceActivity } from "../model/forceRecording.js";
 import { RepResultDetails } from "./cards/RepResultDetails.jsx";
 import { MIXED_DOMAIN_LABELS, isMixedDomainRep, mixedDomainMetadata } from '../model/mixedDomain.js';
-import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from "./forceProtection.jsx";
+import { creditedSeconds } from "./forceProtection.jsx";
 // ──────────────────────────────────────────────────────────────
 // ACTIVE-SESSION VIEWS
 // ──────────────────────────────────────────────────────────────
@@ -35,7 +35,6 @@ import { C } from "../ui/theme.js";
 import { Card, Btn, Label, PageFrame } from "../ui/components.jsx";
 import { fmtW, fmtTime, fromDisp } from "../ui/format.js";
 import { BigTimer, ForceGauge } from "./cards/LiveForceCard.jsx";
-import { creditedSeconds } from "./forceProtection.jsx";
 
 import { suggestWeight, prescribedLoad } from "../model/prescription.js";
 import { levelTitle } from "../model/levels.js";
