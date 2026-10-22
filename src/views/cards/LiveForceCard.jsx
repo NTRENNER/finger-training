@@ -71,10 +71,11 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
   const fPct    = clamp(force / maxDisplay, 0, 1);
   const avgPct  = clamp(avg   / maxDisplay, 0, 1);
   const tgtPct  = targetKg != null ? clamp(targetKg / maxDisplay, 0, 1) : null;
+  const liveActive = typeof force === "number" && isFinite(force);
 
   let barColor = C.blue;
   let numColor = C.blue;
-  if (targetKg != null && targetKg > 0) {
+  if (targetKg != null && targetKg > 0 && liveActive) {
     if (force >= targetKg * 1.10) { barColor = C.purple; numColor = C.purple; }
     else if (force >= targetKg * 0.99) { barColor = C.green;  numColor = C.green;  }
     else                               { barColor = C.orange; numColor = C.orange; }
@@ -82,42 +83,42 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
 
   return (
     <div style={{ marginTop: 8 }}>
-      {/* Large live-force number, same scale as BigTimer above. */}
-      <div style={{ textAlign: "center", fontSize: numberSize, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: numColor, lineHeight: 1 }}>
-        {fmtW(force, unit)}
-      </div>
-      <div style={{ textAlign: "center", fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 10 }}>
-        Live force · {unit}
-      </div>
-      {targetKg != null && (
-        <div style={{ textAlign: "center", marginBottom: 16 }}>
-          <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>Target weight</div>
-          <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1, color: C.blue, fontVariantNumeric: "tabular-nums" }}>
-            {fmtW(targetKg, unit)} {unit}
-          </div>
+      {/* Target weight always visible — it's a prescription, not a
+          measurement, so it exists even without a connected sensor. */}
+      <div style={{ textAlign: "center", marginBottom: liveActive ? 16 : 8 }}>
+        <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>Target weight</div>
+        <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1, color: C.blue, fontVariantNumeric: "tabular-nums" }}>
+          {fmtW(targetKg, unit)} {unit}
         </div>
-      )}
-      {/* Avg / Max running stats — explicit labels because the big
-          number above is "live current force." Same color hierarchy
-          as the bar marker below (avg green, peak orange). */}
-      <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", flexWrap: "wrap", gap: 16, color: C.muted, margin: "12px 0" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>{emphasizePeak ? 'Peak force' : 'Average weight'}</div>
-          <div style={{ fontSize: "clamp(32px, 9vw, 44px)", fontWeight: 800, lineHeight: 1.1, color: C.green, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-            {!emphasizePeak && avg == null ? "—" : fmtW(emphasizePeak ? peak : avg, unit)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
-          </div>
+      </div>
+
+      {/* Live measurement block — only renders with a real sample so the
+          card doesn't take up vertical space on dashes when no sensor
+          is streaming. */}
+      {liveActive && <>
+        <div style={{ textAlign: "center", fontSize: numberSize, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: numColor, lineHeight: 1 }}>
+          {fmtW(force, unit)}
         </div>
-        <span style={{ fontSize: 12 }}>{emphasizePeak ? 'Avg' : 'Max'}: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(emphasizePeak ? avg : peak, unit)}</b></span>
-      </div>
-      {/* Bar — live force as colored fill, avg as a green tick, target
-          as a faint white marker. */}
-      <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
-        <div style={{ position: "absolute", height: "100%", width: `${fPct * 100}%`, background: barColor, borderRadius: 6, transition: "width 0.05s" }} />
-        {avg != null && <div style={{ position: "absolute", top: 0, bottom: 0, left: `${avgPct * 100}%`, width: 3, background: C.green }} />}
-        {tgtPct != null && (
-          <div style={{ position: "absolute", top: 0, bottom: 0, left: `${tgtPct * 100}%`, width: 2, background: "#ffffff60" }} />
-        )}
-      </div>
+        <div style={{ textAlign: "center", fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 10 }}>
+          Live force · {unit}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-around", alignItems: "center", flexWrap: "wrap", gap: 16, color: C.muted, margin: "12px 0" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>{emphasizePeak ? 'Peak force' : 'Average weight'}</div>
+            <div style={{ fontSize: "clamp(32px, 9vw, 44px)", fontWeight: 800, lineHeight: 1.1, color: C.green, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+              {!emphasizePeak && avg == null ? "—" : fmtW(emphasizePeak ? peak : avg, unit)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
+            </div>
+          </div>
+          <span style={{ fontSize: 12 }}>{emphasizePeak ? 'Avg' : 'Max'}: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(emphasizePeak ? avg : peak, unit)}</b></span>
+        </div>
+        <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
+          <div style={{ position: "absolute", height: "100%", width: `${fPct * 100}%`, background: barColor, borderRadius: 6, transition: "width 0.05s" }} />
+          {avg != null && <div style={{ position: "absolute", top: 0, bottom: 0, left: `${avgPct * 100}%`, width: 3, background: C.green }} />}
+          {tgtPct != null && (
+            <div style={{ position: "absolute", top: 0, bottom: 0, left: `${tgtPct * 100}%`, width: 2, background: "#ffffff60" }} />
+          )}
+        </div>
+      </>}
     </div>
   );
 }

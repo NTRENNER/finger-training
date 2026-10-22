@@ -542,7 +542,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       {repPhase === "active" && (
         <Card>
           <BigTimer seconds={Number(creditedSeconds(tindeq.forceLoss, elapsed))} targetSeconds={config.targetTime} running={tindeq.forceLoss?.status !== 'complete' && tindeq.forceLoss?.pendingEndTs == null} referenceOnly={!!config.mixedDomainPlan} />
-          {tindeq.connected && <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />}
+          <ForceGauge force={tindeq.connected ? tindeq.force : null} avg={tindeq.connected ? tindeq.avgForce : null} peak={tindeq.connected ? tindeq.peak : null} targetKg={targetKg} unit={unit} />
         </Card>
       )}
 
