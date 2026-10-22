@@ -34,7 +34,7 @@ import { AnalysisContainer } from "./views/AnalysisContainer.jsx";
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
   loadLS, saveLS, getStorageUserId,
-  LS_HISTORY_KEY, LS_REP_DELETED_KEY,
+  LS_HISTORY_KEY, LS_REP_DELETED_KEY, LS_HISTORY_DOMAIN_KEY,
 } from "./lib/storage.js";
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
@@ -292,6 +292,7 @@ export default function App() {
   // ── Tab ───────────────────────────────────────────────────
   const researchMode = /^\/research\/?$/.test(window.location.pathname);
   const [tab, setTab] = useState(() => researchMode ? RESEARCH_TAB : 0);
+  const [historyFingerFilter, setHistoryFingerFilter] = useState(null);
   const [climbVisited, setClimbVisited] = useState(false);
   useEffect(() => { if (tab === 2) setClimbVisited(true); }, [tab]);
 
@@ -530,7 +531,11 @@ export default function App() {
           return (
           <button
             key={t}
-            onClick={() => { setTab(i); if (i === 0 && phase !== "idle") {/* stay in session */} }}
+            onClick={() => {
+              if (i === 4) setHistoryFingerFilter(null);
+              setTab(i);
+              if (i === 0 && phase !== "idle") {/* stay in session */}
+            }}
             style={{
               padding: "14px 12px", fontSize: 13, fontWeight: tab === i ? 700 : 400,
               color: tab === i ? C.blue : C.muted, background: "none", border: "none",
@@ -788,6 +793,14 @@ export default function App() {
           pinnedPerHandBaselines={pinnedPerHandBaselines}
           onSavePinnedPerHandBaselines={savePinnedPerHandBaselines}
           baselinePinReady={baselinePinReady}
+          onNavigateToHistory={({ grip, handView } = {}) => {
+            setHistoryFingerFilter({
+              grip: grip || "",
+              hand: handView === "L" || handView === "R" ? handView : "",
+            });
+            saveLS(LS_HISTORY_DOMAIN_KEY, "fingers");
+            setTab(4);
+          }}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
@@ -802,6 +815,7 @@ export default function App() {
       {tab === 4 && (
         <HistoryView
           history={history}
+          initialFingerFilter={historyFingerFilter}
           freshMap={freshMap}
           threeExpPriors={threeExpPriors}
           onBwSave={saveBW}

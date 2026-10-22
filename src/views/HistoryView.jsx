@@ -27,7 +27,7 @@ import { isMixedDomainRep, mixedDomainMetadata, MIXED_DOMAIN_LABELS } from '../m
 import React, { useMemo, useRef, useState } from "react";
 import { SectionSelector } from "../ui/SectionSelector.jsx";
 import { C } from "../ui/theme.js";
-import { Card, Btn, PageFrame } from "../ui/components.jsx";
+import { Card, Btn, Disclosure, PageFrame } from "../ui/components.jsx";
 import {
   fmt1, fmtW, fmtTime, toDisp, fromDisp, fmtClock, bwOnDate,
 } from "../ui/format.js";
@@ -53,6 +53,7 @@ import { BadgeCollection } from "./cards/BadgeCollection.jsx";
 import { ClimbingPrBadgeCollection } from "./cards/ClimbingPrBadgeCollection.jsx";
 import { BodyWeightEntry } from "./BodyWeightEntry.jsx";
 import { TendonHistoryList } from "./TendonHistoryList.jsx";
+import { ForceDurationHistoryCard } from "./analysis/ForceDurationHistoryCard.jsx";
 
 // Default hand for the "+ Add rep" picker. Resolution order:
 //   1. STICKY — the last hand you added to THIS session (sessKey match),
@@ -78,6 +79,7 @@ export function addRepDefaultHand({ sticky, sessKey, sessHand, reps }) {
 
 export function HistoryView({
   history,
+  initialFingerFilter = null,
   // Optional opts passed through to the prescription engine when we
   // reconstruct "what would the engine recommend for this protocol?"
   // for the rep-curve chart's target/used load caption. Without these,
@@ -124,8 +126,8 @@ export function HistoryView({
       .sort((a, b) => (b.date || "").localeCompare(a.date || "")),
     [activities]
   );
-  const [grip,        setGrip]        = useState("");
-  const [hand,        setHand]        = useState("");
+  const [grip,        setGrip]        = useState(() => initialFingerFilter?.grip || "");
+  const [hand,        setHand]        = useState(() => initialFingerFilter?.hand || "");
   const [target,      setTarget]      = useState(0);
   const [editKey,     setEditKey]     = useState(null);
   const [editHand,    setEditHand]    = useState("L");
@@ -388,6 +390,15 @@ export function HistoryView({
     (!hand   || r.hand === hand || r.hand === "B") &&  // "Both" sessions visible under any hand filter
     (!target || r.target_duration === target)
   ), [history, grip, hand, target]);
+
+  // The map is a history explorer, not a target-duration filter result:
+  // target pills continue to scope the session list, while grip and hand
+  // scope both the list and the force-duration map.
+  const hasForceDurationData = useMemo(() => history.some(r =>
+    (!grip || r.grip === grip) &&
+    (!hand || r.hand === hand || r.hand === "B") &&
+    effectiveLoad(r) > 0 && Number(r.actual_time_s) > 0
+  ), [history, grip, hand]);
 
   // Group by (session_id, date) so a session_id that spans multiple dates
   // renders as separate cards per date. Backfilled sessions and Both-mode
@@ -726,6 +737,19 @@ export function HistoryView({
         ))}
       </div>
       </div>
+
+      {hasForceDurationData && (
+        <Disclosure title="Explore force-duration history">
+          <ForceDurationHistoryCard
+            history={history}
+            grip={grip}
+            hand={hand}
+            unit={unit}
+            freshMap={freshMap}
+            threeExpPriors={threeExpPriors}
+          />
+        </Disclosure>
+      )}
 
       {grouped.length === 0 && (
         <div style={{ textAlign: "center", color: C.muted, marginTop: 60, fontSize: 15 }}>

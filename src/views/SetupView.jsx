@@ -23,8 +23,8 @@
 //   • BwPrompt — dismissible weekly body-weight reminder.
 //
 // Moved to Analysis (May 2026):
-//   • CurveCoverageCard — per-zone data freshness + annual session
-//     pace. Belongs with the diagnostic view, not the prescription.
+//   • CurveCoverageCard — compact per-zone evidence freshness
+//     summary. Belongs with the diagnostic view, not the prescription.
 //
 // Removed entirely:
 //   • SessionPlannerCard — 6-zone picker + within/between-set

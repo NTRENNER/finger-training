@@ -4,7 +4,9 @@ import { isCapacityEvidenceRep, comparableCapacityHistory } from "../../model/fo
 // ForceDurationCard — the F-D scatter + 3-exp curve + asymmetry rows
 // ─────────────────────────────────────────────────────────────
 // Extracted from AnalysisView.js (late May 2026 BACKLOG #156, fourth
-// pass). The Card-wrapped headline visual on the Analysis tab.
+// pass). It now renders inside Finger History through
+// ForceDurationHistoryCard, which owns the data derivation and session
+// drill-down.
 //
 // What lives here:
 //   • Title + legend strip (changes shape between single-curve and
@@ -17,14 +19,8 @@ import { isCapacityEvidenceRep, comparableCapacityHistory } from "../../model/fo
 //     companion to the L/R scatter — auto-hidden when every grip is
 //     symmetric, see useGripFits / computeHandAsymmetry).
 //
-// What stays in AnalysisView:
-//   • The data derivations that feed this card (threeExpFit,
-//     threeExpCurveData, threeExpRef180, fdSplitData, dotsRel (pooled),
-//     maxDur, maxForceRel, limiterZoneBounds, curveColor).
-//     Those memos depend on view state (selGrip + normalizeOn) and
-//     the threeExpFit consumer fans out beyond this card.
-//   • The session-detail modal — separate concern, triggered by
-//     handleDotClick passed in here.
+// ForceDurationHistoryCard supplies the modeled curve, observed dots,
+// split-grip series, and the session-detail callback.
 //
 // Why one big component vs. splitting chart-vs-asymmetry: the two
 // share the Card border by design (Hand Asymmetry is the tabular
@@ -93,6 +89,7 @@ function BasisPills({ value, onChange }) {
 }
 
 export function ForceDurationCard({
+  title = "Force-Duration Map",
   // Display context
   unit,
   bodyWeight,
@@ -105,7 +102,7 @@ export function ForceDurationCard({
   // Raw / Fresh-eq basis for the modeled-capacity curve (July 2026).
   fdBasis = "fresh",
   onFdBasisChange = null,
-  // Chart-data props (memoized in AnalysisView)
+  // Chart-data props (memoized by the parent history explorer)
   fdSplitData,
   threeExpCurveDataRel,
   threeExpRef180,
@@ -213,7 +210,7 @@ export function ForceDurationCard({
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Recorded pulls and current curve</div>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>{title}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {onFdBasisChange && <BasisPills value={fdBasis} onChange={onFdBasisChange} />}
         </div>

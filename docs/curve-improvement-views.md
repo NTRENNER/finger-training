@@ -16,4 +16,6 @@ Validation covers analytical inverse solutions, all six reference durations, unc
 
 ## Analysis layout
 
-Curve Improvement appears immediately below the analysis scope controls, followed by Recent Performance vs Expected, Peak Force, and Recorded Pulls and Current Curve. Recovery Status and Estimated Capacity Over Time are removed from Analysis. Recovery still informs workout recommendations and weekly coaching without occupying a standalone chart.
+Curve Improvement appears immediately below the analysis scope controls, followed by Recent Performance vs Expected, Peak Force, and compact Curve Coverage. Coverage uses a real six-domain denominator: observed Peak Force plus the five trained duration domains, with missing, aging, and stale evidence named directly. Recovery Status, Estimated Capacity Over Time, the legacy overall curve summary, and the technical Training & Measurements disclosure are removed from Analysis. Recovery still informs workout recommendations and weekly coaching without occupying a standalone chart.
+
+Recorded pulls and the current fitted curve now live in Finger History as the collapsed **Force-Duration Map** explorer. History's grip and hand filters scope the map; Raw/Fresh-eq remains available; selecting a recorded pull opens that workout's first-set comparison. This keeps Analysis focused on interpretation while preserving the combined curve-and-history view where individual sessions are inspected.

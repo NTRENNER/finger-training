@@ -8,9 +8,7 @@ import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/force
 //   1. Curve Improvement — modeled progress plus measured evidence.
 //   2. Recent Performance vs Expected — calibrated pre-session comparison.
 //   3. Peak Force — instantaneous observed ceiling, when available.
-//   4. Recorded pulls and current curve — always visible with reps.
-//   5. Overall curve summary — optional whole-curve trajectory.
-//   6. Curve Coverage — only when sampled data needs attention.
+//   4. Curve Coverage — compact current-evidence summary.
 //
 // State comes in via props: history, freshMap (built in
 // useRepHistory), activities, bodyWeight. threeExpPriors are
@@ -35,29 +33,20 @@ import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/force
 //     training-progress story; the kg·s axis was opaque.
 
 import React, { useMemo, useState } from "react";
-// recharts imports moved out with ForceDurationCard / ForceCurvesOverlayCard
-// (May 2026 BACKLOG #156). AnalysisView no longer renders any chart
-// directly — child cards own their own chart machinery.
 import { C } from "../ui/theme.js";
-import { Card, Disclosure } from "../ui/components.jsx";
+import { Card } from "../ui/components.jsx";
 import { CardBoundary } from "../ui/ErrorBoundary.jsx";
-import { bwOnDate, toDisp, forceOverBW } from "../ui/format.js";
 import { loadLS, saveLS, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY } from "../lib/storage.js";
 import { useLSValue } from "../hooks/useLSValue.js";
 import { STRENGTH_MAX } from "../model/zones.js";
 import {
-  predForceThreeExp,
   buildThreeExpPriors,
 } from "../model/threeExp.js";
 import {
   fitAmpsForPts, improvementForAmps,
   buildGlobalBaseline,
 } from "../model/baselines.js";
-import { RepCurveChart } from "./cards/RepCurveChart.jsx";
-import { buildRepCurveBundle } from "../model/repCurveData.js";
-import { prescription, prescribedLoad, effectiveLoad, freshLoadFor, buildFreshLoadMap, repKey } from "../model/prescription.js";
-import { freshFitReps } from "../model/load.js";
-import { buildForceDurationGripScope } from "../model/analysisScope.js";
+import { effectiveLoad, buildFreshLoadMap, repKey } from "../model/prescription.js";
 import {
   CurveCoverageCard,
 } from "./analysis/CurveCoverageCard.jsx";
@@ -65,15 +54,11 @@ import {
 // invariant to proportional strength gains (so it reads "NEEDS WORK"
 // even while the user is measurably getting stronger), the literature
 // benchmark bands aren't validated against personal performance, and
-// the underlying curve shape is already visible on the F-D chart and
+// the underlying curve shape is already visible on History's F-D map and
 // the 3-min hold weight is shown on the Strength Balance card.
 import { PerformanceTrendCards } from "./analysis/PerformanceTrendCards.jsx";
-import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.jsx";
-import { GRIP_COLORS } from "../ui/grip-colors.js";
-import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
 import { AnalysisScopeToolbar } from "./analysis/AnalysisScopeToolbar.jsx";
-import { useCapacityHistoryByGrip } from "../hooks/useCapacityHistoryByGrip.js";
 import { useGripFits } from "../hooks/useGripFits.js";
 import { useContinuousProgress } from "../hooks/useContinuousProgress.js";
 export function AnalysisView({
@@ -96,122 +81,28 @@ export function AnalysisView({
   // reconciles (user_settings + reps) have landed. See App.js.
   baselinePinReady = true,
   // Curve Improvement card's Fresh-eq basis via useGripFits.
+  onNavigateToHistory = null,
 }) {
-  // Grip filter — null/"" means "Both grips pooled" (default view).
-  // The hand-filter sibling state (selHand) was retired with the L/R/Both
-  // buttons; per-hand views now happen at the per-card level (Strength
-  // Balance, Hand Asymmetry) rather than via a tab-level filter.
+  // Grip filter — null/"" means all grips (default view).
   const [selGrip,   setSelGrip]   = useState("");
 
-  // Click-to-expand state for the F-D chart. Clicking any rep dot
-  // opens a modal showing the RepCurveChart for that rep's session.
-  // null = no modal open.
-  // Per-grip three-exp priors — hoisted above selectedSession so the
-  // session-detail modal's prescription() call can use the curve-fit
-  // path. Used by the gap-narrowing tracker and prescription-potential
-  // calculation too. Could be lifted to App if it becomes hot.
+  // Shared per-grip priors for the progress models below.
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
 
-  const [selectedSessionId, setSelectedSessionId] = useState(null);
-  const handleDotClick = (data) => {
-    if (data?.session_id) setSelectedSessionId(data.session_id);
-  };
-
-  // Build per-hand bundles for the selected session. Mixed-hand
-  // sessions get one bundle per hand so the chart doesn't artifactually
-  // concatenate L+R into one apparent set. Target/used weight pulled
-  // from prescription() run on history strictly before this session.
-  const selectedSession = useMemo(() => {
-    if (!selectedSessionId) return null;
-    const sessReps = history.filter(r => r.session_id === selectedSessionId);
-    if (sessReps.length === 0) return null;
-    const sortedAll = [...sessReps].sort(
-      (a, b) => (a.set_num ?? 1) - (b.set_num ?? 1) || (a.rep_num ?? 0) - (b.rep_num ?? 0)
-    );
-    const sessDate = sortedAll[0].date;
-    const grip = sortedAll[0].grip;
-    const targetDuration = sortedAll[0].target_duration;
-    const restS = sortedAll[0].rest_s ?? 20;
-    const presentHands = Array.from(new Set(sortedAll.map(r => r.hand).filter(h => h === "L" || h === "R")));
-    const hands = presentHands.length > 0 ? presentHands : [sortedAll[0].hand || "L"];
-    const priorHistory = history.filter(r => r.date < sessDate);
-    return {
-      meta: { date: sessDate, grip, targetDuration, restS,
-        multipleSets: sortedAll.some(r => Number(r.set_num ?? 1) > 1) },
-      perHand: hands.map(handKey => {
-        const handReps = sortedAll.filter(r => r.hand === handKey && Number(r.set_num ?? 1) === 1);
-        const handRep1 = handReps[0];
-        if (!handRep1) return null;
-        // The stored prescribed_load_kg on rep 1 IS what was actually
-        // displayed to the user at session time — read it directly
-        // instead of recomputing prescription(). Recompute drifts as
-        // the engine state evolves (new sessions update the grip
-        // prior, freshMap, etc.), so even with referenceDate=sessDate
-        // the recomputed Target can differ substantially from what
-        // was live — and the user reasonably expects "Target" to mean
-        // "what the app told me to lift," not "what the app would
-        // tell me to lift if it asked itself again right now."
-        //
-        // Fall back to live recompute only for pre-#155-schema-split
-        // sessions where prescribed_load_kg is absent.
-        const storedTargetKg = prescribedLoad(handRep1);
-        let targetKg = storedTargetKg > 0 ? storedTargetKg : null;
-        if (targetKg == null) {
-          const recomputed = prescription(priorHistory, handKey, grip, targetDuration,
-            { freshMap, threeExpPriors, referenceDate: sessDate });
-          targetKg = recomputed?.value ?? null;
-        }
-        return {
-          handKey,
-          handRep1,
-          target: targetKg,
-          bundle: buildRepCurveBundle({
-            history, grip, hand: handKey,
-            numReps: handReps.length,
-            firstRepTime: handRep1.actual_time_s,
-            restSeconds: handRep1.rest_s ?? restS,
-            actualReps: handReps,
-            targetDuration,
-            beforeDate: sessDate,
-          }),
-        };
-      }).filter(Boolean),
-    };
-  }, [selectedSessionId, history, freshMap, threeExpPriors]);
-
-  // BW normalization toggle. When ON, every metric surface (F-D chart,
-  // capacity trajectory, Curve Improvement, Hand Asymmetry) renders in
-  // bodyweight-relative units. Per-session-date BW (via bwOnDate +
-  // bwLog) is used so historical points get divided by the BW from
-  // THAT date, not just current BW — the honest comparison. The
-  // per-chart relMode that used to live on the F-D card has been
-  // promoted to this single global state.
+  // BW normalization toggle for the Curve Improvement comparisons.
   const [normalizeOn, setNormalizeOn] = useState(() => loadLS(LS_BW_NORMALIZE_KEY) === true);
   const setNormalizePreference = next => {
     setNormalizeOn(next);
     saveLS(LS_BW_NORMALIZE_KEY, next);
   };
   const normalizationActive = normalizeOn && bodyWeight > 0;
-  const relMode = normalizationActive;
 
   // ── Hand selector (June 2026) ──────────────────────
-  // "pooled" (default) | "L" | "R". One global control, like the
-  // Absolute/×BW toggle: scopes the F-D chart's data + fit, the
-  // Capacity trajectory (against FROZEN per-hand baselines — see
-  // LS_PINNED_PERHAND_BASELINES_KEY), Curve Improvement's tiles, and
-  // the Endurance Ceiling ratios. Not persisted: it's a diagnostic
-  // lens, and per-hand fits run on half the data (noisier), so each
-  // visit starts at the clean pooled view.
+  // "pooled" (default) | "L" | "R". One global control scopes Curve
+  // Improvement, Recent Performance, Peak Force, and Curve Coverage.
+  // It is not persisted: per-hand fits run on half the data and are a
+  // diagnostic lens, so each visit starts at the pooled view.
   const [handView, setHandView] = useState("pooled");
-  // F-D curve basis (July 2026): Raw = loads as actually held (no
-  // within-set-fatigue or cookedness correction); Fresh-eq = the
-  // engine's fresh-equivalent basis (default — what prescription() fits
-  // on). Nulling freshMap in Raw mode flips BOTH the single-grip curve
-  // (threeExpFit below) and the card's split-mode fits, which key off
-  // the freshMap prop we pass down.
-  const [fdBasis, setFdBasis] = useState("fresh");
-  const fdFreshMap = fdBasis === "fresh" ? freshMap : null;
-
   // (Force Curves overlay slider state removed May 2026 — the overlay
   // merged into CurveImprovementCard, which owns its own per-grip "Now"
   // slider state internally. Each grip block scrubs independently, so
@@ -251,25 +142,11 @@ export function AnalysisView({
   // actual_time_s is a failure data point. The legacy success/failure
   // dichotomy is kept here only for backward compat with downstream
   // consumers that destructure both names — the chart's red/green
-  // visual distinction was retired when we switched the F-D chart to
-  // hand-based coloring (commit pending) — `successes` is gone, all
-  // reps flow through `failures` as (T, F) data points.
+  // old visual distinction is gone; all reps flow through `failures`
+  // as (T, F) data points.
   const capacityFitMap = useMemo(() => freshMap || buildFreshLoadMap(history), [freshMap, history]);
   const failures = useMemo(() => comparableCapacityHistory(reps).filter(r =>
     isCapacityEvidenceRep(r) && capacityFitMap.get(repKey(r))?.capacityEligible !== false), [reps, capacityFitMap]);
-
-  // Chart-facing reps: FRESH first reps only (rep_num === 1 + dedup), so
-  // the F-D scatter AND its fitted curve show fresh force-duration
-  // capacity — matching Curve Improvement / overlay / Capacity. The
-  // within-set fatigue cloud (later reps) is still reachable by clicking
-  // any dot, which opens the full per-session breakdown.
-  const freshFailures = useMemo(() => freshFitReps(reps, { preserveAllBases: true }), [reps]);
-
-  // Hand-scoped variant for the F-D chart (fit + dots). Pooled mode is
-  // untouched; in L/R mode the chart shows that hand's reps and a
-  // curve fitted to them alone (handView state is declared above with
-  // the BW-normalize toggle).
-  const fdFailures = freshFailures;
 
   const maxDur = Math.max(...reps.map(r => r.actual_time_s), STRENGTH_MAX + 60);
 
@@ -292,7 +169,7 @@ export function AnalysisView({
   // Migrated from Monod (CF + W'/T) to the three-exp basis in March
   // 2026. The rest of the app moved to three-exp during Phases A–D;
   // leaving this card on Monod meant the headline % the user saw
-  // here didn't agree with the curve they saw on the F-D chart, AND
+  // here didn't agree with the fitted curve shown in History, AND
   // the Power column in particular was dominated by W' fit noise
   // (small-N Monod fits over-estimate W', which inflates F at short
   // T, producing phantom regressions). The three-exp basis with a
@@ -317,7 +194,7 @@ export function AnalysisView({
   // Pooled three-exp baseline — earliest window of ≥3 failures across
   // ≥2 distinct durations, fit grip-agnostic. The two halves of the
   // Δ% live in the same model so the Curve Improvement headline
-  // agrees with the F-D chart.
+  // agrees with the force-duration model.
   const global3xBaseline = useMemo(
     () => buildGlobalBaseline(history),
     [history]
@@ -336,7 +213,6 @@ export function AnalysisView({
     gripBaselines, grip3xEstimates,
     perHandGripBaselines, perHandGripEstimates, perHandGripImprovement,
     gripImprovement, gripImprovementFresh, perHandGripImprovementFresh,
-    handAsymmetry,
   } = useGripFits({
     history, threeExpPriors, grips,
     pinnedGripBaselines, onSavePinnedGripBaselines,
@@ -348,306 +224,12 @@ export function AnalysisView({
   // CurveImprovementCard along with the inline Curve Improvement
   // JSX block — that was the only consumer.)
 
-  // (perHandImprovement Monod useMemo removed — was eslint-disabled
-  // dead code from the deleted Per-Hand CF card. Its modern analog
-  // is the Hand Asymmetry rows below the F-D chart, which compute
-  // per-grip L/R gaps from three-exp fits at T=30s.)
-
-  // The whole-curve capacity trajectory supersedes the old single-time
-  // capacity and literal AUC cards. Its balanced score gives equal
-  // influence to proportional changes at six duration references.
-
-  // Fitted force-duration curve points for overlay.
-  const F_D_T_MIN = 5;
-
-  // Per-grip split-mode flag for the F-D chart. When no grip filter
-  // is active and ≥2 grips have data, we render per-grip curves +
-  // dots side-by-side. A sparse grip may have dots but no fitted line
-  // until its second point arrives. Pooling Micro and
-  // Crusher onto one chart conflates two different muscles (FDP pinch
-  // vs FDS crush) — the cross-muscle amplitude difference dominates
-  // and the user can't see what's happening to each grip individually.
-  //
-  // Output is `{ [grip]: true }` for grips that are present, or null. The
-  // shape used to be `{ [grip]: { fit, curve, failures, successes } }`
-  // back when this also computed a per-grip Monod fit for the chart;
-  // the actual curves drawn are now three-exp via fitThreeExpAmps in
-  // the chart render block, so all this hook needs to do is gate
-  // splitMode on/off.
-  const fdSplitData = useMemo(() => {
-    return buildForceDurationGripScope(history, {
-      grip: selGrip,
-      hand: handView,
-    });
-  }, [history, selGrip, handView]);
-
-  // F-D curve stroke color. When a grip is selected (single-curve mode)
-  // we tint the curve and its 3-min sustainable reference with the
-  // grip's own color so the chart palette stays consistent with the
-  // All-Grips split-mode view (where each grip already has its own
-  // colored curve). Falls back to the neutral purple when no grip is
-  // selected — there's no single grip to tint to.
-  const curveColor = selGrip ? (GRIP_COLORS[selGrip] || C.purple) : C.purple;
-
-  // ── Whole-curve capacity over time, per grip ──
-  // Single balanced score per grip per training date: the geometric
-  // mean of fitted force at all six zone reference durations. This
-  // answers "is my capacity up or down?" without letting the high-force
-  // short end or the slow tail dominate the result.
-  //
-  // Scope: per-grip lines, never pooled (pooling FDP-pinch and FDS-crush
-  // hides each muscle's individual trajectory and inflates the headline
-  // when only one is moving). Returns the union of all dates across
-  // grips, with each grip's column filled where it has a fit.
-  // Per-grip "Curve Improvement %" trajectory. Extracted to a
-  // dedicated hook in late May 2026 (BACKLOG #156 partial pass) so
-  // the 120 lines of fit + smoothing logic don't visually crowd the
-  // AnalysisView render. Same memo deps as before.
-  const capacityHistoryByGrip = useCapacityHistoryByGrip({
-    history, grips: scopedGrips, gripBaselines, threeExpPriors, bwLog,
-    // Hand scoping (June 2026): in L/R mode the trajectory runs on
-    // that hand's reps against the FROZEN per-hand baselines.
-    hand: handView === "pooled" ? null : handView,
-    perHandBaselines: perHandGripBaselines,
-  });
-
-  // ── Three-exp F-D fit (governing model — see src/model/threeExp.js) ──
-  // threeExpPriors memoized earlier in AnalysisView so the F-D chart
-  // curve and any per-grip three-exp consumers share one fit basis.
-
-  // Three-exp fit for the current selGrip scope. Uses the
-  // same `failures` array that backs cfEstimate, so the fits are
-  // directly comparable. When no grip is selected, fitAmpsForPts
-  // falls back to a no-shrinkage fit (which validation showed
-  // loses to Monod by ~3% on aggregate, fine as a degenerate case).
-  const threeExpFit = useMemo(() => {
-    // ENGINE-BASIS fit (June 2026 audit): this curve previously fit
-    // raw loads on fresh rep-1s only, while prescription() fits ALL
-    // reps at fresh-equivalent loads (freshMap-corrected for within-
-    // set fatigue + cookedness). Two strategies for the same confound
-    // — exclusion vs correction — that produced two subtly different
-    // curves, and the one on screen wasn't the one coaching you. The
-    // chart's curve now uses prescription()'s exact basis, so the
-    // line you see IS the line the engine prescribes from. Dots stay
-    // observed fresh rep-1s — observed data vs modeled capacity.
-    const pool = failures.filter(r =>
-      r.actual_time_s > 0 && effectiveLoad(r) > 0
-      && (handView === "pooled" || r.hand === handView)
-    );
-    if (pool.length < 2) return null;
-    const pts = pool.map(r => ({
-      T: r.actual_time_s,
-      F: fdFreshMap ? freshLoadFor(r, fdFreshMap) : effectiveLoad(r),
-    }));
-    const amps = fitAmpsForPts(pts, selGrip, threeExpPriors);
-    if (!amps) return null;
-    return { amps };
-  }, [failures, handView, fdFreshMap, selGrip, threeExpPriors]);
-
-  // Predicted curve for chart overlay — same T grid as curveData so the
-  // two lines align visually.
-  const threeExpCurveData = useMemo(() => {
-    if (!threeExpFit) return [];
-    const tMax = Math.max(maxDur, F_D_T_MIN + 10);
-    return Array.from({ length: 80 }, (_, i) => {
-      const t = F_D_T_MIN + ((tMax - F_D_T_MIN) / 79) * i;
-      const f = predForceThreeExp(threeExpFit.amps, t);
-      // yKg carried so the BW-relative variant divides kg by kg via
-      // the canonical helper instead of display-unit by display-unit.
-      return { x: t, y: toDisp(Math.max(f, 0), unit), yKg: Math.max(f, 0) };
-    });
-  }, [threeExpFit, maxDur, unit]);
-
-  // Three-exp doesn't have a true asymptote (decays to 0), so there is
-  // no direct analog to Monod's CF. The closest "long-duration
-  // sustainable force" reference is F(180s) — well past the medium
-  // component's dominance window (τ₂=30s drained 6× over) where the
-  // slow component carries essentially the whole load. Used as the
-  // dashed horizontal reference on the F-D chart, replacing the CF
-  // line that came from Monod.
-  const threeExpRef180 = useMemo(() => {
-    if (!threeExpFit) return null;
-    return predForceThreeExp(threeExpFit.amps, 180);
-  }, [threeExpFit]);
-
-  // (modelRMSE training-RMSE diagnostic was here. Removed — vestigial
-  // from the three-exp-vs-Monod validation phase. Training RMSE is
-  // biased optimistic and the curve quality is judged by eye on the
-  // F-D scatter anyway. Honest holdout validation still lives in the
-  // offline sim (validate_three_exp_v3.js).)
-
-  // (Per-hand L vs R overlay curves were here. Removed — added visual
-  // noise to the F-D chart without enough insight to justify it. Per-
-  // hand asymmetry is surfaced more clearly on the Per-Hand CF card
-  // below the chart.)
-
-
-  // (Limiter-zone highlight removed May 2026. It used computeLimiterZone's
-  // per-component cross-zone residual to mark a single "limiter" zone on
-  // the F-D chart, but that attribution rested on the same non-identifiable
-  // component split that was retired elsewhere. The coaching engine's
-  // confidence-gated per-T residual is the live "what to train next"
-  // signal; the chart no longer asserts a single limiter zone.)
-
-
-  // ── Relative strength helpers ──
-  // useRel gates the absolute-vs-relative rendering path that
-  // builds leftDotsRel / rightDotsRel / threeExpCurveDataRel /
-  // maxForceRel below. The narrower fmtForce/forceUnit helpers
-  // and the HAND_COLORS palette moved into ForceDurationCard
-  // (the only place that consumes them).
-  const useRel = relMode && bodyWeight != null && bodyWeight > 0;
-
-  // Scatter data — split by hand under the train-to-failure model.
-  // The previous green/red split (Completed / Auto-failed) was a
-  // vestige of the success/failure dichotomy that the data model
-  // no longer carries. Coloring by hand (L = blue, R = yellow)
-  // adds a useful per-hand signal at a glance and pairs with the
-  // Hand Asymmetry card below the chart. Reps with no hand or
-  // hand="Both" (legacy data) drop into the L bucket as a quiet
-  // default — rare and not worth a third bar.
-  // effectiveLoad, not raw avg_force_kg — the rep filter and the fitted
-  // curve both run on effectiveLoad's fallback chain, so reading the
-  // raw column here made manual-load reps (avg_force_kg null) vanish
-  // from the pooled scatter while still shaping the curve.
-  const buildDot = (r) => ({
-    x: r.actual_time_s,
-    y: useRel
-      ? forceOverBW(effectiveLoad(r), bwOnDate(bwLog, r.date)?.kg ?? bodyWeight)
-      : toDisp(effectiveLoad(r), unit),
-    date: r.date, grip: r.grip, hand: r.hand,
-    // session_id lets click handlers gather the full session's reps to
-    // pop up the RepCurveChart for that workout.
-    session_id: r.session_id,
-    target_duration: r.target_duration,
-    rest_s: r.rest_s,
-  });
-  // Pooled across hands — the F-D chart shows the grip's whole fresh
-  // cloud as one series (the curve is already a pooled L+R fit). Click a
-  // dot for the per-session L/R breakdown.
-  const dotsRel = fdFailures.map(buildDot);
-  const threeExpCurveDataRel = threeExpCurveData.map(d => ({
-    x: d.x,
-    y: useRel && bodyWeight > 0 ? forceOverBW(d.yKg, bodyWeight) : d.y,
-  }));
-  // effectiveLoad here too — see buildDot. Otherwise the axis ceiling
-  // ignores manual-load reps and can clip their dots.
-  const maxForceRel = Math.max(
-    ...(useRel
-      ? reps.map(r => forceOverBW(
-          effectiveLoad(r),
-          bwOnDate(bwLog, r.date)?.kg ?? bodyWeight
-        ) ?? 0)
-      : reps.map(r => toDisp(effectiveLoad(r), unit))),
-    useRel ? 0.5 : 40
-  );
-
-  // ── Zone breakdown (power / strength / capacity) ──
-  // Buckets each rep by target_duration (what zone it was *training*),
-  // not actual_time_s, so a failed Endurance-target hang that broke at
-  // 60s still counts as a Endurance failure. Without this, Endurance
-  // failures are structurally impossible when the target sits exactly
-  // on the zone boundary (120s). Falls back to actual_time_s when a
-  // rep has no target_duration (legacy data).
-  //
-  // Failure detection is computed live from actual_time_s < target_duration
-  // to match the red/green rendering in History. The stored r.failed flag
-  // only flips on auto-failure (Tindeq force-drop); manually-ended short
-  // hangs leave r.failed=false even though the rep clearly failed.
-  // (Per-zone `zones` memo + personalResponse memo removed —
-  // both fed the now-gone Energy System Breakdown card and Train
-  // block. recommendation / gripRecs / unexplored also gone.
-  // The Setup tab's ContinuousPickCard is the prescription surface
-  // now; the F-D chart + Curve Improvement + Curve Coverage cover
-  // the diagnostic ground.)
-
   // Force Curves History overlay (cumulative per-grip / per-hand fits
   // by date). See src/hooks/useHistoryOverlay.js for the per-memo notes.
   const continuousProgress = useContinuousProgress({history,grips,pinnedGripBaselines,pinnedPerHandBaselines});
 
-  // (overlayActiveGrip / overlayDates / overlayLast / overlayNowI
-  // moved into ForceCurvesOverlayCard — only that card consumed them.
-  // ScatterTooltip likewise moved into ForceDurationCard.)
-
   return (
     <div style={{ padding: "20px 16px" }}>
-      {/* Click-to-expand session detail modal — triggered by tapping
-          any dot on the F-D scatter. Renders one RepCurveChart per
-          hand (so mixed-hand sessions don't artifactually splice L+R
-          into one apparent set), each with its own target/used load
-          caption and previous-session overlay. */}
-      {selectedSession && selectedSession.perHand.length > 0 && (
-        <div
-          onClick={() => setSelectedSessionId(null)}
-          style={{
-            position: "fixed", inset: 0, zIndex: 100,
-            background: "rgba(0,0,0,0.7)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 16,
-          }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: C.card ?? "#1a1a1a", borderRadius: 12,
-              padding: 16, maxWidth: 520, width: "100%",
-              maxHeight: "90vh", overflowY: "auto",
-              border: `1px solid ${C.border}`,
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>
-                  {selectedSession.meta.grip}
-                  <span style={{ marginLeft: 8, fontSize: 12, color: C.muted, fontWeight: 400 }}>
-                    {selectedSession.meta.date} · target {selectedSession.meta.targetDuration}s · {selectedSession.meta.restS}s rest
-                  </span>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedSessionId(null)}
-                style={{
-                  background: "none", border: "none", color: C.muted,
-                  fontSize: 20, cursor: "pointer", padding: "0 4px",
-                }}
-                aria-label="Close"
-              >×</button>
-            </div>
-            {selectedSession.meta.multipleSets && <p style={{ color: C.muted, fontSize: 12 }}>
-              Set 1 comparison. All sets remain available in History.
-            </p>}
-            {selectedSession.perHand.map(h => (
-              <div key={h.handKey} style={{ marginBottom: selectedSession.perHand.length > 1 ? 14 : 0 }}>
-                {selectedSession.perHand.length > 1 && (
-                  <div style={{
-                    fontSize: 10, fontWeight: 700, letterSpacing: 1,
-                    color: h.handKey === "L" ? C.blue : C.orange,
-                    marginBottom: 4,
-                  }}>
-                    {h.handKey === "L" ? "LEFT" : "RIGHT"}
-                  </div>
-                )}
-                <RepCurveChart
-                  forecasted={h.bundle.forecasted}
-                  actual={h.bundle.actual}
-                  prevSession={h.bundle.prevSession}
-                  asymptoticHold={h.bundle.asymptoticHold}
-                  targetS={h.bundle.targetS}
-                  targetWeightKg={h.target}
-                  usedWeightKg={effectiveLoad(h.handRep1) || null}
-                  unit={unit}
-                  height={220}
-                />
-              </div>
-            ))}
-            {/* Retroactive cookedness lives in HistoryView's finger
-                session cards instead — that's the natural "edit a past
-                session" surface. This modal stays focused on read-only
-                rep-curve diagnostics. */}
-          </div>
-        </div>
-      )}
-
       <h2 style={{ margin: "0 0 4px", fontSize: 22 }}>Finger progress</h2>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
         See your recorded pulls and how your strength and endurance have changed.
@@ -709,47 +291,6 @@ export function AnalysisView({
           normalizeOn={normalizationActive} bodyWeight={bodyWeight} bwLog={bwLog} />
       </CardBoundary>}
 
-      {reps.length > 0 && (<>
-        <CardBoundary name="Force-Duration chart">
-          <ForceDurationCard
-            unit={unit}
-            bodyWeight={bodyWeight}
-            bwLog={bwLog}
-            useRel={useRel}
-            normalizeOn={normalizationActive}
-            handView={handView}
-            fdBasis={fdBasis}
-            onFdBasisChange={setFdBasis}
-            fdSplitData={fdSplitData}
-            threeExpCurveDataRel={threeExpCurveDataRel}
-            threeExpRef180={threeExpRef180}
-            curveColor={curveColor}
-            dotsRel={dotsRel}
-            maxDur={maxDur}
-            maxForceRel={maxForceRel}
-            handAsymmetry={handView === "pooled"
-              ? handAsymmetry.filter(item => !selGrip || item.grip === selGrip)
-              : []}
-            history={history}
-            freshMap={fdFreshMap}
-            threeExpPriors={threeExpPriors}
-            handleDotClick={handleDotClick}
-          />
-        </CardBoundary>
-
-        <Disclosure title="Overall curve summary">
-          <CardBoundary name="Whole-Curve Capacity">
-            <CapacityTrajectoryCard
-            capacityHistoryByGrip={capacityHistoryByGrip}
-            normalizeOn={normalizationActive}
-            activities={activities}
-            handView={handView}
-          />
-          </CardBoundary>
-        </Disclosure>
-
-      </>)}
-
       {reps.length === 0 ? (
         <Card>
           <div style={{ textAlign: "center", padding: "32px 0", color: C.muted }}>
@@ -760,10 +301,13 @@ export function AnalysisView({
         </Card>
       ) : (<>
 
-        {/* Curve Coverage is an exception card: it stays at the bottom
-            and renders only when sampled data is stale or aging. */}
         <CardBoundary name="Curve Coverage">
-        <CurveCoverageCard history={history} grip={selGrip} handView={handView} />
+          <CurveCoverageCard
+            history={history}
+            grip={selGrip}
+            handView={handView}
+            onOpenHistory={onNavigateToHistory}
+          />
         </CardBoundary>
       </>)}
     </div>

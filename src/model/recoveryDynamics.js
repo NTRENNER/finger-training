@@ -270,8 +270,7 @@ export function buildRecoveryReadinessTrend(history, grip, opts = {}) {
 }
 
 // Add 3-session rolling-mean columns to a trend series so the chart
-// can render dots (raw) + smoothed trend lines, same pattern as
-// CapacityTrajectoryCard. Smooths both observedAtTarget and
+// can render dots (raw) + smoothed trend lines. Smooths both observedAtTarget and
 // gapAtTarget when present; emits null when a window has no finite
 // values for a field.
 export function withRollingMean(trend, window = 3) {

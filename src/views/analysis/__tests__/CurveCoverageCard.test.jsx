@@ -1,14 +1,19 @@
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { CurveCoverageCard } from "../CurveCoverageCard.jsx";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { CurveCoverageCard, curveCoverageByGrip } from "../CurveCoverageCard.jsx";
 
 const rep = (date, actual_time_s, over = {}) => ({
   grip: "Crusher",
   hand: "L",
   date,
+  session_id: `${date}-${actual_time_s}-${over.grip || "Crusher"}-${over.hand || "L"}`,
+  set_num: 1,
   rep_num: 1,
+  target_duration: actual_time_s,
   actual_time_s,
+  avg_force_kg: 20,
+  peak_force_kg: 24,
+  failure_valid: true,
   ...over,
 });
 
@@ -22,61 +27,83 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-test("shows exposure separately even when opening measurements are current", () => {
-  const history = [5, 30, 70, 115, 160, 220].map(duration =>
+test("uses a real six-domain denominator for current evidence", () => {
+  const history = [30, 70, 115, 160, 220].map(duration =>
     rep("2026-07-20", duration)
   );
 
   render(<CurveCoverageCard history={history} />);
-  expect(screen.getByText("Training & measurements")).toBeInTheDocument();
-  expect(screen.getByText("Opening measurement")).not.toBeVisible();
-  userEvent.click(screen.getByText("Training & measurements"));
-  expect(screen.getByText("Opening measurement")).toBeVisible();
-  userEvent.click(screen.getByText("Training & measurements"));
-  expect(screen.getByText("Opening measurement")).not.toBeVisible();
-  expect(screen.queryByText(/1 stale/)).not.toBeInTheDocument();
+
+  expect(screen.getByText("Curve coverage")).toBeInTheDocument();
+  expect(screen.getByLabelText("6 of 6 domains current")).toBeInTheDocument();
+  expect(screen.getByText("All domains have current evidence.")).toBeInTheDocument();
+  expect(screen.queryByText(/annual/i)).not.toBeInTheDocument();
 });
 
-test("renders only when a sampled zone needs attention", () => {
-  render(<CurveCoverageCard history={[rep("2026-05-01", 30)]} />);
+test("names missing, aging, and stale domains instead of hiding them in a score", () => {
+  const history = [
+    rep("2026-07-05", 30),
+    rep("2026-06-01", 70, { peak_force_kg: null }),
+  ];
+  const coverage = curveCoverageByGrip(history).Crusher;
 
-  expect(screen.getByText("Training & measurements")).toBeInTheDocument();
-  expect(screen.getByText(/Training exposure and fresh-curve evidence/i)).toBeInTheDocument();
-  expect(screen.getByText(/1 stale/i)).toBeInTheDocument();
-  expect(screen.queryByText(/modeled/i)).not.toBeInTheDocument();
-  expect(screen.queryByText(/last 12 months/i)).not.toBeInTheDocument();
+  expect(coverage.current).toBe(1);
+  expect(coverage.aging).toEqual(["Power"]);
+  expect(coverage.stale).toEqual(["Power-Strength"]);
+  expect(coverage.missing).toEqual([
+    "Strength",
+    "Strength-Endurance",
+    "Endurance",
+  ]);
+
+  render(<CurveCoverageCard history={history} />);
+  expect(screen.getByLabelText("Aging: Power")).toBeInTheDocument();
+  expect(screen.getByLabelText("Stale: Power-Strength")).toBeInTheDocument();
+  expect(screen.getByLabelText(/Missing:.*Endurance/)).toBeInTheDocument();
 });
 
-test("all-grips mode shows every grip needing attention without local selectors", () => {
+test("all-grips mode renders every recorded grip", () => {
   render(
     <CurveCoverageCard
       history={[
-        rep("2026-05-01", 30),
-        rep("2026-05-01", 70, { grip: "Micro" }),
+        rep("2026-07-20", 30),
+        rep("2026-07-20", 70, { grip: "Micro" }),
       ]}
     />
   );
 
   expect(screen.getByText("Crusher")).toBeInTheDocument();
   expect(screen.getByText("Micro")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Crusher" })).not.toBeInTheDocument();
 });
 
-test("focused grip and hand remove unrelated coverage", () => {
+test("focused grip and hand remove unrelated evidence", () => {
   render(
     <CurveCoverageCard
       grip="Crusher"
       handView="L"
       history={[
-        rep("2026-05-01", 30),
-        rep("2026-05-01", 70, { grip: "Micro" }),
-        rep("2026-05-01", 115, { hand: "R" }),
+        rep("2026-07-20", 30),
+        rep("2026-07-20", 70, { grip: "Micro" }),
+        rep("2026-07-20", 115, { hand: "R" }),
       ]}
     />
   );
 
-  expect(screen.getByText(/left hand/i)).toBeInTheDocument();
-  expect(screen.getAllByText(/Power/i).length).toBeGreaterThan(0);
+  expect(screen.getByText("Crusher")).toBeInTheDocument();
   expect(screen.queryByText("Micro")).not.toBeInTheDocument();
-  expect(screen.queryByText("2026-05-01 · R")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("2 of 6 domains current")).toBeInTheDocument();
+});
+
+test("a grip row opens finger history with its active hand scope", () => {
+  const onOpenHistory = jest.fn();
+  render(
+    <CurveCoverageCard
+      history={[rep("2026-07-20", 30, { hand: "R" })]}
+      handView="R"
+      onOpenHistory={onOpenHistory}
+    />
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Open Crusher finger history" }));
+  expect(onOpenHistory).toHaveBeenCalledWith({ grip: "Crusher", handView: "R" });
 });

@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { HistoryView } from '../HistoryView.jsx';
-import { AnalysisView } from '../AnalysisView.jsx';
+import { ForceDurationHistoryCard } from '../analysis/ForceDurationHistoryCard.jsx';
 import { recoveryRows } from '../../testHelpers/recoveryRows.js';
 
 jest.mock('../cards/RepCurveChart.jsx', () => ({ RepCurveChart: ({ actual }) =>
@@ -17,13 +17,14 @@ const history = [1, 2].flatMap(set_num => recoveryRows('measured', { sessionId: 
 
 test('History compares set one without concatenating set two and retains every recorded hold', () => {
   render(<HistoryView history={history} unit="kg" />);
+  expect(screen.getByText('Explore force-duration history')).toBeInTheDocument();
   expect(screen.getByTestId('rep-curve-times')).toHaveTextContent('[40,24,16,12]');
   expect(screen.getByText(/Set 1 comparison/)).toBeInTheDocument();
   expect(screen.getAllByText(/^Set 2 · Rep/)).toHaveLength(4);
 });
 
-test('Analysis labels its first-set comparison and never draws a combined eight-rep curve', () => {
-  render(<AnalysisView history={history} unit="kg" />);
+test('Force-duration history drill-down labels set one and never draws a combined eight-rep curve', () => {
+  render(<ForceDurationHistoryCard history={history} unit="kg" />);
   fireEvent.click(screen.getByRole('button', { name: 'Inspect workout' }));
   expect(screen.getByTestId('rep-curve-times')).toHaveTextContent('[40,24,16,12]');
   expect(screen.getByText(/Set 1 comparison/)).toBeInTheDocument();
