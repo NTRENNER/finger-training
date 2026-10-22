@@ -30,7 +30,6 @@ import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from "./forc
 //
 // State machine:
 //   preview        — protocol overview, mode toggle, Start button
-//   needs-tindeq   — Tindeq not connected, ask user to connect first
 //   swap-prompt    — between Crusher and Micro: "Swap Tindeq to Micro"
 //   hang-armed     — auto-detect armed, waiting for user to pull
 //   hang-active    — hold timer counting up (force ≥ 4 kg)
@@ -103,7 +102,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   // swap-prompt was removed: the "swap to the other gripper" affordance
   // is now a persistent banner over hang-armed, cleared when the user
   // starts their next pull. No click required to resume.
-  const [phase, setPhase] = useState("preview"); // preview|needs-tindeq|hang-armed|hang-active|rest|interrupted|peak-test|done
+  const [phase, setPhase] = useState("preview"); // preview|hang-armed|hang-active|rest|interrupted|peak-test|done
   const phaseRef = useRef(phase);
   const changePhase = (next) => {
     // BLE callbacks may arrive together before React renders. Transition
@@ -123,6 +122,12 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   // per step.
   const [elapsed, setElapsed] = useState(0);          // sec since hang started
   const [restRemaining, setRestRemaining] = useState(0);
+  // Manual mode is committed at startProtocol time: if the Tindeq wasn't
+  // connected when the user tapped Start, this run uses tap-driven hangs
+  // (same model as ActiveSessionView without a sensor). The flag doesn't
+  // flip mid-run even if the Tindeq comes online — a user who started
+  // without a sensor shouldn't suddenly see BLE take over.
+  const [manualMode, setManualMode] = useState(false);
   const tickRef = useRef(null);
   const startTimeRef = useRef(null);
 
@@ -238,9 +243,13 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   }, [visible, tindeq, inSensorPhase, currentStep]);
 
   useEffect(() => {
+    // Only trip "interrupted" on sensor loss when the run is sensor-driven.
+    // A manual-mode run has no sensor to lose; a tab navigation still
+    // interrupts because the hang timer can't credit time off-screen.
+    if (manualMode && visible) return;
     if ((!visible || !tindeq?.connected) && phaseRef.current === "hang-active") changePhase("interrupted");
 
-  }, [visible, tindeq?.connected]);
+  }, [visible, tindeq?.connected, manualMode]);
 
   if (!protocol.ok) {
     return (
@@ -265,10 +274,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   // separate L then R reps per step; that's been removed — one pull,
   // one hold, advance to rest.
   function startProtocol() {
-    if (!tindeq?.connected) {
-      changePhase("needs-tindeq");
-      return;
-    }
+    setManualMode(!tindeq?.connected);
     setFrozenProtocol(previewProtocol);
     setStepIdx(0);
     enterStep(0);
@@ -467,7 +473,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
           <Btn
             onClick={startProtocol}
             color={C.green}
-            disabled={!tindeqConnected}
           >
             Start
           </Btn>
@@ -481,19 +486,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     return <PeakTestView key={currentStep.id} visible={visible} grip={currentStep.grip} history={history} tindeq={tindeq}
       addReps={addReps} unit={unit} source="warmup" onClose={advanceToNextStep}
       completionLabel={stepIdx < steps.length - 1 ? 'Continue warm-up' : 'Finish warm-up'} />;
-  }
-
-  // ── RENDER: NEEDS-TINDEQ (fallback for mid-warmup disconnect) ──
-  if (phase === "needs-tindeq") {
-    return (
-      <Card>
-        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Connect the Tindeq</div>
-        <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, marginBottom: 16 }}>
-          The warm-up uses real-time force feedback to hit prescribed loads. Connect your Tindeq (with the Crusher gripper attached), then come back and tap Start.
-        </div>
-        <Btn onClick={() => changePhase("preview")} small>Back to preview</Btn>
-      </Card>
-    );
   }
 
   const stageDetail = `${currentStep?.grip} · ${currentStep?.type === 'peak_test' ? 'Single-handed' : 'Both hands'}`;
@@ -513,7 +505,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
       <div role="status" style={{ color: C.yellow, fontSize: 18, fontWeight: 700 }}>Warm-up paused</div>
       <p style={{ color: C.muted }}>The sensor stopped sending force readings. This rep has not been counted. Release the load, check the connection, then retry when ready.</p>
       {connectionNotice}
-      {actions(<Btn onClick={() => { setElapsed(0); changePhase("hang-armed"); }} disabled={!tindeq?.connected}>Retry rep</Btn>)}
+      {actions(<Btn onClick={() => { setElapsed(0); changePhase("hang-armed"); }} disabled={!manualMode && !tindeq?.connected}>Retry rep</Btn>)}
     </>);
   }
 
@@ -521,32 +513,40 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     const target = currentStep.targetSec;
     const active = phase === "hang-active";
     const credited = active ? Number(creditedSeconds(tindeq?.forceLoss, elapsed)) : 0;
+    const swapCopy = manualMode
+      ? <>Swap to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then tap Start hang.</>
+      : <>Swap the Tindeq to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then pull — the hang starts automatically.</>;
+    const readyCopy = manualMode ? "Tap Start hang when you're pulling." : "Pull to begin. The timer starts automatically.";
+    const activeCopy = manualMode ? "Hold until the timer finishes, then tap Done." : "Hold until the timer finishes, then release.";
+    const manualPrimary = active
+      ? <Btn onClick={handleHangComplete} color={C.red}>Done</Btn>
+      : <Btn onClick={() => changePhase("hang-active")} color={C.green}>Start hang</Btn>;
     return stage(<>
       {swapPending && !active && (
         <div role="status" style={{
           background: C.card, border: `1px solid ${C.purple}`, borderRadius: 10,
           padding: "10px 14px", color: C.text, fontSize: 14,
         }}>
-          Swap the Tindeq to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then pull — the hang starts automatically.
+          {swapCopy}
         </div>
       )}
-      <SignalRecoveringNotice recovering={tindeq?.signalRecovering} />
+      {!manualMode && <SignalRecoveringNotice recovering={tindeq?.signalRecovering} />}
       <div style={{ fontSize: 15, textAlign: "center", color: C.text }}>
-        {active ? "Hold until the timer finishes, then release." : "Pull to begin. The timer starts automatically."}
+        {active ? activeCopy : readyCopy}
       </div>
       <WarmupTime seconds={active ? credited : 0} label={active ? "Hold time" : "Ready"} target={target} />
-      {active && <ForceLossNotice state={tindeq?.forceLoss} />}
-      {connectionNotice}
+      {active && !manualMode && <ForceLossNotice state={tindeq?.forceLoss} />}
+      {!manualMode && connectionNotice}
       <ForceGauge
-        force={tindeq?.force || 0}
-        avg={active ? tindeq?.avgForce || 0 : 0}
-        peak={active ? tindeq?.peak || 0 : 0}
+        force={manualMode ? null : (tindeq?.force || 0)}
+        avg={!manualMode && active ? tindeq?.avgForce || 0 : null}
+        peak={!manualMode && active ? tindeq?.peak || 0 : null}
         targetKg={currentStep.targetLoadKg}
         maxDisplay={Math.max(50, (currentStep.targetLoadKg || 0) * 1.25)}
         numberSize="clamp(48px, 15vw, 88px)"
         unit={unit}
       />
-      {actions()}
+      {actions(manualMode ? manualPrimary : null)}
     </>);
   }
 
