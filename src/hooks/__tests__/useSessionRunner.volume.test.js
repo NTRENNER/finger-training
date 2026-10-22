@@ -84,17 +84,17 @@ test.each([true, false])('a full five-minute break starts automatically after bo
   expect(view.result.current).toMatchObject({ phase: 'done', currentSet: 2 });
 });
 
-test('right-first day remains right-first for both sets; early start records actual rest without penalty', () => {
-  const view = setup({ history: [{ date: '2026-09-30', hand: 'L', actual_time_s: 30 }] });
-  expect(view.result.current.activeHand).toBe('R');
+test("the session's starting hand carries across set rests; early start records actual rest without penalty", () => {
+  const view = setup();
+  expect(view.result.current.activeHand).toBe('L');
   firstSet(view);
   act(() => view.result.current.handleNextSet());
-  expect(view.result.current.setRestHand).toBe('R');
+  expect(view.result.current.setRestHand).toBe('L');
   advanceClock(22000);
   act(() => view.result.current.handleSetRestDone());
   pull(view);
   const r = view.result.current.sessionReps.at(-1);
-  expect(r).toMatchObject({ hand: 'R', set_num: 2, failure_valid: true,
+  expect(r).toMatchObject({ hand: 'L', set_num: 2, failure_valid: true,
     rep_timing: { rest_before_s: 122 }, force_recording: { volume_beta: { between_set_rest: { actual_s: 122 } } } });
 });
 
