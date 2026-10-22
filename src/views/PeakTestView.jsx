@@ -105,10 +105,9 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
         // Credit only the time held above the dip threshold so a brief
         // slip doesn't poison the duration. No hard auto-cutoff: the
         // user ramps up to peak and releases when done; onRepEnd
-        // (release detection) ends the attempt naturally. PEAK_HOLD_S
-        // still gates validity in isValidPeakMeasurement — releases
-        // before that threshold are marked invalid, but the clock
-        // never forces an early end on the user.
+        // (release detection) ends the attempt naturally. Peak validity
+        // requires a complete measured interval, not a minimum hold time;
+        // the clock never forces an early end on the user.
         const seconds = Number(creditedSeconds(tindeq?.forceLoss, rawSeconds));
         transition({ ...current, elapsed: seconds });
       } else if (current.phase === 'rest') {

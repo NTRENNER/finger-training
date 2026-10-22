@@ -1,12 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
-  ResponsiveContainer, ComposedChart, Line, Bar, Scatter, XAxis, YAxis,
-  Tooltip, CartesianGrid, ReferenceLine,
+  ResponsiveContainer, ComposedChart, Bar, Scatter, XAxis, YAxis,
+  CartesianGrid, ReferenceLine,
 } from 'recharts';
-import { ChartLegend } from '../../ui/ChartLegend.jsx';
 import { CHART } from '../../ui/chartStyles.js';
-import { Card, CardTitle, Disclosure } from '../../ui/components.jsx';
-import { toDisp } from '../../ui/format.js';
+import { Card, CardTitle } from '../../ui/components.jsx';
 import { C } from '../../ui/theme.js';
 import { GRIP_COLORS } from '../../ui/grip-colors.js';
 import { DateRangeSlider, normalizeHistoryWindow } from '../../ui/DateRangeSlider.jsx';
@@ -14,9 +12,8 @@ import { DEFAULT_PERFORMANCE_TREND_MODEL } from '../../model/performanceTrends.j
 import { buildPerformanceTrendAnalysis } from '../../model/performanceTrendEvidence.js';
 import { suggestCookedFromClimbs } from '../../model/climbingFatigue.js';
 import {
-  BAND_LABELS, CONTEXT_LABELS, CapacitySummaries, DurationBreakdown,
-  CapacityEvidenceDetails, PerformancePointGlyph, PerformancePointLegend,
-  PerformancePointTooltip, OpeningHoldInspector,
+  BAND_LABELS, CONTEXT_LABELS, PerformancePointGlyph,
+  PerformancePointLegend, PerformancePointTooltip, OpeningHoldInspector,
 } from './PerformanceTrendEvidence.jsx';
 import './PerformanceTrendCards.css';
 
@@ -26,24 +23,11 @@ const shortDomain = ([low, high]) => {
   const span = Math.max(5, Math.abs(low || 0), Math.abs(high || 0));
   return [-Math.ceil(span), Math.ceil(span)];
 };
-const capacityDomain = ([low, high]) => [Math.max(0, (low || 0) * .95), Math.max(5, (high || 0) * 1.05)];
 const cardStyle = { marginBottom: 16, padding: '20px clamp(14px, 4vw, 24px)', minWidth: 0 };
-
-function CapacityTooltip({ active, payload, label, unit }) {
-  if (!active || !payload?.length) return null;
-  const labelDate = new Date(label);
-  const date = payload[0]?.payload?.date || (Number.isFinite(labelDate.getTime()) ? labelDate.toISOString().slice(0, 10) : '');
-  return <div style={{ ...CHART.tooltip, padding: 12 }}>
-    <b>{date}</b>
-    {payload.map(item => <div key={item.dataKey} style={{ marginTop: 4, color: item.color }}>
-      {item.name}: {item.dataKey === 'climbLoad' ? `${item.value}/10` : `${item.value?.toFixed(1)} ${unit} balanced force`}
-    </div>)}
-  </div>;
-}
 
 export function PerformanceTrendCards({
   history = EMPTY, grips = EMPTY, handView = 'pooled', activities = EMPTY,
-  normalizeOn = false, trendModel = DEFAULT_PERFORMANCE_TREND_MODEL, unit = 'kg',
+  trendModel = DEFAULT_PERFORMANCE_TREND_MODEL, unit = 'kg',
 }) {
   const selectedGrips = grips || EMPTY;
   // Refit only when source history or model scope changes. Date and point
@@ -67,11 +51,9 @@ export function PerformanceTrendCards({
   const [start, end] = normalizeHistoryWindow(first, Math.max(first, last), dates.length - 1);
   const startDate = dates[start], endDate = dates[end];
   const visible = useMemo(() => rows.slice(start, end + 1).map(row => ({
-    ...row, ...Object.fromEntries(selectedGrips.flatMap(grip => [
-      [`${grip}_capacity`, row[`${grip}_evidence`] ? toDisp(row[`${grip}_evidence`].score, unit) : null],
-      [`${grip}_baseline`, row[`${grip}_evidence`]?.maturation?.ready ? toDisp(row[`${grip}_evidence`].maturation.score, unit) : null],
-    ])), climbLoad: suggestCookedFromClimbs(activities, row.date)?.cooked ?? null,
-  })), [rows, start, end, activities, selectedGrips, unit]);
+    ...row,
+    climbLoad: suggestCookedFromClimbs(activities, row.date)?.cooked ?? null,
+  })), [rows, start, end, activities]);
   // Scatter series may begin later or include several holds on the same date.
   // Keep the common date window and tick list independent of their density.
   const dateTicks = [...new Set(visible.map(row => row.timestamp))];
@@ -88,69 +70,20 @@ export function PerformanceTrendCards({
     grip, observations: visibleObservations.filter(item => item.grip === grip),
   })).filter(series => series.observations.length > 0), [selectedGrips, visibleObservations]);
   const hoveredObservation = visibleObservations.find(item => String(item.id) === hoveredId);
-  const summaries = useMemo(() => selectedGrips.map(grip => {
-    const estimates = visible.filter(row => Number.isFinite(row[`${grip}_long`]) && row[`${grip}_evidence`])
-      .map(row => ({ date: row.date, change: row[`${grip}_long`], evidence: row[`${grip}_evidence`] }));
-    const recent = visible.findLast(row => Number.isFinite(row[`${grip}_short`]));
-    return { grip, first: estimates[0], latest: estimates.at(-1), sessionPerformance: recent?.[`${grip}_short`], sessionDate: recent?.date, hasHistoricalEstimate: rows.some(row => row[`${grip}_evidence`]) };
-  }), [visible, rows, selectedGrips]);
-  const hasLong = visible.some(row => selectedGrips.some(grip => Number.isFinite(row[`${grip}_long`])));
   const laterHolds = inRangeObservations.filter(item => item.context === 'after_training').length;
 
   if (!rows.length) return <section className="performance-trends" aria-label="Performance trends">
     <Card style={cardStyle}>
-      <CardTitle>Estimated Capacity Over Time</CardTitle>
-      <p className="trend-intro">More training dates needed. A first estimate needs five eligible training dates per selected hand. Both-hand estimates require a curve for each hand. Try Left or Right above if only one hand has enough history.</p>
-      <CapacitySummaries summaries={summaries} unit={unit} />
-      <p className="trend-small">Curve Improvement remains establishing until every duration domain has two qualifying opening holds per selected hand. Missing estimates do not indicate declining performance.</p>
-    </Card>
-    <Card style={cardStyle}>
       <CardTitle>Recent Performance vs Expected</CardTitle>
-      <p className="trend-intro">Opening-hold comparisons appear once a prior curve is available and the hold falls within previously measured durations.</p>
+      <p className="trend-intro">Opening-hold comparisons appear once a calibrated pre-session curve is available.</p>
     </Card>
   </section>;
 
   return <section className="performance-trends" aria-label="Performance trends">
     <Card style={cardStyle}>
-      <CardTitle>Estimated Capacity Over Time</CardTitle>
-      <p className="trend-intro">Tracks changes in your underlying modeled force–duration ability rather than day-to-day session readiness. Dashed lines show each established baseline; summary percentages show long-term gain from that baseline.</p>
-      <CapacitySummaries summaries={summaries} unit={unit} />
-      <p className="trend-small">The highest estimate is the highest whole-curve score reached by each grip’s latest shown date, including dates before the shown range.</p>
-      {hasLong ? <div className="trend-chart" role="img" aria-label="Estimated Capacity and established baseline, by date and grip">
-        <ResponsiveContainer width="100%" height={CHART.height}>
-          <ComposedChart data={visible} margin={CHART.margin}>
-            <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
-            <XAxis type="number" dataKey="timestamp" domain={dateDomain} ticks={dateTicks} interval="preserveStartEnd" scale="time" tickFormatter={fmtDate} tick={CHART.tick} minTickGap={32} />
-            <YAxis yAxisId="trend" unit={unit} width={52} tickFormatter={value => Number(value.toFixed(1))} tick={CHART.tick} domain={capacityDomain} />
-            <YAxis yAxisId="climb" domain={[0, 40]} orientation="right" width={0} hide />
-            <Tooltip content={<CapacityTooltip unit={unit} />} />
-            <Bar yAxisId="climb" dataKey="climbLoad" name="Logged climbing load" fill={C.orange} opacity={.4} barSize={6} isAnimationActive={false} />
-            {selectedGrips.map(grip => <Line key={grip} yAxisId="trend" dataKey={`${grip}_capacity`} name={`${grip} Estimated Capacity`} stroke={GRIP_COLORS[grip] || C.blue}
-              strokeWidth={3} dot={{ r: 3 }} connectNulls={false} type="linear" isAnimationActive={false} />)}
-            {selectedGrips.map(grip => <Line key={`${grip}_baseline`} yAxisId="trend" dataKey={`${grip}_baseline`} name={`${grip} established baseline`}
-              stroke={GRIP_COLORS[grip] || C.blue} strokeDasharray="5 5" dot={false} connectNulls={false} isAnimationActive={false} />)}
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div> : <p className="trend-small">No capacity estimates in this range for the selected hands. A single-hand view may have more evidence.</p>}
-      <ChartLegend items={[
-        ...selectedGrips.map(grip => ({ label: `${grip} Estimated Capacity`, color: GRIP_COLORS[grip] || C.blue })),
-        { label: 'Established baseline', color: C.muted, dashed: true },
-        { label: 'Logged climbing load (0–10)', color: C.orange, kind: 'bar' },
-      ]} />
-      <DateRangeSlider dates={dates} start={start} end={end} onChange={(a, b) => setWindow([dates[a], dates[b]])} />
-      <DurationBreakdown summaries={summaries} />
-      <CapacityEvidenceDetails summaries={summaries} />
-      <Disclosure title="How to read the estimates" style={{ marginTop: 8, marginBottom: 0 }}>
-        <p className="trend-small">Each date uses the training recorded by that date. Older training gradually receives less weight with a 90-day half-life. Both-hand capacity weights the hands equally. Baseline maturation is an evidence policy, not a statistical confidence or recovery test. It requires two qualifying opening holds in each of the six actual-duration domains for every selected hand. The estimate freezes as soon as the final domain reaches its second point.</p>
-        {trendModel !== 'original' && <p className="trend-small">Sessions after earlier finger training that day receive less weight, including training on another grip. This does not correct for climbing or accumulated fatigue.</p>}
-        {trendModel === 'contextRobust' && <p style={{ color: C.yellow, fontSize: 12 }}>Research preview: unusually high and low results also have reduced influence. This additional smoothing is experimental.</p>}
-        <p className="trend-small">Orange bars show estimated load from logged climbing on that date and the previous day, on a separate 0–10 scale. A score of 10 fills the bottom quarter of the chart. Same-day climbing may have happened before or after finger training.</p>
-      </Disclosure>
-      {normalizeOn && <p className="trend-small">These estimates use absolute measured force. The bodyweight toggle applies to the other curve charts.</p>}
-    </Card>
-    <Card style={cardStyle}>
       <CardTitle>Recent Performance vs Expected</CardTitle>
-      <p className="trend-intro">Session Performance = (observed force − expected force) / expected force × 100. Zero means model expectation. Each point is one opening hold compared with the curve available before that day, at the same duration. −20% means 20% less force than expected for that hold, not a 20% loss of maximum strength.</p>
+      <p className="trend-intro">Session Performance = (observed force − expected force) / expected force × 100. Zero means the calibrated pre-session model expectation. Each point is one opening hold compared at the same duration with the personal curve saved before that workout; older sessions reconstruct that curve from earlier history only. −20% means 20% less force than expected for that hold, not a 20% loss of maximum strength.</p>
+      <DateRangeSlider dates={dates} start={start} end={end} onChange={(a, b) => setWindow([dates[a], dates[b]])} />
       <div className="trend-filters">
         <label className="trend-filter">Hold duration
           <select value={durationBand} onChange={event => setDurationBand(event.target.value)}>
@@ -186,15 +119,15 @@ export function PerformanceTrendCards({
         {hoveredObservation && <div className="trend-hover-details"><PerformancePointTooltip observation={hoveredObservation} unit={unit} /></div>}
       </div> : <p className="trend-context-note">{inRangeObservations.length
         ? 'No opening holds match these filters. Try another duration or session order.'
-        : 'No comparable opening holds in this date range. A prior curve and previously measured duration coverage are needed.'}</p>}
+        : 'No comparable opening holds in this date range. A calibrated curve based on earlier training is needed.'}</p>}
       <PerformancePointLegend grips={selectedGrips} />
       <div className="trend-context-note">
-        First recorded does not mean recovered. Missing climbing logs leave workload unknown; orange bars are context only and do not adjust either curve.
+        First recorded does not mean recovered. Same-day climbing may have happened before or after finger training. Missing climbing logs leave workload unknown; orange bars are context only and do not adjust the calibrated expectation.
         {laterHolds > 0 && <span> {laterHolds} comparable opening {laterHolds === 1 ? 'hold followed' : 'holds followed'} earlier recorded finger training in this date range.</span>}
       </div>
       <OpeningHoldInspector observations={visibleObservations} unit={unit} selectedId={selectedObservationId}
         onSelect={setSelectedObservationId} open={inspectOpen} onToggle={setInspectOpen} />
-      <p className="trend-small">Both charts show {startDate} through {endDate}. Points stay separate across different hold durations. Expected force uses only earlier dates; that day’s results cannot change their own comparison.</p>
+      <p className="trend-small">This chart shows {startDate} through {endDate}. Points stay separate across different hold durations. Expected force uses the saved pre-session calibration when available and otherwise uses only earlier dates; that workout’s results cannot change its own comparison. Ringed points extend beyond the prior measured duration range.</p>
     </Card>
   </section>;
 }

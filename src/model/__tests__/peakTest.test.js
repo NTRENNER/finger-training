@@ -28,12 +28,18 @@ test('brief maximal pulls update peaks and their reminder but never failure capa
   expect(probe.anchor).toBeNull(); // no fabricated (3s, peak) capacity point
 });
 
-test.each([{ endReason: 'equipment_interruption' }, { failureValid: false }, { actualTime: 0.4 }, { peakForce: 0 }])('invalid peak cannot reset reminder or set a ceiling: %j', extra => {
+test.each([{ endReason: 'equipment_interruption' }, { failureValid: false }, { actualTime: 0 }, { peakForce: 0 }])('invalid peak cannot reset reminder or set a ceiling: %j', extra => {
   const r = measuredPeak(extra);
   expect(isValidPeakMeasurement(r)).toBe(false);
   expect(buildPeakForceTrend([r])).toBeNull();
   expect(maxTestStaleness([r], '2026-09-24').lastDate).toBeNull();
   expect(bestAvailablePeakMeasurement([r], 'R', 'Micro')).toBeNull();
+});
+
+test('a brief complete measurement can set an instantaneous peak', () => {
+  const r = measuredPeak({ actualTime: 0.4, endedAtMs: 10400 });
+  expect(isValidPeakMeasurement(r)).toBe(true);
+  expect(buildPeakForceTrend([r]).best.Micro.kg).toBe(40);
 });
 
 

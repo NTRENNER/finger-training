@@ -109,3 +109,29 @@ test("orders same-day workouts by their session start time", () => {
 
   expect(sessions.map(session => session.sessionId)).toEqual(["evening", "morning"]);
 });
+
+test("measured-only history excludes nominal and interrupted opening holds", () => {
+  const sessions = buildZoneSessionHistory([
+    rep("measured", "2026-07-01", 30, 31, 20, {
+      load_provenance: "measured_force",
+      force_recording: { capacity_eligible: true },
+    }),
+    rep("nominal", "2026-07-08", 30, 32, 25, {
+      avg_force_kg: null,
+      prescribed_load_kg: 25,
+      load_provenance: "nominal_setting",
+    }),
+    rep("interrupted", "2026-07-15", 30, 33, 30, {
+      failure_valid: false,
+      load_provenance: "measured_force",
+      force_recording: { capacity_eligible: false },
+    }),
+  ], {
+    grip: "Crusher",
+    zoneKey: "power",
+    measuredOnly: true,
+  });
+
+  expect(sessions).toHaveLength(1);
+  expect(sessions[0]).toMatchObject({ sessionId: "measured", openingLoadKg: 20, openingActualS: 31 });
+});

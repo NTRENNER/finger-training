@@ -159,9 +159,9 @@ export function trendNote(dates, fitScoreAt) {
 }
 
 // ── Per-grip recovery note (Aug 2026) ────────────────────────
-// Complements the DeloadGauge, which by design only reacts CROSS-grip
-// (every grip down) — so it can't catch one grip slipping and never
-// reassures. For the most salient grip this note does both:
+// Complements the cross-grip deload detector, which cannot catch one grip
+// slipping and does not provide reassurance. For the most salient grip this
+// note does both:
 //   • EARLY-WARN when a grip's recent modeled recovery gap sits below
 //     the noise band (recovering worse than the model predicts) — a
 //     grip-specific fatigue sign before the systemic gauge trips.

@@ -1,4 +1,5 @@
 import { effectiveLoad, isOpenerRep } from "./load.js";
+import { isCapacityEvidenceRep } from "./forceRecording.js";
 import { zoneOf } from "./zones.js";
 
 function mean(values) {
@@ -28,6 +29,7 @@ export function buildZoneSessionHistory(history, {
   zoneKey,
   handView = "pooled",
   throughDate = null,
+  measuredOnly = false,
 } = {}) {
   if (!grip || !zoneKey) return [];
 
@@ -39,6 +41,7 @@ export function buildZoneSessionHistory(history, {
     if (throughDate && rep.date > throughDate) continue;
     if (selectedHand && rep.hand !== selectedHand) continue;
     if (!(Number(rep.actual_time_s) > 0) || !(effectiveLoad(rep) > 0)) continue;
+    if (measuredOnly && (!(Number(rep.avg_force_kg) > 0) || !isCapacityEvidenceRep(rep))) continue;
 
     // Include date in the identity because sessions can legitimately span
     // midnight while retaining one session_id.
@@ -58,7 +61,9 @@ export function buildZoneSessionHistory(history, {
     const openers = reps.filter(isOpenerRep);
     const comparisonReps = openers.length > 0 ? openers : reps.filter(r => r.failure_valid !== false).slice(0, 1);
     const openingActualS = mean(numeric(comparisonReps.map(rep => rep.actual_time_s)));
-    const openingLoadKg = mean(numeric(comparisonReps.map(effectiveLoad)));
+    const openingLoadKg = mean(numeric(comparisonReps.map(rep =>
+      measuredOnly ? rep.avg_force_kg : effectiveLoad(rep)
+    )));
     if (!(openingActualS > 0) || !(openingLoadKg > 0)) continue;
 
     const hands = [...new Set(reps.map(rep => rep.hand).filter(hand => hand === "L" || hand === "R"))];

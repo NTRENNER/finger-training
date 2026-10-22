@@ -12,65 +12,9 @@
   margin: 0 0 14px;
 }
 
-.trend-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
-  gap: 12px;
-  margin: 18px 0;
-}
-
-.trend-summary {
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  background: #0d1117;
-}
-
-.trend-summary h4 {
-  font-size: 13px;
-  margin: 0 0 4px;
-}
-
-.trend-summary-date,
 .trend-small {
   color: #8b949e;
   font-size: 12px;
-  line-height: 1.5;
-}
-
-.trend-summary-values {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.trend-summary-values dt {
-  color: #8b949e;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.trend-summary-values dd {
-  margin: 4px 0 0;
-  font-size: 24px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-
-.trend-summary-values time {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  font-weight: 400;
-  color: #8b949e;
-}
-
-.trend-support-label {
-  color: #e3b341;
-  font-size: 11px;
-  margin-top: 10px;
   line-height: 1.5;
 }
 
@@ -110,59 +54,6 @@
   outline-offset: 3px;
 }
 
-.trend-subsection {
-  border-top: 1px solid #30363d;
-  margin-top: 20px;
-  padding-top: 16px;
-}
-
-.trend-subsection h4,
-.trend-evidence h4 {
-  font-size: 13px;
-  margin: 0 0 8px;
-}
-
-.trend-duration-table {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.trend-duration-table caption {
-  text-align: left;
-  color: #8b949e;
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 0 0 10px;
-}
-
-.trend-duration-table th,
-.trend-duration-table td {
-  text-align: right;
-  padding: 9px 4px;
-  border-bottom: 1px solid #30363d;
-  overflow-wrap: anywhere;
-}
-
-.trend-duration-table th:first-child {
-  text-align: left;
-  width: 19%;
-  padding-left: 0;
-}
-
-.trend-duration-table tbody th {
-  color: #8b949e;
-  font-weight: 400;
-}
-
-.trend-duration-table .trend-limited {
-  display: block;
-  margin-top: 3px;
-  color: #e3b341;
-  font-size: 10px;
-}
 
 .trend-context-note {
   padding: 10px 12px;
@@ -193,19 +84,6 @@
 
 .trend-point-legend svg {
   flex-shrink: 0;
-}
-
-.trend-evidence {
-  border-top: 1px solid #30363d;
-  padding-top: 12px;
-  margin-top: 12px;
-  font-size: 12px;
-  color: #8b949e;
-}
-
-.trend-evidence ul {
-  padding-left: 18px;
-  line-height: 1.6;
 }
 
 .trend-point-details {
@@ -257,26 +135,3 @@
   z-index: 5;
   pointer-events: none;
 }
-
-@media (max-width: 420px) {
-  .trend-summary-grid {
-    gap: 10px;
-  }
-
-  .trend-summary-values dd {
-    font-size: 22px;
-  }
-
-  .trend-duration-table th,
-  .trend-duration-table td {
-    padding-right: 2px;
-    padding-left: 2px;
-  }
-}
-
-.trend-hatching {
-  padding: 8px;
-  border-radius: 6px;
-  background: repeating-linear-gradient(135deg, transparent, transparent 7px, #8b949e12 7px, #8b949e12 9px);
-}
-.trend-hatching dd { font-size: 18px; }

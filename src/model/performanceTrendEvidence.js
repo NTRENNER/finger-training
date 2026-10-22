@@ -205,7 +205,8 @@ function pooledReferenceForces(snapshot) {
   ));
 }
 
-function observationFor({ rep, expectedForce, deviation, context }) {
+function observationFor({ rep, expectedForce, deviation, context, expectationSource,
+  calibrationSource, calibrationScale, minDuration, maxDuration, extrapolated }) {
   const recording = rep.force_recording || {};
   const method = recordingMethod(rep);
   const converted = recording.interval_basis_applied === 'legacy_elapsed';
@@ -220,6 +221,12 @@ function observationFor({ rep, expectedForce, deviation, context }) {
     force: rep.avg_force_kg,
     expectedForce,
     deviation,
+    expectationSource,
+    calibrationSource,
+    calibrationScale,
+    modelDurationRange: minDuration != null || maxDuration != null
+      ? { min: minDuration, max: maxDuration } : null,
+    extrapolated: !!extrapolated,
     durationBand: performanceDurationBand(rep.actual_time_s),
     context: context.status,
     earlierGrips: context.earlierGrips,

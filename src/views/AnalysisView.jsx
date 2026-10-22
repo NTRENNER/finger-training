@@ -1,15 +1,18 @@
-import { SustainedMaxCard } from './analysis/SustainedMaxCard.jsx';
+import { PeakForceCard } from './analysis/PeakForceCard.jsx';
 import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/forceRecording.js";
-import { MeasuredProgressSection } from "./cards/MeasuredProgressCard.jsx";
+import { MeasuredDomainProgressCard } from "./analysis/MeasuredDomainProgressCard.jsx";
 // ──────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
 // ──────────────────────────────────────────────────────────────
 // The "Analysis" tab. Top-to-bottom render order:
 //
-//   1. Recorded pulls and current curve — always visible.
-//   2. Curve Improvement — domain progress vs baseline.
-//   3. Overall curve summary — optional whole-curve trajectory.
-//   4. Curve Coverage — only when sampled data needs attention.
+//   1. Peak Force — instantaneous observed ceiling, when available.
+//   2. Recorded pulls and current curve — always visible with reps.
+//   3. Actual Progress by Domain — first vs latest measured results.
+//   4. Recent Performance vs Expected — calibrated pre-session comparison.
+//   5. Curve Improvement — modeled domain progress vs baseline.
+//   6. Overall curve summary — optional whole-curve trajectory.
+//   7. Curve Coverage — only when sampled data needs attention.
 //
 // State comes in via props: history, freshMap (built in
 // useRepHistory), activities, bodyWeight. threeExpPriors are
@@ -68,7 +71,6 @@ import {
 // the 3-min hold weight is shown on the Strength Balance card.
 import { PerformanceTrendCards } from "./analysis/PerformanceTrendCards.jsx";
 import { CapacityTrajectoryCard } from "./analysis/CapacityChartCards.jsx";
-import { RecoveryStatusCard } from "./cards/RecoveryStatusCard.jsx";
 import { GRIP_COLORS } from "../ui/grip-colors.js";
 import { ForceDurationCard } from "./analysis/ForceDurationCard.jsx";
 import { CurveImprovementCard } from "./analysis/CurveImprovementCard.jsx";
@@ -653,15 +655,6 @@ export function AnalysisView({
         See your recorded pulls and how your strength and endurance have changed.
       </p>
 
-      {/* Recovery status — moved here from Session Setup (September 2026).
-          It is read from between-rep recovery across grips, which makes it
-          a finger diagnostic, and it belongs with the other diagnostics
-          rather than on the first screen of the app. Opens by default
-          here: arriving on this tab is already the decision to look. */}
-      <CardBoundary name="Recovery status">
-        <RecoveryStatusCard history={history} activities={activities} defaultExpanded />
-      </CardBoundary>
-
       {/* Bodyweight logging lives on the Setup tab now (next to the
           climb logger). Analysis stays focused on viewing — the only
           BW-related control here is the Absolute / × BW units toggle
@@ -681,9 +674,9 @@ export function AnalysisView({
       />
 
 
-      {peakRecordHistory.length > 0 && <CardBoundary name="Best max of at least 2s">
-        <SustainedMaxCard history={peakRecordHistory} unit={unit} normalizeOn={normalizationActive}
-          bodyWeight={bodyWeight} bwLog={bwLog} />
+      {peakRecordHistory.length > 0 && <CardBoundary name="Peak force">
+        <PeakForceCard history={peakRecordHistory} unit={unit} grip={selGrip} handView={handView}
+          normalizeOn={normalizationActive} bodyWeight={bodyWeight} bwLog={bwLog} />
       </CardBoundary>}
 
       {reps.length > 0 && (<>
@@ -713,8 +706,12 @@ export function AnalysisView({
             handleDotClick={handleDotClick}
           />
         </CardBoundary>
+        <CardBoundary name="Actual Progress by Domain">
+          <MeasuredDomainProgressCard history={history} grips={scopedGrips}
+            handView={handView} unit={unit} />
+        </CardBoundary>
         <CardBoundary name="Performance trends">
-          <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} normalizeOn={normalizationActive} unit={unit} />
+          <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} unit={unit} />
         </CardBoundary>
         <CardBoundary name="Curve Improvement">
         <CurveImprovementCard
@@ -743,14 +740,6 @@ export function AnalysisView({
         />
         </CardBoundary>
 
-        <CardBoundary name="Measured progress">
-          <MeasuredProgressSection
-            history={history}
-            grips={scopedGrips}
-            hands={handView === "pooled" ? ["L", "R"] : [handView]}
-            unit={unit}
-          />
-        </CardBoundary>
         <Disclosure title="Overall curve summary">
           <CardBoundary name="Whole-Curve Capacity">
             <CapacityTrajectoryCard

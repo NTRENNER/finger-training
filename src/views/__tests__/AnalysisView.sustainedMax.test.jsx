@@ -10,16 +10,17 @@ const peak = (grip, hand, kg) => peakMeasurementRecord({
   stats: recordForce(Array.from({ length: 301 }, (_, i) => ({ ts: i * 10, kg }))),
   grip, hand, round: 0, firstHand: 'L', date: '2026-09-30', sessionId: `${grip}-${hand}`,
 });
-test('the active finger Analysis page exposes sustained records and honors grip and hand filters', () => {
+test('the active finger Analysis page exposes instantaneous peaks and honors grip and hand filters', () => {
   render(<AnalysisView history={[peak('Micro', 'L', 20), peak('Micro', 'R', 25), peak('Crusher', 'L', 40)]} unit="kg" />);
-  expect(screen.getByRole('heading', { name: 'Best max of at least 2s' })).toBeInTheDocument();
-  expect(screen.getByText('Micro · Left hand')).toBeInTheDocument();
-  expect(screen.getByText('Micro · Right hand')).toBeInTheDocument();
-  expect(screen.getByText('Crusher · Left hand')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Peak force — max strength over time' })).toBeInTheDocument();
+  const peakCard = screen.getByRole('region', { name: 'Peak force history' });
+  expect(within(peakCard).getByText('Micro')).toBeInTheDocument();
+  expect(within(peakCard).getByText('Crusher')).toBeInTheDocument();
+  expect(screen.queryByText('Recovery status')).not.toBeInTheDocument();
   const scope = within(screen.getByRole('group', { name: 'Analysis scope' }));
   fireEvent.click(scope.getByRole('button', { name: /^Micro/ }));
-  expect(screen.queryByText('Crusher · Left hand')).not.toBeInTheDocument();
+  expect(within(peakCard).queryByText('Crusher')).not.toBeInTheDocument();
   fireEvent.click(scope.getByRole('button', { name: 'Left' }));
-  expect(screen.getByText('Micro · Left hand')).toBeInTheDocument();
-  expect(screen.queryByText('Micro · Right hand')).not.toBeInTheDocument();
+  expect(within(peakCard).getByText('20.0 kg')).toBeInTheDocument();
+  expect(within(peakCard).queryByText('25.0 kg')).not.toBeInTheDocument();
 });

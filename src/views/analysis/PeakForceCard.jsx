@@ -243,12 +243,13 @@ export function PeakForceCard({
   if (!view || view.rows.length < 1) return null;
 
   return (
+    <section aria-label="Peak force history">
     <Card style={{ marginBottom: 16 }}>
       <div style={{ marginBottom: 4 }}>
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, flex: "1 1 190px", minWidth: 0 }}>
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, flex: "1 1 190px", minWidth: 0 }}>
             Peak force — max strength over time
-          </div>
+          </h3>
           {handView === "pooled" && (
             <div style={{ display: "flex", gap: 4 }} aria-label="Peak force display">
               {[{ k: false, label: "Trend" }, { k: true, label: "Compare hands" }].map(opt => (
@@ -309,8 +310,8 @@ export function PeakForceCard({
         {view.mode === "split"
           ? " L solid · R dashed, per-hand PR lines. The standardized trend is pooled-mode only."
           : " The dotted line uses max-intent sessions only, so ordinary sub-max pulls cannot drag it down. It can fall, making it the standardized signal for breakouts and decline."}
-        {" "}Periodic three-pull, 3-second peak tests keep that comparison calibrated,
-        but any workout can advance the PR.
+        {" "}Periodic standardized peak tests keep that comparison calibrated,
+        but any valid instantaneous peak from any workout can advance the PR.
         {Object.keys(view.standardizedPending).length > 0 && (
           <span style={{ fontStyle: "italic" }}>
             {" "}Trend pending means that grip has no max-intent session yet;
@@ -384,5 +385,6 @@ export function PeakForceCard({
         </ComposedChart>
       </ResponsiveContainer>
     </Card>
+    </section>
   );
 }

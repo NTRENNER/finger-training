@@ -20,7 +20,7 @@ jest.mock('recharts', () => {
     Tooltip: () => null, CartesianGrid: () => null, ReferenceLine: () => null };
 });
 
-test('Research passes climbing records through the review into both charts and refreshes the overlay', async () => {
+test('Research passes climbing records through the review into the comparison chart and refreshes the overlay', async () => {
   const date = '2026-08-20';
   buildPerformanceTrendAnalysis.mockReturnValue({
     rows: [{ date, timestamp: Date.parse(date), Crusher_long: 2, Crusher_short: -1 }],
@@ -47,13 +47,13 @@ test('Research passes climbing records through the review into both charts and r
   const values = () => screen.getAllByTestId('research-chart-data').map(el => JSON.parse(el.textContent)[0].climbLoad);
   const expected = suggestCookedFromClimbs(activities, date).cooked;
   expect(expected).toBeGreaterThan(0);
-  expect(values()).toEqual([expected, expected]);
+  expect(values()).toEqual([expected]);
   expect(screen.getByText('22.0 lbs')).toBeInTheDocument();
   expect(screen.getByText('27.6 lbs')).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Research trend model'), { target: { value: 'original' } });
-  expect(values()).toEqual([expected, expected]);
+  expect(values()).toEqual([expected]);
   view.rerender(<ResearchView {...props} activities={[]} />);
-  expect(values()).toEqual([null, null]);
+  expect(values()).toEqual([null]);
   expect(worker.postMessage).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('button', { name: 'Download historical review' })).toBeInTheDocument();
 });

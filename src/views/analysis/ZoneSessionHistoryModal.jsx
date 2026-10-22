@@ -53,13 +53,14 @@ export function ZoneSessionHistoryModal({
   zoneKey,
   handView = "pooled",
   throughDate = null,
+  measuredOnly = false,
   unit = "lbs",
   onClose,
 }) {
   const zone = ZONE6.find(item => item.key === zoneKey);
   const sessions = useMemo(
-    () => buildZoneSessionHistory(history, { grip, zoneKey, handView, throughDate }),
-    [history, grip, zoneKey, handView, throughDate]
+    () => buildZoneSessionHistory(history, { grip, zoneKey, handView, throughDate, measuredOnly }),
+    [history, grip, zoneKey, handView, throughDate, measuredOnly]
   );
 
   useEffect(() => {
@@ -247,6 +248,7 @@ export function ZoneSessionHistoryModal({
           padding: "9px 16px 11px",
         }}>
           Opening hold is the mean first fresh rep for the selected hand view. Changes compare with the previous workout prescribed in this zone.
+          {measuredOnly ? " Only valid measured-force workouts are included." : ""}
         </div>
       </div>
     </div>

@@ -47,9 +47,10 @@ test.each(['original', 'contextOnly', 'contextRobust'])(
 test('baseline, causal peak ratios and per-duration forces use the same equally weighted hand curves', () => {
   const records = history();
   const result = buildPerformanceTrendAnalysis(records, ['Crusher']);
-  const first = result.rows[0].Crusher_evidence;
+  const capacityRows = result.rows.filter(point => point.Crusher_evidence);
+  const first = capacityRows[0].Crusher_evidence;
   let peak = first;
-  for (const point of result.rows) {
+  for (const point of capacityRows) {
     const evidence = point.Crusher_evidence;
     if (evidence.score > peak.score) peak = evidence;
     expect(evidence.baselineDate).toBe(first.date);
@@ -68,8 +69,8 @@ test('baseline, causal peak ratios and per-duration forces use the same equally 
       expect(value.peakForce).toBe(peak.referenceForces.find(item => item.duration === value.duration).force);
     }
   }
-  expect(result.rows.at(-1).Crusher_evidence.changeFromPeak).toBeLessThan(0);
-  expect(result.rows.at(-1).Crusher_evidence.peakDate).not.toBe(result.rows.at(-1).date);
+  expect(capacityRows.at(-1).Crusher_evidence.changeFromPeak).toBeLessThan(0);
+  expect(capacityRows.at(-1).Crusher_evidence.peakDate).not.toBe(capacityRows.at(-1).date);
 });
 
 test('later evidence cannot rewrite an early reference, historical peak, recording mix or scored observations', () => {
@@ -80,7 +81,8 @@ test('later evidence cannot rewrite an early reference, historical peak, recordi
   const after = buildPerformanceTrendAnalysis([...records, ...extra], ['Crusher']);
   expect(after.rows.filter(item => item.date < date(30))).toEqual(before.rows);
   expect(after.observations.filter(item => item.date < date(30))).toEqual(before.observations);
-  expect(after.rows.at(-1).Crusher_evidence.baselineEvidence).toEqual(before.rows[0].Crusher_evidence.baselineEvidence);
+  const beforeFirstCapacity = before.rows.find(item => item.Crusher_evidence).Crusher_evidence;
+  expect(after.rows.at(-1).Crusher_evidence.baselineEvidence).toEqual(beforeFirstCapacity.baselineEvidence);
   expect(after.rows.at(-1).Crusher_evidence.currentEvidence.recordingMethods).toHaveLength(2);
 });
 
@@ -90,7 +92,7 @@ test('coverage counts independent dates per hand and keeps the unsupported start
     { duration: 220, factor: 1 + index * 0.02, session: `long-${index}` })));
   const oneDay = buildPerformanceTrendAnalysis([...early, ...sameDay], ['Crusher']);
   const support = evidence => evidence.referenceSupport.find(item => item.duration === 220);
-  const reference = oneDay.rows[0].Crusher_evidence.baselineEvidence;
+  const reference = oneDay.rows.find(item => item.Crusher_evidence).Crusher_evidence.baselineEvidence;
   expect(reference.status).toBe('provisional');
   expect(reference.stability).toMatchObject({ status: 'insufficient', label: 'Insufficient for stability check' });
   expect(support(reference)).toMatchObject({ status: 'unobserved', dates: 0 });
@@ -120,13 +122,54 @@ test('individual observations preserve eligibility, pre-day expectations, durati
   ];
   const result = buildPerformanceTrendAnalysis([...records, earlier, scored, scored, ...invalid], ['Crusher']);
   const observations = result.observations.filter(item => item.date === date(12));
-  expect(observations).toHaveLength(1);
-  expect(observations[0]).toMatchObject({ id: scored.id, hand: 'R', duration: 121,
+  expect(observations).toHaveLength(2);
+  const scoredObservation = observations.find(item => item.id === scored.id);
+  expect(scoredObservation).toMatchObject({ id: scored.id, hand: 'R', duration: 121,
     durationBand: 'long', context: 'after_training', earlierGrips: expect.arrayContaining(['Micro']) });
+  expect(observations.find(item => item.id === 'outside-L')).toMatchObject({ extrapolated: true });
   const changed = buildPerformanceTrendAnalysis([...records, earlier, { ...scored, avg_force_kg: scored.avg_force_kg * 0.8 }], ['Crusher']);
   const changedObservation = changed.observations.find(item => item.id === scored.id);
-  expect(changedObservation.expectedForce).toBe(observations[0].expectedForce);
-  expect((1 + changedObservation.deviation / 100) / (1 + observations[0].deviation / 100)).toBeCloseTo(0.8, 12);
+  expect(changedObservation.expectedForce).toBe(scoredObservation.expectedForce);
+  expect((1 + changedObservation.deviation / 100) / (1 + scoredObservation.deviation / 100)).toBeCloseTo(0.8, 12);
+});
+
+test('session performance uses the frozen calibrated curve and retains extrapolated holds', () => {
+  const amps = [20, 25, 30];
+  const taus = [6, 45, 420];
+  const scale = 0.5;
+  const duration = 140;
+  const expectedForce = predForceThreeExp(amps, duration, taus) * scale;
+  const calibrated = row(12, 'R', {
+    duration,
+    session: 'calibrated',
+    avg_force_kg: expectedForce * 1.2,
+    force_recording: {
+      version: 5,
+      signal_quality: 'complete',
+      capacity_eligible: true,
+      prediction_check: { models: { current: {
+        status: 'ready',
+        amps,
+        taus,
+        scale,
+        source: 'anchored-curve',
+        duration_basis: 'legacy_elapsed',
+        min_duration_s: 5,
+        max_duration_s: 120,
+      } } },
+    },
+  });
+  const result = buildPerformanceTrendAnalysis([...history(12), calibrated], ['Crusher'], 'R');
+  const observation = result.observations.find(item => item.id === calibrated.id);
+  expect(observation.expectedForce).toBeCloseTo(expectedForce, 12);
+  expect(observation.deviation).toBeCloseTo(20, 12);
+  expect(observation).toMatchObject({
+    expectationSource: 'frozen',
+    calibrationSource: 'anchored-curve',
+    calibrationScale: scale,
+    extrapolated: true,
+    modelDurationRange: { min: 5, max: 120 },
+  });
 });
 
 test('a transition incompatible with a native prior interval cannot create individual short-term points', () => {
@@ -149,7 +192,7 @@ test.each([[0, null], [5, 'short'], [45, 'short'], [45.1, 'medium'], [120, 'medi
 test('maturation freezes as soon as every domain has two qualifying points per selected hand', () => {
   const records = history(24);
   const result = buildPerformanceTrendAnalysis(records, ['Crusher'], 'pooled');
-  const mature = result.rows.find(point => point.Crusher_evidence.maturation.ready);
+  const mature = result.rows.find(point => point.Crusher_evidence?.maturation.ready);
   expect(mature).toBeDefined();
   expect(mature.date).toBe(date(11));
   expect(mature.Crusher_evidence.maturation).toMatchObject({
@@ -157,10 +200,10 @@ test('maturation freezes as soon as every domain has two qualifying points per s
   });
   expect(mature.Crusher_evidence.maturation.domainCounts.every(domain => domain.count === 2)).toBe(true);
   expect(mature.Crusher_evidence.maturation.improvement).toBe(0);
-  const before = result.rows.filter(point => point.date < mature.date);
+  const before = result.rows.filter(point => point.date < mature.date && point.Crusher_evidence);
   expect(before.every(point => !point.Crusher_evidence.maturation.ready && point.Crusher_evidence.maturation.improvement === null)).toBe(true);
   expect(before.at(-1).Crusher_evidence.maturation.supportedDomains).toBe(5);
-  result.rows.filter(point => point.date >= mature.date).forEach(point => {
+  result.rows.filter(point => point.date >= mature.date && point.Crusher_evidence).forEach(point => {
     const evidence = point.Crusher_evidence;
     expect(evidence.maturation.date).toBe(mature.date);
     expect(evidence.maturation.score).toBe(mature.Crusher_evidence.score);
@@ -181,18 +224,21 @@ test('extra points in covered domains cannot compensate for a missing second poi
 
 test('single-hand maturation does not let sparse data from the other hand pass a pooled baseline', () => {
   const imbalanced = history(12).filter(item => item.hand === 'L' || item.date <= date(5));
-  expect(buildPerformanceTrendAnalysis(imbalanced, ['Crusher'], 'L').rows.some(point => point.Crusher_evidence.maturation.ready)).toBe(true);
+  expect(buildPerformanceTrendAnalysis(imbalanced, ['Crusher'], 'L').rows
+    .some(point => point.Crusher_evidence?.maturation.ready)).toBe(true);
   const pooled = buildPerformanceTrendAnalysis(imbalanced, ['Crusher'], 'pooled');
-  expect(pooled.rows.every(point => !point.Crusher_evidence.maturation.ready)).toBe(true);
-  const latest = pooled.rows.at(-1).Crusher_evidence.maturation;
+  expect(pooled.rows.filter(point => point.Crusher_evidence)
+    .every(point => !point.Crusher_evidence.maturation.ready)).toBe(true);
+  const latest = pooled.rows.findLast(point => point.Crusher_evidence).Crusher_evidence.maturation;
   expect(latest.domainCounts.every(domain => domain.perHand.find(item => item.hand === 'R').count === 1)).toBe(true);
 });
 
 test('90-day comparison uses an earlier estimate and never publishes it with insufficient history', () => {
   const result = buildPerformanceTrendAnalysis(history(40), ['Crusher'], 'L');
-  expect(result.rows[0].Crusher_evidence.change90Days).toBeNull();
-  const latest = result.rows.at(-1).Crusher_evidence;
-  const prior = result.rows.findLast(point => Date.parse(point.date) <= Date.parse(latest.date) - 90 * 86400000).Crusher_evidence;
+  const capacityRows = result.rows.filter(point => point.Crusher_evidence);
+  expect(capacityRows[0].Crusher_evidence.change90Days).toBeNull();
+  const latest = capacityRows.at(-1).Crusher_evidence;
+  const prior = capacityRows.findLast(point => Date.parse(point.date) <= Date.parse(latest.date) - 90 * 86400000).Crusher_evidence;
   expect(latest.change90ReferenceDate).toBe(prior.date);
   expect(latest.change90Days).toBeCloseTo(100 * (latest.score / prior.score - 1));
 });

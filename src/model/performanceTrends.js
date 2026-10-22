@@ -6,10 +6,34 @@ import { prepareEvaluationRows } from './evaluationRows.js';
 import { freshFitReps } from './load.js';
 import { loadProvenance } from './forceRecording.js';
 import { fitEstablishedTrend } from './capacityTrendFit.js';
-import { computeBalancedCurveScore, predForceThreeExp } from './threeExp.js';
+import { buildFreshLoadMap, prescription } from './prescription.js';
+import { computeBalancedCurveScore, predForceThreeExp, buildThreeExpPriors, THREE_EXP_TAUS } from './threeExp.js';
 const dayMs = 86400000;
 const mean = values => values.reduce((a,b)=>a+b,0)/values.length;
 const nextDate = date => new Date(Date.parse(date)+dayMs).toISOString().slice(0,10);
+const positive = value => Number.isFinite(Number(value)) && Number(value) > 0;
+const optionalNumber = value => value != null && Number.isFinite(Number(value)) ? Number(value) : null;
+
+function usableCalibratedCurve(model) {
+  if (!model || (model.status && model.status !== 'ready')
+    || !Array.isArray(model.amps) || model.amps.length !== 3
+    || !model.amps.every(value => Number.isFinite(Number(value)) && Number(value) >= 0)
+    || !positive(model.scale)) return null;
+  const taus = Array.isArray(model.taus) && model.taus.length === 3
+    && model.taus.every(positive) ? model.taus.map(Number) : THREE_EXP_TAUS;
+  return { ...model, amps:model.amps.map(Number), scale:Number(model.scale), taus,
+    min_duration_s:optionalNumber(model.min_duration_s), max_duration_s:optionalNumber(model.max_duration_s) };
+}
+
+function savedCalibratedCurve(rep) {
+  return usableCalibratedCurve(rep.force_recording?.prediction_check?.models?.current);
+}
+
+function comparisonBasis(rep) {
+  return rep.force_recording?.basis === 'target_acquired'
+    && rep.force_recording?.interval_basis_applied !== 'legacy_elapsed'
+    ? 'target_acquired' : 'legacy_elapsed';
+}
 
 export const DEFAULT_PERFORMANCE_TREND_MODEL = 'contextOnly';
 
@@ -24,7 +48,7 @@ export function buildPerformanceTrends(history, grips, hand = 'pooled', {model =
     && r.actual_time_s > 0 && r.actual_time_s <= 600);
   const dates = [...new Set(clean.filter(r=>grips.includes(r.grip)).map(r=>r.date))].sort();
   const hands = hand === 'pooled' ? ['L','R'] : [hand];
-  const baselines = new Map(), cache = new Map();
+  const baselines = new Map(), cache = new Map(), dateInputs = new Map(), expectationCache = new Map();
   const fit = (grip,h,date) => {
     const key = `${grip}|${h}|${date}`;
     if (!cache.has(key)) cache.set(key,model==='original'
@@ -32,10 +56,37 @@ export function buildPerformanceTrends(history, grips, hand = 'pooled', {model =
       : fitContextualTrend(clean,h,grip,date,{prepared:true,robust:model==='contextRobust'}));
     return cache.get(key);
   };
+  const reconstructedCurve = (grip,h,date,target) => {
+    const key = `${grip}|${h}|${date}`;
+    if (expectationCache.has(key)) return expectationCache.get(key);
+    if (!dateInputs.has(date)) {
+      const prior = clean.filter(r=>r.date<date);
+      dateInputs.set(date,{prior,freshMap:buildFreshLoadMap(prior),threeExpPriors:buildThreeExpPriors(prior)});
+    }
+    const inputs = dateInputs.get(date);
+    const result = prescription(inputs.prior,h,grip,target,
+      {referenceDate:date,freshMap:inputs.freshMap,threeExpPriors:inputs.threeExpPriors,captureCurve:true});
+    const curve = usableCalibratedCurve(result?.curveSnapshot
+      ? {...result.curveSnapshot,source:result.source,taus:THREE_EXP_TAUS,history_before:date}
+      : null);
+    expectationCache.set(key,curve);
+    return curve;
+  };
+  const expectation = rep => {
+    const saved = savedCalibratedCurve(rep);
+    const curve = saved || reconstructedCurve(rep.grip,rep.hand,rep.date,
+      Number(rep.target_duration)>0?Number(rep.target_duration):rep.actual_time_s);
+    if (!curve || (curve.duration_basis && curve.duration_basis!==comparisonBasis(rep))) return null;
+    const expectedForce = predForceThreeExp(curve.amps,rep.actual_time_s,curve.taus)*curve.scale;
+    if (!positive(expectedForce)) return null;
+    const minDuration = Number.isFinite(curve.min_duration_s)?curve.min_duration_s:null;
+    const maxDuration = Number.isFinite(curve.max_duration_s)?curve.max_duration_s:null;
+    return {expectedForce,expectationSource:saved?'frozen':'reconstructed',calibrationSource:curve.source||null,
+      calibrationScale:curve.scale,minDuration,maxDuration,
+      extrapolated:(minDuration!=null&&rep.actual_time_s<minDuration)||(maxDuration!=null&&rep.actual_time_s>maxDuration)};
+  };
   return dates.map(date => {
     const eligible = eligibleAt(date);
-    const previousDate = new Date(Date.parse(date)-dayMs).toISOString().slice(0,10);
-    const priorEligible = eligibleAt(previousDate);
     const row = {date, timestamp:Date.parse(date)};
     for (const grip of grips) {
       const current = eligible.filter(r=>r.grip===grip && r.date===date && hands.includes(r.hand));
@@ -54,19 +105,12 @@ export function buildPerformanceTrends(history, grips, hand = 'pooled', {model =
       }
       const observations = [];
       const deviations = hands.map(h=>{
-        const prior = fit(grip,h,date);
-        if (!prior) return null;
-        const old = priorEligible.filter(r=>r.grip===grip&&r.hand===h);
-        const priorAcquired = priorEligible.filter(r=>r.grip===grip).every(r=>r.force_recording?.basis==='target_acquired');
-        const minT = Math.min(...old.map(r=>r.actual_time_s));
-        const maxT = Math.max(...old.map(r=>r.actual_time_s));
-        // Do not score a new duration outside that hand's observed coverage.
-        const values = current.filter(r=>r.hand===h&&r.actual_time_s>=minT&&r.actual_time_s<=maxT
-          && (!priorAcquired || (r.force_recording?.basis==='target_acquired' && r.force_recording?.interval_basis_applied!=='legacy_elapsed')))
+        const values = current.filter(r=>r.hand===h)
           .map(r=>{
-            const expectedForce = predForceThreeExp(prior.established,r.actual_time_s);
-            const deviation = 100*(r.avg_force_kg/expectedForce-1);
-            if (onEvidence && Number.isFinite(deviation)) observations.push({rep:r,expectedForce,deviation,context:context(r)});
+            const expected = expectation(r);
+            if (!expected) return null;
+            const deviation = 100*(r.avg_force_kg/expected.expectedForce-1);
+            if (onEvidence && Number.isFinite(deviation)) observations.push({rep:r,...expected,deviation,context:context(r)});
             return deviation;
           })
           .filter(Number.isFinite);

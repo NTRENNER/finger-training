@@ -15,7 +15,10 @@ export const isValidPeakMeasurement = r => isPeakMeasurement(r)
 export function peakMeasurementRecord({ stats, hand, round, grip, sessionId, date, startedAt,
   firstHand, source, previousEnd = null }) {
   const valid = stats.failureValid !== false && stats.endReason !== 'equipment_interruption' && stats.endReason !== 'interrupted'
-    && stats.actualTime >= 1 && sane(stats.peakForce) != null;
+    // Peak force is instantaneous. Require a real, complete measured interval,
+    // but do not turn an arbitrary hold duration into the definition of a PR.
+    && Number.isFinite(stats.actualTime) && stats.actualTime > 0
+    && sane(stats.peakForce) != null;
   const start = stats.startedAtMs ?? null;
   const end = stats.endedAtMs ?? null;
   return {

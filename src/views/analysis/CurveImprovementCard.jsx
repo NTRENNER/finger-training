@@ -504,7 +504,6 @@ export function CurveImprovementCard({
   // tiles' supported zones are built from; used so the per-zone fill
   // shares the same basis (July 2026).
   perHandGripEstimates = {},
-  measuredProgress = null,
   comparisonHistory = history,
 }) {
   const [comparisonMode, setComparisonMode] = useState("percent");
@@ -617,10 +616,6 @@ export function CurveImprovementCard({
     />
   ) : null;
 
-  const supportingDetails = <>
-    {measuredProgress && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontSize: 14, color: C.text, padding: "8px 0" }}>Measured session comparisons</summary>{measuredProgress}</details>}
-  </>;
-
   // ── Per-hand mode: interactive blocks where the hand has an overlay,
   // static tiles vs frozen per-hand baselines otherwise ──
   if (handView === "L" || handView === "R") {
@@ -701,7 +696,6 @@ export function CurveImprovementCard({
             ≥{GRIP_BASELINE_DURATION_THRESHOLD} durations of its own before its frame freezes.
           </div>
         )}
-        {supportingDetails}
       </Card>
     );
   }
@@ -799,7 +793,6 @@ export function CurveImprovementCard({
           />
         </>
       ) : null}
-      {supportingDetails}
     </Card>
   );
 }
