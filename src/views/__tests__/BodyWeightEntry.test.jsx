@@ -85,6 +85,13 @@ test("history can log a past date and correct it through the same save callback"
   expect(loadLS(LS_BW_LOG_KEY)).toEqual([{ date: "2026-09-01", kg: 71.8 }]);
 });
 
+test("history hides tendon while preserving a usable fallback for its saved selection", () => {
+  saveLS(LS_HISTORY_DOMAIN_KEY, "tendon");
+  render(<HistoryView history={[]} />);
+  expect(screen.queryByRole("button", { name: /Tendon/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Fingers/i })).toHaveAttribute("aria-pressed", "true");
+});
+
 test("entry rejects empty weight and future dates without saving", () => {
   const onSave = jest.fn();
   render(<BodyWeightEntry onSave={onSave} onClose={jest.fn()} />);

@@ -7,7 +7,7 @@ import { isMixedDomainRep, mixedDomainMetadata, MIXED_DOMAIN_LABELS } from '../m
 // ──────────────────────────────────────────────────────────────
 // HISTORY VIEW
 // ──────────────────────────────────────────────────────────────
-// The "History" tab — three-domain (fingers / workout / climbing)
+// The "History" tab — four-domain (fingers / workout / climbing / weight)
 // session log with full edit capabilities for finger-training reps.
 //
 // Fingers domain: per-session cards with rep chips. Click ✏️ to enable
@@ -52,8 +52,15 @@ import { deleteBW } from "../lib/sync.js";
 import { BadgeCollection } from "./cards/BadgeCollection.jsx";
 import { ClimbingPrBadgeCollection } from "./cards/ClimbingPrBadgeCollection.jsx";
 import { BodyWeightEntry } from "./BodyWeightEntry.jsx";
-import { TendonHistoryList } from "./TendonHistoryList.jsx";
 import { ForceDurationHistoryCard } from "./analysis/ForceDurationHistoryCard.jsx";
+
+const HISTORY_DOMAIN_OPTIONS = [
+  ["fingers", "🖐 Fingers"],
+  ["workout", "🏋️ Workout"],
+  ["climbing", "🧗 Climbing"],
+  ["weight", "⚖️ Weight"],
+];
+const HISTORY_DOMAINS = new Set(HISTORY_DOMAIN_OPTIONS.map(([key]) => key));
 
 // Default hand for the "+ Add rep" picker. Resolution order:
 //   1. STICKY — the last hand you added to THIS session (sessKey match),
@@ -108,7 +115,10 @@ export function HistoryView({
   onDownloadClimbingCSV = () => {},
   gripPresets = [],
 }) {
-  const [domain,      setDomain]      = useState(() => loadLS(LS_HISTORY_DOMAIN_KEY) || "fingers");
+  const [domain, setDomain] = useState(() => {
+    const savedDomain = loadLS(LS_HISTORY_DOMAIN_KEY);
+    return HISTORY_DOMAINS.has(savedDomain) ? savedDomain : "fingers";
+  });
   const switchDomain = (d) => { setDomain(d); saveLS(LS_HISTORY_DOMAIN_KEY, d); };
   // wLog for the year-at-a-glance heatmap — live via useLSValue, so a
   // cloud pull that merges in another device's sessions repaints the
@@ -485,7 +495,7 @@ export function HistoryView({
       <Card style={{ padding: "20px 18px" }}>
         <h2 style={{ margin: "0 0 20px", fontSize: 26 }}>History</h2>
         <SectionSelector label="History category" value={domain} onChange={switchDomain}
-          options={[["fingers", "🖐 Fingers"], ["workout", "🏋️ Workout"], ["climbing", "🧗 Climbing"], ["weight", "⚖️ Weight"], ["tendon", "🩹 Tendon"]]} />
+          options={HISTORY_DOMAIN_OPTIONS} />
         {["fingers", "workout", "climbing"].includes(domain) && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
             {domain === "fingers" && <Btn style={{ flex: 1, minHeight: 44 }} onClick={() => { setAddingSession(s => !s); setNewSessDate(ymdLocal()); setNewSessGrip(""); setNewSessTarget(TARGET_OPTIONS[0].seconds); setNewSessReps([]); setNewRepLoad(""); setNewRepTime(""); }} color={addingSession ? C.red : C.green}>＋ Session</Btn>}
@@ -702,8 +712,6 @@ export function HistoryView({
           )}
         </Card>
       )}
-      {domain === "tendon" && <TendonHistoryList />}
-
       {domain === "fingers" && <>
 
       <div role="group" aria-label="Filter finger sessions" style={{ marginBottom: 20 }}>
