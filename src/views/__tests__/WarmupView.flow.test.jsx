@@ -180,13 +180,13 @@ test("recovery activity leads into Potentiation Pulls and completes the warm-up"
   fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
   fireEvent.click(screen.getByRole("button", { name: "Start pull" }));
   act(() => jest.advanceTimersByTime(2200));
-  expect(screen.getByText("Recovery movement")).toBeInTheDocument();
   expect(screen.getByText("Med-ball slams")).toBeInTheDocument();
   expect(screen.getByText("3–5 crisp reps")).toBeInTheDocument();
+  // Finishing the movement needs no tap: the rest ends on its own and the
+  // next step waits for the pull.
+  expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
 
   act(() => jest.advanceTimersByTime(2500));
-  expect(screen.getByText("Med-ball slams")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   expect(screen.getByText("Crusher · Potentiation Pulls")).toBeInTheDocument();
   for (let pull = 0; pull < 2; pull += 1) {
     fireEvent.click(screen.getByRole("button", { name: "Start pull" }));
@@ -196,6 +196,22 @@ test("recovery activity leads into Potentiation Pulls and completes the warm-up"
   fireEvent.click(screen.getByRole("button", { name: "Finish warm-up" }));
   expect(screen.getByText(/Warm-up complete/)).toBeInTheDocument();
   expect(addReps).not.toHaveBeenCalled();
+});
+
+test("Continue early ends the rest before its timer runs out", () => {
+  generateWarmupProtocol.mockReturnValue({ ...protocol, steps: [
+    { ...hang("First hold", "Crusher", 20), restAfterSec: 90 },
+    hang("Second hold", "Crusher", 25),
+  ] });
+  render(<WarmupView visible history={[]} wLog={[]} bodyWeightKg={73}
+    tindeq={{ connected: false }} unit="kg" onClose={jest.fn()} addReps={jest.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Start pull" }));
+  act(() => jest.advanceTimersByTime(2200));
+  expect(screen.getByRole("timer", { name: "Rest" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Continue early" }));
+  expect(screen.queryByRole("timer", { name: "Rest" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Start pull" })).toBeInTheDocument();
 });
 
 test("pulling during rest cannot shorten it or pre-start the next rep", async () => {

@@ -11,7 +11,7 @@ import { PEAK_ROUNDS, PEAK_ROUND_REST_S, peakMeasurementRecord, isValidPeakMeasu
 import { finalizeDeviceActivity } from '../model/forceRecording.js';
 import { HandCue } from './cards/HandCue.jsx';
 import { ForceGauge } from './cards/LiveForceCard.jsx';
-import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from './forceProtection.jsx';
+import { creditedSeconds } from './forceProtection.jsx';
 
 // Shared complete protocol for the standalone test and the optional warmup block.
 // Keep one sensor stream alive through hand changes/rest to observe releases.
@@ -178,8 +178,6 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
             ? <div role="timer" aria-label="Peak pull" style={{ fontSize: 96, fontWeight: 900, color: C.blue }}>{state.elapsed.toFixed(1)}s</div>
             : <div style={{ fontSize: 22, fontWeight: 700 }}>Pull to begin</div>}
           {state.phase === 'ready' && <p style={{ color: C.muted }}>Position the grip and release before pulling — the attempt starts automatically.</p>}
-          {state.phase === 'active' && <ForceLossNotice state={tindeq?.forceLoss} />}
-          <SignalRecoveringNotice recovering={tindeq?.signalRecovering} />
           <p>Build force smoothly. Pull as hard as you can, then release when you've reached your max.</p>
           <p style={{ color: C.muted }}>No target weight or time cap. Measures peak force, not time to failure.</p>
         </>}
@@ -188,7 +186,7 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
         {!tindeq?.connected && <><p>Connect the Tindeq to measure your peak.</p><Btn onClick={() => tindeq?.connect?.()}>Connect Tindeq</Btn></>}
         {state.phase === 'active' && <Btn color={C.yellow} onClick={retryRep}>Retry rep</Btn>}
       </Card>
-      <Card style={{ marginTop: 12 }}><ForceGauge force={tindeq?.force || 0} emphasizePeak
+      <Card style={{ marginTop: 12 }}><ForceGauge force={tindeq?.signalRecovering ? null : tindeq?.force || 0} emphasizePeak
         avg={state.phase === 'active' ? tindeq?.avgForce || 0 : 0}
         peak={state.phase === 'active' ? tindeq?.peak || 0 : 0} targetKg={null} maxDisplay={100} unit={unit} />
         {state.rows.length > 0 && <p>Best so far · {context.hands.map(h => `${h}: ${best(h) ? fmtW(best(h), unit) + ' ' + unit : '—'}`).join(' · ')}</p>}

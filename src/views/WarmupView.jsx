@@ -1,7 +1,7 @@
 import { Toggle } from '../ui/Toggle.jsx';
 import { PeakTestView } from './PeakTestView.jsx';
 import { PotentiationPullView } from './PotentiationPullView.jsx';
-import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from "./forceProtection.jsx";
+import { creditedSeconds } from "./forceProtection.jsx";
 // ─────────────────────────────────────────────────────────────
 // ADAPTIVE WARM-UP VIEW (Tindeq-driven)
 // ─────────────────────────────────────────────────────────────
@@ -35,7 +35,10 @@ import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from "./forc
 //   swap-prompt    — between Crusher and Micro: "Swap Tindeq to Micro"
 //   hang-armed     — auto-detect armed, waiting for user to pull
 //   hang-active    — hold timer counting up (force ≥ 4 kg)
-//   rest           — countdown timer between steps
+//   rest           — finger-recovery countdown showing the whole-body
+//                    movement; advances on its own, and the next hang
+//                    starts on your pull, so finishing the movement
+//                    needs no tap
 //   peak-test      — optional shared single-handed Peak Test flow
 //   potentiation   — brief fast pulls with separate speed measurements
 //   done           — completion
@@ -126,8 +129,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   // per step.
   const [elapsed, setElapsed] = useState(0);          // sec since hang started
   const [restRemaining, setRestRemaining] = useState(0);
-  const [restActivityComplete, setRestActivityComplete] = useState(false);
-  const restActivityCompleteRef = useRef(false);
   const restPromptRef = useRef(null);
   // Manual mode is committed at startProtocol time: if the Tindeq wasn't
   // connected when the user tapped Start, this run uses tap-driven hangs
@@ -201,7 +202,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         if (remaining <= 0) {
           clearInterval(tickRef.current);
           tickRef.current = null;
-          if (!currentStep?.restActivity || restActivityCompleteRef.current) advanceFromRest();
+          advanceFromRest();
         }
       }, 200);
     }
@@ -346,8 +347,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     setElapsed(0);
     const isLastStep = stepIdx >= steps.length - 1;
     if (!isLastStep && currentStep?.restAfterSec > 0) {
-      restActivityCompleteRef.current = false;
-      setRestActivityComplete(false);
       changePhase("rest");
     } else {
       advanceToNextStep();
@@ -357,12 +356,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   function advanceFromRest() {
     if (phaseRef.current !== "rest") return;
     advanceToNextStep();
-  }
-
-  function finishRestActivity() {
-    restActivityCompleteRef.current = true;
-    setRestActivityComplete(true);
-    if (restRemaining <= 0) advanceFromRest();
   }
 
   function advanceToNextStep() {
@@ -431,7 +424,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         {['Crusher', 'Micro'].map(grip => <Toggle key={grip} label={`${grip} Max Test`}
           checked={peakTestGrips.includes(grip)} disabled={!protocol.availablePeakGrips?.includes(grip)}
           onChange={checked => setPeakTestGrips(grips => checked ? [...grips, grip] : grips.filter(g => g !== grip))} />)}
-        {includePeakTest && <p style={{ color: C.muted }}>Three 3-second pulls per hand, alternating hands. Rest 60 seconds between rounds. Only the test measurements are saved.</p>}
+        {includePeakTest && <p style={{ color: C.muted }}>Three 3-second pulls per hand, alternating hands. Rest 60 seconds between rounds.</p>}
         <div style={{ marginBottom: 16 }}>
           {steps.map((s, i) => (
             <div key={s.id} style={{
@@ -466,9 +459,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
               </div>
             </div>
           ))}
-        </div>
-        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>
-          Warm-up holds and recovery movements do not update the force curve.
         </div>
 
         {/* Tindeq connect row — placed directly above the Start button
@@ -555,7 +545,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   if (phase === "interrupted") {
     return stage(<>
       <div role="status" style={{ color: C.yellow, fontSize: 18, fontWeight: 700 }}>Warm-up paused</div>
-      <p style={{ color: C.muted }}>The sensor stopped sending force readings. This rep has not been counted. Release the load, check the connection, then retry when ready.</p>
       {connectionNotice}
       {actions(<Btn onClick={() => { setElapsed(0); changePhase("hang-armed"); }} disabled={!manualMode && !tindeq?.connected}>Retry rep</Btn>)}
     </>);
@@ -564,6 +553,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   if (phase === "hang-armed" || phase === "hang-active") {
     const target = currentStep.targetSec;
     const active = phase === "hang-active";
+    const liveSignal = !manualMode && tindeq?.connected && !tindeq?.signalRecovering;
     const credited = active ? (manualMode ? elapsed : Number(creditedSeconds(tindeq?.forceLoss, elapsed))) : 0;
     const swapCopy = manualMode
       ? <>Swap to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then tap Start pull.</>
@@ -582,17 +572,15 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
           {swapCopy}
         </div>
       )}
-      {!manualMode && <SignalRecoveringNotice recovering={tindeq?.signalRecovering} />}
       <div style={{ fontSize: 15, textAlign: "center", color: C.text }}>
         {active ? activeCopy : readyCopy}
       </div>
       <WarmupTime seconds={active ? credited : 0} label={active ? "Hold time" : "Ready"} target={target} />
-      {active && !manualMode && <ForceLossNotice state={tindeq?.forceLoss} />}
       {!manualMode && connectionNotice}
       <ForceGauge
-        force={manualMode ? null : (tindeq?.force || 0)}
-        avg={!manualMode && active ? tindeq?.avgForce || 0 : null}
-        peak={!manualMode && active ? tindeq?.peak || 0 : null}
+        force={liveSignal ? (tindeq?.force || 0) : null}
+        avg={liveSignal && active ? tindeq?.avgForce || 0 : null}
+        peak={liveSignal && active ? tindeq?.peak || 0 : null}
         targetKg={currentStep.targetLoadKg}
         maxDisplay={Math.max(50, (currentStep.targetLoadKg || 0) * 1.25)}
         numberSize="clamp(48px, 15vw, 88px)"
@@ -610,17 +598,8 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
         padding: "14px 16px", marginBottom: 10,
       }}>
-        <div style={{ color: C.green, fontSize: 12, fontWeight: 700, textTransform: "uppercase", marginBottom: 5 }}>
-          Recovery movement
-        </div>
         <div style={{ color: C.text, fontSize: 20, fontWeight: 800 }}>{activity.name}</div>
         <div style={{ color: C.blue, fontSize: 15, fontWeight: 700, marginTop: 3 }}>{activity.dose}</div>
-        {!restActivityComplete ? <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-          <Btn onClick={finishRestActivity} color={C.green}>Done</Btn>
-          <Btn onClick={finishRestActivity} color={C.border} small>Skip movement</Btn>
-        </div> : <div role="status" style={{ color: C.green, fontSize: 13, fontWeight: 700, marginTop: 10 }}>
-          Movement complete · keep recovering
-        </div>}
       </div> : <div style={{ fontSize: 15, textAlign: "center" }}>Release and rest.</div>}
       <WarmupTime seconds={restRemaining} label="Rest" />
       <div style={{ color: C.muted, lineHeight: 1.6, textAlign: "center" }}>
@@ -628,7 +607,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         {nextStep?.type === "hang" && <div style={{ fontSize: 22, fontWeight: 700, color: C.blue }}>{fmtW(nextStep.targetLoadKg, unit)} {unit} · {nextStep.targetSec}s</div>}
       </div>
       {!manualMode && connectionNotice}
-      {actions(<Btn onClick={advanceFromRest}>{restRemaining > 0 ? "Continue early" : "Continue"}</Btn>, false)}
+      {actions(<Btn onClick={advanceFromRest}>Continue early</Btn>, false)}
     </>);
   }
 
@@ -641,9 +620,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         </div>
         <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, marginBottom: 16 }}>
           Continue whenever you feel ready.
-        </div>
-        <div style={{ fontSize: 12, color: C.muted, marginBottom: 16 }}>
-          Warm-up measurements remain separate from the force curve.
         </div>
         <Btn onClick={onClose} color={C.green}>Close</Btn>
       </Card>

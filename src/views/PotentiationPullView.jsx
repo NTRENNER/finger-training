@@ -7,7 +7,6 @@ import { C } from "../ui/theme.js";
 import { fmtW } from "../ui/format.js";
 import { HandCue } from "./cards/HandCue.jsx";
 import { ForceGauge } from "./cards/LiveForceCard.jsx";
-import { SignalRecoveringNotice } from "./forceProtection.jsx";
 
 // Brief, submaximal single-hand pulls used to prime recruitment before
 // climbing. Sensor pulls preserve rapid-force metrics in hidden measurement
@@ -171,7 +170,6 @@ export function PotentiationPullView({
         }}>Swap the Tindeq to the <b>{grip}</b> gripper, let it settle unloaded, then pull.</div>}
         <HandCue hand={activeHand} />
         <p style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>Hit the target quickly, then release.</p>
-        <p style={{ color: C.muted, marginTop: 0 }}>Fast intent, brief contact. Do not continue grinding toward a maximum.</p>
         {manualMode ? <div style={{ margin: "20px 0" }}>
           <div style={{ color: C.muted, fontSize: 13 }}>Target</div>
           <div style={{ color: C.blue, fontSize: 48, fontWeight: 900 }}>{fmtW(targetLoadKg, unit)} <span style={{ fontSize: 18 }}>{unit}</span></div>
@@ -179,7 +177,7 @@ export function PotentiationPullView({
             ? <Btn color={C.green} onClick={() => finishAttempt()}>Pull complete</Btn>
             : <Btn color={C.green} onClick={() => callbacks.current.start()}>Start pull</Btn>}
         </div> : <ForceGauge
-          force={tindeq?.connected ? tindeq.force || 0 : null}
+          force={tindeq?.connected && !tindeq.signalRecovering ? tindeq.force || 0 : null}
           avg={state.phase === "active" ? tindeq?.avgForce || 0 : null}
           peak={state.phase === "active" ? tindeq?.peak || 0 : 0}
           targetKg={targetLoadKg}
@@ -187,10 +185,8 @@ export function PotentiationPullView({
           numberSize="clamp(48px, 15vw, 82px)"
           unit={unit}
         />}
-        {!manualMode && state.phase === "ready" && <p style={{ color: C.muted }}>Pull to begin automatically.</p>}
-        <SignalRecoveringNotice recovering={tindeq?.signalRecovering} />
         {state.phase === "error" && <div role="alert">
-          <p style={{ color: C.yellow }}>The pull was not counted because the sensor connection was interrupted.</p>
+          <p style={{ color: C.yellow }}>Pull not counted</p>
           <Btn onClick={retryPull} disabled={!tindeq?.connected}>Retry pull</Btn>
         </div>}
         {!manualMode && !tindeq?.connected && <div>

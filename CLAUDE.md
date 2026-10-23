@@ -38,6 +38,15 @@ rep before any prompt could appear.
   Unfiltered queries have already produced a wrong diagnosis. Never surface
   other users' data.
 
+## Rep history
+
+`useRepHistory` stores training reps and non-training measurements (warm-up
+Potentiation Pulls, tagged by `force_recording.session_protocol`) in one
+array, because they share the sync path. Its `history` and every curve input
+are training-only. Use `potentiationHistory` for the speed card, and
+`allHistory` only for persistence and backups. Add any new measurement type
+to that split rather than filtering it in views.
+
 ## Tindeq
 
 - The Progressor's sample timestamp can restart mid-stream while packets
@@ -54,6 +63,8 @@ rep before any prompt could appear.
 - The active-rep screen shows live weight, average weight, time, target weight
   and target time. Nothing else, and the layout must not jump.
 - Sessions always start with the same hand.
+- Warm-up rests protect finger recovery, so the timer stays. The next step
+  starts on the user's pull. Never gate progress on a "done" tap.
 - The unused tendon code and the baseline-maturation calculation
   (`maturation` in `src/model/performanceTrendEvidence.js`, no longer
   displayed) are kept on purpose. Don't delete them.

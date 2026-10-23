@@ -49,6 +49,7 @@ import { computePersonalRecoveryTaus } from "../model/recoveryFit.js";
 import { buildFreshLoadMap, fitDoseK } from "../model/prescription.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { isFirstSetRep } from "../model/load.js";
+import { isPotentiationMeasurement } from "../model/potentiationRfd.js";
 
 // Rep-level identity: prefer Supabase's uuid; fall back to a
 // composite key for reps that pre-date the cloud roundtrip
@@ -102,6 +103,19 @@ export function useRepHistory({
   }, [history]);
   useEffect(() => { retryPersistence(); }, [retryPersistence]);
 
+  // Potentiation speed rides the same offline-first rep transport, but it
+  // is a warm-up measurement, not training. Every model input below and
+  // the returned `history` are training-only; the stored array keeps both
+  // for persistence, sync and backups.
+  const trainingHistory = useMemo(
+    () => history.filter(rep => !isPotentiationMeasurement(rep)),
+    [history]
+  );
+  const potentiationHistory = useMemo(
+    () => history.filter(isPotentiationMeasurement),
+    [history]
+  );
+
   // Content-aware fingerprint for fatigue/prior memos. Cloud-sync
   // poll churn (history array reference changes without content
   // changes) is filtered by the outer useMemo's reference compare
@@ -131,7 +145,7 @@ export function useRepHistory({
   // edit that still touches it (shouldn't happen post-split, but
   // belts and braces) also triggers re-fit.
   const freshMapFp = useMemo(() => {
-    return history.map(r => [
+    return trainingHistory.map(r => [
       r.id,
       r.date,
       r.hand,
@@ -154,7 +168,7 @@ export function useRepHistory({
       // needs to rebuild so the new override flows into the curve fit.
       r.session_cooked,
     ].join(":")).join("|");
-  }, [history]);
+  }, [trainingHistory]);
 
   // Per-grip personal recovery taus (fast + medium; slow stays at
   // population — see recoveryFit.js header for the identifiability
@@ -163,7 +177,7 @@ export function useRepHistory({
   // feeds buildFreshLoadMap, which feeds the F-D curve fit, which
   // feeds prescription. No user-facing surface.
   const firstSetHistory = useMemo(
-    () => history.filter(isFirstSetRep),
+    () => trainingHistory.filter(isFirstSetRep),
     [freshMapFp] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
@@ -624,7 +638,9 @@ export function useRepHistory({
   }, []);
 
   return {
-    history,
+    history: trainingHistory,
+    potentiationHistory,
+    allHistory: history,
     historySynced,
     persistenceStatus, retryPersistence,
     freshMap, freshMapFp, threeExpPriors,
