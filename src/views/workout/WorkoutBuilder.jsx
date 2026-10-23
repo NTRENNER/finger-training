@@ -9,14 +9,16 @@ import {
   exerciseMovementCategories,
   sanitizeWorkoutProgram,
 } from "../../model/workoutProgram.js";
-import { MODIFIER_KINDS } from "../../model/workoutModifiers.js";
+import {
+  MODIFIER_CONTROLS,
+  MODIFIER_KINDS,
+} from "../../model/workoutModifiers.js";
 import { ExercisePicker } from "./ExercisePicker.jsx";
 
 const TEMPLATE_TABS = [
   { id: "A", label: "Strength A" },
   { id: "C", label: "Strength B" },
   { id: "S3", label: "Strength C" },
-  { id: "B", label: "Power Primer" },
 ];
 
 const fieldStyle = {
@@ -55,6 +57,7 @@ const EMPTY_DRAFT = {
 const EMPTY_MODIFIER_DRAFT = {
   name: "",
   kind: "assistance",
+  control: "standard",
   options: "",
 };
 
@@ -114,7 +117,9 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
   };
   const saveModifier = () => {
     if (!setupExerciseId) return;
-    const options = modifierDraft.options.split(",").map(value => value.trim()).filter(Boolean);
+    const options = modifierDraft.control === "standard"
+      ? modifierDraft.options.split(",").map(value => value.trim()).filter(Boolean)
+      : [];
     const modifier = createModifierDefinition({ ...modifierDraft, options });
     if (!modifier) return;
     onChange({
@@ -218,13 +223,20 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
                   {program.modifierDefinitions.map(modifier => {
                     const checked = (program.exerciseModifierIds[setupExerciseId] || []).includes(modifier.id);
                     const kind = MODIFIER_KINDS.find(item => item.id === modifier.kind)?.label || "Setup";
+                    const control = MODIFIER_CONTROLS.find(item => item.id === modifier.control)?.label;
                     return (
                       <div key={modifier.id} className="builder-modifier-row">
                         <label className="builder-modifier-option">
                           <input type="checkbox" checked={checked} onChange={() => toggleExerciseModifier(modifier.id)} />
                           <span>
                             <strong>{modifier.name}</strong>
-                            <small>{kind}{modifier.options.length ? ` · ${modifier.options.map(item => item.label).join(", ")}` : " · on/off"}</small>
+                            <small>
+                              {kind} · {modifier.control === "bands"
+                                ? control
+                                : modifier.options.length
+                                  ? modifier.options.map(item => item.label).join(", ")
+                                  : "On/off"}
+                            </small>
                           </span>
                         </label>
                         <button type="button" className="icon-remove-button" aria-label={`Delete ${modifier.name}`} onClick={() => deleteModifier(modifier)}>×</button>
@@ -251,14 +263,22 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
                   </select>
                 </label>
                 <label>
-                  <span>Choices, optional</span>
-                  <input
-                    style={fieldStyle}
-                    placeholder="Red, Blue, Maddog"
-                    value={modifierDraft.options}
-                    onChange={event => setModifierDraft({ ...modifierDraft, options: event.target.value })}
-                  />
+                  <span>Control</span>
+                  <select style={fieldStyle} value={modifierDraft.control} onChange={event => setModifierDraft({ ...modifierDraft, control: event.target.value })}>
+                    {MODIFIER_CONTROLS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
                 </label>
+                {modifierDraft.control === "standard" && (
+                  <label>
+                    <span>Choices, optional</span>
+                    <input
+                      style={fieldStyle}
+                      placeholder="Red, Blue, Maddog"
+                      value={modifierDraft.options}
+                      onChange={event => setModifierDraft({ ...modifierDraft, options: event.target.value })}
+                    />
+                  </label>
+                )}
                 <button type="button" className="builder-primary-action" disabled={!modifierDraft.name.trim()} onClick={saveModifier}>Add and attach</button>
               </div>
             </section>

@@ -6,6 +6,7 @@
 // badge, and stretch pill all consume one or both.
 
 import { C } from "../../ui/theme.js";
+import { BAND_MODIFIER_OPTIONS } from "../../model/workoutModifiers.js";
 
 // Exercise-type badge palette.
 // S = Strength, H = Hypertrophy / mobility, P = Power, X = Stretch.
@@ -42,15 +43,20 @@ export const WORKOUT_COLORS = {
 // what gets stored in the session record. Brand-agnostic — the user
 // picks whichever color matches their actual band, the model just
 // stores the label.
-export const BAND_COLORS = [
-  { key: "yellow", label: "Yellow", swatch: "#facc15" },
-  { key: "orange", label: "Orange", swatch: "#fb923c" },
-  { key: "red",    label: "Red",    swatch: "#ef4444" },
-  { key: "green",  label: "Green",  swatch: "#22c55e" },
-  { key: "blue",   label: "Blue",   swatch: "#3b82f6" },
-  { key: "purple", label: "Purple", swatch: "#a78bfa" },
-  { key: "black",  label: "Black",  swatch: "#1f2937" },
-];
+const BAND_SWATCHES = {
+  yellow: "#facc15",
+  orange: "#fb923c",
+  red: "#ef4444",
+  green: "#22c55e",
+  blue: "#3b82f6",
+  purple: "#a78bfa",
+  black: "#1f2937",
+};
+export const BAND_COLORS = BAND_MODIFIER_OPTIONS.map(option => ({
+  key: option.id,
+  label: option.label,
+  swatch: BAND_SWATCHES[option.id],
+}));
 // Quick lookup by key for rendering swatches from a stored band value.
 export const BAND_COLOR_LOOKUP = Object.fromEntries(
   BAND_COLORS.map(b => [b.key, b])

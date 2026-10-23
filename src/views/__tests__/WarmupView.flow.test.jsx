@@ -153,6 +153,49 @@ test("complete sequence retains stage layout and finishes after the second stren
   expect(addReps).not.toHaveBeenCalled();
 });
 
+test("recovery activity leads into unsaved Potentiation Pulls and completes the warm-up", () => {
+  generateWarmupProtocol.mockReturnValue({ ...protocol, steps: [
+    { ...hang("Primer hold", "Crusher", 20), restActivity: {
+      id: "med-ball-slams",
+      name: "Med-ball slams",
+      dose: "3–5 crisp reps",
+      cue: "Move explosively and stop while every rep is fast.",
+    } },
+    {
+      id: "potentiation-crusher",
+      type: "potentiation",
+      grip: "Crusher",
+      title: "Crusher Potentiation Pulls",
+      targetLoadKg: 30,
+      repsPerHand: 1,
+      restBetweenSec: 20,
+      restAfterSec: 0,
+      intensityLabel: "Fast single-hand pulls",
+    },
+  ] });
+  const addReps = jest.fn();
+  render(<WarmupView visible history={[]} wLog={[]} bodyWeightKg={73}
+    tindeq={{ connected: false }} unit="kg" onClose={jest.fn()} addReps={addReps} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Start hang" }));
+  act(() => jest.advanceTimersByTime(2200));
+  expect(screen.getByText("While your fingers recover")).toBeInTheDocument();
+  expect(screen.getByText("Med-ball slams")).toBeInTheDocument();
+  expect(screen.getByText("3–5 crisp reps")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Skip rest" }));
+  expect(screen.getByText("Crusher · Potentiation Pulls")).toBeInTheDocument();
+  for (let pull = 0; pull < 2; pull += 1) {
+    fireEvent.click(screen.getByRole("button", { name: "Start pull" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pull complete" }));
+    if (pull === 0) fireEvent.click(screen.getByRole("button", { name: "Skip rest" }));
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Finish warm-up" }));
+  expect(screen.getByText(/Warm-up complete/)).toBeInTheDocument();
+  expect(addReps).not.toHaveBeenCalled();
+});
+
 test("pulling during rest cannot shorten it or pre-start the next rep", async () => {
   const { hold, send } = await setup();
   hold(30, 2000); send(0); hold(30, 2000);

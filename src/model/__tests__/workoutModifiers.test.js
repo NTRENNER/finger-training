@@ -34,6 +34,22 @@ describe("workout modifiers", () => {
     expect(modifierSelectionSignature(setModifierSelection(assisted, modifier, ""))).toBe("");
   });
 
+  test("band modifiers use the standard palette and store multi-band combinations canonically", () => {
+    const modifier = createModifierDefinition({
+      name: "Band support",
+      kind: "assistance",
+      control: "bands",
+    });
+    expect(modifier.control).toBe("bands");
+    expect(modifier.options.map(option => option.id)).toEqual([
+      "yellow", "orange", "red", "green", "blue", "purple", "black",
+    ]);
+
+    const assisted = setModifierSelection({}, modifier, ["blue", "green"]);
+    expect(modifierSelectionLabel(assisted)).toBe("Band support: Green + Blue");
+    expect(modifierSelectionSignature(assisted)).toBe(`${modifier.id}=green+blue`);
+  });
+
   test("history filtering keeps only directly comparable set setups", () => {
     const modifier = createModifierDefinition({ name: "Slingshot", kind: "assistance" });
     const raw = { reps: "5", weight: "200", done: true };

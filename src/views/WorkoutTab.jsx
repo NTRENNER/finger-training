@@ -2,18 +2,17 @@ import { markWorkoutPending, syncWorkoutSessions } from '../lib/workoutSync.js';
 // ─────────────────────────────────────────────────────────────
 // WORKOUT TAB
 // ─────────────────────────────────────────────────────────────
-// Strength / power / mobility training that supports climbing.
+// Strength and mobility training that supports climbing.
 // The page owns a phase-based one/two/three-day strength rotation,
-// a separate low-volume power primer, editable templates, and the
-// existing time-based mobility builder.
+// editable templates, and the existing time-based mobility builder.
 //
 // Flow:
 //   1. recommendNextWorkout() looks at the user's recent support
 //      sessions and proposes one workout for today, with a one-line
 //      reason.
 //   2. The user can accept the recommendation or override via the
-//      active strength-day picker. The Power Primer and StretchPill are
-//      independent options, not recommender outputs. CLIMB
+//      active strength-day picker. StretchPill is an independent option,
+//      not a recommender output. CLIMB
 //      and REST are never recommended either — climbing is logged
 //      via the climbing activities flow, REST is just "don't open
 //      the app today."
@@ -92,7 +91,6 @@ import { StretchPill } from "./workout/StretchPill.jsx";
 import { StretchSessionBuilder } from "./workout/StretchSessionBuilder.jsx";
 import { ExercisePicker } from "./workout/ExercisePicker.jsx";
 import { StrengthModeSelector } from "./workout/StrengthModeSelector.jsx";
-import { PowerPrimerCard } from "./workout/PowerPrimerCard.jsx";
 import { WorkoutBuilder } from "./workout/WorkoutBuilder.jsx";
 import {
   countSupportSessions, setSummary, findLastSessionFor,
@@ -803,7 +801,7 @@ export function WorkoutTab({
           )}
           <Card style={{ padding: "20px 18px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 20 }}>
-              <h2 style={{ margin: 0, fontSize: 26, fontWeight: 750 }}>Strength Training</h2>
+              <h2 style={{ margin: 0, fontSize: 26, fontWeight: 750 }}>Workout</h2>
               <button type="button" className="secondary-workout-button" onClick={() => setBuilderOpen(true)}>
                 Edit workouts
               </button>
@@ -830,12 +828,6 @@ export function WorkoutTab({
               onPick={(id) => setPickedId(id)}
               workouts={programWorkouts}
               ids={strengthIds}
-            />
-
-            <PowerPrimerCard
-              workout={programWorkouts.B}
-              selected={activeId === "B"}
-              onSelect={() => setPickedId("B")}
             />
 
             {/* StretchPill sits below the picker, intentionally on its

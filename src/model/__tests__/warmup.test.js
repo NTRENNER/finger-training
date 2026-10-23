@@ -33,7 +33,7 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
     expect(generateWarmupProtocol({ history: [], wLog: [], bodyWeightKg: BW }).ok).toBe(false);
   });
 
-  test("boulder protocol has perfusion, ends after two strength ramps", () => {
+  test("boulder protocol has perfusion, two strength ramps, and final potentiation pulls", () => {
     const p = generateWarmupProtocol({ history, wLog: [], bodyWeightKg: BW, mode: "boulder" });
     expect(p.ok).toBe(true);
     const ids = p.steps.map(s => s.id);
@@ -41,8 +41,8 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
     expect(ids.some(id => id.startsWith("ladder-"))).toBe(true);
     expect(ids).not.toContain("bork-micro");
     expect(ids).not.toContain("pullup-finisher");
-    expect(p.steps.at(-1).id).toBe("ladder-micro-1");
-    expect(p.steps.every(s => s.type === "hang")).toBe(true);
+    expect(p.steps.at(-1).id).toBe("potentiation-micro");
+    expect(p.steps.filter(s => s.type === "potentiation").map(s => s.grip)).toEqual(["Crusher", "Micro"]);
     // Keep the two heavier rungs, ending at the existing 88% reference.
     const rungs = p.steps.filter(s => s.id.startsWith("ladder-"));
     expect(rungs.length).toBe(2);
@@ -55,7 +55,7 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
     expect(ids).not.toContain("bork-micro");
     const rungs = p.steps.filter(s => s.id.startsWith("ladder-"));
     expect(rungs.length).toBe(2);
-    expect(p.steps.at(-1)).toBe(rungs.at(-1));
+    expect(p.steps.at(-1).id).toBe("potentiation-micro");
     expect(p.steps.some(s => s.type === "pullup")).toBe(false);
   });
 
@@ -134,16 +134,33 @@ describe("getRecentMaxPullups — id migration", () => {
 });
 
 
-test.each(['boulder','route'])('optional Peak Test follows the %s ramps as the only maximal block', mode => {
+test.each(['boulder','route'])('optional Peak Test follows the %s ramps and precedes potentiation pulls', mode => {
   const base = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode});
   const peak = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode,peakTestGrips:['Micro']});
-  expect(base.steps.every(s=>s.type==='hang')).toBe(true);
-  expect(base.steps.at(-1).id).toBe('ladder-micro-1');
+  expect(base.steps.filter(s=>s.type==='peak_test')).toHaveLength(0);
+  expect(base.steps.at(-1).id).toBe('potentiation-micro');
   expect(peak.steps.filter(s=>s.type==='peak_test')).toHaveLength(1);
   expect(peak.steps.some(s=>s.type==='bork')).toBe(false);
   expect(peak.steps.filter(s=>s.type==='hang')).toEqual(base.steps.filter(s=>s.type==='hang'));
   expect(peak.steps.find(s=>s.type==='peak_test').restAfterSec).toBe(0);
-  expect(peak.steps.at(-1).type).toBe('peak_test');
+  expect(peak.steps.findIndex(s=>s.type==='peak_test')).toBeLessThan(peak.steps.findIndex(s=>s.type==='potentiation'));
+  expect(peak.steps.at(-1).id).toBe('potentiation-micro');
+});
+
+test('whole-body movements fill each recovery interval in the intended order', () => {
+  const p = generateWarmupProtocol({ history, bodyWeightKg: BW, mode: 'boulder' });
+  expect(p.steps.filter(s => s.type === 'hang').map(s => s.restActivity?.id)).toEqual([
+    'band-pull-aparts', 'heel-dig-bridges', 'med-ball-slams', 'jumps', 'hip-mobility',
+  ]);
+});
+
+test('potentiation pulls use single-hand submaximal targets and are not peak tests', () => {
+  const p = generateWarmupProtocol({ history, bodyWeightKg: BW, mode: 'boulder' });
+  const crusher = p.steps.find(s => s.id === 'potentiation-crusher');
+  const micro = p.steps.find(s => s.id === 'potentiation-micro');
+  expect(crusher.targetLoadKg).toBeCloseTo(p.mvcSource.crusherKg * 0.65, 5);
+  expect(micro.targetLoadKg).toBeCloseTo(p.mvcSource.microKg * 0.60, 5);
+  expect([crusher, micro].every(s => s.repsPerHand === 2 && s.restBetweenSec === 20)).toBe(true);
 });
 
 

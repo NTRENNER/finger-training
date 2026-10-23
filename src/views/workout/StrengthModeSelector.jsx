@@ -30,7 +30,7 @@ export function StrengthModeSelector({ mode, onChange }) {
         })}
       </div>
       <div className="strength-mode-note" style={{ color: C.muted }}>
-        The recommendation rotates only through the strength days in this mode. The power primer remains available separately.
+        The recommendation rotates through the strength days included in this mode.
       </div>
     </section>
   );

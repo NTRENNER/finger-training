@@ -4,6 +4,21 @@ export const MODIFIER_KINDS = [
   { id: "setup", label: "Setup" },
 ];
 
+export const MODIFIER_CONTROLS = [
+  { id: "standard", label: "On/off or choices" },
+  { id: "bands", label: "Band colors" },
+];
+
+export const BAND_MODIFIER_OPTIONS = [
+  { id: "yellow", label: "Yellow" },
+  { id: "orange", label: "Orange" },
+  { id: "red", label: "Red" },
+  { id: "green", label: "Green" },
+  { id: "blue", label: "Blue" },
+  { id: "purple", label: "Purple" },
+  { id: "black", label: "Black" },
+];
+
 function cleanString(value, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
@@ -29,11 +44,15 @@ export function sanitizeModifierDefinition(raw) {
   const name = cleanString(raw.name);
   if (!id.startsWith("modifier_") || !name) return null;
   const kind = MODIFIER_KINDS.some(item => item.id === raw.kind) ? raw.kind : "setup";
+  const control = MODIFIER_CONTROLS.some(item => item.id === raw.control)
+    ? raw.control
+    : "standard";
   const seen = new Set();
-  const options = (Array.isArray(raw.options) ? raw.options : [])
+  const rawOptions = control === "bands" ? BAND_MODIFIER_OPTIONS : raw.options;
+  const options = (Array.isArray(rawOptions) ? rawOptions : [])
     .map(sanitizeOption)
     .filter(option => option && !seen.has(option.id) && seen.add(option.id));
-  return { id, name, kind, options };
+  return { id, name, kind, control, options };
 }
 
 export function createModifierDefinition(values) {
@@ -79,17 +98,26 @@ export function copyModifierSelections(setOrSelections) {
 
 export function setModifierSelection(set, definition, value) {
   const next = copyModifierSelections(set);
-  if (!value) {
+  const isBands = definition.control === "bands";
+  const requested = isBands
+    ? (Array.isArray(value) ? value : cleanString(value).split("+")).filter(Boolean)
+    : [value].filter(Boolean);
+  if (requested.length === 0) {
     delete next[definition.id];
   } else {
-    const option = modifierValueOptions(definition).find(item => item.id === value);
-    if (!option) return { ...set, modifiers: next };
+    const available = modifierValueOptions(definition);
+    const options = isBands
+      ? available.filter(option => requested.includes(option.id))
+      : available.filter(option => option.id === requested[0]).slice(0, 1);
+    if (options.length === 0) return { ...set, modifiers: next };
     next[definition.id] = {
       modifierId: definition.id,
       name: definition.name,
       kind: definition.kind,
-      value: option.id,
-      valueLabel: definition.options?.length ? option.label : "",
+      value: options.map(option => option.id).join("+"),
+      valueLabel: definition.options?.length
+        ? options.map(option => option.label).join(" + ")
+        : "",
     };
   }
   return { ...set, modifiers: next };

@@ -21,8 +21,11 @@ import { isValidFailureRep, isCapacityEvidenceRep, isNominalPrescriptionRep } fr
 //     protocol (60% × peak) was actually a near-failure load for the
 //     60s step — quietly defeating its own warmup goal.
 //
-//   Both modes finish after two strength ramps, with an optional
-//   single-handed Peak Test as the only maximum-effort block.
+//   Both modes finish their measured warm-up after two strength ramps,
+//   with optional single-handed Peak Tests followed by brief Potentiation
+//   Pulls. Whole-body primer movements occupy the recovery intervals
+//   without loading the fingers. Potentiation Pulls are readiness work,
+//   not measurements, and are never written to history or the F-D curve.
 //   Both modes use a 45s long hold for each grip.
 //
 // Tindeq-driven design: each hang step prescribes a target LOAD (in kg)
@@ -74,6 +77,62 @@ import { migrateExerciseId } from "./exerciseIds.js";
 // each hand worked at ~half the intended load — why it felt light.
 export const BILATERAL_FACTOR = 1.9;
 const twoHand = (oneHandKg) => oneHandKg * BILATERAL_FACTOR;
+
+export const WARMUP_REST_ACTIVITIES = {
+  shoulders: {
+    id: "band-pull-aparts",
+    name: "Band pull-aparts",
+    dose: "8–12 easy reps",
+    cue: "Use a light band and relaxed hands. Finish early enough to keep recovering.",
+    alternative: "No band: use controlled wall slides.",
+  },
+  hamstrings: {
+    id: "heel-dig-bridges",
+    name: "Hamstring activation",
+    dose: "6 controlled heel-dig bridges",
+    cue: "Feel the hamstrings switch on without turning this into a strength set.",
+  },
+  slams: {
+    id: "med-ball-slams",
+    name: "Med-ball slams",
+    dose: "3–5 crisp reps",
+    cue: "Move explosively and stop while every rep is fast.",
+    alternative: "No ball: use 3 fast squat jumps.",
+  },
+  jumps: {
+    id: "jumps",
+    name: "Jumps",
+    dose: "2–3 high-quality reps",
+    cue: "Choose broad or vertical jumps. Full intent, full control, no fatigue.",
+  },
+  hips: {
+    id: "hip-mobility",
+    name: "Hip mobility",
+    dose: "4–6 shin-box transitions",
+    cue: "Move smoothly through 90/90 positions while the fingers recover.",
+  },
+};
+
+function addWholeBodyRecovery(steps) {
+  const hangs = steps.filter(step => step.type === "hang");
+  const activities = hangs.length >= 5
+    ? [
+        WARMUP_REST_ACTIVITIES.shoulders,
+        WARMUP_REST_ACTIVITIES.hamstrings,
+        WARMUP_REST_ACTIVITIES.slams,
+        WARMUP_REST_ACTIVITIES.jumps,
+        WARMUP_REST_ACTIVITIES.hips,
+      ]
+    : [
+        WARMUP_REST_ACTIVITIES.shoulders,
+        WARMUP_REST_ACTIVITIES.hamstrings,
+        WARMUP_REST_ACTIVITIES.slams,
+        { ...WARMUP_REST_ACTIVITIES.hips, dose: "2–3 jumps, then 4 shin-box transitions" },
+      ];
+  hangs.forEach((step, index) => {
+    step.restActivity = activities[index] || WARMUP_REST_ACTIVITIES.hips;
+  });
+}
 
 // Curve-anchored sub-failure load for a hold, by MARGIN rather than an
 // arbitrary % of F(60s). A hold of `holdSec` that uses fraction `failFrac`
@@ -268,8 +327,12 @@ function getRecentPeakMVC(history, grip, daysOld = 90) {
  *
  * @param {string[]} [args.peakTestGrips=[]] - independently selected Crusher/Micro tests
  *
- * Optional final Peak Test steps:
+ * Optional Peak Test steps:
  *   { id, title, intensityLabel, type: 'peak_test', grip, restAfterSec: 0 }
+ *
+ * Final Potentiation Pull steps:
+ *   { id, title, intensityLabel, type: 'potentiation', grip,
+ *     targetLoadKg, repsPerHand, restBetweenSec, restAfterSec: 0 }
  *
  */
 export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder", peakTestGrips = [] }) {
@@ -397,6 +460,8 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
     });
   }
 
+  addWholeBodyRecovery(steps);
+
   // Test the grip already attached first, then swap once if both are selected.
   // Only offer tests for grips included in this warmup.
   const availablePeakGrips = microAmps ? ['Crusher', 'Micro'] : ['Crusher'];
@@ -404,6 +469,29 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
   for (const grip of testOrder.filter(grip => peakTestGrips.includes(grip))) {
     steps.push({ id: `peak-test-${grip.toLowerCase()}`, title: `${grip} Peak Test`, type: 'peak_test',
       grip, intensityLabel: 'Single-handed · 3 rounds · 3s pulls · 60s between rounds', restAfterSec: 0 });
+  }
+
+  // Peak Tests deliberately run first so they remain clean measurements.
+  // Potentiation Pulls then provide the final bridge into climbing. Crusher
+  // precedes Micro so the warm-up ends on the more climbing-specific grip.
+  const potentiation = [
+    { grip: "Crusher", mvc: crusherMVC, fraction: 0.65 },
+    { grip: "Micro", mvc: microMVC, fraction: 0.60 },
+  ];
+  for (const { grip, mvc, fraction } of potentiation) {
+    if (!(mvc > 0)) continue;
+    steps.push({
+      id: `potentiation-${grip.toLowerCase()}`,
+      title: `${grip} Potentiation Pulls`,
+      type: "potentiation",
+      grip,
+      targetLoadKg: Math.max(1, mvc * fraction),
+      targetFraction: fraction,
+      repsPerHand: 2,
+      restBetweenSec: 20,
+      intensityLabel: `Fast single-hand pulls · ${Math.round(fraction * 100)}% peak · release immediately`,
+      restAfterSec: 0,
+    });
   }
 
   const bodyWeightLbs = Math.round(bodyWeightKg * 2.20462 * 10) / 10;

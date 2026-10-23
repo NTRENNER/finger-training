@@ -7,8 +7,7 @@
 
 .workout-section-heading,
 .builder-summary-row,
-.workout-builder-header,
-.power-primer-band {
+.workout-builder-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -24,7 +23,6 @@
 }
 
 .workout-section-title,
-.power-primer-title,
 .builder-workout-name {
   color: #e6edf3;
   font-size: 16px;
@@ -83,7 +81,6 @@
 
 .strength-mode-description,
 .strength-mode-note,
-.power-primer-copy,
 .builder-workout-purpose,
 .builder-exercise-prescription {
   color: #8b949e;
@@ -93,23 +90,6 @@
 
 .strength-mode-description { margin-top: 5px; }
 .strength-mode-note { margin-top: 10px; }
-
-.power-primer-band {
-  align-items: center;
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-left: 3px solid #f0883e;
-  border-radius: 8px;
-  margin-top: 20px;
-  padding: 14px 16px;
-}
-
-.power-primer-band.is-selected {
-  background: rgba(240, 136, 62, 0.08);
-  border-color: #f0883e;
-}
-
-.power-primer-copy { margin-top: 3px; }
 
 .secondary-workout-button,
 .text-button,
@@ -346,9 +326,11 @@
 .builder-modifier-create {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1.2fr 0.8fr 1.4fr auto;
+  grid-template-columns: 1.1fr 0.8fr 0.9fr 1.2fr auto;
   align-items: end;
 }
+
+.builder-modifier-create > .builder-primary-action { grid-column: -2 / -1; }
 
 .builder-modifier-create label > span {
   color: #8b949e;
@@ -364,7 +346,7 @@
   }
   .strength-mode-grid { grid-template-columns: minmax(0, 1fr); }
   .strength-mode-button { min-height: 0; }
-  .power-primer-band { align-items: stretch; flex-direction: column; }
   .builder-template-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .builder-modifier-create { grid-template-columns: minmax(0, 1fr); }
+  .builder-modifier-create > .builder-primary-action { grid-column: auto; }
 }

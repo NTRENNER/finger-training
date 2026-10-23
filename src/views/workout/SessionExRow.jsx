@@ -68,6 +68,42 @@ function BandStack({ bands, size = 10, gap = 2 }) {
   );
 }
 
+function BandPicker({ bands, label, onToggle }) {
+  const activeBands = normalizeBands(bands);
+  return (
+    <span
+      role="group"
+      aria-label={label}
+      style={{
+        display: "inline-flex", alignItems: "center", flexWrap: "wrap",
+        gap: 3, maxWidth: 192,
+      }}
+    >
+      {BAND_COLORS.map(band => {
+        const active = activeBands.includes(band.key);
+        return (
+          <button
+            key={band.key}
+            type="button"
+            aria-label={`${label}: ${band.label}`}
+            aria-pressed={active}
+            onClick={() => onToggle(band.key)}
+            title={`${band.label}${active ? " (selected)" : ""} — tap to toggle`}
+            style={{
+              width: 22, height: 22, borderRadius: "50%",
+              background: band.swatch, cursor: "pointer", padding: 0,
+              border: active ? "2px solid #fff" : `1px solid ${C.border}`,
+              opacity: active ? 1 : 0.55,
+              boxShadow: active ? "0 0 0 1px rgba(0,0,0,0.4)" : "none",
+              flexShrink: 0,
+            }}
+          />
+        );
+      })}
+    </span>
+  );
+}
+
 export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recommendations = [], last }) {
   const [repErrorSet, setRepErrorSet] = React.useState(null);
   const repInputRefs = React.useRef(new Map());
@@ -128,46 +164,61 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     </div>
   ) : null;
   const setupModifiers = Array.isArray(ex.setupModifiers) ? ex.setupModifiers : [];
+  const updateModifier = (set, index, modifier, value) => {
+    const next = [...setsData.sets];
+    const before = modifierSelectionSignature(set);
+    let updated = setModifierSelection(set, modifier, value);
+    if (!updated.done && modifierSelectionSignature(updated) !== before) {
+      updated = {
+        ...updated,
+        ...(Object.hasOwn(updated, "weight") ? { weight: "" } : {}),
+        ...(Object.hasOwn(updated, "leftWeight") ? { leftWeight: "" } : {}),
+        ...(Object.hasOwn(updated, "rightWeight") ? { rightWeight: "" } : {}),
+        ...(Object.hasOwn(updated, "band") ? { band: "" } : {}),
+        ...(Object.hasOwn(updated, "leftBand") ? { leftBand: "" } : {}),
+        ...(Object.hasOwn(updated, "rightBand") ? { rightBand: "" } : {}),
+      };
+    }
+    next[index] = updated;
+    onSetsChange({ sets: next });
+  };
   const modifierControls = (set, index) => {
     if (setupModifiers.length === 0) return null;
     const selected = modifierSelections(set);
     return (
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "3px 0 7px 44px" }}>
         {setupModifiers.map(modifier => (
-          <label key={modifier.id} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <div key={modifier.id} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
             <span style={{ color: C.muted, fontSize: 10 }}>{modifier.name}</span>
-            <select
-              aria-label={`${modifier.name} for set ${index + 1}`}
-              value={selected[modifier.id]?.value || ""}
-              onChange={event => {
-                const next = [...setsData.sets];
-                const before = modifierSelectionSignature(next[index]);
-                let updated = setModifierSelection(next[index], modifier, event.target.value);
-                if (!updated.done && modifierSelectionSignature(updated) !== before) {
-                  updated = {
-                    ...updated,
-                    ...(Object.hasOwn(updated, "weight") ? { weight: "" } : {}),
-                    ...(Object.hasOwn(updated, "leftWeight") ? { leftWeight: "" } : {}),
-                    ...(Object.hasOwn(updated, "rightWeight") ? { rightWeight: "" } : {}),
-                    ...(Object.hasOwn(updated, "band") ? { band: "" } : {}),
-                    ...(Object.hasOwn(updated, "leftBand") ? { leftBand: "" } : {}),
-                    ...(Object.hasOwn(updated, "rightBand") ? { rightBand: "" } : {}),
-                  };
-                }
-                next[index] = updated;
-                onSetsChange({ sets: next });
-              }}
-              style={{
-                background: C.bg, border: `1px solid ${C.border}`, color: C.text,
-                borderRadius: 6, padding: "4px 6px", fontSize: 11,
-              }}
-            >
-              <option value="">None</option>
-              {modifierValueOptions(modifier).map(option => (
-                <option key={option.id} value={option.id}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+            {modifier.control === "bands" ? (
+              <BandPicker
+                bands={selected[modifier.id]?.value?.split("+") || []}
+                label={`${modifier.name} for set ${index + 1}`}
+                onToggle={bandKey => {
+                  const current = selected[modifier.id]?.value?.split("+").filter(Boolean) || [];
+                  const values = current.includes(bandKey)
+                    ? current.filter(value => value !== bandKey)
+                    : [...current, bandKey];
+                  updateModifier(set, index, modifier, values);
+                }}
+              />
+            ) : (
+              <select
+                aria-label={`${modifier.name} for set ${index + 1}`}
+                value={selected[modifier.id]?.value || ""}
+                onChange={event => updateModifier(set, index, modifier, event.target.value)}
+                style={{
+                  background: C.bg, border: `1px solid ${C.border}`, color: C.text,
+                  borderRadius: 6, padding: "4px 6px", fontSize: 11,
+                }}
+              >
+                <option value="">None</option>
+                {modifierValueOptions(modifier).map(option => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            )}
+          </div>
         ))}
       </div>
     );
@@ -433,37 +484,16 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       </select>
                     )}
                     {ex.logBand ? (
-                      <span style={{
-                        display: "inline-flex", alignItems: "center", flexWrap: "wrap",
-                        gap: 3, maxWidth: 192,
-                      }}>
-                        {BAND_COLORS.map(b => {
-                          const active = normalizeBands(loadVal).includes(b.key);
-                          return (
-                            <button
-                              key={b.key}
-                              type="button"
-                              onClick={() => {
-                                const nextBands = toggleBand(loadVal, b.key);
-                                const next = [...setsData.sets];
-                                next[i] = { ...next[i], [loadKey]: nextBands };
-                                onSetsChange({ sets: next });
-                              }}
-                              title={`${b.label}${active ? " (selected)" : ""} — tap to toggle`}
-                              style={{
-                                width: 22, height: 22, borderRadius: "50%",
-                                background: b.swatch, cursor: "pointer", padding: 0,
-                                border: active
-                                  ? "2px solid #fff"
-                                  : `1px solid ${C.border}`,
-                                opacity: active ? 1 : 0.55,
-                                boxShadow: active ? "0 0 0 1px rgba(0,0,0,0.4)" : "none",
-                                flexShrink: 0,
-                              }}
-                            />
-                          );
-                        })}
-                      </span>
+                      <BandPicker
+                        bands={loadVal}
+                        label={`${ex.name} ${sLabel} bands`}
+                        onToggle={bandKey => {
+                          const nextBands = toggleBand(loadVal, bandKey);
+                          const next = [...setsData.sets];
+                          next[i] = { ...next[i], [loadKey]: nextBands };
+                          onSetsChange({ sets: next });
+                        }}
+                      />
                     ) : (
                       <>
                         <input

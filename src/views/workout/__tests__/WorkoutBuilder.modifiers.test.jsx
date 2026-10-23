@@ -50,3 +50,22 @@ test("a modifier is created once and can be attached to other exercises", () => 
   expect(program.exerciseModifierIds.benchPress).toEqual([modifierId]);
   expect(program.exerciseModifierIds.dips).toEqual([modifierId]);
 });
+
+test("a band modifier uses the shared color palette instead of manual choices", () => {
+  render(<Harness />);
+
+  fireEvent.click(setupButtonFor("Dips"));
+  fireEvent.change(screen.getByPlaceholderText("Slingshot"), { target: { value: "Band support" } });
+  fireEvent.change(screen.getByLabelText("Control"), { target: { value: "bands" } });
+  expect(screen.queryByPlaceholderText("Red, Blue, Maddog")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Add and attach" }));
+
+  const program = JSON.parse(screen.getByTestId("program-state").textContent);
+  expect(program.modifierDefinitions[0]).toMatchObject({
+    name: "Band support",
+    control: "bands",
+  });
+  expect(program.modifierDefinitions[0].options.map(option => option.id)).toEqual([
+    "yellow", "orange", "red", "green", "blue", "purple", "black",
+  ]);
+});

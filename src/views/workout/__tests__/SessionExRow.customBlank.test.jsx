@@ -1,11 +1,16 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { SessionExRow } from "../SessionExRow.jsx";
-import { createCustomExercise } from "../../../model/workoutProgram.js";
+import { createCustomExercise, createModifierDefinition } from "../../../model/workoutProgram.js";
 
 function StatefulRow({ ex, initialSet }) {
   const [setsData, setSetsData] = React.useState({ sets: [initialSet] });
-  return <SessionExRow ex={ex} unit="lbs" setsData={setsData} onSetsChange={setSetsData} last />;
+  return (
+    <>
+      <SessionExRow ex={ex} unit="lbs" setsData={setsData} onSetsChange={setSetsData} last />
+      <output data-testid="sets-state">{JSON.stringify(setsData)}</output>
+    </>
+  );
 }
 
 test("a blank rep-tracked custom exercise still records reps in its first session", () => {
@@ -70,4 +75,29 @@ test("an attached modifier is selected per set and survives completion", () => {
   fireEvent.click(screen.getByTitle("Set 1: tap to toggle done"));
   expect(screen.getByTitle("Set 1: tap to toggle done")).toHaveTextContent("✓");
   expect(setup).toHaveValue("red");
+});
+
+test("a band modifier reuses the multi-color swatch picker", () => {
+  const bandSupport = createModifierDefinition({
+    name: "Band support",
+    kind: "assistance",
+    control: "bands",
+  });
+  const ex = {
+    ...createCustomExercise({ name: "Front Lever", tracking: "weight", reps: "5" }),
+    setupModifiers: [bandSupport],
+  };
+  render(<StatefulRow ex={ex} initialSet={{ reps: "5", weight: "20", done: false }} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Band support for set 1: Green" }));
+  fireEvent.click(screen.getByRole("button", { name: "Band support for set 1: Blue" }));
+
+  expect(screen.getByRole("button", { name: "Band support for set 1: Green" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Band support for set 1: Blue" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("spinbutton")).toHaveValue(null);
+  const state = JSON.parse(screen.getByTestId("sets-state").textContent);
+  expect(state.sets[0].modifiers[bandSupport.id]).toMatchObject({
+    value: "green+blue",
+    valueLabel: "Green + Blue",
+  });
 });
