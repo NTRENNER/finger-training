@@ -43,7 +43,10 @@ import { buildCoachNotes } from "./coachNotes.js";
 // observational half): workout defs give exercise→workout membership
 // so piecemeal A/B/C elements get seen and credited; the prescriptive
 // keystone nudge stays parked.
-import { workouts as SUPPORT_WORKOUTS, exercises as SUPPORT_EXERCISES } from "./supportTraining.js";
+import {
+  sanitizeWorkoutProgram, sessionExerciseDefinitions, strengthWorkoutIds,
+  workoutProgramCatalog, workoutProgramWorkouts,
+} from "./workoutProgram.js";
 import { migrateExerciseId } from "./exerciseIds.js";
 // Busy-week workout nudge (2026-07-08, BACKLOG #6 prescriptive half,
 // reshaped per Nathan: data-driven risk picks instead of a manual
@@ -69,6 +72,9 @@ function maxDate(rows, key = "date") {
   return m || null;
 }
 const distinctDates = (rows) => new Set((rows || []).map(r => r.date)).size;
+const supportWorkoutKey = (w) => w?.workoutId || w?.workout || null;
+// "Strength B — Balanced" → "Strength B": the name users see, without the subtitle.
+const workoutLabel = (def, key) => (def?.name || `Workout ${key}`).split(" — ")[0];
 const daysDiff = (from, to) =>
   Math.round((new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 86400000);
 
@@ -76,7 +82,11 @@ const daysDiff = (from, to) =>
 export function gatherSignals(history = [], activities = [], workoutSessions = [], opts = {}) {
   const fingerReps = (history || []).filter(r => r && !isPeakMeasurement(r) && r.date && Number(r.actual_time_s) > 0);
   const climbs = (activities || []).filter(a => a && a.date && a.type === "climbing");
-  const support = (workoutSessions || []).filter(w => w && w.date && ["A", "B", "C"].includes(w.workout));
+  // Support = any of the program's templates (strength days + Power Primer).
+  // Sessions carry workoutId; older ones only have `workout`.
+  const program = sanitizeWorkoutProgram(opts.program);
+  const supportIds = new Set(Object.keys(program.templates));
+  const support = (workoutSessions || []).filter(w => w && w.date && supportIds.has(supportWorkoutKey(w)));
 
   const refDate = opts.refDate
     || [maxDate(fingerReps), maxDate(climbs), maxDate(support)].filter(Boolean).sort().pop()
@@ -159,11 +169,19 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
     }
   }
 
-  // Support: adherence + skipped workout.
+  // Support: adherence + skipped workout. Only days in the current strength
+  // rotation can be "skipped" — Maintain doesn't owe a second day, and the
+  // Power Primer is optional.
+  const rotation = new Set(strengthWorkoutIds(program));
+  const programWorkouts = workoutProgramWorkouts(program);
   const supportLastSeen = {};
-  for (const w of support) if (!supportLastSeen[w.workout] || w.date > supportLastSeen[w.workout]) supportLastSeen[w.workout] = w.date;
+  for (const w of support) {
+    const key = supportWorkoutKey(w);
+    if (!supportLastSeen[key] || w.date > supportLastSeen[key]) supportLastSeen[key] = w.date;
+  }
   const staleWorkouts = Object.entries(supportLastSeen)
-    .map(([workout, d]) => ({ workout, days: daysDiff(d, refDate) }))
+    .filter(([workout]) => rotation.has(workout))
+    .map(([workout, d]) => ({ workout, label: workoutLabel(programWorkouts[workout], workout), days: daysDiff(d, refDate) }))
     .filter(w => w.days >= SUPPORT_STALE_DAYS)
     .sort((a, b) => b.days - a.days);
 
@@ -239,7 +257,8 @@ export function assembleReview(signals) {
     concerns.push({ kind: "concern", text: `${g.grip} has gone quiet — ${g.days} days since you last trained it. Worth a session before the curve drifts.` });
   }
   for (const w of support.staleWorkouts.slice(0, 1)) {
-    concerns.push({ kind: "concern", text: `Support workout ${w.workout} hasn't come up in ${w.days} days. If it keeps slipping you'll lose that stimulus.` });
+    concerns.push({ kind: "concern", staleWorkout: w,
+      text: `${w.label} hasn't come up in ${w.days} days. If it keeps slipping you'll lose that stimulus.` });
   }
 
   // CONTEXT — one neutral consistency line, framed by recovery.
@@ -507,14 +526,19 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
       supportDates7.add(w.date);
     }
   }
-  const exName = (id) => SUPPORT_EXERCISES[id]?.name || id;
+  // The user's current templates and catalog, plus the definitions custom
+  // exercises carried when they were logged (they may since be removed).
+  const program = sanitizeWorkoutProgram(opts.program);
+  const programWorkouts = workoutProgramWorkouts(program);
+  const catalog = { ...sessionExerciseDefinitions(workoutSessions), ...workoutProgramCatalog(program) };
+  const exName = (id) => catalog[id]?.name || id;
   const supportDetail = {
     days: supportDates7.size,
     exercises: [...touchedByEx.keys()].sort().map(exName),
   };
   const partialCredit = {};
   for (const sw of base.support.staleWorkouts) {
-    const def = SUPPORT_WORKOUTS[sw.workout];
+    const def = programWorkouts[sw.workout];
     if (!def) continue;
     const ids = new Set((def.exercises || []).map(e => e.id));
     const touched = [...touchedByEx.keys()].filter(id => ids.has(id));
@@ -530,7 +554,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   let anyFull7 = false;
   for (const w of workoutSessions || []) {
     if (!w || !w.date || w.date < d7 || w.date > refDate) continue;
-    const def = SUPPORT_WORKOUTS[w.workout];
+    const def = programWorkouts[supportWorkoutKey(w)];
     if (!def || !def.exercises?.length) continue;
     let touched = 0;
     for (const [exId, ex] of Object.entries(w.exercises || {})) {
@@ -632,23 +656,22 @@ export function assembleCheckIn(signals) {
   // WHAT'S STUCK OR MISSING — digest concerns + behavior (workload
   // ramp / adherence) + stale zones + falling ratio.
   // Partial credit rewrite: the digest's workout-level staleness line
-  // ("Support workout B hasn't come up in 17 days...") is rephrased
-  // when this week touched some of that workout's exercises inside
-  // other sessions. The match keys on the digest's own copy, which is
-  // owned by assembleReview in THIS file — keep the two in sync.
-  const stuck = digest.points.filter(p => p.kind === "concern").map(p => p.text)
-    .map(t => {
+  // ("Strength B hasn't come up in 17 days...") is rephrased when this
+  // week touched some of that workout's exercises inside other sessions.
+  const stuck = digest.points.filter(p => p.kind === "concern")
+    .map(p => {
+      const t = p.text;
       // Recovery concern × volume drop → the merged line (see above),
       // replacing the digest's generic "keep it light" phrasing in
       // place so it keeps the concern's slot at the top of the section.
       if (mergedRecoveryVolume && recovery.label && t.startsWith(recovery.label)) {
         return mergedRecoveryVolume;
       }
-      const m = t.match(/^Support workout (\S+) hasn't come up in (\d+) days/);
-      if (m && partialCredit && partialCredit[m[1]]) {
-        const pc = partialCredit[m[1]];
+      const sw = p.staleWorkout;
+      const pc = sw && partialCredit ? partialCredit[sw.workout] : null;
+      if (pc) {
         const names = pc.names.slice(0, 3).join(", ") + (pc.names.length > 3 ? `, +${pc.names.length - 3} more` : "");
-        return `No full Workout ${m[1]} in ${m[2]} days — but you touched ${pc.count} of its exercise${pc.count === 1 ? "" : "s"} this week (${names}), so the stimulus isn't fully cold.`;
+        return `No full ${sw.label} session in ${sw.days} days — but you touched ${pc.count} of its exercise${pc.count === 1 ? "" : "s"} this week (${names}), so the stimulus isn't fully cold.`;
       }
       return t;
     });

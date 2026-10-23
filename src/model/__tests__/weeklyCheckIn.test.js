@@ -240,25 +240,56 @@ describe("assembleCheckIn", () => {
   test("support work shows at the exercise level; stale workout gets partial credit", () => {
     const hist = [rep("2026-07-01", "Micro", 45, 46)];
     const wlog = [
-      // Old full Workout B — makes B stale (>14d before REF).
-      { date: "2026-06-18", workout: "B",
-        exercises: { medBallThrows: { sets: [{ done: true, reps: 8 }] } } },
-      // This week: A-labeled session that ALSO touches B's med ball slams.
-      { date: "2026-07-02", workout: "A",
+      // Old full Strength B (key "C") — stale (>14d before REF) in Build mode.
+      { date: "2026-06-18", workout: "C", workoutId: "C",
+        exercises: { trxRow: { sets: [{ done: true, reps: 8 }] } } },
+      // This week: an A session that ALSO touches Strength B's TRX row.
+      { date: "2026-07-02", workout: "A", workoutId: "A",
         exercises: {
           weightedPullup: { sets: [{ done: true, reps: 5 }] },
-          medBallThrows:  { sets: [{ done: true, reps: 10 }] },
+          trxRow:         { sets: [{ done: true, reps: 10 }] },
           dips:           { sets: [{ done: false }] },          // not done → not counted
         } },
     ];
     const out = buildCheckIn(hist, [], wlog, { refDate: REF });
     const didFlat = out.sections.did.join(" ");
     expect(didFlat).toMatch(/Support work: 2 exercises across 1 day/);
-    expect(didFlat).toMatch(/Med Ball Slams/);
+    expect(didFlat).toMatch(/TRX Row/);
     expect(didFlat).not.toMatch(/Dips/);
     const stuckFlat = out.sections.stuck.join(" ");
-    expect(stuckFlat).toMatch(/No full Workout B in 1[0-9] days — but you touched 1 of its exercise/);
-    expect(stuckFlat).not.toMatch(/Support workout B hasn't come up/);
+    expect(stuckFlat).toMatch(/No full Strength B session in 1[0-9] days — but you touched 1 of its exercise/);
+    expect(stuckFlat).not.toMatch(/hasn't come up/);
+  });
+
+  test("staleness follows the chosen mode, uses display names, and never nags about the Power Primer", () => {
+    const hist = [rep("2026-07-01", "Micro", 45, 46)];
+    const old = (date, id, exercises) => ({ date, workout: id, workoutId: id, exercises });
+    const wlog = [
+      old("2026-06-10", "C", { trxRow: { sets: [{ done: true, reps: 8 }] } }),
+      old("2026-06-11", "S3", { lockoffEccentric: { sets: [{ done: true, reps: 3 }] } }),
+      old("2026-06-01", "B", { medBallThrows: { sets: [{ done: true, reps: 5 }] } }),
+      old("2026-07-03", "A", { weightedPullup: { sets: [{ done: true, reps: 5 }] } }),
+    ];
+    const stale = mode => gatherCheckInSignals(hist, [], wlog,
+      { refDate: REF, program: { version: 2, mode } }).support.staleWorkouts;
+    expect(stale("maintain")).toEqual([]);
+    expect(stale("build")).toEqual([{ workout: "C", label: "Strength B", days: 25 }]);
+    expect(stale("block").map(w => w.label)).toEqual(["Strength B", "Strength C"]);
+    const out = buildCheckIn(hist, [], wlog, { refDate: REF, program: { version: 2, mode: "block" } });
+    expect(out.sections.stuck.join(" ")).toMatch(/Strength B hasn't come up in 25 days/);
+    expect(out.sections.stuck.join(" ")).not.toMatch(/Power/);
+  });
+
+  test("Strength C sessions count as support days and custom exercises show their names", () => {
+    const hist = [rep("2026-07-01", "Micro", 45, 46)];
+    const custom = { id: "custom_ring_dips_ab12c", name: "Ring Dips", custom: true, movementCategories: ["push"] };
+    const wlog = [{ date: "2026-07-02", workout: "S3", workoutId: "S3", exercises: {
+      lockoffEccentric: { sets: [{ done: true, reps: 3 }] },
+      [custom.id]: { sets: [{ done: true, reps: 6 }], _definition: custom },
+    } }];
+    const signals = gatherCheckInSignals(hist, [], wlog, { refDate: REF });
+    expect(signals.support.daysThisWeek).toBe(1);
+    expect(signals.supportDetail.exercises).toEqual(expect.arrayContaining(["Ring Dips", "90° Lock-Off + Eccentric"]));
   });
 
   test("busy-week nudge: partial support week acknowledges + prescribes at-risk exercises", () => {

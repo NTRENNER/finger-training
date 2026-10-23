@@ -22,7 +22,7 @@ import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.jsx";
 import { buildCheckIn } from "../../model/weeklyReview.js";
 import { weekKey } from "../../lib/climbing-grades.js";
-import { loadLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY } from "../../lib/storage.js";
+import { loadLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY, LS_WORKOUT_PLAN_KEY } from "../../lib/storage.js";
 
 function addDays(ymd, n) {
   const d = new Date(`${ymd}T00:00:00Z`);
@@ -55,9 +55,11 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
     const refDate = addDays(weekKey(todayYMD), -1);
     let workoutSessions = [];
     let bwLog = [];
+    let program = null;
     try { workoutSessions = loadLS(LS_WORKOUT_LOG_KEY) || []; } catch { workoutSessions = []; }
     try { bwLog = loadLS(LS_BW_LOG_KEY) || []; } catch { bwLog = []; }
-    return buildCheckIn(history, activities, workoutSessions, { refDate, bwLog });
+    try { program = loadLS(LS_WORKOUT_PLAN_KEY); } catch { program = null; }
+    return buildCheckIn(history, activities, workoutSessions, { refDate, bwLog, program });
   }, [history, activities]);
 
   const range = review.range;
