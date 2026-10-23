@@ -104,6 +104,23 @@ test('the Volume unlock dialog opens enrollment and starts only after confirmati
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
+test('Volume stays reviewable after its unlock explanation is dismissed, while the plateau lasts', async () => {
+  saveLS(LS_EXPERIMENT_UNLOCKS_KEY, { 'chaos:Micro': true });
+  const start = jest.fn(() => true);
+  const view = render(<SessionPlanCard {...props} onStartVolumeExperiment={start} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Keep recommendation' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+  expect(screen.getByRole('dialog', { name: 'Review Volume Beta' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Start Volume Beta' }));
+  await waitFor(() => expect(start).toHaveBeenCalledWith({ grips: ['Micro'], trigger: 'plateau_prompt' }));
+  view.unmount();
+
+  detectPlateaus.mockReturnValue({ byGrip: [] });
+  render(<SessionPlanCard {...props} />);
+  expect(screen.queryByText('Volume Beta')).not.toBeInTheDocument();
+});
+
 test('an active Volume plan selects two sets, while a manual count opts this workout out', () => {
   saveLS(LS_EXPERIMENT_UNLOCKS_KEY, { 'chaos:Micro': true, 'volume:Micro': true });
   const experiment = createVolumeExperiment({

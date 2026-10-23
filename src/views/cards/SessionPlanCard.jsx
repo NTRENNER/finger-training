@@ -327,6 +327,7 @@ export function SessionPlanCard({
   const chaosAvailable = betasAvailable && !!mixedPlan;
   const releasedExperiments = loadLS(LS_EXPERIMENT_UNLOCKS_KEY) || {};
   const chaosReleased = betasAvailable && Boolean(releasedExperiments[`chaos:${grip}`]);
+  const volumeReleased = betasAvailable && Boolean(releasedExperiments[`volume:${grip}`]);
   const volumeAvailable = betasAvailable && volumeEligible && !!plateauSuggestion
     && !['active', 'paused'].includes(volumeStatus) && !!onStartVolumeExperiment;
   const mixedReadiness = useMemo(
@@ -371,12 +372,15 @@ export function SessionPlanCard({
     }
     setMixedRequested(enabled);
   };
-  const reviewVolume = () => {
-    rememberUnlocks(unlockFeatures);
-    setUnlockFeatures([]);
+  const openVolumeSetup = () => {
     setVolumeGrips([grip]);
     setVolumeError(null);
     setVolumeSetupOpen(true);
+  };
+  const reviewVolume = () => {
+    rememberUnlocks(unlockFeatures);
+    setUnlockFeatures([]);
+    openVolumeSetup();
   };
   const startVolume = async () => {
     const selectedGrips = volumeGrips.filter(candidate => eligibleVolumeGrips.includes(candidate));
@@ -721,6 +725,17 @@ export function SessionPlanCard({
     className="chaos-mode-toggle"
   />;
 
+  // After its one-time explanation, Volume stays reachable for as long as the
+  // plateau invitation still applies. It is a six-week enrollment rather than
+  // a per-session mode, so it opens the review instead of toggling.
+  const volumeEntry = volumeReleased && volumeAvailable && !volumeSetupOpen && <div className="volume-beta-entry">
+    <div>
+      <div className="volume-beta-entry-label">Volume Beta</div>
+      <p className="volume-beta-entry-description">A persistent plateau was detected. Review a six-week trial of two sets per session.</p>
+    </div>
+    <button type="button" onClick={openVolumeSetup}>Review</button>
+  </div>;
+
   if (mixedEnabled) {
     return <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
       {experimentDialogs}
@@ -753,6 +768,7 @@ export function SessionPlanCard({
       {experimentDialogs}
       {plannerHeader}
       {chaosModeToggle}
+      {volumeEntry}
 
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
       {/* Standalone title or optional training-focus control. */}

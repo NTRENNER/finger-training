@@ -137,6 +137,36 @@
   font-size: 11px;
 }
 
+.volume-beta-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #0d1117;
+}
+.volume-beta-entry-label { font-size: 14px; font-weight: 700; }
+.volume-beta-entry-description { margin: 2px 0 0; font-size: 11px; color: #8b949e; line-height: 1.4; }
+.volume-beta-entry button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #161b22;
+  color: #e6edf3;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.volume-beta-entry button:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 2px;
+}
+
 .experiment-dialog-backdrop {
   position: fixed;
   inset: 0;
