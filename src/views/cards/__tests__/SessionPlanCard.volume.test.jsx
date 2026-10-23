@@ -67,11 +67,13 @@ test('newly available experiments are explained once instead of occupying the tr
   expect(screen.getByRole('dialog', { name: 'New training options available' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Keep recommendation' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('switch', { name: 'Chaos Machine' })).not.toBeChecked();
   expect(screen.queryByText(/Your choice for this workout/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Betas unlock after/)).not.toBeInTheDocument();
   view.unmount();
   render(<SessionPlanCard {...props} />);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('switch', { name: 'Chaos Machine' })).toBeInTheDocument();
 });
 
 test('the compact work-set selector defaults to one and updates only this workout', () => {

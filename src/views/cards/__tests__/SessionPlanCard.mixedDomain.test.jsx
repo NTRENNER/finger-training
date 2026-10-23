@@ -6,6 +6,7 @@ import { coachingRecommendationContinuous } from '../../../model/coaching.js';
 import { ZONE_REF_T } from '../../../model/zones.js';
 import { betaEligibility } from '../../../model/betaEligibility.js';
 import { detectPlateaus } from '../../../model/plateau.js';
+import { saveLS, LS_EXPERIMENT_UNLOCKS_KEY } from '../../../lib/storage.js';
 
 jest.mock('../../../model/betaEligibility.js', () => ({
   betaEligibility: jest.fn(() => ({ eligible: true })),
@@ -58,9 +59,25 @@ test('the unlock dialog previews Chaos without replacing the ordinary recommenda
   fireEvent.click(screen.getByRole('button', { name: 'One more work set per hand' }));
   fireEvent.click(screen.getByRole('button', { name: 'One more work set per hand' }));
   expect(apply.mock.calls.at(-1)[0].plannedSets).toBe(3);
-  fireEvent.click(screen.getByRole('button', { name: 'Use recommendation' }));
+  expect(screen.getByRole('switch', { name: 'Chaos Machine' })).toBeChecked();
+  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine' }));
   expect(screen.getByRole('button', { name: 'Use recommended session' })).toBeInTheDocument();
   expect(apply.mock.calls.at(-1)[0].mixedDomainPlan).toBeNull();
+  expect(screen.getByRole('switch', { name: 'Chaos Machine' })).not.toBeChecked();
+});
+
+test('Chaos remains available after its unlock explanation is dismissed', () => {
+  const view = render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg"
+    GOAL_CONFIG={goals} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Keep recommendation' }));
+  expect(screen.getByRole('switch', { name: 'Chaos Machine' })).not.toBeChecked();
+  view.unmount();
+
+  render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg"
+    GOAL_CONFIG={goals} />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine' }));
+  expect(screen.getByRole('region', { name: 'Chaos Machine beta plan' })).toBeInTheDocument();
 });
 
 test('Chaos starts at the recommended domain and both hands share the same sequence', () => {
@@ -87,7 +104,8 @@ test('Chaos starts at the recommended domain and both hands share the same seque
 });
 
 test('incomplete domain estimates do not advertise Chaos', () => {
+  saveLS(LS_EXPERIMENT_UNLOCKS_KEY, { 'chaos:Micro': true });
   render(<SessionPlanCard history={[]} grip="Micro" unit="kg" GOAL_CONFIG={{ power: goals.power }} />);
   expect(screen.queryByRole('dialog', { name: /Chaos Machine/ })).not.toBeInTheDocument();
-  expect(screen.queryByText('Chaos Machine')).not.toBeInTheDocument();
+  expect(screen.getByRole('switch', { name: 'Chaos Machine' })).toBeDisabled();
 });

@@ -76,6 +76,7 @@ import { makeMixedDomainPlan, recommendedMixedDomainZone, MIXED_DOMAIN_REST_S } 
 import { mixedPlanReadiness } from '../../model/mixedLoadPrescription.js';
 import { volumeExperimentStatus, volumeSessionPlan } from '../../model/volumeExperiment.js';
 import { loadLS, saveLS, LS_EXPERIMENT_UNLOCKS_KEY } from '../../lib/storage.js';
+import { Toggle } from '../../ui/Toggle.jsx';
 import { MixedDomainPlan } from './MixedDomainPlan.jsx';
 import { VolumeBetaEnrollment } from './VolumeBetaPlan.jsx';
 import { DialogShell, ExperimentUnlockDialog } from './ExperimentUnlockDialog.jsx';
@@ -324,6 +325,8 @@ export function SessionPlanCard({
     && volumeStatus === 'active' && !!activeVolumePlan && !setsTouched;
   const plannedSets = isPeakTest ? 1 : volumeEnabled ? 2 : selectedSets;
   const chaosAvailable = betasAvailable && !!mixedPlan;
+  const releasedExperiments = loadLS(LS_EXPERIMENT_UNLOCKS_KEY) || {};
+  const chaosReleased = betasAvailable && Boolean(releasedExperiments[`chaos:${grip}`]);
   const volumeAvailable = betasAvailable && volumeEligible && !!plateauSuggestion
     && !['active', 'paused'].includes(volumeStatus) && !!onStartVolumeExperiment;
   const mixedReadiness = useMemo(
@@ -359,6 +362,14 @@ export function SessionPlanCard({
     setUnlockFeatures([]);
     setSetsTouched(true);
     setMixedRequested(true);
+  };
+  const changeChaosMode = enabled => {
+    if (!chaosReleased || (enabled && !chaosAvailable)) return;
+    if (enabled) {
+      setSetsTouched(true);
+      setVolumeSetupOpen(false);
+    }
+    setMixedRequested(enabled);
   };
   const reviewVolume = () => {
     rememberUnlocks(unlockFeatures);
@@ -699,20 +710,27 @@ export function SessionPlanCard({
     </DialogShell>}
   </>;
 
+  const chaosModeToggle = chaosReleased && <Toggle
+    label="Chaos Machine"
+    checked={mixedEnabled}
+    disabled={!chaosAvailable}
+    onChange={changeChaosMode}
+    description={chaosAvailable
+      ? 'Train five force-duration domains in one session.'
+      : 'Finish the current boundary measurement before using Chaos.'}
+    className="chaos-mode-toggle"
+  />;
+
   if (mixedEnabled) {
     return <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
       {experimentDialogs}
       {plannerHeader}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+      {chaosModeToggle}
+      <div style={{ marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.purple, textTransform: 'uppercase' }}>Experimental session</div>
           <h2 style={{ margin: '4px 0 0', fontSize: 20 }}>Chaos Machine</h2>
         </div>
-        <button type="button" onClick={() => setMixedRequested(false)} style={{
-          minHeight: 40, padding: '8px 12px', borderRadius: 6,
-          border: `1px solid ${C.border}`, background: C.bg, color: C.text,
-          font: 'inherit', fontWeight: 700, cursor: 'pointer',
-        }}>Use recommendation</button>
       </div>
       <MixedDomainPlan
         goalConfig={GOAL_CONFIG}
@@ -734,6 +752,7 @@ export function SessionPlanCard({
     <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
       {experimentDialogs}
       {plannerHeader}
+      {chaosModeToggle}
 
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
       {/* Standalone title or optional training-focus control. */}

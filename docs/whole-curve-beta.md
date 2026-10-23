@@ -210,6 +210,8 @@ New frozen mixed-load predictions use version 2 for the changed evidence basis.
 
 The setup set selector is independent of research enrollment. It starts at one and supports up to five sets per hand. Every Chaos set repeats the frozen domain sequence. Between sets, an optional five-minute same-hand rest clock counts other-hand work; users explicitly continue when ready and may finish early. Each later hand receives its own rest check.
 
+After the one-time unlock explanation, a compact Chaos Machine switch remains on Session Setup for that grip. The regular recommendation remains the default; the same switch enters and leaves the five-domain session.
+
 Adaptive prescriptions retain all preceding measured work on that hand across sets. The first hold of a later set is a fatigued hold, not a fresh reference. Its next-rest estimate uses the elapsed interval when the user leaves the between-set rest screen, then stays fixed through that pull. Actual release-to-start rest is saved separately. Unknown releases remain unknown; incomplete prefixes still fall back explicitly. Subsequent holds use the ordinary planned 30-second rest. Frozen curve models are never refitted from this session.
 
 Set and rep numbers identify each hold independently. Later sets cannot fit fresh capacity, advance the ordinary ladder, or enroll in Volume Beta. Mixed-load prediction review includes later-set openers as fatigued observations and groups sets separately while retaining session-level weighting.
