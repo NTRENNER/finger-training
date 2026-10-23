@@ -104,24 +104,31 @@ export function buildPerformanceTrends(history, grips, hand = 'pooled', {model =
         row[`${grip}_long`] = (score/baselines.get(grip)-1)*100;
       }
       const observations = [];
+      let scored = 0;
       const deviations = hands.map(h=>{
         const values = current.filter(r=>r.hand===h)
           .map(r=>{
             const expected = expectation(r);
             if (!expected) return null;
             const deviation = 100*(r.avg_force_kg/expected.expectedForce-1);
-            if (onEvidence && Number.isFinite(deviation)) observations.push({rep:r,...expected,deviation,context:context(r)});
-            return deviation;
+            if (!Number.isFinite(deviation)) return null;
+            scored += 1;
+            if (onEvidence) observations.push({rep:r,...expected,deviation,context:context(r)});
+            // Outside the curve's measured durations the expectation is an
+            // extrapolation: show the hold individually, but keep it out of
+            // the session-performance average.
+            return expected.extrapolated ? null : deviation;
           })
           .filter(Number.isFinite);
         return values.length ? mean(values) : null;
       }).filter(Number.isFinite);
       if (deviations.length) row[`${grip}_short`] = mean(deviations);
+      if (scored) row[`${grip}_scored`] = scored;
       row[`${grip}_holds`] = current.length;
       row[`${grip}_laterHolds`] = current.filter(r=>context(r).status==='after_training').length;
       if (onEvidence) onEvidence({date,grip,hands,score,models,history:clean,
         eligible:eligible.filter(r=>r.grip===grip&&hands.includes(r.hand)),observations});
     }
     return row;
-  }).filter(row=>grips.some(g=>Number.isFinite(row[`${g}_long`])||Number.isFinite(row[`${g}_short`])));
+  }).filter(row=>grips.some(g=>Number.isFinite(row[`${g}_long`])||Number.isFinite(row[`${g}_short`])||row[`${g}_scored`]>0));
 }

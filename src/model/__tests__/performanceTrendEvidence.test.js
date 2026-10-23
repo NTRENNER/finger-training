@@ -32,7 +32,8 @@ test.each(['original', 'contextOnly', 'contextRobust'])(
       const analysis = buildPerformanceTrendAnalysis(records, ['Crusher'], hand, { model });
       expect(withoutEvidence(analysis.rows)).toEqual(buildPerformanceTrends(records, ['Crusher'], hand, { model }));
       for (const point of analysis.rows.filter(item => Number.isFinite(item.Crusher_short))) {
-        const selected = analysis.observations.filter(item => item.date === point.date);
+        // Extrapolated holds are plotted individually but excluded from the average.
+        const selected = analysis.observations.filter(item => item.date === point.date && !item.extrapolated);
         const hands = [...new Set(selected.map(item => item.hand))];
         const means = hands.map(side => {
           const values = selected.filter(item => item.hand === side).map(item => item.deviation);

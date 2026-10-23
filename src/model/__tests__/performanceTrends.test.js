@@ -30,11 +30,14 @@ test('invalid, duplicate and later fatigued holds cannot create progress',()=>{
  const late={...base[0],id:'fatigued',date:'2026-08-12',rep_num:2,avg_force_kg:90};
  expect(buildPerformanceTrends([...base,late],['Crusher'],'L')).toEqual(expected);
 });
-test('new unmeasured durations are scored by the calibrated curve and marked as extrapolated',()=>{
+test('new unmeasured durations are shown as extrapolated but kept out of the session average',()=>{
  const base=history();
  const extra=recoveryRows('legacy',{date:'2026-08-11',sessionId:'newDuration'}).map(r=>({...r,actual_time_s:220}));
  const result=buildPerformanceTrendAnalysis([...base,...extra],['Crusher'],'L');
- expect(result.rows.at(-1).Crusher_short).toEqual(expect.any(Number));
+ const last=result.rows.at(-1);
+ expect(last.date).toBe('2026-08-11');
+ expect(last.Crusher_short).toBeUndefined();
+ expect(last.Crusher_scored).toBeGreaterThan(0);
  expect(result.observations.find(item=>item.id===extra.find(item=>item.hand==='L').id))
    .toMatchObject({expectationSource:'reconstructed',extrapolated:true});
 });
