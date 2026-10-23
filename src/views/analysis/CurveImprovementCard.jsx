@@ -791,7 +791,6 @@ export function CurveImprovementCard({
           Per-hand fits vs that hand's frozen baseline — half the data
           of the pooled view, so expect noisier numbers.
         </div>
-        <p style={{ fontSize: 12, color: C.muted }}>Long-term curve comparisons by duration use an earlier training baseline. The summary above begins tracking gain when its trend baseline matures, so these percentages can differ. Treat early comparisons as provisional.</p>
         <ComparisonModeSelector mode={comparisonMode} onChange={setComparisonMode} />
         {comparisonMode !== "time" && <BasisNote />}
         {entries.length > 0 ? entries.map(([grip, imp, ph], i, arr) => {
@@ -851,7 +850,6 @@ export function CurveImprovementCard({
           )}
         </div>
       </div>
-      <p style={{ fontSize: 12, color: C.muted }}>Long-term curve comparisons by duration use an earlier training baseline. The summary above begins tracking gain when its trend baseline matures, so these percentages can differ. Treat early comparisons as provisional.</p>
       <ComparisonModeSelector mode={comparisonMode} onChange={setComparisonMode} />
       {comparisonMode !== "time" && <BasisNote />}
 

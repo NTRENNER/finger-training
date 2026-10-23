@@ -54,7 +54,9 @@ rep before any prompt could appear.
 - The active-rep screen shows live weight, average weight, time, target weight
   and target time. Nothing else, and the layout must not jump.
 - Sessions always start with the same hand.
-- The unused tendon code is kept on purpose. Don't delete it.
+- The unused tendon code and the baseline-maturation calculation
+  (`maturation` in `src/model/performanceTrendEvidence.js`, no longer
+  displayed) are kept on purpose. Don't delete them.
 
 ## Git
 
