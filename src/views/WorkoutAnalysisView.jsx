@@ -40,6 +40,10 @@ import {
   workoutProgramCatalog,
   workoutProgramWorkouts,
 } from "../model/workoutProgram.js";
+import {
+  modifierSelectionLabel,
+  modifierSelectionSignature,
+} from "../model/workoutModifiers.js";
 import { useLSValue } from "../hooks/useLSValue.js";
 
 // For one exercise id, walk wLog chronologically and produce
@@ -74,19 +78,46 @@ function buildExerciseSeries(wLog, exId, exDef, currentBw, bwLog, unit) {
     if (!s || s.workout === ROTATION_PIN_KEY) continue;
     const sets = s?.exercises?.[exId]?.sets;
     if (!Array.isArray(sets) || sets.length === 0) continue;
-    if (!sets.some(set => set && set.done)) continue;
+    const setupGroups = new Map();
+    for (const set of sets) {
+      if (!set?.done) continue;
+      const signature = modifierSelectionSignature(set);
+      if (!setupGroups.has(signature)) setupGroups.set(signature, []);
+      setupGroups.get(signature).push(set);
+    }
+    if (setupGroups.size === 0) continue;
     // Per-session BW: prefer the log entry on or before this date,
     // fall back to the user's current BW (so brand-new BW logs that
     // postdate old sessions still produce sane numerators). Convert
     // kg → display units so the volume math is unit-consistent.
     const sessionBwKg = bwOnDate(bwLog, s.date)?.kg ?? currentBw ?? null;
     const sessionBw = sessionBwKg != null ? toDisp(sessionBwKg, unit) : null;
-    const top = sessionExerciseTopWeight(sets, sessionBw, exDef);
-    const vol = sessionExerciseVolume(sets, sessionBw, exDef);
-    if (top <= 0 && vol <= 0) continue;
-    out.push({ date: s.date, top, volume: vol, workout: s.workout, sessionBw });
+    for (const [setupSignature, groupSets] of setupGroups) {
+      const top = sessionExerciseTopWeight(groupSets, sessionBw, exDef);
+      const vol = sessionExerciseVolume(groupSets, sessionBw, exDef);
+      if (top <= 0 && vol <= 0) continue;
+      out.push({
+        date: s.date,
+        top,
+        volume: vol,
+        workout: s.workout,
+        sessionBw,
+        setupSignature,
+        setupLabel: modifierSelectionLabel(groupSets[0]),
+      });
+    }
   }
   return out;
+}
+
+function groupSeriesBySetup(series) {
+  const groups = new Map();
+  for (const point of series) {
+    const signature = point.setupSignature || "";
+    if (!groups.has(signature)) groups.set(signature, []);
+    groups.get(signature).push(point);
+  }
+  return groups;
 }
 
 // Reps/variant progression card — for exercises whose progression is
@@ -96,7 +127,7 @@ function buildExerciseSeries(wLog, exId, exDef, currentBw, bwLog, unit) {
 // current variant rung and the ladder move since the first session.
 // The weight-based ExerciseCard takes over automatically once a
 // session logs real weight (see the cards memo).
-function RepsExerciseCard({ ex, series }) {
+function RepsExerciseCard({ ex, series, setupLabel }) {
   if (!series || series.length === 0) return null;
   const first = series[0];
   const last  = series[series.length - 1];
@@ -107,7 +138,9 @@ function RepsExerciseCard({ ex, series }) {
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{ex.name}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>
+            {ex.name}{setupLabel ? ` · ${setupLabel}` : ""}
+          </div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
             {series.length} session{series.length === 1 ? "" : "s"} · leverage / reps progression
             {ex.unilateral ? " · unilateral" : ""}
@@ -181,7 +214,7 @@ function RepsExerciseCard({ ex, series }) {
 // stored on each series point. Falls back to absolute units for
 // any series point missing sessionBw — the chart and the unit
 // labels still render coherently.
-function ExerciseCard({ ex, series, unit, normalizeOn }) {
+function ExerciseCard({ ex, series, unit, normalizeOn, setupLabel }) {
   if (series.length === 0) return null;
 
   // Decide effective values per point. In × BW mode we render the
@@ -219,7 +252,9 @@ function ExerciseCard({ ex, series, unit, normalizeOn }) {
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{ex.name}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>
+            {ex.name}{setupLabel ? ` · ${setupLabel}` : ""}
+          </div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
             {sessionCount} session{sessionCount === 1 ? "" : "s"}
             {additive ? " · bodyweight + added" : ""}
@@ -421,13 +456,33 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
       if (exDef?.logWeight) {
         const series = buildExerciseSeries(wLog, exId, exDef, bodyWeight, bwLog, unit);
         if (series.length > 0) {
-          items.push({ kind: "weight", exDef, series, lastDate: series[series.length - 1].date });
+          const groups = groupSeriesBySetup(series);
+          for (const [setupSignature, setupSeries] of groups) {
+            items.push({
+              kind: "weight",
+              exDef,
+              series: setupSeries,
+              setupSignature,
+              setupLabel: setupSeries[0]?.setupLabel || "",
+              lastDate: setupSeries[setupSeries.length - 1].date,
+            });
+          }
           continue;
         }
       }
       const repsSeries = buildRepsVariantSeries(realSessions, exId, exDef);
       if (repsSeries.length === 0) continue;
-      items.push({ kind: "reps", exDef, series: repsSeries, lastDate: repsSeries[repsSeries.length - 1].date });
+      const groups = groupSeriesBySetup(repsSeries);
+      for (const [setupSignature, setupSeries] of groups) {
+        items.push({
+          kind: "reps",
+          exDef,
+          series: setupSeries,
+          setupSignature,
+          setupLabel: setupSeries[0]?.setupLabel || "",
+          lastDate: setupSeries[setupSeries.length - 1].date,
+        });
+      }
     }
     items.sort((a, b) => (b.lastDate || "").localeCompare(a.lastDate || ""));
     return items;
@@ -460,10 +515,10 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
             </div>
           </Card>
         ) : (
-          cards.map(({ kind, exDef, series }) => (
+          cards.map(({ kind, exDef, series, setupSignature, setupLabel }) => (
             kind === "reps"
-              ? <RepsExerciseCard key={exDef.id} ex={exDef} series={series} />
-              : <ExerciseCard key={exDef.id} ex={exDef} series={series} unit={unit} normalizeOn={normalizeOn} />
+              ? <RepsExerciseCard key={`${exDef.id}:${setupSignature}`} ex={exDef} series={series} setupLabel={setupLabel} />
+              : <ExerciseCard key={`${exDef.id}:${setupSignature}`} ex={exDef} series={series} setupLabel={setupLabel} unit={unit} normalizeOn={normalizeOn} />
           ))
         )}
       </Sect>

@@ -28,6 +28,13 @@
 
 import React from "react";
 import { parseRepsCount } from "../../model/workout-volume.js";
+import {
+  copyModifierSelections,
+  modifierSelectionSignature,
+  modifierSelections,
+  modifierValueOptions,
+  setModifierSelection,
+} from "../../model/workoutModifiers.js";
 import { C } from "../../ui/theme.js";
 import { WTypeBadge } from "./WTypeBadge.jsx";
 import { VideoLink } from "./VideoLink.jsx";
@@ -120,6 +127,51 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
       Enter reps to complete this set.
     </div>
   ) : null;
+  const setupModifiers = Array.isArray(ex.setupModifiers) ? ex.setupModifiers : [];
+  const modifierControls = (set, index) => {
+    if (setupModifiers.length === 0) return null;
+    const selected = modifierSelections(set);
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "3px 0 7px 44px" }}>
+        {setupModifiers.map(modifier => (
+          <label key={modifier.id} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <span style={{ color: C.muted, fontSize: 10 }}>{modifier.name}</span>
+            <select
+              aria-label={`${modifier.name} for set ${index + 1}`}
+              value={selected[modifier.id]?.value || ""}
+              onChange={event => {
+                const next = [...setsData.sets];
+                const before = modifierSelectionSignature(next[index]);
+                let updated = setModifierSelection(next[index], modifier, event.target.value);
+                if (!updated.done && modifierSelectionSignature(updated) !== before) {
+                  updated = {
+                    ...updated,
+                    ...(Object.hasOwn(updated, "weight") ? { weight: "" } : {}),
+                    ...(Object.hasOwn(updated, "leftWeight") ? { leftWeight: "" } : {}),
+                    ...(Object.hasOwn(updated, "rightWeight") ? { rightWeight: "" } : {}),
+                    ...(Object.hasOwn(updated, "band") ? { band: "" } : {}),
+                    ...(Object.hasOwn(updated, "leftBand") ? { leftBand: "" } : {}),
+                    ...(Object.hasOwn(updated, "rightBand") ? { rightBand: "" } : {}),
+                  };
+                }
+                next[index] = updated;
+                onSetsChange({ sets: next });
+              }}
+              style={{
+                background: C.bg, border: `1px solid ${C.border}`, color: C.text,
+                borderRadius: 6, padding: "4px 6px", fontSize: 11,
+              }}
+            >
+              <option value="">None</option>
+              {modifierValueOptions(modifier).map(option => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+    );
+  };
   const doneBtn = (isDone, onPress, title) => (
     <button onClick={onPress} title={title} style={{
       width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
@@ -230,6 +282,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       >−</button>
                     )}
                   </div>
+                  {modifierControls(s, i)}
                   {repError(i)}
                 </React.Fragment>
               ))}
@@ -457,6 +510,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                     {rec?.leftReasoning  && (<div style={hintStyle}>{rec.leftReasoning}</div>)}
                     {renderSideRow("R", "R", `${i}-R`)}
                     {rec?.rightReasoning && (<div style={hintStyle}>{rec.rightReasoning}</div>)}
+                    {modifierControls(s, i)}
                     {repError(i)}
                   </div>
                 );
@@ -465,6 +519,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                 <div key={i}>
                   {renderSideRow(null, `S${i + 1}`, `${i}`)}
                   {rec?.reasoning && (<div style={hintStyle}>{rec.reasoning}</div>)}
+                  {modifierControls(s, i)}
                   {repError(i)}
                 </div>
               );
@@ -497,7 +552,11 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                   }
                   return { reps: ex.reps || "", weight: "", done: false };
                 };
-                onSetsChange({ sets: [...setsData.sets, makeBlank()] });
+                const blank = makeBlank();
+                const modifiers = copyModifierSelections(setsData.sets.at(-1));
+                onSetsChange({
+                  sets: [...setsData.sets, Object.keys(modifiers).length ? { ...blank, modifiers } : blank],
+                });
               }}
               style={{
                 marginTop: 4, width: "100%", padding: "5px 0",

@@ -4,10 +4,12 @@ import {
   MOVEMENT_CATEGORIES,
   STIMULUS_OPTIONS,
   createCustomExercise,
+  createModifierDefinition,
   defaultWorkoutProgram,
   exerciseMovementCategories,
   sanitizeWorkoutProgram,
 } from "../../model/workoutProgram.js";
+import { MODIFIER_KINDS } from "../../model/workoutModifiers.js";
 import { ExercisePicker } from "./ExercisePicker.jsx";
 
 const TEMPLATE_TABS = [
@@ -50,12 +52,20 @@ const EMPTY_DRAFT = {
   intent: "",
 };
 
+const EMPTY_MODIFIER_DRAFT = {
+  name: "",
+  kind: "assistance",
+  options: "",
+};
+
 export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange, onClose }) {
   const program = useMemo(() => sanitizeWorkoutProgram(incoming), [incoming]);
   const [templateId, setTemplateId] = useState("A");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
+  const [setupExerciseId, setSetupExerciseId] = useState(null);
+  const [modifierDraft, setModifierDraft] = useState(EMPTY_MODIFIER_DRAFT);
 
   const ids = program.templates[templateId] || [];
   const selectedWorkout = workouts[templateId];
@@ -91,6 +101,45 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
     setCreating(false);
     setDraft(EMPTY_DRAFT);
   };
+  const toggleExerciseModifier = modifierId => {
+    if (!setupExerciseId) return;
+    const attached = program.exerciseModifierIds[setupExerciseId] || [];
+    const next = attached.includes(modifierId)
+      ? attached.filter(id => id !== modifierId)
+      : [...attached, modifierId];
+    const exerciseModifierIds = { ...program.exerciseModifierIds };
+    if (next.length > 0) exerciseModifierIds[setupExerciseId] = next;
+    else delete exerciseModifierIds[setupExerciseId];
+    onChange({ ...program, exerciseModifierIds });
+  };
+  const saveModifier = () => {
+    if (!setupExerciseId) return;
+    const options = modifierDraft.options.split(",").map(value => value.trim()).filter(Boolean);
+    const modifier = createModifierDefinition({ ...modifierDraft, options });
+    if (!modifier) return;
+    onChange({
+      ...program,
+      modifierDefinitions: [...program.modifierDefinitions, modifier],
+      exerciseModifierIds: {
+        ...program.exerciseModifierIds,
+        [setupExerciseId]: [...(program.exerciseModifierIds[setupExerciseId] || []), modifier.id],
+      },
+    });
+    setModifierDraft(EMPTY_MODIFIER_DRAFT);
+  };
+  const deleteModifier = modifier => {
+    if (!window.confirm(`Delete ${modifier.name} from the modifier library? Saved workout history will keep its labels.`)) return;
+    const exerciseModifierIds = {};
+    for (const [exerciseId, ids] of Object.entries(program.exerciseModifierIds)) {
+      const next = ids.filter(id => id !== modifier.id);
+      if (next.length) exerciseModifierIds[exerciseId] = next;
+    }
+    onChange({
+      ...program,
+      modifierDefinitions: program.modifierDefinitions.filter(item => item.id !== modifier.id),
+      exerciseModifierIds,
+    });
+  };
 
   return (
     <div className="workout-builder-overlay" onMouseDown={onClose}>
@@ -110,7 +159,7 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
               role="tab"
               aria-selected={templateId === tab.id}
               key={tab.id}
-              onClick={() => { setTemplateId(tab.id); setCreating(false); }}
+              onClick={() => { setTemplateId(tab.id); setCreating(false); setSetupExerciseId(null); }}
             >{tab.label}</button>
           ))}
         </div>
@@ -140,18 +189,87 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
                     <div className="builder-exercise-prescription">{exercise.prescription}</div>
                     <CategoryChips exercise={exercise} />
                   </div>
+                  {exercise.loggable && (
+                    <button
+                      type="button"
+                      className="text-button builder-setup-button"
+                      aria-expanded={setupExerciseId === id}
+                      onClick={() => setSetupExerciseId(current => current === id ? null : id)}
+                    >Setup</button>
+                  )}
                   <button type="button" className="icon-remove-button" aria-label={`Remove ${exercise.name}`} onClick={() => updateTemplate(ids.filter(item => item !== id))}>×</button>
                 </div>
               );
             })}
           </div>
 
-          {!creating ? (
+          {setupExerciseId && catalog[setupExerciseId] && (
+            <section className="builder-setup-editor" aria-label={`Setup options for ${catalog[setupExerciseId].name}`}>
+              <div className="builder-summary-row">
+                <div>
+                  <div className="builder-workout-name">Setup options · {catalog[setupExerciseId].name}</div>
+                  <div className="builder-workout-purpose">Attach reusable equipment or technique modifiers.</div>
+                </div>
+                <button type="button" className="text-button" onClick={() => setSetupExerciseId(null)}>Done</button>
+              </div>
+
+              {program.modifierDefinitions.length > 0 && (
+                <div className="builder-modifier-library">
+                  {program.modifierDefinitions.map(modifier => {
+                    const checked = (program.exerciseModifierIds[setupExerciseId] || []).includes(modifier.id);
+                    const kind = MODIFIER_KINDS.find(item => item.id === modifier.kind)?.label || "Setup";
+                    return (
+                      <div key={modifier.id} className="builder-modifier-row">
+                        <label className="builder-modifier-option">
+                          <input type="checkbox" checked={checked} onChange={() => toggleExerciseModifier(modifier.id)} />
+                          <span>
+                            <strong>{modifier.name}</strong>
+                            <small>{kind}{modifier.options.length ? ` · ${modifier.options.map(item => item.label).join(", ")}` : " · on/off"}</small>
+                          </span>
+                        </label>
+                        <button type="button" className="icon-remove-button" aria-label={`Delete ${modifier.name}`} onClick={() => deleteModifier(modifier)}>×</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="builder-modifier-create">
+                <label>
+                  <span>New modifier</span>
+                  <input
+                    style={fieldStyle}
+                    placeholder="Slingshot"
+                    value={modifierDraft.name}
+                    onChange={event => setModifierDraft({ ...modifierDraft, name: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>Effect</span>
+                  <select style={fieldStyle} value={modifierDraft.kind} onChange={event => setModifierDraft({ ...modifierDraft, kind: event.target.value })}>
+                    {MODIFIER_KINDS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>Choices, optional</span>
+                  <input
+                    style={fieldStyle}
+                    placeholder="Red, Blue, Maddog"
+                    value={modifierDraft.options}
+                    onChange={event => setModifierDraft({ ...modifierDraft, options: event.target.value })}
+                  />
+                </label>
+                <button type="button" className="builder-primary-action" disabled={!modifierDraft.name.trim()} onClick={saveModifier}>Add and attach</button>
+              </div>
+            </section>
+          )}
+
+          {!creating && !setupExerciseId ? (
             <div className="builder-actions">
               <button type="button" className="builder-primary-action" onClick={() => setPickerOpen(true)}>Add from library</button>
               <button type="button" className="builder-secondary-action" onClick={() => setCreating(true)}>New exercise</button>
             </div>
-          ) : (
+          ) : creating ? (
             <div className="custom-exercise-form">
               <div className="builder-workout-name">New exercise</div>
               <label>
@@ -189,7 +307,7 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
                 <button type="button" className="builder-secondary-action" onClick={() => setCreating(false)}>Cancel</button>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
 
         {pickerOpen && (

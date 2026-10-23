@@ -4,6 +4,12 @@ import {
   STRENGTH_ROTATIONS,
 } from "./supportTraining.js";
 import { parseRepsCount } from "./workout-volume.js";
+import {
+  createModifierDefinition,
+  sanitizeModifierDefinition,
+} from "./workoutModifiers.js";
+
+export { createModifierDefinition };
 
 export const WORKOUT_MODES = {
   maintain: {
@@ -55,6 +61,8 @@ export function defaultWorkoutProgram() {
     mode: "build",
     templates: defaultTemplateIds(),
     customExercises: [],
+    modifierDefinitions: [],
+    exerciseModifierIds: {},
   };
 }
 
@@ -90,6 +98,9 @@ export function sanitizeCustomExercise(raw) {
   const prescription = cleanString(raw.prescription) || formatPrescription(sets, reps);
   const intent = cleanString(raw.intent) || `${name} for ${stimulus}.`;
   const type = stimulus === "power" ? "P" : "S";
+  const setupModifiers = (Array.isArray(raw.setupModifiers) ? raw.setupModifiers : [])
+    .map(sanitizeModifierDefinition)
+    .filter(Boolean);
 
   return {
     id,
@@ -110,6 +121,7 @@ export function sanitizeCustomExercise(raw) {
     // Same convention as the built-in power and maintenance work: a fixed
     // dose. Only strength exercises add sets and then load.
     ...(stimulus !== "strength" ? { progressionPolicy: "maintain" } : {}),
+    ...(setupModifiers.length ? { setupModifiers } : {}),
     custom: true,
   };
 }
@@ -184,6 +196,10 @@ export function sanitizeWorkoutProgram(raw) {
   const customExercises = (Array.isArray(raw.customExercises) ? raw.customExercises : [])
     .map(sanitizeCustomExercise)
     .filter(Boolean);
+  const modifierDefinitions = (Array.isArray(raw.modifierDefinitions) ? raw.modifierDefinitions : [])
+    .map(sanitizeModifierDefinition)
+    .filter(Boolean);
+  const modifierIds = new Set(modifierDefinitions.map(definition => definition.id));
   const knownIds = new Set([
     ...Object.keys(SUPPORT_EXERCISES),
     ...customExercises.map(ex => ex.id),
@@ -196,15 +212,39 @@ export function sanitizeWorkoutProgram(raw) {
       : base.templates[templateId];
     templates[templateId] = [...new Set(ids)];
   }
-  return { version: 2, mode, templates, customExercises };
+  const exerciseModifierIds = {};
+  for (const [exerciseId, ids] of Object.entries(raw.exerciseModifierIds || {})) {
+    if (!knownIds.has(exerciseId) || !Array.isArray(ids)) continue;
+    const valid = [...new Set(ids.filter(id => modifierIds.has(id)))];
+    if (valid.length > 0) exerciseModifierIds[exerciseId] = valid;
+  }
+  return {
+    version: 2,
+    mode,
+    templates,
+    customExercises,
+    modifierDefinitions,
+    exerciseModifierIds,
+  };
+}
+
+function withSetupModifiers(exercise, program) {
+  if (!exercise) return exercise;
+  const ids = program.exerciseModifierIds[exercise.id] || [];
+  if (ids.length === 0) return exercise;
+  const definitions = new Map(program.modifierDefinitions.map(item => [item.id, item]));
+  const setupModifiers = ids.map(id => definitions.get(id)).filter(Boolean);
+  return setupModifiers.length > 0 ? { ...exercise, setupModifiers } : exercise;
 }
 
 export function workoutProgramCatalog(programLike) {
   const program = sanitizeWorkoutProgram(programLike);
-  return {
+  const catalog = {
     ...SUPPORT_EXERCISES,
     ...Object.fromEntries(program.customExercises.map(ex => [ex.id, ex])),
   };
+  return Object.fromEntries(Object.entries(catalog)
+    .map(([id, exercise]) => [id, withSetupModifiers(exercise, program)]));
 }
 
 export function workoutProgramWorkouts(programLike) {
@@ -219,7 +259,7 @@ export function workoutProgramWorkouts(programLike) {
     resolved[templateId] = {
       ...base,
       exercises: program.templates[templateId]
-        .map(id => native[id] || catalog[id])
+        .map(id => withSetupModifiers(native[id] || catalog[id], program))
         .filter(Boolean),
     };
   }

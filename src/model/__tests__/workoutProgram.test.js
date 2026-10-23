@@ -1,5 +1,6 @@
 import {
   createCustomExercise,
+  createModifierDefinition,
   defaultWorkoutProgram,
   learnedCustomExercise,
   sanitizeWorkoutProgram,
@@ -51,6 +52,32 @@ describe("workout program", () => {
     });
     expect(workoutProgramCatalog(program)[exercise.id].name).toBe("Towel Lock-Off");
     expect(workoutProgramWorkouts(program).S3.exercises.at(-1).id).toBe(exercise.id);
+  });
+
+  test("one reusable modifier can attach to built-in and custom exercises", () => {
+    const custom = createCustomExercise({ name: "Floor Press", tracking: "weight" });
+    const slingshot = createModifierDefinition({
+      name: "Slingshot",
+      kind: "assistance",
+      options: ["Red", "Blue"],
+    });
+    const base = defaultWorkoutProgram();
+    const program = sanitizeWorkoutProgram({
+      ...base,
+      customExercises: [custom],
+      modifierDefinitions: [slingshot],
+      exerciseModifierIds: {
+        benchPress: [slingshot.id],
+        [custom.id]: [slingshot.id],
+        missingExercise: [slingshot.id],
+      },
+    });
+
+    expect(program.exerciseModifierIds.missingExercise).toBeUndefined();
+    expect(workoutProgramCatalog(program).benchPress.setupModifiers).toEqual([slingshot]);
+    expect(workoutProgramCatalog(program)[custom.id].setupModifiers).toEqual([slingshot]);
+    expect(workoutProgramWorkouts(program).C.exercises
+      .find(exercise => exercise.id === "benchPress").setupModifiers).toEqual([slingshot]);
   });
 
   test("saved session snapshots restore custom definitions", () => {

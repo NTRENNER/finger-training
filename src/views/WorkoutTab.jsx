@@ -59,6 +59,10 @@ import { today, nowISO } from "../util.js";
 import { useLSValue } from "../hooks/useLSValue.js";
 import { WorkoutEffort } from "./workout/WorkoutEffort.jsx";
 import { recommendSet, recommendSetCount, returnToTrainingPlan } from "../model/workout-progression.js";
+import {
+  copyModifierSelections,
+  filterHistoryForModifierSetup,
+} from "../model/workoutModifiers.js";
 import "./workout/WorkoutPlanner.css";
 
 import { recommendNextWorkout } from "../model/supportTraining.js";
@@ -281,6 +285,14 @@ export function WorkoutTab({
   // without duplicating the three-logging-mode branching.
   const seedExerciseData = (ex) => {
     if (!ex.loggable) return { done: false, notes: "" };
+    const latestExerciseSession = ex.setupModifiers?.length
+      ? findLastSessionFor(wLog, activeId, ex.id)
+      : null;
+    const latestDoneSets = latestExerciseSession?.exercises?.[ex.id]?.sets || [];
+    const defaultModifiers = copyModifierSelections(latestDoneSets[0]);
+    const progressionLog = ex.setupModifiers?.length
+      ? filterHistoryForModifierSetup(wLog, ex.id, defaultModifiers)
+      : wLog;
     // Set ladder (June 2026): weight-logged exercises earn sets at
     // constant load — see recommendSetCount. circles/band exercises
     // keep their template counts (no load to ladder against), and
@@ -289,43 +301,54 @@ export function WorkoutTab({
     // they're maintenance-dosed by design (no set accumulation).
     const isWeightLogged = !ex.circlesOnly && !ex.logBand && !ex.logVariant;
     const ladder = isWeightLogged
-      ? recommendSetCount(wLog, ex, ex.sets || 1, { referenceDate: today() })
+      ? recommendSetCount(progressionLog, ex, ex.sets || 1, { referenceDate: today() })
       : null;
     const setCount = ladder ? ladder.sets : (ex.sets || 1);
     const sets = Array.from({ length: setCount }, (_, i) => {
+      const source = latestDoneSets[i] ?? latestDoneSets.at(-1);
+      const setProgressionLog = ex.setupModifiers?.length
+        ? filterHistoryForModifierSetup(wLog, ex.id, source)
+        : progressionLog;
+      const setLadder = isWeightLogged
+        ? recommendSetCount(setProgressionLog, ex, ex.sets || 1, { referenceDate: today() })
+        : ladder;
+      const withModifiers = set => {
+        const modifiers = copyModifierSelections(source);
+        return Object.keys(modifiers).length ? { ...set, modifiers } : set;
+      };
       if (ex.circlesOnly) {
         // Seed reps from the prior session when the exercise tracks
         // reps too; otherwise just a bare done flag.
         if (ex.reps) {
-          const lastSession = findLastSessionFor(wLog, activeId, ex.id);
+          const lastSession = findLastSessionFor(setProgressionLog, activeId, ex.id);
           const doneSets = lastSession?.exercises?.[ex.id]?.sets;
           const lastSet = doneSets?.[i] ?? doneSets?.at(-1);
-          return { reps: lastSet?.reps ?? "", done: false };
+          return withModifiers({ reps: lastSet?.reps ?? "", done: false });
         }
-        return { done: false };
+        return withModifiers({ done: false });
       }
       if (ex.logBand) {
         // Seed band from last session if available — no progression
         // logic (band selection is qualitative; let user step up
         // manually when they're ready). Lookup the most-recent
         // session containing this exercise to pull the prior band.
-        const lastSession = findLastSessionFor(wLog, activeId, ex.id);
+        const lastSession = findLastSessionFor(setProgressionLog, activeId, ex.id);
         const doneSets = lastSession?.exercises?.[ex.id]?.sets;
-          const lastSet = doneSets?.[i] ?? doneSets?.at(-1);
+        const lastSet = doneSets?.[i] ?? doneSets?.at(-1);
         if (ex.unilateral) {
-          return {
+          return withModifiers({
             leftReps:  lastSet?.leftReps  ?? ex.reps ?? "",
             leftBand:  lastSet?.leftBand  ?? "",
             rightReps: lastSet?.rightReps ?? ex.reps ?? "",
             rightBand: lastSet?.rightBand ?? "",
             done: false,
-          };
+          });
         }
-        return {
+        return withModifiers({
           reps: lastSet?.reps ?? ex.reps ?? "",
           band: lastSet?.band ?? "",
           done: false,
-        };
+        });
       }
       if (ex.logVariant) {
         // Variant-ladder exercises (June 2026, e.g. TRX Row): each set
@@ -336,34 +359,34 @@ export function WorkoutTab({
         // the next rung is a user judgment call, like band color).
         // Default variant = the easiest rung (first in `variants`);
         // weight stays blank until the user actually adds a vest.
-        const lastSession = findLastSessionFor(wLog, activeId, ex.id);
+        const lastSession = findLastSessionFor(setProgressionLog, activeId, ex.id);
         const doneSets = lastSession?.exercises?.[ex.id]?.sets;
-          const lastSet = doneSets?.[i] ?? doneSets?.at(-1);
-        return {
+        const lastSet = doneSets?.[i] ?? doneSets?.at(-1);
+        return withModifiers({
           variant: lastSet?.variant ?? (ex.variants?.[0] ?? ""),
           reps:    lastSet?.reps    ?? ex.reps ?? "",
           weight:  lastSet?.weight  ?? "",
           done: false,
-        };
+        });
       }
       // Default weight-logged exercise — seed via recommendSet, with
       // the ladder plan steering the load policy (hold during set
       // accumulation; step/jump/bridge only at top-out).
-      const rec = recommendSet(wLog, ex, activeId, i, null, ladder);
+      const rec = recommendSet(setProgressionLog, ex, activeId, i, null, setLadder);
       if (ex.unilateral) {
-        return {
+        return withModifiers({
           leftReps:    rec?.leftReps    ?? ex.reps ?? "",
           leftWeight:  rec?.leftWeight  ?? "",
           rightReps:   rec?.rightReps   ?? ex.reps ?? "",
           rightWeight: rec?.rightWeight ?? "",
           done: false,
-        };
+        });
       }
-      return {
+      return withModifiers({
         reps:   rec?.reps   ?? ex.reps ?? "",
         weight: rec?.weight ?? "",
         done: false,
-      };
+      });
     });
     return { sets };
   };
@@ -371,9 +394,12 @@ export function WorkoutTab({
   const seedExercise = ex => {
     const data = seedExerciseData(ex);
     if (!data.sets) return data;
-    const returnPlan = returnToTrainingPlan(wLog, ex, ex.sets || 1, today());
+    const comparableLog = ex.setupModifiers?.length
+      ? filterHistoryForModifierSetup(wLog, ex.id, data.sets[0])
+      : wLog;
+    const returnPlan = returnToTrainingPlan(comparableLog, ex, ex.sets || 1, today());
     if (returnPlan) data.sets = data.sets.slice(0, returnPlan.sets);
-    const plan = recommendSetCount(wLog, ex, ex.sets || 1, { referenceDate: today() });
+    const plan = recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today() });
     return { ...data, prescription: { version: 1, date: today(),
       sets: data.sets.map(({ done, ...target }) => ({ ...target })),
       progressionMode: plan.mode,
@@ -650,12 +676,23 @@ export function WorkoutTab({
                 // get no hints at all: they're maintenance-dosed and
                 // their progression variable (leverage) isn't
                 // something recommendSet can reason about.
+                const comparableLog = ex.setupModifiers?.length
+                  ? filterHistoryForModifierSetup(wLog, ex.id, exData.sets?.[0])
+                  : wLog;
                 const plan = (!ex.circlesOnly && !ex.logBand && !ex.logVariant)
-                  ? recommendSetCount(wLog, ex, ex.sets || 1, { referenceDate: today() })
+                  ? recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today() })
                   : null;
                 const recommendations = ex.logVariant ? [] : Array.from(
                   { length: (exData.sets?.length || ex.sets || 1) },
-                  (_, idx) => recommendSet(wLog, ex, activeId, idx, null, plan)
+                  (_, idx) => {
+                    const setLog = ex.setupModifiers?.length
+                      ? filterHistoryForModifierSetup(wLog, ex.id, exData.sets?.[idx])
+                      : comparableLog;
+                    const setPlan = (!ex.circlesOnly && !ex.logBand && !ex.logVariant)
+                      ? recommendSetCount(setLog, ex, ex.sets || 1, { referenceDate: today() })
+                      : plan;
+                    return recommendSet(setLog, ex, activeId, idx, null, setPlan);
+                  }
                 );
                 return (
                   <div key={ex.id}>

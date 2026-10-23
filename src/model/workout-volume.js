@@ -17,6 +17,11 @@
 // units (lbs or kg as the user types it), `reps` is a string that
 // usually parses to a number but may carry suffixes like "/side".
 
+import {
+  modifierSelectionLabel,
+  modifierSelectionSignature,
+} from "./workoutModifiers.js";
+
 // Identify a bodyweight-additive exercise. Explicit flag on the
 // exercise definition wins; otherwise fall back to a name-based
 // heuristic for the obvious cases. The heuristic isn't exhaustive
@@ -185,25 +190,35 @@ export function buildRepsVariantSeries(sessions, exId, exDef) {
   for (const s of sorted) {
     const sets = s?.exercises?.[exId]?.sets;
     if (!Array.isArray(sets)) continue;
-    let reps = 0, vIdx = -1, variant = null;
-    for (const t of sets) {
-      if (!t || !t.done) continue;
-      // Both set schemas: bilateral {reps} and unilateral
-      // {leftReps, rightReps} — same shape-handling as the volume
-      // helpers above (sidePayloads).
-      for (const side of sidePayloads(t)) reps += parseRepsCount(side.reps);
-      const i = ladder.indexOf(t.variant);
-      if (i > vIdx) { vIdx = i; variant = t.variant; }
-      else if (vIdx < 0 && variant == null && t.variant) variant = t.variant; // off-ladder label
+    const setupGroups = new Map();
+    for (const set of sets) {
+      if (!set?.done) continue;
+      const signature = modifierSelectionSignature(set);
+      if (!setupGroups.has(signature)) setupGroups.set(signature, []);
+      setupGroups.get(signature).push(set);
     }
-    if (reps <= 0 && variant == null) continue;  // nothing usable logged
-    out.push({
-      date: s.date,
-      reps,
-      variant,
-      variantIdx: vIdx >= 0 ? vIdx : null,
-      workout: s.workout,
-    });
+    for (const [setupSignature, groupSets] of setupGroups) {
+      let reps = 0, vIdx = -1, variant = null;
+      for (const t of groupSets) {
+        // Both set schemas: bilateral {reps} and unilateral
+        // {leftReps, rightReps} — same shape-handling as the volume
+        // helpers above (sidePayloads).
+        for (const side of sidePayloads(t)) reps += parseRepsCount(side.reps);
+        const i = ladder.indexOf(t.variant);
+        if (i > vIdx) { vIdx = i; variant = t.variant; }
+        else if (vIdx < 0 && variant == null && t.variant) variant = t.variant;
+      }
+      if (reps <= 0 && variant == null) continue;
+      out.push({
+        date: s.date,
+        reps,
+        variant,
+        variantIdx: vIdx >= 0 ? vIdx : null,
+        workout: s.workout,
+        setupSignature,
+        setupLabel: modifierSelectionLabel(groupSets[0]),
+      });
+    }
   }
   return out;
 }

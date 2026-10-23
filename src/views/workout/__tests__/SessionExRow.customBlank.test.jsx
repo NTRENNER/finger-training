@@ -50,3 +50,24 @@ test("a weight-tracked set also requires reps before completion", () => {
   expect(screen.getByRole("alert")).toHaveTextContent("Enter reps");
   expect(screen.getByRole("textbox")).toHaveFocus();
 });
+
+test("an attached modifier is selected per set and survives completion", () => {
+  const ex = {
+    ...createCustomExercise({ name: "Bench Press", tracking: "weight", reps: "5" }),
+    setupModifiers: [{
+      id: "modifier_slingshot",
+      name: "Slingshot",
+      kind: "assistance",
+      options: [{ id: "red", label: "Red" }, { id: "blue", label: "Blue" }],
+    }],
+  };
+  render(<StatefulRow ex={ex} initialSet={{ reps: "5", weight: "225", done: false }} />);
+
+  const setup = screen.getByLabelText("Slingshot for set 1");
+  fireEvent.change(setup, { target: { value: "red" } });
+  expect(setup).toHaveValue("red");
+  expect(screen.getByRole("spinbutton")).toHaveValue(null);
+  fireEvent.click(screen.getByTitle("Set 1: tap to toggle done"));
+  expect(screen.getByTitle("Set 1: tap to toggle done")).toHaveTextContent("✓");
+  expect(setup).toHaveValue("red");
+});

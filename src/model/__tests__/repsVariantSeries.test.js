@@ -1,4 +1,5 @@
 import { buildRepsVariantSeries } from "../workout-volume.js";
+import { createModifierDefinition, setModifierSelection } from "../workoutModifiers.js";
 
 const DEF = { variants: ["Two-arm", "Feet-elevated", "Archer", "One-arm"] };
 
@@ -43,6 +44,25 @@ describe("buildRepsVariantSeries", () => {
     expect(out[0]).toMatchObject({ reps: 8, variant: "Two-arm", variantIdx: null });
     expect(buildRepsVariantSeries([], "trxRow", DEF)).toEqual([]);
     expect(buildRepsVariantSeries(null, "trxRow", DEF)).toEqual([]);
+  });
+
+  test("separates raw and modified sets from the same session", () => {
+    const band = createModifierDefinition({ name: "Band support", kind: "assistance" });
+    const raw = { reps: "8", variant: "Full", done: true };
+    const assisted = {
+      ...setModifierSelection({ reps: "10", variant: "Full" }, band, "on"),
+      done: true,
+    };
+    const out = buildRepsVariantSeries([{
+      date: "2026-10-23",
+      workout: "B",
+      exercises: { frontLever: { sets: [raw, assisted] } },
+    }], "frontLever", { variants: ["Tuck", "Full"] });
+    expect(out).toHaveLength(2);
+    expect(out.map(point => [point.setupLabel, point.reps])).toEqual([
+      ["", 8],
+      ["Band support", 10],
+    ]);
   });
 
   test("sorts by date then completedAt", () => {

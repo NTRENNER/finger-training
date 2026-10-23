@@ -6,6 +6,8 @@
 // these aren't pure model code, but they're trivially substitutable
 // in a test environment if needed.
 
+import { modifierSelectionLabel, modifierSelections } from "../model/workoutModifiers.js";
+
 // Per-rep grip-training CSV — flat schema matching the Supabase
 // `reps` table for round-trip import in spreadsheets.
 //
@@ -57,7 +59,7 @@ export function downloadCSV(reps) {
 // current names the rest of the app shows — "Med Ball Slams"
 // rather than "slam balls". Without it we fall back to the raw
 // snake-to-space rendering for back-compat.
-export function downloadWorkoutCSV(log, resolveName) {
+export function toWorkoutCSV(log, resolveName) {
   const nameOf = (exId) => {
     if (typeof resolveName === "function") {
       const n = resolveName(exId);
@@ -76,6 +78,8 @@ export function downloadWorkoutCSV(log, resolveName) {
       const exName = nameOf(exId);
       if (exData.sets && exData.sets.length > 0) {
         exData.sets.forEach((set, i) => {
+          const setupLabel = modifierSelectionLabel(set);
+          const setupJson = setupLabel ? JSON.stringify(modifierSelections(set)) : "";
           // Unilateral sets emit two rows (L, R) so per-side
           // asymmetry survives the export. Bilateral sets emit one
           // row with side="" so existing pipelines reading the
@@ -83,10 +87,10 @@ export function downloadWorkoutCSV(log, resolveName) {
           const isUni = set.leftReps != null  || set.leftWeight  != null
                      || set.rightReps != null || set.rightWeight != null;
           if (isUni) {
-            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "L", set.leftReps ?? "",  set.leftWeight ?? "",  set.done ? "yes" : "no", "", ""]);
-            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "R", set.rightReps ?? "", set.rightWeight ?? "", set.done ? "yes" : "no", "", ""]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "L", set.leftReps ?? "",  set.leftWeight ?? "",  set.done ? "yes" : "no", "", "", setupLabel, setupJson]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "R", set.rightReps ?? "", set.rightWeight ?? "", set.done ? "yes" : "no", "", "", setupLabel, setupJson]);
           } else {
-            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "",  set.reps ?? "",      set.weight ?? "",      set.done ? "yes" : "no", "", ""]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "",  set.reps ?? "",      set.weight ?? "",      set.done ? "yes" : "no", "", "", setupLabel, setupJson]);
           }
         });
       } else {
@@ -103,13 +107,18 @@ export function downloadWorkoutCSV(log, resolveName) {
           exData.done ? "yes" : "no",
           Number(exData.minutes) > 0 ? Number(exData.minutes) : "",
           exData.category || "",
+          "",
+          "",
         ]);
       }
     }
   }
-  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "side", "reps", "weight", "done", "minutes", "mobility_category"];
-  const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
+  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "side", "reps", "weight", "done", "minutes", "mobility_category", "setup_modifiers", "setup_modifiers_json"];
+  return [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+}
+
+export function downloadWorkoutCSV(log, resolveName) {
+  const blob = new Blob([toWorkoutCSV(log, resolveName)], { type: "text/csv" });
   const a = Object.assign(document.createElement("a"), {
     href: URL.createObjectURL(blob), download: "workout-history.csv",
   });

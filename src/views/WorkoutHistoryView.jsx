@@ -41,6 +41,10 @@ import {
   workoutProgramCatalog,
   workoutProgramWorkouts,
 } from "../model/workoutProgram.js";
+import {
+  modifierSelectionLabel,
+  modifierSelectionSignature,
+} from "../model/workoutModifiers.js";
 import { BAND_COLOR_LOOKUP, normalizeBands } from "./workout/workoutConstants.js";
 import { SessionExRow } from "./workout/SessionExRow.jsx";
 import { SimpleExRow } from "./workout/SimpleExRow.jsx";
@@ -630,17 +634,24 @@ export function WorkoutHistoryView({
                 const additive = isBodyweightAdditive(exDef);
                 const vol  = sessionExerciseVolume(data.sets, bwAtSessionDisp, exDef);
                 const e1rm = sessionExerciseEst1RM(data.sets, bwAtSessionDisp, exDef);
+                const setupSignatures = [...new Set((data.sets || [])
+                  .filter(set => set?.done)
+                  .map(modifierSelectionSignature))];
+                const comparableSetup = setupSignatures.length === 1 ? setupSignatures[0] : null;
 
                 let prevVol = null;
-                for (const prior of sorted) {
+                for (const prior of comparableSetup == null ? [] : sorted) {
                   if (prior.workout !== session.workout) continue;
                   if (prior.date >= session.date && prior !== session) continue;
                   if (prior === session) continue;
                   const priorEx = prior.exercises?.[id];
                   if (!priorEx?.sets?.length) continue;
+                  const comparableSets = priorEx.sets.filter(set => set?.done
+                    && modifierSelectionSignature(set) === comparableSetup);
+                  if (!comparableSets.length) continue;
                   const priorBwKg = bwOnDate(bwLog, prior.date)?.kg ?? bwAtSessionKg;
                   const priorBwDisp = priorBwKg != null ? toDisp(priorBwKg, unit) : null;
-                  const v = sessionExerciseVolume(priorEx.sets, priorBwDisp, exDef);
+                  const v = sessionExerciseVolume(comparableSets, priorBwDisp, exDef);
                   if (v > 0) { prevVol = v; break; }
                 }
                 const deltaPct = (prevVol && vol) ? Math.round((vol / prevVol - 1) * 100) : null;
@@ -749,6 +760,11 @@ export function WorkoutHistoryView({
                                   ? `${s.variant} · ${body}`
                                   : body;
                               })()
+                            )}
+                            {modifierSelectionLabel(s) && (
+                              <span style={{ color: C.muted, fontSize: 10 }}>
+                                {modifierSelectionLabel(s)}
+                              </span>
                             )}
                           </span>
                         );
