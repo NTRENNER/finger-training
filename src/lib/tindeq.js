@@ -92,9 +92,19 @@ export function parseTindeqPacket(dataView, onSample) {
 // Force and time are recorded over matching device-clock intervals by
 // recordCapacityForce; the obsolete peak-relative plateau helper is removed.
 export const AUTO_RELEASE_CONFIRM_MS = TARGET_FAILURE_POLICY.release_confirmation_ms;
-// Delivery can pause without losing device samples. Allow catch-up before
-// ending a rep, but never interpolate a missing interval in device time.
+// Delivery can pause without losing device samples. A hole that wall time
+// also shows is carried across at the last observed force when it is this
+// short, and recorded as unobserved time; a longer hole marks the hold as
+// interrupted when it is saved, but never ends it.
 export const STREAM_RECOVERY_MS = 5000;
+// A hold waits this long for a silent stream (the interrupt prompt lets the
+// user decide sooner) before it is saved as interrupted.
+export const STREAM_ABANDON_MS = 30000;
+// Consecutive device samples more than this far apart are a discontinuity.
+const MAX_SAMPLE_STEP_US = 1000000;
+
+// Readings outside a working cell's range are some other reply, not a voltage.
+export const isPlausibleBatteryMv = mv => mv >= 1800 && mv <= 5500;
 
 // ─────────────────────────────────────────────────────────────
 // useTindeq() — React hook wrapper around the BLE GATT API
@@ -241,7 +251,7 @@ export function useTindeq() {
   const adStartTimeRef  = useRef(null);   // device milliseconds when pull began
   const autoPullRef = useRef(null);
   const adSamplesRef    = useRef([]);     // raw {kg, ts} buffer for full-effort integration
-  const deviceClockRef = useRef({ raw: null, elapsed: 0 });
+  const deviceClockRef = useRef({ raw: null, elapsed: 0, step: 0 });
   const lastPacketAtRef = useRef(null);
   const targetDetectorRef = useRef(null);
   const manualTargetDetectorRef = useRef(null);
@@ -332,7 +342,7 @@ export function useTindeq() {
       const request = batteryRequestRef.current;
       if (request && data.byteLength === 6 && data.getUint8(1) === 4) {
         const mv = data.getUint32(2, true);
-        if (mv >= 100 && mv <= 10000) {
+        if (isPlausibleBatteryMv(mv)) {
           clearTimeout(request.timer);
           batteryRequestRef.current = null;
           updateBattery({ status: "available", voltage_mv: mv, voltage_read_at_ms: Date.now() });
@@ -345,37 +355,48 @@ export function useTindeq() {
     // Battery messages and malformed packets cannot keep a stalled force
     // stream alive or alter device timing / force integration.
     if (!packetSamples.length) return;
-    if ((adActiveRef.current || measuringRef.current) && lastPacketAtRef.current != null) {
+    const recording = adActiveRef.current || measuringRef.current;
+    const deliveryGapMs = lastPacketAtRef.current == null ? 0 : Date.now() - lastPacketAtRef.current;
+    if (recording && lastPacketAtRef.current != null) {
       transportRef.current.max_delivery_gap_ms = Math.max(transportRef.current.max_delivery_gap_ms || 0,
-        Date.now() - lastPacketAtRef.current);
+        deliveryGapMs);
     }
     setSignalRecovering(false);
     lastPacketAtRef.current = Date.now();
     const packetLastTs = packetSamples.at(-1)?.ts;
-    packetSamples.forEach(({ kg, ts }) => {
+    const timed = [];
+    packetSamples.forEach(({ kg, ts }, i) => {
       const at = lastPacketAtRef.current - ((packetLastTs - ts + 4294967296) % 4294967296) / 1000;
       const clock = deviceClockRef.current;
-      const delta = clock.raw === null ? 0 : (ts - clock.raw + 4294967296) % 4294967296;
-      clock.elapsed += delta / 1000;
+      let delta = clock.raw === null ? 0 : (ts - clock.raw + 4294967296) % 4294967296;
       clock.raw = ts;
-      const now = clock.elapsed;
-      if ((measuringRef.current || adActiveRef.current) && delta > 1000000) {
-        transportRef.current.interruption = 'device_sample_gap';
-        transportRef.current.device_gap_ms = delta / 1000;
-      }
-      if (measuringRef.current && samplesRef.current.length && delta > 1000000) {
-        measurementInterruptedRef.current = true;
-        autoFailCallbackRef.current?.();
-      }
-      if (adActiveRef.current && delta > 1000000) {
-        const stats = recordWithBattery(adSamplesRef.current, undefined, targetKgRef.current,
-          forceDecision(targetDetectorRef.current, adSamplesRef.current.at(-1)?.ts, 'equipment_interruption'));
-        adActiveRef.current = false;
-        markAwaitingRelease(true);
-        adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
-        adSamplesRef.current = [];
-        return;
-      }
+      let gapMs = 0;
+      if (delta > MAX_SAMPLE_STEP_US) {
+        // Missing data must show in wall time too, and can only precede the
+        // first sample of a packet. Otherwise the Progressor clock restarted
+        // mid-stream (seen with packets arriving on time): re-anchor it.
+        const wallMs = i === 0 ? deliveryGapMs : 0;
+        if (wallMs * 1000 <= MAX_SAMPLE_STEP_US) {
+          delta = clock.step;
+          if (recording) transportRef.current.clock_resets = (transportRef.current.clock_resets || 0) + 1;
+        } else {
+          gapMs = Math.min(delta / 1000, wallMs);
+          delta = gapMs * 1000;
+          if (recording && gapMs <= STREAM_RECOVERY_MS) {
+            for (let t = 1000; t < gapMs; t += 1000) {
+              timed.push({ kg: latestKgRef.current, now: clock.elapsed + t, at: at - gapMs + t });
+            }
+            transportRef.current.unobserved_ms = (transportRef.current.unobserved_ms || 0) + gapMs;
+          } else if (recording) {
+            transportRef.current.interruption = 'device_sample_gap';
+            transportRef.current.device_gap_ms = gapMs;
+          }
+        }
+      } else if (delta > 0) clock.step = delta;
+      clock.elapsed += delta / 1000;
+      timed.push({ kg, now: clock.elapsed, at, gap: gapMs > 0 });
+    });
+    timed.forEach(({ kg, now, at, gap }) => {
       latestKgRef.current = kg;
       if (kg > peakRef.current) peakRef.current = kg;
       scheduleUiFlush();  // state mirror updates at most once per frame
@@ -396,7 +417,7 @@ export function useTindeq() {
       // Zeroing is an explicit unloaded-handle action, never an automatic
       // command during a pull. Verify a fresh, stable zero before re-arming.
       if (zeroingRef.current) {
-        if (delta > 1000000) zeroBelowRef.current = null;
+        if (gap) zeroBelowRef.current = null;
         if (zeroSamplesRef.current && Math.abs(kg) < Math.min(0.25, adReleaseKgRef.current)) {
           if (zeroBelowRef.current === null) zeroBelowRef.current = now;
           if (now - zeroBelowRef.current >= 500) {
@@ -520,7 +541,8 @@ export function useTindeq() {
       setSignalRecovering(true);
       // Timed warmups advance on a wall-clock deadline, so they must pause
       // promptly rather than run that clock through an unobserved interval.
-      const grace = adActiveRef.current && !adEndOnTargetDropRef.current ? 1500 : STREAM_RECOVERY_MS;
+      // Holds keep waiting while the interrupt prompt offers the choice.
+      const grace = adActiveRef.current && !adEndOnTargetDropRef.current ? 1500 : STREAM_ABANDON_MS;
       if (silence <= grace) return;
       transportRef.current.interruption = 'stream_timeout';
       transportRef.current.silence_ms = silence;
@@ -605,8 +627,9 @@ export function useTindeq() {
           adSamplesRef.current = [];
         }
         // Keep the rep and callbacks through one bounded reconnect attempt.
-        // Returning device timestamps must still prove continuous coverage;
-        // otherwise the gap handler saves the observed effort as interrupted.
+        // The packet handler measures the hole in wall time when samples
+        // return: a short one is carried across, a long one is saved as
+        // interrupted once the hold ends.
         if (measuringRef.current || adActiveRef.current) {
           transportRef.current.disconnect_count = (transportRef.current.disconnect_count || 0) + 1;
           setSignalRecovering(true);

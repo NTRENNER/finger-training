@@ -1,5 +1,5 @@
 import { renderHook, act } from "@testing-library/react";
-import { useTindeq, TINDEQ_NOTIFY, CMD_BATTERY, CMD_START } from "../tindeq.js";
+import { useTindeq, TINDEQ_NOTIFY, CMD_BATTERY, CMD_START, STREAM_ABANDON_MS } from "../tindeq.js";
 
 beforeEach(() => jest.useFakeTimers());
 afterEach(() => { jest.useRealTimers(); delete navigator.bluetooth; });
@@ -51,6 +51,14 @@ test("reads millivolts once on connect and accepts no unsolicited command respon
   expect(view.result.current.battery.voltage_mv).toBe(3012);
 });
 
+test("a reply outside a working cell's range is not taken as the voltage", async () => {
+  const { view, battery } = await setup();
+  battery(599);
+  expect(view.result.current.battery.status).toBe("checking");
+  battery(4015);
+  expect(view.result.current.battery).toMatchObject({ status: "available", voltage_mv: 4015 });
+});
+
 test("a device warning is retained even if voltage arrives afterward", async () => {
   const { view, battery } = await setup({ warningOnSubscribe: true });
   battery(2800);
@@ -99,7 +107,7 @@ test("battery warnings cannot keep a silent force stream alive", async () => {
   const end = jest.fn();
   await act(async () => view.result.current.startAutoDetect(jest.fn(), end));
   packet([[0, 20], [500, 20]]);
-  for (let i = 0; i < 11; i++) {
+  for (let i = 0; i <= STREAM_ABANDON_MS / 500; i++) {
     act(() => jest.advanceTimersByTime(500)); emit([4, 0]);
   }
   expect(end).toHaveBeenCalledTimes(1);
@@ -115,7 +123,7 @@ test("disconnect snapshots are immutable and reconnect requests a fresh reading"
   packet([[0, 20], [500, 20]]);
   disconnect();
   await act(async () => { jest.advanceTimersByTime(1500); });
-  await act(async () => { jest.advanceTimersByTime(4000); });
+  await act(async () => { jest.advanceTimersByTime(STREAM_ABANDON_MS - 1000); });
   const saved = end.mock.calls[0][0];
   expect(saved).toMatchObject({ endReason: "equipment_interruption", failureValid: false,
     forceRecording: { battery: { voltage_mv: 2750, low_battery_warning: true } } });

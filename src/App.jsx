@@ -685,8 +685,9 @@ export default function App() {
         if (phase === "rep_ready" || phase === "rep_active") {
           // When Tindeq is connected, use touchless auto-detect mode:
           // reps start and end automatically from force threshold crossings.
-          // When not connected, fall back to the manual tap flow.
-          if (tindeq.connected && phase === "rep_ready") {
+          // When not connected, fall back to the manual tap flow. Stay on the
+          // sensor flow through a reconnect so an active hold isn't dropped.
+          if ((tindeq.connected || tindeq.reconnecting) && phase === "rep_ready") {
             return (
               <AutoRepSessionView
                 key={`auto-${currentSet}-${activeHand}-${currentRep}`}

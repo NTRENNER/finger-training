@@ -34,6 +34,10 @@ test('sensor reps show target time beside target weight, and keep both through a
   expect(screen.getByText('Target weight')).toBeInTheDocument();
   expect(screen.getByText('Average weight')).toBeInTheDocument();
   view.rerender(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()}
+    tindeq={{ ...tindeq, signalRecovering: true }} unit="kg" />);
+  expect(screen.getByText('Target weight')).toBeInTheDocument();
+  expect(screen.queryByText('Average weight')).not.toBeInTheDocument();
+  view.rerender(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()}
     tindeq={{ ...tindeq, connected: false, reconnecting: true }} unit="kg" />);
   expect(screen.getByText('Target time')).toBeInTheDocument();
   expect(screen.getByText('Target weight')).toBeInTheDocument();
