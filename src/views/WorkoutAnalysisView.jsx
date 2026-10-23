@@ -28,18 +28,19 @@ import {
   buildRepsVariantSeries,
 } from "../model/workout-volume.js";
 import {
-  loadLS, saveLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY,
+  loadLS, saveLS, LS_WORKOUT_LOG_KEY, LS_WORKOUT_PLAN_KEY, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY,
   ROTATION_PIN_KEY,
 } from "../lib/storage.js";
 import { bwOnDate, toDisp } from "../ui/format.js";
 import { migrateExerciseId, buildExerciseDefIndex } from "../model/exerciseIds.js";
 import { exercises as SUPPORT_EXERCISES } from "../model/supportTraining.js";
+import {
+  sanitizeWorkoutProgram,
+  sessionExerciseDefinitions,
+  workoutProgramCatalog,
+  workoutProgramWorkouts,
+} from "../model/workoutProgram.js";
 import { useLSValue } from "../hooks/useLSValue.js";
-
-// Locally re-declared to match WorkoutTab's storage key (which is
-// defined inline there, not exported). Keeping the string literal
-// in sync between the two is a small cost for view independence.
-const LS_WORKOUT_PLAN_KEY = "ft_workout_plan";
 
 // For one exercise id, walk wLog chronologically and produce
 // [{date, top, volume, sessionBw}] points, one per session that
@@ -388,11 +389,14 @@ export function WorkoutAnalysisView({ bodyWeight = null, unit = "lbs", defaultWo
       }
       return out;
     };
+    const program = sanitizeWorkoutProgram(planStored);
+    const catalog = workoutProgramCatalog(program);
     return {
-      ...buildExerciseDefIndex(migrate(planStored)),
       ...buildExerciseDefIndex(migrate(defaultWorkouts), SUPPORT_EXERCISES),
+      ...buildExerciseDefIndex(migrate(workoutProgramWorkouts(program)), catalog),
+      ...sessionExerciseDefinitions(wLog),
     };
-  }, [planStored, defaultWorkouts]);
+  }, [planStored, defaultWorkouts, wLog]);
 
   // For each exercise in the plan with logWeight=true, build its
   // series. Sort the result by latest-session date DESC so the most

@@ -6,24 +6,20 @@
 // (three-exp curve, cookedness slider) is finger-
 // specific; this module handles everything else.
 //
-// Design constraints (user-specified, May 2026):
-//   - One BIG strength session per week, max. A is the
-//     reservation slot; everything else is frequent / low-friction.
-//   - Climbing fatigue is local to the forearms — most days a
-//     strength session is fine alongside climbing.
-//   - The post-outdoor-Monday "I'm wiped" case is handled by the
-//     user closing the app, not by a UI toggle. If you're wiped
-//     enough to want a different workout, you're wiped enough to
-//     skip — and on the rare day you want a lighter session, the
-//     A/B/C picker override is one tap. A previous `energyLow`
-//     toggle was removed (May 2026) because it only created a
-//     theoretical behavior change: the user already self-gates.
-//   - Cookedness is finger-specific and is NOT consumed here.
+// Current structure (October 2026):
+//   - Strength frequency is phase-driven: one maintenance day, two
+//     normal build days, or three days during a strength block.
+//   - Power is a separate low-volume primer and never advances the
+//     strength rotation.
+//   - Templates are defaults. workoutProgram.js overlays user-owned
+//     exercise choices without changing historical workout IDs.
+//   - Cookedness remains finger-specific and is not consumed here.
 //
-// Workouts:
-//   A       — Strength Support      (BIG, ~45 min, one per week)
-//   B       — Athletic Power        (FREQUENT, ~30 min, recovers fast)
-//   C       — Neural Strength Touch (FREQUENT, ~15 min, the easy yes)
+// Workouts (stable storage IDs):
+//   A       — Strength A / heavy
+//   B       — Power Primer
+//   C       — Strength B / balanced
+//   S3      — Strength C / lock-off + core
 //   STRETCH — Climbing Mobility     (FLEXIBLE HABIT, 5/10/15 min menu)
 //   CLIMB   — primary climbing session (loggable marker only — the
 //             recommender never pushes you to climb, and climbing no
@@ -717,7 +713,7 @@ export const workouts = {
   A: {
     id: "A",
     shortName: "A",
-    name: "Workout A — Strength Support",
+    name: "Strength A — Heavy",
     purpose: "Low-volume force production and structural strength.",
     fatigueClass: "big",
     fatigueCost: 3,
@@ -762,9 +758,9 @@ export const workouts = {
 
   B: {
     id: "B",
-    shortName: "B",
-    name: "Workout B — Athletic Power",
-    purpose: "Explosiveness, elasticity, sequencing, lateral-plane power.",
+    shortName: "Power",
+    name: "Power Primer",
+    purpose: "A short, crisp primer before finger training, climbing, or strength work.",
     fatigueClass: "frequent",
     fatigueCost: 2,
     // Power/explosive is the stimulus. Hip drive and posterior chain
@@ -808,25 +804,23 @@ export const workouts = {
     // progressing lift on B: the intended strength stimulus, parked on
     // the light, high-adherence day where the arms are fresh.
     exercises: [
-      exercises.medBallThrows,
-      exercises.broadJump,
-      exercises.verticalJump,
-      exercises.skaterBounds,
-      exercises.frontLever,
-      exercises.trxHamstringCurl,
-      exercises.bicepCurls,
+      { ...exercises.medBallThrows, sets: 2, prescription: "2 × 3–5 crisp reps", progressionPolicy: "maintain" },
+      { ...exercises.broadJump, sets: 2, prescription: "2 × 3 fast reps", progressionPolicy: "maintain" },
+      { ...exercises.verticalJump, sets: 2, prescription: "2 × 3 fast reps", progressionPolicy: "maintain" },
+      { ...exercises.skaterBounds, sets: 2, prescription: "2 × 4 / side", progressionPolicy: "maintain" },
+      { ...exercises.trxHamstringCurl, sets: 2, prescription: "2 × 6–8", progressionPolicy: "maintain" },
     ],
     coachingNotes: [
       "Stop while fast and springy.",
-      "This is not conditioning.",
-      "Quality beats volume.",
+      "Keep enough in reserve for the main session.",
+      "Use slams for speed here; use longer sets when capacity is the goal.",
     ],
   },
 
   C: {
     id: "C",
     shortName: "C",
-    name: "Workout C — Neural Strength Touch",
+    name: "Strength B — Balanced",
     purpose: "Brief low-fatigue strength exposure to maintain frequency.",
     // The "I can do this when tired" workout — pull + press + core
     // in ~15 min. Catches the post-outdoor-Monday case and the
@@ -889,6 +883,28 @@ export const workouts = {
     ],
   },
 
+  S3: {
+    id: "S3",
+    shortName: "C",
+    name: "Strength C — Lock-Off & Core",
+    purpose: "A third strength-block day for lock-off control, unilateral legs, shoulders, and trunk.",
+    fatigueClass: "big",
+    fatigueCost: 2,
+    tags: ["strength", "neural", "connective"],
+    exercises: [
+      exercises.lockoffEccentric,
+      exercises.splitSquat,
+      { ...exercises.proneExternalRotation, progressionPolicy: "maintain" },
+      exercises.copenhagenPlank,
+      exercises.abWheel,
+    ],
+    coachingNotes: [
+      "Use this day only during a deliberate three-day strength block.",
+      "Keep lock-offs controlled and stop before elbow or shoulder irritation.",
+      "Progress positions and quality before adding volume.",
+    ],
+  },
+
   STRETCH: {
     id: "STRETCH",
     shortName: "Stretch",
@@ -948,72 +964,22 @@ export const workouts = {
 // ───────────────────────────────────────────────────────
 // Recommender
 // ───────────────────────────────────────────────────────
-// Decision logic (first match wins):
-//
-//   1. A is overdue (≥7 days)
-//      → A. The week's strength reservation.
-//   2. Power / explosive stale (≥10 days)
-//      → B.
-//   3. Strength touch stale (C ≥4 days)
-//      → C.
-//   4. Fallback
-//      → C (the low-fatigue default — brief, doesn't bury you).
-//
-// Neither CLIMB nor REST is ever recommended by this engine.
-// CLIMB is logged via the climbing activities flow; REST is just
-// "don't open the app today." The user knows when they need to
-// rest without the engine prompting. A future deload-week
-// recommender could re-introduce structured rest at a higher
-// level (weeks, not days).
-//
-// May 2026 rewrite — round-robin model:
-//   The earlier engine was frequency-based: A treated as the week's
-//   strength slot (≥7-day staleness), B as power refresh (≥10-day
-//   staleness on power/explosive tags), C as the 4-day strength
-//   touch-up. Each branch had its own clock. That sounded principled
-//   but in practice the clocks didn't align with how the user
-//   actually trained: after an A + B in a single week, the engine
-//   would re-recommend A on day 8 because the A clock had elapsed,
-//   even though the user clearly wanted C next.
-//
-//   The new model is dead-simple A → B → C → A rotation: whichever
-//   letter was logged most recently, the next one in the cycle is
-//   what gets recommended. No frequency clocks, no tag staleness,
-//   no separate budget per letter. Users who skip a session in the
-//   cycle just resume from where they left off — if they did A and
-//   B this week but didn't make it to C, next session is C; if they
-//   did A, B, C, A in a single week, next week starts with B.
-//
-//   STRETCH and REST never count toward rotation advancement —
-//   STRETCH is a separate mobility habit the user logs directly, and REST
-//   is an explicit "no workout" marker. The engine still won't ever
-//   *recommend* STRETCH or REST.
-//
-// What happened to the old "energyLow" rule (A overdue + low
-// energy → C with caution)? Retired May 2026. The toggle was
-// theoretical: if the user is wiped enough to want a lighter
-// workout, they're wiped enough to skip the app entirely; if
-// they want C instead of A on any given day, the picker override
-// is one tap. The toggle didn't capture history either — it
-// auto-cleared at midnight — so it wasn't doing data work.
-//
-// What happened to the old hip/positional-capacity rule? Retired
-// when the dedicated mobility session moved out of the picker
-// rotation into the daily-stretching pill (May 2026). Mobility
-// staleness still surfaces visually on the pill itself — gray
-// default, yellow at 3–5 days, orange at 6+ — instead of elbowing
-// a weekly workout slot.
+// The recommender is a mode-aware strength rotation. Power, stretching,
+// climbing, and rest markers are ignored when advancing the pointer.
+// Same-day sessions use completedAt and then append order as tiebreaks.
 
-// Rotation order. The recommender returns the letter that comes
-// AFTER the most-recently-logged one in this list, wrapping back
-// to the start at the end.
-const ROTATION = ["A", "B", "C"];
+// Stable IDs let old sessions continue to participate after the UI names
+// changed. B is intentionally absent because it is the primer.
+export const STRENGTH_ROTATIONS = {
+  maintain: ["A"],
+  build: ["A", "C"],
+  block: ["A", "C", "S3"],
+};
 
 /**
- * Recommend the next support-training session via A → B → C
- * round-robin advancement.
+ * Recommend the next strength session for the selected weekly mode.
  *
- * Finds the most recent A/B/C session in `workoutHistory` (by date,
+ * Finds the most recent session in the active rotation (by date,
  * with completedAt + array-order tiebreaks for same-day workouts)
  * and returns the next letter in the cycle. Sessions that aren't
  * in the rotation (STRETCH, REST, climbing, anything unknown) are
@@ -1037,7 +1003,13 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
   // we keep the option signature so older callers and tests don't
   // need to change their call sites.
 
-  // Walk the history once and pick the latest A/B/C session. Tiebreaks:
+  const requestedRotation = Array.isArray(opts.rotation) ? opts.rotation : null;
+  const mode = Object.hasOwn(STRENGTH_ROTATIONS, opts.mode) ? opts.mode : "build";
+  const rotation = (requestedRotation || STRENGTH_ROTATIONS[mode])
+    .filter(key => workouts[key]);
+  const safeRotation = rotation.length > 0 ? rotation : STRENGTH_ROTATIONS.build;
+
+  // Walk the history once and pick the latest strength session. Tiebreaks:
   //   1. Later `date` wins.
   //   2. Within a day, later `completedAt` wins (sessions logged in
   //      the same day still resolve to the one finished most recently).
@@ -1048,7 +1020,7 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
   for (let i = 0; i < (workoutHistory || []).length; i++) {
     const s = workoutHistory[i];
     const key = sessionWorkoutKey(s);
-    if (!ROTATION.includes(key) || !s.date) continue;
+    if (!safeRotation.includes(key) || !s.date) continue;
     const isLater =
       !latest
       || s.date > latest.date
@@ -1060,22 +1032,27 @@ export function recommendNextWorkout(workoutHistory = [], opts = {}) {
     }
   }
 
-  // No A/B/C on record yet → seed the rotation at A.
+  // No session from the active mode on record yet: start at its first day.
   if (!latest) {
+    const firstKey = safeRotation[0];
     return {
-      primary: workouts.A,
-      reason: "Start with Workout A. We’ll guide you through A, B, and C.",
-      alternatives: [workouts.B, workouts.C],
+      primary: workouts[firstKey],
+      reason: safeRotation.length === 1
+        ? "Your maintenance plan uses one focused strength day."
+        : `Start with ${workouts[firstKey].name}. We’ll rotate through ${safeRotation.length} strength days.`,
+      alternatives: safeRotation.slice(1).map(key => workouts[key]),
     };
   }
 
   const lastKey = sessionWorkoutKey(latest);
-  const nextKey = ROTATION[(ROTATION.indexOf(lastKey) + 1) % ROTATION.length];
+  const nextKey = safeRotation[(safeRotation.indexOf(lastKey) + 1) % safeRotation.length];
 
   return {
     primary: workouts[nextKey],
-    reason: `You last completed Workout ${lastKey}. Workout ${nextKey} is next.`,
-    alternatives: ROTATION
+    reason: safeRotation.length === 1
+      ? "This mode keeps one strength day in rotation for maintenance."
+      : `${workouts[lastKey].name} was your last strength session. ${workouts[nextKey].name} is next.`,
+    alternatives: safeRotation
       .filter(k => k !== nextKey)
       .map(k => workouts[k]),
   };

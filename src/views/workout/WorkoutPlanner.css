@@ -4,9 +4,320 @@
   gap: 8px;
   margin-bottom: 12px;
 }
+
+.workout-section-heading,
+.builder-summary-row,
+.workout-builder-header,
+.power-primer-band {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.workout-eyebrow {
+  color: #8b949e;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workout-section-title,
+.power-primer-title,
+.builder-workout-name {
+  color: #e6edf3;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin-top: 4px;
+}
+
+.strength-mode-section {
+  border-bottom: 1px solid #30363d;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+}
+
+.strength-day-count {
+  color: #bc8cff;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.strength-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.strength-mode-button {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  color: #e6edf3;
+  cursor: pointer;
+  font: inherit;
+  min-height: 94px;
+  padding: 12px;
+  text-align: left;
+}
+
+.strength-mode-button.is-selected {
+  background: rgba(188, 140, 255, 0.1);
+  border-color: #bc8cff;
+  box-shadow: inset 0 0 0 1px #bc8cff;
+}
+
+.strength-mode-label,
+.strength-mode-description {
+  display: block;
+}
+
+.strength-mode-label {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.strength-mode-description,
+.strength-mode-note,
+.power-primer-copy,
+.builder-workout-purpose,
+.builder-exercise-prescription {
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.strength-mode-description { margin-top: 5px; }
+.strength-mode-note { margin-top: 10px; }
+
+.power-primer-band {
+  align-items: center;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-left: 3px solid #f0883e;
+  border-radius: 8px;
+  margin-top: 20px;
+  padding: 14px 16px;
+}
+
+.power-primer-band.is-selected {
+  background: rgba(240, 136, 62, 0.08);
+  border-color: #f0883e;
+}
+
+.power-primer-copy { margin-top: 3px; }
+
+.secondary-workout-button,
+.text-button,
+.builder-primary-action,
+.builder-secondary-action {
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  min-height: 40px;
+  padding: 8px 14px;
+}
+
+.secondary-workout-button,
+.builder-secondary-action {
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #e6edf3;
+}
+
+.workout-builder-overlay {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.76);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 180;
+}
+
+.workout-builder-panel {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  max-height: calc(100vh - 32px);
+  max-width: 680px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.workout-builder-header {
+  align-items: center;
+  border-bottom: 1px solid #30363d;
+  padding: 16px 18px;
+}
+
+.workout-builder-header h2 {
+  font-size: 20px;
+  margin: 3px 0 0;
+}
+
+.icon-close-button,
+.icon-remove-button,
+.builder-order-controls button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.icon-close-button,
+.icon-remove-button {
+  border-radius: 50%;
+  font-size: 18px;
+  height: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+.builder-template-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 10px 12px;
+  gap: 6px;
+  border-bottom: 1px solid #30363d;
+}
+
+.builder-template-tabs button,
+.builder-option-row button {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #8b949e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 8px;
+}
+
+.builder-template-tabs button[aria-selected="true"],
+.builder-option-row button[aria-pressed="true"] {
+  background: rgba(188, 140, 255, 0.14);
+  border-color: #bc8cff;
+  color: #e6edf3;
+}
+
+.builder-body {
+  max-height: calc(100vh - 170px);
+  overflow-y: auto;
+  padding: 16px 18px 20px;
+}
+
+.text-button {
+  background: transparent;
+  border: none;
+  color: #58a6ff;
+  min-height: 0;
+  padding: 4px 0;
+}
+
+.builder-exercise-list {
+  border-bottom: 1px solid #30363d;
+  border-top: 1px solid #30363d;
+  margin-top: 14px;
+}
+
+.builder-exercise-row {
+  align-items: center;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.builder-exercise-row:last-child { border-bottom: 0; }
+.builder-exercise-copy { flex: 1; min-width: 0; }
+.builder-exercise-name { font-size: 14px; font-weight: 650; }
+.builder-exercise-prescription { margin-top: 2px; }
+
+.builder-order-controls {
+  display: grid;
+  gap: 3px;
+}
+
+.builder-order-controls button {
+  border-radius: 4px;
+  font-size: 11px;
+  height: 24px;
+  padding: 0;
+  width: 26px;
+}
+
+.builder-order-controls button:disabled { cursor: default; opacity: 0.25; }
+.builder-empty { color: #8b949e; font-size: 13px; padding: 24px 0; text-align: center; }
+
+.builder-category-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.builder-category-chip {
+  background: #21262d;
+  border-radius: 4px;
+  color: #8b949e;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.builder-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.builder-primary-action {
+  background: #58a6ff;
+  border: 1px solid #58a6ff;
+  color: #0d1117;
+}
+
+.builder-primary-action:disabled { cursor: default; opacity: 0.45; }
+
+.custom-exercise-form {
+  border-top: 1px solid #30363d;
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.custom-exercise-form label > span,
+.custom-exercise-form legend {
+  color: #8b949e;
+  display: block;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+
+.custom-exercise-form fieldset { border: 0; margin: 0; padding: 0; }
+.builder-option-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.builder-form-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
 @media (max-width: 540px) {
   .workout-choice-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
   }
+  .strength-mode-grid { grid-template-columns: minmax(0, 1fr); }
+  .strength-mode-button { min-height: 0; }
+  .power-primer-band { align-items: stretch; flex-direction: column; }
+  .builder-template-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .builder-form-grid { grid-template-columns: minmax(0, 1fr); }
 }

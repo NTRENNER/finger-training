@@ -30,6 +30,7 @@ import {
   LS_PYRAMID_PROJECT_KEY,
   LS_PINNED_GRIP_BASELINES_KEY,
   LS_PINNED_PERHAND_BASELINES_KEY,
+  LS_WORKOUT_PLAN_KEY,
   migrateLegacyPyramidPins,
 } from "../lib/storage.js";
 import { today } from "../util.js";
@@ -39,6 +40,7 @@ import {
   LS_VOLUME_EXPERIMENTS_KEY, volumeExperimentPatch,
   volumeExperimentsFromSettings, validVolumeExperiments, restoreVolumeExperiments,
 } from '../lib/volumeExperimentStorage.js';
+import { sanitizeWorkoutProgram } from '../model/workoutProgram.js';
 import {
   pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates, removeBWTombstones,
   fetchUserSettings, enqueueUserSettingsPatch, flushUserSettingsPatch,
@@ -460,6 +462,19 @@ export function useUserSettings({ user, syncSignal = 0 }) {
       if (typeof cf === "string" && cf) {
         setClimbingFocusState(cf);
         saveLS(LS_CLIMBING_FOCUS_KEY, cf);
+      }
+      const pendingWorkoutProgram = hasPending("workout_program")
+        ? sanitizeWorkoutProgram(pending.workout_program)
+        : null;
+      const cloudWorkoutProgram = cloud.workout_program
+        ? sanitizeWorkoutProgram(cloud.workout_program)
+        : null;
+      if (pendingWorkoutProgram || cloudWorkoutProgram) {
+        const workoutProgram = pendingWorkoutProgram || cloudWorkoutProgram;
+        saveLS(LS_WORKOUT_PLAN_KEY, workoutProgram);
+        if (pendingWorkoutProgram) {
+          enqueueUserSettingsPatch({ workout_program: workoutProgram });
+        }
       }
       // Pyramid project pin — apply if cloud has it. Migration runs
       // on the cloud side too so a row last written under the legacy

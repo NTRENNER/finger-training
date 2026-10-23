@@ -3,22 +3,17 @@ import { markWorkoutPending, syncWorkoutSessions } from '../lib/workoutSync.js';
 // WORKOUT TAB
 // ─────────────────────────────────────────────────────────────
 // Strength / power / mobility training that supports climbing.
-// Rebuilt May 2026 around the supportTraining schema (see
-// src/model/supportTraining.js) — one BIG workout per week (A)
-// plus two frequent low-friction sessions (B / C), with a daily
-// mobility pill rendered below the picker (it's a flexible habit,
-// not a weekly slot). The previous 3-day rotation
-// (legacy A/B/C, "Lift Day 1" / "Lift Day 2" / "Power") was prone
-// to skipped sessions because the high-volume days took too long;
-// the new shape addresses that directly.
+// The page owns a phase-based one/two/three-day strength rotation,
+// a separate low-volume power primer, editable templates, and the
+// existing time-based mobility builder.
 //
 // Flow:
 //   1. recommendNextWorkout() looks at the user's recent support
 //      sessions and proposes one workout for today, with a one-line
 //      reason.
 //   2. The user can accept the recommendation or override via the
-//      A/B/C picker. The StretchPill below the picker is an
-//      independent daily toggle, not a recommender output. CLIMB
+//      active strength-day picker. The Power Primer and StretchPill are
+//      independent options, not recommender outputs. CLIMB
 //      and REST are never recommended either — climbing is logged
 //      via the climbing activities flow, REST is just "don't open
 //      the app today."
@@ -27,7 +22,7 @@ import { markWorkoutPending, syncWorkoutSessions } from '../lib/workoutSync.js';
 //      WorkoutTab — recommendSet drives weight suggestions); non-
 //      loggable exercises (mobility, explosive, bodyweight)
 //      render as compact SimpleExRow tiles with done + notes.
-//   4. Saving stamps `workoutId: A|B|C|STRETCH` alongside the
+//   4. Saving stamps `workoutId: A|B|C|S3|STRETCH` alongside the
 //      legacy `workout` field for back-compat with the existing
 //      log shape. HistoryView reads `workout` first, so legacy
 //      sessions render unchanged.
@@ -39,11 +34,8 @@ import { markWorkoutPending, syncWorkoutSessions } from '../lib/workoutSync.js';
 // ALL_WORKOUTS_LOOKUP from there and threads it through to the
 // History / Analysis surfaces that need it.
 //
-// Plan editor and exercise substitutes are gone — the supportTraining
-// workouts are opinionated about which exercises do what, and the
-// substitute table was keyed by legacy exercise IDs that no longer
-// exist. Both can come back if needed; for now the simpler tab is
-// the point.
+// The program store keeps only mode, template membership/order, and
+// custom definitions. Completed sessions remain immutable history.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
@@ -53,11 +45,11 @@ import { Card, PageFrame } from "../ui/components.jsx";
 import {
   loadLS, saveLS,
   LS_WORKOUT_LOG_KEY, LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
-  LS_DELOAD_WEEK_KEY, LS_STRETCH_PREFS_KEY, ROTATION_PIN_KEY,
+  LS_DELOAD_WEEK_KEY, LS_STRETCH_PREFS_KEY, LS_WORKOUT_PLAN_KEY, ROTATION_PIN_KEY,
 } from "../lib/storage.js";
 import { DELOAD_WEEK_DAYS } from "../model/deload.js";
 import {
-  deleteWorkoutSession,
+  deleteWorkoutSession, enqueueUserSettingsPatch, flushUserSettingsPatch,
 } from "../lib/sync.js";
 import {
   DEFAULT_TRIP, weeksToTrip, tripCountdown,
@@ -69,10 +61,13 @@ import { WorkoutEffort } from "./workout/WorkoutEffort.jsx";
 import { recommendSet, recommendSetCount, returnToTrainingPlan } from "../model/workout-progression.js";
 import "./workout/WorkoutPlanner.css";
 
+import { recommendNextWorkout } from "../model/supportTraining.js";
 import {
-  workouts as SUPPORT_WORKOUTS,
-  recommendNextWorkout,
-} from "../model/supportTraining.js";
+  sanitizeWorkoutProgram,
+  strengthWorkoutIds,
+  workoutProgramCatalog,
+  workoutProgramWorkouts,
+} from "../model/workoutProgram.js";
 import {
   sanitizeStretchPreferences,
   weeklyStretchCoverage,
@@ -90,6 +85,9 @@ import { WorkoutPicker } from "./workout/WorkoutPicker.jsx";
 import { StretchPill } from "./workout/StretchPill.jsx";
 import { StretchSessionBuilder } from "./workout/StretchSessionBuilder.jsx";
 import { ExercisePicker } from "./workout/ExercisePicker.jsx";
+import { StrengthModeSelector } from "./workout/StrengthModeSelector.jsx";
+import { PowerPrimerCard } from "./workout/PowerPrimerCard.jsx";
+import { WorkoutBuilder } from "./workout/WorkoutBuilder.jsx";
 import {
   countSupportSessions, setSummary, findLastSessionFor,
 } from "./workout/workoutHelpers.js";
@@ -160,6 +158,19 @@ export function WorkoutTab({
   // the position in liveExercises being replaced. Add-at-end is
   // signaled by index === liveExercises.length.
   const [pickerState, setPickerState] = useState(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
+
+  const programRaw = useLSValue(LS_WORKOUT_PLAN_KEY);
+  const program = useMemo(() => sanitizeWorkoutProgram(programRaw), [programRaw]);
+  const programWorkouts = useMemo(() => workoutProgramWorkouts(program), [program]);
+  const exerciseCatalog = useMemo(() => workoutProgramCatalog(program), [program]);
+  const strengthIds = useMemo(() => strengthWorkoutIds(program), [program]);
+  const updateProgram = next => {
+    const sanitized = sanitizeWorkoutProgram(next);
+    saveLS(LS_WORKOUT_PLAN_KEY, sanitized);
+    enqueueUserSettingsPatch({ workout_program: sanitized });
+    flushUserSettingsPatch().catch(() => {});
+  };
 
   // ── Recommendation ───────────────────────────────────
   // Drop pin-style rotation sessions (legacy ROTATION_PIN_KEY) so
@@ -174,18 +185,24 @@ export function WorkoutTab({
     wLog.filter(s => s && (s.workoutId || s.workout) && s.workout !== ROTATION_PIN_KEY),
     [wLog]
   );
-  const recommendation = useMemo(
+  const recommendationBase = useMemo(
     () => recommendNextWorkout(recommenderInput, {
       refDate: today(),
+      mode: program.mode,
     }),
-    [recommenderInput]
+    [recommenderInput, program.mode]
   );
+  const recommendation = useMemo(() => recommendationBase ? ({
+    ...recommendationBase,
+    primary: programWorkouts[recommendationBase.primary.id],
+    alternatives: recommendationBase.alternatives.map(item => programWorkouts[item.id]),
+  }) : null, [recommendationBase, programWorkouts]);
 
   // The active workout is either the user's override or the
   // recommender's primary. We then look up the full template from
-  // SUPPORT_WORKOUTS.
+  // the user's resolved program.
   const activeId = pickedId || recommendation?.primary?.id || "A";
-  const activeWorkout = SUPPORT_WORKOUTS[activeId];
+  const activeWorkout = programWorkouts[activeId];
 
   // Deload-week nudge — set on the Setup tab when the user accepts a
   // deload. During the week, suggest reducing hard support work and
@@ -409,6 +426,12 @@ export function WorkoutTab({
   const saveSession = () => {
     if (!activeWorkout) return;
     const wasRecommended = activeId === recommendation?.primary?.id;
+    const exercisesWithDefinitions = Object.fromEntries(
+      Object.entries(sessionData).map(([exerciseId, data]) => {
+        const definition = liveExercises.find(ex => ex.id === exerciseId);
+        return [exerciseId, definition?.custom ? { ...data, _definition: definition } : data];
+      })
+    );
     const session = {
       id: genId(),
       date: today(),
@@ -417,7 +440,7 @@ export function WorkoutTab({
       workoutId: activeId,
       sessionNumber: countSupportSessions(wLog) + 1,
       wasRecommended,
-      exercises: sessionData,
+      exercises: exercisesWithDefinitions,
       notes: sessionNotes || "",
     };
     const freshLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
@@ -699,6 +722,7 @@ export function WorkoutTab({
           {pickerState && (
             <ExercisePicker
               title={pickerState.index >= liveExercises.length ? "Add exercise" : "Swap exercise"}
+              catalog={exerciseCatalog}
               excludeIds={liveExercises
                 .filter((_, i) => i !== pickerState.index)
                 .map(ex => ex.id)}
@@ -726,18 +750,40 @@ export function WorkoutTab({
             </div>
           )}
           <Card style={{ padding: "20px 18px" }}>
-            <h2 style={{ margin: "0 0 20px", fontSize: 26, fontWeight: 750 }}>Choose a Workout</h2>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 20 }}>
+              <h2 style={{ margin: 0, fontSize: 26, fontWeight: 750 }}>Strength Training</h2>
+              <button type="button" className="secondary-workout-button" onClick={() => setBuilderOpen(true)}>
+                Edit workouts
+              </button>
+            </div>
+
+            <StrengthModeSelector
+              mode={program.mode}
+              onChange={mode => {
+                updateProgram({ ...program, mode });
+                setPickedId(null);
+              }}
+            />
+
             <RecommendationCard
               recommendation={recommendation}
               onPickWorkout={(id) => setPickedId(id)}
               pickedId={pickedId || recommendation?.primary?.id}
             />
 
-            <div style={{ margin: "20px 0 10px", color: C.muted, fontSize: 14 }}>Choose a different workout</div>
+            <div style={{ margin: "20px 0 10px", color: C.muted, fontSize: 14 }}>Strength sessions in this mode</div>
             <WorkoutPicker
               recommendedId={recommendation?.primary?.id}
               pickedId={pickedId || recommendation?.primary?.id}
               onPick={(id) => setPickedId(id)}
+              workouts={programWorkouts}
+              ids={strengthIds}
+            />
+
+            <PowerPrimerCard
+              workout={programWorkouts.B}
+              selected={activeId === "B"}
+              onSelect={() => setPickedId("B")}
             />
 
             {/* StretchPill sits below the picker, intentionally on its
@@ -769,7 +815,7 @@ export function WorkoutTab({
               <section aria-label="Selected workout plan" style={{ marginTop: 24, paddingTop: 20, borderTop: `1px solid ${C.border}` }}>
                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
                   <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>
-                    {activeWorkout.shortName} · {activeWorkout.name.replace(/^Workout [A-D] — /, "")}
+                    {activeWorkout.name}
                   </div>
                   {trip?.date && <div style={{ fontSize: 12, color: C.muted }}>
                     {countdownLabel}{wtr != null ? ` · ${wtr}w to trip` : ""}
@@ -825,11 +871,21 @@ export function WorkoutTab({
                 >
                   {activeWorkout.exercises.length === 0
                     ? `Log ${activeWorkout.shortName} marker`
-                    : `Start Workout ${activeWorkout.shortName} →`}
+                    : `Start ${activeWorkout.name}`}
                 </button>
               </section>
             )}
           </Card>
+
+          {builderOpen && (
+            <WorkoutBuilder
+              program={program}
+              workouts={programWorkouts}
+              catalog={exerciseCatalog}
+              onChange={updateProgram}
+              onClose={() => setBuilderOpen(false)}
+            />
+          )}
 
           <BwPrompt unit={unit} onSave={onBwSave} />
         </>

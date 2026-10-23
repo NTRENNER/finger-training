@@ -191,22 +191,21 @@ describe("computeTagDaysSince", () => {
 // ───────────────────────────────────────────────────────
 // recommendNextWorkout — rule-by-rule
 // ───────────────────────────────────────────────────────
-describe("recommendNextWorkout: A→B→C round-robin", () => {
+describe("recommendNextWorkout: mode-aware strength rotation", () => {
   test("empty history starts the cycle at A", () => {
     const rec = recommendNextWorkout([], { refDate: REF_DATE });
     expect(rec.primary.id).toBe("A");
-    expect(rec.reason).toMatch(/Start with Workout A/);
+    expect(rec.reason).toMatch(/Start with/);
   });
 
-  test("after A → recommends B", () => {
+  test("the default two-day build mode rotates A → C", () => {
     const rec = recommendNextWorkout([sess("A", 2)], { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("B");
-    expect(rec.reason).toMatch(/You last completed Workout A/);
+    expect(rec.primary.id).toBe("C");
   });
 
-  test("after B → recommends C", () => {
+  test("power-primer sessions do not advance the strength rotation", () => {
     const rec = recommendNextWorkout([sess("B", 2)], { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("C");
+    expect(rec.primary.id).toBe("A");
   });
 
   test("after C → recommends A (cycle wraps)", () => {
@@ -214,22 +213,26 @@ describe("recommendNextWorkout: A→B→C round-robin", () => {
     expect(rec.primary.id).toBe("A");
   });
 
-  test("Nathan's example: A,B this week, no C — next is C", () => {
-    // A 4 days ago, B 2 days ago → most recent is B → next is C
+  test("a primer after A does not displace the next strength day", () => {
     const history = [sess("A", 4), sess("B", 2)];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
     expect(rec.primary.id).toBe("C");
   });
 
-  test("Nathan's example: A,B,C,A in one week — next week starts with B", () => {
-    // Sequence in a week: A 6d, B 4d, C 2d, A 0d → most recent is A → next is B
-    const history = [sess("A", 6), sess("B", 4), sess("C", 2), sess("A", 0)];
-    const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("B");
+  test("maintenance mode always recommends A", () => {
+    const rec = recommendNextWorkout([sess("A", 1), sess("C", 0)], { mode: "maintain" });
+    expect(rec.primary.id).toBe("A");
+    expect(rec.alternatives).toEqual([]);
+  });
+
+  test("strength-block mode rotates A → C → S3", () => {
+    expect(recommendNextWorkout([sess("A", 2)], { mode: "block" }).primary.id).toBe("C");
+    expect(recommendNextWorkout([sess("C", 2)], { mode: "block" }).primary.id).toBe("S3");
+    expect(recommendNextWorkout([sess("S3", 2)], { mode: "block" }).primary.id).toBe("A");
   });
 
   test("STRETCH does NOT advance the rotation", () => {
-    // Last A/B/C was C two days ago. A STRETCH yesterday shouldn't
+    // Last strength session was C two days ago. A STRETCH yesterday shouldn't
     // bump the rotation off C — next is still A (the letter after C).
     const history = [sess("C", 2), sess("STRETCH", 1)];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
@@ -237,17 +240,16 @@ describe("recommendNextWorkout: A→B→C round-robin", () => {
   });
 
   test("REST does NOT advance the rotation", () => {
-    // Last A/B/C was A → next is B, regardless of a REST marker after.
+    // Last strength session was A → next is C, regardless of a REST marker after.
     const history = [sess("A", 2), sess("REST", 0)];
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("B");
+    expect(rec.primary.id).toBe("C");
   });
 
-  test("alternatives expose the other two letters in the rotation", () => {
-    // After A, primary=B → alternatives should be A and C (some order)
+  test("alternatives expose the other strength day in build mode", () => {
     const rec = recommendNextWorkout([sess("A", 2)], { refDate: REF_DATE });
     const altIds = rec.alternatives.map(a => a.id).sort();
-    expect(altIds).toEqual(["A", "C"]);
+    expect(altIds).toEqual(["A"]);
   });
 });
 
@@ -258,21 +260,21 @@ describe("recommendNextWorkout: same-day tiebreaks", () => {
   test("completedAt tiebreaks same-date sessions (later completedAt wins)", () => {
     const history = [
       { id: "x1", workoutId: "A", date: REF_DATE, completedAt: `${REF_DATE}T08:00:00Z` },
-      { id: "x2", workoutId: "B", date: REF_DATE, completedAt: `${REF_DATE}T18:00:00Z` },
+      { id: "x2", workoutId: "C", date: REF_DATE, completedAt: `${REF_DATE}T18:00:00Z` },
     ];
-    // Both today, B finished later → next is C
+    // Both today, C finished later → next is A
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("C");
+    expect(rec.primary.id).toBe("A");
   });
 
   test("array order tiebreaks when completedAt is missing/equal", () => {
     const history = [
       { id: "x1", workoutId: "A", date: REF_DATE },
-      { id: "x2", workoutId: "B", date: REF_DATE },
+      { id: "x2", workoutId: "C", date: REF_DATE },
     ];
-    // No completedAt → array order wins, B is later → next is C
+    // No completedAt → array order wins, C is later → next is A
     const rec = recommendNextWorkout(history, { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("C");
+    expect(rec.primary.id).toBe("A");
   });
 });
 
@@ -280,12 +282,12 @@ describe("recommendNextWorkout: legacy field fallback", () => {
   test("legacy session with only `workout` (no workoutId) still advances the rotation", () => {
     // The 5/24 A-session bug: a session missing workoutId but with
     // `workout: "A"` should still count as the most-recent A and
-    // make the next recommendation B.
+    // make the next recommendation C in the default two-day mode.
     const legacyA = {
       id: "legacy", workout: "A", date: daysBefore(REF_DATE, 2),
     };
     const rec = recommendNextWorkout([legacyA], { refDate: REF_DATE });
-    expect(rec.primary.id).toBe("B");
+    expect(rec.primary.id).toBe("C");
   });
 });
 
@@ -315,7 +317,7 @@ describe("recommendNextWorkout: defensive input handling", () => {
 // ───────────────────────────────────────────────────────
 describe("workouts (templates)", () => {
   test("all expected workouts exist", () => {
-    for (const id of ["A", "B", "C", "STRETCH", "CLIMB", "REST"]) {
+    for (const id of ["A", "B", "C", "S3", "STRETCH", "CLIMB", "REST"]) {
       expect(workouts[id]).toBeTruthy();
       expect(workouts[id].id).toBe(id);
     }
@@ -328,9 +330,9 @@ describe("workouts (templates)", () => {
     expect(workouts.D).toBeUndefined();
   });
 
-  test("A is the only 'big' fatigueClass", () => {
+  test("A and the optional third strength day carry the big fatigue class", () => {
     const big = Object.values(workouts).filter(w => w.fatigueClass === "big");
-    expect(big.map(w => w.id)).toEqual(["A"]);
+    expect(big.map(w => w.id)).toEqual(["A", "S3"]);
   });
 
   test("B / C / STRETCH are all 'frequent'", () => {
@@ -350,13 +352,12 @@ describe("workouts (templates)", () => {
     expect(aIds).not.toContain("bicepCurls");
   });
 
-  test("bicep curls live on B (moved off A July 2026), sequenced last, still progressing", () => {
+  test("the power primer is reduced-volume and excludes curls and front lever", () => {
     const bIds = workouts.B.exercises.map(e => e.id);
-    expect(bIds).toContain("bicepCurls");
-    expect(bIds[bIds.length - 1]).toBe("bicepCurls");           // last, so it can't blunt power work
-    const curl = workouts.B.exercises.find(e => e.id === "bicepCurls");
-    expect(curl.progressionPolicy).toBeUndefined();             // default ladder = load-building
-    expect(workouts.B.tags).toEqual(["power", "explosive"]);    // still a power day at the tag level
+    expect(bIds).not.toContain("bicepCurls");
+    expect(bIds).not.toContain("frontLever");
+    expect(workouts.B.exercises.every(ex => ex.sets === 2)).toBe(true);
+    expect(workouts.B.tags).toEqual(["power", "explosive"]);
   });
 
   test("STRETCH exposes the climbing mobility menu", () => {

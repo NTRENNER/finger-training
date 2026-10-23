@@ -50,6 +50,7 @@ function typeBadge(type) {
 
 export function ExercisePicker({
   title = "Pick exercise",
+  catalog = EXERCISE_CATALOG,
   excludeIds = [],
   substituteForId = null,
   onPick,
@@ -81,7 +82,7 @@ export function ExercisePicker({
     // the same canonical exercise.
     const excluded = new Set((excludeIds || []).map(migrateExerciseId));
     const replacementId = substituteForId ? migrateExerciseId(substituteForId) : null;
-    const all = Object.values(EXERCISE_CATALOG)
+    const all = Object.values(catalog || EXERCISE_CATALOG)
       .filter(ex => ex && typeof ex === "object" && ex.id && ex.name)
       .filter(ex => ex.loggable !== false)         // skip non-loggable workout templates
       .map(ex => ({
@@ -114,7 +115,7 @@ export function ExercisePicker({
       return (a.name || "").localeCompare(b.name || "");
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, excludedKey, substituteForId]);
+  }, [q, excludedKey, substituteForId, catalog]);
 
   return (
     <div

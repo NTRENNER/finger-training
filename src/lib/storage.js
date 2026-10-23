@@ -411,6 +411,11 @@ export const LS_BW_REMINDER_DISMISSED_KEY = "ft_bw_reminder_dismissed";
 // rotation-derivation useMemo cares about them.
 export const LS_WORKOUT_LOG_KEY = "ft_workout_log";
 
+// User-owned support-training templates and the selected 1/2/3-day
+// strength mode. Kept separate from completed sessions so editing the
+// program never rewrites history.
+export const LS_WORKOUT_PLAN_KEY = "ft_workout_plan";
+
 // Mobility-builder preferences. The completed session itself is stored
 // in LS_WORKOUT_LOG_KEY and synced through workout_sessions; this key is
 // only the local default for time, priorities, and available equipment.

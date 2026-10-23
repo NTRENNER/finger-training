@@ -24,7 +24,7 @@ import {
   loadLS, saveLS,
   LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
-  ROTATION_PIN_KEY,
+  LS_WORKOUT_PLAN_KEY, ROTATION_PIN_KEY,
 } from "../lib/storage.js";
 import { useLSValue } from "../hooks/useLSValue.js";
 import {
@@ -35,6 +35,12 @@ import {
   migrateExerciseId, buildExerciseDefIndex,
 } from "../model/exerciseIds.js";
 import { exercises as SUPPORT_EXERCISES } from "../model/supportTraining.js";
+import {
+  sanitizeWorkoutProgram,
+  sessionExerciseDefinitions,
+  workoutProgramCatalog,
+  workoutProgramWorkouts,
+} from "../model/workoutProgram.js";
 import { BAND_COLOR_LOOKUP, normalizeBands } from "./workout/workoutConstants.js";
 import { SessionExRow } from "./workout/SessionExRow.jsx";
 import { SimpleExRow } from "./workout/SimpleExRow.jsx";
@@ -105,6 +111,7 @@ export function WorkoutHistoryView({
   const logRaw    = useLSValue(LS_WORKOUT_LOG_KEY);
   const bwRaw     = useLSValue(LS_BW_LOG_KEY);
   const syncedRaw = useLSValue(LS_WORKOUT_SYNCED_KEY);
+  const programRaw = useLSValue(LS_WORKOUT_PLAN_KEY);
   // Filter out rotation-pin entries — they're synced markers used by
   // WorkoutTab to override the next-up rotation, not real workouts.
   const log      = useMemo(() => (logRaw || []).filter(s => s.workout !== ROTATION_PIN_KEY), [logRaw]);
@@ -119,10 +126,13 @@ export function WorkoutHistoryView({
   // precedence over the legacy one (e.g. "Med Ball Slams" over the
   // legacy "Slam balls"). Used for rendering names and querying
   // metadata like isBodyweightAdditive at row-render time.
-  const exDefs = useMemo(
-    () => buildExerciseDefIndex(defaultWorkouts, SUPPORT_EXERCISES),
-    [defaultWorkouts],
-  );
+  const program = useMemo(() => sanitizeWorkoutProgram(programRaw), [programRaw]);
+  const programCatalog = useMemo(() => workoutProgramCatalog(program), [program]);
+  const exDefs = useMemo(() => ({
+    ...buildExerciseDefIndex(defaultWorkouts, SUPPORT_EXERCISES),
+    ...buildExerciseDefIndex(workoutProgramWorkouts(program), programCatalog),
+    ...sessionExerciseDefinitions(log),
+  }), [defaultWorkouts, program, programCatalog, log]);
 
   // Convenience name-only view derived from exDefs. Keyed by current id
   // so every lookup site needs to migrate the logged id first.
@@ -286,7 +296,12 @@ export function WorkoutHistoryView({
       if (prev.exercises[newEx.id]) return prev;
       return {
         ...prev,
-        exercises: { ...prev.exercises, [newEx.id]: seedExerciseEmpty(newEx) },
+        exercises: {
+          ...prev.exercises,
+          [newEx.id]: newEx.custom
+            ? { ...seedExerciseEmpty(newEx), _definition: newEx }
+            : seedExerciseEmpty(newEx),
+        },
       };
     });
   };
@@ -577,6 +592,7 @@ export function WorkoutHistoryView({
                 {editPickerOpen && (
                   <ExercisePicker
                     title="Add exercise"
+                    catalog={programCatalog}
                     excludeIds={Object.keys(editSession.exercises || {})}
                     onPick={editAddExercise}
                     onCancel={() => setEditPickerOpen(false)}

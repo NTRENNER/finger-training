@@ -34,12 +34,18 @@ import { AnalysisContainer } from "./views/AnalysisContainer.jsx";
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
   loadLS, saveLS, getStorageUserId,
-  LS_HISTORY_KEY, LS_REP_DELETED_KEY,
+  LS_HISTORY_KEY, LS_REP_DELETED_KEY, LS_WORKOUT_PLAN_KEY,
 } from "./lib/storage.js";
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
 import { exerciseName, buildExerciseDefIndex } from "./model/exerciseIds.js";
 import { exercises as SUPPORT_EXERCISES } from "./model/supportTraining.js";
+import {
+  sanitizeWorkoutProgram,
+  sessionExerciseDefinitions,
+  workoutProgramCatalog,
+  workoutProgramWorkouts,
+} from "./model/workoutProgram.js";
 
 // App-level hooks (see src/hooks/).
 import { useAuth } from "./hooks/useAuth.js";
@@ -827,7 +833,12 @@ export default function App() {
             // labels the rest of the app shows, instead of the raw
             // logged ids ("slam_balls", "kb_snatch") and the snake-
             // to-space fallback the CSV would otherwise use.
-            const exIndex = buildExerciseDefIndex(ALL_WORKOUTS_LOOKUP, SUPPORT_EXERCISES);
+            const program = sanitizeWorkoutProgram(loadLS(LS_WORKOUT_PLAN_KEY));
+            const exIndex = {
+              ...buildExerciseDefIndex(ALL_WORKOUTS_LOOKUP, SUPPORT_EXERCISES),
+              ...buildExerciseDefIndex(workoutProgramWorkouts(program), workoutProgramCatalog(program)),
+              ...sessionExerciseDefinitions(log),
+            };
             downloadWorkoutCSV(log, (exId) => exerciseName(exId, exIndex));
           }}
           onDownloadClimbingCSV={() => downloadClimbingCSV(activities)}

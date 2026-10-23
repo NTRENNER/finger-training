@@ -1,22 +1,20 @@
 import React from "react";
 import { C } from "../../ui/theme.js";
-import { workouts as SUPPORT_WORKOUTS } from "../../model/supportTraining.js";
 import { WORKOUT_COLORS } from "./workoutConstants.js";
 
-const ORDER = ["A", "B", "C"];
-
-export function WorkoutPicker({ pickedId, recommendedId, onPick }) {
+export function WorkoutPicker({ pickedId, recommendedId, onPick, workouts, ids = [] }) {
   return (
     <div className="workout-choice-grid">
-      {ORDER.map(id => {
-        const wo = SUPPORT_WORKOUTS[id];
+      {ids.map(id => {
+        const wo = workouts[id];
+        if (!wo) return null;
         const isPicked = pickedId === id;
         const accent = WORKOUT_COLORS[id] || C.muted;
         return (
           <button
             key={id}
             type="button"
-            aria-label={`Choose Workout ${id}: ${wo.name.replace(/^Workout [A-D] — /, "")}`}
+            aria-label={`Choose ${wo.name}`}
             aria-pressed={isPicked}
             onClick={() => onPick(id)}
             style={{
@@ -28,9 +26,9 @@ export function WorkoutPicker({ pickedId, recommendedId, onPick }) {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontSize: 24, fontWeight: 750, color: accent }}>{id}</span>
+              <span style={{ fontSize: 24, fontWeight: 750, color: accent }}>{wo.shortName || id}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 650, lineHeight: 1.35 }}>{wo.name.replace(/^Workout [A-D] — /, "")}</div>
+                <div style={{ fontSize: 15, fontWeight: 650, lineHeight: 1.35 }}>{wo.name}</div>
                 <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>{wo.exercises.length} exercises</div>
               </div>
               {recommendedId === id && <span aria-label="Recommended" style={{ color: accent }}>★</span>}

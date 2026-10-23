@@ -7,10 +7,12 @@ import {
   LS_BW_LOG_KEY,
   LS_BW_DIRTY_KEY,
   LS_PINNED_GRIP_BASELINES_KEY,
+  LS_WORKOUT_PLAN_KEY,
   LS_USER_SETTINGS_PATCH_KEY,
   loadLS,
   saveLS,
 } from "../../lib/storage.js";
+import { defaultWorkoutProgram } from "../../model/workoutProgram.js";
 import {
   pushBW,
   removeBWTombstones,
@@ -157,6 +159,17 @@ test("still fetches cloud settings when the queued patch flush fails", async () 
   await waitFor(() => expect(result.current.settingsSynced).toBe(true));
   expect(fetchUserSettings).toHaveBeenCalledTimes(1);
   expect(result.current.climbingFocus).toBe("endurance");
+});
+
+test("restores the workout program from cloud settings", async () => {
+  const workoutProgram = { ...defaultWorkoutProgram(), mode: "block" };
+  flushUserSettingsPatch.mockResolvedValue(true);
+  fetchUserSettings.mockResolvedValue({ workout_program: workoutProgram });
+
+  const { result } = renderHook(() => useUserSettings({ user: { id: "user-1" } }));
+
+  await waitFor(() => expect(result.current.settingsSynced).toBe(true));
+  expect(loadLS(LS_WORKOUT_PLAN_KEY)).toEqual(workoutProgram);
 });
 
 test("pending local values win while cloud map entries are preserved for retry", async () => {

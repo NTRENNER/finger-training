@@ -28,6 +28,7 @@ export const WORKOUT_COLORS = {
   A: C.blue,
   B: C.orange,
   C: C.green,
+  S3: C.purple,
   STRETCH: C.purple,
   CLIMB: "#e05560",
   REST: C.muted,

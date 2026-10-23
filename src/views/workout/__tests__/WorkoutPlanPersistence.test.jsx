@@ -21,7 +21,7 @@ test('saved workout retains planned sets and effort when actual sets are changed
   ] } } }]);
   const saved = jest.fn();
   render(<WorkoutTab unit="lbs" onSessionSaved={saved} />);
-  fireEvent.click(screen.getByRole('button', { name: /Start Workout A/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Start Strength A/ }));
   const row = within(screen.getByTestId('weightedPullup'));
   expect(row.getByText('2 sets')).toBeInTheDocument();
   fireEvent.click(row.getByRole('button', { name: 'Complete one' }));

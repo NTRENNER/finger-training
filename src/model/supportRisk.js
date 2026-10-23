@@ -28,7 +28,7 @@
 //
 // Pure module, no React. Consumed by weeklyReview.gatherCheckInSignals.
 
-import { workouts as SUPPORT_WORKOUTS } from "./supportTraining.js";
+import { exercises as SUPPORT_EXERCISES } from "./supportTraining.js";
 import { migrateExerciseId } from "./exerciseIds.js";
 import { parseRepsCount } from "./workout-volume.js";
 
@@ -76,17 +76,17 @@ export function sessionValue(exDef, ex) {
     : { metric: "reps", value: reps };
 }
 
-// All exercises that appear in the A/B/C workout defs, minus
-// restoration work. Never-logged exercises are skipped — you can't
+// All known support exercises, minus restoration work. The catalog is
+// intentionally broader than today's templates so removing an exercise
+// from the builder does not erase the meaning of its historical sessions.
+// Never-logged exercises are skipped — you can't
 // "go cold" on something that was never warm, and the check-in
 // shouldn't manufacture obligations.
 function abcExerciseDefs() {
   const out = new Map();
-  for (const wk of ["A", "B", "C"]) {
-    for (const def of SUPPORT_WORKOUTS[wk]?.exercises || []) {
-      if (!def || (def.tags || []).includes("restoration")) continue;
-      out.set(def.id, def);
-    }
+  for (const def of Object.values(SUPPORT_EXERCISES)) {
+    if (!def || (def.tags || []).includes("restoration")) continue;
+    out.set(def.id, def);
   }
   return out;
 }
@@ -107,6 +107,7 @@ export function exerciseSupportRisk(workoutSessions = [], refDate) {
     if (!w || !w.date || w.date > refDate) continue;
     for (const [rawId, ex] of Object.entries(w.exercises || {})) {
       const id = migrateExerciseId(rawId);
+      if (!defs.has(id) && ex?._definition?.id === id) defs.set(id, ex._definition);
       const def = defs.get(id);
       if (!def) continue;
       const v = sessionValue(def, ex);
