@@ -23,6 +23,13 @@ test('the force card pairs target time with target weight, and shows neither whe
   expect(screen.queryByText('Target weight')).not.toBeInTheDocument();
 });
 
+test('the force card preserves its live measurement block while the signal is unavailable', () => {
+  render(<ForceGauge force={null} avg={null} peak={null} targetKg={20} unit="kg" showUnavailable />);
+  expect(screen.getByText('Live force · kg')).toBeInTheDocument();
+  expect(screen.getByText('Average weight')).toBeInTheDocument();
+  expect(screen.getAllByText('—')).toHaveLength(3);
+});
+
 test('sensor reps show target time beside target weight, and keep both through a signal drop', () => {
   let start;
   const tindeq = { targetKgRef: {}, startAutoDetect: a => { start = a; }, stopAutoDetect: jest.fn(),
@@ -36,7 +43,8 @@ test('sensor reps show target time beside target weight, and keep both through a
   view.rerender(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()}
     tindeq={{ ...tindeq, signalRecovering: true }} unit="kg" />);
   expect(screen.getByText('Target weight')).toBeInTheDocument();
-  expect(screen.queryByText('Average weight')).not.toBeInTheDocument();
+  expect(screen.getByText('Average weight')).toBeInTheDocument();
+  expect(screen.getAllByText('—')).toHaveLength(3);
   view.rerender(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()}
     tindeq={{ ...tindeq, connected: false, reconnecting: true }} unit="kg" />);
   expect(screen.getByText('Target time')).toBeInTheDocument();

@@ -184,6 +184,7 @@ export function PotentiationPullView({
           maxDisplay={Math.max(20, targetLoadKg * 1.35)}
           numberSize="clamp(48px, 15vw, 82px)"
           unit={unit}
+          showUnavailable={!!tindeq?.signalRecovering}
         />}
         {state.phase === "error" && <div role="alert">
           <p style={{ color: C.yellow }}>Pull not counted</p>

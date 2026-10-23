@@ -188,7 +188,8 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
       </Card>
       <Card style={{ marginTop: 12 }}><ForceGauge force={tindeq?.signalRecovering ? null : tindeq?.force || 0} emphasizePeak
         avg={state.phase === 'active' ? tindeq?.avgForce || 0 : 0}
-        peak={state.phase === 'active' ? tindeq?.peak || 0 : 0} targetKg={null} maxDisplay={100} unit={unit} />
+        peak={state.phase === 'active' ? tindeq?.peak || 0 : 0} targetKg={null} maxDisplay={100} unit={unit}
+        showUnavailable={!!tindeq?.signalRecovering} />
         {state.rows.length > 0 && <p>Best so far · {context.hands.map(h => `${h}: ${best(h) ? fmtW(best(h), unit) + ' ' + unit : '—'}`).join(' · ')}</p>}
       </Card>
     </>}

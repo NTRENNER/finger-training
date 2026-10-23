@@ -72,12 +72,16 @@ function BigTimer({ seconds, targetSeconds, running, referenceOnly = false, show
 //   targetTime / targetTimeLabel — optional preformatted target duration
 //                ("45s"); shown beside the target weight so both targets
 //                read together during a rep
+//   showUnavailable — preserve the live block with dash placeholders during
+//                     a transient signal interruption
 function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs", numberSize = 108, emphasizePeak = false,
-  targetTime = null, targetTimeLabel = "Target time" }) {
-  const fPct    = clamp(force / maxDisplay, 0, 1);
-  const avgPct  = clamp(avg   / maxDisplay, 0, 1);
+  targetTime = null, targetTimeLabel = "Target time", showUnavailable = false }) {
   const tgtPct  = targetKg != null ? clamp(targetKg / maxDisplay, 0, 1) : null;
   const liveActive = typeof force === "number" && isFinite(force);
+  const showLiveBlock = liveActive || showUnavailable;
+  const fPct    = liveActive ? clamp(force / maxDisplay, 0, 1) : 0;
+  const avgPct  = Number.isFinite(avg) ? clamp(avg / maxDisplay, 0, 1) : 0;
+  const displayWeight = value => Number.isFinite(value) ? fmtW(value, unit) : "—";
 
   let barColor = C.blue;
   let numColor = C.blue;
@@ -93,18 +97,17 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
           weight, while training and warm-up callers always provide one. */}
       {(targetTime || Number.isFinite(targetKg)) && <div style={{
         display: "flex", justifyContent: "center", gap: 24, textAlign: "center",
-        marginBottom: liveActive ? 16 : 8,
+        marginBottom: showLiveBlock ? 16 : 8,
       }}>
         {targetTime && <TargetValue label={targetTimeLabel} value={targetTime} paired={Number.isFinite(targetKg)} />}
         {Number.isFinite(targetKg) && <TargetValue label="Target weight" value={`${fmtW(targetKg, unit)} ${unit}`} paired={!!targetTime} />}
       </div>}
 
-      {/* Live measurement block — only renders with a real sample so the
-          card doesn't take up vertical space on dashes when no sensor
-          is streaming. */}
-      {liveActive && <>
+      {/* Keep this block mounted through transient signal recovery so the
+          active-pull layout does not collapse and re-expand. */}
+      {showLiveBlock && <>
         <div style={{ textAlign: "center", fontSize: numberSize, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: numColor, lineHeight: 1 }}>
-          {fmtW(force, unit)}
+          {displayWeight(liveActive ? force : null)}
         </div>
         <div style={{ textAlign: "center", fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 10 }}>
           Live force · {unit}
@@ -113,14 +116,14 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>{emphasizePeak ? 'Peak force' : 'Average weight'}</div>
             <div style={{ fontSize: "clamp(32px, 9vw, 44px)", fontWeight: 800, lineHeight: 1.1, color: C.green, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-              {!emphasizePeak && avg == null ? "—" : fmtW(emphasizePeak ? peak : avg, unit)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
+              {displayWeight(liveActive ? (emphasizePeak ? peak : avg) : null)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
             </div>
           </div>
-          <span style={{ fontSize: 12 }}>{emphasizePeak ? 'Avg' : 'Max'}: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{fmtW(emphasizePeak ? avg : peak, unit)}</b></span>
+          <span style={{ fontSize: 12 }}>{emphasizePeak ? 'Avg' : 'Max'}: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{displayWeight(liveActive ? (emphasizePeak ? avg : peak) : null)}</b></span>
         </div>
         <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
           <div style={{ position: "absolute", height: "100%", width: `${fPct * 100}%`, background: barColor, borderRadius: 6, transition: "width 0.05s" }} />
-          {avg != null && <div style={{ position: "absolute", top: 0, bottom: 0, left: `${avgPct * 100}%`, width: 3, background: C.green }} />}
+          {liveActive && Number.isFinite(avg) && <div style={{ position: "absolute", top: 0, bottom: 0, left: `${avgPct * 100}%`, width: 3, background: C.green }} />}
           {tgtPct != null && (
             <div style={{ position: "absolute", top: 0, bottom: 0, left: `${tgtPct * 100}%`, width: 2, background: "#ffffff60" }} />
           )}

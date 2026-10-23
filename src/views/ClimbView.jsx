@@ -195,13 +195,13 @@ export function ClimbView({
       )}
 
       {/* Adaptive Warm-up entry point — warm up your fingers before
-          climbing. Force-curve-derived hangs + cross-loaded pullups. */}
+          climbing. Force-curve-derived pulls + cross-loaded pullups. */}
       <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
           <div style={{ flex: "1 1 180px", minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>Adaptive Warm-up</div>
             <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.5 }}>
-              Prepare for climbing with easy hangs and pull-ups tailored to your training.
+              Finger pulls and full-body preparation.
             </div>
           </div>
           <button

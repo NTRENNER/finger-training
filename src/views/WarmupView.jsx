@@ -585,6 +585,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         maxDisplay={Math.max(50, (currentStep.targetLoadKg || 0) * 1.25)}
         numberSize="clamp(48px, 15vw, 88px)"
         unit={unit}
+        showUnavailable={!!tindeq?.signalRecovering}
       />
       {actions(manualMode ? manualPrimary : null)}
     </>);

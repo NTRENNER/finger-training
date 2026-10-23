@@ -548,6 +548,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         <Card>
           <BigTimer seconds={Number(creditedSeconds(tindeq.forceLoss, elapsed))} targetSeconds={config.targetTime} running={tindeq.forceLoss?.status !== 'complete' && tindeq.forceLoss?.pendingEndTs == null} referenceOnly={!!config.mixedDomainPlan} showTarget={false} />
           <ForceGauge force={liveSignal ? tindeq.force : null} avg={liveSignal ? tindeq.avgForce : null} peak={liveSignal ? tindeq.peak : null} targetKg={targetKg} unit={unit}
+            showUnavailable={tindeq.signalRecovering}
             targetTime={fmtTime(config.targetTime)} targetTimeLabel={config.mixedDomainPlan ? "Fresh reference" : "Target time"} />
         </Card>
       )}
@@ -1304,6 +1305,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
                 the targets never disappear mid-hold. */}
             <ForceGauge force={liveSignal ? tindeq.force : null} avg={liveSignal ? tindeq.avgForce : null}
               peak={liveSignal ? tindeq.peak : null} targetKg={targetKg} unit={unit}
+              showUnavailable={tindeq.signalRecovering}
               targetTime={`${config.targetTime}s`} targetTimeLabel={timeLabel === 'Target' ? 'Target time' : timeLabel} />
           </>
         ) : (
