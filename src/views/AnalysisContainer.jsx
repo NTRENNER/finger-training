@@ -42,7 +42,7 @@ const VALID_SUBS = new Set(["fingers", "lifts", "climbing", "weight"]);
 export function AnalysisContainer(props) {
   const {
     // AnalysisView (fingers) props
-    history, unit, bodyWeight, activities,
+    history, potentiationHistory = [], unit, bodyWeight, activities,
     freshMap,
     GOAL_CONFIG,
     // Frozen per-grip baselines threaded from App.useUserSettings — see
@@ -85,6 +85,7 @@ export function AnalysisContainer(props) {
       {sub === "fingers" && (
         <AnalysisView
           history={history}
+          potentiationHistory={potentiationHistory}
           unit={unit}
           bodyWeight={bodyWeight}
           activities={activities}

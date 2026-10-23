@@ -1,6 +1,7 @@
 import { createPullMeasurement } from "../model/pullMeasurement.js";
 import { createReleaseDetector, createTargetFailureDetector, RELEASE_BACKSTOP_POLICY, repDetectionThresholds, TARGET_FAILURE_POLICY } from "../model/targetFailure.js";
 import { recordCapacityForce as recordForce } from "../model/forceRecording.js";
+import { measurePotentiationRfd, POTENTIATION_PRETRIGGER_MS } from "../model/potentiationRfd.js";
 // ─────────────────────────────────────────────────────────────
 // TINDEQ PROGRESSOR BLE HOOK
 // ─────────────────────────────────────────────────────────────
@@ -253,6 +254,10 @@ export function useTindeq() {
   const adStartTimeRef  = useRef(null);   // device milliseconds when pull began
   const autoPullRef = useRef(null);
   const adSamplesRef    = useRef([]);     // raw {kg, ts} buffer for full-effort integration
+  const adCaptureRapidForceRef = useRef(false);
+  const adRapidPreTriggerRef = useRef([]);
+  const adRapidSamplesRef = useRef([]);
+  const adRapidTriggerTsRef = useRef(null);
   const deviceClockRef = useRef({ raw: null, elapsed: 0, step: 0 });
   const lastPacketAtRef = useRef(null);
   const targetDetectorRef = useRef(null);
@@ -461,6 +466,11 @@ export function useTindeq() {
 
       if (adOnStartRef.current || adOnEndRef.current) {
         if (!adActiveRef.current) {
+          if (adCaptureRapidForceRef.current && !wasAwaitingRelease && !releaseCheckRef.current) {
+            adRapidPreTriggerRef.current.push({ kg, ts: now, at });
+            const floor = now - POTENTIATION_PRETRIGGER_MS;
+            adRapidPreTriggerRef.current = adRapidPreTriggerRef.current.filter(sample => sample.ts >= floor);
+          }
           // "Await release" guard. Set by endRepAndRequireRelease()
           // — the warmup uses it when it auto-ends a hang at target
           // while the user is still pulling. We don't want their
@@ -469,7 +479,14 @@ export function useTindeq() {
           if (wasAwaitingRelease || releaseCheckRef.current) {
             // Either way, skip the start check this packet.
           } else {
-            const thresholds = repDetectionThresholds(adEndOnTargetDropRef.current ? targetKgRef.current : null);
+            // Timed warm-up holds keep the generic trigger, while rapid-force
+            // pulls use their submax target to remain detectable on low-load
+            // grips where a fixed 4 kg start could exceed the prescription.
+            const thresholds = repDetectionThresholds(
+              adEndOnTargetDropRef.current || adCaptureRapidForceRef.current
+                ? targetKgRef.current
+                : null
+            );
             if (!(kg >= thresholds.startKg)) return;
             adReleaseKgRef.current = thresholds.releaseKg;
             adReleaseDetectorRef.current = createReleaseDetector(thresholds.releaseKg);
@@ -486,6 +503,11 @@ export function useTindeq() {
             publishForceLoss(targetDetectorRef.current, now);
             setAvgForce(null);
             adSamplesRef.current   = [{ kg, ts: now, at }];
+            if (adCaptureRapidForceRef.current) {
+              adRapidTriggerTsRef.current = now;
+              adRapidSamplesRef.current = adRapidPreTriggerRef.current.slice();
+              adRapidPreTriggerRef.current = [];
+            }
             adBelowRef.current     = null;
             peakRef.current = kg;
             scheduleUiFlush();
@@ -494,6 +516,7 @@ export function useTindeq() {
         } else {
           // Include weaker work and transient fluctuations.
           adSamplesRef.current.push({ kg, ts: now, at });
+          if (adCaptureRapidForceRef.current) adRapidSamplesRef.current.push({ kg, ts: now, at });
           autoPullRef.current?.push({ kg, ts: now });
           const failure = targetDetectorRef.current?.({ kg, ts: now });
           adBelowRef.current = observedAutoRelease?.startTs
@@ -508,6 +531,12 @@ export function useTindeq() {
               released ? 'release' : 'release_not_observed', observedAutoRelease);
             const stats = recordWithBattery(adSamplesRef.current,
               decision?.endTs ?? activityEnd, targetKgRef.current, decision);
+            if (adCaptureRapidForceRef.current) {
+              stats.potentiationRfd = measurePotentiationRfd(adRapidSamplesRef.current, {
+                targetKg: targetKgRef.current,
+                triggerTs: adRapidTriggerTsRef.current,
+              });
+            }
             if (actualTime * 1000 < AD_MIN_MS) {
               stats.failureValid = false;
               stats.endReason = 'interrupted';
@@ -520,6 +549,8 @@ export function useTindeq() {
             setAvgForce(stats.avgForce);
             autoPullRef.current = null;
             adSamplesRef.current = [];
+            adRapidSamplesRef.current = [];
+            adRapidTriggerTsRef.current = null;
             adBelowRef.current = null;
             if (released) adReleaseDetectorRef.current = null;
             cb?.(stats);
@@ -555,6 +586,8 @@ export function useTindeq() {
       markAwaitingRelease(true);
       adOnEndRef.current?.({ ...stats, failureValid: false, endReason: "equipment_interruption" });
       adSamplesRef.current = [];
+      adRapidSamplesRef.current = [];
+      adRapidTriggerTsRef.current = null;
     }, 250);
     return () => clearInterval(timer);
   }, [recordWithBattery, markAwaitingRelease]);
@@ -622,6 +655,8 @@ export function useTindeq() {
           markAwaitingRelease(true);
           adOnEndRef.current?.({ ...stats, failureValid: false, endReason: 'equipment_interruption' });
           adSamplesRef.current = [];
+          adRapidSamplesRef.current = [];
+          adRapidTriggerTsRef.current = null;
         }
         // Keep the rep and callbacks through the bounded reconnect attempts.
         // The packet handler measures the hole in wall time when samples
@@ -659,6 +694,8 @@ export function useTindeq() {
             markAwaitingRelease(true);
             adOnEndRef.current?.({ ...stats, failureValid: false, endReason: 'equipment_interruption' });
             adSamplesRef.current = [];
+            adRapidSamplesRef.current = [];
+            adRapidTriggerTsRef.current = null;
           }
           setSignalRecovering(false);
           setBleError("Connection lost — tap Connect Tindeq to reconnect.");
@@ -820,19 +857,26 @@ export function useTindeq() {
   // Start auto-detect mode: Tindeq streams continuously, reps are detected by
   // force threshold crossings. onRepStart fires when a pull begins; onRepEnd
   // fires with { actualTime, avgForce } when the force drops back to baseline.
-  const startAutoDetect = useCallback(async (onRepStart, onRepEnd, { endOnTargetDrop = true } = {}) => {
+  const startAutoDetect = useCallback(async (onRepStart, onRepEnd, {
+    endOnTargetDrop = true,
+    captureRapidForce = false,
+  } = {}) => {
     cancelReleaseWatch();
     const generation = ++adStreamGenerationRef.current;
     setSignalRecovering(false);
     adOnStartRef.current = null;
     adOnEndRef.current = null;
     adEndOnTargetDropRef.current = endOnTargetDrop;
+    adCaptureRapidForceRef.current = captureRapidForce;
     targetDetectorRef.current = null;
     adActiveRef.current    = false;
     adStartTimeRef.current = null;
     autoPullRef.current = null;
     setAvgForce(null);
     adSamplesRef.current   = [];
+    adRapidPreTriggerRef.current = [];
+    adRapidSamplesRef.current = [];
+    adRapidTriggerTsRef.current = null;
     adBelowRef.current     = null;
     if (!adAwaitReleaseRef.current) adReleaseDetectorRef.current = null;
     await writeCommand(CMD_START);
@@ -870,6 +914,8 @@ export function useTindeq() {
     autoPullRef.current = null;
     setAvgForce(avg);
     adSamplesRef.current    = [];
+    adRapidSamplesRef.current = [];
+    adRapidTriggerTsRef.current = null;
     adBelowRef.current      = null;
     markAwaitingRelease(true);
     if (requireZero) requireReleaseCheck();
@@ -883,6 +929,10 @@ export function useTindeq() {
     adOnStartRef.current = null;
     adOnEndRef.current   = null;
     adActiveRef.current  = false;
+    adCaptureRapidForceRef.current = false;
+    adRapidPreTriggerRef.current = [];
+    adRapidSamplesRef.current = [];
+    adRapidTriggerTsRef.current = null;
     if (observeRelease && adAwaitReleaseRef.current && ctrlRef.current) {
       // Listen only for release, never for a new rep, during the handoff to
       // rest. Stop promptly on release; bound this to 10s if no samples arrive

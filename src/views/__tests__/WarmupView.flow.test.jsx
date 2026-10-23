@@ -101,7 +101,7 @@ test('a warm-up started without a sensor stays manual after reconnect and ignore
     onClose: jest.fn(), addReps: jest.fn() };
   const view = render(<WarmupView {...props} tindeq={baseTindeq} />);
   fireEvent.click(screen.getByRole('button', { name: 'Start', exact: true }));
-  fireEvent.click(screen.getByRole('button', { name: 'Start hang' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start pull' }));
   act(() => jest.advanceTimersByTime(500));
   view.rerender(<WarmupView {...props} tindeq={{ ...baseTindeq, connected: true }} />);
   act(() => jest.advanceTimersByTime(1700));
@@ -153,7 +153,7 @@ test("complete sequence retains stage layout and finishes after the second stren
   expect(addReps).not.toHaveBeenCalled();
 });
 
-test("recovery activity leads into unsaved Potentiation Pulls and completes the warm-up", () => {
+test("recovery activity leads into Potentiation Pulls and completes the warm-up", () => {
   generateWarmupProtocol.mockReturnValue({ ...protocol, steps: [
     { ...hang("Primer hold", "Crusher", 20), restActivity: {
       id: "med-ball-slams",
@@ -178,7 +178,7 @@ test("recovery activity leads into unsaved Potentiation Pulls and completes the 
     tindeq={{ connected: false }} unit="kg" onClose={jest.fn()} addReps={addReps} />);
 
   fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
-  fireEvent.click(screen.getByRole("button", { name: "Start hang" }));
+  fireEvent.click(screen.getByRole("button", { name: "Start pull" }));
   act(() => jest.advanceTimersByTime(2200));
   expect(screen.getByText("Recovery movement")).toBeInTheDocument();
   expect(screen.getByText("Med-ball slams")).toBeInTheDocument();

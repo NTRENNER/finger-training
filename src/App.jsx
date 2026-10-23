@@ -6,7 +6,7 @@ import { PeakTestView } from './views/PeakTestView.jsx';
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-exp F-D / curve-trust prescription · Tindeq Progressor BLE
 import React, {
-  useCallback, useState, useEffect,
+  useCallback, useState, useEffect, useMemo,
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
@@ -59,6 +59,7 @@ import { today, uuid } from './util.js';
 import { useActivities } from "./hooks/useActivities.js";
 import { useConnectivity } from "./hooks/useConnectivity.js";
 import { usePendingSyncCount } from "./hooks/usePendingSyncCount.js";
+import { isPotentiationMeasurement } from "./model/potentiationRfd.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue, LS_QUEUE_KEY,
   fetchRepTombstoneIds, fetchRepSlotTombstoneKeys, fetchSessionTombstoneIds,
@@ -273,7 +274,7 @@ export default function App() {
   // freshMap behaves like the original within-set fatigue-only
   // version.
   const {
-    history,
+    history: storedHistory,
     historySynced,
     persistenceStatus, retryPersistence,
     freshMap, threeExpPriors,
@@ -281,6 +282,19 @@ export default function App() {
     replaceHistory,
     handleWorkoutSessionSaved,
   } = useRepHistory({ user, dailyState, syncSignal });
+
+  // Potentiation speed rides the existing offline-first rep transport, but it
+  // is a warm-up measurement rather than training. Keep every established
+  // consumer on the training-only view and pass the hidden stream only to its
+  // dedicated Analysis card.
+  const history = useMemo(
+    () => storedHistory.filter(rep => !isPotentiationMeasurement(rep)),
+    [storedHistory]
+  );
+  const potentiationHistory = useMemo(
+    () => storedHistory.filter(isPotentiationMeasurement),
+    [storedHistory]
+  );
 
   // Gate for useGripFits' pin-on-first-seed write (threaded through
   // AnalysisContainer → AnalysisView). Both cloud reconciles must land
@@ -584,7 +598,7 @@ export default function App() {
       {persistenceStatus === 'failed' && <div role="alert" style={{ padding: 16, color: C.yellow }}>
         Your latest workout changes could not be saved on this device. Keep this page open and download a backup before reloading.
         <Btn small onClick={retryPersistence}>Retry saving</Btn>
-        <Btn small onClick={() => downloadHistoryBackup(history)}>Download backup</Btn>
+        <Btn small onClick={() => downloadHistoryBackup(storedHistory)}>Download backup</Btn>
       </div>}
       {persistenceStatus === 'research_trimmed' && <div role="status" style={{ padding: 12, color: C.muted }}>
         Your workouts are saved. Research details were not saved on this device because storage is full.
@@ -783,6 +797,7 @@ export default function App() {
       {tab === 3 && (
         <AnalysisContainer
           history={history}
+          potentiationHistory={potentiationHistory}
           unit={unit}
           bodyWeight={bodyWeight}
           activities={activities}

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { startingHandForDay, otherHand } from "../model/handOrder.js";
-import { today } from "../util.js";
+import { potentiationMeasurementRecord } from "../model/potentiationRfd.js";
+import { today, uuid } from "../util.js";
 import { Btn, Card } from "../ui/components.jsx";
 import { C } from "../ui/theme.js";
 import { fmtW } from "../ui/format.js";
@@ -8,8 +9,9 @@ import { HandCue } from "./cards/HandCue.jsx";
 import { ForceGauge } from "./cards/LiveForceCard.jsx";
 import { SignalRecoveringNotice } from "./forceProtection.jsx";
 
-// Brief, submaximal single-hand pulls used only to prime recruitment before
-// climbing. They intentionally do not create rep rows or affect any curve.
+// Brief, submaximal single-hand pulls used to prime recruitment before
+// climbing. Sensor pulls preserve rapid-force metrics in hidden measurement
+// rows; those rows never enter training history or the force-duration model.
 export function PotentiationPullView({
   grip,
   targetLoadKg,
@@ -21,13 +23,20 @@ export function PotentiationPullView({
   visible = true,
   manualMode = false,
   swapRequired = false,
+  addReps = null,
   onPullStart = null,
   onClose,
   completionLabel = "Continue warm-up",
 }) {
   const [context] = useState(() => {
-    const first = startingHandForDay(history, today());
-    return { hands: [first, otherHand(first)] };
+    const date = today();
+    const first = startingHandForDay(history, date);
+    return {
+      date,
+      hands: [first, otherHand(first)],
+      sessionId: `pot_${uuid()}`,
+      startedAt: new Date().toISOString(),
+    };
   });
   const total = context.hands.length * repsPerHand;
   const [state, setState] = useState({ phase: "ready", index: 0, elapsed: 0, peaks: {} });
@@ -50,6 +59,20 @@ export function PotentiationPullView({
       return;
     }
     const hand = context.hands[current.index % context.hands.length];
+    if (!manualMode && addReps) {
+      const measurement = potentiationMeasurementRecord({
+        stats,
+        hand,
+        grip,
+        sessionId: context.sessionId,
+        date: context.date,
+        startedAt: context.startedAt,
+        targetLoadKg,
+        position: current.index + 1,
+        restSec,
+      });
+      if (measurement) addReps([measurement]);
+    }
     const peak = Number(stats.peakForce);
     const peaks = Number.isFinite(peak)
       ? { ...current.peaks, [hand]: Math.max(current.peaks[hand] || 0, peak) }
@@ -82,7 +105,7 @@ export function PotentiationPullView({
     Promise.resolve(tindeq.startAutoDetect(
       () => callbacks.current.start(),
       stats => callbacks.current.end(stats),
-      { endOnTargetDrop: false },
+      { endOnTargetDrop: false, captureRapidForce: true },
     )).catch(() => {
       if (!disposed) transition({ ...live.current, phase: "error" });
     });
@@ -124,7 +147,6 @@ export function PotentiationPullView({
   if (state.phase === "done") {
     return <Card>
       <h2 style={{ marginTop: 0 }}>Potentiation Pulls complete</h2>
-      <p style={{ color: C.muted }}>Your fingers are primed. These pulls were not saved as training or performance data.</p>
       <Btn onClick={leave} color={C.green}>{completionLabel}</Btn>
     </Card>;
   }

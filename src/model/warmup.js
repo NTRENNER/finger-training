@@ -24,8 +24,8 @@ import { isValidFailureRep, isCapacityEvidenceRep, isNominalPrescriptionRep } fr
 //   Both modes finish their measured warm-up after two strength ramps,
 //   with optional single-handed Peak Tests followed by brief Potentiation
 //   Pulls. Whole-body primer movements occupy the recovery intervals
-//   without loading the fingers. Potentiation Pulls are readiness work,
-//   not measurements, and are never written to history or the F-D curve.
+//   without loading the fingers. Potentiation speed is stored separately
+//   and never enters training history or the F-D curve.
 //   Both modes use a 45s long hold for each grip.
 //
 // Tindeq-driven design: each hang step prescribes a target LOAD (in kg)
@@ -83,33 +83,26 @@ export const WARMUP_REST_ACTIVITIES = {
     id: "band-pull-aparts",
     name: "Band pull-aparts",
     dose: "8–12 easy reps",
-    cue: "Use a light band and relaxed hands. Finish early enough to keep recovering.",
-    alternative: "No band: use controlled wall slides.",
   },
   hamstrings: {
     id: "heel-dig-bridges",
     name: "Hamstring activation",
     dose: "6 controlled heel-dig bridges",
-    cue: "Feel the hamstrings switch on without turning this into a strength set.",
   },
   slams: {
     id: "med-ball-slams",
     name: "Med-ball slams",
     dose: "3–5 crisp reps",
-    cue: "Move explosively and stop while every rep is fast.",
-    alternative: "No ball: use 3 fast squat jumps.",
   },
   jumps: {
     id: "jumps",
     name: "Jumps",
     dose: "2–3 high-quality reps",
-    cue: "Choose broad or vertical jumps. Full intent, full control, no fatigue.",
   },
   hips: {
     id: "hip-mobility",
     name: "Hip mobility",
     dose: "4–6 shin-box transitions",
-    cue: "Move smoothly through 90/90 positions while the fingers recover.",
   },
 };
 
@@ -347,7 +340,7 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
   if (!crusherAmps) {
     return {
       ok: false,
-      reason: "Need Crusher curve data first. Run a few Crusher hangs to failure (across multiple durations) to seed the force curve.",
+      reason: "Need Crusher curve data first. Run a few Crusher pulls to failure (across multiple durations) to seed the force curve.",
     };
   }
   const measuredMicro = fitGripAmps(history, "Micro");

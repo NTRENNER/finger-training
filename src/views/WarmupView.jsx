@@ -11,8 +11,8 @@ import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from "./forc
 //   - boulder: perfusion holds and two heavier strength ramps
 //   - route: 45s perfusion holds and two lighter strength ramps
 // Both modes use whole-body movements during finger-recovery intervals,
-// optionally run single-handed Peak Tests, and finish with unsaved
-// Potentiation Pulls.
+// optionally run single-handed Peak Tests, and finish with measured
+// Potentiation Pulls that remain separate from training history.
 //
 // The preview screen offers a pill toggle between modes; selection
 // persists in localStorage via LS_WARMUP_MODE_KEY.
@@ -37,7 +37,7 @@ import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from "./forc
 //   hang-active    — hold timer counting up (force ≥ 4 kg)
 //   rest           — countdown timer between steps
 //   peak-test      — optional shared single-handed Peak Test flow
-//   potentiation   — brief fast pulls, alternating hands, never saved
+//   potentiation   — brief fast pulls with separate speed measurements
 //   done           — completion
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -467,10 +467,8 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
             </div>
           ))}
         </div>
-        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5, fontStyle: "italic" }}>
-          {includePeakTest
-            ? "Only Peak Test measurements are saved. Warm-up holds, recovery movements, and Potentiation Pulls are not logged."
-            : "Warm-up holds, recovery movements, and Potentiation Pulls are not logged as training data."}
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>
+          Warm-up holds and recovery movements do not update the force curve.
         </div>
 
         {/* Tindeq connect row — placed directly above the Start button
@@ -535,6 +533,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   if (phase === 'potentiation') {
     return <PotentiationPullView key={currentStep.id} visible={visible} grip={currentStep.grip}
       history={history} tindeq={tindeq} unit={unit} manualMode={manualMode}
+      addReps={addReps}
       targetLoadKg={currentStep.targetLoadKg} repsPerHand={currentStep.repsPerHand}
       restSec={currentStep.restBetweenSec} swapRequired={swapPending}
       onPullStart={() => setSwapPending(false)} onClose={advanceToNextStep}
@@ -567,13 +566,13 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     const active = phase === "hang-active";
     const credited = active ? (manualMode ? elapsed : Number(creditedSeconds(tindeq?.forceLoss, elapsed))) : 0;
     const swapCopy = manualMode
-      ? <>Swap to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then tap Start hang.</>
-      : <>Swap the Tindeq to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then pull — the hang starts automatically.</>;
-    const readyCopy = manualMode ? "Tap Start hang when you're pulling." : "Pull to begin. The timer starts automatically.";
+      ? <>Swap to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then tap Start pull.</>
+      : <>Swap the Tindeq to the <b style={{ color: C.purple }}>{currentStep.grip}</b> gripper, then pull. The timer starts automatically.</>;
+    const readyCopy = manualMode ? "Tap Start pull when you're ready." : "Pull to begin. The timer starts automatically.";
     const activeCopy = manualMode ? "Hold until the timer finishes, then tap Done." : "Hold until the timer finishes, then release.";
     const manualPrimary = active
       ? <Btn onClick={handleHangComplete} color={C.red}>Done</Btn>
-      : <Btn onClick={() => changePhase("hang-active")} color={C.green}>Start hang</Btn>;
+      : <Btn onClick={() => changePhase("hang-active")} color={C.green}>Start pull</Btn>;
     return stage(<>
       {swapPending && !active && (
         <div role="status" style={{
@@ -616,8 +615,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         </div>
         <div style={{ color: C.text, fontSize: 20, fontWeight: 800 }}>{activity.name}</div>
         <div style={{ color: C.blue, fontSize: 15, fontWeight: 700, marginTop: 3 }}>{activity.dose}</div>
-        <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.5, marginTop: 7 }}>{activity.cue}</div>
-        {activity.alternative && <div style={{ color: C.muted, fontSize: 12, marginTop: 5 }}>{activity.alternative}</div>}
         {!restActivityComplete ? <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
           <Btn onClick={finishRestActivity} color={C.green}>Done</Btn>
           <Btn onClick={finishRestActivity} color={C.border} small>Skip movement</Btn>
@@ -645,10 +642,8 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, marginBottom: 16 }}>
           Continue whenever you feel ready.
         </div>
-        <div style={{ fontSize: 12, color: C.muted, marginBottom: 16, lineHeight: 1.5, fontStyle: "italic" }}>
-          {includePeakTest
-            ? 'Peak Test measurements were saved separately. Warm-up holds, recovery movements, and Potentiation Pulls do not update the force curve.'
-            : 'Nothing here was logged — warm-up holds, recovery movements, and Potentiation Pulls do not update the force curve.'}
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 16 }}>
+          Warm-up measurements remain separate from the force curve.
         </div>
         <Btn onClick={onClose} color={C.green}>Close</Btn>
       </Card>

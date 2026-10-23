@@ -315,6 +315,25 @@ test.each([5, 6])('a sustained force loss at %s kg is still identified after the
 function feed(packet, from, to, force) {
   for (let ms = from; ms <= to; ms += 100) packet([[ms, force(ms)]]);
 }
+
+test('rapid-force capture keeps pre-trigger samples without changing short-rep handling', async () => {
+  const {packet,onEnd}=await setup(20,{endOnTargetDrop:false,captureRapidForce:true});
+  feed(packet,0,2500,ms=>ms<500?0:ms<=1000?(ms-500)*.05:ms<1300?25:0);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({
+    failureValid:false,
+    endReason:'interrupted',
+    potentiationRfd:{valid:true,target_kg:20},
+  });
+  expect(onEnd.mock.calls[0][0].potentiationRfd.rfd_200_kg_s).toBeCloseTo(50,4);
+});
+test('rapid-force capture detects a low-load pull below the generic 4 kg threshold', async () => {
+  const {packet,onStart,onEnd}=await setup(2.5,{endOnTargetDrop:false,captureRapidForce:true});
+  feed(packet,0,2400,ms=>ms<500?0:ms<=900?(ms-500)*.0075:ms<1200?3:0);
+  expect(onStart).toHaveBeenCalledTimes(1);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0].potentiationRfd.valid).toBe(true);
+});
 test('confirmed loss freezes hold time, records weaker work until release, and then advances once', async () => {
   const {view,packet,onEnd,onStart}=await setup(25);
   feed(packet,0,9000,ms=>ms<3000?25:20);

@@ -28,6 +28,7 @@ test("manual potentiation alternates four unsaved pulls and completes", () => {
 
 test("a deliberately brief sensor pull advances despite the generic short-rep label", () => {
   let callbacks;
+  const addReps = jest.fn();
   const targetKgRef = { current: null };
   const tindeq = {
     connected: true,
@@ -40,14 +41,21 @@ test("a deliberately brief sensor pull advances despite the generic short-rep la
     endRepAndRequireRelease: jest.fn(),
   };
   render(<PotentiationPullView grip="Crusher" targetLoadKg={30} repsPerHand={1} restSec={20}
-    history={[]} tindeq={tindeq} unit="kg" onClose={jest.fn()} />);
+    history={[]} tindeq={tindeq} unit="kg" addReps={addReps} onClose={jest.fn()} />);
 
   expect(targetKgRef.current).toBe(30);
+  expect(tindeq.startAutoDetect).toHaveBeenCalledWith(expect.any(Function), expect.any(Function),
+    { endOnTargetDrop: false, captureRapidForce: true });
   act(() => callbacks.start());
-  act(() => callbacks.end({ peakForce: 31, failureValid: false, endReason: "interrupted" }));
+  act(() => callbacks.end({ actualTime: 0.8, peakForce: 31, failureValid: false, endReason: "interrupted",
+    potentiationRfd: { version: 1, valid: true, rfd_200_kg_s: 120, peak_kg: 31 }, forceRecording: {} }));
   expect(screen.getByRole("timer", { name: "Potentiation rest" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Skip rest" }));
   act(() => callbacks.start());
-  act(() => callbacks.end({ peakForce: 32, failureValid: false, endReason: "interrupted" }));
+  act(() => callbacks.end({ actualTime: 0.7, peakForce: 32, failureValid: false, endReason: "interrupted",
+    potentiationRfd: { version: 1, valid: true, rfd_200_kg_s: 125, peak_kg: 32 }, forceRecording: {} }));
   expect(screen.getByText("Potentiation Pulls complete")).toBeInTheDocument();
+  expect(addReps).toHaveBeenCalledTimes(2);
+  expect(addReps.mock.calls[0][0][0]).toMatchObject({ grip: "Crusher", failure_valid: false,
+    force_recording: { capacity_eligible: false, session_protocol: { id: "warmup_potentiation" } } });
 });

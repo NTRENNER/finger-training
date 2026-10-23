@@ -1,4 +1,5 @@
 import { PeakForceCard } from './analysis/PeakForceCard.jsx';
+import { PotentiationSpeedCard } from './analysis/PotentiationSpeedCard.jsx';
 import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/forceRecording.js";
 // ──────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
@@ -58,7 +59,7 @@ import { AnalysisScopeToolbar } from "./analysis/AnalysisScopeToolbar.jsx";
 import { useGripFits } from "../hooks/useGripFits.js";
 import { useContinuousProgress } from "../hooks/useContinuousProgress.js";
 export function AnalysisView({
-  history, unit = "lbs", bodyWeight = null,
+  history, potentiationHistory = [], unit = "lbs", bodyWeight = null,
   activities = [],
   freshMap = null,
   // Cross-cutting App config — passed in rather than imported so this
@@ -285,6 +286,11 @@ export function AnalysisView({
         <PeakForceCard history={peakRecordHistory} unit={unit} grip={selGrip} handView={handView}
           normalizeOn={normalizationActive} bodyWeight={bodyWeight} bwLog={bwLog} />
       </CardBoundary>}
+
+      <CardBoundary name="Potentiation speed">
+        <PotentiationSpeedCard history={potentiationHistory} grips={scopedGrips}
+          handView={handView} unit={unit} />
+      </CardBoundary>
 
       {reps.length === 0 ? (
         <Card>
