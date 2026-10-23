@@ -92,14 +92,14 @@ export function parseTindeqPacket(dataView, onSample) {
 // Force and time are recorded over matching device-clock intervals by
 // recordCapacityForce; the obsolete peak-relative plateau helper is removed.
 export const AUTO_RELEASE_CONFIRM_MS = TARGET_FAILURE_POLICY.release_confirmation_ms;
-// Delivery can pause without losing device samples. Those delayed-but-
-// continuous samples remain valid. When both the device clock and wall clock
-// show more than one second missing, keep the effort running but never invent
-// force for the unobserved interval; the saved rep is activity-only evidence.
 // A hold waits this long for a silent stream (the interrupt prompt lets the
 // user decide sooner) before it is saved as interrupted.
 export const STREAM_ABANDON_MS = 30000;
 // Consecutive device samples more than this far apart are a discontinuity.
+// Delivery can pause without losing samples; delayed-but-continuous samples
+// remain valid. When wall time shows the gap too, the hold keeps running but
+// no force is invented for the missing interval, so the saved rep is
+// activity-only evidence.
 const MAX_SAMPLE_STEP_US = 1000000;
 
 // Spaced, bounded reconnect attempts after an unexpected disconnect.
@@ -623,7 +623,7 @@ export function useTindeq() {
           adOnEndRef.current?.({ ...stats, failureValid: false, endReason: 'equipment_interruption' });
           adSamplesRef.current = [];
         }
-        // Keep the rep and callbacks through one bounded reconnect attempt.
+        // Keep the rep and callbacks through the bounded reconnect attempts.
         // The packet handler measures the hole in wall time when samples
         // return. Continuous device samples remain valid; genuinely missing
         // samples keep the effort alive but make it ineligible curve evidence.

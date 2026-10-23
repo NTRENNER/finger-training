@@ -119,37 +119,35 @@ function formatPrescription(sets, reps) {
   return sets ? `${sets} sets` : "";
 }
 
-function firstUsableLoggedSets(sessions, exercise) {
+function firstUsableLoggedSets(sessions, exercise, needsReps) {
   let first = null;
   for (const session of sessions || []) {
     const sets = session?.exercises?.[exercise.id]?.sets;
     if (!session?.date || !Array.isArray(sets)) continue;
     const done = sets.filter(set => set?.done);
-    const needsReps = exercise.tracking !== "completion" && !exercise.reps;
-    const usable = needsReps
-      ? done.filter(set => parseRepsCount(set.reps) > 0)
-      : done;
-    if (!usable.length) continue;
+    const repCounts = done.map(set => parseRepsCount(set.reps)).filter(count => count > 0);
+    if (!done.length || (needsReps && !repCounts.length)) continue;
     const order = `${session.date}\u0000${session.completedAt || ""}\u0000${session.id || ""}`;
-    if (!first || order < first.order) first = { date: session.date, sets: usable, order };
+    if (!first || order < first.order) first = { date: session.date, completed: done.length, repCounts, order };
   }
   return first;
 }
 
 // A custom exercise created without sets or reps learns them from its first
-// usable logged session: blank completed rows are not a rep prescription.
-// From the next session on, the ordinary progression rules (add sets after
-// clean sessions, then load) run against that target exactly as they do for
-// built-in templates. Anything the user did set is kept.
+// usable logged session. Every completed set counts toward the set target;
+// rows left blank just don't set the reps, and a session with no rep counts
+// at all can't teach reps. From the next session on, the ordinary
+// progression rules (add sets after clean sessions, then load) run against
+// that target exactly as they do for built-in templates. Anything the user
+// did set is kept.
 export function learnedCustomExercise(exercise, sessions) {
   if (!exercise?.custom) return exercise;
   const needsReps = exercise.tracking !== "completion" && !exercise.reps;
   if (exercise.sets && !needsReps) return exercise;
-  const first = firstUsableLoggedSets(sessions, exercise);
+  const first = firstUsableLoggedSets(sessions, exercise, needsReps);
   if (!first) return exercise;
-  const repCounts = first.sets.map(set => parseRepsCount(set.reps)).filter(count => count > 0);
-  const sets = exercise.sets || first.sets.length;
-  const reps = needsReps && repCounts.length ? String(Math.min(...repCounts)) : exercise.reps;
+  const sets = exercise.sets || first.completed;
+  const reps = needsReps ? String(Math.min(...first.repCounts)) : exercise.reps;
   return {
     ...exercise,
     sets,

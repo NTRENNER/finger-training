@@ -90,7 +90,7 @@ describe("workout program", () => {
       });
     });
 
-    test("blank completed rows do not block learning from the first usable rep session", () => {
+    test("blank completed rows still count as sets but don't set the reps", () => {
       const ex = createCustomExercise({ name: "Ring Rows", tracking: "reps" });
       const sessions = [
         session("2026-10-20", ex.id, [{ done: true }, { reps: "", done: true }]),
@@ -99,7 +99,7 @@ describe("workout program", () => {
         ]),
       ];
       expect(learnedCustomExercise(ex, sessions)).toMatchObject({
-        sets: 2, reps: "8", prescription: "2 × 8", learnedFrom: "2026-10-22",
+        sets: 3, reps: "8", prescription: "3 × 8", learnedFrom: "2026-10-22",
       });
     });
 
