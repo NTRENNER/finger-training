@@ -296,6 +296,8 @@ export default function App() {
   const researchMode = /^\/research\/?$/.test(window.location.pathname);
   const [tab, setTab] = useState(() => researchMode ? RESEARCH_TAB : 0);
   const [climbVisited, setClimbVisited] = useState(false);
+  const [climbTrainingActive, setClimbTrainingActive] = useState(false);
+  const [supportTrainingActive, setSupportTrainingActive] = useState(false);
   useEffect(() => { if (tab === 2) setClimbVisited(true); }, [tab]);
 
   // (activities + addActivity + deleteActivity + updateActivity all
@@ -331,7 +333,7 @@ export default function App() {
     tindeqConnected: tindeq.connected,
     onSessionStart: () => setTab(0),
   });
-  useScreenWakeLock(tindeq.connected || tindeq.reconnecting || phase !== "idle");
+  useScreenWakeLock(phase !== "idle" || climbTrainingActive || supportTrainingActive);
 
   const volumeReady = user ? historySynced && settingsSynced : getStorageUserId() == null;
   const volumeExperiment = Object.values(volumeExperiments || {})
@@ -763,7 +765,8 @@ export default function App() {
       })()}
       </div>
 
-      {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip} />}
+      {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip}
+        onTrainingStateChange={setSupportTrainingActive} />}
       <div hidden={tab !== 2}>
         {(tab === 2 || climbVisited) && <ClimbView visible={tab === 2}
           addReps={addReps}
@@ -774,6 +777,7 @@ export default function App() {
           bodyWeight={bodyWeight}
           tindeq={tindeq}
           unit={unit}
+          onTrainingStateChange={setClimbTrainingActive}
         />}
       </div>
       {tab === 3 && (

@@ -105,6 +105,7 @@ export function WorkoutTab({
   onSessionSaved,
   onBwSave = () => {},
   trip = DEFAULT_TRIP,
+  onTrainingStateChange = null,
 }) {
   // ── State ─────────────────────────────────────────────
   // wLog — live LS read. This view used to hold the log in useState
@@ -161,6 +162,11 @@ export function WorkoutTab({
   // signaled by index === liveExercises.length.
   const [pickerState, setPickerState] = useState(null);
   const [builderOpen, setBuilderOpen] = useState(false);
+
+  useEffect(() => {
+    onTrainingStateChange?.(sessionActive);
+  }, [sessionActive, onTrainingStateChange]);
+  useEffect(() => () => onTrainingStateChange?.(false), [onTrainingStateChange]);
 
   const programRaw = useLSValue(LS_WORKOUT_PLAN_KEY);
   const program = useMemo(() => sanitizeWorkoutProgram(programRaw), [programRaw]);

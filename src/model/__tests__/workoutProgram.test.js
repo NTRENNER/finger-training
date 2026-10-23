@@ -90,6 +90,19 @@ describe("workout program", () => {
       });
     });
 
+    test("blank completed rows do not block learning from the first usable rep session", () => {
+      const ex = createCustomExercise({ name: "Ring Rows", tracking: "reps" });
+      const sessions = [
+        session("2026-10-20", ex.id, [{ done: true }, { reps: "", done: true }]),
+        session("2026-10-22", ex.id, [
+          { reps: "10", done: true }, { done: true }, { reps: "8", done: true },
+        ]),
+      ];
+      expect(learnedCustomExercise(ex, sessions)).toMatchObject({
+        sets: 2, reps: "8", prescription: "2 × 8", learnedFrom: "2026-10-22",
+      });
+    });
+
     test("completion exercises learn only a set count; anything the user set is kept", () => {
       const done = createCustomExercise({ name: "Dead Hang", tracking: "completion" });
       expect(learnedCustomExercise(done, [session("2026-10-20", done.id, [{ done: true }, { done: true }])]))

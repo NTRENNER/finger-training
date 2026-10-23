@@ -1,5 +1,5 @@
 import { renderHook, act } from '@testing-library/react';
-import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP, STREAM_RECOVERY_MS, STREAM_ABANDON_MS, RECONNECT_DELAYS_MS } from '../tindeq.js';
+import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP, STREAM_ABANDON_MS, RECONNECT_DELAYS_MS } from '../tindeq.js';
 
 async function setup(targetKg = null, options) {
   const listeners = {};
@@ -86,10 +86,10 @@ test('a device clock restart while packets arrive on time keeps the hold going',
   expect(saved).toMatchObject({actualTime: 4.1, failureValid: true, forceRecording: {transport: {clock_resets: 1}}});
   expect(saved.forceRecording.transport.interruption).toBeUndefined();
 });
-test('a hole longer than the recovery window keeps the hold but saves it as interrupted', async () => {
+test('a genuine device-sample gap keeps the hold but saves it as interrupted', async () => {
   const { view, packet, onEnd } = await setup(20);
   feed(packet, 0, 1000, () => 20);
-  act(() => jest.advanceTimersByTime(STREAM_RECOVERY_MS + 1000));
+  act(() => jest.advanceTimersByTime(6000));
   expect(view.result.current.signalRecovering).toBe(true);
   feed(packet, 7000, 10000, ms => ms < 9000 ? 20 : 0);
   expect(onEnd).toHaveBeenCalledTimes(1);
@@ -517,7 +517,7 @@ test('reconnection restarts auto streaming and keeps continuous samples in the s
     forceRecording:{transport:{disconnect_count:1}}});
 });
 
-test('a short hole in the signal is carried across and recorded as unobserved time', async () => {
+test('a short genuine sample gap is not filled with invented force', async () => {
   const { view, packet, onEnd, onStart } = await setup(20);
   packet([[0,20],[500,20],[1000,20]]);
   act(() => jest.advanceTimersByTime(2500));
@@ -528,7 +528,24 @@ test('a short hole in the signal is carried across and recorded as unobserved ti
   expect(onStart).toHaveBeenCalledTimes(1);
   expect(onEnd).toHaveBeenCalledTimes(1);
   const saved = onEnd.mock.calls[0][0];
-  expect(saved).toMatchObject({actualTime:4.5,failureValid:true,forceRecording:{transport:{unobserved_ms:2500}}});
+  expect(saved).toMatchObject({actualTime:4.5,failureValid:false,endReason:'equipment_interruption',
+    forceRecording:{transport:{interruption:'device_sample_gap',device_gap_ms:2500},capacity_eligible:false}});
+});
+
+test('one dropped notification remains valid curve evidence when the next packet resumes promptly', async () => {
+  const { packet, onEnd } = await setup(20);
+  const samples = (from, to, kg) => Array.from(
+    { length: Math.floor((to - from) / 100) + 1 }, (_, i) => [from + i * 100, kg]
+  );
+  packet(samples(0, 1000, 20));
+  // A notification carrying the missing 1100–1200 ms samples is lost.
+  act(() => jest.advanceTimersByTime(300));
+  packet(samples(1300, 3000, 20));
+  packet(samples(3100, 4300, 0));
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  const saved = onEnd.mock.calls[0][0];
+  expect(saved).toMatchObject({ failureValid: true, forceRecording: { capacity_eligible: true } });
+  expect(saved.endReason).not.toBe('equipment_interruption');
   expect(saved.forceRecording.transport.interruption).toBeUndefined();
 });
 
@@ -583,7 +600,7 @@ test('a failed reconnect saves once before the screen disarms', async () => {
   expect(onEnd).toHaveBeenCalledTimes(1);
 });
 
-test('a clock reset across a reconnect bridges wall time, never a multi-minute rep', async () => {
+test('a clock reset across a reconnect preserves elapsed activity but not curve evidence', async () => {
   const { packet, onEnd, deviceListeners } = await setup(20);
   packet([[10000,20],[10500,20],[11000,20]]);
   act(() => { deviceListeners.gattserverdisconnected(); });
@@ -592,8 +609,9 @@ test('a clock reset across a reconnect bridges wall time, never a multi-minute r
   expect(onEnd).not.toHaveBeenCalled();
   packet([[1000,0],[1500,0],[2000,0],[2500,0]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
-  expect(onEnd.mock.calls[0][0]).toMatchObject({failureValid:true,actualTime:3.5,
-    forceRecording:{transport:{disconnect_count:1,unobserved_ms:1500}}});
+  expect(onEnd.mock.calls[0][0]).toMatchObject({failureValid:false,actualTime:3.5,endReason:'equipment_interruption',
+    forceRecording:{transport:{disconnect_count:1,interruption:'device_sample_gap',device_gap_ms:1500},
+      capacity_eligible:false}});
 });
 
 test('a reconnect that fails once keeps trying and keeps the hold', async () => {

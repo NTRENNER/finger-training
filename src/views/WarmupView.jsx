@@ -74,7 +74,8 @@ function WarmupTime({ seconds, label, target }) {
   </div>;
 }
 
-export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit = "lbs", onClose, addReps }) {
+export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit = "lbs", onClose, addReps,
+  onTrainingStateChange = null }) {
   // ── Warmup mode (boulder / route) ──
   // Persisted to LS so the user's last choice carries across sessions.
   // Default to "boulder" when no prior mode has been selected.
@@ -139,6 +140,11 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   // an empty array. The effects skip work when there's no step.
   const steps = protocol.ok ? protocol.steps : [];
   const currentStep = steps[stepIdx];
+
+  useEffect(() => {
+    onTrainingStateChange?.(!["preview", "done"].includes(phase));
+  }, [phase, onTrainingStateChange]);
+  useEffect(() => () => onTrainingStateChange?.(false), [onTrainingStateChange]);
 
   // ── Hang timer (count up while force is held above threshold) ──
   // The hang phase auto-advances when elapsed reaches the prescribed

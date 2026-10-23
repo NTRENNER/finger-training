@@ -110,6 +110,18 @@ test('a warm-up started without a sensor stays manual after reconnect and ignore
   expect(screen.queryByText('Connect the Tindeq to continue.')).not.toBeInTheDocument();
 });
 
+test('the warm-up reports active training only after it starts and clears it on exit', () => {
+  const onTrainingStateChange = jest.fn();
+  const props = { visible: true, history: [], wLog: [], bodyWeightKg: 73, unit: 'kg',
+    onClose: jest.fn(), addReps: jest.fn(), onTrainingStateChange };
+  const view = render(<WarmupView {...props} tindeq={{ connected: false }} />);
+  expect(onTrainingStateChange).toHaveBeenLastCalledWith(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Start', exact: true }));
+  expect(onTrainingStateChange).toHaveBeenLastCalledWith(true);
+  view.unmount();
+  expect(onTrainingStateChange).toHaveBeenLastCalledWith(false);
+});
+
 test("complete sequence retains stage layout and finishes after the second strength ramp", async () => {
   const { hold, rest, commands, addReps } = await setup();
   const completeStep = step => {

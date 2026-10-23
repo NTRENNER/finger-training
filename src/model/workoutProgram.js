@@ -119,30 +119,36 @@ function formatPrescription(sets, reps) {
   return sets ? `${sets} sets` : "";
 }
 
-function firstLoggedSets(sessions, exerciseId) {
+function firstUsableLoggedSets(sessions, exercise) {
   let first = null;
   for (const session of sessions || []) {
-    const sets = session?.exercises?.[exerciseId]?.sets;
-    if (!session?.date || !Array.isArray(sets) || !sets.some(set => set?.done)) continue;
-    if (!first || session.date < first.date) first = { date: session.date, sets };
+    const sets = session?.exercises?.[exercise.id]?.sets;
+    if (!session?.date || !Array.isArray(sets)) continue;
+    const done = sets.filter(set => set?.done);
+    const needsReps = exercise.tracking !== "completion" && !exercise.reps;
+    const usable = needsReps
+      ? done.filter(set => parseRepsCount(set.reps) > 0)
+      : done;
+    if (!usable.length) continue;
+    const order = `${session.date}\u0000${session.completedAt || ""}\u0000${session.id || ""}`;
+    if (!first || order < first.order) first = { date: session.date, sets: usable, order };
   }
   return first;
 }
 
 // A custom exercise created without sets or reps learns them from its first
-// logged session: the number of completed sets and the lowest rep count among
-// them. From the next session on, the ordinary progression rules (add sets
-// after clean sessions, then load) run against that target exactly as they
-// do for built-in templates. Anything the user did set is kept.
+// usable logged session: blank completed rows are not a rep prescription.
+// From the next session on, the ordinary progression rules (add sets after
+// clean sessions, then load) run against that target exactly as they do for
+// built-in templates. Anything the user did set is kept.
 export function learnedCustomExercise(exercise, sessions) {
   if (!exercise?.custom) return exercise;
   const needsReps = exercise.tracking !== "completion" && !exercise.reps;
   if (exercise.sets && !needsReps) return exercise;
-  const first = firstLoggedSets(sessions, exercise.id);
+  const first = firstUsableLoggedSets(sessions, exercise);
   if (!first) return exercise;
-  const done = first.sets.filter(set => set?.done);
-  const repCounts = done.map(set => parseRepsCount(set.reps)).filter(count => count > 0);
-  const sets = exercise.sets || done.length;
+  const repCounts = first.sets.map(set => parseRepsCount(set.reps)).filter(count => count > 0);
+  const sets = exercise.sets || first.sets.length;
   const reps = needsReps && repCounts.length ? String(Math.min(...repCounts)) : exercise.reps;
   return {
     ...exercise,

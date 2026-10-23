@@ -130,6 +130,7 @@ export function ClimbView({
   visible = true,
   tindeq = null,
   unit = "lbs",
+  onTrainingStateChange = null,
 }) {
   const [warmupActive, setWarmupActive] = useState(false);
 
@@ -146,6 +147,7 @@ export function ClimbView({
           tindeq={tindeq}
           unit={unit}
           onClose={() => setWarmupActive(false)}
+          onTrainingStateChange={onTrainingStateChange}
         />
       </PageFrame>
     );

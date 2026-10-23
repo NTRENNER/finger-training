@@ -92,11 +92,10 @@ export function parseTindeqPacket(dataView, onSample) {
 // Force and time are recorded over matching device-clock intervals by
 // recordCapacityForce; the obsolete peak-relative plateau helper is removed.
 export const AUTO_RELEASE_CONFIRM_MS = TARGET_FAILURE_POLICY.release_confirmation_ms;
-// Delivery can pause without losing device samples. A hole that wall time
-// also shows is carried across at the last observed force when it is this
-// short, and recorded as unobserved time; a longer hole marks the hold as
-// interrupted when it is saved, but never ends it.
-export const STREAM_RECOVERY_MS = 5000;
+// Delivery can pause without losing device samples. Those delayed-but-
+// continuous samples remain valid. When both the device clock and wall clock
+// show more than one second missing, keep the effort running but never invent
+// force for the unobserved interval; the saved rep is activity-only evidence.
 // A hold waits this long for a silent stream (the interrupt prompt lets the
 // user decide sooner) before it is saved as interrupted.
 export const STREAM_ABANDON_MS = 30000;
@@ -385,12 +384,7 @@ export function useTindeq() {
         } else {
           gapMs = Math.min(delta / 1000, wallMs);
           delta = gapMs * 1000;
-          if (recording && gapMs <= STREAM_RECOVERY_MS) {
-            for (let t = 1000; t < gapMs; t += 1000) {
-              timed.push({ kg: latestKgRef.current, now: clock.elapsed + t, at: at - gapMs + t });
-            }
-            transportRef.current.unobserved_ms = (transportRef.current.unobserved_ms || 0) + gapMs;
-          } else if (recording) {
+          if (recording) {
             transportRef.current.interruption = 'device_sample_gap';
             transportRef.current.device_gap_ms = gapMs;
           }
@@ -631,8 +625,8 @@ export function useTindeq() {
         }
         // Keep the rep and callbacks through one bounded reconnect attempt.
         // The packet handler measures the hole in wall time when samples
-        // return: a short one is carried across, a long one is saved as
-        // interrupted once the hold ends.
+        // return. Continuous device samples remain valid; genuinely missing
+        // samples keep the effort alive but make it ineligible curve evidence.
         if (measuringRef.current || adActiveRef.current) {
           transportRef.current.disconnect_count = (transportRef.current.disconnect_count || 0) + 1;
           setSignalRecovering(true);

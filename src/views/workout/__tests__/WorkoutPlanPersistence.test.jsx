@@ -20,14 +20,18 @@ test('saved workout retains planned sets and effort when actual sets are changed
     {weight:'50',reps:'4',done:true}, {weight:'50',reps:'4',done:true}, {weight:'70',reps:'2',done:false}
   ] } } }]);
   const saved = jest.fn();
-  render(<WorkoutTab unit="lbs" onSessionSaved={saved} />);
+  const onTrainingStateChange = jest.fn();
+  render(<WorkoutTab unit="lbs" onSessionSaved={saved} onTrainingStateChange={onTrainingStateChange} />);
+  expect(onTrainingStateChange).toHaveBeenLastCalledWith(false);
   fireEvent.click(screen.getByRole('button', { name: /Start Strength A/ }));
+  expect(onTrainingStateChange).toHaveBeenLastCalledWith(true);
   const row = within(screen.getByTestId('weightedPullup'));
   expect(row.getByText('2 sets')).toBeInTheDocument();
   fireEvent.click(row.getByRole('button', { name: 'Complete one' }));
   fireEvent.click(screen.getByRole('button', { name: 'At my limit' }));
   fireEvent.click(row.getByRole('button', { name: 'Remove sets' }));
   fireEvent.click(screen.getByRole('button', { name: 'Save Session' }));
+  expect(onTrainingStateChange).toHaveBeenLastCalledWith(false);
   const exercise = saved.mock.calls[0][0].exercises.weightedPullup;
   expect(exercise.sets).toHaveLength(1);
   expect(exercise.effort).toBe('at_limit');
