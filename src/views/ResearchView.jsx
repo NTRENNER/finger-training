@@ -30,7 +30,7 @@ export function ResearchView({ history, activities, unit, signedIn, historySynce
           <VolumeExperimentReview experiments={volumeExperiments} history={history} activities={activities}
             unit={unit} onSave={onSaveVolumeExperiment} ready={volumeReady} />
         </CardBoundary><CardBoundary name="Prediction accuracy">
-          <PredictionAccuracyCard history={history} activities={activities} unit={unit} />
+          <PredictionAccuracyCard history={history} unit={unit} />
         </CardBoundary></>}
   </PageFrame>;
 }
