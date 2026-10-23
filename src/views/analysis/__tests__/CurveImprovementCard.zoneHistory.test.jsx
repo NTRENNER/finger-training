@@ -100,11 +100,38 @@ test("puts first and latest measured openings inside each modeled tile", () => {
   expect(screen.getByText("Max · modeled 5s")).toBeInTheDocument();
   expect(screen.getByText("First 17.0 kg")).toBeInTheDocument();
   expect(screen.getByText("Best 20.0 kg")).toBeInTheDocument();
+  // The best peak is also the most recent one, so no separate Latest line.
+  expect(screen.queryByText(/^Latest \d/)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Power measured opening history" }));
   expect(screen.getByRole("dialog")).toHaveTextContent("2 sessions");
   expect(screen.getByText("15.0 kg")).toBeInTheDocument();
   expect(screen.queryByText("30.0 kg")).not.toBeInTheDocument();
+});
+
+test("the peak tile shows the most recent peak when it is below the best", () => {
+  const peakRep = (id, date, peak) => rep(7, 7, 30, {
+    id, session_id: id, date, peak_force_kg: peak,
+    failure_valid: true, load_provenance: "measured_force", force_recording: { capacity_eligible: true },
+  });
+  render(
+    <CurveImprovementCard
+      improvement={improvement}
+      gripImprovement={{}}
+      grip3xEstimates={{ Crusher: [1, 1, 1] }}
+      gripBaselines={{}}
+      global3xBaseline={{ date: "2026-04-20", maxHoldS: 240 }}
+      selGrip={null}
+      history={[peakRep("a", "2026-06-01", 40), peakRep("b", "2026-07-01", 52), peakRep("c", "2026-10-20", 49),
+        rep(220, 200, 8, { id: "e", session_id: "e", date: "2026-10-22", peak_force_kg: 13, failure_valid: true,
+          load_provenance: "measured_force", force_recording: { capacity_eligible: true } })]}
+      unit="kg"
+    />
+  );
+  expect(screen.getByText("First 40.0 kg")).toBeInTheDocument();
+  expect(screen.getByText("Best 52.0 kg")).toBeInTheDocument();
+  const shortDate = new Date("2026-10-20T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  expect(screen.getByText(`Latest 49.0 kg · ${shortDate}`)).toBeInTheDocument();
 });
 
 test("does not present unlike measured openings as progress", () => {

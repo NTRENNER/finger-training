@@ -173,6 +173,8 @@ function measuredResultText(result, unit, peak = false) {
   return `${force} · ${duration}s`;
 }
 
+const shortDate = ymd => new Date(`${ymd}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
 function measuredComparisonLabel(comparison, unit) {
   if (comparison?.type === "fixed_force") {
     return `Matched force · ~${fmtW(comparison.anchorForceKg, unit)} ${unit}`;
@@ -280,7 +282,10 @@ function ImprovementRow({
               {modelContent}
             </div>
           );
-          const hasPeak = peak && measured?.first && measured?.latest;
+          const hasPeak = peak && measured?.first && measured?.best;
+          // Only worth a line when the latest test wasn't itself the best.
+          const latestPeak = hasPeak && measured.latest && measured.latest.date !== measured.best.date
+            ? measured.latest : null;
           const comparison = !peak ? measured?.comparison : null;
           const estimatedFallback = !peak && measured?.sessions > 0 && !comparison
             ? comparisons[z.key]
@@ -294,8 +299,11 @@ function ImprovementRow({
               <span className="curve-improvement-measured-values">
                 <span>First {measuredResultText(measured.first, unit, true)}</span>
                 <span className="curve-improvement-measured-arrow" aria-hidden="true">→</span>
-                <span>Best {measuredResultText(measured.latest, unit, true)}</span>
+                <span>Best {measuredResultText(measured.best, unit, true)}</span>
               </span>
+              {latestPeak && <span className="curve-improvement-measured-latest">
+                Latest {measuredResultText(latestPeak, unit, true)} · {shortDate(latestPeak.date)}
+              </span>}
             </>
           ) : comparison ? (
             <>
@@ -326,7 +334,8 @@ function ImprovementRow({
             </>
           ) : <span className="curve-improvement-measured-empty">No measured opening yet</span>;
           const measuredTitle = hasPeak
-            ? `First observed to current best: ${measured.first.date} to ${measured.latest.date}`
+            ? `First observed ${measured.first.date}, best ${measured.best.date}`
+              + (measured.latest ? `, latest ${measured.latest.date}` : "")
             : comparison
               ? `Like-for-like opening comparison: ${comparison.earlier.date} to ${comparison.latest.date}`
               : estimatedFallback

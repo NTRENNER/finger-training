@@ -13,6 +13,17 @@ describe("buildPeakForceTrend", () => {
     expect(buildPeakForceTrend([{ grip: "Crusher", date: "2026-05-01", actual_time_s: 8 }])).toBeNull();
   });
 
+  test("latestMaxIntent ignores later long holds; latest does not", () => {
+    const t = buildPeakForceTrend([
+      rep("Crusher", "2026-05-01", 7, 50),
+      rep("Crusher", "2026-05-10", 7, 46),
+      rep("Crusher", "2026-05-12", 200, 30, 220),
+    ]);
+    expect(t.latest.Crusher).toMatchObject({ kg: 30, date: "2026-05-12" });
+    expect(t.latestMaxIntent.Crusher).toMatchObject({ kg: 46, date: "2026-05-10" });
+    expect(buildPeakForceTrend([rep("Micro", "2026-05-12", 200, 30, 220)]).latestMaxIntent.Micro).toBeUndefined();
+  });
+
   test("takes the best peak per grip per session", () => {
     const t = buildPeakForceTrend([
       rep("Crusher", "2026-05-01", 8, 55),

@@ -103,6 +103,19 @@ export function buildPeakForceTrend(history, {
     firstBest[g] = observedByGrip[g].get(earliest).kg;
   }
 
+  // Most recent max-intent reading per grip (peak test or short protocol).
+  // Unlike `latest`, a long hold's instantaneous peak never stands in for
+  // current maximum strength.
+  const latestMaxIntent = {};
+  for (const g of grips) {
+    const days = maxIntentByGrip[g];
+    if (!days?.size) continue;
+    const date = [...days.keys()].sort().at(-1);
+    const measurement = days.get(date);
+    const factor = 10 ** roundDigits;
+    latestMaxIntent[g] = { kg: Math.round(measurement.kg * factor) / factor, date, context: measurement.context };
+  }
+
   const allDates = [...new Set(grips.flatMap(g => [...observedByGrip[g].keys()]))].sort();
   const best = {};
   const bestRaw = {};
@@ -186,6 +199,7 @@ export function buildPeakForceTrend(history, {
     rows,
     best,
     latest,
+    latestMaxIntent,
     firstBest,
     changePct,
     domain,

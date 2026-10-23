@@ -79,11 +79,16 @@ export function buildMeasuredDomainProgress(history, {
   const peakTrend = buildPeakForceTrend(scoped, { roundDigits: 5 });
   const firstPeak = peakTrend?.firstBest?.[grip];
   const bestPeak = peakTrend?.best?.[grip];
+  const latestPeak = peakTrend?.latestMaxIntent?.[grip];
+  // best = highest measured peak (PR); latest = the most recent max-intent
+  // reading (peak test or short protocol), so the tile can show how close
+  // current form is to the PR without an endurance hold posing as a max.
   const peak = firstPeak > 0 && bestPeak?.kg > 0 ? {
     key: "peak_force",
     label: "Peak Force",
     first: { date: firstPeakDate(peakTrend, grip), forceKg: firstPeak },
-    latest: { date: bestPeak.date, forceKg: bestPeak.kg },
+    best: { date: bestPeak.date, forceKg: bestPeak.kg },
+    latest: latestPeak?.kg > 0 ? { date: latestPeak.date, forceKg: latestPeak.kg } : null,
     sessions: peakTrend.rows.filter(row => Number.isFinite(row?.[grip])).length,
   } : null;
 

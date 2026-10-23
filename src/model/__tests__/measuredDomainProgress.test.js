@@ -27,9 +27,12 @@ test("reports a fixed-duration comparison when opening times closely match", () 
 
   expect(progress.peak).toMatchObject({
     first: { date: "2026-06-01", forceKg: 17 },
-    latest: { date: "2026-07-01", forceKg: 20 },
+    best: { date: "2026-07-01", forceKg: 20 },
     sessions: 3,
   });
+  // None of these holds is a max effort (all > 12 s), so there is no
+  // "latest" peak — the 220 s hold's 13 kg must not read as current strength.
+  expect(progress.peak.latest).toBeNull();
   expect(progress.domains.find(item => item.key === "power")).toMatchObject({
     sessions: 2,
     first: { date: "2026-06-01", forceKg: 12, durationS: 28 },
@@ -62,7 +65,23 @@ test("excludes nominal and interrupted rows and honors the selected hand", () =>
   const left = buildMeasuredDomainProgress(history, { grip: "Micro", handView: "L" });
   const domain = left.domains.find(item => item.key === "power_strength");
   expect(domain).toMatchObject({ sessions: 1, first: { forceKg: 10 }, latest: { forceKg: 10 } });
-  expect(left.peak.latest.forceKg).toBe(15);
+  expect(left.peak.best.forceKg).toBe(15);
+  expect(left.peak.latest).toBeNull();
+});
+
+test("peak progress separates the first, best and most recent measured peak", () => {
+  const peak = (id, date, kg) => rep(id, date, 7, 7, kg - 5);
+  const progress = buildMeasuredDomainProgress([
+    peak("a", "2026-06-01", 40),
+    peak("b", "2026-07-01", 52),
+    peak("c", "2026-10-20", 49),
+    rep("endurance", "2026-10-22", 220, 200, 8),
+  ], { grip: "Micro", handView: "L" });
+  expect(progress.peak).toMatchObject({
+    first: { date: "2026-06-01", forceKg: 40 },
+    best: { date: "2026-07-01", forceKg: 52 },
+    latest: { date: "2026-10-20", forceKg: 49 },
+  });
 });
 
 test("uses the latest similar-force repeat to compare hold time", () => {
