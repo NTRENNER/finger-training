@@ -87,7 +87,9 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
   // Used for movements like Ab Wheel where ROM quality is the load
   // axis (no weight, no band) but rep volume is still useful info.
   if (ex.circlesOnly && setsData?.sets) {
-    const showReps = !!ex.reps;
+    // A rep-tracked custom exercise has no rep target until its first
+    // session is logged, but that first session still records reps.
+    const showReps = !!ex.reps || ex.tracking === "reps";
     return (
       <div style={{
         padding: "12px 0",

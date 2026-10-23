@@ -42,21 +42,20 @@ function CategoryChips({ exercise }) {
   );
 }
 
+const EMPTY_DRAFT = {
+  name: "",
+  movementCategories: ["pull"],
+  stimulus: "strength",
+  tracking: "reps",
+  intent: "",
+};
+
 export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange, onClose }) {
   const program = useMemo(() => sanitizeWorkoutProgram(incoming), [incoming]);
   const [templateId, setTemplateId] = useState("A");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState({
-    name: "",
-    movementCategories: ["pull"],
-    stimulus: "strength",
-    tracking: "reps",
-    sets: 3,
-    reps: "5–8",
-    prescription: "",
-    intent: "",
-  });
+  const [draft, setDraft] = useState(EMPTY_DRAFT);
 
   const ids = program.templates[templateId] || [];
   const selectedWorkout = workouts[templateId];
@@ -90,10 +89,7 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
       templates: { ...program.templates, [templateId]: [...ids, exercise.id] },
     });
     setCreating(false);
-    setDraft({
-      name: "", movementCategories: ["pull"], stimulus: "strength",
-      tracking: "reps", sets: 3, reps: "5–8", prescription: "", intent: "",
-    });
+    setDraft(EMPTY_DRAFT);
   };
 
   return (
@@ -186,11 +182,7 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
                   ))}
                 </div>
               </fieldset>
-              <div className="builder-form-grid">
-                <label><span>Sets</span><input type="number" min="1" max="10" style={fieldStyle} value={draft.sets} onChange={event => setDraft({ ...draft, sets: event.target.value })} /></label>
-                <label><span>Reps</span><input style={fieldStyle} value={draft.reps} onChange={event => setDraft({ ...draft, reps: event.target.value })} /></label>
-              </div>
-              <label><span>Prescription override</span><input style={fieldStyle} placeholder="Optional" value={draft.prescription} onChange={event => setDraft({ ...draft, prescription: event.target.value })} /></label>
+              <p className="builder-note">No prescription needed. Log your first session however it goes; it becomes the starting point, and later sessions progress from there.</p>
               <label><span>Why it is in the plan</span><textarea style={{ ...fieldStyle, resize: "vertical" }} rows="2" value={draft.intent} onChange={event => setDraft({ ...draft, intent: event.target.value })} /></label>
               <div className="builder-actions">
                 <button type="button" className="builder-primary-action" disabled={!draft.name.trim()} onClick={saveCustom}>Add exercise</button>

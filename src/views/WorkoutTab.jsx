@@ -63,8 +63,10 @@ import "./workout/WorkoutPlanner.css";
 
 import { recommendNextWorkout } from "../model/supportTraining.js";
 import {
+  learnedCustomExercise,
   sanitizeWorkoutProgram,
   strengthWorkoutIds,
+  withLearnedCustomExercises,
   workoutProgramCatalog,
   workoutProgramWorkouts,
 } from "../model/workoutProgram.js";
@@ -162,8 +164,15 @@ export function WorkoutTab({
 
   const programRaw = useLSValue(LS_WORKOUT_PLAN_KEY);
   const program = useMemo(() => sanitizeWorkoutProgram(programRaw), [programRaw]);
-  const programWorkouts = useMemo(() => workoutProgramWorkouts(program), [program]);
-  const exerciseCatalog = useMemo(() => workoutProgramCatalog(program), [program]);
+  // Custom exercises created without sets/reps take them from their first
+  // logged session, so seeding and the prescription line follow that template.
+  const programWorkouts = useMemo(
+    () => withLearnedCustomExercises(workoutProgramWorkouts(program), wLog),
+    [program, wLog],
+  );
+  const exerciseCatalog = useMemo(() => Object.fromEntries(
+    Object.entries(workoutProgramCatalog(program)).map(([id, ex]) => [id, learnedCustomExercise(ex, wLog)])
+  ), [program, wLog]);
   const strengthIds = useMemo(() => strengthWorkoutIds(program), [program]);
   const updateProgram = next => {
     const sanitized = sanitizeWorkoutProgram(next);

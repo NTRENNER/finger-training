@@ -308,7 +308,7 @@
 
 .custom-exercise-form fieldset { border: 0; margin: 0; padding: 0; }
 .builder-option-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.builder-form-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.builder-note { margin: 0; color: #8b949e; font-size: 12px; line-height: 1.45; }
 
 @media (max-width: 540px) {
   .workout-choice-grid {
@@ -319,5 +319,4 @@
   .strength-mode-button { min-height: 0; }
   .power-primer-band { align-items: stretch; flex-direction: column; }
   .builder-template-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .builder-form-grid { grid-template-columns: minmax(0, 1fr); }
 }

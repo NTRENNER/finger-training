@@ -3,6 +3,7 @@ import {
   workouts as SUPPORT_WORKOUTS,
   STRENGTH_ROTATIONS,
 } from "./supportTraining.js";
+import { parseRepsCount } from "./workout-volume.js";
 
 export const WORKOUT_MODES = {
   maintain: {
@@ -82,13 +83,12 @@ export function sanitizeCustomExercise(raw) {
   const tracking = ["weight", "reps", "completion"].includes(raw.tracking)
     ? raw.tracking
     : "reps";
-  const sets = positiveInt(raw.sets, 3);
-  const reps = cleanString(raw.reps, "5–8");
-  const prescription = cleanString(
-    raw.prescription,
-    tracking === "completion" ? `${sets} sets` : `${sets} × ${reps}`,
-  );
-  const intent = cleanString(raw.intent, `${name} for ${stimulus}.`);
+  // Sets and reps are optional: a new custom exercise starts blank and its
+  // first logged session becomes the template (see learnedCustomExercise).
+  const sets = positiveInt(raw.sets, null);
+  const reps = tracking === "completion" ? "" : cleanString(raw.reps);
+  const prescription = cleanString(raw.prescription) || formatPrescription(sets, reps);
+  const intent = cleanString(raw.intent) || `${name} for ${stimulus}.`;
   const type = stimulus === "power" ? "P" : "S";
 
   return {
@@ -104,12 +104,59 @@ export function sanitizeCustomExercise(raw) {
     cautions: Array.isArray(raw.cautions) ? raw.cautions.filter(Boolean) : [],
     loggable: true,
     type,
-    sets,
-    reps: tracking === "completion" ? "" : reps,
+    ...(sets ? { sets } : {}),
+    reps,
     ...(tracking === "weight" ? { logWeight: true } : { circlesOnly: true }),
-    ...(stimulus === "capacity" ? { progressionPolicy: "maintain" } : {}),
+    // Same convention as the built-in power and maintenance work: a fixed
+    // dose. Only strength exercises add sets and then load.
+    ...(stimulus !== "strength" ? { progressionPolicy: "maintain" } : {}),
     custom: true,
   };
+}
+
+function formatPrescription(sets, reps) {
+  if (sets && reps) return `${sets} × ${reps}`;
+  return sets ? `${sets} sets` : "";
+}
+
+function firstLoggedSets(sessions, exerciseId) {
+  let first = null;
+  for (const session of sessions || []) {
+    const sets = session?.exercises?.[exerciseId]?.sets;
+    if (!session?.date || !Array.isArray(sets) || !sets.some(set => set?.done)) continue;
+    if (!first || session.date < first.date) first = { date: session.date, sets };
+  }
+  return first;
+}
+
+// A custom exercise created without sets or reps learns them from its first
+// logged session: the number of completed sets and the lowest rep count among
+// them. From the next session on, the ordinary progression rules (add sets
+// after clean sessions, then load) run against that target exactly as they
+// do for built-in templates. Anything the user did set is kept.
+export function learnedCustomExercise(exercise, sessions) {
+  if (!exercise?.custom) return exercise;
+  const needsReps = exercise.tracking !== "completion" && !exercise.reps;
+  if (exercise.sets && !needsReps) return exercise;
+  const first = firstLoggedSets(sessions, exercise.id);
+  if (!first) return exercise;
+  const done = first.sets.filter(set => set?.done);
+  const repCounts = done.map(set => parseRepsCount(set.reps)).filter(count => count > 0);
+  const sets = exercise.sets || done.length;
+  const reps = needsReps && repCounts.length ? String(Math.min(...repCounts)) : exercise.reps;
+  return {
+    ...exercise,
+    sets,
+    reps,
+    prescription: exercise.prescription || formatPrescription(sets, reps),
+    learnedFrom: first.date,
+  };
+}
+
+export function withLearnedCustomExercises(workouts, sessions) {
+  return Object.fromEntries(Object.entries(workouts || {}).map(([id, workout]) => [id,
+    workout?.exercises ? { ...workout, exercises: workout.exercises.map(ex => learnedCustomExercise(ex, sessions)) } : workout,
+  ]));
 }
 
 export function createCustomExercise(values) {
