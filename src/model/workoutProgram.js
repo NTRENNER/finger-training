@@ -152,12 +152,6 @@ export function workoutProgramCatalog(programLike) {
   };
 }
 
-const DISPLAY_OVERRIDES = {
-  A: { shortName: "A", name: "Strength A — Heavy" },
-  C: { shortName: "B", name: "Strength B — Balanced" },
-  S3: { shortName: "C", name: "Strength C — Lock-Off & Core" },
-};
-
 export function workoutProgramWorkouts(programLike) {
   const program = sanitizeWorkoutProgram(programLike);
   const catalog = workoutProgramCatalog(program);
@@ -169,7 +163,6 @@ export function workoutProgramWorkouts(programLike) {
     const native = Object.fromEntries((base.exercises || []).map(ex => [ex.id, ex]));
     resolved[templateId] = {
       ...base,
-      ...(DISPLAY_OVERRIDES[templateId] || {}),
       exercises: program.templates[templateId]
         .map(id => native[id] || catalog[id])
         .filter(Boolean),

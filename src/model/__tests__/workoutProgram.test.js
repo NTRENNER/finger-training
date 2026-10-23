@@ -7,8 +7,18 @@ import {
   workoutProgramCatalog,
   workoutProgramWorkouts,
 } from "../workoutProgram.js";
+import { workouts as SUPPORT_WORKOUTS } from "../supportTraining.js";
 
 describe("workout program", () => {
+  test("strength days carry unique display letters in rotation order, raw and resolved alike", () => {
+    const block = { ...defaultWorkoutProgram(), mode: "block" };
+    const ids = strengthWorkoutIds(block);
+    expect(ids.map(id => SUPPORT_WORKOUTS[id].shortName)).toEqual(["A", "B", "C"]);
+    const resolved = workoutProgramWorkouts(block);
+    expect(ids.map(id => resolved[id].shortName)).toEqual(["A", "B", "C"]);
+    expect(ids.map(id => resolved[id].name)).toEqual(ids.map(id => SUPPORT_WORKOUTS[id].name));
+  });
+
   test("defaults to two strength days and keeps the power primer separate", () => {
     const program = defaultWorkoutProgram();
     expect(program.mode).toBe("build");

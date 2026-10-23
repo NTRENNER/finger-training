@@ -819,7 +819,9 @@ export const workouts = {
 
   C: {
     id: "C",
-    shortName: "C",
+    // The key stays "C" so logged sessions keep their identity; the
+    // display letter follows the Maintain/Build/Block rotation order.
+    shortName: "B",
     name: "Strength B — Balanced",
     purpose: "Brief low-fatigue strength exposure to maintain frequency.",
     // The "I can do this when tired" workout — pull + press + core
