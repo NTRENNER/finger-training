@@ -126,6 +126,9 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   // per step.
   const [elapsed, setElapsed] = useState(0);          // sec since hang started
   const [restRemaining, setRestRemaining] = useState(0);
+  const [restActivityComplete, setRestActivityComplete] = useState(false);
+  const restActivityCompleteRef = useRef(false);
+  const restPromptRef = useRef(null);
   // Manual mode is committed at startProtocol time: if the Tindeq wasn't
   // connected when the user tapped Start, this run uses tap-driven hangs
   // (same model as ActiveSessionView without a sensor). The flag doesn't
@@ -197,7 +200,8 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         setRestRemaining(Math.max(0, remaining));
         if (remaining <= 0) {
           clearInterval(tickRef.current);
-          advanceFromRest();
+          tickRef.current = null;
+          if (!currentStep?.restActivity || restActivityCompleteRef.current) advanceFromRest();
         }
       }, 200);
     }
@@ -205,6 +209,10 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
       if (tickRef.current) clearInterval(tickRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, stepIdx]);
+
+  useEffect(() => {
+    if (phase === "rest") restPromptRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
   }, [phase, stepIdx]);
 
   // Keep notifications running through rest and gripper changes. Stopping
@@ -338,6 +346,8 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     setElapsed(0);
     const isLastStep = stepIdx >= steps.length - 1;
     if (!isLastStep && currentStep?.restAfterSec > 0) {
+      restActivityCompleteRef.current = false;
+      setRestActivityComplete(false);
       changePhase("rest");
     } else {
       advanceToNextStep();
@@ -347,6 +357,12 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   function advanceFromRest() {
     if (phaseRef.current !== "rest") return;
     advanceToNextStep();
+  }
+
+  function finishRestActivity() {
+    restActivityCompleteRef.current = true;
+    setRestActivityComplete(true);
+    if (restRemaining <= 0) advanceFromRest();
   }
 
   function advanceToNextStep() {
@@ -591,17 +607,23 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
     const nextStep = steps[stepIdx + 1];
     const activity = currentStep?.restActivity;
     return stage(<>
-      {activity ? <div style={{
+      {activity ? <div ref={restPromptRef} style={{
         background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
         padding: "14px 16px", marginBottom: 10,
       }}>
         <div style={{ color: C.green, fontSize: 12, fontWeight: 700, textTransform: "uppercase", marginBottom: 5 }}>
-          While your fingers recover
+          Recovery movement
         </div>
         <div style={{ color: C.text, fontSize: 20, fontWeight: 800 }}>{activity.name}</div>
         <div style={{ color: C.blue, fontSize: 15, fontWeight: 700, marginTop: 3 }}>{activity.dose}</div>
         <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.5, marginTop: 7 }}>{activity.cue}</div>
         {activity.alternative && <div style={{ color: C.muted, fontSize: 12, marginTop: 5 }}>{activity.alternative}</div>}
+        {!restActivityComplete ? <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+          <Btn onClick={finishRestActivity} color={C.green}>Done</Btn>
+          <Btn onClick={finishRestActivity} color={C.border} small>Skip movement</Btn>
+        </div> : <div role="status" style={{ color: C.green, fontSize: 13, fontWeight: 700, marginTop: 10 }}>
+          Movement complete · keep recovering
+        </div>}
       </div> : <div style={{ fontSize: 15, textAlign: "center" }}>Release and rest.</div>}
       <WarmupTime seconds={restRemaining} label="Rest" />
       <div style={{ color: C.muted, lineHeight: 1.6, textAlign: "center" }}>
@@ -609,7 +631,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         {nextStep?.type === "hang" && <div style={{ fontSize: 22, fontWeight: 700, color: C.blue }}>{fmtW(nextStep.targetLoadKg, unit)} {unit} · {nextStep.targetSec}s</div>}
       </div>
       {!manualMode && connectionNotice}
-      {actions(<Btn onClick={advanceFromRest}>Skip rest</Btn>, false)}
+      {actions(<Btn onClick={advanceFromRest}>{restRemaining > 0 ? "Continue early" : "Continue"}</Btn>, false)}
     </>);
   }
 

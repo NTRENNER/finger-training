@@ -180,11 +180,13 @@ test("recovery activity leads into unsaved Potentiation Pulls and completes the 
   fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
   fireEvent.click(screen.getByRole("button", { name: "Start hang" }));
   act(() => jest.advanceTimersByTime(2200));
-  expect(screen.getByText("While your fingers recover")).toBeInTheDocument();
+  expect(screen.getByText("Recovery movement")).toBeInTheDocument();
   expect(screen.getByText("Med-ball slams")).toBeInTheDocument();
   expect(screen.getByText("3–5 crisp reps")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Skip rest" }));
+  act(() => jest.advanceTimersByTime(2500));
+  expect(screen.getByText("Med-ball slams")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   expect(screen.getByText("Crusher · Potentiation Pulls")).toBeInTheDocument();
   for (let pull = 0; pull < 2; pull += 1) {
     fireEvent.click(screen.getByRole("button", { name: "Start pull" }));
