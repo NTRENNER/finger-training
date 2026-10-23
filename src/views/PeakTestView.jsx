@@ -11,7 +11,6 @@ import { PEAK_ROUNDS, PEAK_ROUND_REST_S, peakMeasurementRecord, isValidPeakMeasu
 import { finalizeDeviceActivity } from '../model/forceRecording.js';
 import { HandCue } from './cards/HandCue.jsx';
 import { ForceGauge } from './cards/LiveForceCard.jsx';
-import { TindeqBattery } from './cards/TindeqBattery.jsx';
 import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from './forceProtection.jsx';
 
 // Shared complete protocol for the standalone test and the optional warmup block.
@@ -146,7 +145,6 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
       <b>{grip} · Peak Test</b>
       {state.phase !== 'done' && <Btn small color={C.red} onClick={endEarly}>End test</Btn>}
     </div>
-    <TindeqBattery battery={tindeq?.battery} connected={tindeq?.connected} warningOnly />
     {state.rows.length > 0 && !isValidPeakMeasurement(state.rows.at(-1)) && <p role="status" style={{ color: C.yellow }}>
       Last attempt was incomplete. Its activity was saved, but it will not count toward your measured peak.
     </p>}

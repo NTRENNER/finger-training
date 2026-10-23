@@ -1,7 +1,6 @@
 import { displayedRepTime } from "../model/pullMeasurement.js";
 import { mixedAdjustmentText } from '../model/mixedLoadPrescription.js';
 import { HandCue } from './cards/HandCue.jsx';
-import { TindeqBattery, InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { finalizeDeviceActivity } from "../model/forceRecording.js";
 import { RepResultDetails } from "./cards/RepResultDetails.jsx";
 import { MIXED_DOMAIN_LABELS, isMixedDomainRep, mixedDomainMetadata } from '../model/mixedDomain.js';
@@ -523,7 +522,6 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       </div>
 
       {startError && repPhase === "ready" && <p role="alert" style={{ color: C.red }}>{startError}</p>}
-      <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <MixedHoldInfo config={config} currentRep={currentRep} />
 
@@ -813,7 +811,6 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
           </p>}
           <RepResultDetails rep={{ failure_valid: lastRep.failureValid, end_reason: lastRep.endReason,
             force_recording: lastRep.forceRecording, load_provenance: lastRep.loadProvenance }}>
-            {lastRep.endReason === "equipment_interruption" && <InterruptedBatteryNote battery={lastRep.forceRecording?.battery} />}
             {lastRep.restBefore != null && <p>Actual rest before this rep: {lastRep.restBefore.toFixed(1)}s.</p>}
             {lastRep.forceRecording?.plateau?.duration_s > 0 && <p>
               Strong phase: {fmtW(lastRep.forceRecording.plateau.avg_force_kg, unit)} {unit} for {lastRep.forceRecording.plateau.duration_s.toFixed(1)}s.
@@ -1078,9 +1075,7 @@ export function SessionSummaryView({
                 <tr key={r.id || `${r.hand}-${r.rep_num}`} style={{ borderTop: `1px solid ${C.border}` }}>
                   <td style={{ padding: "6px 0" }}>{r.hand} {r.rep_num}
                     {isMixedDomainRep(r) && <div>{MIXED_DOMAIN_LABELS[mixedDomainMetadata(r).zone]}</div>}
-                    <RepResultDetails rep={r}>
-                      {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
-                    </RepResultDetails>
+                    <RepResultDetails rep={r} />
                   </td>
                   <td style={{ textAlign: "right" }}>{fmtW(prescribedLoad(r), unit)} {unit}</td>
                   <td style={{ textAlign: "right", color: isMixedDomainRep(r) ? C.text : displayedRepTime(r.actual_time_s, r.force_recording) >= r.target_duration ? C.green : C.red }}>
@@ -1284,7 +1279,6 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
         <Btn small color={C.red} onClick={() => finishAttempt({ endSession: true })}>End Session</Btn>
       </div>
 
-      <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} warningOnly />
       <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
       <MixedHoldInfo config={config} currentRep={currentRep} />
       {startError && !repActive && <div role="alert" style={{ color: C.red }}>

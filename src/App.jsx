@@ -3,7 +3,6 @@ import { detectPlateaus, plateauEnrollmentEvidence } from './model/plateau.js';
 import { betaEligibility } from './model/betaEligibility.js';
 import { ResearchView } from "./views/ResearchView.jsx";
 import { PeakTestView } from './views/PeakTestView.jsx';
-import { TindeqBattery } from "./views/cards/TindeqBattery.jsx";
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-exp F-D / curve-trust prescription · Tindeq Progressor BLE
 import React, {
@@ -648,7 +647,6 @@ export default function App() {
                     </span>
                   </div>
                 )}
-                <TindeqBattery battery={tindeq.battery} connected={tindeq.connected} />
                 {tindeq.bleError && (
                   <div style={{ marginTop: 8, fontSize: 12, color: C.red }}>{tindeq.bleError}</div>
                 )}

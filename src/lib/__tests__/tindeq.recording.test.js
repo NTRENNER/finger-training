@@ -1,5 +1,5 @@
 import { renderHook, act } from '@testing-library/react';
-import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP, STREAM_RECOVERY_MS, STREAM_ABANDON_MS } from '../tindeq.js';
+import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP, STREAM_RECOVERY_MS, STREAM_ABANDON_MS, RECONNECT_DELAYS_MS } from '../tindeq.js';
 
 async function setup(targetKg = null, options) {
   const listeners = {};
@@ -571,7 +571,10 @@ test('a failed reconnect saves once before the screen disarms', async () => {
   packet([[0,20],[500,20],[1000,20]]);
   device.gatt.connect = async () => { throw new Error('offline'); };
   act(() => { deviceListeners.gattserverdisconnected(); });
-  await act(async () => { jest.advanceTimersByTime(1500); });
+  for (const wait of RECONNECT_DELAYS_MS.slice(0, -1)) await act(async () => { jest.advanceTimersByTime(wait); });
+  expect(onEnd).not.toHaveBeenCalled();
+  expect(view.result.current.reconnecting).toBe(true);
+  await act(async () => { jest.advanceTimersByTime(RECONNECT_DELAYS_MS.at(-1)); });
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({failureValid:false,actualTime:1,
     forceRecording:{transport:{interruption:'reconnect_failed'}}});
@@ -591,6 +594,22 @@ test('a clock reset across a reconnect bridges wall time, never a multi-minute r
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({failureValid:true,actualTime:3.5,
     forceRecording:{transport:{disconnect_count:1,unobserved_ms:1500}}});
+});
+
+test('a reconnect that fails once keeps trying and keeps the hold', async () => {
+  const { view, packet, onEnd, deviceListeners, device } = await setup(20);
+  packet([[0,20],[500,20],[1000,20]]);
+  const connect = device.gatt.connect;
+  let tries = 0;
+  device.gatt.connect = async () => { if (++tries === 1) throw new Error('busy'); return connect(); };
+  act(() => { deviceListeners.gattserverdisconnected(); });
+  await act(async () => { jest.advanceTimersByTime(RECONNECT_DELAYS_MS[0]); });
+  expect(view.result.current.connected).toBe(false);
+  await act(async () => { jest.advanceTimersByTime(RECONNECT_DELAYS_MS[1]); });
+  expect(tries).toBe(2);
+  expect(view.result.current.connected).toBe(true);
+  expect(view.result.current.reconnecting).toBe(false);
+  expect(onEnd).not.toHaveBeenCalled();
 });
 
 test('unmount cancels a pending reconnect', async () => {

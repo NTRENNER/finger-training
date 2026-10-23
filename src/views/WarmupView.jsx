@@ -1,6 +1,5 @@
 import { Toggle } from '../ui/Toggle.jsx';
 import { PeakTestView } from './PeakTestView.jsx';
-import { TindeqBattery } from "./cards/TindeqBattery.jsx";
 import { ForceLossNotice, creditedSeconds, SignalRecoveringNotice } from "./forceProtection.jsx";
 // ─────────────────────────────────────────────────────────────
 // ADAPTIVE WARM-UP VIEW (Tindeq-driven)
@@ -472,7 +471,6 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
               </Btn>
             </div>
           </div>
-          <TindeqBattery battery={tindeq?.battery} connected={tindeqConnected} />
           {tindeqConnected && (
             <div style={{ marginTop: 6, fontSize: 11, color: C.muted }}>
               Live force: <b style={{ color: C.blue }}>{fmtW(tindeq.force, unit)} {unit}</b> · tap Tare to zero before starting.
@@ -500,7 +498,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
   }
 
   const stageDetail = `${currentStep?.grip} · ${currentStep?.type === 'peak_test' ? 'Single-handed' : 'Both hands'}`;
-  const stage = children => <WarmupStage step={currentStep} index={stepIdx} total={steps.length} detail={stageDetail}><TindeqBattery battery={tindeq?.battery} connected={tindeq?.connected} warningOnly />{children}</WarmupStage>;
+  const stage = children => <WarmupStage step={currentStep} index={stepIdx} total={steps.length} detail={stageDetail}>{children}</WarmupStage>;
   const actions = (primary, skip = true) => <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 16 }}>
     {primary}
     {skip && <Btn onClick={skipStep} color={C.border}>Skip step</Btn>}

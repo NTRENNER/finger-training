@@ -1,7 +1,6 @@
 import { displayedRepTime, editedRepTime } from "../model/pullMeasurement.js";
 import { isPeakMeasurement, isValidPeakMeasurement } from '../model/peakTest.js';
 import { isPeakTestRep } from '../model/peakForce.js';
-import { InterruptedBatteryNote } from "./cards/TindeqBattery.jsx";
 import { RepResultDetails } from "./cards/RepResultDetails.jsx";
 import { isMixedDomainRep, mixedDomainMetadata, MIXED_DOMAIN_LABELS } from '../model/mixedDomain.js';
 // ──────────────────────────────────────────────────────────────
@@ -1116,7 +1115,6 @@ export function HistoryView({
                       {beta && <span> · {MIXED_DOMAIN_LABELS[mixedDomainMetadata(r).zone]}</span>}
                       <RepResultDetails rep={r}>
                         {!peakTest && r.force_recording?.version >= 1 && <div>Time-weighted average</div>}
-                        {r.end_reason === "equipment_interruption" && <InterruptedBatteryNote battery={r.force_recording?.battery} />}
                         <div>{r.rep_timing?.rest_before_s != null
                           ? `Actual rest before rep: ${r.rep_timing.rest_before_s.toFixed(1)}s`
                           : "Actual rest not recorded"} · {peakTest ? "Rest between rounds" : "Planned rest"}: {r.rest_s ?? 20}s</div>

@@ -103,8 +103,11 @@ export const STREAM_ABANDON_MS = 30000;
 // Consecutive device samples more than this far apart are a discontinuity.
 const MAX_SAMPLE_STEP_US = 1000000;
 
+// Spaced, bounded reconnect attempts after an unexpected disconnect.
+export const RECONNECT_DELAYS_MS = [1500, 3000, 5000];
+
 // Readings outside a working cell's range are some other reply, not a voltage.
-export const isPlausibleBatteryMv = mv => mv >= 1800 && mv <= 5500;
+const isPlausibleBatteryMv = mv => mv >= 1800 && mv <= 5500;
 
 // ─────────────────────────────────────────────────────────────
 // useTindeq() — React hook wrapper around the BLE GATT API
@@ -606,9 +609,9 @@ export function useTindeq() {
       });
       deviceRef.current = device;
 
-      // Single-shot reconnect after 1.5 s to handle brief signal blips.
+      // A few spaced reconnect attempts ride out brief signal blips.
       // Aggressive retry loops can poison the adapter state on Android —
-      // if this one try fails, surface a clean error and let the user reconnect.
+      // if these fail, surface a clean error and let the user reconnect.
       const onDisconnected = async () => {
         if (reconnectingRef.current) return;
         connectionGenerationRef.current += 1;
@@ -638,12 +641,18 @@ export function useTindeq() {
         reconnectingRef.current = true;
         setReconnecting(true);
         const generation = connectionGenerationRef.current;
-        await new Promise(r => setTimeout(r, 1500));
-        if (generation !== connectionGenerationRef.current || device !== deviceRef.current) return;
+        let restored = false;
+        for (const wait of RECONNECT_DELAYS_MS) {
+          await new Promise(r => setTimeout(r, wait));
+          if (generation !== connectionGenerationRef.current || device !== deviceRef.current) return;
+          try {
+            await setupGatt(device);
+            restored = true;
+            break;
+          } catch { /* wait and try again */ }
+        }
         try {
-          await setupGatt(device);
-          setConnected(true);
-        } catch {
+          if (restored) { setConnected(true); return; }
           transportRef.current.interruption = 'reconnect_failed';
           if (measuringRef.current && !measurementInterruptedRef.current) {
             measurementInterruptedRef.current = true;
