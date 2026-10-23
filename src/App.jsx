@@ -52,6 +52,7 @@ import { downloadHistoryBackup } from './lib/historyPersistence.js';
 import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useDailyState } from "./hooks/useDailyState.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
+import { useScreenWakeLock } from "./hooks/useScreenWakeLock.js";
 import { useUserSettings } from "./hooks/useUserSettings.js";
 import { createVolumeExperiment, volumeExperimentStatus } from './model/volumeExperiment.js';
 import { today, uuid } from './util.js';
@@ -330,6 +331,7 @@ export default function App() {
     tindeqConnected: tindeq.connected,
     onSessionStart: () => setTab(0),
   });
+  useScreenWakeLock(tindeq.connected || tindeq.reconnecting || phase !== "idle");
 
   const volumeReady = user ? historySynced && settingsSynced : getStorageUserId() == null;
   const volumeExperiment = Object.values(volumeExperiments || {})

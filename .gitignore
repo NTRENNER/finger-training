@@ -53,3 +53,6 @@ yarn-error.log*
 # Real rep history — never commit it to a public repo.
 /scripts/data
 /scripts/.replay-snapshot.json
+
+# Personal Claude Code notes (owner account details)
+CLAUDE.local.md
