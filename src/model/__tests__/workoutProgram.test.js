@@ -90,7 +90,7 @@ describe("workout program", () => {
       });
     });
 
-    test("blank completed rows still count as sets but don't set the reps", () => {
+    test("blank completed rows do not teach a rep-tracked template", () => {
       const ex = createCustomExercise({ name: "Ring Rows", tracking: "reps" });
       const sessions = [
         session("2026-10-20", ex.id, [{ done: true }, { reps: "", done: true }]),
@@ -99,7 +99,17 @@ describe("workout program", () => {
         ]),
       ];
       expect(learnedCustomExercise(ex, sessions)).toMatchObject({
-        sets: 3, reps: "8", prescription: "3 × 8", learnedFrom: "2026-10-22",
+        sets: 2, reps: "8", prescription: "2 × 8", learnedFrom: "2026-10-22",
+      });
+    });
+
+    test("blank completed rows do not inflate a learned set count when reps were prescribed", () => {
+      const ex = createCustomExercise({ name: "Ring Rows", tracking: "reps", reps: "8" });
+      const sessions = [session("2026-10-20", ex.id, [
+        { reps: "8", done: true }, { done: true }, { reps: "", done: true },
+      ])];
+      expect(learnedCustomExercise(ex, sessions)).toMatchObject({
+        sets: 1, reps: "8", prescription: "1 × 8", learnedFrom: "2026-10-20",
       });
     });
 

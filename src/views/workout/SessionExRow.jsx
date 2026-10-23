@@ -27,6 +27,7 @@
 // happen sequentially.
 
 import React from "react";
+import { parseRepsCount } from "../../model/workout-volume.js";
 import { C } from "../../ui/theme.js";
 import { WTypeBadge } from "./WTypeBadge.jsx";
 import { VideoLink } from "./VideoLink.jsx";
@@ -61,6 +62,8 @@ function BandStack({ bands, size = 10, gap = 2 }) {
 }
 
 export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recommendations = [], last }) {
+  const [repErrorSet, setRepErrorSet] = React.useState(null);
+  const repInputRefs = React.useRef(new Map());
   const allSetsDone = setsData?.sets
     ? setsData.sets.every(s => s.done)
     : false;
@@ -69,8 +72,56 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     color: C.text, borderRadius: 6, padding: "4px 7px", fontSize: 14,
     textAlign: "center",
   };
-  const doneBtn = (isDone, onPress) => (
-    <button onClick={onPress} style={{
+  const repKeys = ex.unilateral ? ["leftReps", "rightReps"] : ["reps"];
+  const requiresReps = !ex.circlesOnly || !!ex.reps || ex.tracking === "reps";
+  const resolvedReps = (set, index, key) => {
+    const stored = set?.[key];
+    if (stored != null && stored !== "") return stored;
+    const recommended = recommendations[index]?.[key] ?? recommendations[index]?.reps;
+    if (recommended != null && recommended !== "") return recommended;
+    return ex.reps || "";
+  };
+  const setRepInputRef = (index, key, node) => {
+    const refKey = `${index}-${key}`;
+    if (node) repInputRefs.current.set(refKey, node);
+    else repInputRefs.current.delete(refKey);
+  };
+  const toggleSetDone = (index) => {
+    const current = setsData.sets[index];
+    if (!current || current.done || !requiresReps) {
+      const next = [...setsData.sets];
+      next[index] = { ...current, done: !current?.done };
+      setRepErrorSet(null);
+      onSetsChange({ sets: next });
+      return;
+    }
+    const missingKey = repKeys.find(key => parseRepsCount(resolvedReps(current, index, key)) <= 0);
+    if (missingKey) {
+      setRepErrorSet(index);
+      repInputRefs.current.get(`${index}-${missingKey}`)?.focus();
+      return;
+    }
+    const next = [...setsData.sets];
+    next[index] = { ...current, done: true };
+    for (const key of repKeys) next[index][key] = String(resolvedReps(current, index, key));
+    setRepErrorSet(null);
+    onSetsChange({ sets: next });
+  };
+  const updateReps = (index, key, value) => {
+    const next = [...setsData.sets];
+    next[index] = { ...next[index], [key]: value };
+    if (repKeys.every(repKey => parseRepsCount(
+      repKey === key ? value : resolvedReps(next[index], index, repKey)
+    ) > 0)) setRepErrorSet(null);
+    onSetsChange({ sets: next });
+  };
+  const repError = index => repErrorSet === index ? (
+    <div role="alert" style={{ color: C.red, fontSize: 11, margin: "2px 0 6px 44px" }}>
+      Enter reps to complete this set.
+    </div>
+  ) : null;
+  const doneBtn = (isDone, onPress, title) => (
+    <button onClick={onPress} title={title} style={{
       width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
       background: isDone ? C.green : "transparent",
       border: `2px solid ${isDone ? C.green : C.border}`,
@@ -121,69 +172,66 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
             <div style={{ marginTop: 12 }}>
               {/* One row per set: label, optional reps input, circle. */}
               {setsData.sets.map((s, i) => (
-                <div key={i} style={{
-                  display: "flex", alignItems: "center", gap: 8, marginBottom: 6,
-                }}>
-                  <span style={{ fontSize: 12, color: C.muted, width: 36, flexShrink: 0 }}>
-                    Set {i + 1}
-                  </span>
-                  {showReps && (
-                    <input
-                      type="text" inputMode="numeric"
-                      // Select-all on focus (June 2026): inputs arrive
-                      // pre-filled with the recommendation, and on
-                      // phones overriding meant tap → double-tap →
-                      // delete → type. One tap now highlights the
-                      // value so typing replaces it. inputMode numeric
-                      // brings up the number pad on mobile.
-                      onFocus={e => e.target.select()}
-                      value={s.reps ?? ""}
-                      onChange={e => {
-                        const next = [...setsData.sets];
-                        next[i] = { ...next[i], reps: e.target.value };
-                        onSetsChange({ sets: next });
-                      }}
-                      placeholder={ex.reps}
-                      style={{
-                        width: 60, background: C.bg, border: `1px solid ${C.border}`,
-                        color: C.text, borderRadius: 6, padding: "4px 7px", fontSize: 14,
-                        textAlign: "center",
-                      }}
-                    />
-                  )}
-                  {showReps && (
-                    <span style={{ fontSize: 11, color: C.muted }}>reps</span>
-                  )}
-                  <button
-                    onClick={() => {
-                      const next = [...setsData.sets];
-                      next[i] = { ...next[i], done: !next[i].done };
-                      onSetsChange({ sets: next });
-                    }}
-                    title={`Set ${i + 1}: tap to toggle done`}
-                    style={{
-                      width: 32, height: 32, borderRadius: "50%",
-                      background: s.done ? C.green : "transparent",
-                      border: `2px solid ${s.done ? C.green : C.border}`,
-                      color: s.done ? "#000" : C.muted,
-                      cursor: "pointer", fontSize: 13, fontWeight: 700,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {s.done ? "✓" : ""}
-                  </button>
-                  {i >= (ex.sets || 0) && (
+                <React.Fragment key={i}>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8, marginBottom: 6,
+                  }}>
+                    <span style={{ fontSize: 12, color: C.muted, width: 36, flexShrink: 0 }}>
+                      Set {i + 1}
+                    </span>
+                    {showReps && (
+                      <input
+                        ref={node => setRepInputRef(i, "reps", node)}
+                        type="text" inputMode="numeric"
+                        // Select-all on focus (June 2026): inputs arrive
+                        // pre-filled with the recommendation, and on
+                        // phones overriding meant tap → double-tap →
+                        // delete → type. One tap now highlights the
+                        // value so typing replaces it. inputMode numeric
+                        // brings up the number pad on mobile.
+                        onFocus={e => e.target.select()}
+                        value={resolvedReps(s, i, "reps")}
+                        onChange={e => updateReps(i, "reps", e.target.value)}
+                        placeholder={ex.reps}
+                        style={{
+                          width: 60, background: C.bg,
+                          border: `1px solid ${repErrorSet === i ? C.red : C.border}`,
+                          color: C.text, borderRadius: 6, padding: "4px 7px", fontSize: 14,
+                          textAlign: "center",
+                        }}
+                      />
+                    )}
+                    {showReps && (
+                      <span style={{ fontSize: 11, color: C.muted }}>reps</span>
+                    )}
                     <button
-                      onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
+                      onClick={() => toggleSetDone(i)}
+                      title={`Set ${i + 1}: tap to toggle done`}
                       style={{
-                        background: "none", border: "none", color: C.muted,
-                        cursor: "pointer", fontSize: 14, padding: "0 4px", lineHeight: 1,
+                        width: 32, height: 32, borderRadius: "50%",
+                        background: s.done ? C.green : "transparent",
+                        border: `2px solid ${s.done ? C.green : C.border}`,
+                        color: s.done ? "#000" : C.muted,
+                        cursor: "pointer", fontSize: 13, fontWeight: 700,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        flexShrink: 0,
                       }}
-                      title="Remove this set"
-                    >−</button>
-                  )}
-                </div>
+                    >
+                      {s.done ? "✓" : ""}
+                    </button>
+                    {i >= (ex.sets || 0) && (
+                      <button
+                        onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
+                        style={{
+                          background: "none", border: "none", color: C.muted,
+                          cursor: "pointer", fontSize: 14, padding: "0 4px", lineHeight: 1,
+                        }}
+                        title="Remove this set"
+                      >−</button>
+                    )}
+                  </div>
+                  {repError(i)}
+                </React.Fragment>
               ))}
               <button
                 onClick={() => onSetsChange({
@@ -286,17 +334,17 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       {sLabel}
                     </span>
                     <input
+                      ref={node => setRepInputRef(i, repsKey, node)}
                       type="text" inputMode="numeric"
                       // Select-all on focus — see the bilateral reps
                       // input above for the mobile-override rationale.
                       onFocus={e => e.target.select()}
                       value={repsVal}
-                      onChange={e => {
-                        const next = [...setsData.sets];
-                        next[i] = { ...next[i], [repsKey]: e.target.value };
-                        onSetsChange({ sets: next });
+                      onChange={e => updateReps(i, repsKey, e.target.value)}
+                      style={{
+                        ...inputStyle, width: 48, fontSize: 13,
+                        border: `1px solid ${repErrorSet === i && parseRepsCount(repsVal) <= 0 ? C.red : C.border}`,
                       }}
-                      style={{ ...inputStyle, width: 48, fontSize: 13 }}
                       placeholder={recReps != null ? String(recReps) : (ex.reps || "")}
                     />
                     {/* Per-set variant selector (June 2026). A <select>
@@ -383,11 +431,11 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       </>
                     )}
                     {renderPrev()}
-                    {(side === null || side === "R") && doneBtn(s.done, () => {
-                      const next = [...setsData.sets];
-                      next[i] = { ...next[i], done: !next[i].done };
-                      onSetsChange({ sets: next });
-                    })}
+                    {(side === null || side === "R") && doneBtn(
+                      s.done,
+                      () => toggleSetDone(i),
+                      `Set ${i + 1}: tap to toggle done`
+                    )}
                     {(side === null || side === "R") && isExtra && (
                       <button
                         onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
@@ -409,6 +457,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                     {rec?.leftReasoning  && (<div style={hintStyle}>{rec.leftReasoning}</div>)}
                     {renderSideRow("R", "R", `${i}-R`)}
                     {rec?.rightReasoning && (<div style={hintStyle}>{rec.rightReasoning}</div>)}
+                    {repError(i)}
                   </div>
                 );
               }
@@ -416,6 +465,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                 <div key={i}>
                   {renderSideRow(null, `S${i + 1}`, `${i}`)}
                   {rec?.reasoning && (<div style={hintStyle}>{rec.reasoning}</div>)}
+                  {repError(i)}
                 </div>
               );
             })}
