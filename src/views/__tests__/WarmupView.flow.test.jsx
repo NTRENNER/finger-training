@@ -45,7 +45,7 @@ async function setup({ peak = false, crusherPeak = false } = {}) {
   const addReps = jest.fn();
   function Harness({ visible = true, tabVisible = true }) {
     hook = useTindeq();
-    return visible && <WarmupView visible={tabVisible} history={[]} wLog={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} addReps={addReps} />;
+    return visible && <WarmupView visible={tabVisible} history={[]} bodyWeightKg={73} tindeq={hook} unit="kg" onClose={onClose} addReps={addReps} />;
   }
   const view = render(<Harness />);
   expect(screen.getByRole("switch", { name: "Micro Max Test" })).not.toBeChecked();
@@ -97,7 +97,7 @@ test('a warm-up started without a sensor stays manual after reconnect and ignore
   const targetKgRef = { current: null };
   const baseTindeq = { connected: false, reconnecting: false, targetKgRef, startAutoDetect,
     stopAutoDetect: jest.fn(), forceLoss: { status: 'recovering', pendingEndTs: 0 } };
-  const props = { visible: true, history: [], wLog: [], bodyWeightKg: 73, unit: 'kg',
+  const props = { visible: true, history: [], bodyWeightKg: 73, unit: 'kg',
     onClose: jest.fn(), addReps: jest.fn() };
   const view = render(<WarmupView {...props} tindeq={baseTindeq} />);
   fireEvent.click(screen.getByRole('button', { name: 'Start', exact: true }));
@@ -112,7 +112,7 @@ test('a warm-up started without a sensor stays manual after reconnect and ignore
 
 test('the warm-up reports active training only after it starts and clears it on exit', () => {
   const onTrainingStateChange = jest.fn();
-  const props = { visible: true, history: [], wLog: [], bodyWeightKg: 73, unit: 'kg',
+  const props = { visible: true, history: [], bodyWeightKg: 73, unit: 'kg',
     onClose: jest.fn(), addReps: jest.fn(), onTrainingStateChange };
   const view = render(<WarmupView {...props} tindeq={{ connected: false }} />);
   expect(onTrainingStateChange).toHaveBeenLastCalledWith(false);
@@ -174,7 +174,7 @@ test("recovery activity leads into Potentiation Pulls and completes the warm-up"
     },
   ] });
   const addReps = jest.fn();
-  render(<WarmupView visible history={[]} wLog={[]} bodyWeightKg={73}
+  render(<WarmupView visible history={[]} bodyWeightKg={73}
     tindeq={{ connected: false }} unit="kg" onClose={jest.fn()} addReps={addReps} />);
 
   fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
@@ -203,7 +203,7 @@ test("Continue early ends the rest before its timer runs out", () => {
     { ...hang("First hold", "Crusher", 20), restAfterSec: 90 },
     hang("Second hold", "Crusher", 25),
   ] });
-  render(<WarmupView visible history={[]} wLog={[]} bodyWeightKg={73}
+  render(<WarmupView visible history={[]} bodyWeightKg={73}
     tindeq={{ connected: false }} unit="kg" onClose={jest.fn()} addReps={jest.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }));
   fireEvent.click(screen.getByRole("button", { name: "Start pull" }));

@@ -27,7 +27,7 @@ import {
   disciplineMeta, ascentMeta, wallMeta, describeClimb,
 } from "../lib/climbing-grades.js";
 import { today } from "../util.js";
-import { loadLS, LS_WORKOUT_LOG_KEY, LS_DELOAD_WEEK_KEY } from "../lib/storage.js";
+import { loadLS, LS_DELOAD_WEEK_KEY } from "../lib/storage.js";
 import { DELOAD_WEEK_DAYS } from "../model/deload.js";
 
 // How many recent climbs to surface inline before pointing the
@@ -136,13 +136,11 @@ export function ClimbView({
 
   // Adaptive Warm-up takeover — replaces ClimbView until closed.
   if (warmupActive) {
-    const wLog = loadLS(LS_WORKOUT_LOG_KEY) || [];
     return (
       <PageFrame style={{ padding: "20px 16px" }}>
         <WarmupView visible={visible}
           addReps={addReps}
           history={history}
-          wLog={wLog}
           bodyWeightKg={bodyWeight}
           tindeq={tindeq}
           unit={unit}
@@ -195,7 +193,8 @@ export function ClimbView({
       )}
 
       {/* Adaptive Warm-up entry point — warm up your fingers before
-          climbing. Force-curve-derived pulls + cross-loaded pullups. */}
+          climbing. Force-curve-derived finger pulls, with whole-body movements
+          during the recovery intervals. */}
       <Card style={{ marginBottom: 16, border: `1px solid ${C.purple}40` }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
           <div style={{ flex: "1 1 180px", minWidth: 0 }}>

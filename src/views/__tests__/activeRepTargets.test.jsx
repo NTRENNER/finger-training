@@ -46,10 +46,12 @@ test('sensor reps show target time beside target weight, and keep both through a
   expect(screen.getByText('Average weight')).toBeInTheDocument();
   expect(screen.getAllByText('—')).toHaveLength(3);
   view.rerender(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()}
-    tindeq={{ ...tindeq, connected: false, reconnecting: true }} unit="kg" />);
+    tindeq={{ ...tindeq, connected: false, reconnecting: true, signalRecovering: true }} unit="kg" />);
+  // A mid-rep disconnect is flagged as recovering, so the layout holds with dashes.
   expect(screen.getByText('Target time')).toBeInTheDocument();
   expect(screen.getByText('Target weight')).toBeInTheDocument();
-  expect(screen.queryByText('Average weight')).not.toBeInTheDocument();
+  expect(screen.getByText('Average weight')).toBeInTheDocument();
+  expect(screen.getAllByText('—')).toHaveLength(3);
 });
 
 test('manual reps show the target time in the target row instead of a small line under the clock', () => {

@@ -2,7 +2,7 @@
 // two-handed load scaling, the progressive strength ladder, and the
 // margin-based (in-range) perfusion loads.
 
-import { generateWarmupProtocol, BILATERAL_FACTOR, getRecentMaxPullups } from "../warmup.js";
+import { generateWarmupProtocol, BILATERAL_FACTOR } from "../warmup.js";
 
 // Synthetic Crusher + Micro history spanning several durations so the
 // per-grip curves fit. Each rep is a single-hand (T, F) failure point;
@@ -29,12 +29,12 @@ const BW = 75;
 
 describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
   test("fails cleanly without bodyweight or Crusher data", () => {
-    expect(generateWarmupProtocol({ history, wLog: [], bodyWeightKg: 0 }).ok).toBe(false);
-    expect(generateWarmupProtocol({ history: [], wLog: [], bodyWeightKg: BW }).ok).toBe(false);
+    expect(generateWarmupProtocol({ history, bodyWeightKg: 0 }).ok).toBe(false);
+    expect(generateWarmupProtocol({ history: [], bodyWeightKg: BW }).ok).toBe(false);
   });
 
   test("boulder protocol has perfusion, two strength ramps, and final potentiation pulls", () => {
-    const p = generateWarmupProtocol({ history, wLog: [], bodyWeightKg: BW, mode: "boulder" });
+    const p = generateWarmupProtocol({ history, bodyWeightKg: BW, mode: "boulder" });
     expect(p.ok).toBe(true);
     const ids = p.steps.map(s => s.id);
     expect(ids).toContain("perfusion-crusher-easy");
@@ -50,7 +50,7 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
   });
 
   test("route protocol: 45s perfusion, lower-topping ladder, no BORK", () => {
-    const p = generateWarmupProtocol({ history, wLog: [], bodyWeightKg: BW, mode: "route" });
+    const p = generateWarmupProtocol({ history, bodyWeightKg: BW, mode: "route" });
     const ids = p.steps.map(s => s.id);
     expect(ids).not.toContain("bork-micro");
     const rungs = p.steps.filter(s => s.id.startsWith("ladder-"));
@@ -60,7 +60,7 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
   });
 
   test("ladder loads are two-handed (~1.9× the one-hand % of MVC)", () => {
-    const p = generateWarmupProtocol({ history, wLog: [], bodyWeightKg: BW, mode: "boulder" });
+    const p = generateWarmupProtocol({ history, bodyWeightKg: BW, mode: "boulder" });
     const microMVC = p.mvcSource.microKg;           // one-hand peak ~22
     const topRung = p.steps.filter(s => s.id.startsWith("ladder-")).at(-1);
     // top rung is 88% MVC, two-handed
@@ -71,7 +71,7 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
   });
 
   test("perfusion load comes from the curve in-range (margin-based), two-handed", () => {
-    const p = generateWarmupProtocol({ history, wLog: [], bodyWeightKg: BW, mode: "boulder" });
+    const p = generateWarmupProtocol({ history, bodyWeightKg: BW, mode: "boulder" });
     const easy = p.steps.find(s => s.id === "perfusion-crusher-easy");
     // 45s hold at failFrac 0.45 → load = F(100) one-hand, ×1.9
     // (we don't have crusherAmps here, but it must be a positive,
@@ -85,58 +85,9 @@ describe("generateWarmupProtocol — two-handed + ladder rebuild", () => {
 
 });
 
-// ─────────────────────────────────────────────────────────────
-// getRecentMaxPullups — exercise-id migration
-// ─────────────────────────────────────────────────────────────
-// Regression (July 2026): the lookup hard-coded the LEGACY id
-// "pull_ups", but current sessions log pullups under "weightedPullup"
-// (supportTraining.js; exerciseIds.js maps pull_ups → weightedPullup).
-// Once legacy sessions aged past the 30-day window this returned null
-// forever and the finisher silently pinned to its default 5 reps.
-describe("getRecentMaxPullups — id migration", () => {
-  const BW_LBS = 165;
-  const isoDaysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
-  const wSession = (exId, daysAgo, sets) => ({
-    date: isoDaysAgo(daysAgo),
-    exercises: { [exId]: { sets } },
-  });
-
-  test("finds pullups logged under the CURRENT id weightedPullup", () => {
-    const wLog = [wSession("weightedPullup", 3, [{ reps: 8, weight: 25, done: true }])];
-    const out = getRecentMaxPullups(wLog, { bodyWeightLbs: BW_LBS });
-    expect(out).not.toBeNull();
-    expect(out.sourceReps).toBe(8);
-    expect(out.sourceWeightLbs).toBe(25);
-    expect(out.unweightedReps).toBeGreaterThan(8);   // Epley: +25 lb ⇒ more BW reps
-  });
-
-  test("still finds pullups under the legacy pull_ups id", () => {
-    const wLog = [wSession("pull_ups", 5, [{ reps: 10, weight: 0, done: true }])];
-    const out = getRecentMaxPullups(wLog, { bodyWeightLbs: BW_LBS });
-    expect(out).not.toBeNull();
-    expect(out.unweightedReps).toBe(10);
-    expect(out.ageDays).toBe(5);
-  });
-
-  test("takes the best across a legacy and a current session", () => {
-    const wLog = [
-      wSession("pull_ups", 20, [{ reps: 6, weight: 0, done: true }]),
-      wSession("weightedPullup", 2, [{ reps: 12, weight: 0, done: true }]),
-    ];
-    const out = getRecentMaxPullups(wLog, { bodyWeightLbs: BW_LBS });
-    expect(out.unweightedReps).toBe(12);
-  });
-
-  test("unrelated exercises never match", () => {
-    const wLog = [wSession("benchPress", 2, [{ reps: 10, weight: 135, done: true }])];
-    expect(getRecentMaxPullups(wLog, { bodyWeightLbs: BW_LBS })).toBeNull();
-  });
-});
-
-
 test.each(['boulder','route'])('optional Peak Test follows the %s ramps and precedes potentiation pulls', mode => {
-  const base = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode});
-  const peak = generateWarmupProtocol({history,wLog:[],bodyWeightKg:BW,mode,peakTestGrips:['Micro']});
+  const base = generateWarmupProtocol({history,bodyWeightKg:BW,mode});
+  const peak = generateWarmupProtocol({history,bodyWeightKg:BW,mode,peakTestGrips:['Micro']});
   expect(base.steps.filter(s=>s.type==='peak_test')).toHaveLength(0);
   expect(base.steps.at(-1).id).toBe('potentiation-micro');
   expect(peak.steps.filter(s=>s.type==='peak_test')).toHaveLength(1);

@@ -62,7 +62,6 @@ import {
 import { effectiveLoad, SANE_MAX_KG, isSeedArtifactRep } from "./load.js";
 import { computePersonalRecoveryTaus } from "./recoveryFit.js";
 import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
-import { migrateExerciseId } from "./exerciseIds.js";
 
 // ─────────────────────────────────────────────────────────────
 // TWO-HANDED LOAD FACTOR
@@ -174,99 +173,6 @@ function fitGripAmps(history, grip, nominal = false) {
   const amps = fitThreeExpAmps(pts, { prior, lambda });
   if (!amps || (amps[0] + amps[1] + amps[2]) <= 0) return null;
   return amps;
-}
-
-// Epley 1RM estimate: 1RM ≈ load × (1 + reps/30). Standard formula
-// for converting submaximal sets to a one-rep-max equivalent. Reliable
-// up to ~10 reps, increasingly approximate beyond that — we cap output
-// reps at 30 for the bodyweight-pullup use case to keep the warm-up
-// prescription sensible.
-function epleyOneRM(loadLbs, reps) {
-  if (!(loadLbs > 0) || !(reps > 0)) return null;
-  return loadLbs * (1 + reps / 30);
-}
-
-// Reverse Epley: given a 1RM and a target load, how many reps could
-// the user do at that load? reps ≈ 30 × (1RM/load − 1). Returns null
-// if 1RM ≤ load (meaning load IS or exceeds the 1RM, can't do reps).
-function epleyRepsAtLoad(oneRM, loadLbs) {
-  if (!(oneRM > 0) || !(loadLbs > 0)) return null;
-  if (oneRM <= loadLbs) return 1;
-  return 30 * (oneRM / loadLbs - 1);
-}
-
-// Read recent max pullup CAPACITY from the Lifts/Workout log, expressed
-// as estimated UNWEIGHTED bodyweight pullup reps. For weighted pullups,
-// we use Epley to convert the logged (weight × reps) set into a 1RM
-// estimate, then back to estimated reps at bodyweight. For sets logged
-// without added weight (weight = 0 or null), we use the rep count as-is.
-//
-// Two-pass search:
-//   1. Strict pass — sets explicitly marked done (s.done === true).
-//   2. Loose pass — any set with reps > 0 (catches "Finish Session"
-//      without per-set done taps).
-//
-// Returns { unweightedReps, ageDays, strict, sourceWeightLbs, sourceReps }
-// or null if nothing found within `daysOld`.
-export function getRecentMaxPullups(wLog, { daysOld = 30, bodyWeightLbs } = {}) {
-  if (!Array.isArray(wLog) || !(bodyWeightLbs > 0)) return null;
-  const now = Date.now();
-  const cutoffMs = now - daysOld * 24 * 60 * 60 * 1000;
-
-  const search = (strict) => {
-    let bestUnweightedReps = 0;
-    let bestSet = null; // { weight, reps, ts }
-    for (const session of wLog) {
-      if (!session?.date) continue;
-      const sessTs = Date.parse(session.date);
-      if (!isFinite(sessTs) || sessTs < cutoffMs) continue;
-      // Pullups live under the CURRENT id "weightedPullup"
-      // (supportTraining.js) in new sessions and the legacy "pull_ups"
-      // in old ones — resolve every logged id through the exerciseIds
-      // migration map instead of hard-coding either. Before July 2026
-      // this read only "pull_ups": current sessions were invisible, so
-      // once legacy sessions aged past the 30-day window this returned
-      // null forever and the finisher silently pinned to its default
-      // 5 reps.
-      const sets = [];
-      for (const [exId, ex] of Object.entries(session.exercises || {})) {
-        if (migrateExerciseId(exId) !== "weightedPullup") continue;
-        if (Array.isArray(ex?.sets)) sets.push(...ex.sets);
-      }
-      if (sets.length === 0) continue;
-      for (const set of sets) {
-        if (strict && !set?.done) continue;
-        const reps = Number(set?.reps);
-        const addedWeightLbs = Number(set?.weight) || 0;
-        if (!Number.isFinite(reps) || reps <= 0) continue;
-        // Total load on the user during the pullup = bodyweight + added.
-        const totalLoadLbs = bodyWeightLbs + Math.max(0, addedWeightLbs);
-        const oneRM = epleyOneRM(totalLoadLbs, reps);
-        if (!oneRM) continue;
-        // Estimated unweighted (BW only) reps at this 1RM.
-        const bwReps = epleyRepsAtLoad(oneRM, bodyWeightLbs);
-        if (!(bwReps > 0)) continue;
-        const cappedBwReps = Math.min(30, Math.round(bwReps));
-        if (cappedBwReps > bestUnweightedReps) {
-          bestUnweightedReps = cappedBwReps;
-          bestSet = { weight: addedWeightLbs, reps, ts: sessTs };
-        }
-      }
-    }
-    if (bestUnweightedReps <= 0) return null;
-    const ageDays = bestSet?.ts != null
-      ? Math.max(0, Math.round((now - bestSet.ts) / (24 * 60 * 60 * 1000)))
-      : null;
-    return {
-      unweightedReps: bestUnweightedReps,
-      ageDays,
-      strict,
-      sourceWeightLbs: bestSet?.weight ?? 0,
-      sourceReps: bestSet?.reps ?? null,
-    };
-  };
-
-  return search(true) || search(false) || null;
 }
 
 // Compute target load: intensity_pct × F_grip(reference_time).
