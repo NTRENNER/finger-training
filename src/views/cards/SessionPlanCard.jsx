@@ -1,6 +1,6 @@
 import { MAX_OPTIONAL_SETS } from '../../model/setRecommendation.js';
 import { detectPlateaus } from '../../model/plateau.js';
-import { betaEligibility, BETA_ELIGIBILITY_DESCRIPTION } from '../../model/betaEligibility.js';
+import { betaEligibility } from '../../model/betaEligibility.js';
 import { markUncertainDomainTimes, progressionLabel } from '../../model/domainTargetConsistency.js';
 import { startingHandForDay } from '../../model/handOrder.js';
 import { trainingPurpose } from "../../model/trainingPurpose.js";
@@ -47,7 +47,7 @@ import { trainingPurpose } from "../../model/trainingPurpose.js";
 import React, { useEffect, useMemo, useState } from "react";
 import "./SessionPlanCard.css";
 import { C } from "../../ui/theme.js";
-import { Card, Btn } from "../../ui/components.jsx";
+import { Card } from "../../ui/components.jsx";
 import { fmtW } from "../../ui/format.js";
 import { ZONE_KEYS, TRAINING_ZONE_KEYS } from "../../model/zones.js";
 import { prescription } from "../../model/prescription.js";
@@ -74,10 +74,11 @@ import {
 import { today } from "../../util.js";
 import { makeMixedDomainPlan, recommendedMixedDomainZone, MIXED_DOMAIN_REST_S } from '../../model/mixedDomain.js';
 import { mixedPlanReadiness } from '../../model/mixedLoadPrescription.js';
+import { volumeExperimentStatus, volumeSessionPlan } from '../../model/volumeExperiment.js';
+import { loadLS, saveLS, LS_EXPERIMENT_UNLOCKS_KEY } from '../../lib/storage.js';
 import { MixedDomainPlan } from './MixedDomainPlan.jsx';
-import { Toggle } from '../../ui/Toggle.jsx';
-import { VolumeBetaEnrollment, VolumeBetaSummary } from './VolumeBetaPlan.jsx';
-import { volumeExperimentStatus, volumeSessionPlan, volumeProgress } from '../../model/volumeExperiment.js';
+import { VolumeBetaEnrollment } from './VolumeBetaPlan.jsx';
+import { DialogShell, ExperimentUnlockDialog } from './ExperimentUnlockDialog.jsx';
 
 const DEFAULT_VOLUME_GRIPS = ['Micro', 'Crusher', 'Prime'];
 
@@ -120,7 +121,6 @@ export function SessionPlanCard({
   onNavigateToSettings,
   volumeExperiment = null,
   onStartVolumeExperiment,
-  onVolumeExperimentStatusChange,
   volumeReady = true,
   availableGrips = DEFAULT_VOLUME_GRIPS,
 }) {
@@ -165,14 +165,13 @@ export function SessionPlanCard({
   // ── Active zone — defaults to recommended, user can override via tiles ──
   // Stored as the zone key (e.g. "power") or null = "follow recommendation"
   const [overrideZone, setOverrideZone] = useState(null);
+  const [selectedSets, setSelectedSets] = useState(1);
+  const [setsTouched, setSetsTouched] = useState(false);
   const [mixedRequested, setMixedRequested] = useState(false);
   const [mixedOpening, setMixedOpening] = useState(null);
-  const [volumeOverride, setVolumeOverride] = useState(null);
-  const [selectedSets, setSelectedSets] = useState(1);
+  const [unlockFeatures, setUnlockFeatures] = useState([]);
   const [volumeSetupOpen, setVolumeSetupOpen] = useState(false);
   const [volumeGrips, setVolumeGrips] = useState(() => grip ? [grip] : []);
-  const [plateauDismissed, setPlateauDismissed] = useState(false);
-  const [plateauAccepted, setPlateauAccepted] = useState(false);
   const [volumeBusy, setVolumeBusy] = useState(false);
   const [volumeError, setVolumeError] = useState(null);
   // Why-line Details expander (July 2026) — receipts and secondary
@@ -186,21 +185,20 @@ export function SessionPlanCard({
   // Reset the override when the grip changes — a Crusher pick shouldn't
   // carry into Micro silently.
   useEffect(() => {
-    setSelectedSets(1);
-    setPlateauDismissed(false);
-    setPlateauAccepted(false);
     setOverrideZone(null);
+    setSelectedSets(1);
+    setSetsTouched(false);
     setMixedRequested(false);
     setMixedOpening(null);
-    setVolumeOverride(null);
+    setUnlockFeatures([]);
     setVolumeSetupOpen(false);
     setVolumeGrips(grip ? [grip] : []);
     setVolumeError(null);
   }, [grip]);
 
-  // A newly enrolled plan can activate this grip. Ordinary history syncs
-  // must not undo the athlete's choice to use Chaos for this workout.
-  useEffect(() => { setVolumeOverride(null); }, [volumeExperiment?.id]);
+  useEffect(() => {
+    setSetsTouched(false);
+  }, [volumeExperiment?.id]);
 
   // ── Density ladder for the active (grip, zone) ───────────────
   // Next-workout progression at constant load, gated by the previous
@@ -284,79 +282,108 @@ export function SessionPlanCard({
   const mixedPlan = useMemo(() => {
     if (rec?.boundaryProbe) return null;
     const opening = mixedOpening || recommendedMixedDomainZone(recommendedZone);
-    // The runner applies the reported fatigue adjustment once at session start.
-    const freshRows = curveRows?.map(r => ({ ...r, L: r.L == null ? null : r.L / loadMultiplier,
-      R: r.R == null ? null : r.R / loadMultiplier }));
+    const freshRows = curveRows?.map(row => ({
+      ...row,
+      L: row.L == null ? null : row.L / loadMultiplier,
+      R: row.R == null ? null : row.R / loadMultiplier,
+    }));
     return makeMixedDomainPlan(freshRows, opening, expectedHands);
   }, [curveRows, mixedOpening, expectedHands, recommendedZone, loadMultiplier, rec]);
+
   const readinessDate = today();
-  const betaAccess = useMemo(() => betaEligibility(history, readinessDate, grip), [history, readinessDate, grip]);
-  const eligibleVolumeGrips = useMemo(() => availableGrips.filter(g => betaEligibility(history, readinessDate, g).eligible),
-    [availableGrips, history, readinessDate]);
+  const betaAccess = useMemo(
+    () => betaEligibility(history, readinessDate, grip),
+    [history, readinessDate, grip]
+  );
+  const eligibleVolumeGrips = useMemo(
+    () => availableGrips.filter(candidate => betaEligibility(history, readinessDate, candidate).eligible),
+    [availableGrips, history, readinessDate]
+  );
   const betasAvailable = volumeReady && betaAccess.eligible;
-  const plateauReport = useMemo(() => betasAvailable ? detectPlateaus({ history, activities, asOf: readinessDate,
-    experiments: volumeExperiment ? { [volumeExperiment.id]: volumeExperiment } : {} }) : null,
-    [betasAvailable, history, activities, readinessDate, volumeExperiment]);
-  const plateauSuggestion = plateauReport?.byGrip.find(g => g.grip === grip && g.recommendation === 'consider_volume_beta');
-  const mixedEnabled = betasAvailable && mixedRequested && !!mixedPlan;
+  const plateauReport = useMemo(
+    () => betasAvailable
+      ? detectPlateaus({
+          history,
+          activities,
+          asOf: readinessDate,
+          experiments: volumeExperiment ? { [volumeExperiment.id]: volumeExperiment } : {},
+        })
+      : null,
+    [betasAvailable, history, activities, readinessDate, volumeExperiment]
+  );
+  const plateauSuggestion = plateauReport?.byGrip.find(row =>
+    row.grip === grip && row.recommendation === 'consider_volume_beta');
   const volumeStatus = volumeExperiment ? volumeExperimentStatus(volumeExperiment, readinessDate) : null;
-  const volumePlan = useMemo(() => volumeSessionPlan(volumeExperiment, grip, readinessDate),
-    [volumeExperiment, grip, readinessDate]);
-  const volumeReport = useMemo(() => volumeExperiment ? volumeProgress(volumeExperiment, history, readinessDate) : null,
-    [volumeExperiment, history, readinessDate]);
+  const activeVolumePlan = useMemo(
+    () => volumeSessionPlan(volumeExperiment, grip, readinessDate),
+    [volumeExperiment, grip, readinessDate]
+  );
   const volumeEligible = !isPeakTest && !rec?.boundaryProbe && TRAINING_ZONE_KEYS.includes(activeZone);
-  const volumeEnabled = betasAvailable && volumeEligible && !mixedEnabled && !!volumePlan && volumeOverride !== false;
-  const volumeFinished = volumeStatus === 'completed' || volumeStatus === 'ended';
-  const volumeGripIncluded = !volumeExperiment || volumeExperiment.grips?.includes(grip);
-  const canResumeVolume = !volumeExperiment || (volumeExperiment.grips?.length > 0
-    && volumeExperiment.grips.every(g => eligibleVolumeGrips.includes(g)));
-  const canSetupAnotherVolume = betasAvailable && !volumeBusy && volumeEligible && !!onStartVolumeExperiment;
-  const canChangeVolume = betasAvailable && !volumeBusy && (!volumeFinished || volumeSetupOpen)
-    && (volumeStatus !== 'paused' || canResumeVolume)
-    && (volumeFinished ? !!onStartVolumeExperiment : volumeGripIncluded
-      && (volumeExperiment ? !!onVolumeExperimentStatusChange : !!onStartVolumeExperiment))
-    && (volumeEligible || volumeEnabled);
+  const mixedEnabled = betasAvailable && mixedRequested && !!mixedPlan;
+  const volumeEnabled = volumeReady && volumeEligible && !mixedEnabled
+    && volumeStatus === 'active' && !!activeVolumePlan && !setsTouched;
+  const plannedSets = isPeakTest ? 1 : volumeEnabled ? 2 : selectedSets;
+  const chaosAvailable = betasAvailable && !!mixedPlan;
+  const volumeAvailable = betasAvailable && volumeEligible && !!plateauSuggestion
+    && !['active', 'paused'].includes(volumeStatus) && !!onStartVolumeExperiment;
+  const mixedReadiness = useMemo(
+    () => mixedEnabled
+      ? mixedPlanReadiness(history, grip, expectedHands, mixedPlan, readinessDate)
+      : null,
+    [mixedEnabled, history, grip, expectedHands, mixedPlan, readinessDate]
+  );
 
-  const changeVolume = async enabled => {
-    if (enabled && (!betasAvailable || (volumeStatus === 'paused' && !canResumeVolume))) return;
-    setPlateauAccepted(false);
-    setVolumeError(null);
-    if (!volumeExperiment || volumeFinished) {
-      setVolumeSetupOpen(enabled);
-      if (enabled) setMixedRequested(false);
-      return;
-    }
-    setVolumeOverride(enabled);
-    if (enabled) setMixedRequested(false);
-    if (enabled && volumeStatus === 'active') return;
-    setVolumeBusy(true);
-    try {
-      const saved = await onVolumeExperimentStatusChange?.(enabled ? 'active' : 'paused');
-      if (saved === false) throw new Error('Volume plan was not saved.');
-    } catch {
-      setVolumeOverride(null);
-      setVolumeError('Could not save the Volume plan change. Please try again.');
-    } finally { setVolumeBusy(false); }
+  useEffect(() => {
+    if (!volumeReady || !grip || unlockFeatures.length || volumeSetupOpen || mixedRequested) return;
+    const seen = loadLS(LS_EXPERIMENT_UNLOCKS_KEY) || {};
+    const available = [
+      chaosAvailable && !seen[`chaos:${grip}`] ? 'chaos' : null,
+      volumeAvailable && !seen[`volume:${grip}`] ? 'volume' : null,
+    ].filter(Boolean);
+    if (available.length) setUnlockFeatures(available);
+  }, [volumeReady, grip, chaosAvailable, volumeAvailable, unlockFeatures.length, volumeSetupOpen, mixedRequested]);
+
+  const rememberUnlocks = features => {
+    const seen = loadLS(LS_EXPERIMENT_UNLOCKS_KEY) || {};
+    saveLS(LS_EXPERIMENT_UNLOCKS_KEY, {
+      ...seen,
+      ...Object.fromEntries(features.map(feature => [`${feature}:${grip}`, true])),
+    });
   };
-
+  const closeUnlockDialog = () => {
+    rememberUnlocks(unlockFeatures);
+    setUnlockFeatures([]);
+  };
+  const chooseChaos = () => {
+    rememberUnlocks(unlockFeatures);
+    setUnlockFeatures([]);
+    setSetsTouched(true);
+    setMixedRequested(true);
+  };
+  const reviewVolume = () => {
+    rememberUnlocks(unlockFeatures);
+    setUnlockFeatures([]);
+    setVolumeGrips([grip]);
+    setVolumeError(null);
+    setVolumeSetupOpen(true);
+  };
   const startVolume = async () => {
-    const selectedGrips = volumeGrips.filter(g => eligibleVolumeGrips.includes(g));
-    if (!selectedGrips.length || volumeBusy || !betasAvailable || !volumeEligible) return;
+    const selectedGrips = volumeGrips.filter(candidate => eligibleVolumeGrips.includes(candidate));
+    if (!selectedGrips.length || volumeBusy || !volumeAvailable) return;
     setVolumeBusy(true);
     setVolumeError(null);
     try {
-      const saved = await onStartVolumeExperiment?.({ grips: selectedGrips, ...(plateauAccepted ? { trigger: 'plateau_prompt' } : {}) });
+      const saved = await onStartVolumeExperiment?.({ grips: selectedGrips, trigger: 'plateau_prompt' });
       if (saved === false) throw new Error('Volume plan was not saved.');
-      setMixedRequested(false);
-      setVolumeOverride(null);
+      setSetsTouched(false);
+      setSelectedSets(2);
       setVolumeSetupOpen(false);
     } catch {
       setVolumeError('Could not start Volume Beta. Your usual session is still available. Please try again.');
-    } finally { setVolumeBusy(false); }
+    } finally {
+      setVolumeBusy(false);
+    }
   };
-  const mixedReadiness = useMemo(() => mixedEnabled
-    ? mixedPlanReadiness(history, grip, expectedHands, mixedPlan, readinessDate) : null,
-  [mixedEnabled, history, grip, expectedHands, mixedPlan, readinessDate]);
 
   // ── Active row — drives the bottom session-details panel ──────────────
   const activeRow = activeZone && rows ? rows.find(r => r.key === activeZone) : null;
@@ -434,16 +461,25 @@ export function SessionPlanCard({
   useEffect(() => {
     if (mixedEnabled) {
       const first = mixedPlan.steps[0];
-      onApplyPlan?.({ goal: first.zone, targetTime: first.targetTime, repsPerSet: 5,
-        restTime: MIXED_DOMAIN_REST_S, plannedSets: selectedSets, ladderLoadByHand: null,
-        plannedLoadByHand: first.loadByHand, mixedDomainPlan: mixedPlan, peakTest: false, volumePlan: null });
+      onApplyPlan?.({
+        goal: first.zone,
+        targetTime: first.targetTime,
+        repsPerSet: 5,
+        restTime: MIXED_DOMAIN_REST_S,
+        plannedSets,
+        ladderLoadByHand: null,
+        plannedLoadByHand: first.loadByHand,
+        mixedDomainPlan: mixedPlan,
+        peakTest: false,
+        volumePlan: null,
+      });
       return;
     }
     if (!activeZone || !activeT) return;
     onApplyPlan?.({
       mixedDomainPlan: null,
-      volumePlan: volumeEnabled ? volumePlan : null,
-      plannedSets: isPeakTest ? 1 : volumeEnabled ? 2 : selectedSets,
+      volumePlan: volumeEnabled ? activeVolumePlan : null,
+      plannedSets,
       peakTest: isPeakTest,
       goal: activeZone,
       targetTime: activeT,
@@ -461,7 +497,7 @@ export function SessionPlanCard({
   }, [
     activeZone, activeT, reps, rest, ladder, ladderPlanLoadByHand,
     rec, isOverridden, isPeakTest, mixedEnabled, mixedPlan,
-    volumeEnabled, volumePlan, selectedSets,
+    volumeEnabled, activeVolumePlan, plannedSets,
   ]);
 
   // ── Empty / loading states ───────────────────────────────────
@@ -600,76 +636,104 @@ export function SessionPlanCard({
   const s = totalSec % 60;
   const timeStr = `~${m}:${String(s).padStart(2, "0")}${both ? " (both)" : ""}`;
 
+  const workSetSelector = !isPeakTest && <div className="work-set-selector">
+    <div className="work-set-copy">
+      <div className="work-set-title">Work sets</div>
+      <div className="work-set-detail">
+        {plannedSets > 1 ? 'Repeat the full sequence · 5 min recovery between sets' : 'One full sequence per hand'}
+      </div>
+    </div>
+    <div className="work-set-stepper" role="group" aria-label="Work sets per hand">
+      <button
+        type="button"
+        aria-label="One fewer work set per hand"
+        disabled={plannedSets <= 1}
+        onClick={() => {
+          if (plannedSets <= 1) return;
+          setSelectedSets(plannedSets - 1);
+          setSetsTouched(true);
+        }}
+      >−</button>
+      <output className="work-set-value" aria-live="polite">
+        <strong>{plannedSets}</strong>
+        <span>{plannedSets === 1 ? 'set' : 'sets'} / hand</span>
+      </output>
+      <button
+        type="button"
+        aria-label="One more work set per hand"
+        disabled={plannedSets >= MAX_OPTIONAL_SETS}
+        onClick={() => {
+          if (plannedSets >= MAX_OPTIONAL_SETS) return;
+          setSelectedSets(plannedSets + 1);
+          setSetsTouched(true);
+        }}
+      >+</button>
+    </div>
+  </div>;
+
+  const experimentDialogs = <>
+    {unlockFeatures.length > 0 && <ExperimentUnlockDialog
+      features={unlockFeatures}
+      grip={grip}
+      onChaos={chooseChaos}
+      onVolume={reviewVolume}
+      onClose={closeUnlockDialog}
+    />}
+    {volumeSetupOpen && <DialogShell title="Review Volume Beta" onClose={() => {
+      if (volumeBusy) return;
+      setVolumeSetupOpen(false);
+      setVolumeError(null);
+    }}>
+      <VolumeBetaEnrollment
+        grips={eligibleVolumeGrips}
+        selectedGrips={volumeGrips.filter(candidate => eligibleVolumeGrips.includes(candidate))}
+        onGripsChange={setVolumeGrips}
+        onStart={startVolume}
+        onCancel={() => {
+          setVolumeSetupOpen(false);
+          setVolumeError(null);
+        }}
+        busy={volumeBusy}
+        error={volumeError}
+      />
+    </DialogShell>}
+  </>;
+
+  if (mixedEnabled) {
+    return <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
+      {experimentDialogs}
+      {plannerHeader}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.purple, textTransform: 'uppercase' }}>Experimental session</div>
+          <h2 style={{ margin: '4px 0 0', fontSize: 20 }}>Chaos Machine</h2>
+        </div>
+        <button type="button" onClick={() => setMixedRequested(false)} style={{
+          minHeight: 40, padding: '8px 12px', borderRadius: 6,
+          border: `1px solid ${C.border}`, background: C.bg, color: C.text,
+          font: 'inherit', fontWeight: 700, cursor: 'pointer',
+        }}>Use recommendation</button>
+      </div>
+      <MixedDomainPlan
+        goalConfig={GOAL_CONFIG}
+        plan={mixedPlan}
+        sets={plannedSets}
+        readiness={mixedReadiness}
+        hands={expectedHands}
+        unit={unit}
+        multiplier={loadMultiplier}
+        onOpeningChange={setMixedOpening}
+      />
+      {workSetSelector}
+      {plannerFooter}
+    </Card>;
+  }
+
   // ── Render ─────────────────────────────────────────────────
   return (
     <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
+      {experimentDialogs}
       {plannerHeader}
-
-      {(!isPeakTest || mixedEnabled) && <div style={{ marginBottom: 20 }}>
-        <label style={{ display: 'block', fontWeight: 700 }}>
-          Sets per hand
-          <select value={volumeEnabled ? 2 : selectedSets} onChange={e => {
-            setSelectedSets(Number(e.target.value));
-            setVolumeOverride(false);
-            setVolumeSetupOpen(false);
-          }} style={{ display: 'block', width: '100%', minHeight: 48, marginTop: 8, padding: 10,
-            background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 16 }}>
-            {Array.from({ length: MAX_OPTIONAL_SETS }, (_, i) => i + 1).map(n =>
-              <option key={n} value={n}>{n} {n === 1 ? 'set' : 'sets'} per hand</option>)}
-          </select>
-        </label>
-        <p style={{ color: C.muted, marginBottom: 0 }}>
-          {volumeEnabled ? 'Your Volume Beta plan uses two sets. Changing this selection makes this workout independent of the study.'
-            : 'Your choice for this workout. Extra sets do not enroll you in the six-week Volume Beta. You can finish early.'}
-          {(volumeEnabled || selectedSets > 1) && ' A five-minute rest starts automatically between sets; start the next set when ready.'}
-        </p>
-      </div>}
-
-      <div className="session-beta-options">
-        {!betasAvailable && <p style={{ color: C.muted }}>
-          {!volumeReady ? 'Your training history and plan are still loading.' : <>
-            {BETA_ELIGIBILITY_DESCRIPTION} {grip}: {betaAccess.qualifyingWeeks} of 10 qualifying weeks in your best 13-week period.
-            {!betaAccess.hasThreeMonths && ' Three months of training history is not established yet.'}
-          </>}
-        </p>}
-        {betasAvailable && <>
-        <Toggle label="Chaos Machine (Beta)" checked={mixedEnabled} description="Five different loads per set. Try a different training structure while keeping it separate from a volume experiment." disabled={!betasAvailable || !mixedPlan || volumeBusy}
-          onChange={enabled => {
-            setMixedRequested(enabled);
-            if (enabled) { setVolumeOverride(false); setVolumeSetupOpen(false); }
-          }} />
-        <Toggle label="Volume (Beta)" checked={volumeEnabled || (betasAvailable && volumeSetupOpen)} disabled={!canChangeVolume}
-          onChange={changeVolume}
-          description={!betasAvailable ? undefined
-            : !volumeEligible ? 'Complete the initial measurements first. Volume Beta uses ordinary training sessions, not peak tests or boundary measurements.'
-            : volumeStatus === 'active' && volumeEnabled ? 'Two sets per hand to test additional volume. Turn off to pause your six-week plan.'
-            : 'Optional six-week trial of two sets per hand to test whether extra volume helps when progress stalls.'} />
-        </>}
-        {betasAvailable && plateauSuggestion && volumeEligible && !mixedEnabled && !volumeSetupOpen && !plateauDismissed && <section aria-label="Plateau experiment suggestion" style={{ margin: '16px 0' }}>
-          <strong>Progress may have slowed in some duration ranges.</strong>
-          <p>Comparable opening holds on both hands have stayed similar across several weeks of steady training. An optional six-week Volume Beta can help you test whether a second set helps.</p>
-          <p style={{ color: C.muted }}>Only try additional volume if fatigue and climbing quality are manageable. Keep Chaos Machine separate so the result is easier to interpret.</p>
-          <Btn small onClick={() => { setPlateauAccepted(true); setVolumeGrips([grip]); setVolumeSetupOpen(true); }}>Review Volume Beta</Btn>{' '}
-          <Btn small color={C.border} onClick={() => setPlateauDismissed(true)}>Not now</Btn>{' '}
-          <a href="/research" style={{ color: C.blue }}>See the evidence</a>
-        </section>}
-        {betasAvailable && volumeSetupOpen && <VolumeBetaEnrollment grips={eligibleVolumeGrips} selectedGrips={volumeGrips.filter(g => eligibleVolumeGrips.includes(g))}
-          onGripsChange={setVolumeGrips} onStart={startVolume} onCancel={() => { setVolumeSetupOpen(false); setVolumeError(null); }}
-          busy={volumeBusy} error={volumeError} />}
-        <VolumeBetaSummary experiment={volumeExperiment} progress={volumeReport} status={volumeStatus}
-          grip={grip} enabled={volumeEnabled} chaosEnabled={mixedEnabled}
-          onSetupAnother={volumeSetupOpen ? null : () => {
-            if (!canSetupAnotherVolume) return;
-            setVolumeGrips([grip]);
-            setVolumeError(null);
-            setMixedRequested(false);
-            setVolumeSetupOpen(true);
-          }} canSetupAnother={canSetupAnotherVolume} />
-        {!volumeSetupOpen && volumeError && <p role="alert" style={{ color: C.orange }}>{volumeError}</p>}
-      </div>
-      {betasAvailable && !mixedPlan && <p style={{ color: C.muted }}>The beta needs a load estimate in all five domains for each selected hand. Complete the initial sessions first.</p>}
-      {mixedEnabled && <MixedDomainPlan goalConfig={GOAL_CONFIG} plan={mixedPlan} sets={selectedSets} readiness={mixedReadiness} hands={expectedHands} unit={unit}
-        multiplier={loadMultiplier} onOpeningChange={setMixedOpening} />}
 
       {rec?.source === "manual-load-estimate" && <p style={{ color: C.muted }}>Estimated from your recorded manual load. Recovery calibration still needs measured, comparable force.</p>}
       {/* Standalone title or optional training-focus control. */}
@@ -710,7 +774,7 @@ export function SessionPlanCard({
           alternative tile is selected), retain the continuous engine's
           recommendation. The cookedness multiplier remains identical
           between display and runner. */}
-      {!mixedEnabled && (() => {
+      {(() => {
         const recCfg = rec.peakTest ? { color: C.blue, label: "Peak Test", emoji: "🎯" } : GOAL_CONFIG[rec.zone] ?? { color: C.blue, label: rec.zone, emoji: "🎯" };
         // Per-grip cookedness multiplier — same factor the tiles below
         // and the runner use. Multiplied through rec.loadKg and the
@@ -828,18 +892,18 @@ export function SessionPlanCard({
         );
       })()}
 
-      {!mixedEnabled && isOverridden && <div style={{ fontSize: 12, fontWeight: 700, color: activeColor, marginBottom: 8 }}>{activeEmoji} {activeLabel} · Selected session</div>}
+      {isOverridden && <div style={{ fontSize: 12, fontWeight: 700, color: activeColor, marginBottom: 8 }}>{activeEmoji} {activeLabel} · Selected session</div>}
 
       {/* Hangs / Rest / Time strip */}
-      {!mixedEnabled && <div style={{
+      <div style={{
         display: "flex", gap: 6, marginBottom: 14,
         padding: "12px 0", alignItems: "center",
         borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
       }}>
         {[
-          { label: isPeakTest ? "Pulls" : volumeEnabled ? "Holds / set" : "Hangs", value: reps },
-          { label: volumeEnabled ? "Rest / hold" : "Rest", value: `${rest}s` },
-          { label: volumeEnabled || selectedSets > 1 ? "Sets / hand" : "Time", value: volumeEnabled ? 2 : selectedSets > 1 ? selectedSets : timeStr },
+          { label: isPeakTest ? "Pulls" : "Hangs", value: reps },
+          { label: "Rest", value: `${rest}s` },
+          { label: "Time", value: timeStr },
         ].map(({ label, value }, i, arr) => (
           <React.Fragment key={label}>
             <div style={{ textAlign: "center", flex: 1 }}>
@@ -849,7 +913,9 @@ export function SessionPlanCard({
             {i < arr.length - 1 && <div style={{ color: C.border, fontSize: 16 }}>·</div>}
           </React.Fragment>
         ))}
-      </div>}
+      </div>
+
+      {workSetSelector}
 
       {/* Optional self-reported load adjustment. Spacing groups the
           controls without another card inside the session plan. */}
@@ -964,7 +1030,7 @@ export function SessionPlanCard({
 
       {/* Override indicator — shows up when the user has selected a tile
           other than the recommended one. Click to revert. */}
-      {!mixedEnabled && isOverridden && (
+      {isOverridden && (
         <div style={{ marginBottom: 10, fontSize: 11, color: C.muted, textAlign: "center" }}>
           overriding the recommendation ({rec.zone.replace(/_/g, " ")} →{" "}
           {isPeakTest
@@ -991,7 +1057,7 @@ export function SessionPlanCard({
           Loads on every tile reflect the RPE slider's per-zone scale-
           down so the user sees the trade-off across the full curve.
           Peak measurements are available in warmup. */}
-      {!mixedEnabled && <><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
+      <><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
       <div className="session-choice-grid">
         {rows.filter(r => TRAINING_ZONE_KEYS.includes(r.key)).map(r => {
           // Tile is "active" only when it's the user's override pick.
@@ -1081,7 +1147,7 @@ export function SessionPlanCard({
         Build force smoothly. Pull as hard as you can for {MAX_TEST_TARGET_S}s, then release.
         {" "}Alternate hands for three rounds. Records peak force; no target load or failure hold.
       </div>}
-      </>}
+      </>
       {hand === 'Both' && <p style={{ fontSize: 12, color: C.muted, marginTop: 16 }}>
         Today starts with your {startingHandForDay(history, ymdLocal()) === 'L' ? 'left' : 'right'} hand.
       </p>}

@@ -20,10 +20,9 @@ test('the active finger Analysis page exposes instantaneous peaks and honors gri
   const curveImprovement = screen.getByText('Curve Improvement by Duration');
   const recentPerformance = screen.getByRole('heading', { name: 'Recent Performance vs Expected' });
   const peakForce = screen.getByRole('heading', { name: 'Peak force — max strength over time' });
-  const curveCoverage = screen.getByText('Curve coverage');
   expect(curveImprovement.compareDocumentPosition(recentPerformance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(recentPerformance.compareDocumentPosition(peakForce) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(peakForce.compareDocumentPosition(curveCoverage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByText('Curve coverage')).not.toBeInTheDocument();
   expect(screen.queryByText('Recorded pulls and current curve')).not.toBeInTheDocument();
   expect(screen.queryByText('Overall curve summary')).not.toBeInTheDocument();
   expect(screen.queryByText('Training & measurements')).not.toBeInTheDocument();

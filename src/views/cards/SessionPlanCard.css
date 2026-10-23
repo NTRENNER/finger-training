@@ -53,3 +53,140 @@
 .volume-beta-actions .volume-beta-primary { background: #58a6ff; color: #0d1117; }
 .volume-beta-actions button:disabled { opacity: 0.5; cursor: default; }
 .volume-beta-actions button:focus-visible, .volume-beta-summary a:focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
+
+.work-set-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #0d1117;
+}
+.work-set-copy { min-width: 0; }
+.work-set-title { font-size: 13px; font-weight: 700; }
+.work-set-detail { margin-top: 2px; color: #8b949e; font-size: 11px; line-height: 1.35; }
+.work-set-stepper {
+  display: grid;
+  grid-template-columns: 36px minmax(76px, auto) 36px;
+  align-items: stretch;
+  gap: 0;
+  flex: 0 0 auto;
+  min-height: 38px;
+  overflow: hidden;
+  border: 1px solid #30363d;
+  border-radius: 7px;
+  background: #161b22;
+}
+.work-set-stepper button {
+  width: 36px;
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #c9d1d9;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.work-set-stepper button:first-child { border-right: 1px solid #30363d; }
+.work-set-stepper button:last-child { border-left: 1px solid #30363d; }
+.work-set-stepper button:disabled {
+  color: #484f58;
+  cursor: default;
+}
+.work-set-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 9px;
+  color: #8b949e;
+  white-space: nowrap;
+}
+.work-set-value strong {
+  color: #58a6ff;
+  font-size: 17px;
+  line-height: 1;
+}
+.work-set-value span {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.work-set-stepper button:focus-visible,
+.experiment-dialog button:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 2px;
+}
+
+.experiment-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(1, 4, 9, 0.78);
+}
+.experiment-dialog {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid #484f58;
+  border-radius: 8px;
+  background: #161b22;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+}
+.experiment-dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.experiment-dialog-heading h2 { margin: 0; font-size: 20px; }
+.experiment-dialog-close {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #8b949e;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+.experiment-dialog-intro,
+.experiment-dialog-option p {
+  color: #8b949e;
+  line-height: 1.5;
+}
+.experiment-dialog-option {
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid #30363d;
+}
+.experiment-dialog-primary,
+.experiment-dialog-secondary {
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.experiment-dialog-primary { background: #58a6ff; color: #0d1117; border-color: #58a6ff; }
+.experiment-dialog-secondary { width: 100%; margin-top: 16px; background: #21262d; }
+
+@media (max-width: 520px) {
+  .work-set-selector { gap: 10px; }
+  .work-set-stepper { grid-template-columns: 40px minmax(76px, auto) 40px; }
+  .work-set-stepper button { width: 40px; }
+}

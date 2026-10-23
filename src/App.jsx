@@ -34,7 +34,7 @@ import { AnalysisContainer } from "./views/AnalysisContainer.jsx";
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
   loadLS, saveLS, getStorageUserId,
-  LS_HISTORY_KEY, LS_REP_DELETED_KEY, LS_HISTORY_DOMAIN_KEY,
+  LS_HISTORY_KEY, LS_REP_DELETED_KEY,
 } from "./lib/storage.js";
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
@@ -140,13 +140,10 @@ const LS_NOTES_KEY     = "ft_notes";     // { [session_id]: string }
 // to write detailed compartment-physiology commentary the way the old
 // strings did for power/strength/endurance.
 //
-// Multi-set fields (setsDefault, setRestDefault) were dropped May 2026
-// when the workout runner moved to single-set sessions only. The
-// `setsRationale` + `intensity` text fields followed shortly after:
-// no consumer rendered them. The continuous engine derives reps/rest
-// from T_star directly, so the protocol-description strings were dead
-// text. Reference times, labels, colors, and emojis are still consumed
-// across SetupView, SessionPlanCard, and elsewhere.
+// Per-zone set defaults were dropped when set count became a per-workout
+// choice. The continuous engine still derives reps/rest from T_star;
+// the compact setup stepper repeats that complete prescribed sequence.
+// Reference times, labels, colors, and emojis remain shared UI metadata.
 const GOAL_CONFIG = {
   max_strength: {
     label: "Max Strength", emoji: "💥", color: "#c83838",
@@ -292,7 +289,6 @@ export default function App() {
   // ── Tab ───────────────────────────────────────────────────
   const researchMode = /^\/research\/?$/.test(window.location.pathname);
   const [tab, setTab] = useState(() => researchMode ? RESEARCH_TAB : 0);
-  const [historyFingerFilter, setHistoryFingerFilter] = useState(null);
   const [climbVisited, setClimbVisited] = useState(false);
   useEffect(() => { if (tab === 2) setClimbVisited(true); }, [tab]);
 
@@ -341,18 +337,16 @@ export default function App() {
       ['active', 'paused'].includes(volumeExperimentStatus(plan, today())))) return false;
     const selected = [...new Set(grips || [])].filter(grip => GRIP_PRESETS.includes(grip));
     if (!selected.length || selected.some(grip => !betaEligibility(history, today(), grip).eligible)) return false;
-    const plan = createVolumeExperiment({ history, grips: selected, startDate: today(),
-      id: uuid(), createdAt: new Date().toISOString(),
-      entryEvidence: plateauEnrollmentEvidence(detectPlateaus({ history, activities, asOf: today(),
-        experiments: volumeExperiments }), selected, trigger) });
+    const report = detectPlateaus({ history, activities, asOf: today(), experiments: volumeExperiments });
+    const plan = createVolumeExperiment({
+      history,
+      grips: selected,
+      startDate: today(),
+      id: uuid(),
+      createdAt: new Date().toISOString(),
+      entryEvidence: plateauEnrollmentEvidence(report, selected, trigger),
+    });
     return saveVolumeExperiment(plan);
-  };
-  const changeVolumeStatus = status => {
-    if (!volumeReady || !volumeExperiment || !['active', 'paused', 'ended'].includes(status)) return false;
-    if (status === 'active' && (!volumeExperiment.grips?.length
-      || volumeExperiment.grips.some(grip => !betaEligibility(history, today(), grip).eligible))) return false;
-    if (['completed', 'ended'].includes(volumeExperimentStatus(volumeExperiment, today()))) return false;
-    return saveVolumeExperiment({ ...volumeExperiment, status, updatedAt: new Date().toISOString() }, { statusOnly: true });
   };
 
   // A post-session effect used to re-fetch user_settings here, to pick
@@ -532,7 +526,6 @@ export default function App() {
           <button
             key={t}
             onClick={() => {
-              if (i === 4) setHistoryFingerFilter(null);
               setTab(i);
               if (i === 0 && phase !== "idle") {/* stay in session */}
             }}
@@ -670,7 +663,6 @@ export default function App() {
               GRIP_PRESETS={GRIP_PRESETS}
               volumeExperiment={volumeExperiment}
               onStartVolumeExperiment={startVolumeExperiment}
-              onVolumeExperimentStatusChange={changeVolumeStatus}
               volumeReady={volumeReady}
               climbingFocus={climbingFocus}
               onNavigateToSettings={() => setTab(SETTINGS_TAB)}
@@ -793,14 +785,6 @@ export default function App() {
           pinnedPerHandBaselines={pinnedPerHandBaselines}
           onSavePinnedPerHandBaselines={savePinnedPerHandBaselines}
           baselinePinReady={baselinePinReady}
-          onNavigateToHistory={({ grip, handView } = {}) => {
-            setHistoryFingerFilter({
-              grip: grip || "",
-              hand: handView === "L" || handView === "R" ? handView : "",
-            });
-            saveLS(LS_HISTORY_DOMAIN_KEY, "fingers");
-            setTab(4);
-          }}
         />
       )}
       {/* (Journey / BadgesView tab removed May 2026 — the badge ladder
@@ -815,7 +799,6 @@ export default function App() {
       {tab === 4 && (
         <HistoryView
           history={history}
-          initialFingerFilter={historyFingerFilter}
           freshMap={freshMap}
           threeExpPriors={threeExpPriors}
           onBwSave={saveBW}

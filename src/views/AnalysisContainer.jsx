@@ -54,7 +54,6 @@ export function AnalysisContainer(props) {
     pinnedPerHandBaselines = null,
     onSavePinnedPerHandBaselines = () => {},
     baselinePinReady = true,
-    onNavigateToHistory = null,
     // Per-grip fatigue β model — feeds the Curve Improvement card's
     // Measured-force estimates via useGripFits (legacy freshEq aliases).
     // WorkoutAnalysisView (lifts) props
@@ -96,7 +95,6 @@ export function AnalysisContainer(props) {
           pinnedPerHandBaselines={pinnedPerHandBaselines}
           onSavePinnedPerHandBaselines={onSavePinnedPerHandBaselines}
           baselinePinReady={baselinePinReady}
-          onNavigateToHistory={onNavigateToHistory}
         />
       )}
       {sub === "lifts" && (

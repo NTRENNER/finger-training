@@ -79,7 +79,6 @@ export function addRepDefaultHand({ sticky, sessKey, sessHand, reps }) {
 
 export function HistoryView({
   history,
-  initialFingerFilter = null,
   // Optional opts passed through to the prescription engine when we
   // reconstruct "what would the engine recommend for this protocol?"
   // for the rep-curve chart's target/used load caption. Without these,
@@ -126,8 +125,8 @@ export function HistoryView({
       .sort((a, b) => (b.date || "").localeCompare(a.date || "")),
     [activities]
   );
-  const [grip,        setGrip]        = useState(() => initialFingerFilter?.grip || "");
-  const [hand,        setHand]        = useState(() => initialFingerFilter?.hand || "");
+  const [grip,        setGrip]        = useState("");
+  const [hand,        setHand]        = useState("");
   const [target,      setTarget]      = useState(0);
   const [editKey,     setEditKey]     = useState(null);
   const [editHand,    setEditHand]    = useState("L");

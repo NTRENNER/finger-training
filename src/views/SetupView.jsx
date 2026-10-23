@@ -8,7 +8,8 @@
 // to one of six fixed zone reference times.
 //
 // Layout (top to bottom):
-//   • Grip Type pills — per-grip; the curve is grip-scoped.
+//   • Grip coverage selector — the three device rings select the grip
+//     and show whether each curve has current evidence across six domains.
 //   • SessionPlanCard — the unified plan surface. It hosts:
 //       - The recommended (T, load) pick from the continuous engine
 //       - A 6-zone tile grid with anchored loads (was PrescribedLoadCard)
@@ -19,12 +20,8 @@
 //     Replaces three previously separate cards (ContinuousPickCard,
 //     PrescribedLoadCard, SessionRPECard).
 //   • Tindeq Connect slot
-//   • Start Session button — single set; multi-set was retired.
+//   • Start Session button and a compact per-workout set selector.
 //   • BwPrompt — dismissible weekly body-weight reminder.
-//
-// Moved to Analysis (May 2026):
-//   • CurveCoverageCard — compact per-zone evidence freshness
-//     summary. Belongs with the diagnostic view, not the prescription.
 //
 // Removed entirely:
 //   • SessionPlannerCard — 6-zone picker + within/between-set
@@ -38,9 +35,9 @@
 //   • PrescribedLoadCard.js (the standalone component) — merged
 //     into SessionPlanCard as the tile grid.
 //
-// Multi-set machinery is fully removed from the data model + runner
-// (May 2026). Sessions are single-set; the runner reads
-// config.targetTime / config.repsPerSet / config.restTime directly.
+// The prescribed sequence remains the default. A compact selector can
+// repeat it for up to five work sets; experimental protocols are disclosed
+// only when the user's history first makes them available.
 //
 // ClimbingLogCard was hosted on this view between May 2026 (when the
 // dedicated Climbing tab was retired) and late May 2026 (when the
@@ -60,8 +57,8 @@ import { today } from "../util.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
 import { deloadStatus, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.jsx";
-import { TendonCard } from "./cards/TendonCard.jsx";
 import { DeloadBanner } from "./cards/DeloadBanner.jsx";
+import { GripCoverageSelector } from "./cards/GripCoverageSelector.jsx";
 
 // ────────────────────────────────────────────────────────────────
 // SETUP VIEW
@@ -89,7 +86,8 @@ export function SetupView({
   // Tab-switch callback used by SessionPlanCard's focus pill to jump
   // to Settings when the user wants to change their climbing focus.
   onNavigateToSettings,
-  volumeExperiment = null, onStartVolumeExperiment, onVolumeExperimentStatusChange,
+  volumeExperiment = null,
+  onStartVolumeExperiment,
   volumeReady = true,
 }) {
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
@@ -135,29 +133,12 @@ export function SetupView({
   };
 
   const plannerHeader = (
-      <section aria-label="Grip selection" style={{ marginBottom: 24 }}>
-        <h2 style={{ margin: "0 0 20px", fontSize: 26, fontWeight: 750 }}>Select a Device to Begin</h2>
-        <div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
-            {GRIP_PRESETS.map(g => (
-              <button
-                key={g}
-                onClick={() => handleGrip(g)}
-                aria-pressed={config.grip === g}
-                style={{
-                  padding: "12px 4px", borderRadius: 12, fontSize: 16, minWidth: 0,
-                  cursor: "pointer", fontWeight: 650,
-                  background: config.grip === g ? C.blue : C.border,
-                  color: config.grip === g ? "#fff" : C.text,
-                  border: "none", minHeight: 52,
-                }}
-              >
-                {g}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
+    <GripCoverageSelector
+      history={history}
+      grips={GRIP_PRESETS}
+      value={config.grip}
+      onChange={handleGrip}
+    />
   );
 
   const plannerFooter = (
@@ -218,17 +199,9 @@ export function SetupView({
         onNavigateToSettings={onNavigateToSettings}
         volumeExperiment={volumeExperiment}
         onStartVolumeExperiment={onStartVolumeExperiment}
-        onVolumeExperimentStatusChange={onVolumeExperimentStatusChange}
         volumeReady={volumeReady}
         availableGrips={GRIP_PRESETS}
       />
-
-      {/* Abrahangs-inspired low-intensity finger loading — a submaximal
-          adjunct, cloud-synced and kept entirely separate from the
-          muscular reps model. */}
-      <div style={{ marginTop: 16 }}>
-        <TendonCard />
-      </div>
 
       <BwPrompt unit={unit} onSave={onBwSave} />
     </PageFrame>

@@ -8,7 +8,6 @@ import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/force
 //   1. Curve Improvement — modeled progress plus measured evidence.
 //   2. Recent Performance vs Expected — calibrated pre-session comparison.
 //   3. Peak Force — instantaneous observed ceiling, when available.
-//   4. Curve Coverage — compact current-evidence summary.
 //
 // State comes in via props: history, freshMap (built in
 // useRepHistory), activities, bodyWeight. threeExpPriors are
@@ -47,9 +46,6 @@ import {
   buildGlobalBaseline,
 } from "../model/baselines.js";
 import { effectiveLoad, buildFreshLoadMap, repKey } from "../model/prescription.js";
-import {
-  CurveCoverageCard,
-} from "./analysis/CurveCoverageCard.jsx";
 // EnduranceCeilingCard dropped May 2026 — the F(180s)/F(5s) ratio is
 // invariant to proportional strength gains (so it reads "NEEDS WORK"
 // even while the user is measurably getting stronger), the literature
@@ -81,7 +77,6 @@ export function AnalysisView({
   // reconciles (user_settings + reps) have landed. See App.js.
   baselinePinReady = true,
   // Curve Improvement card's Fresh-eq basis via useGripFits.
-  onNavigateToHistory = null,
 }) {
   // Grip filter — null/"" means all grips (default view).
   const [selGrip,   setSelGrip]   = useState("");
@@ -99,7 +94,7 @@ export function AnalysisView({
 
   // ── Hand selector (June 2026) ──────────────────────
   // "pooled" (default) | "L" | "R". One global control scopes Curve
-  // Improvement, Recent Performance, Peak Force, and Curve Coverage.
+  // Improvement, Recent Performance, and Peak Force.
   // It is not persisted: per-hand fits run on half the data and are a
   // diagnostic lens, so each visit starts at the pooled view.
   const [handView, setHandView] = useState("pooled");
@@ -299,17 +294,7 @@ export function AnalysisView({
             <div style={{ fontSize: 12, marginTop: 8 }}>Run a few sessions on this grip / hand to start building a force-duration curve.</div>
           </div>
         </Card>
-      ) : (<>
-
-        <CardBoundary name="Curve Coverage">
-          <CurveCoverageCard
-            history={history}
-            grip={selGrip}
-            handView={handView}
-            onOpenHistory={onNavigateToHistory}
-          />
-        </CardBoundary>
-      </>)}
+      ) : null}
     </div>
   );
 }

@@ -1,82 +1,93 @@
-import { betaEligibility } from '../../../model/betaEligibility.js';
 import React from 'react';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { SessionPlanCard } from '../SessionPlanCard.jsx';
 import { MIXED_DOMAIN_LABELS, MIXED_DOMAIN_ZONES } from '../../../model/mixedDomain.js';
 import { coachingRecommendationContinuous } from '../../../model/coaching.js';
 import { ZONE_REF_T } from '../../../model/zones.js';
-jest.mock('../../../model/betaEligibility.js', () => ({ ...jest.requireActual('../../../model/betaEligibility.js'), betaEligibility: jest.fn(() => ({ eligible: true })) }));
-beforeEach(() => betaEligibility.mockReturnValue({ eligible: true }));
-jest.mock('../../../model/prescription.js', () => ({ prescription: (history, h, g, t) => ({ value: 40 - t / 10 }) }));
-jest.mock('../../../model/coaching.js', () => ({ coachingRecommendationContinuous: jest.fn(() => ({
-  zone: 'power', T: 45, loadKg: 20, loadByHand: { L: 20, R: 20 }, reasons: [],
-})) }));
-beforeEach(() => coachingRecommendationContinuous.mockReturnValue({
-  zone: 'power', T: 45, loadKg: 20, loadByHand: { L: 20, R: 20 }, reasons: [],
+import { betaEligibility } from '../../../model/betaEligibility.js';
+import { detectPlateaus } from '../../../model/plateau.js';
+
+jest.mock('../../../model/betaEligibility.js', () => ({
+  betaEligibility: jest.fn(() => ({ eligible: true })),
 }));
-const goals = Object.fromEntries(MIXED_DOMAIN_ZONES.map(key => [key, { label: MIXED_DOMAIN_LABELS[key], color: '#fff', refTime: ZONE_REF_T[key] }]));
-test('beta is off by default, previews the five loads, supports another opener and returns to the regular plan', () => {
+jest.mock('../../../model/plateau.js', () => ({
+  detectPlateaus: jest.fn(() => ({ byGrip: [] })),
+}));
+jest.mock('../../../model/prescription.js', () => ({
+  prescription: (history, hand, grip, time) => ({ value: 40 - time / 10 }),
+}));
+jest.mock('../../../model/coaching.js', () => ({
+  coachingRecommendationContinuous: jest.fn(),
+  COLD_START_BOUNDARY_REPS: 4,
+  COLD_START_BOUNDARY_REST_S: 20,
+  FRESH_TEST_SHORT_T_MAX: 12,
+}));
+
+const goals = Object.fromEntries(MIXED_DOMAIN_ZONES.map(key => [key, {
+  label: MIXED_DOMAIN_LABELS[key],
+  color: '#fff',
+  refTime: ZONE_REF_T[key],
+}]));
+
+beforeEach(() => {
+  localStorage.clear();
+  betaEligibility.mockReturnValue({ eligible: true });
+  detectPlateaus.mockReturnValue({ byGrip: [] });
+  coachingRecommendationContinuous.mockReturnValue({
+    zone: 'power',
+    T: 45,
+    loadKg: 20,
+    loadByHand: { L: 20, R: 20 },
+    reasons: [],
+  });
+});
+
+test('the unlock dialog previews Chaos without replacing the ordinary recommendation by default', () => {
   const apply = jest.fn();
-  render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
-  const toggle = screen.getByRole('switch', { name: 'Chaos Machine (Beta)' });
-  expect(toggle).not.toBeChecked();
+  render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg"
+    GOAL_CONFIG={goals} onApplyPlan={apply} />);
   expect(screen.getByRole('button', { name: 'Use recommended session' })).toBeInTheDocument();
-  fireEvent.click(toggle);
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Chaos session' }));
   expect(screen.getByRole('region', { name: 'Chaos Machine beta plan' })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Use recommended session' })).not.toBeInTheDocument();
-  expect(apply.mock.calls.at(-1)[0]).toMatchObject({ repsPerSet: 5, restTime: 30,
-    ladderLoadByHand: null, mixedDomainPlan: { id: 'whole_curve_beta', adjustLoads: true } });
-  fireEvent.change(screen.getByRole('combobox', { name: 'First domain' }), { target: { value: 'endurance' } });
-  expect(apply.mock.calls.at(-1)[0]).toMatchObject({ goal: 'endurance', targetTime: 220, plannedLoadByHand: { L: 18, R: 18 } });
-  fireEvent.click(toggle);
-  expect(apply.mock.calls.at(-1)[0]).toMatchObject({ goal: 'power', targetTime: 45, restTime: 20, mixedDomainPlan: null });
-});
-test('missing domain estimates disable the beta', () => {
-  render(<SessionPlanCard history={[]} grip="Micro" unit="kg" GOAL_CONFIG={{ power: goals.power }} />);
-  expect(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' })).toBeDisabled();
+  expect(apply.mock.calls.at(-1)[0]).toMatchObject({
+    repsPerSet: 5,
+    restTime: 30,
+    plannedSets: 1,
+    mixedDomainPlan: { id: 'whole_curve_beta', adjustLoads: true },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'One more work set per hand' }));
+  fireEvent.click(screen.getByRole('button', { name: 'One more work set per hand' }));
+  expect(apply.mock.calls.at(-1)[0].plannedSets).toBe(3);
+  fireEvent.click(screen.getByRole('button', { name: 'Use recommendation' }));
+  expect(screen.getByRole('button', { name: 'Use recommended session' })).toBeInTheDocument();
+  expect(apply.mock.calls.at(-1)[0].mixedDomainPlan).toBeNull();
 });
 
-test('adaptive loads are automatic, disclose missing readiness before starting and remain enabled for another grip', () => {
+test('Chaos starts at the recommended domain and both hands share the same sequence', () => {
+  coachingRecommendationContinuous.mockReturnValue({
+    zone: 'strength_endurance',
+    T: 160,
+    loadKg: 20,
+    loadByHand: { L: 20, R: 20 },
+    reasons: [],
+  });
   const apply = jest.fn();
-  const view = render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
-  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' }));
-  expect(screen.queryByRole('checkbox', { name:'Adjust loads to target times' })).not.toBeInTheDocument();
-  expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.adjustLoads).toBe(true);
-  expect(screen.queryByText(/23:50/)).not.toBeInTheDocument();
-  expect(screen.getByText(/More measured history is needed for automatic adjustments/)).toBeInTheDocument();
-  expect(screen.getAllByText('Reference target · adjustment unavailable')).toHaveLength(8);
-  view.rerender(<SessionPlanCard history={[]} grip="Crusher" hand="Both" unit="kg" GOAL_CONFIG={goals} onApplyPlan={apply} />);
-  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' }));
-  expect(screen.queryByRole('checkbox', { name:'Adjust loads to target times' })).not.toBeInTheDocument();
-  expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.adjustLoads).toBe(true);
-});
-
-
-test('Chaos follows the recommendation instead of past rotation, and keeps manual choice until the grip changes', () => {
-  const apply = jest.fn();
-  const recommend = zone => coachingRecommendationContinuous.mockReturnValue({ zone, T: ZONE_REF_T[zone],
-    loadKg: 20, loadByHand: { L: 20, R: 20 }, reasons: [] });
-  const old = { id: 'old', session_id: 'old', date: '2026-09-29', grip: 'Micro', hand: 'L',
-    rep_num: 1, actual_time_s: 30, failure_valid: true,
-    force_recording: { session_protocol: { id: 'whole_curve_beta', version: 1, zone: 'power' } } };
-  const props = { history: [old], grip: 'Micro', hand: 'Both', unit: 'kg', GOAL_CONFIG: goals, onApplyPlan: apply };
-  recommend('strength_endurance');
-  const view = render(<SessionPlanCard {...props} />);
-  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' }));
+  render(<SessionPlanCard history={[]} grip="Micro" hand="Both" unit="kg"
+    GOAL_CONFIG={goals} onApplyPlan={apply} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Chaos session' }));
   expect(screen.getByRole('combobox', { name: 'First domain' })).toHaveValue('strength_endurance');
-  expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.steps.map(s => s.zone)).toEqual([
-    'strength_endurance', 'endurance', 'power', 'power_strength', 'strength']);
-  const left = within(screen.getByRole('list', { name: 'Left hand holds' })).getAllByRole('listitem').map(el => el.textContent);
-  const right = within(screen.getByRole('list', { name: 'Right hand holds' })).getAllByRole('listitem').map(el => el.textContent);
+  expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.steps.map(step => step.zone)).toEqual([
+    'strength_endurance', 'endurance', 'power', 'power_strength', 'strength',
+  ]);
+  const left = within(screen.getByRole('list', { name: 'Left hand holds' }))
+    .getAllByRole('listitem').map(element => element.textContent);
+  const right = within(screen.getByRole('list', { name: 'Right hand holds' }))
+    .getAllByRole('listitem').map(element => element.textContent);
   expect(left).toEqual(right);
-  recommend('strength');
-  view.rerender(<SessionPlanCard {...props} history={[old]} />);
-  expect(screen.getByRole('combobox', { name: 'First domain' })).toHaveValue('strength');
-  fireEvent.change(screen.getByRole('combobox', { name: 'First domain' }), { target: { value: 'endurance' } });
-  recommend('power_strength');
-  view.rerender(<SessionPlanCard {...props} history={[old]} />);
-  expect(screen.getByRole('combobox', { name: 'First domain' })).toHaveValue('endurance');
-  view.rerender(<SessionPlanCard {...props} grip="Crusher" history={[old]} />);
-  fireEvent.click(screen.getByRole('switch', { name: 'Chaos Machine (Beta)' }));
-  expect(screen.getByRole('combobox', { name: 'First domain' })).toHaveValue('power_strength');
+});
+
+test('incomplete domain estimates do not advertise Chaos', () => {
+  render(<SessionPlanCard history={[]} grip="Micro" unit="kg" GOAL_CONFIG={{ power: goals.power }} />);
+  expect(screen.queryByRole('dialog', { name: /Chaos Machine/ })).not.toBeInTheDocument();
+  expect(screen.queryByText('Chaos Machine')).not.toBeInTheDocument();
 });

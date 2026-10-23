@@ -16,6 +16,8 @@ Validation covers analytical inverse solutions, all six reference durations, unc
 
 ## Analysis layout
 
-Curve Improvement appears immediately below the analysis scope controls, followed by Recent Performance vs Expected, Peak Force, and compact Curve Coverage. Coverage uses a real six-domain denominator: observed Peak Force plus the five trained duration domains, with missing, aging, and stale evidence named directly. Recovery Status, Estimated Capacity Over Time, the legacy overall curve summary, and the technical Training & Measurements disclosure are removed from Analysis. Recovery still informs workout recommendations and weekly coaching without occupying a standalone chart.
+Curve Improvement appears immediately below the analysis scope controls, followed by Recent Performance vs Expected and Peak Force. Recovery Status, Estimated Capacity Over Time, Curve Coverage, the legacy overall curve summary, and the technical Training & Measurements disclosure are removed from Analysis. Recovery still informs workout recommendations and weekly coaching without occupying a standalone chart.
+
+Curve Coverage now doubles as the device selector on the Finger Training page. Crusher, Micro, and Prime appear as three tappable rings, each using a real six-domain denominator: observed Peak Force plus the five trained duration domains. Selecting a ring changes the active training device, and the line beneath it names missing, aging, and stale evidence for that device. The rings are current-evidence indicators, not progress scores.
 
 Recorded pulls and the current fitted curve now live in Finger History as the collapsed **Force-Duration Map** explorer. History's grip and hand filters scope the map; Raw/Fresh-eq remains available; selecting a recorded pull opens that workout's first-set comparison. This keeps Analysis focused on interpretation while preserving the combined curve-and-history view where individual sessions are inspected.

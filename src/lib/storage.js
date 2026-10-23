@@ -486,6 +486,12 @@ export const LS_DAILY_STATE_KEY = "ft_daily_state";
 // deload is a personal week-scoped choice, not synced training data.
 export const LS_DELOAD_WEEK_KEY = "ft_deload_week";
 
+// One-time notices shown when the user's history first qualifies for an
+// optional training experiment. Shape: { "chaos:Crusher": true,
+// "volume:Micro": true }. This is presentation state only; experiment
+// enrollment and results remain in user_settings.
+export const LS_EXPERIMENT_UNLOCKS_KEY = "ft_experiment_unlocks";
+
 // Climbing history filter pills — persists the active filter selection
 // (named-only toggle + per-category single-select for discipline, venue,
 // wall) so re-opening the History tab lands on the same view the user

@@ -2,9 +2,10 @@
 
 An optional mixed-load session inspired by the Whole HoG format. This is an
 experimental format, not a reproduction or validation of Grip Goblins' model.
-Enable **Chaos Machine (Beta)** in the Fingers session planner. It is off by
-default and requires an available load estimate for every selected hand in
-all five domains.
+When the athlete first qualifies, a one-time dialog explains and previews
+**Chaos Machine** from the Fingers session planner. It is off by default and
+requires an available load estimate for every selected hand in all five
+domains. Dismissing the dialog leaves the ordinary recommendation unchanged.
 
 ## Session
 
