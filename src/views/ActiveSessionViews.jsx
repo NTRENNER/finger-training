@@ -547,8 +547,9 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       {/* Timer (shown during active rep) */}
       {repPhase === "active" && (
         <Card>
-          <BigTimer seconds={Number(creditedSeconds(tindeq.forceLoss, elapsed))} targetSeconds={config.targetTime} running={tindeq.forceLoss?.status !== 'complete' && tindeq.forceLoss?.pendingEndTs == null} referenceOnly={!!config.mixedDomainPlan} />
-          <ForceGauge force={tindeq.connected ? tindeq.force : null} avg={tindeq.connected ? tindeq.avgForce : null} peak={tindeq.connected ? tindeq.peak : null} targetKg={targetKg} unit={unit} />
+          <BigTimer seconds={Number(creditedSeconds(tindeq.forceLoss, elapsed))} targetSeconds={config.targetTime} running={tindeq.forceLoss?.status !== 'complete' && tindeq.forceLoss?.pendingEndTs == null} referenceOnly={!!config.mixedDomainPlan} showTarget={false} />
+          <ForceGauge force={tindeq.connected ? tindeq.force : null} avg={tindeq.connected ? tindeq.avgForce : null} peak={tindeq.connected ? tindeq.peak : null} targetKg={targetKg} unit={unit}
+            targetTime={fmtTime(config.targetTime)} targetTimeLabel={config.mixedDomainPlan ? "Fresh reference" : "Target time"} />
         </Card>
       )}
 
@@ -1303,10 +1304,11 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
             }}>
               {holdSeconds.toFixed(1)}s
             </div>
-            <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
-              {timeLabel} {config.targetTime}s
-            </div>
-            {tindeq.connected && <ForceGauge force={tindeq.force} avg={tindeq.avgForce} peak={tindeq.peak} targetKg={targetKg} unit={unit} />}
+            {/* Rendered through brief signal drops (live values blank out) so
+                the targets never disappear mid-hold. */}
+            <ForceGauge force={tindeq.connected ? tindeq.force : null} avg={tindeq.connected ? tindeq.avgForce : null}
+              peak={tindeq.connected ? tindeq.peak : null} targetKg={targetKg} unit={unit}
+              targetTime={`${config.targetTime}s`} targetTimeLabel={timeLabel === 'Target' ? 'Target time' : timeLabel} />
           </>
         ) : (
           <>

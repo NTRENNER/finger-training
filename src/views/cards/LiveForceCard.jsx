@@ -31,7 +31,9 @@ import { clamp } from "../../util.js";
 //   seconds        — elapsed seconds (number)
 //   targetSeconds  — target hold duration (number)
 //   running        — when false the display reads as muted (paused)
-function BigTimer({ seconds, targetSeconds, running, referenceOnly = false }) {
+//   showTarget     — false when the target is displayed elsewhere (the
+//                    active rep shows it beside the target weight)
+function BigTimer({ seconds, targetSeconds, running, referenceOnly = false, showTarget = true }) {
   const pct = targetSeconds ? Math.min(seconds / targetSeconds, 1) : 0;
   const over = !referenceOnly && seconds >= targetSeconds;
   const color = running ? (over ? C.green : C.blue) : C.muted;
@@ -40,9 +42,9 @@ function BigTimer({ seconds, targetSeconds, running, referenceOnly = false }) {
       <div style={{ fontSize: 108, fontWeight: 800, fontVariantNumeric: "tabular-nums", color, lineHeight: 1 }}>
         {fmtTime(seconds)}
       </div>
-      <div style={{ marginTop: 12, fontSize: 13, color: C.muted }}>
+      {showTarget && <div style={{ marginTop: 12, fontSize: 13, color: C.muted }}>
         {referenceOnly ? 'fresh reference' : 'target'}: {fmtTime(targetSeconds)}
-      </div>
+      </div>}
       {!referenceOnly && <div style={{ marginTop: 10, height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${pct * 100}%`, background: color, borderRadius: 3, transition: "width 0.2s" }} />
       </div>}
@@ -67,7 +69,11 @@ function BigTimer({ seconds, targetSeconds, running, referenceOnly = false }) {
 //                marker visually for typical training loads)
 //   unit       — "lbs" or "kg" — display only, kg is the wire format
 //   numberSize — CSS font size for the live force; warm-ups scale for phones
-function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs", numberSize = 108, emphasizePeak = false }) {
+//   targetTime / targetTimeLabel — optional preformatted target duration
+//                ("45s"); shown beside the target weight so both targets
+//                read together during a rep
+function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs", numberSize = 108, emphasizePeak = false,
+  targetTime = null, targetTimeLabel = "Target time" }) {
   const fPct    = clamp(force / maxDisplay, 0, 1);
   const avgPct  = clamp(avg   / maxDisplay, 0, 1);
   const tgtPct  = targetKg != null ? clamp(targetKg / maxDisplay, 0, 1) : null;
@@ -85,11 +91,12 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
     <div style={{ marginTop: 8 }}>
       {/* A target is optional: Peak Test intentionally has no prescribed
           weight, while training and warm-up callers always provide one. */}
-      {Number.isFinite(targetKg) && <div style={{ textAlign: "center", marginBottom: liveActive ? 16 : 8 }}>
-        <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>Target weight</div>
-        <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1, color: C.blue, fontVariantNumeric: "tabular-nums" }}>
-          {fmtW(targetKg, unit)} {unit}
-        </div>
+      {(targetTime || Number.isFinite(targetKg)) && <div style={{
+        display: "flex", justifyContent: "center", gap: 24, textAlign: "center",
+        marginBottom: liveActive ? 16 : 8,
+      }}>
+        {targetTime && <TargetValue label={targetTimeLabel} value={targetTime} paired={Number.isFinite(targetKg)} />}
+        {Number.isFinite(targetKg) && <TargetValue label="Target weight" value={`${fmtW(targetKg, unit)} ${unit}`} paired={!!targetTime} />}
       </div>}
 
       {/* Live measurement block — only renders with a real sample so the
@@ -119,6 +126,18 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
           )}
         </div>
       </>}
+    </div>
+  );
+}
+
+function TargetValue({ label, value, paired }) {
+  return (
+    <div style={{ flex: paired ? "1 1 0" : "0 1 auto", minWidth: 0 }}>
+      <div style={{ fontSize: 14, color: C.text, marginBottom: 4 }}>{label}</div>
+      <div style={{
+        fontSize: paired ? "clamp(28px, 8vw, 44px)" : 44, fontWeight: 900, lineHeight: 1.1,
+        color: C.blue, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
+      }}>{value}</div>
     </div>
   );
 }
