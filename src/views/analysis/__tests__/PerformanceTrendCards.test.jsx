@@ -2,10 +2,10 @@ import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { PerformanceTrendCards } from '../PerformanceTrendCards.jsx';
 import { PerformanceObservationDetails, PerformancePointTooltip } from '../PerformanceTrendEvidence.jsx';
-import { buildPerformanceTrendAnalysis } from '../../../model/performanceTrendEvidence.js';
+import { buildPerformanceObservations } from '../../../model/performanceTrendEvidence.js';
 
 jest.mock('../../../model/performanceTrendEvidence.js', () => ({
-  buildPerformanceTrendAnalysis: jest.fn(),
+  buildPerformanceObservations: jest.fn(),
   PERFORMANCE_REFERENCE_DURATIONS: [5, 30, 70, 115, 160, 220],
   DURATION_BAND_LABELS: { short: 'Short (≤45 s)', medium: 'Medium (>45–120 s)', long: 'Long (>120 s)' },
 }));
@@ -76,7 +76,7 @@ function makeAnalysis(scores = [100, 110, 120, 116, 112, 110]) {
   return { rows, observations };
 }
 
-beforeEach(() => buildPerformanceTrendAnalysis.mockReturnValue(makeAnalysis()));
+beforeEach(() => buildPerformanceObservations.mockReturnValue(makeAnalysis()));
 
 test('keeps calibrated session performance after estimated capacity is removed', () => {
   render(<PerformanceTrendCards history={history} grips={grips} />);
@@ -88,12 +88,12 @@ test('keeps calibrated session performance after estimated capacity is removed',
 test('the date window filters actual comparison points without refitting', () => {
   render(<PerformanceTrendCards history={history} grips={grips} />);
   expect(screen.getAllByTestId('trend-chart')).toHaveLength(1);
-  expect(buildPerformanceTrendAnalysis).toHaveBeenCalledWith(history, grips, 'pooled', { model: 'contextOnly' });
+  expect(buildPerformanceObservations).toHaveBeenCalledWith(history, grips, 'pooled');
   fireEvent.change(screen.getByRole('slider', { name: 'Start date' }), { target: { value: 2 } });
   fireEvent.change(screen.getByRole('slider', { name: 'End date' }), { target: { value: 4 } });
   expect(screen.getByTestId('trend-chart')).toHaveAttribute('data-dates', '2026-08-03,2026-08-04,2026-08-05');
   expect(screen.getByTestId('opening-hold-points')).toHaveAttribute('data-holds', 'hold-2,hold-3,hold-4');
-  expect(buildPerformanceTrendAnalysis).toHaveBeenCalledTimes(1);
+  expect(buildPerformanceObservations).toHaveBeenCalledTimes(1);
   fireEvent.change(screen.getByRole('slider', { name: 'Start date' }), { target: { value: 0 } });
   fireEvent.change(screen.getByRole('slider', { name: 'End date' }), { target: { value: 5 } });
   expect(screen.getByText('Showing 6 of 6 training dates')).toBeInTheDocument();
@@ -111,13 +111,13 @@ test('short chart has individual unconnected points and keyboard-selectable dura
   fireEvent.change(screen.getByRole('combobox', { name: 'Finger session order' }), { target: { value: 'first_recorded' } });
   expect(screen.getByText(/No opening holds match these filters/)).toBeInTheDocument();
   expect(screen.queryByTestId('trend-chart')).not.toBeInTheDocument();
-  expect(buildPerformanceTrendAnalysis).toHaveBeenCalledTimes(1);
+  expect(buildPerformanceObservations).toHaveBeenCalledTimes(1);
 });
 
 test('the chart retains the exact shown date domain and unique ticks when observations start later', () => {
   const analysis = makeAnalysis();
   analysis.observations = [...analysis.observations.slice(2), { ...analysis.observations[4], id: 'another-hold-same-date' }];
-  buildPerformanceTrendAnalysis.mockReturnValue(analysis);
+  buildPerformanceObservations.mockReturnValue(analysis);
   render(<PerformanceTrendCards history={history} grips={grips} />);
   const timestamps = analysis.rows.map(row => row.timestamp);
   screen.getAllByTestId('trend-x-axis').forEach(axis => {
@@ -129,7 +129,7 @@ test('the chart retains the exact shown date domain and unique ticks when observ
     expect(axis).toHaveAttribute('data-domain', JSON.stringify([timestamps[1], timestamps.at(-1)]));
     expect(axis).toHaveAttribute('data-ticks', JSON.stringify(timestamps.slice(1)));
   });
-  expect(buildPerformanceTrendAnalysis).toHaveBeenCalledTimes(1);
+  expect(buildPerformanceObservations).toHaveBeenCalledTimes(1);
 });
 
 test('grips with no observations do not render empty Scatter series that could inherit chart data', () => {
@@ -155,7 +155,7 @@ test('an accessible hold inspector exposes force, prior expectation, duration, h
 });
 
 test('empty history explains that calibrated opening-hold comparisons are unavailable', () => {
-  buildPerformanceTrendAnalysis.mockReturnValue({ rows: [], observations: [] });
+  buildPerformanceObservations.mockReturnValue({ rows: [], observations: [] });
   render(<PerformanceTrendCards history={null} grips={grips} />);
   expect(screen.getByText(/Opening-hold comparisons appear once a calibrated pre-session curve is available/)).toBeInTheDocument();
   expect(screen.queryByText('Estimated Capacity Over Time')).not.toBeInTheDocument();
@@ -164,7 +164,7 @@ test('empty history explains that calibrated opening-hold comparisons are unavai
 
 test('partial-hand evidence can show the available opening holds', () => {
   const analysis = makeAnalysis();
-  buildPerformanceTrendAnalysis.mockReturnValue({
+  buildPerformanceObservations.mockReturnValue({
     rows: analysis.rows.map(({ date, timestamp, Micro_short }) => ({ date, timestamp, Micro_short })),
     observations: analysis.observations.filter(item => item.hand === 'L'),
   });
@@ -176,7 +176,7 @@ test('partial-hand evidence can show the available opening holds', () => {
 test('deleting dates in a selected window keeps charts and handles usable', () => {
   const view = render(<PerformanceTrendCards history={history} grips={grips} />);
   fireEvent.change(screen.getByRole('slider', { name: 'Start date' }), { target: { value: 4 } });
-  buildPerformanceTrendAnalysis.mockReturnValue(makeAnalysis([100, 110, 120, 116, 112]));
+  buildPerformanceObservations.mockReturnValue(makeAnalysis([100, 110, 120, 116, 112]));
   view.rerender(<PerformanceTrendCards history={[{ id: 'changed' }]} grips={grips} />);
   expect(screen.getByText('Showing 2 of 5 training dates')).toBeInTheDocument();
   screen.getAllByTestId('trend-chart').forEach(chart => expect(chart).toHaveAttribute('data-dates', '2026-08-04,2026-08-05'));
@@ -188,7 +188,7 @@ test('climbing context never refits the calibrated comparison and missing entrie
   const view = render(<PerformanceTrendCards history={history} grips={grips} />);
   screen.getAllByTestId('trend-chart').forEach(chart => expect(chart).toHaveAttribute('data-climbs', 'unknown,unknown,unknown,unknown,unknown,unknown'));
   view.rerender(<PerformanceTrendCards history={history} grips={grips} activities={[{ type: 'climbing', date: '2026-08-04', rpe: 8 }]} />);
-  expect(buildPerformanceTrendAnalysis).toHaveBeenCalledTimes(1);
+  expect(buildPerformanceObservations).toHaveBeenCalledTimes(1);
   expect(screen.getByText(/Same-day climbing may have happened before or after finger training/)).toBeInTheDocument();
 });
 
@@ -196,7 +196,7 @@ test('hover and click inspect the actual observation when grip series have diffe
   const analysis = makeAnalysis();
   const crusherHold = { ...analysis.observations[1], id: 'crusher-only', grip: 'Crusher', hand: 'R', force: 15, expectedForce: 30, deviation: -50 };
   analysis.observations = [analysis.observations[0], crusherHold, ...analysis.observations.slice(2)];
-  buildPerformanceTrendAnalysis.mockReturnValue(analysis);
+  buildPerformanceObservations.mockReturnValue(analysis);
   render(<PerformanceTrendCards history={history} grips={['Micro', 'Crusher']} />);
   fireEvent.mouseEnter(screen.getByTestId('point-crusher-only'));
   const tooltip = screen.getByRole('tooltip');

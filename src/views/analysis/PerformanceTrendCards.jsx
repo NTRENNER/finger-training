@@ -8,8 +8,7 @@ import { Card, CardTitle } from '../../ui/components.jsx';
 import { C } from '../../ui/theme.js';
 import { GRIP_COLORS } from '../../ui/grip-colors.js';
 import { DateRangeSlider, normalizeHistoryWindow } from '../../ui/DateRangeSlider.jsx';
-import { DEFAULT_PERFORMANCE_TREND_MODEL } from '../../model/performanceTrends.js';
-import { buildPerformanceTrendAnalysis } from '../../model/performanceTrendEvidence.js';
+import { usePerformanceObservations } from '../../hooks/usePerformanceObservations.js';
 import { suggestCookedFromClimbs } from '../../model/climbingFatigue.js';
 import {
   BAND_LABELS, CONTEXT_LABELS, PerformancePointGlyph,
@@ -26,18 +25,14 @@ const shortDomain = ([low, high]) => {
 const cardStyle = { marginBottom: 16, padding: '20px clamp(14px, 4vw, 24px)', minWidth: 0 };
 
 export function PerformanceTrendCards({
-  history = EMPTY, grips = EMPTY, handView = 'pooled', activities = EMPTY,
-  trendModel = DEFAULT_PERFORMANCE_TREND_MODEL, unit = 'kg',
+  history = EMPTY, grips = EMPTY, handView = 'pooled', activities = EMPTY, unit = 'kg',
 }) {
   const selectedGrips = grips || EMPTY;
-  // Refit only when source history or model scope changes. Date and point
-  // filters expose a view of the historical estimates; they never rebase them.
-  const analysis = useMemo(
-    () => buildPerformanceTrendAnalysis(history, selectedGrips, handView, { model: trendModel }),
-    [history, selectedGrips, handView, trendModel],
-  );
-  const rows = analysis.rows || EMPTY;
-  const observations = analysis.observations || EMPTY;
+  // Recompute only when source history or scope changes. Date and point
+  // filters expose a view of the historical observations; they never rebase them.
+  const { loading, result: analysis } = usePerformanceObservations(history, selectedGrips, handView);
+  const rows = analysis?.rows || EMPTY;
+  const observations = analysis?.observations || EMPTY;
   const [window, setWindow] = useState(null);
   const [durationBand, setDurationBand] = useState('all');
   const [sessionContext, setSessionContext] = useState('all');
@@ -75,7 +70,9 @@ export function PerformanceTrendCards({
   if (!rows.length) return <section className="performance-trends" aria-label="Performance trends">
     <Card style={cardStyle}>
       <CardTitle>Recent Performance vs Expected</CardTitle>
-      <p className="trend-intro">Opening-hold comparisons appear once a calibrated pre-session curve is available.</p>
+      <p className="trend-intro" role={loading ? 'status' : undefined}>{loading
+        ? 'Calculating expected performance for each opening hold…'
+        : 'Opening-hold comparisons appear once a calibrated pre-session curve is available.'}</p>
     </Card>
   </section>;
 

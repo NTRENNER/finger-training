@@ -1,4 +1,4 @@
-import {buildPerformanceTrendAnalysis} from '../performanceTrendEvidence.js';
+import {buildPerformanceTrendAnalysis, buildPerformanceObservations} from '../performanceTrendEvidence.js';
 import {buildPerformanceTrends} from '../performanceTrends.js';
 import {recoveryRows} from '../../testHelpers/recoveryRows.js';
 const history=()=>Array.from({length:10},(_,i)=>recoveryRows('legacy',{
@@ -40,4 +40,15 @@ test('new unmeasured durations are shown as extrapolated but kept out of the ses
  expect(last.Crusher_scored).toBeGreaterThan(0);
  expect(result.observations.find(item=>item.id===extra.find(item=>item.hand==='L').id))
    .toMatchObject({expectationSource:'reconstructed',extrapolated:true});
+});
+test('the observations-only path matches the full analysis without fitting capacity',()=>{
+ const records=history();
+ for (const hand of ['L','R','pooled']) {
+  const full=buildPerformanceTrendAnalysis(records,['Crusher'],hand);
+  const lean=buildPerformanceObservations(records,['Crusher'],hand);
+  expect(lean.observations).toEqual(full.observations);
+  expect(lean.rows.every(row=>row.Crusher_long===undefined)).toBe(true);
+  const shortByDate=rows=>Object.fromEntries(rows.filter(r=>Number.isFinite(r.Crusher_short)).map(r=>[r.date,r.Crusher_short]));
+  expect(shortByDate(lean.rows)).toEqual(shortByDate(full.rows));
+ }
 });

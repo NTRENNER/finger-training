@@ -4,12 +4,12 @@ import { ResearchView } from '../ResearchView.jsx';
 import { createHistoricalReviewWorker } from '../../model/historicalWorkerClient.js';
 import { evaluateHistorical } from '../../model/historicalEvaluation.js';
 import { recoveryRows } from '../../testHelpers/recoveryRows.js';
-import { buildPerformanceTrendAnalysis } from '../../model/performanceTrendEvidence.js';
+import { buildPerformanceObservations } from '../../model/performanceTrendEvidence.js';
 import { suggestCookedFromClimbs } from '../../model/climbingFatigue.js';
 jest.mock('../../model/historicalWorkerClient.js', () => ({ createHistoricalReviewWorker: jest.fn() }));
 jest.mock('../../model/performanceTrendEvidence.js', () => ({
   ...jest.requireActual('../../model/performanceTrendEvidence.js'),
-  buildPerformanceTrendAnalysis: jest.fn(),
+  buildPerformanceObservations: jest.fn(),
 }));
 jest.mock('recharts', () => {
   const React = require('react');
@@ -22,7 +22,7 @@ jest.mock('recharts', () => {
 
 test('Research passes climbing records through the review into the comparison chart and refreshes the overlay', async () => {
   const date = '2026-08-20';
-  buildPerformanceTrendAnalysis.mockReturnValue({
+  buildPerformanceObservations.mockReturnValue({
     rows: [{ date, timestamp: Date.parse(date), Crusher_long: 2, Crusher_short: -1 }],
     observations: [{
       id: 'crusher-opening-hold', date, timestamp: Date.parse(date), grip: 'Crusher', hand: 'L',

@@ -91,8 +91,8 @@ async function run() {
     }
   }
 
-  // Both compute workers must be available without a network connection.
-  for (const name of ["predictionBuild.worker-", "historicalEvaluation.worker-"]) {
+  // Every compute worker must be available without a network connection.
+  for (const name of ["predictionBuild.worker-", "historicalEvaluation.worker-", "performanceObservations.worker-"]) {
     assert(shellUrls.some(url => url.includes(name)), `missing cached worker: ${name}`);
   }
   await waitForLifecycle("activate");
@@ -110,7 +110,7 @@ async function run() {
       `offline ${pathname} did not fall back to the cached app shell`);
   }
 
-  console.log("Verified app shell, both compute workers, cache upgrades, and offline analysis/research routes");
+  console.log("Verified app shell, all compute workers, cache upgrades, and offline analysis/research routes");
 }
 
 run().catch((error) => {

@@ -241,6 +241,17 @@ function observationFor({ rep, expectedForce, deviation, context, expectationSou
   };
 }
 
+// Opening-hold observations only, for the performance-vs-expected scatter.
+// Skips the whole-curve fits, coverage evidence and leave-one-date stability
+// refits, which the scatter never reads and which dominate the cost.
+export function buildPerformanceObservations(history, grips, hand = 'pooled') {
+  const observations = [];
+  const rows = buildPerformanceTrends(history, grips, hand, { capacity: false, onEvidence: snapshot => {
+    observations.push(...snapshot.observations.map(observationFor));
+  } });
+  return { rows, observations };
+}
+
 // The original builder owns all eligibility, duration/basis guards, causal
 // fits and daily aggregation. Its optional sink supplies those same inputs;
 // this wrapper only annotates them. There is intentionally no activities or

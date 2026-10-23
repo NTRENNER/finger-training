@@ -39,7 +39,8 @@ export const DEFAULT_PERFORMANCE_TREND_MODEL = 'contextOnly';
 
 // The optional read-only evidence sink shares these exact fits and scored holds
 // with the analysis view. It never changes the returned rows or the model.
-export function buildPerformanceTrends(history, grips, hand = 'pooled', {model = DEFAULT_PERFORMANCE_TREND_MODEL, onEvidence = null} = {}) {
+// capacity:false skips the per-date whole-curve fits, which only feed _long.
+export function buildPerformanceTrends(history, grips, hand = 'pooled', {model = DEFAULT_PERFORMANCE_TREND_MODEL, onEvidence = null, capacity = true} = {}) {
   const clean = prepareEvaluationRows(history || []).rows;
   const context = trainingDayContext(clean);
   const eligibleAt = date => freshFitReps(clean.filter(r=>r.date<=date), { includeLaterSessions: true }).filter(r => grips.includes(r.grip)
@@ -93,15 +94,17 @@ export function buildPerformanceTrends(history, grips, hand = 'pooled', {model =
       if (!current.length) continue;
       // Both-hand views require both curves, weighted equally. Extra reps on
       // one hand never change the hand weighting of the capacity index.
-      const models = hands.map(h=>fit(grip,h,nextDate(date)));
-      const scores = models.map(model=>{
-        return model ? computeBalancedCurveScore(model.established) : null;
-      });
-      let score = null;
-      if (scores.every(s=>Number.isFinite(s)&&s>0)) {
-        score = Math.exp(mean(scores.map(Math.log)));
-        if (!baselines.has(grip)) baselines.set(grip,score);
-        row[`${grip}_long`] = (score/baselines.get(grip)-1)*100;
+      let models = null, score = null;
+      if (capacity) {
+        models = hands.map(h=>fit(grip,h,nextDate(date)));
+        const scores = models.map(model=>{
+          return model ? computeBalancedCurveScore(model.established) : null;
+        });
+        if (scores.every(s=>Number.isFinite(s)&&s>0)) {
+          score = Math.exp(mean(scores.map(Math.log)));
+          if (!baselines.has(grip)) baselines.set(grip,score);
+          row[`${grip}_long`] = (score/baselines.get(grip)-1)*100;
+        }
       }
       const observations = [];
       let scored = 0;
