@@ -579,7 +579,7 @@ export function SessionPlanCard({
       const detail = lb.missingHands.length > 0
         ? `missing ${lb.missingHands.join("/")}`
         : lb.unevenRepCounts ? "uneven rep counts" : "measurements were not comparable";
-      return `ladder: last workout incomplete (${detail}) → repeat ${ladder.reps} reps, no advance (${loadStr} ${unit})${raised}${suffix}`;
+      return `ladder: last workout incomplete (${detail}) → repeat ${ladder.reps} reps, no advance (${loadStr} ${unit})${suffix}`;
     }
     if (lb.adjustedSession) {
       const restored = Object.keys(lb.restoredPlanByHand || {}).length > 0;

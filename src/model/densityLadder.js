@@ -245,8 +245,11 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   // Overshoot recalibration (see the constants block): a fresh rep 1 well
   // past T gets no pin; the next workout resolves a heavier curve load.
   // Unlike a shortfall, a softened session still counts: running long on a
-  // lighter load is stronger evidence, not weaker.
-  const overshootHands = requiredHands.filter(h => {
+  // lighter load is stronger evidence, not weaker. An incomplete session does
+  // not: lowering a failed opener's load is the safe direction, raising one
+  // needs the complete set, and an incomplete session's retained target is
+  // not necessarily the load actually held.
+  const overshootHands = incomplete ? [] : requiredHands.filter(h => {
     const openers = (byHand[h] || []).filter(r => Number(r.rep_num ?? 1) === 1);
     const opener = openers[0];
     return openers.length === 1 && isCapacityEvidenceRep(opener)

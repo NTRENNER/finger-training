@@ -584,6 +584,19 @@ describe("overshoot recalibration", () => {
     expect(ladder.decision).not.toBe("recalibrate_up");
   });
 
+  test("an incomplete session never raises the load, though a shortfall still lowers it", () => {
+    // Both-mode with R missing: L's 60 s on a 40 s target would otherwise
+    // have resolved 58.8 → 70.6 kg under an "incomplete, no advance" plan.
+    const long = session({ id: "s1", date: "2026-06-01", T: 40, loadKg: 58.8, times: { L: [60, 30, 20, 15] } });
+    const ladder = computeDensityLadder(long, "Crusher", "power", { expectedHands: ["L", "R"] });
+    expect(ladder).toMatchObject({ decision: "incomplete", loadByHand: { L: 58.8 }, basis: { overshootHands: [] } });
+    expect(resolveDensityLadderLoads(ladder, { L: 75, R: 50 }).L).toBe(58.8);
+    const short = session({ id: "s1", date: "2026-06-01", T: 40, loadKg: 58.8, times: { L: [30, 20, 15, 12] } });
+    const lowered = computeDensityLadder(short, "Crusher", "power", { expectedHands: ["L", "R"] });
+    expect(lowered.decision).toBe("recalibrate");
+    expect(resolveDensityLadderLoads(lowered, { L: 75, R: 50 }).L).toBeLessThan(58.8);
+  });
+
   test("a softened session that runs long still raises the load", () => {
     // 2026-06-12 Crusher L, rated cooked 8: 70.8 s on a 45 s target at 29.4 kg.
     const reps = session({ id: "s1", date: "2026-06-12", T: 45, loadKg: 29.4, cooked: 8,
