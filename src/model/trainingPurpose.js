@@ -3,7 +3,7 @@ import { overshootRaisedHands } from './densityLadder.js';
 // Explain the decision already made; never change the training prescription.
 export function trainingPurpose(rec, ladder = null, ladderLoads = null) {
   if (ladder) {
-    if (['recalibrate', 'down_step'].includes(ladder.decision)) return {label:'Rebuild consistency', text:'Recent efforts did not support the previous load. This session adjusts the load so you can build consistency.'};
+    if (ladder.decision === 'recalibrate') return {label:'Rebuild consistency', text:'Recent efforts did not support the previous load. This session adjusts the load so you can build consistency.'};
     if (ladder.decision === 'recalibrate_up' && overshootRaisedHands(ladder, ladderLoads).length > 0) return {label:'You outperformed the load', text:'Your last first rep ran well past the target, so this session raises the load to match it.'};
     if (ladder.decision === 'advance') return {label:'You hit your target', text:"We'll keep the weight the same and add a rep to consolidate your gains."};
     if (ladder.decision === 'step_load') return {label:'Progress a demonstrated ability', text:'You completed the top rung. Increase the load and restart at fewer reps.'};

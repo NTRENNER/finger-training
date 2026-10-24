@@ -69,7 +69,6 @@ import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import {
   computeDensityLadder, resolveDensityLadderLoads, overshootRaisedHands,
   LADDER_MAX_REPS, LADDER_MIN_REPS, LADDER_LOAD_STEP_FRAC,
-  LADDER_COLLAPSE_STEP_FRAC,
 } from "../../model/densityLadder.js";
 import { today } from "../../util.js";
 import { makeMixedDomainPlan, recommendedMixedDomainZone, MIXED_DOMAIN_REST_S } from '../../model/mixedDomain.js';
@@ -561,10 +560,6 @@ export function SessionPlanCard({
     if (Object.keys(lb.boundedByHand || {}).length) {
       notes.push("pin capped by the engine's load ceiling");
     }
-    const collapsedHands = Object.keys(lb.collapseByHand || {});
-    if (collapsedHands.length && ladder.decision !== "down_step") {
-      notes.push(`${collapsedHands.join("+")} load also stepped down after recovery collapse`);
-    }
     const suffix = notes.length ? ` — ${notes.join("; ")}` : "";
     const repOnes = hands => hands.map(h => `${h} rep 1 ${lb.firstRepSecByHand[h]}s`).join(", ");
     const overshoots = repOnes(overshootRaisedHands(ladder, ladderPlanLoadByHand));
@@ -585,14 +580,6 @@ export function SessionPlanCard({
         ? `missing ${lb.missingHands.join("/")}`
         : lb.unevenRepCounts ? "uneven rep counts" : "measurements were not comparable";
       return `ladder: last workout incomplete (${detail}) → repeat ${ladder.reps} reps, no advance (${loadStr} ${unit})${raised}${suffix}`;
-    }
-    if (ladder.decision === "down_step") {
-      // Collapse down-step (July 2026): reps 2+ decayed below the
-      // personal recovery model's forecast last time, so the load
-      // steps down 10% and the rung holds. Show the worst hand's C so
-      // the claim is inspectable.
-      const worstC = Math.min(...Object.values(lb.collapseByHand || {}).map(c => c.C));
-      return `ladder: last session's reps 2+ decayed to ${Math.round(worstC * 100)}% of your recovery model's forecast → −${Math.round(LADDER_COLLAPSE_STEP_FRAC * 100)}% load (${loadStr} ${unit}), same ${ladder.reps} reps until it's absorbed${suffix}`;
     }
     if (lb.adjustedSession) {
       const restored = Object.keys(lb.restoredPlanByHand || {}).length > 0;

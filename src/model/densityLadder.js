@@ -57,11 +57,6 @@ import { recordedAdjustment } from "./cookedScaling.js";
 // comment below). prescription.js does not import this module, so the
 // dependency is acyclic.
 import { loadBounds, isShortfall, SHORTFALL_TOL } from "./prescription.js";
-// Personal recovery-model forecast (July 2026 — see the COLLAPSE
-// DOWN-STEP comment below). repCurveData imports fatigue/recoveryFit/
-// zones only, so this dependency is acyclic too.
-import { buildPhysModel } from "./repCurveData.js";
-import { predictRepTimes } from "./fatigue.js";
 import { progressionSetEvidence, recordedSessionPrescription } from "./progressionEvidence.js";
 
 export const LADDER_MIN_REPS = 4;
@@ -88,10 +83,9 @@ export const LADDER_RECALIBRATION_STEP_FRAC = 0.05;
 // load until the rung topped out). It takes the curve's load at T, which
 // is already anchored to that rep 1, never below the load just held and
 // at most +20% per session so one big day can't overshoot the other way.
-// The rung is kept. Such a session is also exempt from the collapse
-// down-step: short later reps are expected after a very long rep 1. It
-// applies to softened (adjusted) sessions too: the held load is measured,
-// so running long on it is direct evidence whatever the day's rating was.
+// The rung is kept. It applies to softened (adjusted) sessions too: the
+// held load is measured, so running long on it is direct evidence whatever
+// the day's rating was.
 //
 // Backtest (2026-10-24, opening holds 2026-06 → 10-23): pinned loads
 // overshot 1.25× T in 43% of sessions (36% within 0.8–1.25×), curve
@@ -100,74 +94,22 @@ export const LADDER_RECALIBRATION_STEP_FRAC = 0.05;
 export const LADDER_OVERSHOOT_FRAC = 1.25;
 export const LADDER_OVERSHOOT_MAX_STEP_FRAC = 0.20;
 
-// ── COLLAPSE DOWN-STEP (July 2026, per Nathan) ────────────────
-// The re-pin guard catches OPENER failures; this catches the other
-// failure mode: rep 1 lands fine (often over-pulled) but reps 2+
-// decay far below what the user's own recovery model predicts —
-// the June 2026 pattern where intended strength/endurance sessions
-// ground down into 15-30s efforts at loads too heavy to recover
-// between short rests, and "same weight, more reps" re-pinned the
-// grind forever.
-//
-// Conformance C = mean(actual_i / forecast_i) over reps 2+, where the
-// forecast is the personal recovery model seeded by the session's OWN
-// rep 1 — so C asks "given how rep 1 went, did the rest decay as your
-// physiology says it should?", which is duration- and rest-aware (a
-// 220s session naturally decays to ~25% of target; a 45s session
-// holds ~75-90%). A fixed actual/target threshold can't do this.
-//
-// Backtested on the full history (2026-07-23, leak-free per-date
-// fits): after a session with C < 0.75, the next same-(grip, zone)
-// session at the same-or-higher load repeated the collapse (mean next
-// C 0.69, 14% healthy, n=14), while a lower load restored conformance
-// (mean next C 1.02, 38% fully healthy, n=8); after conforming
-// sessions (C ≥ 0.85), holding or raising load was fine (next C 1.09,
-// n=66). Deterministic response: pin at last load × (1 −
-// LADDER_COLLAPSE_STEP_FRAC) and DON'T advance the rung — absorb the
-// lighter dose first. Repeats until conformance recovers (each
-// collapsed session triggers its own step).
-export const LADDER_COLLAPSE_TOL = 0.75;      // C below this = collapsed
-export const LADDER_COLLAPSE_STEP_FRAC = 0.10; // −10% per collapsed session
-// Need rep 1 + at least this many later reps for a stable C estimate.
-export const LADDER_COLLAPSE_MIN_LATER_REPS = 2;
+// (Collapse down-step removed October 2026, per Nathan. From July it cut
+// a hand's load 10% and held the rung when reps 2+ averaged under 0.75×
+// the personal recovery model's forecast. The forecast drifts optimistic
+// with rep position: within a session, actual/forecast relative to rep 2
+// fell to ×0.87, 0.84, 0.79 and 0.71 at reps 3–6, so 45% of 6-rep sessions
+// "collapsed" against 5–18% at 4–5 reps, and the top rung cut load instead
+// of stepping it. Refitting the model's depletion speed and weights left
+// that drift in place. Judged against the athlete's own residuals per grip,
+// zone and rep, a flagged session no longer predicted trouble at the same
+// load (next C 0.92, 56% healthy, vs 0.98 and 64% unflagged; next rep 1
+// reached T 56% vs 69%). The July evidence for the cut, a repeat collapse
+// at the same load, was that bias carrying into the next session. Load now
+// follows rep 1 (re-pin guard, overshoot) and the last-rep gate decides
+// progress; after gate-passing sessions a +3–8% step held rep 1 in 10 of 11.)
 
 const round1 = (v) => Math.round(v * 10) / 10;
-
-// Decay conformance of one hand's rep sequence vs the personal
-// recovery model, seeded by the sequence's own rep 1 (see the
-// COLLAPSE DOWN-STEP block above). historyBefore = reps strictly
-// before the session, so the model can't be fit on the session it's
-// judging. Returns C (mean actual/forecast over reps 2+) or null when
-// there's too little data / no model to judge with.
-function sessionConformance(historyBefore, hand, grip, reps) {
-  if (!reps || reps.length < 1 + LADDER_COLLAPSE_MIN_LATER_REPS) return null;
-  const rep1 = reps[0];
-  if (!(Number(rep1.actual_time_s) > 0)) return null;
-  let physModel = null;
-  // This model decides the next fresh set's load and rung. Its calibration
-  // must obey the same first-session/first-set boundary as the judged set;
-  // otherwise extra fatigued work can indirectly change the fresh ladder.
-  const freshHistory = firstTrainingSessionRows(historyBefore).filter(isFirstSetRep);
-  try { physModel = buildPhysModel(freshHistory, hand, grip); } catch { physModel = null; }
-  if (!physModel) return null;
-  const evidence = progressionSetEvidence(reps);
-  if (!evidence.complete) return null;
-  const fc = predictRepTimes({
-    numReps: reps.length,
-    firstRepTime: Number(rep1.actual_time_s),
-    restIntervals: evidence.rests,
-    physModel,
-  });
-  if (!fc || fc.length !== reps.length) return null;
-  const ratios = [];
-  for (let i = 1; i < reps.length; i++) {
-    const f = fc[i] || 0;
-    const a = Number(reps[i].actual_time_s);
-    if (f > 0 && a > 0) ratios.push(a / f);
-  }
-  if (ratios.length < LADDER_COLLAPSE_MIN_LATER_REPS) return null;
-  return ratios.reduce((s, x) => s + x, 0) / ratios.length;
-}
 
 // Most recent session for (grip, zone): groups grip-matching reps by
 // session_id (fallback date), keeps the group whose target_duration
@@ -208,7 +150,7 @@ function latestSessionInZone(history, grip, zoneKey) {
 //     T,            // pinned target duration (the previous session's)
 //     reps,         // rep count to prescribe next
 //     loadByHand,   // { L?, R? } observed or explicitly retained base targets
-//     decision,     // "advance" | "repeat" | "step_load" | "down_step"
+//     decision,     // "advance" | "repeat" | "step_load"
 //                   //   | "recalibrate" | "recalibrate_up" | "incomplete"
 //     previousLoadByHand, // prior targets before a ladder change
 //     basis: {      // receipts for the Why line
@@ -376,35 +318,15 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   for (const h of shortfallHands) delete loadByHand[h];
   for (const h of overshootHands) delete loadByHand[h];
 
-  // COLLAPSE DOWN-STEP (see the constants block for rationale +
-  // backtest). Runs only on hands that SURVIVED the re-pin guard —
-  // opener failures are the guard's job; this judges the decay of a
-  // session whose opener was fine. The model is fit on history
-  // strictly before the judged session (leak-free, same as the
-  // backtest), and a collapsed hand pins 10% lighter.
   // Missing hands keep an established prior target when available.
   for (const h of missingHands) {
     const retained = priorLadder?.loadByHand?.[h] ?? priorLadder?.previousLoadByHand?.[h];
     if (retained > 0) { previousLoadByHand[h] = retained; loadByHand[h] = retained; }
   }
-  const collapseByHand = {};
-  for (const h of incomplete || adjustedSession ? [] : Object.keys(loadByHand)) {
-    const C = sessionConformance(historyBefore, h, grip, byHand[h]);
-    if (C != null && C < LADDER_COLLAPSE_TOL) {
-      const from = loadByHand[h];
-      const to = round1(from * (1 - LADDER_COLLAPSE_STEP_FRAC));
-      loadByHand[h] = to;
-      collapseByHand[h] = { C: Math.round(C * 100) / 100, from, to };
-    }
-  }
-  const collapsed = Object.keys(collapseByHand).length > 0;
 
   // Decision. Rep counts are kept inside [MIN, MAX]: a legacy session
   // with fewer than MIN reps just enters the ladder at MIN rather than
-  // skipping rungs, and advance never exceeds MAX. A collapse
-  // overrides advance/step_load — the lighter dose gets absorbed at
-  // the CURRENT rung before the ladder climbs again (and definitely
-  // before any +5% step).
+  // skipping rungs, and advance never exceeds MAX.
   let decision, reps;
   if (shortfallHands.length > 0) {
     decision = "recalibrate";
@@ -419,9 +341,6 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   } else if (adjustedSession) {
     // An easier chosen target is not proof of the same gain at the base load.
     decision = "repeat";
-    reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
-  } else if (collapsed) {
-    decision = "down_step";
     reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
   } else if (gatePassed && prevReps >= LADDER_MAX_REPS) {
     decision = "step_load";
@@ -481,10 +400,6 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       // Hands whose previous rep 1 ran past LADDER_OVERSHOOT_FRAC × T: no
       // pin — the next workout resolves a heavier curve load.
       overshootHands,
-      // Hands whose previous session's reps 2+ decayed below the
-      // personal recovery model's forecast (C < LADDER_COLLAPSE_TOL):
-      // { C, from, to } — pin stepped down 10%, rung not advanced.
-      collapseByHand,
       // Hands whose pin was clamped by the engine bounds: { from, to }.
       boundedByHand,
       expectedHands: requiredHands,

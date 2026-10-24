@@ -1,8 +1,6 @@
 import { computeDensityLadder } from '../densityLadder.js';
 import { progressionSetEvidence } from '../progressionEvidence.js';
 import { sessionAdjustment } from '../cookedScaling.js';
-import { predictRepTimes } from '../fatigue.js';
-import { buildPhysModel } from '../repCurveData.js';
 import { recommendAnotherSet } from '../setRecommendation.js';
 
 const session = (times = [40, 24, 16, 12], options = {}) => {
@@ -65,15 +63,10 @@ test('normal delay and ramp-up preserve measured rest and normal 4–5–6 progr
   }
 });
 
-test('actual rest qualifies the collapse forecast rather than being an adherence gate', () => {
-  const physModel = buildPhysModel([], 'L', 'Crusher');
-  const atFive = predictRepTimes({ numReps: 4, firstRepTime: 40, restSeconds: 5, physModel });
-  expect(ladder(session(atFive, { rest: 5 }))).toMatchObject({ decision: 'repeat', loadByHand: { L: 40 }, basis: { collapseByHand: {} } });
-  const atFifty = predictRepTimes({ numReps: 4, firstRepTime: 40, restSeconds: 50, physModel });
-  const underperforming = atFifty.map((t, i) => i ? t * .7 : t);
-  expect(ladder(session(underperforming, { rest: 50 }))).toMatchObject({ decision: 'down_step', loadByHand: { L: 36 },
-    basis: { collapseByHand: { L: { C: .7 } } } });
-  expect(ladder(session(atFifty, { rest: 50 }))).toMatchObject({ decision: 'advance', reps: 5 });
+test('actual rest is not an adherence gate', () => {
+  for (const rest of [5, 50]) {
+    expect(ladder(session([40, 24, 16, 12], { rest }))).toMatchObject({ decision: 'advance', reps: 5, loadByHand: { L: 40 } });
+  }
 });
 
 test('release not observed or missing modern timing retains the rung without interpreting unknown recovery', () => {

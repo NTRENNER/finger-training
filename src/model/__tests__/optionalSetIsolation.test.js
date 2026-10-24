@@ -141,7 +141,7 @@ describe("the density ladder ignores optional sets", () => {
     expect(ladder([...set1, ...heavy])?.loadByHand?.L).toBe(ladder(set1)?.loadByHand?.L);
   });
 
-  test("a collapsed optional set cannot down-step a strong set 1", () => {
+  test("a collapsed optional set cannot change a strong set 1's ladder", () => {
     const strongSet1 = [30, 25, 20, 15].map((actual_time_s, i) => rep({
       id: `strong-${i}`, set_num: 1, rep_num: i + 1, actual_time_s,
     }));
@@ -154,7 +154,6 @@ describe("the density ladder ignores optional sets", () => {
       reps: result?.reps,
       loadByHand: result?.loadByHand,
       lastRepSec: result?.basis?.lastRepSec,
-      collapseByHand: result?.basis?.collapseByHand,
     });
     const base = ladder(strongSet1);
     expect(base?.decision).toBe("advance");
