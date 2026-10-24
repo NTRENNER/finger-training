@@ -350,3 +350,9 @@
   .builder-modifier-create { grid-template-columns: minmax(0, 1fr); }
   .builder-modifier-create > .builder-primary-action { grid-column: auto; }
 }
+
+/* Set rows wrap on narrow screens, so the column labels above them would
+   no longer line up; the inputs carry their own units there. */
+@media (max-width: 520px) {
+  .session-set-columns { display: none !important; }
+}

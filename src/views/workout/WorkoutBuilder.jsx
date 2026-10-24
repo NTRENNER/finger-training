@@ -315,7 +315,7 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
               <fieldset>
                 <legend>Log</legend>
                 <div className="builder-option-row">
-                  {[{ id: "weight", label: "Weight + reps" }, { id: "reps", label: "Reps" }, { id: "completion", label: "Completion" }].map(item => (
+                  {[{ id: "weight", label: "Weight + reps" }, { id: "reps", label: "Reps" }, { id: "time", label: "Reps × seconds" }, { id: "completion", label: "Completion" }].map(item => (
                     <button type="button" aria-pressed={draft.tracking === item.id} key={item.id} onClick={() => setDraft({ ...draft, tracking: item.id })}>{item.label}</button>
                   ))}
                 </div>

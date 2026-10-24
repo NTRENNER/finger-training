@@ -533,7 +533,11 @@ export const exercises = {
     loggable: true,
     type: "S",
     sets: 4,
-    reps: "5–10 sec",
+    // Timed hold: reps × seconds per set (3 × 10 s). Earlier sets used the
+    // reps box as a rep count, so they keep their reps with no known time.
+    reps: "1",
+    seconds: "5–10",
+    logTime: true,
     logVariant: true,
     variants: ["Tuck", "Advanced tuck", "Single-leg", "Straddle", "Full"],
     logWeight: true,
@@ -602,7 +606,12 @@ export const exercises = {
     loggable: true,
     type: "S",
     sets: 3,
-    reps: "8–10 sec",
+    // Timed hold per side: reps × seconds. Earlier sets put the seconds in
+    // the reps box, so they read as one hold of that length.
+    reps: "1",
+    seconds: "8–10",
+    logTime: true,
+    legacyRepsAreSeconds: true,
     logWeight: true,
     unilateral: true,
     progressionPolicy: "maintain",
@@ -661,7 +670,12 @@ export const exercises = {
     loggable: true,
     type: "S",
     sets: 3,
-    reps: "8–12 sec",
+    // Timed hold: reps × seconds. Earlier sets put the seconds in the reps
+    // box, so they read as one hold of that length.
+    reps: "1",
+    seconds: "8–12",
+    logTime: true,
+    legacyRepsAreSeconds: true,
     logVariant: true,
     variants: ["Knee-supported", "Mid-shin", "Ankle-supported"],
     logWeight: true,

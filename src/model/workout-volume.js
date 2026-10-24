@@ -50,6 +50,66 @@ export function parseRepsCount(repsStr) {
   return Math.round(n);
 }
 
+// ─────────────────────────────────────────────────────────────
+// TIMED HOLDS — reps × seconds per set
+// ─────────────────────────────────────────────────────────────
+// Exercises flagged `logTime` (front lever, Copenhagen plank, heel-hook
+// pull, custom "time" exercises) log a rep count AND the seconds each rep
+// was held: 3 × 10 s. Storage mirrors reps: `seconds`, or `leftSeconds` /
+// `rightSeconds` for unilateral sets.
+//
+// Before seconds existed, exercises flagged `legacyRepsAreSeconds` used
+// the reps box for the hold time (one hold per set, e.g. "8" or the
+// prefilled "8–12 sec"), so a set without a seconds field reads as one
+// rep of that many seconds. Other legacy sets keep their reps and have no
+// known time.
+export function parseSeconds(value) {
+  const n = parseFloat(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function timedHold(set, exDef, side = null) {
+  if (!set || !exDef?.logTime) return null;
+  const repsKey = side ? `${side}Reps` : "reps";
+  const secondsKey = side ? `${side}Seconds` : "seconds";
+  const stored = set[secondsKey];
+  const legacy = (stored == null || stored === "") && exDef.legacyRepsAreSeconds;
+  const seconds = parseSeconds(legacy ? set[repsKey] : stored);
+  return { reps: legacy ? (seconds > 0 ? 1 : 0) : parseRepsCount(set[repsKey]), seconds: seconds || null };
+}
+
+// The reps and seconds a new session starts from: the last session's
+// matching set, read with timedHold (so older seconds-in-reps sets
+// carry forward correctly), else the prescription.
+export function holdTimeSeed(exDef, lastSet) {
+  if (!exDef?.logTime) return {};
+  const out = {};
+  for (const side of exDef.unilateral ? ["left", "right"] : [null]) {
+    const hold = timedHold(lastSet, exDef, side);
+    out[side ? `${side}Reps` : "reps"] = hold?.reps ? String(hold.reps) : (exDef.reps ?? "");
+    out[side ? `${side}Seconds` : "seconds"] = hold?.seconds ? String(hold.seconds) : (exDef.seconds ?? "");
+  }
+  return out;
+}
+
+// Total seconds held across a session's done sets (reps × seconds, both
+// sides for unilateral sets). Null when no set has a known time.
+export function sessionHoldSeconds(sets, exDef) {
+  if (!exDef?.logTime || !Array.isArray(sets)) return null;
+  let total = 0, known = false;
+  for (const set of sets) {
+    if (!set?.done) continue;
+    const sides = exDef.unilateral ? ["left", "right"] : [null];
+    for (const side of sides) {
+      const hold = timedHold(set, exDef, side);
+      if (!hold?.seconds || !hold.reps) continue;
+      total += hold.reps * hold.seconds;
+      known = true;
+    }
+  }
+  return known ? Math.round(total * 10) / 10 : null;
+}
+
 // Effective per-rep load: weight as recorded, plus bodyweight if the
 // exercise is bodyweight-additive. Bodyweight is in display units
 // (already converted by the caller). Returns 0 if both are 0/missing.
@@ -203,7 +263,11 @@ export function buildRepsVariantSeries(sessions, exId, exDef) {
         // Both set schemas: bilateral {reps} and unilateral
         // {leftReps, rightReps} — same shape-handling as the volume
         // helpers above (sidePayloads).
-        for (const side of sidePayloads(t)) reps += parseRepsCount(side.reps);
+        if (exDef?.logTime) {
+          for (const side of exDef.unilateral ? ["left", "right"] : [null]) reps += timedHold(t, exDef, side)?.reps || 0;
+        } else {
+          for (const side of sidePayloads(t)) reps += parseRepsCount(side.reps);
+        }
         const i = ladder.indexOf(t.variant);
         if (i > vIdx) { vIdx = i; variant = t.variant; }
         else if (vIdx < 0 && variant == null && t.variant) variant = t.variant;
@@ -214,6 +278,8 @@ export function buildRepsVariantSeries(sessions, exId, exDef) {
         reps,
         variant,
         variantIdx: vIdx >= 0 ? vIdx : null,
+        // Timed holds chart total seconds held (reps × seconds).
+        ...(exDef?.logTime ? { holdSeconds: sessionHoldSeconds(groupSets, exDef) } : {}),
         workout: s.workout,
         setupSignature,
         setupLabel: modifierSelectionLabel(groupSets[0]),

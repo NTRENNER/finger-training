@@ -115,8 +115,15 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     color: C.text, borderRadius: 6, padding: "4px 7px", fontSize: 14,
     textAlign: "center",
   };
+  // Set-row boxes count their padding in their width so a row's layout
+  // is predictable when it wraps on a phone.
+  const compactInput = width => ({ ...inputStyle, width, boxSizing: "border-box", padding: "4px 3px", fontSize: 13 });
   const repKeys = ex.unilateral ? ["leftReps", "rightReps"] : ["reps"];
-  const requiresReps = !ex.circlesOnly || !!ex.reps || ex.tracking === "reps";
+  // Timed holds (front lever, planks, custom "time" exercises) log the
+  // seconds each rep was held next to the reps: 3 × 10 s.
+  const timeKeys = !ex.logTime ? [] : ex.unilateral ? ["leftSeconds", "rightSeconds"] : ["seconds"];
+  const requiredKeys = [...repKeys, ...timeKeys];
+  const requiresReps = !ex.circlesOnly || !!ex.reps || ex.tracking === "reps" || ex.tracking === "time";
   const resolvedReps = (set, index, key) => {
     const stored = set?.[key];
     if (stored != null && stored !== "") return stored;
@@ -124,6 +131,12 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     if (recommended != null && recommended !== "") return recommended;
     return ex.reps || "";
   };
+  const resolvedSeconds = (set, key) => {
+    const stored = set?.[key];
+    return stored != null && stored !== "" ? stored : (ex.seconds || "");
+  };
+  const resolvedValue = (set, index, key) => timeKeys.includes(key)
+    ? resolvedSeconds(set, key) : resolvedReps(set, index, key);
   const setRepInputRef = (index, key, node) => {
     const refKey = `${index}-${key}`;
     if (node) repInputRefs.current.set(refKey, node);
@@ -138,7 +151,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
       onSetsChange({ sets: next });
       return;
     }
-    const missingKey = repKeys.find(key => parseRepsCount(resolvedReps(current, index, key)) <= 0);
+    const missingKey = requiredKeys.find(key => parseRepsCount(resolvedValue(current, index, key)) <= 0);
     if (missingKey) {
       setRepErrorSet(index);
       repInputRefs.current.get(`${index}-${missingKey}`)?.focus();
@@ -146,21 +159,21 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     }
     const next = [...setsData.sets];
     next[index] = { ...current, done: true };
-    for (const key of repKeys) next[index][key] = String(resolvedReps(current, index, key));
+    for (const key of requiredKeys) next[index][key] = String(resolvedValue(current, index, key));
     setRepErrorSet(null);
     onSetsChange({ sets: next });
   };
   const updateReps = (index, key, value) => {
     const next = [...setsData.sets];
     next[index] = { ...next[index], [key]: value };
-    if (repKeys.every(repKey => parseRepsCount(
-      repKey === key ? value : resolvedReps(next[index], index, repKey)
+    if (requiredKeys.every(requiredKey => parseRepsCount(
+      requiredKey === key ? value : resolvedValue(next[index], index, requiredKey)
     ) > 0)) setRepErrorSet(null);
     onSetsChange({ sets: next });
   };
   const repError = index => repErrorSet === index ? (
     <div role="alert" style={{ color: C.red, fontSize: 11, margin: "2px 0 6px 44px" }}>
-      Enter reps to complete this set.
+      {ex.logTime ? "Enter reps and seconds to complete this set." : "Enter reps to complete this set."}
     </div>
   ) : null;
   const setupModifiers = Array.isArray(ex.setupModifiers) ? ex.setupModifiers : [];
@@ -223,6 +236,31 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
       </div>
     );
   };
+  const secondsInput = (set, index, key, width = 40) => (
+    <>
+      <span style={{ fontSize: 12, color: C.muted }}>×</span>
+      <input
+        ref={node => setRepInputRef(index, key, node)}
+        type="text" inputMode="decimal"
+        aria-label={`Seconds for set ${index + 1}${key === "leftSeconds" ? " left" : key === "rightSeconds" ? " right" : ""}`}
+        onFocus={e => e.target.select()}
+        value={resolvedSeconds(set, key)}
+        onChange={e => updateReps(index, key, e.target.value)}
+        placeholder={ex.seconds || ""}
+        style={{
+          ...compactInput(width),
+          border: `1px solid ${repErrorSet === index && parseRepsCount(resolvedSeconds(set, key)) <= 0 ? C.red : C.border}`,
+        }}
+      />
+      <span style={{ fontSize: 11, color: C.muted }}>s</span>
+    </>
+  );
+  // A new set copies the previous set's hold time, like its variant.
+  const secondsBlank = () => {
+    if (!ex.logTime) return {};
+    const prev = setsData.sets.at(-1) || {};
+    return Object.fromEntries(timeKeys.map(key => [key, prev[key] ?? ex.seconds ?? ""]));
+  };
   const doneBtn = (isDone, onPress, title) => (
     <button onClick={onPress} title={title} style={{
       width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
@@ -243,7 +281,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
   if (ex.circlesOnly && setsData?.sets) {
     // A rep-tracked custom exercise has no rep target until its first
     // session is logged, but that first session still records reps.
-    const showReps = !!ex.reps || ex.tracking === "reps";
+    const showReps = !!ex.reps || ex.tracking === "reps" || ex.tracking === "time";
     return (
       <div style={{
         padding: "12px 0",
@@ -307,6 +345,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                     {showReps && (
                       <span style={{ fontSize: 11, color: C.muted }}>reps</span>
                     )}
+                    {ex.logTime && secondsInput(s, i, "seconds")}
                     <button
                       onClick={() => toggleSetDone(i)}
                       title={`Set ${i + 1}: tap to toggle done`}
@@ -339,7 +378,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
               ))}
               <button
                 onClick={() => onSetsChange({
-                  sets: [...setsData.sets, showReps ? { reps: "", done: false } : { done: false }],
+                  sets: [...setsData.sets, showReps ? { reps: "", ...secondsBlank(), done: false } : { done: false }],
                 })}
                 style={{
                   marginTop: 4, width: "100%", padding: "5px 0",
@@ -373,15 +412,17 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
 
           <div style={{ marginTop: 10 }}>
             {/* Column headers — load column header swaps for band mode. */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
-              <span style={{ fontSize: 11, color: C.muted, width: 36, flexShrink: 0 }}></span>
-              <span style={{ fontSize: 11, color: C.muted, width: 48, textAlign: "center" }}>reps</span>
+            <div className="session-set-columns" style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: C.muted, width: 28, flexShrink: 0 }}></span>
+              <span style={{ fontSize: 11, color: C.muted, width: ex.logTime ? 106 : 40, textAlign: "center" }}>
+                {ex.logTime ? "reps × sec" : "reps"}
+              </span>
               {/* Variant column header (June 2026) — sits between reps
                   and weight to match the input order below. */}
               {ex.logVariant && (
-                <span style={{ fontSize: 11, color: C.muted, width: 104, textAlign: "center" }}>variant</span>
+                <span style={{ fontSize: 11, color: C.muted, width: 96, textAlign: "center" }}>variant</span>
               )}
-              <span style={{ fontSize: 11, color: C.muted, width: ex.logBand ? 192 : 72, textAlign: "center" }}>
+              <span style={{ fontSize: 11, color: C.muted, width: ex.logBand ? 192 : 80, textAlign: "center" }}>
                 {ex.logBand ? "bands" : "weight"}
               </span>
               {prevSets?.length > 0 && (
@@ -433,10 +474,13 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                   return <span style={{ fontSize: 12, color: C.muted, width: 44 }}>{prevShown}</span>;
                 };
                 return (
-                  <div key={sideKey} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: side === "L" ? 4 : 6 }}>
-                    <span style={{ fontSize: 12, color: isExtra ? C.orange : C.muted, width: 36, flexShrink: 0 }}>
+                  // Wraps onto a second line on narrow screens; prev and the
+                  // tick stay together at the right so the tick stays on screen.
+                  <div key={sideKey} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: side === "L" ? 4 : 6 }}>
+                    <span style={{ fontSize: 12, color: isExtra ? C.orange : C.muted, width: 28, flexShrink: 0 }}>
                       {sLabel}
                     </span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                     <input
                       ref={node => setRepInputRef(i, repsKey, node)}
                       type="text" inputMode="numeric"
@@ -446,11 +490,13 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       value={repsVal}
                       onChange={e => updateReps(i, repsKey, e.target.value)}
                       style={{
-                        ...inputStyle, width: 48, fontSize: 13,
+                        ...compactInput(40),
                         border: `1px solid ${repErrorSet === i && parseRepsCount(repsVal) <= 0 ? C.red : C.border}`,
                       }}
                       placeholder={recReps != null ? String(recReps) : (ex.reps || "")}
                     />
+                    {ex.logTime && secondsInput(s, i, sideWord ? `${sideWord}Seconds` : "seconds")}
+                    </span>
                     {/* Per-set variant selector (June 2026). A <select>
                         rather than pill buttons — four leverage rungs
                         with multi-word labels would blow out the row
@@ -473,7 +519,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                           onSetsChange({ sets: next });
                         }}
                         style={{
-                          width: 104, background: C.bg, border: `1px solid ${C.border}`,
+                          width: 96, background: C.bg, border: `1px solid ${C.border}`,
                           color: C.text, borderRadius: 6, padding: "4px 4px", fontSize: 12,
                         }}
                       >
@@ -495,7 +541,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                         }}
                       />
                     ) : (
-                      <>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                         <input
                           type="number" inputMode="decimal"
                           // Select-all on focus — see the reps inputs
@@ -507,25 +553,27 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                             next[i] = { ...next[i], [loadKey]: e.target.value };
                             onSetsChange({ sets: next });
                           }}
-                          style={inputStyle}
+                          style={compactInput(56)}
                           placeholder={recLoad != null ? String(recLoad) : ""}
                         />
                         <span style={{ fontSize: 12, color: C.muted }}>{unit}</span>
-                      </>
+                      </span>
                     )}
-                    {renderPrev()}
-                    {(side === null || side === "R") && doneBtn(
-                      s.done,
-                      () => toggleSetDone(i),
-                      `Set ${i + 1}: tap to toggle done`
-                    )}
-                    {(side === null || side === "R") && isExtra && (
-                      <button
-                        onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
-                        style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1 }}
-                        title="Remove this set"
-                      >−</button>
-                    )}
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                      {renderPrev()}
+                      {(side === null || side === "R") && doneBtn(
+                        s.done,
+                        () => toggleSetDone(i),
+                        `Set ${i + 1}: tap to toggle done`
+                      )}
+                      {(side === null || side === "R") && isExtra && (
+                        <button
+                          onClick={() => onSetsChange({ sets: setsData.sets.filter((_, j) => j !== i) })}
+                          style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1 }}
+                          title="Remove this set"
+                        >−</button>
+                      )}
+                    </span>
                   </div>
                 );
               };
@@ -582,7 +630,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                   }
                   return { reps: ex.reps || "", weight: "", done: false };
                 };
-                const blank = makeBlank();
+                const blank = { ...makeBlank(), ...secondsBlank() };
                 const modifiers = copyModifierSelections(setsData.sets.at(-1));
                 onSetsChange({
                   sets: [...setsData.sets, Object.keys(modifiers).length ? { ...blank, modifiers } : blank],

@@ -62,6 +62,7 @@ import {
   copyModifierSelections,
   filterHistoryForModifierSetup,
 } from "../model/workoutModifiers.js";
+import { holdTimeSeed } from "../model/workout-volume.js";
 import "./workout/WorkoutPlanner.css";
 
 import { recommendNextWorkout } from "../model/supportTraining.js";
@@ -385,8 +386,18 @@ export function WorkoutTab({
         weight: rec?.weight ?? "",
         done: false,
       });
-    });
+    }).map((set, i) => withHoldTime(ex, set, i, latestDoneSets, progressionLog));
     return { sets };
+  };
+
+  // Timed holds carry reps AND seconds forward from the last session in
+  // the same setup (see holdTimeSeed).
+  const withHoldTime = (ex, set, i, latestDoneSets, progressionLog) => {
+    if (!ex.logTime) return set;
+    const source = latestDoneSets[i] ?? latestDoneSets.at(-1);
+    const log = ex.setupModifiers?.length ? filterHistoryForModifierSetup(wLog, ex.id, source) : progressionLog;
+    const doneSets = findLastSessionFor(log, activeId, ex.id)?.exercises?.[ex.id]?.sets;
+    return { ...set, ...holdTimeSeed(ex, doneSets?.[i] ?? doneSets?.at(-1)) };
   };
 
   const seedExercise = ex => {
@@ -589,8 +600,8 @@ export function WorkoutTab({
   // Surface previous session's reps/weights for each exercise so
   // SessionExRow's "prev" column populates. Walks back through wLog
   // for the most recent session containing this exercise id.
-  const prevSetsFor = exId =>
-    (findLastSessionFor(wLog, activeId, exId)?.exercises?.[exId]?.sets || []).map(setSummary);
+  const prevSetsFor = ex =>
+    (findLastSessionFor(wLog, activeId, ex.id)?.exercises?.[ex.id]?.sets || []).map(set => setSummary(set, ex));
 
   const abortSession = () => {
     setSessionActive(false);
@@ -699,7 +710,7 @@ export function WorkoutTab({
                     <SessionExRow
                       ex={ex}
                       unit={unit}
-                      prevSets={prevSetsFor(ex.id)}
+                      prevSets={prevSetsFor(ex)}
                       setsData={exData}
                       onSetsChange={(next) => updateExerciseSets(ex.id, next)}
                       recommendations={recommendations}

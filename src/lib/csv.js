@@ -87,10 +87,10 @@ export function toWorkoutCSV(log, resolveName) {
           const isUni = set.leftReps != null  || set.leftWeight  != null
                      || set.rightReps != null || set.rightWeight != null;
           if (isUni) {
-            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "L", set.leftReps ?? "",  set.leftWeight ?? "",  set.done ? "yes" : "no", "", "", setupLabel, setupJson]);
-            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "R", set.rightReps ?? "", set.rightWeight ?? "", set.done ? "yes" : "no", "", "", setupLabel, setupJson]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "L", set.leftReps ?? "",  set.leftWeight ?? "",  set.done ? "yes" : "no", "", "", setupLabel, setupJson, set.leftSeconds ?? ""]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "R", set.rightReps ?? "", set.rightWeight ?? "", set.done ? "yes" : "no", "", "", setupLabel, setupJson, set.rightSeconds ?? ""]);
           } else {
-            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "",  set.reps ?? "",      set.weight ?? "",      set.done ? "yes" : "no", "", "", setupLabel, setupJson]);
+            rows.push([s.date, s.completedAt || "", s.workout || "", s.sessionNumber || "", exName, i + 1, "",  set.reps ?? "",      set.weight ?? "",      set.done ? "yes" : "no", "", "", setupLabel, setupJson, set.seconds ?? ""]);
           }
         });
       } else {
@@ -109,11 +109,12 @@ export function toWorkoutCSV(log, resolveName) {
           exData.category || "",
           "",
           "",
+          "",
         ]);
       }
     }
   }
-  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "side", "reps", "weight", "done", "minutes", "mobility_category", "setup_modifiers", "setup_modifiers_json"];
+  const header = ["date", "completed_at", "workout", "session_number", "exercise", "set", "side", "reps", "weight", "done", "minutes", "mobility_category", "setup_modifiers", "setup_modifiers_json", "seconds"];
   return [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
 }
 

@@ -29,7 +29,7 @@ import {
 import { useLSValue } from "../hooks/useLSValue.js";
 import {
   sessionExerciseVolume, sessionExerciseEst1RM,
-  isBodyweightAdditive, parseRepsCount,
+  isBodyweightAdditive, parseRepsCount, timedHold,
 } from "../model/workout-volume.js";
 import {
   migrateExerciseId, buildExerciseDefIndex,
@@ -57,7 +57,12 @@ import { ExercisePicker } from "./workout/ExercisePicker.jsx";
 // no recommender hint that might mislead the retrospective log.
 function seedExerciseEmpty(ex) {
   if (!ex.loggable) return { done: false, notes: "" };
-  const sets = Array.from({ length: ex.sets || 1 }, () => {
+  // Timed holds record seconds next to reps.
+  const timeKeys = !ex.logTime ? [] : ex.unilateral ? ["leftSeconds", "rightSeconds"] : ["seconds"];
+  const withTime = set => timeKeys.length
+    ? { ...(ex.circlesOnly ? { reps: "" } : {}), ...set, ...Object.fromEntries(timeKeys.map(key => [key, ""])) }
+    : set;
+  const sets = Array.from({ length: ex.sets || 1 }, () => withTime((() => {
     if (ex.circlesOnly) return ex.reps ? { reps: "", done: false } : { done: false };
     if (ex.logBand) {
       if (ex.unilateral) {
@@ -77,7 +82,7 @@ function seedExerciseEmpty(ex) {
       return { variant: "", reps: "", weight: "", done: false };
     }
     return { reps: "", weight: "", done: false };
-  });
+  })()));
   return { sets };
 }
 
@@ -701,6 +706,15 @@ export function WorkoutHistoryView({
                             </>
                           );
                         };
+                        // Timed holds read "3 × 10 s"; older sets with no
+                        // recorded time keep their reps (see timedHold).
+                        const formatHold = side => {
+                          const hold = timedHold(s, exDef, side);
+                          if (!hold?.reps) return "—";
+                          const w = parseFloat(s[side ? `${side}Weight` : "weight"]);
+                          const body = hold.seconds ? `${hold.reps} × ${hold.seconds} s` : `${hold.reps} reps`;
+                          return isFinite(w) && w > 0 ? `${body} · ${w} ${unit}` : body;
+                        };
                         const formatSide = (reps, weight) => {
                           const r = parseRepsCount(reps);
                           const w = parseFloat(weight);
@@ -725,7 +739,14 @@ export function WorkoutHistoryView({
                             color: s.done ? C.text : C.muted,
                             display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 1,
                           }}>
-                            {isCircles ? (
+                            {exDef?.logTime && exDef.unilateral ? (
+                              <>
+                                <span style={{ fontSize: 11 }}><span style={{ color: C.muted }}>L </span>{formatHold("left")}</span>
+                                <span style={{ fontSize: 11 }}><span style={{ color: C.muted }}>R </span>{formatHold("right")}</span>
+                              </>
+                            ) : exDef?.logTime ? (
+                              <span>{s.variant && formatHold(null) !== "—" ? `${s.variant} · ` : ""}{formatHold(null)}</span>
+                            ) : isCircles ? (
                               <span style={{ fontSize: 12 }}>{s.done ? "✓" : "—"}</span>
                             ) : isUni && isBand ? (
                               <>

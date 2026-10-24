@@ -129,9 +129,15 @@ function groupSeriesBySetup(series) {
 // session logs real weight (see the cards memo).
 function RepsExerciseCard({ ex, series, setupLabel }) {
   if (!series || series.length === 0) return null;
-  const first = series[0];
-  const last  = series[series.length - 1];
-  const dReps = last.reps - first.reps;
+  // Timed holds chart total seconds held (reps × seconds); sessions from
+  // before seconds were recorded have no point.
+  const timed = !!ex.logTime && series.some(p => p.holdSeconds != null);
+  const valueKey = timed ? "holdSeconds" : "reps";
+  const valueUnit = timed ? "s held" : "reps";
+  const measured = timed ? series.filter(p => p.holdSeconds != null) : series;
+  const first = measured[0];
+  const last  = measured[measured.length - 1];
+  const dReps = Math.round((last[valueKey] - first[valueKey]) * 10) / 10;
   const ladderMoved = first.variant && last.variant && first.variant !== last.variant;
   const data = series.map(p => ({ ...p }));
   return (
@@ -142,7 +148,7 @@ function RepsExerciseCard({ ex, series, setupLabel }) {
             {ex.name}{setupLabel ? ` · ${setupLabel}` : ""}
           </div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-            {series.length} session{series.length === 1 ? "" : "s"} · leverage / reps progression
+            {series.length} session{series.length === 1 ? "" : "s"} · leverage / {timed ? "hold time" : "reps"} progression
             {ex.unilateral ? " · unilateral" : ""}
           </div>
         </div>
@@ -152,13 +158,13 @@ function RepsExerciseCard({ ex, series, setupLabel }) {
             {last.variant || "—"}
           </div>
           <div style={{ fontSize: 11, color: C.muted }}>
-            {last.reps} reps last session
+            {last[valueKey]} {valueUnit} last session
           </div>
-          {series.length > 1 && (
+          {measured.length > 1 && (
             <div style={{ fontSize: 11, color: ladderMoved || dReps > 0 ? C.green : dReps < 0 ? C.red : C.muted }}>
               {ladderMoved
                 ? `${first.variant} → ${last.variant} since ${first.date}`
-                : `${dReps > 0 ? "+" : ""}${dReps} reps since ${first.date}`}
+                : `${dReps > 0 ? "+" : ""}${dReps} ${valueUnit} since ${first.date}`}
             </div>
           )}
         </div>
@@ -177,20 +183,20 @@ function RepsExerciseCard({ ex, series, setupLabel }) {
             <YAxis
               stroke={C.purple}
               tick={{ fontSize: 10, fill: C.purple }}
-              width={30}
+              width={timed ? 38 : 30}
               allowDecimals={false}
             />
             <Tooltip
               contentStyle={CHART.tooltip}
               labelStyle={{ color: C.muted }}
               formatter={(value, name, entry) => [
-                `${value} reps${entry?.payload?.variant ? ` · ${entry.payload.variant}` : ""}`,
-                "total reps",
+                `${value} ${valueUnit}${entry?.payload?.variant ? ` · ${entry.payload.variant}` : ""}`,
+                timed ? "total hold time" : "total reps",
               ]}
             />
             <Line
               type="monotone"
-              dataKey="reps"
+              dataKey={valueKey}
               stroke={C.purple}
               strokeWidth={2}
               dot={{ r: 3, fill: C.purple }}
@@ -200,7 +206,7 @@ function RepsExerciseCard({ ex, series, setupLabel }) {
         </ResponsiveContainer>
       </div>
       <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
-        Total done reps per session. Chart switches to weight once you log added load.
+        {timed ? "Seconds held per session (reps × seconds)." : "Total done reps per session."} Chart switches to weight once you log added load.
       </div>
     </Card>
   );

@@ -15,6 +15,7 @@
 //   • findLastSessionFor   — wLog walker for band-mode seeding
 
 import { ROTATION_PIN_KEY } from "../../lib/storage.js";
+import { timedHold } from "../../model/workout-volume.js";
 
 // Count non-pin sessions in the log. Used to assign sessionNumber
 // on save. Counts both legacy and new sessions — sessionNumber is
@@ -33,8 +34,20 @@ export function countSupportSessions(wLog) {
 //     → returns { bands: [...], reps } so the prev pill can render
 //     a swatch stack.
 //   - circles-only: { done } → returns "✓" if done else "".
-export function setSummary(set) {
+//   - timed hold (exDef.logTime): reps × seconds, like "3×10s" or
+//     "3×10s@5", per side for unilateral holds.
+export function setSummary(set, exDef = null) {
   if (set == null) return null;
+  if (exDef?.logTime) {
+    const fmt = side => {
+      const hold = timedHold(set, exDef, side);
+      const weight = set[side ? `${side}Weight` : "weight"];
+      if (!hold?.reps) return "";
+      const body = hold.seconds ? `${hold.reps}×${hold.seconds}s` : `${hold.reps}`;
+      return weight != null && weight !== "" ? `${body}@${weight}` : body;
+    };
+    return exDef.unilateral ? { L: fmt("left"), R: fmt("right") } : fmt(null);
+  }
   const toBandShape = (bands, reps) => {
     const arr = Array.isArray(bands) ? bands : (bands ? [bands] : []);
     if (arr.length === 0 && (reps == null || reps === "")) return "";

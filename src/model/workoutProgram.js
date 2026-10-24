@@ -3,7 +3,7 @@ import {
   workouts as SUPPORT_WORKOUTS,
   STRENGTH_ROTATIONS,
 } from "./supportTraining.js";
-import { parseRepsCount } from "./workout-volume.js";
+import { parseRepsCount, parseSeconds } from "./workout-volume.js";
 import {
   createModifierDefinition,
   sanitizeModifierDefinition,
@@ -88,14 +88,16 @@ export function sanitizeCustomExercise(raw) {
   const stimulus = STIMULUS_OPTIONS.some(item => item.id === raw.stimulus)
     ? raw.stimulus
     : "strength";
-  const tracking = ["weight", "reps", "completion"].includes(raw.tracking)
+  // "time" = reps × seconds per set, for holds (see timedHold).
+  const tracking = ["weight", "reps", "time", "completion"].includes(raw.tracking)
     ? raw.tracking
     : "reps";
   // Sets and reps are optional: a new custom exercise starts blank and its
   // first logged session becomes the template (see learnedCustomExercise).
   const sets = positiveInt(raw.sets, null);
   const reps = tracking === "completion" ? "" : cleanString(raw.reps);
-  const prescription = cleanString(raw.prescription) || formatPrescription(sets, reps);
+  const seconds = tracking === "time" ? cleanString(raw.seconds) : "";
+  const prescription = cleanString(raw.prescription) || formatPrescription(sets, reps, seconds);
   const intent = cleanString(raw.intent) || `${name} for ${stimulus}.`;
   const type = stimulus === "power" ? "P" : "S";
   const setupModifiers = (Array.isArray(raw.setupModifiers) ? raw.setupModifiers : [])
@@ -117,6 +119,7 @@ export function sanitizeCustomExercise(raw) {
     type,
     ...(sets ? { sets } : {}),
     reps,
+    ...(tracking === "time" ? { seconds, logTime: true } : {}),
     ...(tracking === "weight" ? { logWeight: true } : { circlesOnly: true }),
     // Same convention as the built-in power and maintenance work: a fixed
     // dose. Only strength exercises add sets and then load.
@@ -126,7 +129,8 @@ export function sanitizeCustomExercise(raw) {
   };
 }
 
-function formatPrescription(sets, reps) {
+function formatPrescription(sets, reps, seconds = "") {
+  if (sets && reps && seconds) return `${sets} × ${reps} × ${seconds} s`;
   if (sets && reps) return `${sets} × ${reps}`;
   return sets ? `${sets} sets` : "";
 }
@@ -141,9 +145,10 @@ function firstUsableLoggedSets(sessions, exercise, requiresReps) {
       ? done.filter(set => parseRepsCount(set.reps) > 0)
       : done;
     const repCounts = usable.map(set => parseRepsCount(set.reps)).filter(count => count > 0);
+    const secondCounts = usable.map(set => parseSeconds(set.seconds)).filter(count => count > 0);
     if (!usable.length) continue;
     const order = `${session.date}\u0000${session.completedAt || ""}\u0000${session.id || ""}`;
-    if (!first || order < first.order) first = { date: session.date, completed: usable.length, repCounts, order };
+    if (!first || order < first.order) first = { date: session.date, completed: usable.length, repCounts, secondCounts, order };
   }
   return first;
 }
@@ -154,21 +159,26 @@ function firstUsableLoggedSets(sessions, exercise, requiresReps) {
 // target. Completion-only exercises still learn from every completed row.
 // From the next session on, the ordinary progression rules (add sets after
 // clean sessions, then load) run against that target exactly as they do for
-// built-in templates. Anything the user did set is kept.
+// built-in templates. Anything the user did set is kept. Timed holds learn
+// their seconds the same way, from the shortest logged hold.
 export function learnedCustomExercise(exercise, sessions) {
   if (!exercise?.custom) return exercise;
   const requiresReps = exercise.tracking !== "completion";
   const needsReps = requiresReps && !exercise.reps;
-  if (exercise.sets && !needsReps) return exercise;
+  const needsSeconds = exercise.tracking === "time" && !exercise.seconds;
+  if (exercise.sets && !needsReps && !needsSeconds) return exercise;
   const first = firstUsableLoggedSets(sessions, exercise, requiresReps);
   if (!first) return exercise;
   const sets = exercise.sets || first.completed;
   const reps = needsReps ? String(Math.min(...first.repCounts)) : exercise.reps;
+  const seconds = needsSeconds && first.secondCounts.length
+    ? String(Math.min(...first.secondCounts)) : exercise.seconds;
   return {
     ...exercise,
     sets,
     reps,
-    prescription: exercise.prescription || formatPrescription(sets, reps),
+    ...(exercise.tracking === "time" ? { seconds } : {}),
+    prescription: exercise.prescription || formatPrescription(sets, reps, seconds),
     learnedFrom: first.date,
   };
 }
