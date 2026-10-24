@@ -1,5 +1,5 @@
 import { exercises } from "../supportTraining.js";
-import { buildRepsVariantSeries, holdTimeSeed, sessionHoldSeconds, timedHold } from "../workout-volume.js";
+import { buildRepsVariantSeries, holdTimeSeed, isMeasuredSeconds, sessionHoldSeconds, timedHold } from "../workout-volume.js";
 import { createCustomExercise, learnedCustomExercise } from "../workoutProgram.js";
 import { setSummary } from "../../views/workout/workoutHelpers.js";
 import { toWorkoutCSV } from "../../lib/csv.js";
@@ -24,6 +24,12 @@ test("a timed set reads as reps × seconds; older sets are read by what the box 
   expect(timedHold({ reps: "3", seconds: "10" }, { name: "Row" })).toBeNull();
 });
 
+test("only a plain number is a measured hold time; history still reads leniently", () => {
+  for (const v of ["10", "7.5", " 12 "]) expect(isMeasuredSeconds(v)).toBe(true);
+  for (const v of ["5–10", "8-12", "8–12 sec", "0", "", null, "abc"]) expect(isMeasuredSeconds(v)).toBe(false);
+  expect(timedHold({ reps: "3", seconds: "5–10" }, frontLever)).toEqual({ reps: 3, seconds: 5 });
+});
+
 test("hold time totals reps × seconds over done sets, both sides for one-sided holds", () => {
   const set = { reps: "3", seconds: "10", done: true, modifiers: redBand };
   expect(sessionHoldSeconds([set, set, set, { ...set, done: false }], frontLever)).toBe(90);
@@ -31,10 +37,11 @@ test("hold time totals reps × seconds over done sets, both sides for one-sided 
   expect(sessionHoldSeconds([{ reps: "3", done: true }], frontLever)).toBeNull();
 });
 
-test("a new session starts from the last set's reps and seconds, or the prescription", () => {
+test("a new session starts from the last set's reps and seconds; a prescribed range stays blank", () => {
   expect(holdTimeSeed(frontLever, { reps: "3", seconds: "10" })).toEqual({ reps: "3", seconds: "10" });
-  expect(holdTimeSeed(frontLever, { reps: "3" })).toEqual({ reps: "3", seconds: "5–10" });
-  expect(holdTimeSeed(frontLever, undefined)).toEqual({ reps: "1", seconds: "5–10" });
+  expect(holdTimeSeed(frontLever, { reps: "3" })).toEqual({ reps: "3", seconds: "" });
+  expect(holdTimeSeed(frontLever, undefined)).toEqual({ reps: "1", seconds: "" });
+  expect(holdTimeSeed({ ...frontLever, seconds: "20" }, undefined)).toEqual({ reps: "1", seconds: "20" });
   expect(holdTimeSeed(heelHookPull, { leftReps: "8", rightReps: "10" }))
     .toEqual({ leftReps: "1", leftSeconds: "8", rightReps: "1", rightSeconds: "10" });
   expect(holdTimeSeed({ name: "Row" }, { reps: "5" })).toEqual({});

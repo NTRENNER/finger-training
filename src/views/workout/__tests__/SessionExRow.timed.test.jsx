@@ -20,8 +20,12 @@ test("a front lever set takes reps and seconds, and can't be ticked without a ti
     initialSets={[{ reps: "3", seconds: "", variant: "Full", weight: "", done: false }]} />);
   const seconds = screen.getByRole("textbox", { name: "Seconds for set 1" });
   const done = screen.getByTitle("Set 1: tap to toggle done");
-  // Like reps, a blank box shows the prescribed range until edited.
-  expect(seconds).toHaveValue("5–10");
+  // The prescribed range is a placeholder, never an accepted time.
+  expect(seconds).toHaveValue("");
+  expect(seconds).toHaveAttribute("placeholder", "5–10");
+  fireEvent.click(done);
+  expect(screen.getByRole("alert")).toHaveTextContent("Enter reps and seconds");
+  expect(state()[0].done).toBe(false);
 
   fireEvent.change(seconds, { target: { value: "0" } });
   fireEvent.click(done);
@@ -32,6 +36,24 @@ test("a front lever set takes reps and seconds, and can't be ticked without a ti
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   fireEvent.click(done);
   expect(state()[0]).toMatchObject({ reps: "3", seconds: "10", variant: "Full", done: true });
+});
+
+test("a range already in a set (an older draft) can't be completed until a time is typed", () => {
+  render(<StatefulRow ex={exercises.frontLever}
+    initialSets={[{ reps: "3", seconds: "5–10", variant: "Full", weight: "", done: false }]} />);
+  fireEvent.click(screen.getByTitle("Set 1: tap to toggle done"));
+  expect(screen.getByRole("alert")).toHaveTextContent("Enter reps and seconds");
+  expect(state()[0]).toMatchObject({ seconds: "5–10", done: false });
+  fireEvent.change(screen.getByRole("textbox", { name: "Seconds for set 1" }), { target: { value: "8" } });
+  fireEvent.click(screen.getByTitle("Set 1: tap to toggle done"));
+  expect(state()[0]).toMatchObject({ seconds: "8", done: true });
+});
+
+test("an added set copies the previous set's hold time, but not a range", () => {
+  render(<StatefulRow ex={exercises.frontLever}
+    initialSets={[{ reps: "3", seconds: "5–10", variant: "Full", weight: "", done: false }]} />);
+  fireEvent.click(screen.getByRole("button", { name: "+ Set" }));
+  expect(state()[1]).toMatchObject({ seconds: "", done: false });
 });
 
 test("an added set copies the previous set's hold time", () => {

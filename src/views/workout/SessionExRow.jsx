@@ -27,7 +27,7 @@
 // happen sequentially.
 
 import React from "react";
-import { parseRepsCount } from "../../model/workout-volume.js";
+import { isMeasuredSeconds, measuredSecondsOrBlank, parseRepsCount } from "../../model/workout-volume.js";
 import {
   copyModifierSelections,
   modifierSelectionSignature,
@@ -131,12 +131,17 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     if (recommended != null && recommended !== "") return recommended;
     return ex.reps || "";
   };
+  // A prescribed range ("5–10") stays a placeholder; only a plain number
+  // can stand in for an untyped hold time.
   const resolvedSeconds = (set, key) => {
     const stored = set?.[key];
-    return stored != null && stored !== "" ? stored : (ex.seconds || "");
+    return stored != null && stored !== "" ? stored : measuredSecondsOrBlank(ex.seconds);
   };
   const resolvedValue = (set, index, key) => timeKeys.includes(key)
     ? resolvedSeconds(set, key) : resolvedReps(set, index, key);
+  const entered = (set, index, key) => timeKeys.includes(key)
+    ? isMeasuredSeconds(resolvedSeconds(set, key))
+    : parseRepsCount(resolvedReps(set, index, key)) > 0;
   const setRepInputRef = (index, key, node) => {
     const refKey = `${index}-${key}`;
     if (node) repInputRefs.current.set(refKey, node);
@@ -151,7 +156,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
       onSetsChange({ sets: next });
       return;
     }
-    const missingKey = requiredKeys.find(key => parseRepsCount(resolvedValue(current, index, key)) <= 0);
+    const missingKey = requiredKeys.find(key => !entered(current, index, key));
     if (missingKey) {
       setRepErrorSet(index);
       repInputRefs.current.get(`${index}-${missingKey}`)?.focus();
@@ -166,9 +171,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
   const updateReps = (index, key, value) => {
     const next = [...setsData.sets];
     next[index] = { ...next[index], [key]: value };
-    if (requiredKeys.every(requiredKey => parseRepsCount(
-      requiredKey === key ? value : resolvedValue(next[index], index, requiredKey)
-    ) > 0)) setRepErrorSet(null);
+    if (requiredKeys.every(requiredKey => entered(next[index], index, requiredKey))) setRepErrorSet(null);
     onSetsChange({ sets: next });
   };
   const repError = index => repErrorSet === index ? (
@@ -249,7 +252,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
         placeholder={ex.seconds || ""}
         style={{
           ...compactInput(width),
-          border: `1px solid ${repErrorSet === index && parseRepsCount(resolvedSeconds(set, key)) <= 0 ? C.red : C.border}`,
+          border: `1px solid ${repErrorSet === index && !isMeasuredSeconds(resolvedSeconds(set, key)) ? C.red : C.border}`,
         }}
       />
       <span style={{ fontSize: 11, color: C.muted }}>s</span>
@@ -259,7 +262,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
   const secondsBlank = () => {
     if (!ex.logTime) return {};
     const prev = setsData.sets.at(-1) || {};
-    return Object.fromEntries(timeKeys.map(key => [key, prev[key] ?? ex.seconds ?? ""]));
+    return Object.fromEntries(timeKeys.map(key => [key, measuredSecondsOrBlank(prev[key]) || measuredSecondsOrBlank(ex.seconds)]));
   };
   const doneBtn = (isDone, onPress, title) => (
     <button onClick={onPress} title={title} style={{

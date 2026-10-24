@@ -68,6 +68,15 @@ export function parseSeconds(value) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+// A hold time the athlete can log: one plain number. parseSeconds stays
+// lenient for history, but a prescribed range ("5–10") is a placeholder,
+// never a measurement — saved as-is it would read as 5 s and seed the next
+// workout with 5.
+export function isMeasuredSeconds(value) {
+  return /^\s*\d+(?:\.\d+)?\s*$/.test(String(value ?? "")) && parseFloat(value) > 0;
+}
+export const measuredSecondsOrBlank = value => isMeasuredSeconds(value) ? String(value).trim() : "";
+
 export function timedHold(set, exDef, side = null) {
   if (!set || !exDef?.logTime) return null;
   const repsKey = side ? `${side}Reps` : "reps";
@@ -80,14 +89,15 @@ export function timedHold(set, exDef, side = null) {
 
 // The reps and seconds a new session starts from: the last session's
 // matching set, read with timedHold (so older seconds-in-reps sets
-// carry forward correctly), else the prescription.
+// carry forward correctly), else the prescription. A prescribed range is
+// left blank; the row shows it as the placeholder.
 export function holdTimeSeed(exDef, lastSet) {
   if (!exDef?.logTime) return {};
   const out = {};
   for (const side of exDef.unilateral ? ["left", "right"] : [null]) {
     const hold = timedHold(lastSet, exDef, side);
     out[side ? `${side}Reps` : "reps"] = hold?.reps ? String(hold.reps) : (exDef.reps ?? "");
-    out[side ? `${side}Seconds` : "seconds"] = hold?.seconds ? String(hold.seconds) : (exDef.seconds ?? "");
+    out[side ? `${side}Seconds` : "seconds"] = hold?.seconds ? String(hold.seconds) : measuredSecondsOrBlank(exDef.seconds);
   }
   return out;
 }
