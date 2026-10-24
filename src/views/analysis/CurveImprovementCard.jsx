@@ -33,7 +33,7 @@ import { CHART } from '../../ui/chartStyles.js';
 import { HistorySlider } from '../../ui/HistorySlider.jsx';
 import React, { useMemo, useState } from "react";
 import {
-  ResponsiveContainer, LineChart, Line,
+  ResponsiveContainer, LineChart, Line, ReferenceDot,
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import { C } from "../../ui/theme.js";
@@ -51,9 +51,11 @@ import {
   GRIP_BASELINE_DURATION_THRESHOLD,
 } from "../../model/baselines.js";
 import { predForceThreeExp } from "../../model/threeExp.js";
-import { forceComparison, comparisonReps, progressForce } from "../../model/curveComparison.js";
+import {
+  forceComparison, comparisonReps, progressForce, curveEvidence, curveEvidenceDots,
+} from "../../model/curveComparison.js";
 import { ComparisonModeSelector, WeightTile, HoldTimeView, WeightHistoryView } from "./CurveComparisonViews.jsx";
-import { effectiveLoad, freshFitReps } from "../../model/load.js";
+import { curveFitReps, effectiveLoad, freshFitReps } from "../../model/load.js";
 import { buildMeasuredDomainProgress } from "../../model/measuredDomainProgress.js";
 import { ZoneSessionHistoryModal } from "./ZoneSessionHistoryModal.jsx";
 import { PeakForceHistoryModal } from "./PeakForceHistoryModal.jsx";
@@ -401,6 +403,22 @@ function gateGlobalImprovement(imp, maxHoldS) {
   return out;
 }
 
+// The pointed-at rep dot shows its date, duration and load; elsewhere the
+// two curves' values at the hovered duration. Rep dots are reference dots,
+// not a Scatter series: a Scatter takes over the axis tooltip and drops the
+// curves from it, so each dot reports itself through its own pointer events.
+function CurveTooltip({ active, payload, label, format, activeDot }) {
+  const style = { ...CHART.tooltip, padding: "6px 10px", fontSize: 12 };
+  if (activeDot) return <div style={style}>{activeDot.date} · {fmt1(activeDot.x)}s · {format(activeDot.y)}</div>;
+  if (!active || !payload?.length) return null;
+  return <div style={style}>
+    <div>{fmt1(label)}s</div>
+    {payload.map(item => <div key={item.dataKey} style={{ color: item.color }}>
+      {item.name}: {item.value == null ? "—" : format(item.value)}
+    </div>)}
+  </div>;
+}
+
 // Baseline vs Now force-curve chart with a FIXED y-axis (sized once from
 // the tallest curve any slider position can draw, so scrubbing doesn't
 // rescale the axis). tMin..tMax sampled at 80 points.
@@ -415,7 +433,9 @@ function OverlayChart({
   baselineDate,
   nowDate,
   overlay,
+  evidence = [],
 }) {
+  const [activeDot, setActiveDot] = useState(null);
   const tMin = 5;
   const tMax = Math.max(...Object.values(ZONE_REF_T), maxDur || 0);
   const displayForce = force => normalizeOn ? force : toDisp(force, unit);
@@ -434,7 +454,12 @@ function OverlayChart({
     (m, a) => Math.max(m, displayForce(Math.max(predForceThreeExp(a, tMin), 0))),
     normalizeOn ? 0.1 : 1
   );
-  const yDomain = [0, Math.ceil(Math.max(yPeak,...samples.map(p=>p.now || 0)) * 1.1 / axisStep) * axisStep];
+  const dots = curveEvidenceDots(evidence, { nowDate, tMin, tMax, display: displayForce });
+  // A transparent fill keeps a baseline ring hoverable across its middle.
+  const dotShape = (dot, paint) => ({ cx, cy }) => <circle cx={cx} cy={cy} r={4.5} {...paint}
+    style={{ cursor: "pointer" }} onMouseEnter={() => setActiveDot(dot)}
+    onMouseLeave={() => setActiveDot(null)} onClick={() => setActiveDot(dot)} />;
+  const yDomain = [0, Math.ceil(Math.max(yPeak, dots.peak, ...samples.map(p=>p.now || 0)) * 1.1 / axisStep) * axisStep];
 
   return (
     <ResponsiveContainer width="100%" height={200}>
@@ -450,20 +475,19 @@ function OverlayChart({
           width={64}
           unit={normalizeOn ? "" : ` ${unit}`}
         />
-        <Tooltip
-          contentStyle={CHART.tooltip}
-          formatter={(val, name) => [
-            val == null
-              ? "—"
-              : `${normalizeOn ? Number(val).toFixed(2) : fmt1(val)} ${displayUnit}`,
-            name,
-          ]}
-          labelFormatter={(t) => `${fmt1(t)}s`}
-        />
+        <Tooltip content={<CurveTooltip activeDot={activeDot}
+          format={val => `${normalizeOn ? Number(val).toFixed(2) : fmt1(val)} ${displayUnit}`} />} />
         <Line dataKey="past" stroke={C.muted} strokeWidth={2} strokeDasharray="6 4"
           dot={false} connectNulls name={`Baseline (${baselineDate})`} isAnimationActive={false} />
         <Line dataKey="now" stroke={color} strokeWidth={3}
           dot={false} connectNulls name={`Now (${nowDate})`} isAnimationActive={false} />
+        {/* The reps behind each curve: grip-coloured for those since the
+            baseline (up to the Now date), and grey rings on top for the
+            baseline's own window so overlapping points stay readable. */}
+        {dots.since.map((dot, i) => <ReferenceDot key={`since-${i}`} className="curve-dot-since"
+          x={dot.x} y={dot.y} shape={dotShape(dot, { fill: color, fillOpacity: 0.85 })} />)}
+        {dots.baseline.map((dot, i) => <ReferenceDot key={`baseline-${i}`} className="curve-dot-baseline"
+          x={dot.x} y={dot.y} shape={dotShape(dot, { fill: "transparent", stroke: C.muted, strokeWidth: 2 })} />)}
       </LineChart>
     </ResponsiveContainer>
   );
@@ -482,7 +506,7 @@ function GripBlock({
   onZoneSelect = null,
   selectedZoneKey = null,
   mode = "percent", reps = [], staticImprovement = null,
-  history = [], handView = "pooled", onPeakSelect = null,
+  history = [], handView = "pooled", onPeakSelect = null, evidence = [],
 }) {
   const [timeZone, setTimeZone] = useState("power");
   const [weightZone, setWeightZone] = useState("power");
@@ -572,6 +596,7 @@ function GripBlock({
         color={color}
         baselineDate={overlay.baselineDate}
         nowDate={nowDate}
+        evidence={evidence}
       />}
 
       {/* Now slider — scrub the comparison date; tiles + curve follow.
@@ -637,6 +662,17 @@ export function CurveImprovementCard({
     setZoneDetail({ grip, zoneKey, throughDate, measuredOnly });
   };
   const openPeakDetail = (grip, throughDate = null) => setPeakDetail({ grip, throughDate });
+
+  // The reps every curve here is fitted to, drawn as dots under them. In
+  // × BW mode each rep is divided by bodyweight on its own date, the same
+  // way the curves are scaled.
+  const fitReps = useMemo(() => curveFitReps(comparisonHistory), [comparisonHistory]);
+  const evidenceFor = (grip, hand, overlay) => curveEvidence(fitReps, {
+    grip, hand, baselineDate: overlay?.baselineDate ?? null,
+    forceFor: normalizeOn
+      ? rep => effectiveLoad(rep) / (bwOnDate(bwLog, rep.date)?.kg ?? bodyWeight)
+      : effectiveLoad,
+  });
 
   const scaledData = useMemo(() => {
     if (!normalizeOn) {
@@ -803,6 +839,7 @@ export function CurveImprovementCard({
             return (
               <GripBlock key={`${grip}|${handView}`} grip={grip} overlay={ph}
                 mode={comparisonMode} reps={comparisonReps(comparisonHistory, grip, handView)}
+                evidence={evidenceFor(grip, handView, ph)}
                 unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
                 nowIdx={nowIdxByGrip[`${grip}|${handView}`]}
                 onScrub={(g, idx) => scrub(`${g}|${handView}`, idx)}
@@ -862,6 +899,7 @@ export function CurveImprovementCard({
                 return (
                   <GripBlock key={grip} grip={grip} overlay={scaledData.historyOverlay[grip]}
                     mode={comparisonMode} reps={comparisonReps(comparisonHistory, grip)}
+                    evidence={evidenceFor(grip, null, scaledData.historyOverlay[grip])}
                     unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
                     nowIdx={nowIdxByGrip[grip]} onScrub={scrub} divider={divider}
                     onZoneSelect={openZoneDetail}
@@ -907,6 +945,7 @@ export function CurveImprovementCard({
         overlayGrips.has(displayGrip) ? (
           <GripBlock key={displayGrip} grip={displayGrip} overlay={scaledData.historyOverlay[displayGrip]}
             mode={comparisonMode} reps={comparisonReps(comparisonHistory, displayGrip)}
+            evidence={evidenceFor(displayGrip, null, scaledData.historyOverlay[displayGrip])}
             unit={unit} normalizeOn={normalizeOn} maxDur={maxDur}
             nowIdx={nowIdxByGrip[displayGrip]} onScrub={scrub} divider={false}
             onZoneSelect={openZoneDetail}

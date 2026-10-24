@@ -28,7 +28,7 @@
 import { useMemo } from "react";
 import { fitAmpsForPts } from "../model/baselines.js";
 import { buildThreeExpPriors } from "../model/threeExp.js";
-import { effectiveLoad, freshFitReps } from "../model/load.js";
+import { curveFitReps, effectiveLoad } from "../model/load.js";
 
 export function useHistoryOverlay({
   history,
@@ -73,10 +73,7 @@ export function useHistoryOverlay({
       // Fresh + de-duped so the overlay's "now" curve is fit the same
       // way as the baseline / Curve-Improvement / Capacity cards — without
       // this the overlay used raw all-reps and disagreed (e.g. -1% vs +26%).
-      const gripReps = freshFitReps(history).filter(r =>
-        r.grip === g &&
-        effectiveLoad(r) > 0 && r.actual_time_s > 0
-      );
+      const gripReps = curveFitReps(history).filter(r => r.grip === g);
       if (gripReps.length < 3) continue;
       // Restrict the Now slider to dates AT or AFTER the baseline
       // date. Earlier dates produce a partial cumulative fit that

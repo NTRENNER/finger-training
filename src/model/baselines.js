@@ -27,7 +27,7 @@ import {
   buildThreeExpPriors,
 } from "./threeExp.js";
 import { ZONE_KEYS, ZONE_REF_T } from "./zones.js";
-import { effectiveLoad, freshFitReps } from "./load.js";
+import { curveFitReps, effectiveLoad, freshFitReps } from "./load.js";
 
 // Per-zone reference times pulled into a single lookup, indexed by
 // zone key. Keeps the improvement loop tight.
@@ -38,6 +38,21 @@ const REF_T_BY_ZONE = Object.fromEntries(ZONE_KEYS.map(k => [k, ZONE_REF_T[k]]))
 // UI while buildGripBaselines is still waiting for usable data.
 export const GRIP_BASELINE_REP_THRESHOLD = 5;
 export const GRIP_BASELINE_DURATION_THRESHOLD = 3;
+
+// The reps a per-grip (or per-hand) baseline is fitted to: date-ordered
+// curve-fit reps from its start, until there are enough of them across
+// enough target durations. Null while the gate is unmet. The Curve
+// Improvement chart uses the same window to mark the baseline's points.
+export function baselineWindow(repsByDate) {
+  const acc = [];
+  const durs = new Set();
+  for (const r of repsByDate) {
+    acc.push(r);
+    durs.add(r.target_duration);
+    if (acc.length >= GRIP_BASELINE_REP_THRESHOLD && durs.size >= GRIP_BASELINE_DURATION_THRESHOLD) return acc;
+  }
+  return null;
+}
 
 export function gripBaselineProgress(history, grip, hand = null) {
   const durations = new Set();
@@ -222,43 +237,31 @@ export function buildGlobalBaseline(history) {
 export function buildGripBaselines(history, threeExpPriors) {
   const out = {};
   const byGrip = {};
-  for (const r of freshFitReps(history)) {
+  for (const r of curveFitReps(history)) {
     if (!r.grip) continue;
-    if (!(effectiveLoad(r) > 0)) continue;
-    if (!(r.actual_time_s > 0)) continue;
     if (!byGrip[r.grip]) byGrip[r.grip] = [];
     byGrip[r.grip].push(r);
   }
   for (const [grip, reps] of Object.entries(byGrip)) {
     reps.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    const acc = [];
-    const durs = new Set();
-    for (const r of reps) {
-      acc.push(r);
-      durs.add(r.target_duration);
-      if (
-        acc.length >= GRIP_BASELINE_REP_THRESHOLD
-        && durs.size >= GRIP_BASELINE_DURATION_THRESHOLD
-      ) {
-        // LEAK-FREE prior: anchor the baseline toward only the data that
-        // existed when this window closed, not the whole (future-
-        // inclusive) history. Passing the whole-history threeExpPriors
-        // here drags the small, heavily-shrunk baseline UP toward current
-        // strength and erases real improvement. Fall back to the passed
-        // prior if the cutoff somehow yields nothing for this grip.
-        const closeDate = acc.reduce((m, x) => (x.date > m ? x.date : m), acc[0].date);
-        const leakFree = buildThreeExpPriors(history, { upTo: closeDate });
-        const priorsForFit = leakFree.has(grip) ? leakFree : threeExpPriors;
-        const amps = fitAmpsForPts(
-          acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
-          grip,
-          priorsForFit,
-        );
-        const maxHoldS = acc.reduce((m, x) => Math.max(m, x.actual_time_s || 0), 0);
-        if (amps) out[grip] = { date: acc[0].date, amps, maxHoldS };
-        break;
-      }
-    }
+    const acc = baselineWindow(reps);
+    if (!acc) continue;
+    // LEAK-FREE prior: anchor the baseline toward only the data that
+    // existed when this window closed, not the whole (future-
+    // inclusive) history. Passing the whole-history threeExpPriors
+    // here drags the small, heavily-shrunk baseline UP toward current
+    // strength and erases real improvement. Fall back to the passed
+    // prior if the cutoff somehow yields nothing for this grip.
+    const closeDate = acc.reduce((m, x) => (x.date > m ? x.date : m), acc[0].date);
+    const leakFree = buildThreeExpPriors(history, { upTo: closeDate });
+    const priorsForFit = leakFree.has(grip) ? leakFree : threeExpPriors;
+    const amps = fitAmpsForPts(
+      acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
+      grip,
+      priorsForFit,
+    );
+    const maxHoldS = acc.reduce((m, x) => Math.max(m, x.actual_time_s || 0), 0);
+    if (amps) out[grip] = { date: acc[0].date, amps, maxHoldS };
   }
   return out;
 }
@@ -272,41 +275,29 @@ export function buildGripBaselines(history, threeExpPriors) {
 export function buildPerHandGripBaselines(history, threeExpPriors) {
   const out = {};
   const byKey = {};
-  for (const r of freshFitReps(history)) {
+  for (const r of curveFitReps(history)) {
     if (!r.grip || !r.hand || r.hand === "Both") continue;
-    if (!(effectiveLoad(r) > 0)) continue;
-    if (!(r.actual_time_s > 0)) continue;
     const key = `${r.grip}|${r.hand}`;
     if (!byKey[key]) byKey[key] = [];
     byKey[key].push(r);
   }
   for (const [key, reps] of Object.entries(byKey)) {
     reps.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    const acc = [];
-    const durs = new Set();
-    for (const r of reps) {
-      acc.push(r);
-      durs.add(r.target_duration);
-      if (
-        acc.length >= GRIP_BASELINE_REP_THRESHOLD
-        && durs.size >= GRIP_BASELINE_DURATION_THRESHOLD
-      ) {
-        const grip = key.split("|")[0];
-        // Leak-free prior — see buildGripBaselines. The per-hand baseline
-        // window is even smaller, so the future-leak distortion is larger.
-        const closeDate = acc.reduce((m, x) => (x.date > m ? x.date : m), acc[0].date);
-        const leakFree = buildThreeExpPriors(history, { upTo: closeDate });
-        const priorsForFit = leakFree.has(grip) ? leakFree : threeExpPriors;
-        const amps = fitAmpsForPts(
-          acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
-          grip,
-          priorsForFit,
-        );
-        const maxHoldS = acc.reduce((m, x) => Math.max(m, x.actual_time_s || 0), 0);
-        if (amps) out[key] = { date: acc[0].date, amps, maxHoldS };
-        break;
-      }
-    }
+    const acc = baselineWindow(reps);
+    if (!acc) continue;
+    const grip = key.split("|")[0];
+    // Leak-free prior — see buildGripBaselines. The per-hand baseline
+    // window is even smaller, so the future-leak distortion is larger.
+    const closeDate = acc.reduce((m, x) => (x.date > m ? x.date : m), acc[0].date);
+    const leakFree = buildThreeExpPriors(history, { upTo: closeDate });
+    const priorsForFit = leakFree.has(grip) ? leakFree : threeExpPriors;
+    const amps = fitAmpsForPts(
+      acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
+      grip,
+      priorsForFit,
+    );
+    const maxHoldS = acc.reduce((m, x) => Math.max(m, x.actual_time_s || 0), 0);
+    if (amps) out[key] = { date: acc[0].date, amps, maxHoldS };
   }
   return out;
 }

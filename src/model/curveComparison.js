@@ -1,7 +1,7 @@
 import { predForceThreeExp } from "./threeExp.js";
-import { SUPPORT_MIN_HOLD_FRAC } from "./baselines.js";
+import { SUPPORT_MIN_HOLD_FRAC, baselineWindow } from "./baselines.js";
 import { ZONE_REF_T } from "./zones.js";
-import { freshFitReps, sane } from "./load.js";
+import { effectiveLoad, freshFitReps, sane } from "./load.js";
 
 const validAmps = amps => Array.isArray(amps) && amps.length === 3
   && amps.every(n => Number.isFinite(n) && n >= 0) && amps.some(n => n > 0);
@@ -118,4 +118,32 @@ export function forceHistorySeries(overlay, zone, throughDate) {
     rows.set(date, { date, force: validAmps(amps) ? progressForce(overlay,date,duration) : null });
   }
   return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// The points under the Curve Improvement curves: each curve-fit rep (see
+// curveFitReps) at its measured load. `baseline` marks the reps inside the
+// baseline's own window, which both curves rest on; the rest feed only the
+// "Now" fit. Sorted like the baseline builders so the window matches.
+export function curveEvidence(fitReps, { grip, hand = null, baselineDate = null, forceFor = effectiveLoad } = {}) {
+  const reps = fitReps
+    .filter(r => r.grip === grip && (!hand || r.hand === hand))
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const window = baselineDate ? baselineWindow(reps.filter(r => (r.date || "") >= baselineDate)) : null;
+  const inBaseline = new Set(window || []);
+  return reps
+    .map(r => ({ t: Number(r.actual_time_s), f: forceFor(r), date: r.date || "", baseline: inBaseline.has(r) }))
+    .filter(p => Number.isFinite(p.f) && p.f > 0);
+}
+
+// The dots for one slider date. Baseline points always show, like the
+// dashed curve; later points appear once "Now" reaches their date. `peak`
+// covers every point in range so the y-axis never rescales while scrubbing.
+export function curveEvidenceDots(evidence, { nowDate, tMin, tMax, display = f => f }) {
+  const shown = evidence.filter(p => p.t >= tMin && p.t <= tMax);
+  const dot = p => ({ x: p.t, y: display(p.f), date: p.date });
+  return {
+    baseline: shown.filter(p => p.baseline).map(dot),
+    since: shown.filter(p => !p.baseline && p.date <= nowDate).map(dot),
+    peak: shown.reduce((m, p) => Math.max(m, display(p.f)), 0),
+  };
 }

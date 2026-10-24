@@ -21,39 +21,30 @@
 // partial local cache) — the caller then falls back to the stored pin.
 
 import { buildThreeExpPriors } from "./threeExp.js";
-import { fitAmpsForPts } from "./baselines.js";
-import { effectiveLoad, freshFitReps } from "./load.js";
+import { baselineWindow, fitAmpsForPts } from "./baselines.js";
+import { curveFitReps, effectiveLoad } from "./load.js";
 
 export function refitPinnedBaseline(history, grip, startDate, threeExpPriors, { hand = null } = {}) {
   if (!grip || !startDate) return null;
-  const reps = freshFitReps(history).filter(r =>
+  const reps = curveFitReps(history).filter(r =>
     r.grip === grip &&
     (hand == null || r.hand === hand) &&
-    effectiveLoad(r) > 0 && r.actual_time_s > 0 &&
     (r.date || "") >= startDate
   );
-  if (reps.length < 5) return null;
   reps.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-  const acc = [];
-  const durs = new Set();
-  for (const r of reps) {
-    acc.push(r);
-    durs.add(r.target_duration);
-    if (acc.length >= 5 && durs.size >= 3) {
-      // Leak-free prior anchored at the window's close — same contract as
-      // buildGripBaselines, so a re-fit is identical to the original seed
-      // fit under the current model.
-      const closeDate = acc.reduce((m, x) => (x.date > m ? x.date : m), acc[0].date);
-      const leakFree = buildThreeExpPriors(history, { upTo: closeDate });
-      const priorsForFit = leakFree.has(grip) ? leakFree : threeExpPriors;
-      const amps = fitAmpsForPts(
-        acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
-        grip,
-        priorsForFit,
-      );
-      const maxHoldS = acc.reduce((m, x) => Math.max(m, x.actual_time_s || 0), 0);
-      return amps ? { date: acc[0].date, amps, maxHoldS } : null;
-    }
-  }
-  return null;
+  const acc = baselineWindow(reps);
+  if (!acc) return null;
+  // Leak-free prior anchored at the window's close — same contract as
+  // buildGripBaselines, so a re-fit is identical to the original seed
+  // fit under the current model.
+  const closeDate = acc.reduce((m, x) => (x.date > m ? x.date : m), acc[0].date);
+  const leakFree = buildThreeExpPriors(history, { upTo: closeDate });
+  const priorsForFit = leakFree.has(grip) ? leakFree : threeExpPriors;
+  const amps = fitAmpsForPts(
+    acc.map(x => ({ T: x.actual_time_s, F: effectiveLoad(x) })),
+    grip,
+    priorsForFit,
+  );
+  const maxHoldS = acc.reduce((m, x) => Math.max(m, x.actual_time_s || 0), 0);
+  return amps ? { date: acc[0].date, amps, maxHoldS } : null;
 }

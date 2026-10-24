@@ -136,6 +136,13 @@ export function freshFitReps(history, { preserveAllBases = false, includeLaterSe
   return out;
 }
 
+// The points a capacity curve is actually fitted to: fresh opening holds
+// with a usable load and duration. Baselines, the Curve Improvement overlay
+// and the dots drawn under its curves all read this one definition.
+export function curveFitReps(history) {
+  return freshFitReps(history).filter(r => effectiveLoad(r) > 0 && r.actual_time_s > 0);
+}
+
 // A session's OPENING rep — rep 1 of set 1, the fresh effort before any
 // within-session fatigue accumulates. This is the same rep the β
 // learner and the density ladder's re-pin guard read (the cleanest
