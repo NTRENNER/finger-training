@@ -596,3 +596,61 @@ describe('valid opener recalibration survives later recording problems', () => {
     expect(ladder.reps).toBe(5);
   });
 });
+
+describe("overshoot recalibration", () => {
+  const ladderFor = (times, T = 20) => computeDensityLadder(
+    session({ id: "s1", date: "2026-10-23", T, loadKg: 16.8, times: { L: times } }),
+    "Crusher", "power", { expectedHands: ["L"] });
+
+  test("a rep 1 well past the target drops the pin and keeps the rung", () => {
+    // 2026-10-23 Micro: 43.6 s on a 20 s target at 16.8 kg.
+    const ladder = ladderFor([43.6, 21.3, 11.1, 9.7]);
+    expect(ladder).toMatchObject({ decision: "recalibrate_up", reps: 4, previousLoadByHand: { L: 16.8 } });
+    expect(ladder.basis.overshootHands).toEqual(["L"]);
+    expect(ladder.loadByHand.L).toBeUndefined();
+    expect(ladder.basis.collapseByHand).toEqual({});
+  });
+
+  test("short later reps after an overshoot are not treated as a collapse", () => {
+    const steep = [5, 4, 3];
+    expect(ladderFor([24, ...steep])).toMatchObject({ decision: "down_step" });
+    expect(ladderFor([43.6, ...steep])).toMatchObject({ decision: "recalibrate_up", basis: { collapseByHand: {} } });
+  });
+
+  test("a rep 1 within 1.25× the target keeps the ordinary pin", () => {
+    const ladder = ladderFor([24.9, 15, 12, 10]);
+    expect(ladder.basis.overshootHands).toEqual([]);
+    expect(ladder.loadByHand.L).toBe(16.8);
+  });
+
+  test("an interrupted rep 1 cannot trigger an increase", () => {
+    const reps = session({ id: "s1", date: "2026-10-23", T: 20, loadKg: 16.8, times: { L: [43.6, 21.3, 11.1, 9.7] } });
+    reps[0] = { ...reps[0], failure_valid: false, end_reason: "equipment_interruption" };
+    const ladder = computeDensityLadder(reps, "Crusher", "power", { expectedHands: ["L"] });
+    expect(ladder.basis.overshootHands).toEqual([]);
+    expect(ladder.decision).not.toBe("recalibrate_up");
+  });
+
+  test("a softened session that runs long still raises the load", () => {
+    // 2026-06-12 Crusher L, rated cooked 8: 70.8 s on a 45 s target at 29.4 kg.
+    const reps = session({ id: "s1", date: "2026-06-12", T: 45, loadKg: 29.4, cooked: 8,
+      times: { L: [70.8, 40.7, 21.3, 20.8] } });
+    const ladder = computeDensityLadder(reps, "Crusher", "power", { expectedHands: ["L"] });
+    expect(ladder).toMatchObject({ decision: "recalibrate_up", reps: 4, basis: { adjustedSession: true, overshootHands: ["L"] } });
+    expect(ladder.loadByHand.L).toBeUndefined();
+    // A softened session that merely holds its target still repeats.
+    const held = session({ id: "s1", date: "2026-06-12", T: 45, loadKg: 29.4, cooked: 8,
+      times: { L: [50, 40.7, 21.3, 20.8] } });
+    expect(computeDensityLadder(held, "Crusher", "power", { expectedHands: ["L"] }))
+      .toMatchObject({ decision: "repeat", loadByHand: { L: 29.4 } });
+  });
+
+  test("the next load follows the curve, never below the held load and at most +20%", () => {
+    const ladder = { decision: "recalibrate_up", loadByHand: {}, previousLoadByHand: { L: 16.8 },
+      basis: { overshootHands: ["L"], expectedHands: ["L"] } };
+    expect(resolveDensityLadderLoads(ladder, { L: 23.7 }).L).toBe(20.2);
+    expect(resolveDensityLadderLoads(ladder, { L: 18 }).L).toBe(18);
+    expect(resolveDensityLadderLoads(ladder, { L: 15 }).L).toBe(16.8);
+    expect(resolveDensityLadderLoads(ladder, {}).L).toBe(16.8);
+  });
+});

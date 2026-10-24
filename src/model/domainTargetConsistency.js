@@ -19,5 +19,5 @@ export function markUncertainDomainTimes(rows, displayLoad = n => n.toFixed(1)) 
 
 export function progressionLabel(decision) {
   return ({advance:'add a hold', step_load:'increase target', down_step:'ease target',
-    recalibrate:'adjust target', incomplete:'repeat to confirm', repeat:'repeat target'})[decision] || 'progression kept';
+    recalibrate:'adjust target', recalibrate_up:'raise target', incomplete:'repeat to confirm', repeat:'repeat target'})[decision] || 'progression kept';
 }

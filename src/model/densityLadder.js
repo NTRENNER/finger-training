@@ -81,6 +81,25 @@ export const LADDER_LOAD_STEP_FRAC = 0.05;
 // load indefinitely.
 export const LADDER_RECALIBRATION_STEP_FRAC = 0.05;
 
+// ── OVERSHOOT RECALIBRATION (October 2026, per Nathan) ───────
+// The mirror of the re-pin guard. A fresh rep 1 that ran well past T
+// shows the load was too light for this target, so the next workout does
+// NOT re-pin it ("same weight, more reps" would hold a known-too-light
+// load until the rung topped out). It takes the curve's load at T, which
+// is already anchored to that rep 1, never below the load just held and
+// at most +20% per session so one big day can't overshoot the other way.
+// The rung is kept. Such a session is also exempt from the collapse
+// down-step: short later reps are expected after a very long rep 1. It
+// applies to softened (adjusted) sessions too: the held load is measured,
+// so running long on it is direct evidence whatever the day's rating was.
+//
+// Backtest (2026-10-24, opening holds 2026-06 → 10-23): pinned loads
+// overshot 1.25× T in 43% of sessions (36% within 0.8–1.25×), curve
+// loads in 0% (65% within); in every pinned session where the curve was
+// heavier, rep 1 overshot.
+export const LADDER_OVERSHOOT_FRAC = 1.25;
+export const LADDER_OVERSHOOT_MAX_STEP_FRAC = 0.20;
+
 // ── COLLAPSE DOWN-STEP (July 2026, per Nathan) ────────────────
 // The re-pin guard catches OPENER failures; this catches the other
 // failure mode: rep 1 lands fine (often over-pulled) but reps 2+
@@ -190,7 +209,7 @@ function latestSessionInZone(history, grip, zoneKey) {
 //     reps,         // rep count to prescribe next
 //     loadByHand,   // { L?, R? } observed or explicitly retained base targets
 //     decision,     // "advance" | "repeat" | "step_load" | "down_step"
-//                   //   | "recalibrate" | "incomplete"
+//                   //   | "recalibrate" | "recalibrate_up" | "incomplete"
 //     previousLoadByHand, // prior targets before a ladder change
 //     basis: {      // receipts for the Why line
 //       date, prevReps, gateSec, firstRepTargetSec,
@@ -281,6 +300,17 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       && Number(opener.actual_time_s) > 0 && effectiveLoad(opener) > 0
       && isShortfall(opener.actual_time_s, T);
   });
+  // Overshoot recalibration (see the constants block): a fresh rep 1 well
+  // past T gets no pin; the next workout resolves a heavier curve load.
+  // Unlike a shortfall, a softened session still counts: running long on a
+  // lighter load is stronger evidence, not weaker.
+  const overshootHands = requiredHands.filter(h => {
+    const openers = (byHand[h] || []).filter(r => Number(r.rep_num ?? 1) === 1);
+    const opener = openers[0];
+    return openers.length === 1 && isCapacityEvidenceRep(opener)
+      && effectiveLoad(opener) > 0
+      && Number(opener.actual_time_s) > T * LADDER_OVERSHOOT_FRAC;
+  });
   const firstRepSecValues = Object.values(firstRepSecByHand);
   const firstRepSec = firstRepSecValues.length > 0
     ? Math.min(...firstRepSecValues)
@@ -344,6 +374,7 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
   }
   const loadByHand = { ...previousLoadByHand };
   for (const h of shortfallHands) delete loadByHand[h];
+  for (const h of overshootHands) delete loadByHand[h];
 
   // COLLAPSE DOWN-STEP (see the constants block for rationale +
   // backtest). Runs only on hands that SURVIVED the re-pin guard —
@@ -380,6 +411,10 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
     reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
   } else if (incomplete) {
     decision = "incomplete";
+    reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
+  } else if (overshootHands.length > 0) {
+    // The load catches up first; the rung holds until it is absorbed.
+    decision = "recalibrate_up";
     reps = Math.max(LADDER_MIN_REPS, Math.min(LADDER_MAX_REPS, prevReps));
   } else if (adjustedSession) {
     // An easier chosen target is not proof of the same gain at the base load.
@@ -443,6 +478,9 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
       // Hands whose previous rep 1 fell short of T (value = that rep-1
       // time, s): no pin — the next workout resolves a lower load.
       droppedByHand,
+      // Hands whose previous rep 1 ran past LADDER_OVERSHOOT_FRAC × T: no
+      // pin — the next workout resolves a heavier curve load.
+      overshootHands,
       // Hands whose previous session's reps 2+ decayed below the
       // personal recovery model's forecast (C < LADDER_COLLAPSE_TOL):
       // { C, from, to } — pin stepped down 10%, rung not advanced.
@@ -468,6 +506,8 @@ export function computeDensityLadder(history, grip, zoneKey, opts = {}) {
 // Normal ladder hands keep their pins. Recalibrating hands use the
 // newly-fitted curve at the pinned T, with a guaranteed 5% reduction
 // if that fit would otherwise repeat or raise the known-too-high load.
+// Overshooting hands use the curve too, between the load just held and
+// a +20% step.
 // Missing hands in an incomplete Both-mode session use their curve
 // prescription without forcing a reduction (there was no failed load
 // on that hand to calibrate from).
@@ -481,6 +521,7 @@ export function resolveDensityLadderLoads(ladder, curveLoadByHand = {}) {
     ...(ladder.basis?.expectedHands || []),
   ]);
   const shortfallHands = new Set(ladder.basis?.shortfallHands || []);
+  const overshootHands = new Set(ladder.basis?.overshootHands || []);
 
   for (const h of hands) {
     const pinned = Number(ladder.loadByHand?.[h]);
@@ -494,10 +535,22 @@ export function resolveDensityLadderLoads(ladder, curveLoadByHand = {}) {
     if (shortfallHands.has(h) && previous > 0) {
       const ceiling = previous * (1 - LADDER_RECALIBRATION_STEP_FRAC);
       out[h] = round1(curve > 0 ? Math.min(curve, ceiling) : ceiling);
+    } else if (overshootHands.has(h) && previous > 0) {
+      // Never lighter than the load just held; at most one capped step up.
+      const ceiling = previous * (1 + LADDER_OVERSHOOT_MAX_STEP_FRAC);
+      out[h] = round1(curve > 0 ? Math.min(Math.max(curve, previous), ceiling) : previous);
     } else if (curve > 0) {
       out[h] = round1(curve);
     }
   }
 
   return Object.keys(out).length > 0 ? out : null;
+}
+
+// Overshooting hands whose resolved load is above the load just held. The
+// curve can sit at or below it (bounds, an older anchor), and then the load
+// holds and nothing should say it rises.
+export function overshootRaisedHands(ladder, resolvedLoadByHand) {
+  return (ladder?.basis?.overshootHands || []).filter(h =>
+    Number(resolvedLoadByHand?.[h]) > Number(ladder.previousLoadByHand?.[h]));
 }

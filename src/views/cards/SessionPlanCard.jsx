@@ -67,7 +67,7 @@ import { decisiveWhy } from "../../model/coachNotes.js";
 import { capacityMultiplier } from "../../model/cookedScaling.js";
 import { suggestCookedFromClimbs } from "../../model/climbingFatigue.js";
 import {
-  computeDensityLadder, resolveDensityLadderLoads,
+  computeDensityLadder, resolveDensityLadderLoads, overshootRaisedHands,
   LADDER_MAX_REPS, LADDER_MIN_REPS, LADDER_LOAD_STEP_FRAC,
   LADDER_COLLAPSE_STEP_FRAC,
 } from "../../model/densityLadder.js";
@@ -566,17 +566,25 @@ export function SessionPlanCard({
       notes.push(`${collapsedHands.join("+")} load also stepped down after recovery collapse`);
     }
     const suffix = notes.length ? ` — ${notes.join("; ")}` : "";
+    const repOnes = hands => hands.map(h => `${h} rep 1 ${lb.firstRepSecByHand[h]}s`).join(", ");
+    const overshoots = repOnes(overshootRaisedHands(ladder, ladderPlanLoadByHand));
+    const raised = overshoots ? `; ${overshoots} ran well past it, so that hand's load rises` : "";
     if (ladder.decision === "recalibrate") {
       const misses = lb.shortfallHands
         .map(h => `${h} rep 1 ${lb.firstRepSecByHand[h]}s`)
         .join(", ");
-      return `ladder: ${misses} missed the ${lb.firstRepTargetSec}s minimum for a ${ladder.T}s target → next workout lowers load (${loadStr} ${unit}) and repeats ${ladder.reps} reps${suffix}`;
+      return `ladder: ${misses} missed the ${lb.firstRepTargetSec}s minimum for a ${ladder.T}s target → next workout lowers load (${loadStr} ${unit}) and repeats ${ladder.reps} reps${raised}${suffix}`;
+    }
+    if (ladder.decision === "recalibrate_up") {
+      return overshoots
+        ? `ladder: ${overshoots} ran well past the ${ladder.T}s target → load rises to match your curve (${loadStr} ${unit}), same ${ladder.reps} reps${suffix}`
+        : `ladder: ${repOnes(lb.overshootHands)} ran well past the ${ladder.T}s target, but your curve doesn't support more load yet → same load (${loadStr} ${unit}), same ${ladder.reps} reps${suffix}`;
     }
     if (ladder.decision === "incomplete") {
       const detail = lb.missingHands.length > 0
         ? `missing ${lb.missingHands.join("/")}`
         : lb.unevenRepCounts ? "uneven rep counts" : "measurements were not comparable";
-      return `ladder: last workout incomplete (${detail}) → repeat ${ladder.reps} reps, no advance (${loadStr} ${unit})${suffix}`;
+      return `ladder: last workout incomplete (${detail}) → repeat ${ladder.reps} reps, no advance (${loadStr} ${unit})${raised}${suffix}`;
     }
     if (ladder.decision === "down_step") {
       // Collapse down-step (July 2026): reps 2+ decayed below the
@@ -826,7 +834,7 @@ export function SessionPlanCard({
         const recommendedRow = rows.find(row => row.key === recommendedZone);
         const recLadder = isOverridden ? recommendedRow?.ladder : ladder;
         const recommendedLoads = isOverridden ? recommendedRow?.resolvedLoads : ladderPlanLoadByHand;
-        const purpose = rec.peakTest ? { label: 'Measure your peak', text: 'Three brief pulls per hand help us measure your maximum force.' } : trainingPurpose(rec, recLadder);
+        const purpose = rec.peakTest ? { label: 'Measure your peak', text: 'Three brief pulls per hand help us measure your maximum force.' } : trainingPurpose(rec, recLadder, recommendedLoads);
         const recT = recLadder ? recLadder.T : rec.T;
         let recLoadKg, recL, recR;
         if (recLadder && recommendedLoads) {
