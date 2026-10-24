@@ -32,11 +32,18 @@ rep before any prompt could appear.
 
 - Access is read-only: SELECT only. Never write, delete, or migrate without
   asking first.
-- Several user accounts share the tables. Always filter to the owner's account
-  (the email is in `CLAUDE.local.md`), for example
+- Several user accounts share the tables. When diagnosing one person's
+  sessions or prescriptions, filter to that account (the owner's email is in
+  `CLAUDE.local.md`), for example
   `with me as (select id from auth.users where email = '…') … where r.user_id = me.id`.
-  Unfiltered queries have already produced a wrong diagnosis. Never surface
-  other users' data.
+  Unfiltered queries have already produced a wrong diagnosis.
+- Model work may pool every account. The current users have agreed that
+  their data is pooled to improve prescriptions (a formal data policy will
+  follow as the user base grows). Keep each account separate inside the
+  analysis (fits, backtests, and holdouts are per athlete), and report only
+  aggregates: never one person's records, email, or identity.
+- Rep exports stay out of git (`scripts/data/` is ignored). Scripts and
+  aggregate results, such as fitted population defaults, belong in the repo.
 
 ## Rep history
 
