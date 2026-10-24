@@ -186,7 +186,7 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
     .sort((a, b) => b.days - a.days);
 
   // Recovery — the marquee honesty signal.
-  let recovery = { level: "unknown", label: null, guidanceAction: null };
+  let recovery = { level: "unknown", label: null, guidanceAction: null, why: null };
   try {
     const ds = deloadStatus(history, workoutSessions, { today: refDate, activities });
     let guidanceAction = null;
@@ -194,7 +194,8 @@ export function gatherSignals(history = [], activities = [], workoutSessions = [
       const g = buildDeloadGuidance(ds.deload.severity, history, { today: refDate });
       guidanceAction = g ? g.action : null;
     }
-    recovery = { level: ds.level, label: ds.label, guidanceAction };
+    const why = ["local_concern", "systemic_concern"].includes(ds.state) ? ds.deload?.why ?? null : null;
+    recovery = { level: ds.level, label: ds.label, guidanceAction, why };
   } catch { /* leave unknown: missing computation is not reassuring evidence */ }
 
   const finger = {
@@ -235,7 +236,7 @@ export function assembleReview(signals) {
       : `First ${where} PR — you sent ${p.grade}. Badge earned.` });
   }
   for (const b of finger.ladderBumps) {
-    wins.push({ kind: "win", text: `You earned a load bump on ${b.grip} ${b.T}s — six clean reps, so the weight steps up (+5%). Progress by the book.` });
+    wins.push({ kind: "win", text: `You earned a load bump on ${b.grip} ${b.T}s — six clean reps, so the weight steps up (+5%).` });
   }
   for (const [grip, c] of Object.entries(finger.curveByGrip)) {
     if (c.weekDelta != null && c.weekDelta >= CURVE_TICK_PP) {
@@ -243,22 +244,19 @@ export function assembleReview(signals) {
     }
   }
 
-  // CONCERNS — recovery is the marquee honest signal.
-  if (recovery.level === "red") {
-    concerns.push({ kind: "concern", text: recovery.guidanceAction
-      ? `${recovery.label}. ${recovery.guidanceAction}`
-      : `${recovery.label} — your cross-grip recovery is down. Take an easier week.` });
-  } else if (recovery.level === "yellow") {
-    concerns.push({ kind: "concern", text: recovery.guidanceAction
-      ? `${recovery.label}. ${recovery.guidanceAction}`
-      : `${recovery.label}. Consider less hard work and reassess with a comparable first set when you feel ready.` });
+  // CONCERNS — recovery first. Each line states what was measured; it does
+  // not tell the athlete what to do (October 2026, less is more).
+  if (recovery.level === "red" || recovery.level === "yellow") {
+    const detail = recovery.why || (recovery.level === "red" ? "Your cross-grip recovery is down." : null);
+    const parts = [detail, recovery.guidanceAction].filter(Boolean).join(" ");
+    concerns.push({ kind: "concern", text: parts ? `${recovery.label} — ${parts}` : `${recovery.label}.` });
   }
   for (const g of finger.staleGrips.slice(0, 2)) {
-    concerns.push({ kind: "concern", text: `${g.grip} has gone quiet — ${g.days} days since you last trained it. Worth a session before the curve drifts.` });
+    concerns.push({ kind: "concern", text: `${g.grip} has gone quiet — ${g.days} days since you last trained it.` });
   }
   for (const w of support.staleWorkouts.slice(0, 1)) {
     concerns.push({ kind: "concern", staleWorkout: w,
-      text: `${w.label} hasn't come up in ${w.days} days. If it keeps slipping you'll lose that stimulus.` });
+      text: `${w.label} hasn't come up in ${w.days} days.` });
   }
 
   // CONTEXT — one neutral consistency line, framed by recovery.
@@ -282,13 +280,13 @@ export function assembleReview(signals) {
   } else if (wins.length) {
     headline = wins.length === 1 ? `Strong week — you've got a win to bank.` : `Big week — ${wins.length} things went right.`;
   } else if (recovery.level === "red") {
-    headline = `Time to back off — recovery says deload.`;
+    headline = `Recovery says deload.`;
   } else if (recovery.level === "yellow") {
-    headline = `Solid week, but keep an eye on recovery.`;
+    headline = `Solid week; recovery is softening.`;
   } else if (concerns.length) {
     headline = `Decent week, with one thing to tidy up.`;
   } else {
-    headline = `Steady, consistent week — nothing to flag. Keep the rhythm.`;
+    headline = `Steady, consistent week — nothing to flag.`;
   }
 
   const points = [...wins, ...concerns.slice(0, 2), ...info.slice(0, 1)];
@@ -604,16 +602,16 @@ export function assembleCheckIn(signals) {
   const recoveryConcern = recovery.level === 'red' || recovery.level === 'yellow';
   const mergedRecoveryVolume = rampDrop && recoveryConcern && recovery.label
     ? (recovery.level === "red"
-      ? `Volume fell to ${volumeRead} this week. Rep 2 recovered less than expected after the rest in recent comparable sessions; reduced volume alone cannot tell us whether you have recovered. Reassess when you feel ready.`
-      : `Volume was already ${volumeRead} this week. Keep the earlier recovery signal in context and reassess with a comparable first set when you feel ready.`)
+      ? `Volume fell to ${volumeRead} this week. Rep 2 recovered less than expected after the rest in recent comparable sessions; reduced volume alone cannot tell us whether you have recovered.`
+      : `Volume was already ${volumeRead} this week, after the earlier recovery signal.`)
     : null;
   const reducedVolumeWithinRange = rampDrop && recovery.level === "green"
-    ? `Volume fell to ${volumeRead} this week. Recent comparable sets stayed within your recorded recovery range; use that alongside how you feel when planning the next session.`
+    ? `Volume fell to ${volumeRead} this week. Recent comparable sets stayed within your recorded recovery range.`
     : null;
   const compactRecoveryVolume = rampDrop && recoveryConcern && recovery.label
     ? (recovery.level === "red"
-      ? `Volume fell to ${volumeRead}. Earlier sets were below expected; reassess when you feel ready.`
-      : `Volume was already ${volumeRead}. Reassess the earlier recovery signal when you feel ready.`)
+      ? `Volume fell to ${volumeRead}. Earlier sets were below expected.`
+      : `Volume was already ${volumeRead}, after the earlier recovery signal.`)
     : null;
   const compactPoints = compactRecoveryVolume
     ? digest.points.map(p =>
@@ -693,16 +691,15 @@ export function assembleCheckIn(signals) {
   }
 
   // FOCUS — at most 3 total. Grip-level finger items first (engine-
-  // owned); on a busy week the workout nudge takes the last slot:
-  // acknowledge the piecemeal effort (rhetorical, coach-voice), then
-  // name the exercises most at risk of going cold or regressing.
+  // owned); on a busy week the workout nudge takes the last slot and
+  // names the exercises most at risk of going cold or regressing.
   const focus = (focusCandidates || []).map(f => f.text);
   if (supportNudge && supportNudge.picks.length) {
     const pickStr = supportNudge.picks.map(pk =>
       `${pk.name} (${pk.regressing ? "trending down" : `${pk.daysSince}d idle`})`
     ).join(", ");
     const powerLed = supportNudge.picks[0] && supportNudge.picks[0].windowDays <= 10 && !supportNudge.picks[0].regressing;
-    let nudgeText = `No full A/B/C workout this week, but you got pieces in — busy stretch? That's the right instinct. Next week, try to get: ${pickStr}.`;
+    let nudgeText = `No full A/B/C workout this week, but you got pieces in. Most at risk of going cold: ${pickStr}.`;
     if (powerLed) nudgeText += " Power qualities fade fastest, which is why the explosive work leads.";
     if (focus.length >= 3) focus.length = 2;   // nudge takes the third slot
     focus.push(nudgeText);

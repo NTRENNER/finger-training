@@ -25,7 +25,6 @@
 // without driving the SessionPlanCard render tree.
 
 import { effectiveLoad } from "./load.js";
-import { recoveryCoachSignals, GAP_NOISE_BAND } from "./recoveryDynamics.js";
 
 // ── Thresholds ────────────────────────────────────
 // Adherence: nag only when the current gap is well past the user's OWN
@@ -85,7 +84,7 @@ export function adherenceNote(history, todayStr) {
     const medStr = Math.round(med);
     return {
       key: "adherence", tone: "warn",
-      text: `It's been ${sinceLast} days since your last finger session — you usually train every ~${medStr}. Ease back in rather than making up for lost time.`,
+      text: `It's been ${sinceLast} days since your last finger session — you usually train every ~${medStr}.`,
     };
   }
   return null;
@@ -117,13 +116,13 @@ export function volumeRampNote(history, todayStr) {
   if (ratio >= RAMP_SPIKE_RATIO) {
     return {
       key: "ramp-spike", tone: "warn", ratio,
-      text: `This week's finger volume is running ~${ratio.toFixed(1)}× your monthly average — tendons adapt slower than muscles, so ramp gently.`,
+      text: `This week's finger volume is running ~${ratio.toFixed(1)}× your monthly average.`,
     };
   }
   if (ratio <= RAMP_DROP_RATIO) {
     return {
       key: "ramp-drop", tone: "info", ratio,
-      text: `This week's volume is well under your monthly norm (~${Math.round(ratio * 100)}%). If life got busy, a lighter session still protects the base you've built.`,
+      text: `This week's volume is well under your monthly norm (~${Math.round(ratio * 100)}%).`,
     };
   }
   return null;
@@ -146,77 +145,30 @@ export function trendNote(dates, fitScoreAt) {
   if (pct <= TREND_DOWN_PCT) {
     return {
       key: "trend-down", tone: "warn",
-      text: `Modeled capacity has slipped ~${Math.abs(pct)}% over your last ${TREND_SESSIONS} sessions — fatigue, sleep, or missed load can all do this. Worth a fresher, lighter day.`,
+      text: `Modeled capacity has slipped ~${Math.abs(pct)}% over your last ${TREND_SESSIONS} sessions.`,
     };
   }
   if (pct >= TREND_UP_PCT) {
     return {
       key: "trend-up", tone: "good",
-      text: `Up ~${pct}% over your last ${TREND_SESSIONS} sessions — the progression is landing.`,
+      text: `Modeled capacity is up ~${pct}% over your last ${TREND_SESSIONS} sessions.`,
     };
   }
   return null;
 }
 
-// ── Per-grip recovery note (Aug 2026) ────────────────────────
-// Complements the cross-grip deload detector, which cannot catch one grip
-// slipping and does not provide reassurance. For the most salient grip this
-// note does both:
-//   • EARLY-WARN when a grip's recent modeled recovery gap sits below
-//     the noise band (recovering worse than the model predicts) — a
-//     grip-specific fatigue sign before the systemic gauge trips.
-//   • REASSURE when a grip's rep-duration ratio has drifted down but the
-//     gap is still within the band — expected under progressive load,
-//     so the declining line isn't misread as fatigue.
-// Consumes the compact signals from recoveryCoachSignals (percentage
-// points). Pure over the injected array.
-export const RECOVERY_BAND_PP    = Math.round(GAP_NOISE_BAND * 100); // descriptive model-gap band
-export const RECOVERY_DECLINE_PP = -8;  // smoothed duration ratio dropped ≥ this to reassure
-
-export function recoveryNote(signals) {
-  if (!Array.isArray(signals) || signals.length === 0) return null;
-  // Early-warn: the grip whose recent gap is furthest below the band.
-  const slipping = signals
-    .filter(s => Number.isFinite(s.recentGapPct) && s.recentGapPct <= -RECOVERY_BAND_PP)
-    .sort((a, b) => a.recentGapPct - b.recentGapPct);
-  if (slipping.length) {
-    const s = slipping[0];
-    return {
-      key: "recovery-warn", tone: "warn",
-      text: `Between-rep recovery on ${s.grip} was ~${Math.abs(s.recentGapPct)}pp under the model across comparable first sets on separate days. Consider less hard work alongside how you feel; this approximate trend does not establish broader fatigue.`,
-    };
-  }
-  // Reassure: biggest recovery decline that's still tracking the model.
-  const declining = signals
-    .filter(s => Number.isFinite(s.recoveryDeltaPct) && s.recoveryDeltaPct <= RECOVERY_DECLINE_PP
-      && Number.isFinite(s.recentGapPct) && Math.abs(s.recentGapPct) < RECOVERY_BAND_PP)
-    .sort((a, b) => a.recoveryDeltaPct - b.recoveryDeltaPct);
-  if (declining.length) {
-    const s = declining[0];
-    return {
-      key: "recovery-ok", tone: "info",
-      text: `Your ${s.grip} rep-time retention has drifted down across comparable first sets, but it's still tracking the nonlinear fatigue model. That change alone does not establish fatigue or confirm today's recovery.`,
-    };
-  }
-  return null;
-}
+// (Per-grip recovery note removed October 2026: it restated the recovery
+// banner's finding from the same model and added advice to it.)
 
 // Priority-ordered assembly: regressions first, then workload warnings,
-// then adherence, then the pat on the back. At most two notes so the
-// card coaches instead of lecturing.
-const PRIORITY = ["trend-down", "recovery-warn", "ramp-spike", "adherence", "ramp-drop", "recovery-ok", "trend-up"];
+// then adherence, then the gains. At most two notes.
+const PRIORITY = ["trend-down", "ramp-spike", "adherence", "ramp-drop", "trend-up"];
 
-export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreAt = null, recoverySignals = null } = {}) {
-  // Injectable so a caller with memoized fits can pass its own; else
-  // compute internally from history (guarded — the fits can throw on
-  // sparse data). buildCoachNotes already receives history.
-  let recSignals = recoverySignals;
-  if (recSignals == null) { try { recSignals = recoveryCoachSignals(history, { todayStr }); } catch { recSignals = []; } }
+export function buildCoachNotes(history, { todayStr, gripDates = null, fitScoreAt = null } = {}) {
   const candidates = [
     adherenceNote(history, todayStr),
     volumeRampNote(history, todayStr),
     trendNote(gripDates, fitScoreAt),
-    recoveryNote(recSignals),
   ].filter(Boolean);
   candidates.sort((a, b) => PRIORITY.indexOf(a.key) - PRIORITY.indexOf(b.key));
   // Adherence already explains an empty week — don't also show the drop.

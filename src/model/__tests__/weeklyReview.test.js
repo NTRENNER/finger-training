@@ -57,13 +57,13 @@ describe("assembleReview", () => {
     expect(c.text).toMatch(/limit finger training/);
   });
 
-  test("yellow recovery → softening headline", () => {
-    const r = assembleReview(makeSignals({ recovery: { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null } }));
-    expect(r.headline).toMatch(/eye on recovery/i);
+  test("yellow recovery → softening headline, the measured claim, no advice", () => {
+    const why = "Rep 2 recovered less than expected after the rest in your last 2 comparable Crusher sessions.";
+    const r = assembleReview(makeSignals({ recovery: { level: "yellow", label: "Recovery softening", guidanceAction: null, why } }));
+    expect(r.headline).toBe("Solid week; recovery is softening.");
     const concern = r.points.find(p => p.kind === "concern").text;
-    expect(concern).toMatch(/softening/i);
-    expect(concern).toMatch(/reassess with a comparable first set when you feel ready/i);
-    expect(concern).not.toMatch(/until.*green/i);
+    expect(concern).toBe(`Recovery softening — ${why}`);
+    expect(concern).not.toMatch(/consider|reassess|how you feel|until.*green/i);
   });
 
   test("stale grip surfaces as a concern", () => {

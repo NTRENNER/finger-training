@@ -631,7 +631,7 @@ export function SessionPlanCard({
   const pickIsShort = activeT != null && activeT <= FRESH_TEST_SHORT_T_MAX;
   if (pickIsShort) {
     if (cookedSuggestion && cookedSuggestion.todayFatigue != null && cookedSuggestion.cooked >= 4) {
-      detailParts.push("⚠️ you've climbed today — a max effort now will read low; consider a fresh day");
+      detailParts.push("⚠️ you've climbed today — a max effort now will read low");
     } else {
       detailParts.push("do this fresh — before climbing — so it anchors the curve's top end honestly");
     }

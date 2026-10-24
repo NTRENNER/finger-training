@@ -29,7 +29,6 @@ import { firstSessionEvidence } from "./firstSessionEvidence.js";
 // Pure functions; no React, no Supabase. Tested in isolation.
 
 import { predictRepTimes } from "./fatigue.js";
-import { buildPhysModel } from "./repCurveData.js";
 
 // Observed rep-duration-retention ratio, computed from a session's
 // rep records. Rep 1 always anchors at 1.0; subsequent reps return
@@ -291,8 +290,7 @@ export function withRollingMean(trend, window = 3) {
 }
 
 // The "matches model" band for the recovery CHART (shaded region + raw
-// dot / smoothed-line context) and the per-grip COACHING early-warn.
-// Both read the 3-session SMOOTHED gap, so they share this one band.
+// dot / smoothed-line context), read against the 3-session SMOOTHED gap.
 //
 // Calibrated on a time-separated holdout of the July 2026 nonlinear
 // constant-force solver over ~5 months of real sessions (reproduced by
@@ -307,49 +305,3 @@ export function withRollingMean(trend, window = 3) {
 // in deload.js. Don't collapse the two — they're calibrated separately.
 export const GAP_NOISE_BAND = 0.15;
 
-
-// ───────────────────────────────────────────────────────────────
-// COACHING SIGNALS — compact per-grip recovery read for coachNotes
-// ───────────────────────────────────────────────────────────────
-// A descriptive per-grip companion to the held-out deload assessment.
-// Use the same first-session/set context and independent dates. It reports
-// the recent smoothed model gap
-// (percentage points — negative = recovering worse than predicted) and
-// how far the smoothed recovery FRACTION has drifted over the last
-// `window` points. Self-contained (builds its own per-grip physModel)
-// so the caller just passes history.
-export const RECOVERY_COACH_MIN_POINTS = 4;   // independent dates
-export const RECOVERY_TREND_WINDOW     = 3;   // smoothed now vs this many points back
-export const RECOVERY_COACH_STALE_DAYS = 14;
-
-export function recoveryCoachSignals(history, {
-  minPoints = RECOVERY_COACH_MIN_POINTS,
-  window = RECOVERY_TREND_WINDOW,
-  todayStr = null,
-} = {}) {
-  if (!Array.isArray(history) || history.length === 0) return [];
-  const ref = todayStr || history.map(r => r?.date).filter(Boolean).sort().at(-1);
-  const scopedHistory = recoveryReadinessHistory(history.filter(r => r?.date && r.date <= ref));
-  const grips = [...new Set(scopedHistory.map(r => r.grip).filter(Boolean))];
-  const out = [];
-  for (const grip of grips) {
-    // Seed the physModel with whichever hand actually has reps for this
-    // grip; recovery taus are grip-level so the hand barely moves the gap.
-    const hand = scopedHistory.some(r => r.grip === grip && r.hand === "R" && Number(r.actual_time_s) > 0) ? "R" : "L";
-    let physModel = null;
-    try { physModel = buildPhysModel(scopedHistory, hand, grip); } catch { physModel = null; }
-    const trend = withRollingMean(buildRecoveryReadinessTrend(scopedHistory, grip, { physModel }), window);
-    const recPts = trend.filter(r => Number.isFinite(r.observedSmoothed));
-    if (recPts.length < minPoints) continue;
-    const oldestRecent = recPts.slice(-window)[0];
-    if ((Date.parse(ref) - Date.parse(oldestRecent.date)) / 86400000 > RECOVERY_COACH_STALE_DAYS) continue;
-    const last  = recPts[recPts.length - 1];
-    const prior = recPts[Math.max(0, recPts.length - 1 - window)];
-    const recentGapPct = Number.isFinite(last.gapSmoothed) ? Math.round(last.gapSmoothed * 100) : null;
-    const recoveryDeltaPct = (Number.isFinite(last.observedSmoothed) && Number.isFinite(prior.observedSmoothed))
-      ? Math.round((last.observedSmoothed - prior.observedSmoothed) * 100)
-      : null;
-    out.push({ grip, recentGapPct, recoveryDeltaPct, nPoints: recPts.length });
-  }
-  return out;
-}

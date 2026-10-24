@@ -188,7 +188,7 @@ export function ClimbView({
           fontSize: 12.5, color: C.text, lineHeight: 1.5,
         }}>
           <span style={{ color: C.orange, fontWeight: 700, letterSpacing: 0.4 }}>DELOAD WEEK</span>
-          {` · consider less hard climbing than usual and protect the sessions that matter to you. You've recorded ${climbDaysThisWeek} climbing day${climbDaysThisWeek === 1 ? '' : 's'} in the last 7 days. Reassess alongside how you feel.`}
+          {` · ${climbDaysThisWeek} climbing day${climbDaysThisWeek === 1 ? '' : 's'} in the last 7 days`}
         </div>
       )}
 

@@ -156,24 +156,23 @@ describe("assembleCheckIn", () => {
 
   test("recovery softening + deload-sized week credits the lower volume in both views", () => {
     const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
-    s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
+    s.recovery = { level: "yellow", label: "Recovery softening", guidanceAction: null };
     const out = assembleCheckIn(s);
     const compact = out.points.find(p => p.kind === "concern" && /Volume was already/.test(p.text));
     const merged = out.sections.stuck.find(t => /Volume was already/.test(t));
     expect(compact).toBeTruthy();
-    expect(compact.text).toMatch(/Volume was already/);
-    expect(compact.text).toMatch(/Reassess.*when you feel ready/);
+    expect(compact.text).toMatch(/earlier recovery signal/);
     expect(merged).toBeTruthy();
     expect(merged).toMatch(/earlier recovery signal/);
-    expect(merged).not.toMatch(/until.*green|advance fresh/);
+    expect([compact.text, merged].join(" ")).not.toMatch(/reassess|when you feel|until.*green|advance fresh/i);
     // Neither original line survives alongside the merge.
-    expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
-    expect(out.sections.stuck.some(t => /ease up soon/.test(t))).toBe(false);
+    expect(out.sections.stuck.some(t => /well under your monthly norm/.test(t))).toBe(false);
+    expect(out.sections.stuck.some(t => /^Recovery softening/.test(t))).toBe(false);
   });
 
   test("near-zero volume is phrased naturally instead of as ~0% of norm", () => {
     const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
-    s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
+    s.recovery = { level: "yellow", label: "Recovery softening", guidanceAction: null };
     s.behaviorNotes = [{ key: "ramp-drop", ratio: 0, text: "raw ramp-drop note" }];
     const out = assembleCheckIn(s);
 
@@ -189,8 +188,8 @@ describe("assembleCheckIn", () => {
     const merged = out.sections.stuck.find(t => /Volume fell/.test(t));
     expect(merged).toBeTruthy();
     expect(merged).toMatch(/reduced volume alone cannot tell us whether you have recovered/);
-    expect(merged).not.toMatch(/Extend the deload|until the trend/);
-    expect(out.sections.stuck.some(t => /If life got busy/.test(t))).toBe(false);
+    expect(merged).not.toMatch(/Extend the deload|until the trend|reassess/i);
+    expect(out.sections.stuck.some(t => /well under your monthly norm/.test(t))).toBe(false);
   });
 
   test("green recovery + light week describes the observed range without readiness clearance", () => {
@@ -211,10 +210,11 @@ describe("assembleCheckIn", () => {
       rep("2026-07-01", "Micro", 45, 45, 10),
       rep("2026-07-03", "Micro", 45, 45, 10)];
     const s = gatherCheckInSignals(hist, [], [], { refDate: REF });
-    s.recovery = { level: "yellow", label: "Recovery softening — ease up soon", guidanceAction: null };
+    s.recovery = { level: "yellow", label: "Recovery softening", guidanceAction: null,
+      why: "Rep 2 recovered less than expected after the rest in your last 2 comparable Micro sessions." };
     const out = assembleCheckIn(s);
-    expect(out.sections.stuck.some(t => /reassess with a comparable first set/.test(t))).toBe(true);
-    expect(out.sections.stuck.some(t => /volume was already/.test(t))).toBe(false);
+    expect(out.sections.stuck).toContain(`Recovery softening — ${s.recovery.why}`);
+    expect(out.sections.stuck.some(t => /volume was already/i.test(t))).toBe(false);
   });
 
   test("unknown recovery plus lower volume does not become a softening or recovery claim", () => {
@@ -292,7 +292,7 @@ describe("assembleCheckIn", () => {
     expect(signals.supportDetail.exercises).toEqual(expect.arrayContaining(["Ring Dips", "90° Lock-Off + Eccentric"]));
   });
 
-  test("busy-week nudge: partial support week acknowledges + prescribes at-risk exercises", () => {
+  test("busy-week nudge: partial support week names the at-risk exercises", () => {
     const hist = [rep("2026-07-01", "Micro", 45, 46)];
     const wlog = [
       // History: slams trained regularly, but last touch 12d before REF
@@ -306,8 +306,7 @@ describe("assembleCheckIn", () => {
     const out = buildCheckIn(hist, [], wlog, { refDate: REF });
     const nudge = out.sections.focus.find(t => /No full A\/B\/C workout this week/.test(t));
     expect(nudge).toBeTruthy();
-    expect(nudge).toMatch(/busy stretch\?/);
-    expect(nudge).toMatch(/Next week, try to get:/);
+    expect(nudge).toMatch(/Most at risk of going cold:/);
     expect(nudge).toMatch(/Med Ball Slams \(12d idle\)/);
     expect(nudge).toMatch(/Power qualities fade fastest/);
     expect(out.sections.focus.length).toBeLessThanOrEqual(3);

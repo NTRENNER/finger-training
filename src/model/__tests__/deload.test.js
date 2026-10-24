@@ -83,8 +83,7 @@ describe("computeDeload", () => {
     const r = computeDeload(history, [], { today: TODAY });
     expect(r.deload).toBe(false);
     expect(r.signals.downGrips).toEqual(["Crusher"]);
-    expect(r.why).toMatch(/not yet clear whether this is specific to Crusher or general fatigue/i);
-    expect(r.why).not.toMatch(/Only |grip-specific|artifact/i);
+    expect(r.why).toBe("Rep 2 recovered less than expected after the rest in your last 2 comparable Crusher sessions.");
   });
 
   test("both grips down, no lifting spike → MILD deload", () => {
@@ -140,16 +139,13 @@ describe("weekly deload plan", () => {
     expect(deloadPlan("none")).toBeNull();
   });
 
-  test("buildDeloadGuidance names actual training days and offers reassessment", () => {
+  test("buildDeloadGuidance states the recorded training days, not instructions", () => {
     const hist = sess("Crusher", "L", "2026-05-20", 30, 28);
     const g = buildDeloadGuidance("strong", hist, { today: "2026-05-20" });
     expect(g.severity).toBe("strong");
     expect(g.fingerDoneThisWeek).toBe(1);
     expect(g.fingerTrainingDaysThisWeek).toBe(1);
-    expect(g.action).toMatch(/1 finger-training day recorded/i);
-    expect(g.action).toMatch(/relative to your usual week/i);
-    expect(g.action).toMatch(/Reassess with a comparable first set/i);
-    expect(g.action).not.toMatch(/skip Workout A|from 3|limit finger training to 1 session/i);
+    expect(g.action).toBe("1 finger-training day in the last 7 days.");
   });
 
   test("buildDeloadGuidance: null severity → null", () => {
@@ -431,9 +427,7 @@ describe("recovery evidence scope", () => {
     expect(status.deload.signals.gripGaps.Micro.lastDate).toBe(TODAY);
     expect(Boolean(status.deload.signals.gripGaps.Crusher)).toBe(assessed);
     expect(status.deload.signals.unassessedGrips).toEqual(!assessed && dates.length ? ["Crusher"] : []);
-    expect(status.deload.why).toMatch(/^Rep 2 recovered less than expected after the rest in your last 2 comparable \w+ sessions\./);
-    expect(status.deload.why).toMatch(/It's not yet clear whether this is specific to \w+ or general fatigue\.$/);
-    expect(status.deload.why).not.toMatch(/Only |grip-specific/);
+    expect(status.deload.why).toBe("Rep 2 recovered less than expected after the rest in your last 2 comparable Micro sessions.");
   });
 
   test("historical assessment does not list grips first trained later", () => {

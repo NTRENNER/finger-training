@@ -270,7 +270,7 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
     // the opening hold, which can be strong on the same day.
     const gripList = downGrips.join(" and ");
     const why = downGrips.length > 0
-      ? `Rep 2 recovered less than expected after the rest in your last ${minSessions} comparable ${gripList} sessions. Consider easing hard work and see how you feel. It's not yet clear whether this is specific to ${downGrips.length === 1 ? gripList : "these grips"} or general fatigue.`
+      ? `Rep 2 recovered less than expected after the rest in your last ${minSessions} comparable ${gripList} sessions.`
       : "Observed recovery is within your normal range for the currently measured grips.";
     return none(why, signals, downGrips.length > 0 ? "local_concern" : "normal");
   }
@@ -289,8 +289,8 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   if (lifting.spike) loadParts.push(`lifting volume is ${lifting.ratio.toFixed(1)}× your 4-week average`);
   if (climbing.spike) loadParts.push(`climbing load is ${climbing.ratio.toFixed(1)}× your 4-week average`);
   const why = loadParts.length > 0
-    ? `Rep 2 recovered less than expected after the rest on every measured grip in your last ${minSessions} comparable sessions (${gapStr}), and ${loadParts.join(", and ")}. Consider reducing hard finger work and trimming the load that spiked. This comparison does not establish your readiness today.`
-    : `Rep 2 recovered less than expected after the rest on every measured grip in your last ${minSessions} comparable sessions (${gapStr}). Consider reducing hard work and reassess alongside how you feel.`;
+    ? `Rep 2 recovered less than expected after the rest on every measured grip in your last ${minSessions} comparable sessions (${gapStr}), and ${loadParts.join(", and ")}.`
+    : `Rep 2 recovered less than expected after the rest on every measured grip in your last ${minSessions} comparable sessions (${gapStr}).`;
 
   return { deload: true, severity, state: "systemic_concern", signals, why };
 }
@@ -345,7 +345,7 @@ export function deloadStatus(history, workoutSessions = [], opts = {}) {
 
   const label =
     level === "red" ? "Deload recommended" :
-    level === "yellow" ? "Recovery softening — ease up soon" :
+    level === "yellow" ? "Recovery softening" :
     haveSignal ? "Observed recovery within range" : "Not enough recent data";
 
   return {
@@ -390,18 +390,17 @@ export function deloadPlan(severity) {
   return null;
 }
 
-// Banner-ready guidance: the action text + the weekly counts, derived
-// from a computeDeload result (or a stored severity during an accepted
-// deload week). Pure — the UI owns acceptance/persistence.
+// Banner-ready guidance: the weekly count, derived from a computeDeload
+// result (or a stored severity during an accepted deload week). Pure — the
+// UI owns acceptance/persistence. `action` states what was recorded, not
+// what to do (October 2026, less is more: the athlete knows what a deload
+// week means, and advice built on the recovery model adds nothing to it).
 export function buildDeloadGuidance(severity, history, opts = {}) {
   const plan = deloadPlan(severity);
   if (!plan) return null;
   const datesAsc = (history || []).filter(r => r.date).map(r => r.date).sort();
   const today = opts.today || datesAsc[datesAsc.length - 1] || null;
   const done = today ? fingerSessionsThisWeek(history, today) : 0;
-  const recorded = `${done} finger-training day${done === 1 ? '' : 's'} recorded in the last 7 days.`;
-  const action = severity === "strong"
-    ? `Reduce hard finger work relative to your usual week, skip optional extra sets, and review recent lifting and climbing load. Protect the climbing sessions that matter to you. ${recorded} Reassess with a comparable first set when you feel ready; a green gauge is not required.`
-    : `Consider less hard finger work than usual and hold off adding sets or other training volume. ${recorded} Reassess with a comparable first set when you feel ready; past results do not confirm today's recovery.`;
+  const action = `${done} finger-training day${done === 1 ? '' : 's'} in the last 7 days.`;
   return { severity, plan, fingerTrainingDaysThisWeek: done, fingerDoneThisWeek: done, action };
 }

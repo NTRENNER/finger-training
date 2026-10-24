@@ -807,7 +807,7 @@ export function WorkoutTab({
               fontSize: 12.5, color: C.text, lineHeight: 1.5,
             }}>
               <span style={{ color: C.orange, fontWeight: 700, letterSpacing: 0.4 }}>DELOAD WEEK</span>
-              {` · consider less hard support work than usual and avoid optional extra sets. Choose exercises and loads that fit how you feel and your climbing plans.`}
+              {` · in progress`}
             </div>
           )}
           <Card style={{ padding: "20px 18px" }}>
