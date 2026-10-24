@@ -83,7 +83,7 @@ describe("computeDeload", () => {
     const r = computeDeload(history, [], { today: TODAY });
     expect(r.deload).toBe(false);
     expect(r.signals.downGrips).toEqual(["Crusher"]);
-    expect(r.why).toMatch(/cannot tell yet whether this is limited/i);
+    expect(r.why).toMatch(/not yet clear whether this is specific to Crusher or general fatigue/i);
     expect(r.why).not.toMatch(/Only |grip-specific|artifact/i);
   });
 
@@ -431,7 +431,8 @@ describe("recovery evidence scope", () => {
     expect(status.deload.signals.gripGaps.Micro.lastDate).toBe(TODAY);
     expect(Boolean(status.deload.signals.gripGaps.Crusher)).toBe(assessed);
     expect(status.deload.signals.unassessedGrips).toEqual(!assessed && dates.length ? ["Crusher"] : []);
-    expect(status.deload.why).toContain("We cannot tell yet whether this is limited to that grip or reflects broader fatigue.");
+    expect(status.deload.why).toMatch(/^Rep 2 recovered less than expected after the rest in your last 2 comparable \w+ sessions\./);
+    expect(status.deload.why).toMatch(/It's not yet clear whether this is specific to \w+ or general fatigue\.$/);
     expect(status.deload.why).not.toMatch(/Only |grip-specific/);
   });
 

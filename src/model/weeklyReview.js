@@ -604,7 +604,7 @@ export function assembleCheckIn(signals) {
   const recoveryConcern = recovery.level === 'red' || recovery.level === 'yellow';
   const mergedRecoveryVolume = rampDrop && recoveryConcern && recovery.label
     ? (recovery.level === "red"
-      ? `Volume fell to ${volumeRead} this week. Earlier comparable sets were below the expected recovery range; reduced volume alone cannot tell us whether you have recovered. Reassess when you feel ready.`
+      ? `Volume fell to ${volumeRead} this week. Rep 2 recovered less than expected after the rest in recent comparable sessions; reduced volume alone cannot tell us whether you have recovered. Reassess when you feel ready.`
       : `Volume was already ${volumeRead} this week. Keep the earlier recovery signal in context and reassess with a comparable first set when you feel ready.`)
     : null;
   const reducedVolumeWithinRange = rampDrop && recovery.level === "green"

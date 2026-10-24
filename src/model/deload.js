@@ -266,8 +266,11 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   signals.crossGripDown = measured.length >= 2 && downGrips.length === measured.length;
 
   if (!signals.crossGripDown) {
+    // Says what is measured: rep 2 relative to rep 1 after the rest, not
+    // the opening hold, which can be strong on the same day.
+    const gripList = downGrips.join(" and ");
     const why = downGrips.length > 0
-      ? `Comparable first sets were below the expected recovery range in ${downGrips.join(", ")}. Consider reducing hard work and reassess alongside how you feel. We cannot tell yet whether this is limited to ${downGrips.length === 1 ? "that grip" : "those grips"} or reflects broader fatigue.`
+      ? `Rep 2 recovered less than expected after the rest in your last ${minSessions} comparable ${gripList} sessions. Consider easing hard work and see how you feel. It's not yet clear whether this is specific to ${downGrips.length === 1 ? gripList : "these grips"} or general fatigue.`
       : "Observed recovery is within your normal range for the currently measured grips.";
     return none(why, signals, downGrips.length > 0 ? "local_concern" : "normal");
   }
@@ -286,8 +289,8 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
   if (lifting.spike) loadParts.push(`lifting volume is ${lifting.ratio.toFixed(1)}× your 4-week average`);
   if (climbing.spike) loadParts.push(`climbing load is ${climbing.ratio.toFixed(1)}× your 4-week average`);
   const why = loadParts.length > 0
-    ? `Between-rep recovery was below the expected range on every measured grip across the last ${minSessions} comparable training days (${gapStr}), and ${loadParts.join(", and ")}. Consider reducing hard finger work and trimming the load that spiked. This comparison does not establish your readiness today.`
-    : `Between-rep recovery was below the expected range on every measured grip across the last ${minSessions} comparable training days (${gapStr}). Consider reducing hard work and reassess alongside how you feel.`;
+    ? `Rep 2 recovered less than expected after the rest on every measured grip in your last ${minSessions} comparable sessions (${gapStr}), and ${loadParts.join(", and ")}. Consider reducing hard finger work and trimming the load that spiked. This comparison does not establish your readiness today.`
+    : `Rep 2 recovered less than expected after the rest on every measured grip in your last ${minSessions} comparable sessions (${gapStr}). Consider reducing hard work and reassess alongside how you feel.`;
 
   return { deload: true, severity, state: "systemic_concern", signals, why };
 }
