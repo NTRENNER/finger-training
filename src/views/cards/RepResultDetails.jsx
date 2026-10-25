@@ -1,11 +1,15 @@
 import React from 'react';
 import { C } from '../../ui/theme.js';
 import { evidenceLabel } from '../../model/forceRecording.js';
+import { isPeakMeasurement, isValidPeakMeasurement } from '../../model/peakTest.js';
 
 // Keep measurement provenance available without crowding the rep's result.
+// A Peak Test pull is never a failure hold (failure_valid is false by
+// design), so only an invalid pull reads as interrupted.
 export function RepResultDetails({ rep, children }) {
-  const interrupted = rep.failure_valid === false
-    || rep.force_recording?.duration_basis === 'elapsed_activity_estimate';
+  const interrupted = isPeakMeasurement(rep) ? !isValidPeakMeasurement(rep)
+    : rep.failure_valid === false
+      || rep.force_recording?.duration_basis === 'elapsed_activity_estimate';
   const releaseUncertain = rep.force_recording?.recording_stop_reason === 'release_not_observed';
   return <>
     {interrupted && <div style={{ color: C.muted }}>{rep.end_reason === 'target_not_reached' ? 'Target not reached' : 'Interrupted'}</div>}
