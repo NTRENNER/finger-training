@@ -14,11 +14,8 @@ export function RepResultDetails({ rep, children }) {
   return <>
     {interrupted && <div style={{ color: C.muted }}>{rep.end_reason === 'target_not_reached' ? 'Target not reached' : 'Interrupted'}</div>}
     {!interrupted && releaseUncertain && <div style={{ color: C.muted }}>Release not detected</div>}
-    {detailRows.length > 0 && <details onClick={event => event.stopPropagation()} style={{ marginTop: 4 }}>
-      <summary style={{ cursor: 'pointer', color: C.muted, fontSize: 12, padding: '12px 0', lineHeight: '20px' }}>Details</summary>
-      <div style={{ fontSize: 12, lineHeight: 1.5 }}>
-        {detailRows}
-      </div>
-    </details>}
+    {detailRows.length > 0 && <div style={{ color: C.muted, fontSize: 12, lineHeight: 1.5, marginTop: 4 }}>
+      {detailRows}
+    </div>}
   </>;
 }

@@ -174,7 +174,6 @@ test('rest shows pull time with compact recorded rest and force variation detail
     restBefore: 21.4, forceRecording: { pull_duration_s: 30, force_cv: 0.03 } }} restSeconds={20} repNum={1} repsPerSet={4} unit="kg" onRestDone={jest.fn()} />);
   expect(screen.getByText('30s')).toBeVisible();
   const detail = screen.getByText('Rest: 21.4s · Force variation: 3%');
-  expect(detail).not.toBeVisible();
-  fireEvent.click(screen.getByText('Details'));
   expect(detail).toBeVisible();
+  expect(screen.queryByText('Details')).not.toBeInTheDocument();
 });
