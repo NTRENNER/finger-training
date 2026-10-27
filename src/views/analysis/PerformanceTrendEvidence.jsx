@@ -61,36 +61,21 @@ export function PerformancePointLegend({ grips }) {
 
 export function PerformanceObservationDetails({ observation, unit = 'kg' }) {
   if (!observation) return null;
-  const { date, grip, hand, force, expectedForce, duration, deviation, context, earlierGrips,
-    recordingCompatibility, expectationSource, expectationBasis, plannedLoad, plannedDuration,
-    calibrationScale, modelDurationRange, extrapolated } = observation;
+  const { date, grip, hand, force, expectedForce, duration, deviation, context,
+    expectationBasis, plannedLoad, plannedDuration } = observation;
   const percent = formatTrendPercent(deviation);
   return <section className="trend-point-details" aria-label="Selected opening hold">
     <h4 style={{ color: GRIP_COLORS[grip] || C.blue }}>{grip} · {handLabel(hand)} · {date}</h4>
     <strong>{percent} versus expected force</strong>
     <dl>
       <dt>Measured average force</dt><dd>{fmtW(force, unit)} {unit}</dd>
-      <dt>Calibrated expected force</dt><dd>{fmtW(expectedForce, unit)} {unit}</dd>
+      <dt>Expected force</dt><dd>{fmtW(expectedForce, unit)} {unit}</dd>
       <dt>Comparable hold duration</dt><dd>{durationText(duration)}</dd>
       {expectationBasis === 'workout_plan' && <>
         <dt>Workout target</dt><dd>{fmtW(plannedLoad, unit)} {unit} for {durationText(plannedDuration)}</dd>
       </>}
-      <dt>Expectation source</dt><dd>{expectationSource === 'frozen'
-        ? 'Saved before this workout' : 'Reconstructed from earlier history'}</dd>
       <dt>Finger session order</dt><dd>{CONTEXT_LABELS[context] || CONTEXT_LABELS.unknown}</dd>
     </dl>
-    {expectationBasis !== 'workout_plan' && Number.isFinite(calibrationScale)
-      && <p>Personal calibration applied: {calibrationScale.toFixed(2)}×.</p>}
-    {extrapolated && <p>The achieved duration sits outside the previously measured range
-      {modelDurationRange ? ` (${durationText(modelDurationRange.min)}–${durationText(modelDurationRange.max)})` : ''}. The point is shown with an extrapolation ring rather than discarded.</p>}
-    {earlierGrips?.length > 0 && <p>Earlier recorded finger training: {earlierGrips.join(', ')}.</p>}
-    <p>{context === 'after_training'
-      ? 'Earlier finger training is recorded. Its effect on this hold is unknown.'
-      : context === 'first_recorded'
-        ? 'First recorded does not establish recovery; earlier or recent climbing may be missing.'
-        : 'The records do not establish this session’s order or your recovery.'}</p>
-    {recordingCompatibility && <p>{recordingCompatibility}</p>}
-    <p>A negative percentage means force below the saved workout expectation at this duration. It is not a percentage loss of maximum strength.</p>
   </section>;
 }
 

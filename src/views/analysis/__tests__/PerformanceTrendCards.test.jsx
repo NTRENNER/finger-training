@@ -138,7 +138,7 @@ test('grips with no observations do not render empty Scatter series that could i
   expect(screen.getByTestId('opening-hold-points')).toHaveAttribute('data-grip', 'Micro');
 });
 
-test('an accessible hold inspector exposes force, prior expectation, duration, hand and workload limits', () => {
+test('an accessible hold inspector exposes the compact comparison fields', () => {
   render(<PerformanceTrendCards history={history} grips={grips} />);
   fireEvent.click(screen.getByText('Inspect opening-hold measurements'));
   fireEvent.change(screen.getByRole('combobox', { name: 'Opening hold' }), { target: { value: 'hold-4' } });
@@ -148,9 +148,8 @@ test('an accessible hold inspector exposes force, prior expectation, duration, h
   expect(within(details).getByText('25.0 kg')).toBeInTheDocument();
   expect(within(details).getByText('160 s')).toBeInTheDocument();
   expect(within(details).getByText('After earlier finger training')).toBeInTheDocument();
-  expect(within(details).getByText('Earlier recorded finger training: Crusher.')).toBeInTheDocument();
-  fireEvent.change(screen.getByRole('combobox', { name: 'Opening hold' }), { target: { value: 'hold-0' } });
-  expect(within(details).getByText(/First recorded does not establish recovery/)).toBeInTheDocument();
+  expect(within(details).queryByText('Expectation source')).not.toBeInTheDocument();
+  expect(within(details).queryByText(/Earlier recorded finger training/)).not.toBeInTheDocument();
   expect(screen.getByText(/Missing climbing logs leave workload unknown/)).toBeInTheDocument();
 });
 
@@ -219,7 +218,8 @@ test('tooltip and hold details respect display units and do not call unknown ses
   expect(screen.getByText('22.0 lbs for 160 s')).toBeInTheDocument();
   expect(screen.queryByText(/Personal calibration applied/)).not.toBeInTheDocument();
   expect(screen.getByText('Session order unknown')).toBeInTheDocument();
-  expect(screen.getByText(/do not establish this session’s order or your recovery/)).toBeInTheDocument();
+  expect(screen.queryByText('Expectation source')).not.toBeInTheDocument();
+  expect(screen.queryByText(/do not establish this session’s order or your recovery/)).not.toBeInTheDocument();
   view.rerender(<PerformanceObservationDetails observation={null} />);
   expect(screen.queryByRole('region', { name: 'Selected opening hold' })).not.toBeInTheDocument();
 });
