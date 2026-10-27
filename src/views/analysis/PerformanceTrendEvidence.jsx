@@ -2,7 +2,6 @@ import React from 'react';
 import { C } from '../../ui/theme.js';
 import { GRIP_COLORS } from '../../ui/grip-colors.js';
 import { fmtW } from '../../ui/format.js';
-import { CHART } from '../../ui/chartStyles.js';
 import { DURATION_BAND_LABELS } from '../../model/performanceTrendEvidence.js';
 
 const handLabel = hand => hand === 'L' ? 'Left' : hand === 'R' ? 'Right' : hand;
@@ -66,10 +65,10 @@ export function PerformanceObservationDetails({ observation, unit = 'kg' }) {
   const percent = formatTrendPercent(deviation);
   return <section className="trend-point-details" aria-label="Selected opening hold">
     <h4 style={{ color: GRIP_COLORS[grip] || C.blue }}>{grip} · {handLabel(hand)} · {date}</h4>
-    <strong>{percent} versus expected force</strong>
+    <strong>{percent} versus predicted force</strong>
     <dl>
       <dt>Measured average force</dt><dd>{fmtW(force, unit)} {unit}</dd>
-      <dt>Expected force</dt><dd>{fmtW(expectedForce, unit)} {unit}</dd>
+      <dt>Predicted force</dt><dd>{fmtW(expectedForce, unit)} {unit}</dd>
       <dt>Comparable hold duration</dt><dd>{durationText(duration)}</dd>
       {expectationBasis === 'workout_plan' && <>
         <dt>Workout target</dt><dd>{fmtW(plannedLoad, unit)} {unit} for {durationText(plannedDuration)}</dd>
@@ -77,25 +76,4 @@ export function PerformanceObservationDetails({ observation, unit = 'kg' }) {
       <dt>Finger session order</dt><dd>{CONTEXT_LABELS[context] || CONTEXT_LABELS.unknown}</dd>
     </dl>
   </section>;
-}
-
-export function PerformancePointTooltip({ observation, unit = 'kg' }) {
-  if (!observation) return null;
-  return <div role="tooltip" style={{ ...CHART.tooltip, padding: 12 }}><PerformanceObservationDetails observation={observation} unit={unit} /></div>;
-}
-
-export function OpeningHoldInspector({ observations, unit = 'kg', selectedId, onSelect, open, onToggle }) {
-  const selected = observations.find(item => String(item.id) === selectedId) || observations.at(-1);
-  if (!selected) return null;
-  return <details open={open} style={{ marginTop: 8, marginBottom: 0 }}>
-    <summary onClick={event => { event.preventDefault(); onToggle(!open); }} style={{ cursor: 'pointer', fontSize: 14, color: C.muted, padding: '12px 0', lineHeight: '20px' }}>Inspect opening-hold measurements</summary>
-    <label className="trend-filter" style={{ marginBottom: 14 }}>Opening hold
-      <select value={String(selected.id)} onChange={event => onSelect(event.target.value)}>
-        {[...observations].reverse().map(item => <option value={String(item.id)} key={item.id}>
-          {item.date} · {item.grip} · {handLabel(item.hand)} · {durationText(item.duration)} · {formatTrendPercent(item.deviation)}
-        </option>)}
-      </select>
-    </label>
-    <PerformanceObservationDetails observation={selected} unit={unit} />
-  </details>;
 }

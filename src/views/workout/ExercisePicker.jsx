@@ -19,6 +19,7 @@
 
 import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
+import { useEscapeDismiss } from "../../hooks/useEscapeDismiss.js";
 import { exercises as EXERCISE_CATALOG } from "../../model/supportTraining.js";
 import { migrateExerciseId } from "../../model/exerciseIds.js";
 
@@ -57,6 +58,7 @@ export function ExercisePicker({
   onCancel,
 }) {
   const [q, setQ] = useState("");
+  useEscapeDismiss(true, onCancel);
 
   // Stable Set for "already in this workout" lookup. Kept outside the
   // useMemo so the items list re-renders only when the underlying ids
@@ -129,6 +131,9 @@ export function ExercisePicker({
     >
       <div
         onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         style={{
           background: C.card ?? "#1a1a1a",
           borderRadius: 12,

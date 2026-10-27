@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 import { C } from "../../ui/theme.js";
+import { useEscapeDismiss } from "../../hooks/useEscapeDismiss.js";
 import { PeakForceCard } from "./PeakForceCard.jsx";
 
 export function PeakForceHistoryModal({
@@ -10,20 +11,13 @@ export function PeakForceHistoryModal({
   unit = "lbs",
   onClose,
 }) {
+  useEscapeDismiss(true, onClose);
   const scopedHistory = useMemo(
     () => throughDate
       ? history.filter(rep => !rep?.date || rep.date <= throughDate)
       : history,
     [history, throughDate]
   );
-
-  useEffect(() => {
-    const onKeyDown = event => {
-      if (event.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
 
   return (
     <div

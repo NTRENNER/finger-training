@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 import { ZONE6 } from "../../model/zones.js";
 import { buildZoneSessionHistory } from "../../model/zoneSessionHistory.js";
+import { useEscapeDismiss } from "../../hooks/useEscapeDismiss.js";
 import { C } from "../../ui/theme.js";
 import { fmt1, fmtClock, fmtTime, fmtW, toDisp } from "../../ui/format.js";
 
@@ -57,19 +58,12 @@ export function ZoneSessionHistoryModal({
   unit = "lbs",
   onClose,
 }) {
+  useEscapeDismiss(true, onClose);
   const zone = ZONE6.find(item => item.key === zoneKey);
   const sessions = useMemo(
     () => buildZoneSessionHistory(history, { grip, zoneKey, handView, throughDate, measuredOnly }),
     [history, grip, zoneKey, handView, throughDate, measuredOnly]
   );
-
-  useEffect(() => {
-    const onKeyDown = event => {
-      if (event.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
 
   if (!zone) return null;
 

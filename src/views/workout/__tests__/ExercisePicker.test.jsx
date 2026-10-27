@@ -22,3 +22,12 @@ test("surfaces the lock-off eccentric as the suggested TRX-row substitute", () =
     expect.objectContaining({ id: "lockoffEccentric" })
   );
 });
+
+test("dismisses with Escape", () => {
+  const onCancel = jest.fn();
+
+  render(<ExercisePicker excludeIds={[]} onPick={() => {}} onCancel={onCancel} />);
+
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(onCancel).toHaveBeenCalledTimes(1);
+});

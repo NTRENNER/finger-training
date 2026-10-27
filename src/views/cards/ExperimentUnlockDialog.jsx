@@ -1,16 +1,10 @@
 import React, { useEffect, useRef } from 'react';
+import { useEscapeDismiss } from '../../hooks/useEscapeDismiss.js';
 
 export function DialogShell({ title, onClose, children }) {
   const closeRef = useRef(null);
-
-  useEffect(() => {
-    closeRef.current?.focus();
-    const onKeyDown = event => {
-      if (event.key === 'Escape') onClose?.();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  useEscapeDismiss(true, onClose);
+  useEffect(() => { closeRef.current?.focus(); }, []);
 
   return <div className="experiment-dialog-backdrop" role="presentation" onMouseDown={event => {
     if (event.target === event.currentTarget) onClose?.();

@@ -8,7 +8,7 @@ import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/force
 // The "Analysis" tab. Top-to-bottom render order:
 //
 //   1. Curve Improvement — modeled progress plus measured evidence.
-//   2. Recent Performance vs Expected — calibrated pre-session comparison.
+//   2. Recent Performance vs Prediction — calibrated pre-session comparison.
 //   3. Peak Force — instantaneous observed ceiling, when available.
 //
 // State comes in via props: history, freshMap (built in

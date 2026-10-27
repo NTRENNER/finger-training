@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
+import { useEscapeDismiss } from "../../hooks/useEscapeDismiss.js";
 import {
   MOVEMENT_CATEGORIES,
   STIMULUS_OPTIONS,
@@ -65,6 +66,7 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
   const program = useMemo(() => sanitizeWorkoutProgram(incoming), [incoming]);
   const [templateId, setTemplateId] = useState("A");
   const [pickerOpen, setPickerOpen] = useState(false);
+  useEscapeDismiss(!pickerOpen, onClose);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [setupExerciseId, setSetupExerciseId] = useState(null);
@@ -148,7 +150,8 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
 
   return (
     <div className="workout-builder-overlay" onMouseDown={onClose}>
-      <div className="workout-builder-panel" onMouseDown={event => event.stopPropagation()}>
+      <div className="workout-builder-panel" onMouseDown={event => event.stopPropagation()}
+        role="dialog" aria-modal="true" aria-label="Workout builder">
         <header className="workout-builder-header">
           <div>
             <div className="workout-eyebrow">Workout builder</div>

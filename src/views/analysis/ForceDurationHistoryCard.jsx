@@ -16,6 +16,7 @@ import {
 } from "../../model/prescription.js";
 import { buildRepCurveBundle } from "../../model/repCurveData.js";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
+import { useEscapeDismiss } from "../../hooks/useEscapeDismiss.js";
 import { RepCurveChart } from "../cards/RepCurveChart.jsx";
 import { ForceDurationCard } from "./ForceDurationCard.jsx";
 
@@ -31,6 +32,7 @@ export function ForceDurationHistoryCard({
 }) {
   const [basis, setBasis] = useState("fresh");
   const [selectedPoint, setSelectedPoint] = useState(null);
+  useEscapeDismiss(Boolean(selectedPoint), () => setSelectedPoint(null));
   const handView = hand || "pooled";
   const priors = useMemo(
     () => threeExpPriors || buildThreeExpPriors(history),
@@ -151,6 +153,9 @@ export function ForceDurationHistoryCard({
     {selectedSession?.perHand.length > 0 && (
       <div
         onClick={() => setSelectedPoint(null)}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Force-duration session details"
         style={{
           position: "fixed", inset: 0, zIndex: 100,
           background: "rgba(0,0,0,0.7)", display: "flex",

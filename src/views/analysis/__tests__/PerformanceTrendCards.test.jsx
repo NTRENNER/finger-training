@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { PerformanceTrendCards } from '../PerformanceTrendCards.jsx';
-import { PerformanceObservationDetails, PerformancePointTooltip } from '../PerformanceTrendEvidence.jsx';
+import { PerformanceObservationDetails } from '../PerformanceTrendEvidence.jsx';
 import { buildPerformanceObservations } from '../../../model/performanceTrendEvidence.js';
 
 jest.mock('../../../model/performanceTrendEvidence.js', () => ({
@@ -15,9 +15,9 @@ jest.mock('recharts', () => {
   return {
     ResponsiveContainer: Wrap,
     ComposedChart: ({ data, children }) => <div data-testid="trend-chart" data-dates={data.map(row => row.date).join(',')} data-climbs={data.map(row => row.climbLoad == null ? 'unknown' : row.climbLoad).join(',')}>{children}</div>,
-    Scatter: ({ data, line, name, onMouseEnter, onMouseLeave, onClick }) => <div data-testid="opening-hold-points" data-grip={name} data-holds={data.map(row => row.id).join(',')} data-connected={String(line)}>
-      {data.map(row => <button key={row.id} data-testid={`point-${row.id}`} onMouseEnter={() => onMouseEnter({ payload: row })}
-        onMouseLeave={onMouseLeave} onClick={() => onClick({ payload: row })}>Point {row.id}</button>)}
+    Scatter: ({ data, line, name, onClick }) => <div data-testid="opening-hold-points" data-grip={name} data-holds={data.map(row => row.id).join(',')} data-connected={String(line)}>
+      {data.map(row => <button key={row.id} data-testid={`point-${row.id}`}
+        onClick={() => onClick({ payload: row })}>Point {row.id}</button>)}
     </div>,
     XAxis: ({ domain, ticks }) => <div data-testid="trend-x-axis" data-domain={JSON.stringify(domain)} data-ticks={JSON.stringify(ticks)} />,
     Bar: () => null, YAxis: () => null, Tooltip: () => null, CartesianGrid: () => null, ReferenceLine: ({ y, label }) => <div data-testid="reference-line" data-value={y}>{label?.value}</div>,
@@ -80,8 +80,8 @@ beforeEach(() => buildPerformanceObservations.mockReturnValue(makeAnalysis()));
 
 test('keeps calibrated session performance after estimated capacity is removed', () => {
   render(<PerformanceTrendCards history={history} grips={grips} />);
-  expect(screen.getByRole('heading', { name: 'Recent Performance vs Expected' })).toBeInTheDocument();
-  expect(screen.getByText(/not a 20% loss of maximum strength/)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Recent Performance vs Prediction' })).toBeInTheDocument();
+  expect(screen.queryByText(/Session Performance =/)).not.toBeInTheDocument();
   expect(screen.queryByText('Estimated Capacity Over Time')).not.toBeInTheDocument();
 });
 
@@ -138,10 +138,9 @@ test('grips with no observations do not render empty Scatter series that could i
   expect(screen.getByTestId('opening-hold-points')).toHaveAttribute('data-grip', 'Micro');
 });
 
-test('an accessible hold inspector exposes the compact comparison fields', () => {
+test('point details expose the compact comparison fields without a duplicate inspector', () => {
   render(<PerformanceTrendCards history={history} grips={grips} />);
-  fireEvent.click(screen.getByText('Inspect opening-hold measurements'));
-  fireEvent.change(screen.getByRole('combobox', { name: 'Opening hold' }), { target: { value: 'hold-4' } });
+  fireEvent.click(screen.getByTestId('point-hold-4'));
   const details = screen.getByRole('region', { name: 'Selected opening hold' });
   expect(within(details).getByRole('heading', { name: 'Micro · Left · 2026-08-05' })).toBeInTheDocument();
   expect(within(details).getByText('20.0 kg')).toBeInTheDocument();
@@ -150,13 +149,13 @@ test('an accessible hold inspector exposes the compact comparison fields', () =>
   expect(within(details).getByText('After earlier finger training')).toBeInTheDocument();
   expect(within(details).queryByText('Expectation source')).not.toBeInTheDocument();
   expect(within(details).queryByText(/Earlier recorded finger training/)).not.toBeInTheDocument();
-  expect(screen.getByText(/Missing climbing logs leave workload unknown/)).toBeInTheDocument();
+  expect(screen.queryByText('Inspect opening-hold measurements')).not.toBeInTheDocument();
 });
 
 test('empty history explains that calibrated opening-hold comparisons are unavailable', () => {
   buildPerformanceObservations.mockReturnValue({ rows: [], observations: [] });
   render(<PerformanceTrendCards history={null} grips={grips} />);
-  expect(screen.getByText(/Opening-hold comparisons appear once a calibrated pre-session curve is available/)).toBeInTheDocument();
+  expect(screen.getByText(/Comparisons appear once a pre-workout prediction is available/)).toBeInTheDocument();
   expect(screen.queryByText('Estimated Capacity Over Time')).not.toBeInTheDocument();
   expect(screen.queryByRole('slider')).not.toBeInTheDocument();
 });
@@ -188,7 +187,7 @@ test('climbing context never refits the calibrated comparison and missing entrie
   screen.getAllByTestId('trend-chart').forEach(chart => expect(chart).toHaveAttribute('data-climbs', 'unknown,unknown,unknown,unknown,unknown,unknown'));
   view.rerender(<PerformanceTrendCards history={history} grips={grips} activities={[{ type: 'climbing', date: '2026-08-04', rpe: 8 }]} />);
   expect(buildPerformanceObservations).toHaveBeenCalledTimes(1);
-  expect(screen.getByText(/Same-day climbing may have happened before or after finger training/)).toBeInTheDocument();
+  expect(screen.getAllByTestId('trend-chart')).toHaveLength(1);
 });
 
 test('shares the calibrated observations with the surrounding analysis view', () => {
@@ -199,28 +198,31 @@ test('shares the calibrated observations with the surrounding analysis view', ()
   expect(onAnalysis).toHaveBeenCalledWith(analysis);
 });
 
-test('hover and click inspect the actual observation when grip series have different dates and lengths', () => {
+test('click opens the actual observation and close, escape, or a second click dismisses it', () => {
   const analysis = makeAnalysis();
   const crusherHold = { ...analysis.observations[1], id: 'crusher-only', grip: 'Crusher', hand: 'R', force: 15, expectedForce: 30, deviation: -50 };
   analysis.observations = [analysis.observations[0], crusherHold, ...analysis.observations.slice(2)];
   buildPerformanceObservations.mockReturnValue(analysis);
   render(<PerformanceTrendCards history={history} grips={['Micro', 'Crusher']} />);
-  fireEvent.mouseEnter(screen.getByTestId('point-crusher-only'));
-  const tooltip = screen.getByRole('tooltip');
-  expect(within(tooltip).getByRole('heading', { name: 'Crusher · Right · 2026-08-02' })).toBeInTheDocument();
-  expect(within(tooltip).getByText('15.0 kg')).toBeInTheDocument();
-  expect(within(tooltip).getByText('-50.0% versus expected force')).toBeInTheDocument();
-  fireEvent.mouseLeave(screen.getByTestId('point-crusher-only'));
-  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   fireEvent.click(screen.getByTestId('point-crusher-only'));
-  expect(screen.getByRole('combobox', { name: 'Opening hold' })).toHaveValue('crusher-only');
-  expect(within(screen.getByRole('region', { name: 'Selected opening hold' })).getByRole('heading', { name: 'Crusher · Right · 2026-08-02' })).toBeInTheDocument();
+  const popup = screen.getByRole('dialog', { name: 'Opening hold details' });
+  expect(within(popup).getByRole('heading', { name: 'Crusher · Right · 2026-08-02' })).toBeInTheDocument();
+  expect(within(popup).getByText('15.0 kg')).toBeInTheDocument();
+  expect(within(popup).getByText('-50.0% versus predicted force')).toBeInTheDocument();
+  fireEvent.click(within(popup).getByRole('button', { name: 'Close point details' }));
+  expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTestId('point-crusher-only'));
+  fireEvent.keyDown(window, { key: 'Escape' });
+  expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTestId('point-crusher-only'));
+  fireEvent.click(screen.getByTestId('point-crusher-only'));
+  expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
 });
 
-test('tooltip and hold details respect display units and do not call unknown sessions rested', () => {
+test('hold details respect display units and do not call unknown sessions rested', () => {
   const observation = { ...makeAnalysis().observations[2], force: 10, expectedForce: 12.5,
     expectationBasis: 'workout_plan', plannedLoad: 10, plannedDuration: 160, calibrationScale: 1.36 };
-  const view = render(<PerformancePointTooltip observation={observation} unit="lbs" />);
+  const view = render(<PerformanceObservationDetails observation={observation} unit="lbs" />);
   expect(screen.getByText('22.0 lbs')).toBeInTheDocument();
   expect(screen.getByText('27.6 lbs')).toBeInTheDocument();
   expect(screen.getByText('22.0 lbs for 160 s')).toBeInTheDocument();

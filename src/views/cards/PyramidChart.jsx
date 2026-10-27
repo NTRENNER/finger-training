@@ -25,6 +25,7 @@
 
 import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
+import { useEscapeDismiss } from "../../hooks/useEscapeDismiss.js";
 import {
   buildPyramidPlan,
   inferProjectGrade,
@@ -264,6 +265,7 @@ export function PyramidChart({
 // visible block) because the user logged them and should be able
 // to see them. Sorted newest-first by the caller.
 function ClimbDetailModal({ tier, accent, onClose }) {
+  useEscapeDismiss(true, onClose);
   // Defensive sort here too — if a future caller passes climbs in a
   // different order, the popover stays "newest first" regardless.
   const climbs = useMemo(
@@ -276,6 +278,9 @@ function ClimbDetailModal({ tier, accent, onClose }) {
   return (
     <div
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${tier.grade ?? "Climb"} sends`}
       style={{
         position: "fixed", inset: 0, zIndex: 100,
         background: "rgba(0,0,0,0.65)",

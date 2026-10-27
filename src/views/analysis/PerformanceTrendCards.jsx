@@ -9,10 +9,11 @@ import { C } from '../../ui/theme.js';
 import { GRIP_COLORS } from '../../ui/grip-colors.js';
 import { DateRangeSlider, normalizeHistoryWindow } from '../../ui/DateRangeSlider.jsx';
 import { usePerformanceObservations } from '../../hooks/usePerformanceObservations.js';
+import { useEscapeDismiss } from '../../hooks/useEscapeDismiss.js';
 import { suggestCookedFromClimbs } from '../../model/climbingFatigue.js';
 import {
   BAND_LABELS, CONTEXT_LABELS, PerformancePointGlyph,
-  PerformancePointLegend, PerformancePointTooltip, OpeningHoldInspector,
+  PerformanceObservationDetails, PerformancePointLegend,
 } from './PerformanceTrendEvidence.jsx';
 import './PerformanceTrendCards.css';
 
@@ -37,9 +38,8 @@ export function PerformanceTrendCards({
   const [window, setWindow] = useState(null);
   const [durationBand, setDurationBand] = useState('all');
   const [sessionContext, setSessionContext] = useState('all');
-  const [hoveredId, setHoveredId] = useState(null);
   const [selectedObservationId, setSelectedObservationId] = useState(null);
-  const [inspectOpen, setInspectOpen] = useState(false);
+  useEscapeDismiss(Boolean(selectedObservationId), () => setSelectedObservationId(null));
   const dates = rows.map(row => row.date);
   const firstMatch = window ? dates.findIndex(date => date >= window[0]) : 0;
   const first = firstMatch < 0 ? dates.length - 1 : firstMatch;
@@ -65,32 +65,39 @@ export function PerformanceTrendCards({
   const observationSeries = useMemo(() => selectedGrips.map(grip => ({
     grip, observations: visibleObservations.filter(item => item.grip === grip),
   })).filter(series => series.observations.length > 0), [selectedGrips, visibleObservations]);
-  const hoveredObservation = visibleObservations.find(item => String(item.id) === hoveredId);
-  const laterHolds = inRangeObservations.filter(item => item.context === 'after_training').length;
+  const selectedObservation = visibleObservations.find(item => String(item.id) === selectedObservationId);
 
   if (!rows.length) return <section className="performance-trends" aria-label="Performance trends">
     <Card style={cardStyle}>
-      <CardTitle>Recent Performance vs Expected</CardTitle>
+      <CardTitle>Recent Performance vs Prediction</CardTitle>
       <p className="trend-intro" role={loading ? 'status' : undefined}>{loading
-        ? 'Calculating expected performance for each opening hold…'
-        : 'Opening-hold comparisons appear once a calibrated pre-session curve is available.'}</p>
+        ? 'Calculating performance predictions…'
+        : 'Comparisons appear once a pre-workout prediction is available.'}</p>
     </Card>
   </section>;
 
   return <section className="performance-trends" aria-label="Performance trends">
     <Card style={cardStyle}>
-      <CardTitle>Recent Performance vs Expected</CardTitle>
-      <p className="trend-intro">Session Performance = (observed force − expected force) / expected force × 100. The workout's prescribed force and target time anchor the pre-session curve, so clearing both targets appears above zero. Older sessions reconstruct the curve from earlier history only. −20% means 20% less force than expected for that hold, not a 20% loss of maximum strength.</p>
-      <DateRangeSlider dates={dates} start={start} end={end} onChange={(a, b) => setWindow([dates[a], dates[b]])} />
+      <CardTitle>Recent Performance vs Prediction</CardTitle>
+      <DateRangeSlider dates={dates} start={start} end={end} onChange={(a, b) => {
+        setWindow([dates[a], dates[b]]);
+        setSelectedObservationId(null);
+      }} />
       <div className="trend-filters">
         <label className="trend-filter">Hold duration
-          <select value={durationBand} onChange={event => setDurationBand(event.target.value)}>
+          <select value={durationBand} onChange={event => {
+            setDurationBand(event.target.value);
+            setSelectedObservationId(null);
+          }}>
             <option value="all">All hold durations</option>
             {Object.entries(BAND_LABELS).map(([key, label]) => <option value={key} key={key}>{label}</option>)}
           </select>
         </label>
         <label className="trend-filter">Finger session order
-          <select value={sessionContext} onChange={event => setSessionContext(event.target.value)}>
+          <select value={sessionContext} onChange={event => {
+            setSessionContext(event.target.value);
+            setSelectedObservationId(null);
+          }}>
             <option value="all">All recorded session orders</option>
             {Object.entries(CONTEXT_LABELS).map(([key, label]) => <option value={key} key={key}>{label}</option>)}
           </select>
@@ -104,28 +111,26 @@ export function PerformanceTrendCards({
             <XAxis type="number" dataKey="timestamp" domain={dateDomain} ticks={dateTicks} interval="preserveStartEnd" scale="time" tickFormatter={fmtDate} tick={CHART.tick} minTickGap={32} />
             <YAxis yAxisId="trend" type="number" dataKey="deviation" unit="%" width={52} tickFormatter={value => Number(value.toFixed(1))} tick={CHART.tick} domain={shortDomain} />
             <YAxis yAxisId="climb" domain={[0, 40]} orientation="right" width={0} hide />
-            <ReferenceLine yAxisId="trend" y={0} stroke={C.muted} strokeDasharray="5 5" label={{ value: "Expected (0%)", fill: C.muted, position: "insideRight" }} />
+            <ReferenceLine yAxisId="trend" y={0} stroke={C.muted} strokeDasharray="5 5" label={{ value: "Prediction (0%)", fill: C.muted, position: "insideRight" }} />
             <Bar yAxisId="climb" dataKey="climbLoad" name="Logged climbing load" fill={C.orange} opacity={.4} barSize={6} isAnimationActive={false} />
             {observationSeries.map(({ grip, observations: gripObservations }) => <Scatter key={grip} yAxisId="trend" dataKey="deviation" name={grip}
               data={gripObservations} fill={GRIP_COLORS[grip] || C.blue}
-              onMouseEnter={point => setHoveredId(String(point.payload?.id))}
-              onMouseLeave={() => setHoveredId(null)}
-              onClick={point => { setSelectedObservationId(String(point.payload?.id)); setInspectOpen(true); setHoveredId(null); }}
+              onClick={point => {
+                const id = String(point.payload?.id);
+                setSelectedObservationId(current => current === id ? null : id);
+              }}
               line={false} shape={<PerformancePointGlyph />} isAnimationActive={false} />)}
           </ComposedChart>
         </ResponsiveContainer>
-        {hoveredObservation && <div className="trend-hover-details"><PerformancePointTooltip observation={hoveredObservation} unit={unit} /></div>}
-      </div> : <p className="trend-context-note">{inRangeObservations.length
+        {selectedObservation && <div className="trend-point-popup" role="dialog" aria-label="Opening hold details">
+          <button type="button" className="trend-point-popup-close" aria-label="Close point details"
+            onClick={() => setSelectedObservationId(null)}>×</button>
+          <PerformanceObservationDetails observation={selectedObservation} unit={unit} />
+        </div>}
+      </div> : <p className="trend-small">{inRangeObservations.length
         ? 'No opening holds match these filters. Try another duration or session order.'
-        : 'No comparable opening holds in this date range. A calibrated curve based on earlier training is needed.'}</p>}
+        : 'No comparable opening holds in this date range.'}</p>}
       <PerformancePointLegend grips={selectedGrips} />
-      <div className="trend-context-note">
-        First recorded does not mean recovered. Same-day climbing may have happened before or after finger training. Missing climbing logs leave workload unknown; orange bars are context only and do not adjust the calibrated expectation.
-        {laterHolds > 0 && <span> {laterHolds} comparable opening {laterHolds === 1 ? 'hold followed' : 'holds followed'} earlier recorded finger training in this date range.</span>}
-      </div>
-      <OpeningHoldInspector observations={visibleObservations} unit={unit} selectedId={selectedObservationId}
-        onSelect={setSelectedObservationId} open={inspectOpen} onToggle={setInspectOpen} />
-      <p className="trend-small">This chart shows {startDate} through {endDate}. Points stay separate across different hold durations. Expected force uses the saved workout target and pre-session curve when available; that workout’s results cannot change its own comparison. Ringed points extend beyond the prior measured duration range.</p>
     </Card>
   </section>;
 }
