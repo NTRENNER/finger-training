@@ -33,7 +33,7 @@ import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/force
 //   • Absolute Capacity (raw kg·s) card — % vs baseline tells the
 //     training-progress story; the kg·s axis was opaque.
 
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.jsx";
 import { CardBoundary } from "../ui/ErrorBoundary.jsx";
@@ -121,6 +121,13 @@ export function AnalysisView({
     () => selGrip ? [selGrip] : grips,
     [selGrip, grips]
   );
+  const performanceScopeKey = `${handView}|${scopedGrips.join("|")}`;
+  const [performanceAnalysis, setPerformanceAnalysis] = useState({ key: null, result: null });
+  const receivePerformanceAnalysis = useCallback(result => {
+    setPerformanceAnalysis({ key: performanceScopeKey, result });
+  }, [performanceScopeKey]);
+  const scopedPerformanceObservations = performanceAnalysis.key === performanceScopeKey
+    ? performanceAnalysis.result?.observations || [] : [];
 
   // Peak records use every measured hold, independently of curve eligibility.
   const peakRecordHistory = useMemo(() => history.filter(r =>
@@ -279,7 +286,9 @@ export function AnalysisView({
           />
         </CardBoundary>
         <CardBoundary name="Performance trends">
-          <PerformanceTrendCards key={`${handView}|${scopedGrips.join("|")}`} history={history} grips={scopedGrips} handView={handView} activities={activities} unit={unit} />
+          <PerformanceTrendCards key={performanceScopeKey} history={history} grips={scopedGrips}
+            handView={handView} activities={activities} unit={unit}
+            onAnalysis={receivePerformanceAnalysis} />
         </CardBoundary>
       </>}
 
@@ -290,7 +299,8 @@ export function AnalysisView({
 
       <CardBoundary name="Finger training load">
         <FingerTrainingLoadCard history={history} grips={scopedGrips}
-          handView={handView} unit={unit} />
+          handView={handView} unit={unit}
+          performanceObservations={scopedPerformanceObservations} />
       </CardBoundary>
 
       <CardBoundary name="Potentiation speed">

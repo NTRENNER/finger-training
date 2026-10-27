@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { buildFingerTrainingLoad } from "../../model/fingerTrainingLoad.js";
+import { buildVolumeResponse } from "../../model/volumeResponse.js";
 import { Card } from "../../ui/components.jsx";
 import { C } from "../../ui/theme.js";
 import { fmt1, toDisp } from "../../ui/format.js";
@@ -37,13 +38,49 @@ function LoadTooltip({ active, payload, mode, unit }) {
   </div>;
 }
 
-export function FingerTrainingLoadCard({ history = [], grips = [], handView = "pooled", unit = "lbs" }) {
+function signedPoints(value) {
+  return `${value > 0 ? "+" : ""}${fmt1(value)} pts`;
+}
+
+function VolumeResponse({ response }) {
+  if (!response) return null;
+  return <section aria-label="Training load response" style={{ borderTop: `1px solid ${C.border}`, marginTop: 16, paddingTop: 14 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, alignItems: "baseline" }}>
+      <strong style={{ fontSize: 13 }}>Training load response</strong>
+      <span style={{ color: C.text, fontSize: 12 }}>{response.summary}</span>
+    </div>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
+      {response.windows.map(window => <div key={window.id}>
+        <div style={{ color: C.muted, fontSize: 11 }}>{window.label}</div>
+        <div style={{ color: window.direction === "up" ? C.green : window.direction === "down" ? C.orange : C.text,
+          fontSize: 18, fontWeight: 800, marginTop: 2 }}>
+          {window.status === "ready" ? signedPoints(window.effect) : "—"}
+        </div>
+        <div style={{ color: C.muted, fontSize: 10, marginTop: 2 }}>
+          {window.status === "ready" ? `higher vs lower dose · ${window.pairs} weeks` : "More comparable weeks needed"}
+        </div>
+      </div>)}
+    </div>
+    <div style={{ color: C.muted, fontSize: 10, marginTop: 12 }}>Association only · prescriptions unchanged</div>
+  </section>;
+}
+
+export function FingerTrainingLoadCard({
+  history = [], grips = [], handView = "pooled", unit = "lbs", performanceObservations = [],
+}) {
   const [mode, setMode] = useState("time");
+  const throughDate = today();
   const load = useMemo(() => buildFingerTrainingLoad(history, {
     grips,
     hand: handView,
-    throughDate: today(),
-  }), [history, grips, handView]);
+    throughDate,
+  }), [history, grips, handView, throughDate]);
+  const response = useMemo(() => buildVolumeResponse(history, performanceObservations, {
+    grips,
+    hand: handView,
+    mode,
+    throughDate,
+  }), [history, performanceObservations, grips, handView, mode, throughDate]);
   const display = useMemo(() => {
     if (!load) return null;
     return {
@@ -114,6 +151,8 @@ export function FingerTrainingLoadCard({ history = [], grips = [], handView = "p
         <span>This week <strong style={{ color: C.text }}>{fmt1(current)} {suffix}</strong></span>
         {display.reference.weeks > 0 && <span>Previous {display.reference.weeks}-week average <strong style={{ color: C.text }}>{fmt1(reference)} {suffix}</strong></span>}
       </div>
+
+      <VolumeResponse response={response} />
     </Card>
   </section>;
 }

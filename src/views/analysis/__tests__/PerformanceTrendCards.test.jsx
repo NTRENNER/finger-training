@@ -191,6 +191,14 @@ test('climbing context never refits the calibrated comparison and missing entrie
   expect(screen.getByText(/Same-day climbing may have happened before or after finger training/)).toBeInTheDocument();
 });
 
+test('shares the calibrated observations with the surrounding analysis view', () => {
+  const onAnalysis = jest.fn();
+  const analysis = makeAnalysis();
+  buildPerformanceObservations.mockReturnValue(analysis);
+  render(<PerformanceTrendCards history={history} grips={grips} onAnalysis={onAnalysis} />);
+  expect(onAnalysis).toHaveBeenCalledWith(analysis);
+});
+
 test('hover and click inspect the actual observation when grip series have different dates and lengths', () => {
   const analysis = makeAnalysis();
   const crusherHold = { ...analysis.observations[1], id: 'crusher-only', grip: 'Crusher', hand: 'R', force: 15, expectedForce: 30, deviation: -50 };

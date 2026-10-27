@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ResponsiveContainer, ComposedChart, Bar, Scatter, XAxis, YAxis,
   CartesianGrid, ReferenceLine,
@@ -25,7 +25,7 @@ const shortDomain = ([low, high]) => {
 const cardStyle = { marginBottom: 16, padding: '20px clamp(14px, 4vw, 24px)', minWidth: 0 };
 
 export function PerformanceTrendCards({
-  history = EMPTY, grips = EMPTY, handView = 'pooled', activities = EMPTY, unit = 'kg',
+  history = EMPTY, grips = EMPTY, handView = 'pooled', activities = EMPTY, unit = 'kg', onAnalysis,
 }) {
   const selectedGrips = grips || EMPTY;
   // Recompute only when source history or scope changes. Date and point
@@ -33,6 +33,7 @@ export function PerformanceTrendCards({
   const { loading, result: analysis } = usePerformanceObservations(history, selectedGrips, handView);
   const rows = analysis?.rows || EMPTY;
   const observations = analysis?.observations || EMPTY;
+  useEffect(() => { onAnalysis?.(analysis || null); }, [analysis, onAnalysis]);
   const [window, setWindow] = useState(null);
   const [durationBand, setDurationBand] = useState('all');
   const [sessionContext, setSessionContext] = useState('all');
