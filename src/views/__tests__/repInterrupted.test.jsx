@@ -83,16 +83,15 @@ test('beta sensor flow arms each domain load and does not finish at the referenc
   expect(tindeq.targetKgRef.current).toBe(15);
   expect(screen.getByText(/Chaos Machine/)).toBeInTheDocument();
 });
-test('rest keeps technical measurement details collapsed', () => {
+test('rest keeps interruption status without redundant measurement provenance', () => {
   render(<RestView lastRep={{actualTime: 30, avgForce: 17.5, failureValid: false, targetTime: 40}} restSeconds={20} repNum={1} repsPerSet={4} unit="kg" onRestDone={() => {}} />);
-  expect(screen.getByText(/17.5 kg time-weighted average over 30.0s/)).not.toBeVisible();
   expect(screen.getByText('Interrupted')).toBeVisible();
-  expect(screen.getByText(/Interrupted — activity only/)).not.toBeVisible();
+  expect(screen.queryByText('Details')).not.toBeInTheDocument();
 });
 test('final rep retains its interruption status in session summary', () => {
   render(<SessionSummaryView config={config} reps={[{rep_num: 1, set_num: 1, actual_time_s: 12, avg_force_kg: 18, failure_valid: false}]} onDone={() => {}} />);
   expect(screen.getByText('Interrupted')).toBeVisible();
-  expect(screen.getByText(/Interrupted — activity only/)).not.toBeVisible();
+  expect(screen.queryByText('Details')).not.toBeInTheDocument();
 });
 
 test('an aborted partial set is not described as complete', () => {
@@ -170,11 +169,11 @@ test('live clock includes the ramp and freezes at the same end when loss confirm
   expect(screen.getByText('30.0s')).toBeVisible();
 });
 
-test('rest shows pull time while keeping matched averaging duration in Details', () => {
+test('rest shows pull time with compact recorded rest and force variation details', () => {
   render(<RestView lastRep={{ actualTime: 27, avgForce: 20, targetTime: 30, failureValid: true,
-    forceRecording: { pull_duration_s: 30 } }} restSeconds={20} repNum={1} repsPerSet={4} unit="kg" onRestDone={jest.fn()} />);
+    restBefore: 21.4, forceRecording: { pull_duration_s: 30, force_cv: 0.03 } }} restSeconds={20} repNum={1} repsPerSet={4} unit="kg" onRestDone={jest.fn()} />);
   expect(screen.getByText('30s')).toBeVisible();
-  const detail = screen.getByText(/20.0 kg time-weighted average over 27.0s/);
+  const detail = screen.getByText('Rest: 21.4s · Force variation: 3%');
   expect(detail).not.toBeVisible();
   fireEvent.click(screen.getByText('Details'));
   expect(detail).toBeVisible();

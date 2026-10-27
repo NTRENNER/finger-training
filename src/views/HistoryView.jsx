@@ -1085,6 +1085,13 @@ export function HistoryView({
                 const peakTest = isPeakMeasurement(r);
                 const passed = peakTest ? isValidPeakMeasurement(r) : displayedRepTime(r.actual_time_s, r.force_recording) >= r.target_duration;
                 const beta = isMixedDomainRep(r);
+                const detailBits = [];
+                if (r.rep_timing?.rest_before_s != null) {
+                  detailBits.push(`Rest: ${r.rep_timing.rest_before_s.toFixed(1)}s`);
+                }
+                if (!peakTest && Number.isFinite(Number(r.force_recording?.force_cv))) {
+                  detailBits.push(`Force variation: ${Math.round(Number(r.force_recording.force_cv) * 100)}%`);
+                }
                 // Per-rep hand letter — same color scheme as the F-D
                 // chart's L/R dots (L=blue, R=orange). Always shown,
                 // including on single-hand sessions, so the hand is
@@ -1114,14 +1121,7 @@ export function HistoryView({
                       <b>{fmtW(peakTest ? r.peak_force_kg : effectiveLoad(r), unit)}{unit}{peakTest ? " peak" : ""}</b> · {fmtTime(displayedRepTime(r.actual_time_s, r.force_recording))}
                       {beta && <span> · {MIXED_DOMAIN_LABELS[mixedDomainMetadata(r).zone]}</span>}
                       <RepResultDetails rep={r}>
-                        {!peakTest && r.force_recording?.version >= 1 && <div>Time-weighted average</div>}
-                        <div>{r.rep_timing?.rest_before_s != null
-                          ? `Actual rest before rep: ${r.rep_timing.rest_before_s.toFixed(1)}s`
-                          : "Actual rest not recorded"} · {peakTest ? "Rest between rounds" : "Planned rest"}: {r.rest_s ?? 20}s</div>
-                        {!peakTest && r.force_recording?.plateau?.duration_s > 0 && <div>
-                          Strong phase: {fmtW(r.force_recording.plateau.avg_force_kg, unit)} {unit} for {r.force_recording.plateau.duration_s.toFixed(1)}s
-                          · Force variation: {Math.round((r.force_recording.force_cv || 0) * 100)}%
-                        </div>}
+                        {detailBits.length > 0 && <div>{detailBits.join(" · ")}</div>}
                       </RepResultDetails>
                     </div>
                     {repEditMode === cardKey && (

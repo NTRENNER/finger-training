@@ -12,7 +12,7 @@ const pull = over => ({ failure_valid: false, peak_force_kg: 69.9, actual_time_s
 test("a complete Peak Test pull carries no interruption label", () => {
   render(<RepResultDetails rep={pull()} />);
   expect(screen.queryByText("Interrupted")).not.toBeInTheDocument();
-  expect(screen.getByText("Peak measurement — not a failure hold")).toBeInTheDocument();
+  expect(screen.queryByText("Details")).not.toBeInTheDocument();
 });
 
 test("an aborted Peak Test pull still reads as interrupted", () => {

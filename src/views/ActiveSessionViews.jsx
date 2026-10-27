@@ -812,11 +812,14 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
           </p>}
           <RepResultDetails rep={{ failure_valid: lastRep.failureValid, end_reason: lastRep.endReason,
             force_recording: lastRep.forceRecording, load_provenance: lastRep.loadProvenance }}>
-            {lastRep.restBefore != null && <p>Actual rest before this rep: {lastRep.restBefore.toFixed(1)}s.</p>}
-            {lastRep.forceRecording?.plateau?.duration_s > 0 && <p>
-              Strong phase: {fmtW(lastRep.forceRecording.plateau.avg_force_kg, unit)} {unit} for {lastRep.forceRecording.plateau.duration_s.toFixed(1)}s.
-            </p>}
-            <p>{lastRep.forceRecording?.duration_basis === "elapsed_activity_estimate" ? "Elapsed activity time estimated; no measured hold duration available." : lastRep.avgForce > 0 ? `${fmtW(lastRep.avgForce, unit)} ${unit} time-weighted average over ${lastRep.actualTime.toFixed(1)}s.` : "Manually timed effort."}</p>
+            {(lastRep.restBefore != null || Number.isFinite(Number(lastRep.forceRecording?.force_cv))) && <div>
+              {[
+                lastRep.restBefore != null ? `Rest: ${lastRep.restBefore.toFixed(1)}s` : null,
+                Number.isFinite(Number(lastRep.forceRecording?.force_cv))
+                  ? `Force variation: ${Math.round(Number(lastRep.forceRecording.force_cv) * 100)}%`
+                  : null,
+              ].filter(Boolean).join(" · ")}
+            </div>}
           </RepResultDetails>
         </Card>
       )}
