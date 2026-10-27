@@ -1,5 +1,6 @@
 import { PeakForceCard } from './analysis/PeakForceCard.jsx';
 import { PotentiationSpeedCard } from './analysis/PotentiationSpeedCard.jsx';
+import { FingerTrainingLoadCard } from './analysis/FingerTrainingLoadCard.jsx';
 import { isCapacityEvidenceRep, comparableCapacityHistory } from "../model/forceRecording.js";
 // ──────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
@@ -286,6 +287,11 @@ export function AnalysisView({
         <PeakForceCard history={peakRecordHistory} unit={unit} grip={selGrip} handView={handView}
           normalizeOn={normalizationActive} bodyWeight={bodyWeight} bwLog={bwLog} />
       </CardBoundary>}
+
+      <CardBoundary name="Finger training load">
+        <FingerTrainingLoadCard history={history} grips={scopedGrips}
+          handView={handView} unit={unit} />
+      </CardBoundary>
 
       <CardBoundary name="Potentiation speed">
         <PotentiationSpeedCard history={potentiationHistory} grips={scopedGrips}
