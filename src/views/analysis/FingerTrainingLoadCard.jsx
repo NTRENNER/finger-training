@@ -42,7 +42,6 @@ export function FingerTrainingLoadCard({ history = [], grips = [], handView = "p
   const load = useMemo(() => buildFingerTrainingLoad(history, {
     grips,
     hand: handView,
-    weeks: 12,
     throughDate: today(),
   }), [history, grips, handView]);
   const display = useMemo(() => {

@@ -54,3 +54,14 @@ test("training load honors grip and hand scope and keeps empty calendar weeks", 
   expect(result.rows[0].volumeKgS).toBe(100);
   expect(result.reference).toMatchObject({ weeks: 3, tutS: 10 / 3, volumeKgS: 100 / 3 });
 });
+
+test("training load defaults to every week since the selected scope began", () => {
+  const result = buildFingerTrainingLoad([
+    rep({ date: "2026-04-06", session_id: "first" }),
+    rep({ date: "2026-10-27", session_id: "latest" }),
+  ], { throughDate: "2026-10-27" });
+
+  expect(result.rows).toHaveLength(30);
+  expect(result.rows[0].week).toBe("2026-04-06");
+  expect(result.rows.at(-1).week).toBe("2026-10-26");
+});

@@ -22,21 +22,26 @@ export function isFingerTrainingLoadRep(rep) {
 export function buildFingerTrainingLoad(history = [], {
   grips = [],
   hand = "pooled",
-  weeks = 12,
+  weeks = null,
   throughDate = null,
 } = {}) {
   const gripSet = new Set((grips || []).filter(Boolean));
-  const eligible = (history || []).filter(rep =>
+  const scoped = (history || []).filter(rep =>
     isFingerTrainingLoadRep(rep)
     && (!gripSet.size || gripSet.has(rep.grip))
     && (hand === "pooled" || rep.hand === hand));
 
-  if (!eligible.length) return null;
+  if (!scoped.length) return null;
 
-  const endDate = throughDate || eligible.reduce((latest, rep) => rep.date > latest ? rep.date : latest, "");
+  const endDate = throughDate || scoped.reduce((latest, rep) => rep.date > latest ? rep.date : latest, "");
+  const eligible = scoped.filter(rep => rep.date <= endDate);
+  if (!eligible.length) return null;
   const endWeek = weekKey(endDate);
-  const count = Math.max(1, Math.floor(Number(weeks) || 12));
-  const startWeek = addDays(endWeek, -(count - 1) * 7);
+  const firstWeek = weekKey(eligible.reduce((earliest, rep) => rep.date < earliest ? rep.date : earliest, eligible[0].date));
+  const requestedWeeks = weeks == null ? null : Math.max(1, Math.floor(Number(weeks) || 1));
+  const allWeeks = Math.round((new Date(`${endWeek}T00:00:00Z`) - new Date(`${firstWeek}T00:00:00Z`)) / (7 * 86400000)) + 1;
+  const count = requestedWeeks || Math.max(1, allWeeks);
+  const startWeek = requestedWeeks ? addDays(endWeek, -(count - 1) * 7) : firstWeek;
   const rows = Array.from({ length: count }, (_, index) => {
     const week = addDays(startWeek, index * 7);
     return { week, tutS: 0, volumeKgS: 0, sessions: new Set() };
