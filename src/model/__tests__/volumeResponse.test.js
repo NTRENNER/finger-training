@@ -34,7 +34,7 @@ test("detects an acute dip and delayed rebound after repeated higher-volume week
     grips: ["Crusher"], hand: "L", mode: "time", throughDate: date(24 * 7 + 28),
   });
 
-  expect(result.summary).toBe("Short dip, later rebound");
+  expect(result.summary).toBe("Higher-load weeks were followed by a short dip and later rebound.");
   expect(result.windows.map(window => window.status)).toEqual(["ready", "ready"]);
   expect(result.windows.find(window => window.id === "acute")).toMatchObject({ direction: "down" });
   expect(result.windows.find(window => window.id === "delayed")).toMatchObject({ direction: "up", effect: 7 });
@@ -78,7 +78,7 @@ test("reports no consistent pattern when higher and lower weeks have similar lat
   const result = buildVolumeResponse(history, observations, {
     grips: ["Crusher"], hand: "L", mode: "volume", throughDate: date(14 * 7 + 28),
   });
-  expect(result.summary).toBe("No consistent pattern yet");
+  expect(result.summary).toBe("Training load and later performance are not consistent enough yet to guide training.");
   expect(result.windows.every(window => window.direction === "neutral")).toBe(true);
 });
 

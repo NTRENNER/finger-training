@@ -16,8 +16,8 @@ export const VOLUME_RESPONSE_POLICY = Object.freeze({
 });
 
 export const VOLUME_RESPONSE_WINDOWS = Object.freeze([
-  Object.freeze({ id: "acute", label: "Next 7 days", startDay: 7, endDay: 13 }),
-  Object.freeze({ id: "delayed", label: "Days 8–21", startDay: 14, endDay: 27 }),
+  Object.freeze({ id: "acute", label: "Following week", startDay: 7, endDay: 13 }),
+  Object.freeze({ id: "delayed", label: "Following days 8–21", startDay: 14, endDay: 27 }),
 ]);
 
 const mean = values => values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -144,14 +144,22 @@ function analyzeWindow(loadRows, outcomes, window, doseKey, throughDate) {
 function responseSummary(windows) {
   const acute = windows.find(window => window.id === "acute")?.direction;
   const delayed = windows.find(window => window.id === "delayed")?.direction;
-  if (acute === "down" && delayed === "up") return "Short dip, later rebound";
-  if (acute === "down" && delayed === "down") return "Lower performance after higher volume";
-  if (acute === "up" && delayed === "up") return "Stronger performance after higher volume";
-  if (delayed === "up") return "Possible later rebound";
-  if (delayed === "down") return "Possible delayed dip";
-  if (acute === "down") return "Possible short-term fatigue";
-  if (acute === "up") return "Possible short-term lift";
-  return "No consistent pattern yet";
+  if (acute === "down" && delayed === "up") return "Higher-load weeks were followed by a short dip and later rebound.";
+  if (acute === "down" && delayed === "down") return "Higher-load weeks were consistently followed by lower performance.";
+  if (acute === "up" && delayed === "up") return "Higher-load weeks were consistently followed by better performance.";
+  if (delayed === "up") return "Higher-load weeks may have been followed by later improvement.";
+  if (delayed === "down") return "Higher-load weeks may have been followed by a delayed dip.";
+  if (acute === "down") return "Higher-load weeks may have been followed by a short-term dip.";
+  if (acute === "up") return "Higher-load weeks may have been followed by short-term improvement.";
+  const effects = windows.filter(window => window.status === "ready" && Number.isFinite(window.effect))
+    .map(window => window.effect);
+  if (effects.length && effects.every(effect => effect > 0)) {
+    return "Higher-load weeks were followed by better performance, but the pattern is not consistent enough yet to guide training.";
+  }
+  if (effects.length && effects.every(effect => effect < 0)) {
+    return "Higher-load weeks were followed by lower performance, but the pattern is not consistent enough yet to guide training.";
+  }
+  return "Training load and later performance are not consistent enough yet to guide training.";
 }
 
 export function buildVolumeResponse(history = [], observations = [], {

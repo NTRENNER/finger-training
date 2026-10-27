@@ -45,10 +45,7 @@ function signedPoints(value) {
 function VolumeResponse({ response }) {
   if (!response) return null;
   return <section aria-label="Training load response" style={{ borderTop: `1px solid ${C.border}`, marginTop: 16, paddingTop: 14 }}>
-    <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, alignItems: "baseline" }}>
-      <strong style={{ fontSize: 13 }}>Training load response</strong>
-      <span style={{ color: C.text, fontSize: 12 }}>{response.summary}</span>
-    </div>
+    <strong style={{ fontSize: 13 }}>Training load response</strong>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
       {response.windows.map(window => <div key={window.id}>
         <div style={{ color: C.muted, fontSize: 11 }}>{window.label}</div>
@@ -57,11 +54,12 @@ function VolumeResponse({ response }) {
           {window.status === "ready" ? signedPoints(window.effect) : "—"}
         </div>
         <div style={{ color: C.muted, fontSize: 10, marginTop: 2 }}>
-          {window.status === "ready" ? `higher vs lower dose · ${window.pairs} weeks` : "More comparable weeks needed"}
+          {window.status === "ready" ? `after higher-load weeks · ${window.pairs} comparisons` : "More comparisons needed"}
         </div>
       </div>)}
     </div>
-    <div style={{ color: C.muted, fontSize: 10, marginTop: 12 }}>Association only · prescriptions unchanged</div>
+    <div style={{ color: C.text, fontSize: 12, lineHeight: 1.45, marginTop: 12 }}>{response.summary}</div>
+    <div style={{ color: C.muted, fontSize: 10, marginTop: 6 }}>Analysis only · recommendations unchanged</div>
   </section>;
 }
 

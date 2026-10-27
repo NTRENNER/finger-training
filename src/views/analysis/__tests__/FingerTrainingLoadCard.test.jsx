@@ -79,8 +79,10 @@ test("shows a compact lagged response once repeated dose and performance evidenc
     grips={["Crusher"]} handView="L" unit="kg" />);
 
   const response = screen.getByRole("region", { name: "Training load response" });
-  expect(response).toHaveTextContent("Short dip, later rebound");
-  expect(response).toHaveTextContent("Next 7 days");
-  expect(response).toHaveTextContent("Days 8–21");
-  expect(response).toHaveTextContent("Association only · prescriptions unchanged");
+  expect(response).toHaveTextContent("Higher-load weeks were followed by a short dip and later rebound.");
+  expect(response).toHaveTextContent("Following week");
+  expect(response).toHaveTextContent("Following days 8–21");
+  expect(response).toHaveTextContent("after higher-load weeks");
+  expect(response).toHaveTextContent("comparisons");
+  expect(response).toHaveTextContent("Analysis only · recommendations unchanged");
 });
