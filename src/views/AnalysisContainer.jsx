@@ -80,6 +80,9 @@ export function AnalysisContainer(props) {
         <SectionSelector label="Analysis category" value={sub} onChange={pickSub}
           options={[["fingers", "Fingers"], ["lifts", "Lifts"], ["climbing", "Climbs"], ["weight", "Weight"]]} />
       </Card>
+      {/* Interpretation is intentionally centralized in Analysis. This live
+          summary refreshes after completed work; training surfaces stay
+          focused on the session currently being performed. */}
       <WeeklyReviewCard history={history} activities={activities} />
 
       {sub === "fingers" && (

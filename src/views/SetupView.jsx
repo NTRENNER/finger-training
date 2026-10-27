@@ -45,19 +45,15 @@
 // activities still flow through SetupView for SessionPlanCard's
 // today-climb fatigue read, but the capture UI no longer sits here.
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 
 import { C } from "../ui/theme.js";
 import { Btn, PageFrame } from "../ui/components.jsx";
 
-import { loadLS, saveLS, LS_WORKOUT_LOG_KEY, LS_DELOAD_WEEK_KEY } from "../lib/storage.js";
 import { BwPrompt } from "./BodyWeightEntry.jsx";
-import { today } from "../util.js";
 
 import { buildThreeExpPriors } from "../model/threeExp.js";
-import { deloadStatus, buildDeloadGuidance, DELOAD_WEEK_DAYS } from "../model/deload.js";
 import { SessionPlanCard } from "./cards/SessionPlanCard.jsx";
-import { DeloadBanner } from "./cards/DeloadBanner.jsx";
 import { GripCoverageSelector } from "./cards/GripCoverageSelector.jsx";
 
 // ────────────────────────────────────────────────────────────────
@@ -94,44 +90,6 @@ export function SetupView({
 
   const threeExpPriors = useMemo(() => buildThreeExpPriors(history), [history]);
 
-  // ── Deload detection + weekly plan ──
-  // Cross-grip recovery decline (personal taus), with lifting and
-  // climbing volume as severity context. The lifting log lives in
-  // localStorage in exactly the shape computeDeload expects, and the
-  // climb log arrives as a prop. Evaluated as of the real current date
-  // so the staleness guard works. Detect/explain/propose only — the
-  // accepted "deload week" is a volume-cap reminder, not a silent load
-  // scale-down.
-  const todayStr = today();
-  const recoveryStatus = useMemo(
-    () => deloadStatus(history, loadLS(LS_WORKOUT_LOG_KEY) || [], { today: todayStr, activities }),
-    [history, todayStr, activities]
-  );
-  const deloadState = recoveryStatus.deload;
-
-  // Accepted deload-week state (device-local). Active for DELOAD_WEEK_DAYS.
-  const [deloadWeek, setDeloadWeek] = useState(() => loadLS(LS_DELOAD_WEEK_KEY) || null);
-  const dayDiff = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
-  const weekDay = deloadWeek?.start ? dayDiff(deloadWeek.start, todayStr) + 1 : 0;
-  const weekActive = !!deloadWeek?.start && weekDay >= 1 && weekDay <= DELOAD_WEEK_DAYS;
-
-  // Guidance text: during an accepted week use the stored severity;
-  // otherwise the live detector's severity. Null when neither applies.
-  const guidance = useMemo(() => {
-    const sev = weekActive ? deloadWeek.severity : (deloadState.deload ? deloadState.severity : null);
-    return sev ? buildDeloadGuidance(sev, history, { today: todayStr }) : null;
-  }, [weekActive, deloadWeek, deloadState, history, todayStr]);
-
-  const startDeloadWeek = () => {
-    const next = { start: todayStr, severity: deloadState.severity };
-    saveLS(LS_DELOAD_WEEK_KEY, next);
-    setDeloadWeek(next);
-  };
-  const endDeloadWeek = () => {
-    saveLS(LS_DELOAD_WEEK_KEY, null);
-    setDeloadWeek(null);
-  };
-
   const plannerHeader = (
     <GripCoverageSelector
       history={history}
@@ -156,24 +114,6 @@ export function SetupView({
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
-      {/* The recovery gauge itself moved to Analysis → Fingers in
-          September 2026. It is a diagnostic, not a pre-session decision:
-          it does not change a single prescribed load, and it read green
-          for five months straight, so on the first screen of the app it
-          was mostly furniture for a new user. What stays here is the
-          escalation path — the banner below, which surfaces only when
-          there is actually something to act on before you pull. */}
-      <DeloadBanner
-        deload={deloadState}
-        softening={recoveryStatus.level === "yellow"}
-        softeningWhy={deloadState?.why || null}
-        guidance={guidance}
-        weekActive={weekActive}
-        dayOfWeek={weekDay}
-        onStartWeek={startDeloadWeek}
-        onEndWeek={endDeloadWeek}
-      />
-
       {/* Single unified session-pick surface — RPE slider on top, six
           clickable zone tiles, session details below. Replaces the
           previously-separate ContinuousPickCard + PrescribedLoadCard

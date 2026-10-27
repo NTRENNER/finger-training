@@ -48,6 +48,14 @@ test('two genuinely poor first sets on separate days still trigger concern', () 
     evidenceScope: 'first_session_first_set', firstDate: '2026-09-28', lastDate: TODAY });
 });
 
+test('one poor workout cannot trigger recovery coaching by pulling down the two-day average', () => {
+  const rows = ['2026-09-28', TODAY].flatMap((date, index) => grips.flatMap(grip =>
+    session(date, grip, index === 0 ? 28 : 1)));
+  const result = computeDeload(rows, [], { today: TODAY });
+  expect(result.state).toBe('normal');
+  expect(deloadStatus(rows, [], { today: TODAY }).level).toBe('green');
+});
+
 test('uncertain session order does not promote either session to a readiness check', () => {
   const rows = [8, 18].flatMap(hour => session(TODAY, 'Micro', 10, { hour, session_started_at: null }));
   expect(buildRecoveryReadinessTrend(rows, 'Micro')).toEqual([]);

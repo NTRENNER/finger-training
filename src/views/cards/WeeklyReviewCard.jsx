@@ -1,17 +1,14 @@
 // ─────────────────────────────────────────────────────────────
-// WEEKLY REVIEW CARD
+// CURRENT TRAINING ANALYSIS CARD
 // ─────────────────────────────────────────────────────────────
-// Coach's note at the top of the Analysis tab. COMPACT by default —
-// the digest headline + 2-4 points from src/model/weeklyReview.js —
-// with a tap-to-expand FULL CHECK-IN (July 2026): the five-section
-// coach report (What you did / What's moving / What's stuck or
-// missing / What the engine will recommend / Heads up) modeled on the
-// scheduled-task coach prompt. Both views come from the same
+// Current interpretation at the top of the Analysis tab. Compact by
+// default, with a tap-to-expand five-section evidence summary. Both views
+// come from the same
 // buildCheckIn() call; the compact card just renders the digest subset.
 //
-// COMPLETED-WEEK MODE: refDate is the Sunday that ended the last full
-// Mon–Sun week (weekStart-of-today minus one day), so the card always
-// shows a stable, finished week rather than a sparse mid-week sliver.
+// LIVE-WEEK MODE: refDate is today. Finger, climbing, strength, bodyweight,
+// and program writes all invalidate the card, so analysis refreshes after
+// completed work instead of waiting for the next calendar week.
 //
 // Data: history + activities come from props; the workout log and BW
 // log are read straight from localStorage, mirroring
@@ -21,53 +18,62 @@ import React, { useMemo, useState } from "react";
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.jsx";
 import { buildCheckIn } from "../../model/weeklyReview.js";
-import { weekKey } from "../../lib/climbing-grades.js";
-import { loadLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY, LS_WORKOUT_PLAN_KEY } from "../../lib/storage.js";
+import { buildDeloadGuidance, deloadStatus, DELOAD_WEEK_DAYS } from "../../model/deload.js";
+import { saveLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY, LS_WORKOUT_PLAN_KEY, LS_DELOAD_WEEK_KEY } from "../../lib/storage.js";
+import { useLSValue } from "../../hooks/useLSValue.js";
+import { today } from "../../util.js";
 
-function addDays(ymd, n) {
-  const d = new Date(`${ymd}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
 function fmt(ymd) {
   return new Date(`${ymd}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 const MARK = { win: "✅", concern: "⚠️", info: "•" };
 const COLOR = { win: C.green, concern: C.orange, info: C.muted };
 
-// Section order + display copy for the expanded check-in.
+// Section order + display copy for the expanded analysis.
 // "focus" header (July 2026, per Nathan): the section EXPLAINS what the
 // recommender will do and why (staleness receipts), rather than issuing
 // a parallel set of orders — item voice in weeklyReview.js matches.
 const SECTIONS = [
-  ["did",     "What you did"],
-  ["moving",  "What's moving"],
-  ["stuck",   "What's stuck or missing"],
-  ["focus",   "What the engine will recommend — and why"],
-  ["headsUp", "Heads up"],
+  ["did",     "Training completed"],
+  ["moving",  "Progress"],
+  ["stuck",   "Gaps and recovery"],
+  ["focus",   "Recommendation inputs"],
+  ["headsUp", "Data notes"],
 ];
 
 export function WeeklyReviewCard({ history = [], activities = [] }) {
   const [expanded, setExpanded] = useState(false);
+  const workoutSessionsRaw = useLSValue(LS_WORKOUT_LOG_KEY);
+  const bwLogRaw = useLSValue(LS_BW_LOG_KEY);
+  const program = useLSValue(LS_WORKOUT_PLAN_KEY);
+  const deloadWeek = useLSValue(LS_DELOAD_WEEK_KEY);
+  const workoutSessions = useMemo(() => workoutSessionsRaw || [], [workoutSessionsRaw]);
+  const bwLog = useMemo(() => bwLogRaw || [], [bwLogRaw]);
+  const todayYMD = today();
   const review = useMemo(() => {
-    // Last complete Mon–Sun week: the Sunday before this week's Monday.
-    const todayYMD = new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
-    const refDate = addDays(weekKey(todayYMD), -1);
-    let workoutSessions = [];
-    let bwLog = [];
-    let program = null;
-    try { workoutSessions = loadLS(LS_WORKOUT_LOG_KEY) || []; } catch { workoutSessions = []; }
-    try { bwLog = loadLS(LS_BW_LOG_KEY) || []; } catch { bwLog = []; }
-    try { program = loadLS(LS_WORKOUT_PLAN_KEY); } catch { program = null; }
-    return buildCheckIn(history, activities, workoutSessions, { refDate, bwLog, program });
-  }, [history, activities]);
+    return buildCheckIn(history, activities, workoutSessions, { refDate: todayYMD, bwLog, program });
+  }, [history, activities, workoutSessions, todayYMD, bwLog, program]);
+
+  const recoveryStatus = useMemo(
+    () => deloadStatus(history, workoutSessions, { today: todayYMD, activities }),
+    [history, workoutSessions, todayYMD, activities],
+  );
+  const dayDiff = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+  const deloadDay = deloadWeek?.start ? dayDiff(deloadWeek.start, todayYMD) + 1 : 0;
+  const deloadActive = !!deloadWeek?.start && deloadDay >= 1 && deloadDay <= DELOAD_WEEK_DAYS;
+  const activeGuidance = useMemo(() => deloadActive
+    ? buildDeloadGuidance(deloadWeek.severity, history, { today: todayYMD }) : null,
+  [deloadActive, deloadWeek, history, todayYMD]);
+  const startDeloadWeek = () => saveLS(LS_DELOAD_WEEK_KEY,
+    { start: todayYMD, severity: recoveryStatus.deload.severity });
+  const endDeloadWeek = () => saveLS(LS_DELOAD_WEEK_KEY, null);
 
   const range = review.range;
   return (
     <Card style={{ margin: "12px 16px 0" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: C.muted }}>
-          Weekly check-in{range ? ` · ${fmt(range.weekStart)} – ${fmt(range.weekEnd)}` : ""}
+          Current training analysis{range ? ` · ${fmt(range.weekStart)} – ${fmt(range.weekEnd)}` : ""}
         </div>
         {review.sections && (
           <button
@@ -78,7 +84,7 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
               fontSize: 14, fontWeight: 700, color: C.blue,
             }}
           >
-            {expanded ? "− compact" : "Full check-in ▾"}
+            {expanded ? "− Summary" : "Details ▾"}
           </button>
         )}
       </div>
@@ -92,6 +98,19 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
           <span style={{ color: COLOR[p.kind] || C.text, fontSize: 14, lineHeight: 1.4 }}>{p.text}</span>
         </div>
       ))}
+
+      {deloadActive && activeGuidance && (
+        <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 14, paddingTop: 12 }}>
+          <div style={{ color: C.orange, fontWeight: 700, fontSize: 12 }}>DELOAD WEEK · DAY {deloadDay} OF 7</div>
+          <div style={{ color: C.text, fontSize: 13, lineHeight: 1.45, marginTop: 4 }}>{activeGuidance.action}</div>
+          <button onClick={endDeloadWeek} style={{ marginTop: 8, background: "none", border: "none", color: C.muted, cursor: "pointer", padding: 0 }}>End deload week</button>
+        </div>
+      )}
+      {!deloadActive && recoveryStatus.deload?.deload && recoveryStatus.deload.severity === "strong" && (
+        <button onClick={startDeloadWeek} style={{ marginTop: 12, border: `1px solid ${C.orange}`, color: C.orange, background: "none", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontWeight: 700 }}>
+          Start deload week
+        </button>
+      )}
 
       {expanded && review.sections && (
         <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 14, paddingTop: 2 }}>
@@ -115,7 +134,6 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
               </div>
             );
           })}
-          <div style={{ marginTop: 12, fontSize: 11, color: C.muted, fontStyle: "italic" }}>— Coach</div>
         </div>
       )}
     </Card>

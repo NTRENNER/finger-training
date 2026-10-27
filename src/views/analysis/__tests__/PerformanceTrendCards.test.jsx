@@ -211,10 +211,13 @@ test('hover and click inspect the actual observation when grip series have diffe
 });
 
 test('tooltip and hold details respect display units and do not call unknown sessions rested', () => {
-  const observation = { ...makeAnalysis().observations[2], force: 10, expectedForce: 12.5 };
+  const observation = { ...makeAnalysis().observations[2], force: 10, expectedForce: 12.5,
+    expectationBasis: 'workout_plan', plannedLoad: 10, plannedDuration: 160, calibrationScale: 1.36 };
   const view = render(<PerformancePointTooltip observation={observation} unit="lbs" />);
   expect(screen.getByText('22.0 lbs')).toBeInTheDocument();
   expect(screen.getByText('27.6 lbs')).toBeInTheDocument();
+  expect(screen.getByText('22.0 lbs for 160 s')).toBeInTheDocument();
+  expect(screen.queryByText(/Personal calibration applied/)).not.toBeInTheDocument();
   expect(screen.getByText('Session order unknown')).toBeInTheDocument();
   expect(screen.getByText(/do not establish this session’s order or your recovery/)).toBeInTheDocument();
   view.rerender(<PerformanceObservationDetails observation={null} />);

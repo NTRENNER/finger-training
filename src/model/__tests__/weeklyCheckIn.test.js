@@ -211,7 +211,7 @@ describe("assembleCheckIn", () => {
       rep("2026-07-03", "Micro", 45, 45, 10)];
     const s = gatherCheckInSignals(hist, [], [], { refDate: REF });
     s.recovery = { level: "yellow", label: "Recovery softening", guidanceAction: null,
-      why: "Rep 2 recovered less than expected after the rest in your last 2 comparable Micro sessions." };
+      why: "Rep 2 recovered less than expected after the rest on each of your last 2 comparable Micro sessions." };
     const out = assembleCheckIn(s);
     expect(out.sections.stuck).toContain(`Recovery softening — ${s.recovery.why}`);
     expect(out.sections.stuck.some(t => /volume was already/i.test(t))).toBe(false);

@@ -58,7 +58,7 @@ describe("assembleReview", () => {
   });
 
   test("yellow recovery → softening headline, the measured claim, no advice", () => {
-    const why = "Rep 2 recovered less than expected after the rest in your last 2 comparable Crusher sessions.";
+    const why = "Rep 2 recovered less than expected after the rest on each of your last 2 comparable Crusher sessions.";
     const r = assembleReview(makeSignals({ recovery: { level: "yellow", label: "Recovery softening", guidanceAction: null, why } }));
     expect(r.headline).toBe("Solid week; recovery is softening.");
     const concern = r.points.find(p => p.kind === "concern").text;

@@ -173,6 +173,51 @@ test('session performance uses the frozen calibrated curve and retains extrapola
   });
 });
 
+test('saved workout target, not unused raw curve amplitude, anchors session performance', () => {
+  const amps = [10, 10, 10];
+  const taus = [6, 45, 420];
+  const scale = 1.36;
+  const target = 160;
+  const duration = 182.3;
+  const plannedLoad = 6.8;
+  const measuredForce = 6.9;
+  const rawExpected = predForceThreeExp(amps, duration, taus) * scale;
+  expect(rawExpected).toBeGreaterThan(measuredForce);
+  const rep = row(12, 'L', {
+    duration,
+    target_duration: target,
+    session: 'ladder-pinned',
+    avg_force_kg: measuredForce,
+    prescribed_load_kg: plannedLoad,
+    force_recording: {
+      version: 5,
+      signal_quality: 'complete',
+      capacity_eligible: true,
+      prediction_check: {
+        planned_load_kg: plannedLoad,
+        target_s: target,
+        models: { current: {
+          status: 'ready', amps, taus, scale, source: 'anchored-curve',
+          duration_basis: 'legacy_elapsed', min_duration_s: 5, max_duration_s: 220,
+        } },
+      },
+    },
+  });
+  const result = buildPerformanceTrendAnalysis([...history(12), rep], ['Crusher'], 'L');
+  const observation = result.observations.find(item => item.id === rep.id);
+  const expected = plannedLoad * predForceThreeExp(amps, duration, taus)
+    / predForceThreeExp(amps, target, taus);
+  expect(observation.expectedForce).toBeCloseTo(expected, 12);
+  expect(observation.expectedForce).toBeLessThan(measuredForce);
+  expect(observation.deviation).toBeGreaterThan(0);
+  expect(observation).toMatchObject({
+    expectationBasis: 'workout_plan',
+    plannedLoad,
+    plannedDuration: target,
+    planSource: 'saved_workout',
+  });
+});
+
 test('a transition incompatible with a native prior interval cannot create individual short-term points', () => {
   const records = Array.from({ length: 6 }, (_, index) => row(index, 'L', { duration: 40,
     force_recording: { version: 3, basis: 'target_acquired', acquisition_s: 0,

@@ -83,7 +83,7 @@ describe("computeDeload", () => {
     const r = computeDeload(history, [], { today: TODAY });
     expect(r.deload).toBe(false);
     expect(r.signals.downGrips).toEqual(["Crusher"]);
-    expect(r.why).toBe("Rep 2 recovered less than expected after the rest in your last 2 comparable Crusher sessions.");
+    expect(r.why).toBe("Rep 2 recovered less than expected after the rest on each of your last 2 comparable Crusher sessions.");
   });
 
   test("both grips down, no lifting spike → MILD deload", () => {
@@ -427,7 +427,7 @@ describe("recovery evidence scope", () => {
     expect(status.deload.signals.gripGaps.Micro.lastDate).toBe(TODAY);
     expect(Boolean(status.deload.signals.gripGaps.Crusher)).toBe(assessed);
     expect(status.deload.signals.unassessedGrips).toEqual(!assessed && dates.length ? ["Crusher"] : []);
-    expect(status.deload.why).toBe("Rep 2 recovered less than expected after the rest in your last 2 comparable Micro sessions.");
+    expect(status.deload.why).toBe("Rep 2 recovered less than expected after the rest on each of your last 2 comparable Micro sessions.");
   });
 
   test("historical assessment does not list grips first trained later", () => {

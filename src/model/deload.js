@@ -10,7 +10,9 @@ import { PHYS_MODEL_DEFAULT } from "./fatigue.js";
 import { sessionFatigueDetail } from "./climbingFatigue.js";
 
 // Sustained: compare first-session, first-set recovery on distinct training
-// dates. Two sessions or two hands on one rough day are still one observation.
+// dates. Both recent dates must independently cross the relevant threshold;
+// one rough workout cannot pull a rolling average into a recovery flag.
+// Two sessions or two hands on one rough day are still one observation.
 export const DELOAD_MIN_SESSIONS = 2;
 
 // Provisional absolute recovery-gap threshold until there is enough
@@ -201,6 +203,7 @@ export function recentGapHeldOut(history, grip, today, n) {
   const distance = (1 - weight) * DELOAD_GAP_TRIGGER + weight * personalDistance;
   return { mean, n: last.length, lastDate: last[last.length - 1].date,
     independentDates: last.length, firstDate: last[0].date,
+    recent: last.map(row => ({ date: row.date, gapAtTarget: row.gapAtTarget })),
     evidenceScope: 'first_session_first_set',
     confidence: last.some(r => r.confidence === "historical_estimate") ? "historical_estimate" : "measured",
     baseline: baselineStats, center, distance, threshold: center - distance,
@@ -218,8 +221,20 @@ export function gripPressure(gap) {
     : gap.z != null ? -gap.z / DELOAD_GAP_TRIGGER_SD : -gap.mean / DELOAD_GAP_TRIGGER;
   return raw >= 1 - 1e-12 ? 1 : Math.max(0, Math.min(1, raw));
 }
+
+function sustainedPressure(gap, pressure) {
+  if (!gap) return false;
+  // Compatibility for diagnostic callers that supply only an aggregate gap.
+  // Production readiness gaps always carry the independent recent dates.
+  if (!Array.isArray(gap.recent)) return gripPressure(gap) >= pressure;
+  const required = Number.isFinite(gap.n) ? gap.n : DELOAD_MIN_SESSIONS;
+  if (gap.recent.length < required || !Number.isFinite(gap.center) || !Number.isFinite(gap.distance)) return false;
+  const threshold = gap.center - gap.distance * pressure;
+  return gap.recent.every(row => Number.isFinite(row.gapAtTarget) && row.gapAtTarget <= threshold);
+}
+
 export function gripIsDown(gap) {
-  return !!gap && gripPressure(gap) === 1;
+  return !!gap && gripPressure(gap) === 1 && sustainedPressure(gap, 1);
 }
 
 // Main entry. Returns:
@@ -270,7 +285,7 @@ export function computeDeload(history, workoutSessions = [], opts = {}) {
     // the opening hold, which can be strong on the same day.
     const gripList = downGrips.join(" and ");
     const why = downGrips.length > 0
-      ? `Rep 2 recovered less than expected after the rest in your last ${minSessions} comparable ${gripList} sessions.`
+      ? `Rep 2 recovered less than expected after the rest on each of your last ${minSessions} comparable ${gripList} sessions.`
       : "Observed recovery is within your normal range for the currently measured grips.";
     return none(why, signals, downGrips.length > 0 ? "local_concern" : "normal");
   }
@@ -340,7 +355,8 @@ export function deloadStatus(history, workoutSessions = [], opts = {}) {
   if (!haveSignal) level = "unknown";
   else if (res.severity === "strong") level = "red";
   else if (res.severity === "mild" || res.state === "local_concern") level = "yellow";
-  else if (haveSignal && pressure >= DELOAD_YELLOW_AT) level = "yellow";
+  else if (haveSignal && pressure >= DELOAD_YELLOW_AT
+    && entries.some(gap => sustainedPressure(gap, DELOAD_YELLOW_AT))) level = "yellow";
   else level = "green";
 
   const label =

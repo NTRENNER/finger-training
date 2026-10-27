@@ -1,10 +1,9 @@
 import { isPeakMeasurement } from './peakTest.js';
 // ─────────────────────────────────────────────────────────────
-// WEEKLY REVIEW — coach-voice training digest
+// TRAINING ANALYSIS — concise evidence digest
 // ─────────────────────────────────────────────────────────────
-// A short weekly note in an expert coach's voice: a headline, a win or
-// two, an honest concern, a forward nudge — and it stays quiet on
-// uneventful weeks rather than manufacturing praise.
+// A concise interpretation of recent training: a headline, meaningful
+// progress, gaps, and the inputs already used by the recommendation engine.
 //
 // DESIGN: this is a NARRATION layer, not a parallel stats engine. Every
 // signal is computed by the app's existing, already-tested model code;
@@ -308,15 +307,11 @@ export function formatWeeklyReview(review) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// WEEKLY CHECK-IN — the full five-section coach report (July 2026)
+// EXPANDED TRAINING ANALYSIS
 // ─────────────────────────────────────────────────────────────
-// The structured big sibling of the digest above, modeled on Nathan's
-// scheduled-task coach prompt: What you did / What's moving / What's
-// stuck or missing / What the engine will recommend / Heads up. Same
-// philosophy — narration over EXISTING signals, and the focus section
-// never argues with the recommender: focus items come from zone/grip
-// staleness, the peak-test cadence, and prescription() loads, all
-// engine-owned.
+// The structured sibling of the digest above. It narrates existing signals;
+// the focus section reports inputs owned by the recommendation engine rather
+// than issuing a parallel prescription.
 //
 // gatherCheckInSignals() layers the extra signals over gatherSignals();
 // assembleCheckIn() is pure phrasing/ranking over the combined object.
@@ -580,7 +575,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
 
 export function assembleCheckIn(signals) {
   if (!signals || signals.empty || !signals.range) {
-    return { range: null, headline: "No training logged yet — log a session to start your weekly check-in.", sections: null };
+    return { range: null, headline: "No training logged yet — log a session to begin your training analysis.", sections: null };
   }
   const digest = assembleReview(signals);
   const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates } = signals;

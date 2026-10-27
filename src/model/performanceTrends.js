@@ -35,6 +35,28 @@ function comparisonBasis(rep) {
     ? 'target_acquired' : 'legacy_elapsed';
 }
 
+// The workout plan is the athlete-facing expectation. The raw anchored curve
+// can sit above or below that plan after density-ladder pins, cooked scaling,
+// and prescription bounds are applied. Re-anchor the saved curve at the load
+// and target that the runner actually displayed so clearing both targets lands
+// above zero instead of being judged against an unused raw amplitude.
+function workoutExpectationAnchor(rep, curve) {
+  const prediction = rep.force_recording?.prediction_check;
+  const savedLoad = positive(prediction?.planned_load_kg)
+    ? Number(prediction.planned_load_kg) : null;
+  const recordedLoad = positive(rep.prescribed_load_kg)
+    ? Number(rep.prescribed_load_kg) : null;
+  const load = savedLoad ?? recordedLoad;
+  const savedTarget = positive(prediction?.target_s) ? Number(prediction.target_s) : null;
+  const recordedTarget = positive(rep.target_duration) ? Number(rep.target_duration) : null;
+  const duration = savedTarget ?? recordedTarget;
+  if (!positive(load) || !positive(duration)) return null;
+  const curveForce = predForceThreeExp(curve.amps, duration, curve.taus) * curve.scale;
+  if (!positive(curveForce)) return null;
+  return { load, duration, scale: load / curveForce,
+    source: savedLoad != null && savedTarget != null ? 'saved_workout' : 'recorded_prescription' };
+}
+
 export const DEFAULT_PERFORMANCE_TREND_MODEL = 'contextOnly';
 
 // The optional read-only evidence sink shares these exact fits and scored holds
@@ -78,12 +100,17 @@ export function buildPerformanceTrends(history, grips, hand = 'pooled', {model =
     const curve = saved || reconstructedCurve(rep.grip,rep.hand,rep.date,
       Number(rep.target_duration)>0?Number(rep.target_duration):rep.actual_time_s);
     if (!curve || (curve.duration_basis && curve.duration_basis!==comparisonBasis(rep))) return null;
-    const expectedForce = predForceThreeExp(curve.amps,rep.actual_time_s,curve.taus)*curve.scale;
+    const rawExpectedForce = predForceThreeExp(curve.amps,rep.actual_time_s,curve.taus)*curve.scale;
+    const workoutAnchor = workoutExpectationAnchor(rep, curve);
+    const expectedForce = rawExpectedForce * (workoutAnchor?.scale ?? 1);
     if (!positive(expectedForce)) return null;
     const minDuration = Number.isFinite(curve.min_duration_s)?curve.min_duration_s:null;
     const maxDuration = Number.isFinite(curve.max_duration_s)?curve.max_duration_s:null;
     return {expectedForce,expectationSource:saved?'frozen':'reconstructed',calibrationSource:curve.source||null,
-      calibrationScale:curve.scale,minDuration,maxDuration,
+      calibrationScale:curve.scale,
+      expectationBasis:workoutAnchor?'workout_plan':'calibrated_curve',
+      plannedLoad:workoutAnchor?.load??null,plannedDuration:workoutAnchor?.duration??null,
+      planSource:workoutAnchor?.source??null,minDuration,maxDuration,
       extrapolated:(minDuration!=null&&rep.actual_time_s<minDuration)||(maxDuration!=null&&rep.actual_time_s>maxDuration)};
   };
   return dates.map(date => {

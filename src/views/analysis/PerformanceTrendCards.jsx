@@ -79,7 +79,7 @@ export function PerformanceTrendCards({
   return <section className="performance-trends" aria-label="Performance trends">
     <Card style={cardStyle}>
       <CardTitle>Recent Performance vs Expected</CardTitle>
-      <p className="trend-intro">Session Performance = (observed force − expected force) / expected force × 100. Zero means the calibrated pre-session model expectation. Each point is one opening hold compared at the same duration with the personal curve saved before that workout; older sessions reconstruct that curve from earlier history only. −20% means 20% less force than expected for that hold, not a 20% loss of maximum strength.</p>
+      <p className="trend-intro">Session Performance = (observed force − expected force) / expected force × 100. The workout's prescribed force and target time anchor the pre-session curve, so clearing both targets appears above zero. Older sessions reconstruct the curve from earlier history only. −20% means 20% less force than expected for that hold, not a 20% loss of maximum strength.</p>
       <DateRangeSlider dates={dates} start={start} end={end} onChange={(a, b) => setWindow([dates[a], dates[b]])} />
       <div className="trend-filters">
         <label className="trend-filter">Hold duration
@@ -124,7 +124,7 @@ export function PerformanceTrendCards({
       </div>
       <OpeningHoldInspector observations={visibleObservations} unit={unit} selectedId={selectedObservationId}
         onSelect={setSelectedObservationId} open={inspectOpen} onToggle={setInspectOpen} />
-      <p className="trend-small">This chart shows {startDate} through {endDate}. Points stay separate across different hold durations. Expected force uses the saved pre-session calibration when available and otherwise uses only earlier dates; that workout’s results cannot change its own comparison. Ringed points extend beyond the prior measured duration range.</p>
+      <p className="trend-small">This chart shows {startDate} through {endDate}. Points stay separate across different hold durations. Expected force uses the saved workout target and pre-session curve when available; that workout’s results cannot change its own comparison. Ringed points extend beyond the prior measured duration range.</p>
     </Card>
   </section>;
 }
