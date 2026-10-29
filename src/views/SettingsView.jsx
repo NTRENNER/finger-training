@@ -8,6 +8,7 @@
 //   Training Goal     — trip name + date; powers the WorkoutTab
 //                       countdown ("days until __").
 //   Cloud Sync        — Supabase OTP auth + manual pull
+//   Hand Measurement  — HO device sizing: instructions + photo upload
 //   Tindeq Progressor — informational text about BLE
 //   Developer options — collapsible setup-SQL display
 //   About             — model + version
@@ -22,7 +23,10 @@
 
 import React, { useState } from "react";
 import { C } from "../ui/theme.js";
-import { Card, Btn, PageFrame, Sect } from "../ui/components.jsx";
+import { Card, Btn, Disclosure, PageFrame, Sect } from "../ui/components.jsx";
+import { supabase } from "../lib/supabase.js";
+import { HandPhotoUpload } from "../hands/HandPhotoUpload.jsx";
+import { userPrefix } from "../hands/handUpload.js";
 import { KG_TO_LBS, fmt1, toDisp } from "../ui/format.js";
 import { BodyWeightEntry } from "./BodyWeightEntry.jsx";
 import { tripCountdown } from "../lib/trip.js";
@@ -373,6 +377,19 @@ CREATE POLICY "auth_all" ON reps
               a value next to it, but only a tap applies it.
             </p>
           </div>
+        </Sect>
+      </Card>
+
+      <Card>
+        <Sect title="Hand Measurement">
+          <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+            Photos of your marked hand size your HO Micro and Crusher.
+          </div>
+          <Disclosure title="Instructions and photo upload" style={{ marginBottom: 0 }}>
+            <HandPhotoUpload client={supabase}
+              prefix={user && supabase.storage ? userPrefix(user.id) : null}
+              blockedMessage="Sign in under Cloud Sync to upload your photos." />
+          </Disclosure>
         </Sect>
       </Card>
 

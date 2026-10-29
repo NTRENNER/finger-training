@@ -24,7 +24,11 @@ export default defineConfig(({ mode }) => {
     },
     server: { port: Number(process.env.PORT) || 3000 },
     preview: { port: 5000 },
-    build: { outDir: 'build', assetsDir: 'static', target: 'baseline-widely-available', manifest: true },
+    build: {
+      outDir: 'build', assetsDir: 'static', target: 'baseline-widely-available', manifest: true,
+      // Second page: the public hand-photo upload form (no app or sign-in).
+      rollupOptions: { input: { main: fileURLToPath(new URL('index.html', import.meta.url)), hands: fileURLToPath(new URL('hands/index.html', import.meta.url)) } },
+    },
     worker: { format: 'es' },
   };
 });
