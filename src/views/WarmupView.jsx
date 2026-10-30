@@ -81,7 +81,7 @@ function WarmupTime({ seconds, label, target }) {
   </div>;
 }
 
-export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit = "lbs", onClose, addReps,
+export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit = "lbs", onClose, addReps, updateRep = null,
   onTrainingStateChange = null }) {
   // ── Warmup mode (boulder / route) ──
   // Persisted to LS so the user's last choice carries across sessions.
@@ -516,7 +516,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
 
   if (phase === 'peak-test') {
     return <PeakTestView key={currentStep.id} visible={visible} grip={currentStep.grip} history={history} tindeq={tindeq}
-      addReps={addReps} unit={unit} source="warmup" onClose={advanceToNextStep}
+      addReps={addReps} updateRep={updateRep} unit={unit} source="warmup" onClose={advanceToNextStep}
       completionLabel={stepIdx < steps.length - 1 ? 'Continue warm-up' : 'Finish warm-up'} />;
   }
 

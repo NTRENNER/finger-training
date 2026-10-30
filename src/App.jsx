@@ -615,7 +615,7 @@ export default function App() {
 
       {config.peakTest && phase !== "idle" && <div hidden={tab !== 0}>
         <PageFrame style={{ padding: '20px 16px' }}><PeakTestView key={sessionId} grip={config.grip} hand={config.hand}
-          history={history} tindeq={tindeq} addReps={addReps} unit={unit} visible={tab === 0}
+          history={history} tindeq={tindeq} addReps={addReps} updateRep={updateRep} unit={unit} visible={tab === 0}
           onClose={() => setPhase("idle")} /></PageFrame>
       </div>}
       {/* Train tab */}
@@ -772,6 +772,7 @@ export default function App() {
       <div hidden={tab !== 2}>
         {(tab === 2 || climbVisited) && <ClimbView visible={tab === 2}
           addReps={addReps}
+          updateRep={updateRep}
           activities={activities}
           onLogActivity={addActivity}
           onNavigateToHistory={() => setTab(4)}
