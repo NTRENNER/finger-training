@@ -24,6 +24,7 @@ import { isPeakMeasurement } from './peakTest.js';
 // as raw inputs for that future logic.
 
 import { isCapacityEvidenceRep } from "./forceRecording.js";
+import { SHORTFALL_TOL } from "./prescription.js";
 import { ZONE_KEYS, TRAINING_ZONE_KEYS, zoneOf } from "./zones.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -71,14 +72,22 @@ export const LOCKOUT_WINDOW_DAYS = {
 // user can see whether they're on pace.
 export const ANNUAL_SESSION_GOAL = 100;
 
-// Find the most recent training date per zone. Buckets each rep by
-// the ACTUAL time-to-failure (zoneOf(actual_time_s)) — under train-to-
-// failure the actual hold IS the duration physiology delivered against,
-// which is what "training a zone" should mean. The prescribed
-// target_duration is just intent; if you target strength_endurance
-// (140s) and hold 222s, you trained endurance, not strength_endurance.
-// Falls back to target_duration only when actual is missing (legacy
-// rows or manual entries without an actual time recorded).
+export function creditedTrainingZone(rep) {
+  const actual = Number(rep?.actual_time_s);
+  const target = Number(rep?.target_duration);
+  const reachedPrescription = actual > 0 && target > 0
+    && actual >= target * SHORTFALL_TOL;
+  const duration = reachedPrescription ? target : actual > 0 ? actual : target;
+  return duration > 0 ? zoneOf(duration) : null;
+}
+
+// Find the most recent training date per zone. A valid fresh opener that
+// reaches the same 95% success threshold used by progression refreshes the
+// PRESCRIBED domain. Its actual failure duration remains the curve point;
+// freshness should not penalize someone for exceeding the workout target and
+// landing just across a zone boundary. A genuine shortfall is credited only
+// to the domain actually reached. Falls back to target_duration when actual
+// is missing (legacy rows or manual entries without an actual time recorded).
 //
 // FRESH EFFORTS ONLY (rep_num === 1, May 2026): a zone counts as
 // "trained" only when a FRESH first rep landed there. Later within-set
@@ -96,9 +105,8 @@ export function getLastZoneTrainedDates(history) {
   for (const r of history || []) {
     if (!r?.date || !isCapacityEvidenceRep(r) || Number(r.set_num ?? 1) !== 1) continue;
     if (!(r.rep_num == null || r.rep_num === 1)) continue;  // fresh efforts only
-    const td = r.actual_time_s > 0 ? r.actual_time_s : r.target_duration;
-    if (!(td > 0)) continue;
-    const k = zoneOf(td);
+    const k = creditedTrainingZone(r);
+    if (!k) continue;
     if (!out[k] || r.date > out[k]) out[k] = r.date;
   }
   return out;

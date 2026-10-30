@@ -49,7 +49,7 @@ import { isCapacityEvidenceRep, isNominalPrescriptionRep } from "./forceRecordin
 import { ymdLocal } from "../util.js";
 import { MAX_TEST_TARGET_S } from "./peakForce.js";
 import { zoneOf, ZONE_REF_T, MAX_STRENGTH_MAX } from "./zones.js";
-import { getZoneStaleness, stalenessBoost } from "./lockout.js";
+import { creditedTrainingZone, getZoneStaleness, stalenessBoost } from "./lockout.js";
 import {
   THREE_EXP_LAMBDA_DEFAULT, fitThreeExpAmpsLOO,
   predForceThreeExp,
@@ -104,11 +104,9 @@ export function calendarRecencyDays(T) {
 // asymptotically to 1.0 as days_ago grows. Zone-specific tau means
 // Power recovers faster than Endurance. Returns 1.0 if zone never trained.
 //
-// Buckets reps by ACTUAL hold time (zoneOf(actual_time_s)), matching
-// getZoneStaleness's definition of "training a zone." Targeting a 140s
-// (S·E) hold but only lasting 60s means the body trained power_strength,
-// not S·E — both functions should agree. Falls back to target_duration
-// when actual_time_s is missing (legacy or manual rows).
+// Uses the same success-aware domain credit as getZoneStaleness: reaching
+// the prescribed duration refreshes that domain even when the failure point
+// crosses a boundary; a genuine shortfall is credited where it ended.
 //
 // Earlier version used target_duration only. That disagreed with
 // getZoneStaleness: an off-target session locked in recency for the
@@ -126,12 +124,9 @@ export function recencyPenalty(zone, history, grip) {
       if (!isCapacityEvidenceRep(r)) return false;
       if (r.grip !== grip) return false;
       // Fresh efforts only (rep_num === 1, or null for legacy/manual) —
-      // a zone is "recently trained" only when a fresh first rep landed
-      // there, not when a fatigued within-set rep died at that duration.
-      // Mirrors getLastZoneTrainedDates so coverage + recency agree.
+      // fatigued within-set reps cannot refresh another domain.
       if (!(r.rep_num == null || r.rep_num === 1)) return false;
-      const td = r.actual_time_s > 0 ? r.actual_time_s : r.target_duration;
-      return td > 0 && zoneOf(td) === zone;
+      return creditedTrainingZone(r) === zone;
     })
     .map(r => r.date)
     .filter(Boolean);
@@ -900,14 +895,11 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // residual-argmax T. When a zone wins because it's stale/never (a
   // coverage pick, not a confident in-zone limiter), the within-zone
   // argmax often lands near the zone's UPPER boundary — e.g. T≈45s in
-  // Power's [12,50) window, where reps sit a touch below the curve. If
-  // capacity has grown even slightly, a 45s target overshoots past 50s
-  // into Power-Strength, so the stale zone never actually gets refreshed
-  // (the classic "I trained Power but it still shows stale" trap). Snap
-  // to the zone reference time (Power → 30s): mid-window with overshoot
-  // margin, and because the curve is higher at the shorter hold it
-  // naturally prescribes a HEAVIER load for a SHORTER target — the
-  // overshoot-tolerant dose that actually clears the stale flag.
+  // Power's [12,50) window, where a slight overshoot changes the observed
+  // physiology and makes sessions harder to compare. Snap to the zone
+  // reference time (Power → 30s): mid-window with overshoot margin, and
+  // because the curve is higher at the shorter hold it naturally prescribes
+  // a HEAVIER load for a SHORTER target.
   // Boundary probes carry an exact measurement duration (3s upper,
   // 220s lower). The generic zone-reference snap must not rewrite that
   // protocol merely because the new grip's zone is necessarily "never."
