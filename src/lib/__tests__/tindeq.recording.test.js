@@ -131,6 +131,16 @@ test('timed warmups tolerate target crossings until the timer ends the rep', asy
   expect(onStart).toHaveBeenCalledTimes(2);
 });
 
+test('timed warmups exclude the force ramp from their average', async () => {
+  const { view, packet, onStart } = await setup(20, { endOnTargetDrop: false });
+  packet([[0, 4], [500, 10], [1000, 20], [1500, 20], [2000, 20]]);
+  expect(onStart).toHaveBeenCalledTimes(1);
+  let stats;
+  act(() => { stats = view.result.current.endRepAndRequireRelease(); });
+  expect(stats).toMatchObject({ actualTime: 1, avgForce: 20, failureValid: true,
+    forceRecording: { averaging_basis: 'first_target_crossing', ramp_duration_s: 1 } });
+});
+
 test('timed warmups still end on an actual early release', async () => {
   const { packet, onEnd } = await setup(25, { endOnTargetDrop: false });
   for (let ms = 0; ms <= 4000; ms += 100) packet([[ms, ms < 3000 ? 26 : 0]]);

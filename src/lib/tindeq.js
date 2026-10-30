@@ -153,12 +153,18 @@ export function useTindeq() {
   }, []);
   const recordWithBattery = useCallback((...args) => {
     const [samples, endTs, targetKg, decision] = args;
-    // Only ordinary targeted holds adopt this convention; peak tests and
-    // timed warmups retain their own acquisition and timing protocols.
     const measurement = samples === adSamplesRef.current ? autoPullRef.current : manualPullRef.current;
-    const stats = recordForce(samples, endTs, targetKg, decision && measurement ? {
-      ...decision, averageStartTs: measurement.averageStartTs, pullStartTs: measurement.pullStartTs,
-    } : decision);
+    // Starting a timed warm-up and ending it on target loss are separate
+    // decisions. Every targeted pull uses the first target crossing for its
+    // force average, even when the warm-up timer starts earlier and tolerates
+    // later dips below target.
+    const measuredDecision = measurement && targetKg > 0 ? {
+      ...(decision || {}),
+      startTs: decision?.startTs ?? measurement.averageStartTs,
+      averageStartTs: measurement.averageStartTs,
+      pullStartTs: measurement.pullStartTs,
+    } : decision;
+    const stats = recordForce(samples, endTs, targetKg, measuredDecision);
     return { ...stats, forceRecording: { ...stats.forceRecording,
       battery: { ...batteryRef.current }, transport: { ...transportRef.current } } };
   }, []);
@@ -498,7 +504,7 @@ export function useTindeq() {
             transportRef.current = { version: 1 };
             adActiveRef.current    = true;
             adStartTimeRef.current = now;
-            autoPullRef.current = createPullMeasurement(targetDetectorRef.current ? targetKgRef.current : null);
+            autoPullRef.current = createPullMeasurement(targetKgRef.current > 0 ? targetKgRef.current : null);
             autoPullRef.current.push({ kg, ts: now });
             publishForceLoss(targetDetectorRef.current, now);
             setAvgForce(null);

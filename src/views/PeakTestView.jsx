@@ -16,7 +16,7 @@ import { creditedSeconds } from './forceProtection.jsx';
 // Shared complete protocol for the standalone test and the optional warmup block.
 // Keep one sensor stream alive through hand changes/rest to observe releases.
 export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addReps,
-  source = 'standalone', onClose, unit = 'lbs', visible = true, completionLabel }) {
+  updateRep = null, source = 'standalone', onClose, unit = 'lbs', visible = true, completionLabel }) {
   const [context] = useState(() => {
     const date = today();
     const first = hand === 'Both' ? startingHandForDay(history, date) : hand;
@@ -32,7 +32,8 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
   // peak-test attempt begins the moment force crosses the auto-detect
   // threshold. The `armed` field is preserved for defensive gating in
   // callbacks.current.start but is no longer gated behind a UI click.
-  const [state, setState] = useState({ phase: 'ready', armed: true, index: 0, rows: [], elapsed: 0 });
+  const [state, setState] = useState({ phase: 'ready', armed: true, index: 0, rows: [], elapsed: 0,
+    replacement: null });
   const live = useRef(state);
   const transition = next => { live.current = next; setState(next); };
   const startRef = useRef(null);
@@ -50,18 +51,30 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
     live.current = { ...current, phase: 'completing' };
     const stats = finalizeDeviceActivity(raw, startRef.current, Date.now(), interruption);
     const h = context.hands[current.index % context.hands.length];
-    const previous = [...current.rows].reverse().find(r => r.hand === h);
-    const record = peakMeasurementRecord({ stats, hand: h,
+    const retainedRows = current.replacement
+      ? current.rows.filter(r => r.id !== current.replacement.id)
+      : current.rows;
+    const previous = [...retainedRows].reverse().find(r => r.hand === h);
+    let record = peakMeasurementRecord({ stats, hand: h,
       round: Math.floor(current.index / context.hands.length), grip,
       sessionId: context.sessionId, date: context.date, startedAt: context.startedAt,
       firstHand: context.first, source, previousEnd: previous?.rep_timing?.ended_at_ms });
-    const rows = [...current.rows, record];
-    addReps([record]);
+    let rows;
+    if (current.replacement && updateRep) {
+      record = { ...record, id: current.replacement.id };
+      const { id: _id, ...updates } = record;
+      updateRep(current.replacement, updates);
+      rows = [...retainedRows, record];
+    } else {
+      rows = [...current.rows, record];
+      addReps([record]);
+    }
     startRef.current = null;
     const next = current.index + 1;
     const phase = next >= total ? 'done' : next % context.hands.length === 0 ? 'rest' : 'ready';
     deadlineRef.current = phase === 'rest' ? Date.now() + PEAK_ROUND_REST_S * 1000 : null;
-    transition({ phase, armed: true, index: next, rows, elapsed: phase === 'rest' ? PEAK_ROUND_REST_S : 0 });
+    transition({ phase, armed: true, index: next, rows,
+      elapsed: phase === 'rest' ? PEAK_ROUND_REST_S : 0, replacement: null });
   }
   callbacks.current = {
     start: () => {
@@ -131,6 +144,17 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
     transition({ ...live.current, phase: 'ready', armed: true, elapsed: 0 });
   };
 
+  const retryLastRep = () => {
+    const current = live.current;
+    const last = current.rows.at(-1);
+    if (!updateRep || !last || isValidPeakMeasurement(last) || current.index < 1) return;
+    tindeq?.endRepAndRequireRelease?.();
+    startRef.current = null;
+    deadlineRef.current = null;
+    transition({ ...current, phase: 'ready', armed: true, index: current.index - 1,
+      elapsed: 0, replacement: last });
+  };
+
   const endEarly = () => {
     if (live.current.phase === 'active') callbacks.current.complete({
       ...tindeq.endRepAndRequireRelease(), endReason: 'interrupted', failureValid: false,
@@ -145,9 +169,10 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
       <b>{grip} · Peak Test</b>
       {state.phase !== 'done' && <Btn small color={C.red} onClick={endEarly}>End test</Btn>}
     </div>
-    {state.rows.length > 0 && !isValidPeakMeasurement(state.rows.at(-1)) && <p role="status" style={{ color: C.yellow }}>
-      Last attempt was incomplete. Its activity was saved, but it will not count toward your measured peak.
-    </p>}
+    {state.rows.length > 0 && !isValidPeakMeasurement(state.rows.at(-1)) && <div role="status" style={{ color: C.yellow, marginBottom: 12 }}>
+      <p>Last attempt was incomplete.</p>
+      {updateRep && <Btn onClick={retryLastRep}>Redo last rep</Btn>}
+    </div>}
     {state.phase === 'done' ? <Card>
       <h2>Peak Test complete</h2>
       {context.hands.map(h => <p key={h} style={{ fontSize: 22, fontWeight: 700 }}>

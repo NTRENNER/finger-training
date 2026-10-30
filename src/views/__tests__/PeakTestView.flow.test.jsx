@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { PeakTestView } from '../PeakTestView.jsx';
 import { useTindeq, TINDEQ_NOTIFY, CMD_START, CMD_STOP } from '../../lib/tindeq.js';
-import { isValidPeakMeasurement } from '../../model/peakTest.js';
+import { isValidPeakMeasurement, PEAK_ROUND_REST_S } from '../../model/peakTest.js';
 import { freshFitReps } from '../../model/load.js';
 beforeEach(() => { jest.useFakeTimers().setSystemTime(new Date(2026, 8, 24, 12)); localStorage.clear(); });
 afterEach(() => { jest.useRealTimers(); delete navigator.bluetooth; });
@@ -114,6 +114,39 @@ test('Retry rep discards the active attempt and keeps the slot', async () => {
   expect(addReps).toHaveBeenCalledTimes(1);
   const r = addReps.mock.calls[0][0][0];
   expect(r.rep_num).toBe(1); // first slot — the retry didn't consume it
+});
+
+test('an incomplete saved attempt can be redone in the same slot', () => {
+  let start, end;
+  const addReps = jest.fn();
+  const updateRep = jest.fn();
+  const tindeq = { connected: true, targetKgRef: {}, force: 0, avgForce: 0, peak: 0,
+    startAutoDetect: (onStart, onEnd) => { start = onStart; end = onEnd; },
+    stopAutoDetect: jest.fn(), endRepAndRequireRelease: jest.fn() };
+  render(<PeakTestView grip="Micro" hand="L" history={[]} tindeq={tindeq}
+    addReps={addReps} updateRep={updateRep} onClose={jest.fn()} />);
+
+  const complete = stats => { act(() => start()); act(() => end(stats)); };
+  const valid = peak => ({ actualTime: 2, avgForce: peak - 1, peakForce: peak,
+    failureValid: true, endReason: 'release' });
+  complete(valid(30));
+  act(() => jest.advanceTimersByTime(PEAK_ROUND_REST_S * 1000 + 100));
+  complete(valid(32));
+  act(() => jest.advanceTimersByTime(PEAK_ROUND_REST_S * 1000 + 100));
+  complete({ ...valid(20), failureValid: false, endReason: 'interrupted' });
+
+  expect(screen.getByText('Peak Test complete')).toBeInTheDocument();
+  const incomplete = addReps.mock.calls.at(-1)[0][0];
+  fireEvent.click(screen.getByRole('button', { name: 'Redo last rep' }));
+  expect(screen.getByText('Round 3 of 3')).toBeInTheDocument();
+  complete(valid(35));
+
+  expect(addReps).toHaveBeenCalledTimes(3);
+  expect(updateRep).toHaveBeenCalledWith(incomplete, expect.objectContaining({
+    rep_num: 3, peak_force_kg: 35, end_reason: 'peak_test_complete',
+  }));
+  expect(screen.getByText('Peak Test complete')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Redo last rep' })).not.toBeInTheDocument();
 });
 
 
