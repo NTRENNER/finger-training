@@ -17,18 +17,19 @@ const caption = { color: C.muted, fontSize: 12, textAlign: 'center', marginTop: 
 const field = { display: 'grid', gap: 6, fontSize: 14, fontWeight: 600, color: C.text, minWidth: 0 };
 const input = { font: 'inherit', width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text };
 
+// Top-down view. YES: a short tick from each edge onto the palm side.
+// NO: a line across the finger.
 function MarkDiagram() {
+  const ink = (x1, x2, y, w = 2.4) => <line x1={x1} y1={y} x2={x2} y2={y} stroke="#111" strokeWidth={w} strokeLinecap="round" />;
   const finger = (x, good) => <g key={x}>
     <rect x={x} y="8" width="46" height="128" rx="22" fill="#f1d3c2" stroke={C.muted} />
     {[64, 104].map(y => <g key={y}>
       <line x1={x + 4} y1={y} x2={x + 42} y2={y} stroke="#c9a896" strokeWidth="0.8" />
-      {good
-        ? <><line x1={x + 1} y1={y} x2={x + 7} y2={y} stroke="#111" strokeWidth="2.4" /><line x1={x + 39} y1={y} x2={x + 45} y2={y} stroke="#111" strokeWidth="2.4" /></>
-        : <line x1={x + 1} y1={y} x2={x + 45} y2={y} stroke="#111" strokeWidth="3.4" />}
+      {good ? <>{ink(x + 1, x + 8, y)}{ink(x + 38, x + 45, y)}</> : ink(x + 1, x + 45, y, 3.4)}
     </g>)}
     <text x={x + 23} y="160" textAnchor="middle" fontWeight="700" fontSize="13" fill={good ? C.green : C.red}>{good ? 'YES' : 'NO'}</text>
   </g>;
-  return <svg viewBox="0 0 180 170" style={img} role="img" aria-label="Yes: small marks at each edge. No: a line across the finger.">
+  return <svg viewBox="0 0 180 170" style={img} role="img" aria-label="Yes: short marks from each edge onto the palm side. No: a line across the finger.">
     {finger(25, true)}{finger(109, false)}
   </svg>;
 }
@@ -63,9 +64,10 @@ export function HandPhotoUpload({ client, prefix, blockedMessage, defaultName = 
   return <div>
     <p style={{ ...text, color: C.muted }}>You need a thin black pen, a bank card, a sheet of white paper and your phone. Measure the hand you train with.</p>
 
-    <h3 style={step}><span style={num}>1.</span>Mark the creases: small marks at the edges only</h3>
-    <p style={callout}>Use a <b>thin</b> pen. Make a <b>small mark (about 1/8 inch)</b> at <b>each edge</b> of the finger, where the crease ends. <b>Do not draw a line across the finger.</b></p>
-    <p style={text}>On the index, middle, ring and little finger, mark the crease at the <b>middle joint</b> and the crease at the <b>end joint</b>. Skip the thumb. That's <b>16 small marks</b>.</p>
+    <h3 style={step}><span style={num}>1.</span>Mark the creases: two small marks on each</h3>
+    <p style={callout}>Use a black <b>ultra-fine marker</b> (such as an Ultra Fine Sharpie), not a ballpoint. Start each mark exactly where the crease <b>reaches the side of the finger</b>, and draw it about <b>1/8 inch onto the palm side</b> so it shows from above. <b>Don't</b> draw a line across.</p>
+    <p style={text}>If a joint shows two crease lines, follow them to the side of the finger: they usually <b>meet there</b>, and that point is the joint.</p>
+    <p style={text}>Mark the <b>middle joint</b> and the <b>end joint</b> of the index, middle, ring and little finger. Skip the thumb. That's <b>16 small marks</b>.</p>
     <div style={row}>
       <figure style={{ margin: 0 }}><MarkDiagram /></figure>
       <figure style={{ margin: 0 }}>

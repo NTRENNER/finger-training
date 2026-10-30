@@ -6,7 +6,7 @@ const photo = (name, size = 3_000_000) => new File([new Uint8Array(1)], name, { 
 
 test('without an upload folder it shows the instructions and why upload is unavailable', () => {
   render(<HandPhotoUpload client={null} prefix={null} blockedMessage="Sign in under Cloud Sync to upload your photos." />);
-  expect(screen.getByText(/small marks at the edges only/)).toBeInTheDocument();
+  expect(screen.getByText(/two small marks on each/)).toBeInTheDocument();
   expect(screen.getByText('Sign in under Cloud Sync to upload your photos.')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Upload photos' })).toBeNull();
 });
