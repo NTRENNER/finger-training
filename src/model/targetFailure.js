@@ -88,6 +88,7 @@ export function createTargetFailureDetector(targetKg) {
   let acquisition = null, startTs = null, belowSince = null, recoverySince = null;
   let result = null, previous = null, window = [], runs = [], excursions = [];
   let runCount = 0, excursionCount = 0, belowMs = 0, recoveredMs = 0;
+  let continuationPending = false, continuationCount = 0;
   // Summarize smoothed-force runs for auditing recovery decisions. These are
   // not a raw trace and cannot reconstruct a different force threshold.
   const snapshot = (details = true) => {
@@ -98,6 +99,7 @@ export function createTargetFailureDetector(targetKg) {
     const offset = ts => ts == null || startTs == null ? null : Math.round(ts - startTs);
     return { ...live, version: 2, time_basis: 'acquisition_offset_ms',
       startTs: startTs == null ? null : 0, endTs: offset(live.endTs), confirmedTs: offset(live.confirmedTs),
+      continued_adjustment_count: continuationCount,
       run_count: runCount, excursion_count: excursionCount,
       runs_truncated: runCount > runs.length, excursions_truncated: excursionCount > excursions.length,
       below_boundary_ms: belowMs, recovered_excursion_ms: recoveredMs,
@@ -135,6 +137,21 @@ export function createTargetFailureDetector(targetKg) {
       runCount++;
       retainEnds(runs, { from_ms: last ? ts : startTs, to_ms: ts, above });
     }
+    // Continue means the athlete identified this force loss as a body or
+    // equipment adjustment, not the end of the effort. Keep the original
+    // pull clock and trace, but do not re-arm failure detection until force
+    // has returned to the working band long enough to be unambiguous.
+    if (continuationPending) {
+      belowSince = null;
+      if (above) {
+        if (recoverySince === null) recoverySince = ts;
+        if (ts - recoverySince >= TARGET_FAILURE_POLICY.recovery_ms) {
+          continuationPending = false;
+          recoverySince = null;
+        }
+      } else recoverySince = null;
+      return null;
+    }
     if (!above) {
       recoverySince = null;
       if (belowSince === null) belowSince = ts;
@@ -153,6 +170,15 @@ export function createTargetFailureDetector(targetKg) {
       result = { endTs: belowSince, startTs, confirmedTs: ts, targetAcquired: true, reason: 'sustained_force_loss' };
     }
     return result;
+  };
+  detect.continueRep = () => {
+    if (startTs === null) return false;
+    result = null;
+    belowSince = null;
+    recoverySince = null;
+    continuationPending = true;
+    continuationCount++;
+    return true;
   };
   detect.snapshot = snapshot;
   detect.finish = releaseTs => ({ ...(result || {}), startTs,

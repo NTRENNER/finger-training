@@ -373,6 +373,49 @@ test.each([2.5,5,6,25])('a two-second adjustment at target %s survives; zero rel
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:9.1,failureValid:true,
     forceRecording:{capacity_end_reason:'release',failure_policy:{version:11}}});
 });
+test('Continue keeps the same trace and records a later genuine failure', async () => {
+  const { view, packet, onEnd } = await setup(25);
+  feed(packet, 0, 7500, ms => ms < 3000 ? 25 : 20);
+  expect(view.result.current.forceLoss.status).toBe('complete');
+  expect(view.result.current.forceLoss.endTs).toBeGreaterThanOrEqual(3000);
+  expect(view.result.current.forceLoss.endTs).toBeLessThan(3400);
+  act(() => { expect(view.result.current.continueCurrentRep()).toBe(true); });
+  expect(view.result.current.forceLoss).toMatchObject({ status: 'holding', pendingEndTs: null });
+
+  feed(packet, 7600, 9500, ms => ms < 8500 ? 20 : 25);
+  feed(packet, 9600, 15100, ms => ms < 10500 ? 25 : 20);
+  expect(view.result.current.forceLoss.status).toBe('complete');
+  expect(view.result.current.forceLoss.endTs).toBeGreaterThanOrEqual(10500);
+  expect(onEnd).not.toHaveBeenCalled();
+
+  feed(packet, 15200, 16300, () => 0);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0].actualTime).toBeGreaterThanOrEqual(10);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({ failureValid: true,
+    endReason: 'target_force_failure', forceRecording: { force_loss: { continued_adjustment_count: 1 } } });
+});
+test('Continue also resumes a manually started Tindeq rep', async () => {
+  const { view, packet } = await setup(25);
+  const onFailure = jest.fn();
+  await act(async () => {
+    await view.result.current.stopAutoDetect();
+    view.result.current.setAutoFailCallback(onFailure);
+    await view.result.current.startMeasuring();
+  });
+  feed(packet, 0, 7500, ms => ms < 3000 ? 25 : 20);
+  expect(view.result.current.forceLoss.status).toBe('complete');
+  act(() => { expect(view.result.current.continueCurrentRep()).toBe(true); });
+  expect(view.result.current.forceLoss).toMatchObject({ status: 'holding', pendingEndTs: null });
+
+  feed(packet, 7600, 9500, ms => ms < 8500 ? 20 : 25);
+  feed(packet, 9600, 16300, ms => ms < 10500 ? 25 : ms < 15200 ? 20 : 0);
+  expect(onFailure).toHaveBeenCalledTimes(1);
+  let stats;
+  await act(async () => { stats = await view.result.current.stopMeasuring(); });
+  expect(stats.actualTime).toBeGreaterThanOrEqual(10);
+  expect(stats).toMatchObject({ failureValid: true, endReason: 'target_force_failure',
+    forceRecording: { force_loss: { continued_adjustment_count: 1 } } });
+});
 test('repeated short good pulses do not erase an ongoing loss in the live detector', async () => {
   const {packet,view,onEnd}=await setup(20);
   feed(packet,0,10000,ms=>ms<3000?20:ms%1000===0?18.7:18);

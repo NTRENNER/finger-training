@@ -36,6 +36,20 @@ test('redoing an automatic rep requires release and zero before re-arming withou
   expect(endRepAndRequireRelease).toHaveBeenCalledWith({ requireZero: true });
   expect(onRepDone).not.toHaveBeenCalled();
 });
+test('continuing an automatic rep forgives the current force dip without ending it', () => {
+  let start;
+  const continueCurrentRep = jest.fn(() => true);
+  const onRepDone = jest.fn();
+  const tindeq = { targetKgRef: {}, startAutoDetect: a => { start = a; }, stopAutoDetect: jest.fn(),
+    continueCurrentRep, connected: true, force: 18, avgForce: 18, peak: 20,
+    forceLoss: { status: 'recovering', pullStartTs: 0, observedTs: 6000, pendingEndTs: 3000 } };
+  render(<AutoRepSessionView session={session} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={tindeq} />);
+  act(() => start());
+  act(() => jest.advanceTimersByTime(2100));
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  expect(continueCurrentRep).toHaveBeenCalledTimes(1);
+  expect(onRepDone).not.toHaveBeenCalled();
+});
 test('manual interruption does not reuse stale sensor averages', () => {
   const onRepDone = jest.fn();
   const tindeq = { connected: false, avgForce: 99, peak: 100, targetKgRef: {}, setAutoFailCallback: jest.fn() };

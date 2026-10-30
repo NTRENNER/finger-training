@@ -860,6 +860,23 @@ export function useTindeq() {
     } catch { fail(); return false; }
   }, [writeCommand, cancelReleaseWatch, requireReleaseCheck]);
 
+  // The athlete may identify a sustained force dip as a position or equipment
+  // adjustment. Forgive only that loss episode: the original clock, samples,
+  // and average continue uninterrupted, while failure detection re-arms after
+  // force has stabilized back in the working band.
+  const continueCurrentRep = useCallback(() => {
+    const detector = adActiveRef.current
+      ? targetDetectorRef.current
+      : measuringRef.current ? manualTargetDetectorRef.current : null;
+    if (!detector?.continueRep?.()) return false;
+    manualBackstopRef.current = false;
+    const observedTs = latestForceLossRef.current?.observedTs ?? null;
+    const releaseTs = adActiveRef.current ? adBelowRef.current : belowSinceRef.current;
+    publishForceLoss(detector, observedTs, releaseTs);
+    scheduleUiFlush();
+    return true;
+  }, [publishForceLoss, scheduleUiFlush]);
+
   // Start auto-detect mode: Tindeq streams continuously, reps are detected by
   // force threshold crossings. onRepStart fires when a pull begins; onRepEnd
   // fires with { actualTime, avgForce } when the force drops back to baseline.
@@ -954,5 +971,5 @@ export function useTindeq() {
     if (ctrlRef.current) await writeCommand(CMD_STOP);
   }, [writeCommand, cancelReleaseWatch]);
 
-  return { connected, reconnecting, signalRecovering, force, peak, avgForce, bleError, battery, awaitingRelease, forceLoss, releaseCheckRequired, zeroing, zeroForNextRep, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
+  return { connected, reconnecting, signalRecovering, force, peak, avgForce, bleError, battery, awaitingRelease, forceLoss, releaseCheckRequired, zeroing, zeroForNextRep, continueCurrentRep, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
 }
