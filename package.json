@@ -16,6 +16,7 @@
     "postbuild": "node scripts/generate-asset-manifest.js && node scripts/generate-service-worker.js && node scripts/verify-service-worker.js",
     "verify:offline": "node scripts/verify-service-worker.js",
     "replay": "node --no-warnings scripts/replay.mjs",
+    "hand-photos": "node --no-warnings scripts/fetch-hand-photos.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "jest",
     "evaluate:mixed": "node --no-warnings scripts/evaluate-mixed-load.mjs",
