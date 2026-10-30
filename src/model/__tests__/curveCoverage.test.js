@@ -38,6 +38,16 @@ test("uses observed peak plus five trained domains for the denominator", () => {
   });
 });
 
+test("successful overshoot refreshes the prescribed coverage domain", () => {
+  const coverage = curveCoverageByGrip([
+    rep("2026-07-20", 140.3, { target_duration: 120 }),
+  ]).Crusher;
+
+  expect(coverage.current).toBe(2); // peak + prescribed Strength
+  expect(coverage.missing).not.toContain("Strength");
+  expect(coverage.missing).toContain("Strength-Endurance");
+});
+
 test("names missing, aging, and stale domains", () => {
   const history = [
     rep("2026-07-05", 30),

@@ -80,6 +80,15 @@ describe("getLastZoneTrainedDates", () => {
     expect(out.strength_endurance).toBeNull();
   });
 
+  test("a successful opener refreshes its prescribed domain after overshooting a boundary", () => {
+    const out = getLastZoneTrainedDates([
+      { grip: "Micro", date: "2026-10-29", rep_num: 1,
+        target_duration: 120, actual_time_s: 140.3 },
+    ]);
+    expect(out.strength).toBe("2026-10-29");
+    expect(out.strength_endurance).toBeNull();
+  });
+
   test("falls back to target_duration when actual_time_s missing", () => {
     const out = getLastZoneTrainedDates([
       { grip: "Crusher", date: "2026-05-11", target_duration: 30 },
