@@ -33,7 +33,7 @@ export function PerformancePointGlyph({ cx = 9, cy = 9, payload = {}, fill = C.b
     : payload.durationBand === 'medium'
       ? <rect x={cx - radius} y={cy - radius} width={radius * 2} height={radius * 2} {...props} />
       : <circle cx={cx} cy={cy} r={radius} {...props} />;
-  return <g>{symbol}{payload.extrapolated && <circle cx={cx} cy={cy} r={radius + 3}
+  return <g className="trend-point-glyph">{symbol}{payload.extrapolated && <circle cx={cx} cy={cy} r={radius + 3}
     fill="none" stroke={fill} strokeWidth="1.2" strokeDasharray="2 2" />}</g>;
 }
 

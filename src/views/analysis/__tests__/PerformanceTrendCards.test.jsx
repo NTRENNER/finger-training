@@ -16,7 +16,7 @@ jest.mock('recharts', () => {
     ResponsiveContainer: Wrap,
     ComposedChart: ({ data, children }) => <div data-testid="trend-chart" data-dates={data.map(row => row.date).join(',')} data-climbs={data.map(row => row.climbLoad == null ? 'unknown' : row.climbLoad).join(',')}>{children}</div>,
     Scatter: ({ data, line, name, onClick }) => <div data-testid="opening-hold-points" data-grip={name} data-holds={data.map(row => row.id).join(',')} data-connected={String(line)}>
-      {data.map(row => <button key={row.id} data-testid={`point-${row.id}`}
+      {data.map(row => <button key={row.id} className="trend-point-glyph" data-testid={`point-${row.id}`}
         onClick={() => onClick({ payload: row })}>Point {row.id}</button>)}
     </div>,
     XAxis: ({ domain, ticks }) => <div data-testid="trend-x-axis" data-domain={JSON.stringify(domain)} data-ticks={JSON.stringify(ticks)} />,
@@ -216,6 +216,21 @@ test('click opens the actual observation and close, escape, or a second click di
   expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByTestId('point-crusher-only'));
   fireEvent.click(screen.getByTestId('point-crusher-only'));
+  expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
+});
+
+test('tapping outside the popup closes it, but tapping inside it or on a point does not', () => {
+  buildPerformanceObservations.mockReturnValue(makeAnalysis());
+  render(<><PerformanceTrendCards history={history} grips={grips} /><p>Elsewhere on the page</p></>);
+  const [first, second] = screen.getAllByTestId(/^point-/);
+  fireEvent.click(first);
+  const popup = screen.getByRole('dialog', { name: 'Opening hold details' });
+  fireEvent.pointerDown(within(popup).getByRole('heading'));
+  expect(screen.getByRole('dialog', { name: 'Opening hold details' })).toBeInTheDocument();
+  fireEvent.pointerDown(second);
+  fireEvent.click(second);
+  expect(screen.getByRole('dialog', { name: 'Opening hold details' })).toBeInTheDocument();
+  fireEvent.pointerDown(screen.getByText('Elsewhere on the page'));
   expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
 });
 

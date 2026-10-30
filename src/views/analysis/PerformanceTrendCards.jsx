@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ResponsiveContainer, ComposedChart, Bar, Scatter, XAxis, YAxis,
   CartesianGrid, ReferenceLine,
@@ -10,6 +10,7 @@ import { GRIP_COLORS } from '../../ui/grip-colors.js';
 import { DateRangeSlider, normalizeHistoryWindow } from '../../ui/DateRangeSlider.jsx';
 import { usePerformanceObservations } from '../../hooks/usePerformanceObservations.js';
 import { useEscapeDismiss } from '../../hooks/useEscapeDismiss.js';
+import { useOutsideDismiss } from '../../hooks/useOutsideDismiss.js';
 import { suggestCookedFromClimbs } from '../../model/climbingFatigue.js';
 import {
   BAND_LABELS, CONTEXT_LABELS, PerformancePointGlyph,
@@ -39,7 +40,10 @@ export function PerformanceTrendCards({
   const [durationBand, setDurationBand] = useState('all');
   const [sessionContext, setSessionContext] = useState('all');
   const [selectedObservationId, setSelectedObservationId] = useState(null);
-  useEscapeDismiss(Boolean(selectedObservationId), () => setSelectedObservationId(null));
+  const popupRef = useRef(null);
+  const closePopup = () => setSelectedObservationId(null);
+  useEscapeDismiss(Boolean(selectedObservationId), closePopup);
+  useOutsideDismiss(Boolean(selectedObservationId), popupRef, closePopup, '.trend-point-glyph');
   const dates = rows.map(row => row.date);
   const firstMatch = window ? dates.findIndex(date => date >= window[0]) : 0;
   const first = firstMatch < 0 ? dates.length - 1 : firstMatch;
@@ -122,7 +126,7 @@ export function PerformanceTrendCards({
               line={false} shape={<PerformancePointGlyph />} isAnimationActive={false} />)}
           </ComposedChart>
         </ResponsiveContainer>
-        {selectedObservation && <div className="trend-point-popup" role="dialog" aria-label="Opening hold details">
+        {selectedObservation && <div ref={popupRef} className="trend-point-popup" role="dialog" aria-label="Opening hold details">
           <button type="button" className="trend-point-popup-close" aria-label="Close point details"
             onClick={() => setSelectedObservationId(null)}>×</button>
           <PerformanceObservationDetails observation={selectedObservation} unit={unit} />
