@@ -46,6 +46,21 @@ test('separate fully recovered dips do not accumulate to a failure', () => {
   expect(result).toBeNull();
   expect(detector.snapshot().excursions.length).toBeGreaterThan(1);
 });
+test('continuing after an adjustment preserves the clock and re-arms after recovery', () => {
+  const detector = createTargetFailureDetector(25);
+  for (const sample of trace(8, t => t < 3 ? 25 : 20)) detector(sample);
+  expect(detector.snapshot(false).status).toBe('complete');
+  expect(detector.snapshot(false).endTs).toBeGreaterThanOrEqual(3000);
+  expect(detector.snapshot(false).endTs).toBeLessThan(3400);
+  expect(detector.continueRep()).toBe(true);
+  expect(detector.snapshot(false)).toMatchObject({ status: 'holding', endTs: null, pendingEndTs: null });
+
+  for (const sample of trace(3, t => t < 1 ? 20 : 25)) detector({ ...sample, ts: sample.ts + 8100 });
+  for (const sample of trace(5, () => 20)) detector({ ...sample, ts: sample.ts + 11200 });
+  expect(detector.snapshot(false)).toMatchObject({ status: 'complete' });
+  expect(detector.snapshot(false).endTs).toBeGreaterThan(11000);
+  expect(detector.snapshot().continued_adjustment_count).toBe(1);
+});
 test('short initial spikes do not acquire a working hold', () => {
   const { detector, result } = run(trace(8, t => t < .1 ? 25 : 15), 25);
   expect(result).toBeNull();

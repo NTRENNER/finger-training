@@ -644,7 +644,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       </div>
       {interruptPrompt.show && (
         <InterruptPrompt
-          onContinue={interruptPrompt.dismiss}
+          onContinue={() => { tindeq.continueCurrentRep?.(); interruptPrompt.dismiss(); }}
           onInterrupted={() => { interruptPrompt.dismiss(); endRep(true); }}
           onRedo={() => { interruptPrompt.dismiss(); redoRep(); }}
         />
@@ -1393,7 +1393,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
       </div>
       {interruptPrompt.show && (
         <InterruptPrompt
-          onContinue={interruptPrompt.dismiss}
+          onContinue={() => { tindeq.continueCurrentRep?.(); interruptPrompt.dismiss(); }}
           onInterrupted={() => { interruptPrompt.dismiss(); finishAttempt({ explicit: true }); }}
           onRedo={() => { interruptPrompt.dismiss(); redoRep(); }}
         />
