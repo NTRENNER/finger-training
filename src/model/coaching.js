@@ -194,6 +194,12 @@ export function buildContinuousRecency(history, grip, { sigmaLog = 0.35, today =
 // confident limiter picks. Re-sweep if the data distribution shifts.
 export const CONFIDENCE_K = 1.5;
 
+// Bump when the recommender's choice can change for the same history.
+// Stored with every session decision (docs/model-roadmap.md).
+export const RECOMMENDER_VERSION = 1;
+// Leading alternatives the engine reports alongside its pick.
+const CANDIDATES_REPORTED = 4;
+
 // RECOVERY-COST WEIGHT (June 2026). The stated training goal is curve
 // lift per unit of CALENDAR time, but the bare score treats a session
 // costing 3.5 recovery days (endurance) the same as one costing 1.0
@@ -692,8 +698,11 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
   // Recovery-cost normalizer (mean tau) for the efficiency denominator.
   const meanTau = _meanRecoveryTau();
 
-  // Sweep T per hand, find argmax score across (hand, T).
+  // Sweep T per hand, find argmax score across (hand, T). The best T for
+  // each (domain, hand) is kept as a reported alternative; it never
+  // changes the pick.
   let best = null;
+  const bestByZoneHand = new Map();
   for (const [hand, { ratios, evidence }] of Object.entries(handFits)) {
     for (let T = tMin; T <= tMax; T += tStep) {
       // LOG-T Gaussian-smoothed local residual ratio at T. Distance is
@@ -830,6 +839,14 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
         if (refT) effectiveScore -= Math.abs(T - refT) * 1e-6;
       }
 
+      const candidateKey = `${zoneKey}|${hand}`;
+      if (!(bestByZoneHand.get(candidateKey)?.sortKey >= effectiveScore)) {
+        bestByZoneHand.set(candidateKey, { sortKey: effectiveScore, candidate: {
+          zone: zoneKey, T, hand, score, adaptBoost, stalenessBoost: stale, recency,
+          costFactor, handBoost: hBoost, focus, staleStatus: zoneStatus, localRatio, confidence,
+        } });
+      }
+
       if (!best || effectiveScore > best._effectiveScore) {
         best = {
           T,
@@ -874,6 +891,10 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
 
   if (!best) return null;
   delete best._effectiveScore;
+  best.candidates = [...bestByZoneHand.values()]
+    .sort((a, b) => b.sortKey - a.sortKey)
+    .slice(0, CANDIDATES_REPORTED)
+    .map(entry => entry.candidate);
 
   // Sparse-grip boundary probes override only the selected target. The
   // scoring engine remains intact underneath and resumes automatically

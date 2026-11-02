@@ -59,6 +59,10 @@ import { recordedAdjustment } from "./cookedScaling.js";
 import { loadBounds, isShortfall, SHORTFALL_TOL } from "./prescription.js";
 import { progressionSetEvidence, recordedSessionPrescription } from "./progressionEvidence.js";
 
+// Bump when the ladder's load or rung decision can change for the same
+// history. Stored with every session decision (docs/model-roadmap.md).
+export const PROGRESSION_VERSION = 1;
+
 export const LADDER_MIN_REPS = 4;
 export const LADDER_MAX_REPS = 6;
 // Rep 1 must reach 95% of T before the ladder can hold or advance the

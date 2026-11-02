@@ -146,6 +146,7 @@ export function useSessionRunner({
   const preSessionHistoryRef = useRef(null);
   const sessionAdjustmentRef = useRef(null);
   const sessionPrescriptionRef = useRef({});
+  const sessionDecisionRef = useRef(null);
   const volumePlanRef = useRef(null);
   const lastActivityByHandRef = useRef({});
   const [setRestStartedAtMs, setSetRestStartedAtMs] = useState(null);
@@ -313,6 +314,15 @@ export function useSessionRunner({
       pushDailyState(startedDay, cfg.cooked);
     }
     const startedAt = nowISO();
+    // Freeze the plan card's decision record (model/decisionLog.js) with the
+    // loads this session actually started from. Copied onto every rep.
+    const startLoads = byHand => Object.fromEntries(['L', 'R']
+      .filter(h => byHand[h] > 0).map(h => [h, Math.round(byHand[h] * 10) / 10]));
+    sessionDecisionRef.current = cfg.decision ? JSON.parse(JSON.stringify({
+      ...cfg.decision, started_at: startedAt, session_date: startedDay, hand_mode: cfg.hand,
+      base_load_by_hand: startLoads(originalLoads), applied_load_by_hand: startLoads(rw),
+      applied_multiplier: fatigueMod,
+    })) : null;
     preSessionHistoryRef.current = history;  // freeze pre-session view for level-up detection
     repDoneLockRef.current = false;   // arm rep-done for the first rep
     setSessionId(sid);
@@ -490,6 +500,9 @@ export function useSessionRunner({
     }
     if (!mixed && sessionPrescriptionRef.current[effectiveHand]) {
       recordedForce.session_prescription = { ...sessionPrescriptionRef.current[effectiveHand] };
+    }
+    if (sessionDecisionRef.current) {
+      recordedForce.decision = JSON.parse(JSON.stringify(sessionDecisionRef.current));
     }
     const roundedPrescribed = Math.round(weight * 10) / 10;
     const repRecord = {

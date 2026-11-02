@@ -127,6 +127,36 @@ test("sensor two-second summary survives rep saving independently of the instant
   expect(sustainedMaxKg(saved)).toBeCloseTo(20.3);
 });
 
+test("the plan's decision record is frozen at start and copied onto every rep", () => {
+  const { view, addReps } = setup();
+  const decision = { version: 1, plan_source: "curve", overridden: false,
+    recommended: { zone: "power", t_s: 45 }, selected: { zone: "power", t_s: 45, load_by_hand: { L: 20 } } };
+  act(() => view.result.current.startSession({ ...cfg, repsPerSet: 2, plannedLoadByHand: { L: 20 },
+    cooked: 8, adjustLoadForFatigue: true, decision }));
+  // Later plan or config changes cannot rewrite the session's decision.
+  decision.overridden = true;
+  act(() => view.result.current.setConfig(c => ({ ...c, decision: { version: 99 } })));
+  act(() => view.result.current.handleRepDone({ actualTime: 50, avgForce: 16 }));
+  act(() => view.result.current.handleRestDone());
+  act(() => view.result.current.handleRepDone({ actualTime: 30, avgForce: 16 }));
+  const rows = addReps.mock.calls.flatMap(call => call[0]);
+  expect(rows).toHaveLength(2);
+  for (const rep of rows) {
+    expect(rep.force_recording.decision).toMatchObject({ version: 1, overridden: false, hand_mode: "L",
+      base_load_by_hand: { L: 20 }, applied_load_by_hand: { L: 16 }, applied_multiplier: 0.8,
+      started_at: expect.any(String), session_date: expect.any(String) });
+  }
+  rows[0].force_recording.decision.selected.zone = "changed";
+  expect(rows[1].force_recording.decision.selected.zone).toBe("power");
+});
+
+test("a session started without a decision record stores none", () => {
+  const { view, addReps } = setup();
+  act(() => view.result.current.startSession(cfg));
+  act(() => view.result.current.handleRepDone({ actualTime: 50, avgForce: 20 }));
+  expect(addReps.mock.calls[0][0][0].force_recording.decision).toBeUndefined();
+});
+
 test('ordinary planned dose is immutable across actual overpulls, session edits and optional sets', () => {
   const { view, addReps } = setup();
   act(() => view.result.current.startSession({ ...cfg, repsPerSet: 4,

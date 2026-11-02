@@ -57,6 +57,9 @@ export const THREE_EXP_LAMBDA_DEFAULT = 100;
 // endurance for lower-endurance climbers (long-zone fit ~0.98 of held
 // force at 480 vs 0.75 at 180, with short/mid unchanged). Tune here.
 export const THREE_EXP_SLOW_TAU_S = 480;
+// Bump when the curve fit's behavior changes (time constants, priors,
+// shrinkage). Stored with every session decision (docs/model-roadmap.md).
+export const CURVE_MODEL_VERSION = 1;
 export const THREE_EXP_TAUS = [
   PHYS_MODEL_DEFAULT.tauD.fast,    // 10s
   PHYS_MODEL_DEFAULT.tauD.medium,  // 30s

@@ -70,6 +70,7 @@ import {
   computeDensityLadder, resolveDensityLadderLoads, overshootRaisedHands,
   LADDER_MAX_REPS, LADDER_MIN_REPS, LADDER_LOAD_STEP_FRAC,
 } from "../../model/densityLadder.js";
+import { buildSessionDecision } from "../../model/decisionLog.js";
 import { today } from "../../util.js";
 import { makeMixedDomainPlan, recommendedMixedDomainZone, MIXED_DOMAIN_REST_S } from '../../model/mixedDomain.js';
 import { mixedPlanReadiness } from '../../model/mixedLoadPrescription.js';
@@ -472,6 +473,12 @@ export function SessionPlanCard({
   // prefers these over a fresh prescription() call so the "same
   // weight, more reps" contract actually holds — re-prescribing from
   // the curve would drift the load between ladder rungs.
+  // The plan also carries a frozen decision record (model/decisionLog.js):
+  // what the engine recommended and why, its leading alternatives, what was
+  // selected, and the curve it came from. The runner stamps it on every rep.
+  const decisionFor = (source, selected, planLadder = null) => buildSessionDecision({
+    grip, history, freshMap, threeExpPriors, rec, overridden: isOverridden, source, selected, ladder: planLadder,
+  });
   useEffect(() => {
     if (mixedEnabled) {
       const first = mixedPlan.steps[0];
@@ -486,10 +493,14 @@ export function SessionPlanCard({
         mixedDomainPlan: mixedPlan,
         peakTest: false,
         volumePlan: null,
+        decision: decisionFor("chaos", { zone: first.zone, t_s: first.targetTime, reps: 5,
+          rest_s: MIXED_DOMAIN_REST_S, sets: plannedSets, load_by_hand: first.loadByHand }),
       });
       return;
     }
     if (!activeZone || !activeT) return;
+    const boundaryLoads = rec?.boundaryProbe && !isOverridden ? rec.loadByHand : null;
+    const planLadder = !isPeakTest && ladder ? ladder : null;
     onApplyPlan?.({
       mixedDomainPlan: null,
       volumePlan: volumeEnabled ? activeVolumePlan : null,
@@ -499,13 +510,18 @@ export function SessionPlanCard({
       targetTime: activeT,
       repsPerSet: reps,
       restTime: rest,
-      ladderLoadByHand: !isPeakTest && ladder ? ladderPlanLoadByHand : null,
+      ladderLoadByHand: planLadder ? ladderPlanLoadByHand : null,
       // Boundary probes must run at the exact load displayed above.
       // Otherwise startSession would call prescription() again and the
       // conservative lower-bound probe would silently revert to the old
       // sparse-curve extrapolation.
-      plannedLoadByHand:
-        rec?.boundaryProbe && !isOverridden ? rec.loadByHand : null,
+      plannedLoadByHand: boundaryLoads,
+      decision: decisionFor(
+        isPeakTest ? "peak_test" : planLadder ? "ladder" : boundaryLoads ? "boundary_probe" : "curve",
+        { zone: activeZone, t_s: activeT, reps, rest_s: rest, sets: plannedSets, peak_test: !!isPeakTest,
+          volume: !!(volumeEnabled && activeVolumePlan),
+          load_by_hand: planLadder ? ladderPlanLoadByHand : boundaryLoads },
+        planLadder),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
