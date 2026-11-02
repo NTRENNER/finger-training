@@ -197,8 +197,6 @@ export const CONFIDENCE_K = 1.5;
 // Bump when the recommender's choice can change for the same history.
 // Stored with every session decision (docs/model-roadmap.md).
 export const RECOMMENDER_VERSION = 1;
-// Leading alternatives the engine reports alongside its pick.
-const CANDIDATES_REPORTED = 4;
 
 // RECOVERY-COST WEIGHT (June 2026). The stated training goal is curve
 // lift per unit of CALENDAR time, but the bare score treats a session
@@ -891,9 +889,10 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
 
   if (!best) return null;
   delete best._effectiveScore;
+  // The best candidate for every domain and hand, best first, reported
+  // alongside the pick (the decision log keeps each domain's best).
   best.candidates = [...bestByZoneHand.values()]
     .sort((a, b) => b.sortKey - a.sortKey)
-    .slice(0, CANDIDATES_REPORTED)
     .map(entry => entry.candidate);
 
   // Sparse-grip boundary probes override only the selected target. The

@@ -41,6 +41,7 @@ import {
   volumeExperimentsFromSettings, validVolumeExperiments, restoreVolumeExperiments,
 } from '../lib/volumeExperimentStorage.js';
 import { sanitizeWorkoutProgram } from '../model/workoutProgram.js';
+import { validPilotEnrollment } from '../model/emphasisPilot.js';
 import {
   pushBW, deleteBW, fetchBWLog, fetchBWTombstoneDates, removeBWTombstones,
   fetchUserSettings, enqueueUserSettingsPatch, flushUserSettingsPatch,
@@ -79,6 +80,7 @@ function migratePins(raw) {
 const LS_BW_KEY             = "ft_bw";              // body weight in kg (number)
 const LS_TRIP_KEY           = "ft_trip";            // { date: "YYYY-MM-DD", name }
 const LS_CLIMBING_FOCUS_KEY = "ft_climbing_focus";  // "balanced" | "bouldering" | "power_endurance" | "endurance"
+const LS_EMPHASIS_PILOT_KEY = "ft_emphasis_pilot";  // { version, pilot_id, status, updated_at }
 
 // Confirm-or-keep-dirty helper for the BW dirty set (see storage.js
 // for the sync model). Clears the dirty mark only if the LS log entry
@@ -325,6 +327,21 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     if (user) flushUserSettingsPatch();
   }, [user]);
 
+  // ── Emphasis-block pilot enrollment ──────────────────────
+  // Joined and left on the Research page (model/emphasisPilot.js). Synced
+  // to user_settings.emphasis_pilot so it follows the athlete across devices.
+  const [emphasisPilot, setEmphasisPilotState] = useState(() =>
+    validPilotEnrollment(loadLS(LS_EMPHASIS_PILOT_KEY)));
+  const saveEmphasisPilot = useCallback((next) => {
+    const valid = validPilotEnrollment(next);
+    if (!valid) return false;
+    setEmphasisPilotState(valid);
+    saveLS(LS_EMPHASIS_PILOT_KEY, valid);
+    enqueueUserSettingsPatch({ emphasis_pilot: valid });
+    if (user) flushUserSettingsPatch();
+    return true;
+  }, [user]);
+
   // ── Climbing pyramid project pin (per filter combination) ──
   // Stored as a { [composite-key]: grade } map where the key is
   // `${discipline}|${venue}|${wall}` (built via pyramidPinKey). Each
@@ -463,6 +480,12 @@ export function useUserSettings({ user, syncSignal = 0 }) {
         setClimbingFocusState(cf);
         saveLS(LS_CLIMBING_FOCUS_KEY, cf);
       }
+      const pilot = (hasPending("emphasis_pilot") && validPilotEnrollment(pending.emphasis_pilot))
+        || validPilotEnrollment(cloud.emphasis_pilot);
+      if (pilot) {
+        setEmphasisPilotState(pilot);
+        saveLS(LS_EMPHASIS_PILOT_KEY, pilot);
+      }
       const pendingWorkoutProgram = hasPending("workout_program")
         ? sanitizeWorkoutProgram(pending.workout_program)
         : null;
@@ -551,6 +574,7 @@ export function useUserSettings({ user, syncSignal = 0 }) {
     bodyWeight, saveBW,
     trip, saveTrip,
     climbingFocus, saveClimbingFocus,
+    emphasisPilot, saveEmphasisPilot,
     pyramidProjectMap, savePyramidProjectMap,
     pinnedGripBaselines, savePinnedGripBaselines,
     pinnedPerHandBaselines, savePinnedPerHandBaselines,

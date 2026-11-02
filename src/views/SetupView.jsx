@@ -85,6 +85,7 @@ export function SetupView({
   volumeExperiment = null,
   onStartVolumeExperiment,
   volumeReady = true,
+  pilotEnrollment = null,
 }) {
   const handleGrip = (g) => setConfig(c => ({ ...c, grip: g }));
 
@@ -141,6 +142,7 @@ export function SetupView({
         onStartVolumeExperiment={onStartVolumeExperiment}
         volumeReady={volumeReady}
         availableGrips={GRIP_PRESETS}
+        pilotEnrollment={pilotEnrollment}
       />
 
       <BwPrompt unit={unit} onSave={onBwSave} />

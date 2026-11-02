@@ -227,6 +227,7 @@ export default function App() {
     bodyWeight, saveBW,
     trip, saveTrip,
     climbingFocus, saveClimbingFocus,
+    emphasisPilot, saveEmphasisPilot,
     pyramidProjectMap, savePyramidProjectMap,
     pinnedGripBaselines, savePinnedGripBaselines,
     pinnedPerHandBaselines, savePinnedPerHandBaselines,
@@ -676,6 +677,7 @@ export default function App() {
               volumeReady={volumeReady}
               climbingFocus={climbingFocus}
               onNavigateToSettings={() => setTab(SETTINGS_TAB)}
+              pilotEnrollment={emphasisPilot}
             />
           );
         }
@@ -862,7 +864,7 @@ export default function App() {
         <ResearchView history={history} activities={activities} unit={unit} signedIn={!!user}
           historySynced={historySynced} onOpenSettings={() => setTab(SETTINGS_TAB)}
           volumeExperiments={volumeExperiments} onSaveVolumeExperiment={saveVolumeExperiment}
-          volumeReady={volumeReady} />
+          volumeReady={volumeReady} emphasisPilot={emphasisPilot} onSaveEmphasisPilot={saveEmphasisPilot} />
       )}
       {tab === SETTINGS_TAB && (
         <SettingsView

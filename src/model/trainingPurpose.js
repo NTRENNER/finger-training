@@ -1,4 +1,5 @@
 import { overshootRaisedHands } from './densityLadder.js';
+import { EMPHASIS_BLOCK_NAME } from './emphasisPilot.js';
 
 // Explain the decision already made; never change the training prescription.
 export function trainingPurpose(rec, ladder = null, ladderLoads = null) {
@@ -9,6 +10,7 @@ export function trainingPurpose(rec, ladder = null, ladderLoads = null) {
     if (ladder.decision === 'step_load') return {label:'Progress a demonstrated ability', text:'You completed the top rung. Increase the load and restart at fewer reps.'};
     return {label:'Build consistency', text:ladder.decision === 'incomplete' ? 'The previous session was incomplete. Repeat the rung before advancing.' : 'Repeat this load and rep count until the ladder gates are met.'};
   }
+  if (rec?.pilot) return {label:'Pilot block', text:`Step ${rec.pilot.step} of ${rec.pilot.cycleLength} in the ${EMPHASIS_BLOCK_NAME[rec.pilot.emphasis]}.`};
   if (rec?.coldStart || rec?.boundaryProbe || rec?.coverageSnap) return {label:'More data needed', text:'Each workout helps us fine-tune your recommendations.'};
   return {label:'Build capacity', text:'This duration is selected from your recent performance and training coverage. It is a training opportunity, not proof that this is your weakest ability.'};
 }

@@ -8,7 +8,8 @@ import { RECOMMENDER_VERSION } from './coaching.js';
 import { PROGRESSION_VERSION } from './densityLadder.js';
 import { prescription } from './prescription.js';
 
-export const DECISION_LOG_VERSION = 1;
+// v2: every domain's best alternative, and the emphasis-pilot step.
+export const DECISION_LOG_VERSION = 2;
 
 const r1 = v => Number.isFinite(v) ? Math.round(v * 10) / 10 : null;
 const r3 = v => Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null;
@@ -45,9 +46,19 @@ function curveSnapshot(history, grip, T, freshMap, threeExpPriors) {
   return { taus: [...THREE_EXP_TAUS], by_hand: byHand };
 }
 
+// The best candidate in each domain other than the pick's (candidates arrive
+// best first).
+function domainAlternatives(rec) {
+  const seen = new Set([rec?.zone]);
+  return (rec?.candidates || []).filter(c => !seen.has(c.zone) && seen.add(c.zone)).map(candidate);
+}
+
+// `rec` is always the recommender's own pick. Under the emphasis pilot the
+// athlete is shown the pilot step instead; `overridden` is then relative to
+// that step.
 export function buildSessionDecision({
   grip, history = [], freshMap = null, threeExpPriors = null,
-  rec = null, overridden = false, source, selected, ladder = null,
+  rec = null, pilot = null, overridden = false, source, selected, ladder = null,
 }) {
   const gripRows = history.filter(r => r?.grip === grip);
   const last = gripRows.reduce((m, r) => {
@@ -66,9 +77,12 @@ export function buildSessionDecision({
       load_by_hand: loads(rec.loadByHand), score: r3(rec.score),
       coverage_status: rec.staleStatus ?? null, terms: terms(rec),
     } : null,
-    alternatives: (rec?.candidates || [])
-      .filter(c => !(c.zone === rec.zone && c.hand === rec.hand))
-      .slice(0, 3).map(candidate),
+    alternatives: domainAlternatives(rec),
+    pilot: pilot ? {
+      id: pilot.pilotId, version: pilot.version, block: pilot.block, emphasis: pilot.emphasis,
+      block_day: pilot.blockDay, step: pilot.step, cycle_length: pilot.cycleLength,
+      zone: pilot.zone, sessions_before: pilot.sessionsBefore,
+    } : null,
     selected: { ...selected, load_by_hand: loads(selected?.load_by_hand) },
     overridden: !!overridden,
     plan_source: source,

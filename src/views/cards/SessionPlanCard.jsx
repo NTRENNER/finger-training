@@ -71,6 +71,7 @@ import {
   LADDER_MAX_REPS, LADDER_MIN_REPS, LADDER_LOAD_STEP_FRAC,
 } from "../../model/densityLadder.js";
 import { buildSessionDecision } from "../../model/decisionLog.js";
+import { EMPHASIS_BLOCK_NAME, pilotLabel, pilotRecommendation, pilotStep } from "../../model/emphasisPilot.js";
 import { today } from "../../util.js";
 import { makeMixedDomainPlan, recommendedMixedDomainZone, MIXED_DOMAIN_REST_S } from '../../model/mixedDomain.js';
 import { mixedPlanReadiness } from '../../model/mixedLoadPrescription.js';
@@ -124,6 +125,8 @@ export function SessionPlanCard({
   onStartVolumeExperiment,
   volumeReady = true,
   availableGrips = DEFAULT_VOLUME_GRIPS,
+  // Emphasis-block pilot enrollment (user_settings.emphasis_pilot).
+  pilotEnrollment = null,
 }) {
   const loadMultiplier = adjustLoadForFatigue ? capacityMultiplier(cooked) : 1;
   // ── Recommendation from the continuous engine ──────────────
@@ -131,7 +134,7 @@ export function SessionPlanCard({
   // personalGains opts ("intentionally not consumed" — see
   // model/coaching.js). We still pass cooked through for future
   // engine consumption but the recommendation today is fatigue-blind.
-  const rec = useMemo(
+  const engineRec = useMemo(
     () => grip
       ? coachingRecommendationContinuous(history, grip, {
           freshMap, threeExpPriors, activities,
@@ -140,6 +143,17 @@ export function SessionPlanCard({
         })
       : null,
     [history, grip, freshMap, threeExpPriors, activities, cooked, climbingFocus]
+  );
+  // Emphasis-block pilot (model/emphasisPilot.js): an enrolled athlete is
+  // shown each grip's next pilot step instead. The decision log still
+  // records the engine's own pick as the recommendation.
+  const pilot = useMemo(
+    () => grip ? pilotStep(pilotEnrollment, history, grip, today()) : null,
+    [pilotEnrollment, history, grip]
+  );
+  const rec = useMemo(
+    () => pilotRecommendation(pilot, engineRec, { history, grip, freshMap, threeExpPriors }),
+    [pilot, engineRec, history, grip, freshMap, threeExpPriors]
   );
   const recommendedZone = rec?.zone;
 
@@ -477,7 +491,8 @@ export function SessionPlanCard({
   // what the engine recommended and why, its leading alternatives, what was
   // selected, and the curve it came from. The runner stamps it on every rep.
   const decisionFor = (source, selected, planLadder = null) => buildSessionDecision({
-    grip, history, freshMap, threeExpPriors, rec, overridden: isOverridden, source, selected, ladder: planLadder,
+    grip, history, freshMap, threeExpPriors, rec: engineRec, pilot: rec?.pilot ?? null,
+    overridden: isOverridden, source, selected, ladder: planLadder,
   });
   useEffect(() => {
     if (mixedEnabled) {
@@ -609,13 +624,16 @@ export function SessionPlanCard({
     }
     return `ladder: topped out at ${LADDER_MAX_REPS} reps → +${Math.round(LADDER_LOAD_STEP_FRAC * 100)}% load (${loadStr} ${unit}), back to ${LADDER_MIN_REPS} reps${suffix}`;
   })();
-  const whyText = decisiveWhy(rec, { ladderText });
+  const pilotWhy = rec.pilot
+    ? `${EMPHASIS_BLOCK_NAME[rec.pilot.emphasis]} · step ${rec.pilot.step} of ${rec.pilot.cycleLength}`
+    : null;
+  const whyText = pilotWhy ? (ladderText || pilotWhy) : decisiveWhy(rec, { ladderText });
 
   // Secondary factors + receipts, shown only on demand. Any line that
   // duplicates the headline is filtered out at the end.
   const detailParts = [];
   if (ladderText) {
-    const curveWhy = decisiveWhy(rec);
+    const curveWhy = pilotWhy || decisiveWhy(rec);
     if (curveWhy) detailParts.push(curveWhy);
   }
   if (rec.adaptBoost != null && rec.adaptBoost < 0.85 && !rec.coverageSnap) {
@@ -643,8 +661,9 @@ export function SessionPlanCard({
       : `${focusLabel} focus despite −${Math.abs(fPct)}% de-emphasis`);
   }
   // Short-T picks keep their freshness caveat — it changes how you
-  // should RUN the session, so it stays visible in Details.
-  const pickIsShort = activeT != null && activeT <= FRESH_TEST_SHORT_T_MAX;
+  // should RUN the session, so it stays visible in Details. The pilot
+  // protocol trains after climbing, so its sessions skip it.
+  const pickIsShort = !rec.pilot && activeT != null && activeT <= FRESH_TEST_SHORT_T_MAX;
   if (pickIsShort) {
     if (cookedSuggestion && cookedSuggestion.todayFatigue != null && cookedSuggestion.cooked >= 4) {
       detailParts.push("⚠️ you've climbed today — a max effort now will read low");
@@ -874,7 +893,9 @@ export function SessionPlanCard({
           >
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: recCfg.color, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                {recActive ? "★ Recommended" : "↩ Use recommended session"}
+                {rec.pilot
+                  ? (recActive ? `★ ${pilotLabel(rec.pilot)}` : "↩ Use pilot session")
+                  : (recActive ? "★ Recommended" : "↩ Use recommended session")}
               </div>
               <div style={{ fontSize: 10, fontWeight: 700, color: recCfg.color }}>
                 {recCfg.emoji} {recCfg.label}

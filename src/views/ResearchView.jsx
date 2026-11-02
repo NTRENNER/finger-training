@@ -5,9 +5,11 @@ import { CardBoundary } from '../ui/ErrorBoundary.jsx';
 import { C } from '../ui/theme.js';
 import { PredictionAccuracyCard } from './cards/PredictionAccuracyCard.jsx';
 import { VolumeExperimentReview } from './cards/VolumeExperimentReview.jsx';
+import { EmphasisPilotCard } from './cards/EmphasisPilotCard.jsx';
 
 export function ResearchView({ history, activities, unit, signedIn, historySynced, onOpenSettings,
-  volumeExperiments = {}, onSaveVolumeExperiment, volumeReady = true }) {
+  volumeExperiments = {}, onSaveVolumeExperiment, volumeReady = true,
+  emphasisPilot = null, onSaveEmphasisPilot }) {
   return <PageFrame style={{ padding: '20px 16px' }}>
     <header style={{ marginBottom: 24 }}>
       <div style={{ color: C.purple, fontSize: 13, fontWeight: 700 }}>BETA · RESEARCH</div>
@@ -24,7 +26,9 @@ export function ResearchView({ history, activities, unit, signedIn, historySynce
     </div>}
     {signedIn && !historySynced
       ? <p role="status" style={{ color: C.muted }}>Loading your synced history…</p>
-      : <><CardBoundary name="Plateau review">
+      : <><CardBoundary name="Emphasis-block pilot">
+          <EmphasisPilotCard enrollment={emphasisPilot} history={history} onSave={onSaveEmphasisPilot} />
+        </CardBoundary><CardBoundary name="Plateau review">
           <PlateauReview history={history} activities={activities} experiments={volumeExperiments} unit={unit} />
         </CardBoundary><CardBoundary name="Volume Beta review">
           <VolumeExperimentReview experiments={volumeExperiments} history={history} activities={activities}
