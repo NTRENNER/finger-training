@@ -551,6 +551,10 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
     // module constant; overridable so the K-sweep harness can tune it
     // against real history without editing the constant.
     confidenceK = CONFIDENCE_K,
+    // Offline audit only (see recommendationAudit.js): neutralize one score
+    // term — residual, staleness, recency, cost or hand — to learn whether
+    // it decided a pick. The default leaves every term in place.
+    ablate = {},
   } = opts;
   // perceivedFatigue + personalGains opts intentionally not consumed
   // here — see the per-T loop below for the rationale. The recommendation
@@ -755,12 +759,13 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       if (zoneStatus === "never" || zoneStatus === "stale") {
         adaptBoost = Math.max(adaptBoost, 1.0);
       }
-      const stale = stalenessBoost(zoneKey, stalenessMap);
+      if (ablate.residual) adaptBoost = 1;
+      const stale = ablate.staleness ? 1 : stalenessBoost(zoneKey, stalenessMap);
       // Recency: just-trained durations get crushed (~0 immediately after
       // training, recovering to 1.0 over the local recovery tau). Now
       // Duration-local influence (buildContinuousRecency)
       // — using fixed calendar-recency constants.
-      const recency = recencyAt(T);
+      const recency = ablate.recency ? 1 : recencyAt(T);
       // NOTE on fatigue: recent-climbing and in-the-moment readiness are
       // INTENTIONALLY NOT factored into the recommendation pick. The
       // recommendation answers "what stimulus does the curve want next"
@@ -791,7 +796,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       // is a coverage objective decided by staleness/refT, independent of
       // recovery cost (you need the measurement regardless). w=0 disables.
       const zoneTau = calendarRecencyDays(T);
-      const costMult = (recoveryCostWeight > 0 && zoneStatus !== "never")
+      const costMult = (recoveryCostWeight > 0 && zoneStatus !== "never" && !ablate.cost)
         ? Math.pow(meanTau / zoneTau, recoveryCostWeight)
         : 1;
       // Cost-adjusted adaptBoost: neutral (1.0) is the fixed point, only
@@ -800,7 +805,7 @@ export function coachingRecommendationContinuous(history, grip, opts = {}) {
       const adaptBoostCosted = 1 + (adaptBoost - 1) * costMult;
 
       // WEAKER-HAND boost: favor the lagging hand (more pooled-AUC gain).
-      const hBoost = handBoost[hand] ?? 1.0;
+      const hBoost = ablate.hand ? 1 : handBoost[hand] ?? 1.0;
 
       // Cold-start seeding bias — neutral (1.0) once the grip has
       // enough distinct durations logged. See coldStartSeedWeight.

@@ -390,6 +390,22 @@ describe("coachingRecommendationContinuous", () => {
     expect(rec.adaptBoost).toBeGreaterThanOrEqual(1.0);
   });
 
+  test("ablate neutralizes one term for the offline audit and is inert by default", () => {
+    const history = [
+      buildRep("L", 30, F_curve(30), 6), buildRep("L", 30, F_curve(30), 12),
+      buildRep("L", 95, F_curve(95) * 1.4, 8), buildRep("L", 120, F_curve(120) * 1.4, 8),
+      buildRep("L", 120, F_curve(120) * 1.4, 18), buildRep("L", 220, F_curve(220), 14),
+    ];
+    const opts = { threeExpPriors: buildThreeExpPriors(history), today };
+    const base = coachingRecommendationContinuous(history, "Crusher", opts);
+    expect(coachingRecommendationContinuous(history, "Crusher", { ...opts, ablate: {} })).toEqual(base);
+    // Coverage alone sends this history to the never-sampled S·E zone.
+    expect(base.zone).toBe("strength_endurance");
+    const noCoverage = coachingRecommendationContinuous(history, "Crusher", { ...opts, ablate: { staleness: true } });
+    expect(noCoverage.zone).not.toBe("strength_endurance");
+    expect(noCoverage.stalenessBoost).toBe(1);
+  });
+
   test("STALE zone with above-curve data still wins (stale adaptBoost floor + escalation)", () => {
     // July 2026 freshness fix. A zone trained past its detraining window,
     // whose (now old) data sat ABOVE the curve, used to have its

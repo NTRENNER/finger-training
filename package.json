@@ -25,6 +25,7 @@
     "evaluate:trends": "node --no-warnings scripts/evaluate-trends.mjs",
     "evaluate:adaptive": "node --no-warnings scripts/evaluate-adaptive.mjs",
     "evaluate:windows": "node --no-warnings scripts/evaluate-windows.mjs",
+    "audit:recommendations": "node --no-warnings scripts/audit-recommendations.mjs",
     "test:watch": "jest --watch"
   },
   "devDependencies": {
