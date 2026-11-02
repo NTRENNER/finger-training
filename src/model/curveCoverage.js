@@ -40,8 +40,13 @@ export function curveCoverageByGrip(
       else if (status === "stale") stale.push(LABELS[zone]);
     }
 
+    // A domain stays current until its full window passes, when the engine
+    // also starts treating it as overdue. Counting only "ok" dropped it at
+    // 70% of the window, so the ring fell about a week before the app asked
+    // for that domain and bounced back and forth (2026-11). Aging domains
+    // are still named below as the early heads-up.
     const current = (maxMeasured ? 1 : 0)
-      + TRAINING_ZONE_KEYS.filter(zone => staleness[zone]?.status === "ok").length;
+      + TRAINING_ZONE_KEYS.filter(zone => ["ok", "warning"].includes(staleness[zone]?.status)).length;
 
     return [grip, { current, total: 6, missing, aging, stale }];
   }));

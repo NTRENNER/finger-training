@@ -67,3 +67,13 @@ test("reports complete current evidence without an issue list", () => {
   expect(screen.getByRole("button", { name: "Crusher, 6 of 6 domains current" })).toBeInTheDocument();
   expect(screen.getByText(/all six domains have current evidence/i)).toBeInTheDocument();
 });
+
+test("a full ring still names an aging domain", () => {
+  const history = [70, 115, 160, 220].map(duration => rep(duration));
+  history.push(rep(30, { date: "2026-07-05", session_id: "session-30-old" })); // 18 days: aging
+  render(<GripCoverageSelector history={history} grips={GRIPS} value="Crusher" />);
+
+  expect(screen.getByRole("button", { name: "Crusher, 6 of 6 domains current" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Aging: Power")).toBeInTheDocument();
+  expect(screen.queryByText(/all six domains have current evidence/i)).not.toBeInTheDocument();
+});

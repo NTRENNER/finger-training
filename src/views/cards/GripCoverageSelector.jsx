@@ -42,7 +42,7 @@ function compactLabels(values) {
 
 function CoverageStatus({ grip, coverage }) {
   if (!coverage) return null;
-  if (coverage.current === coverage.total) {
+  if (coverage.current === coverage.total && coverage.aging.length === 0) {
     return <div style={{ color: C.muted, fontSize: 12, lineHeight: 1.5 }}>
       <strong style={{ color: C.text }}>{grip}:</strong> all six domains have current evidence.
     </div>;

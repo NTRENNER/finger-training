@@ -55,12 +55,21 @@ test("names missing, aging, and stale domains", () => {
   ];
 
   expect(curveCoverageByGrip(history).Crusher).toEqual({
-    current: 1,
+    current: 2, // peak + aging Power, which still counts until it goes stale
     total: 6,
     aging: ["Power"],
     stale: ["Power-Strength"],
     missing: ["Strength", "Strength-Endurance", "Endurance"],
   });
+});
+
+test("a domain counts until its full window passes, not at 70% of it", () => {
+  // Crusher 2026-10-23: Strength trained 21 days earlier (30-day window)
+  // dropped the ring from 5/6 to 4/6 the day after a new domain was added.
+  const aging = curveCoverageByGrip([rep("2026-07-02", 115)]).Crusher;
+  expect(aging).toMatchObject({ current: 2, aging: ["Strength"], stale: [] });
+  const stale = curveCoverageByGrip([rep("2026-06-22", 115)]).Crusher;
+  expect(stale).toMatchObject({ current: 1, aging: [], stale: ["Strength"] });
 });
 
 test("requested grips remain visible before they have any data", () => {
