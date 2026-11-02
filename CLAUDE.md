@@ -4,6 +4,10 @@ The README covers architecture. Commands: `npm test` (Jest), `npm run lint`
 (zero warnings allowed), `npm run build`, `npm start` (dev server). Pushing to
 `main` deploys to production through Vercel.
 
+Changes to how the app measures, models or recommends training follow
+`docs/model-roadmap.md`: one layer at a time, leak-free evidence gates,
+versioned and reversible, decision logging before further model changes.
+
 ## Find the cause before fixing
 
 When something misbehaves (a rep ended early, a number looks wrong):
