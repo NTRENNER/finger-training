@@ -17,9 +17,8 @@ safe default when the evidence is thin.
   95–97% of it is the slow component (see `computeBalancedCurveScore`).
 - The three curve components are regression timescales, not measured
   alactic, glycolytic and aerobic capacities.
-- Benefits the curve cannot see (tendon and pulley conditioning, rate of
-  force development, injury resilience, climbing transfer) are protected by
-  guardrails, not optimized.
+- Benefits the curve cannot see (rate of force development, climbing
+  transfer) are protected by guardrails, not optimized.
 
 ## Layers
 
@@ -68,7 +67,8 @@ to retune them continually.
   - acute, days 2–7: fatigue, not adaptation; recorded but not learned from;
   - adaptation, days 8–21: fresh openers scored against the curve frozen
     before the session;
-  - block response: a standardized test after a fixed recovery period.
+  - block response: change against the curve frozen at the start of the
+    block, from standardized tests or fresh session openers.
 - **Curve-evidence coverage** (the rings) asks whether there is current
   evidence across the curve. **Training exposure** asks whether a domain got
   enough stimulus, and counts qualifying later reps and sets. They are
@@ -117,7 +117,7 @@ The protocol is written and fixed before anyone starts (pre-registration):
   counterbalanced starting order;
 - matched total workload between blocks as closely as practical;
 - a defined maintenance dose for every domain outside the emphasis;
-- standardized boundary tests after the same recovery period;
+- measurements defined in advance and taken the same way in every block;
 - 3–4 weeks as a pilot, 4–6 weeks per block once the protocol is proven;
 - success and failure criteria stated in advance.
 
@@ -125,14 +125,14 @@ The protocol is written and fixed before anyone starts (pre-registration):
 
 Minimum exposure in every domain including max strength; peak-force and
 long-hold load caps; progression limits (+5% ladder steps, at most +20% after
-an overshoot); recovery spacing; deloads; a pain override.
+an overshoot); recovery spacing; deloads.
 
 ## Scorecard
 
 - **Outcome:** balanced-score growth per month, per athlete.
 - **Instruments:** rep 1 within 0.8–1.25× target; held-out force error by
   duration; the recommendation audit (`npm run audit:recommendations`).
-- **Guardrails:** pain or injury reports; whether athletes keep training.
+- **Guardrails:** whether athletes keep training.
 
 Review monthly: rerun the scorecard against the last snapshot, adopt or
 retire changes through the gates, and invite outside review of proposals.
