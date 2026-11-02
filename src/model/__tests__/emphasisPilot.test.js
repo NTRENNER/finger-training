@@ -18,20 +18,21 @@ test("enrollment is validated and only an active one turns the pilot on", () => 
 
 test("blocks follow the pre-registered calendar", () => {
   const pilot = activePilot(joined);
-  expect(pilotBlockOn(pilot, "2026-11-02")).toBeNull();
-  expect(pilotBlockOn(pilot, "2026-11-03")).toMatchObject({ label: "B", emphasis: "long", day: 1, days: 28 });
-  expect(pilotBlockOn(pilot, "2026-11-30")).toMatchObject({ label: "B", day: 28 });
-  expect(pilotBlockOn(pilot, "2026-12-01")).toMatchObject({ label: "A", emphasis: "short", day: 1, days: 28 });
-  expect(pilotBlockOn(pilot, "2026-12-29")).toBeNull();
+  expect(pilotBlockOn(pilot, "2026-11-01")).toBeNull();
+  expect(pilotBlockOn(pilot, "2026-11-02")).toMatchObject({ label: "B", emphasis: "long", day: 1, days: 28 });
+  expect(pilotBlockOn(pilot, "2026-11-29")).toMatchObject({ label: "B", day: 28 });
+  expect(pilotBlockOn(pilot, "2026-11-30")).toMatchObject({ label: "A", emphasis: "short", day: 1, days: 28 });
+  expect(pilotBlockOn(pilot, "2026-12-27")).toMatchObject({ label: "A", day: 28 });
+  expect(pilotBlockOn(pilot, "2026-12-28")).toBeNull();
 });
 
 test("each grip starts its cycle on the first day of a block", () => {
-  expect(pilotStep(joined, [], "Micro", "2026-11-03")).toMatchObject({
+  expect(pilotStep(joined, [], "Micro", "2026-11-02")).toMatchObject({
     block: "B", emphasis: "long", blockDay: 1, primary: true, step: 1, cycleLength: 8, zone: "strength",
   });
-  expect(pilotStep(joined, [], "Crusher", "2026-11-03")).toMatchObject({ primary: false, cycleLength: 4, zone: "strength" });
-  expect(pilotStep(joined, [], "Micro", "2026-12-01")).toMatchObject({ block: "A", zone: "max_strength" });
-  expect(pilotLabel(pilotStep(joined, [], "Micro", "2026-11-07"))).toBe("Pilot · Long end · day 5 of 28");
+  expect(pilotStep(joined, [], "Crusher", "2026-11-02")).toMatchObject({ primary: false, cycleLength: 4, zone: "strength" });
+  expect(pilotStep(joined, [], "Micro", "2026-11-30")).toMatchObject({ block: "A", zone: "max_strength" });
+  expect(pilotLabel(pilotStep(joined, [], "Micro", "2026-11-06"))).toBe("Pilot · Long end · day 5 of 28");
 });
 
 test("only earlier training days in the block advance the step", () => {
@@ -57,7 +58,7 @@ test("the cycle repeats once it is used up", () => {
 
 test("no pilot step when not enrolled, outside the blocks, or on another grip", () => {
   expect(pilotStep(null, [], "Micro", "2026-11-05")).toBeNull();
-  expect(pilotStep(joined, [], "Micro", "2026-11-02")).toBeNull();
+  expect(pilotStep(joined, [], "Micro", "2026-11-01")).toBeNull();
   expect(pilotStep(joined, [], "Edge", "2026-11-05")).toBeNull();
 });
 

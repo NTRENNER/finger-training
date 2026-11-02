@@ -20,7 +20,7 @@ test('an enrolled athlete is shown the pilot step, run on its ladder, with the e
   const apply = jest.fn();
   render(<SessionPlanCard history={ladderSession} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals}
     onApplyPlan={apply} pilotEnrollment={enrollment} />);
-  expect(screen.getByText('★ Pilot · Long end · day 3 of 28')).toBeInTheDocument();
+  expect(screen.getByText('★ Pilot · Long end · day 4 of 28')).toBeInTheDocument();
   const plan = apply.mock.calls.at(-1)[0];
   expect(plan).toMatchObject({ goal: 'strength', targetTime: 110, peakTest: false });
   expect(plan.decision).toMatchObject({

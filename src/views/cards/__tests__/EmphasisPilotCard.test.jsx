@@ -16,7 +16,7 @@ test('a joined athlete sees the block day and each grip\'s next step, and can le
   const history = [{ date: '2026-11-03', grip: 'Micro', hand: 'L', target_duration: 115 }];
   render(<EmphasisPilotCard enrollment={pilotEnrollment('emphasis-2026-11', 'active')} history={history}
     onSave={save} date="2026-11-04" />);
-  expect(screen.getByRole('status')).toHaveTextContent('Pilot · Long end · day 2 of 28');
+  expect(screen.getByRole('status')).toHaveTextContent('Pilot · Long end · day 3 of 28');
   expect(screen.getByText('Micro: Strength/Endurance · step 2 of 8')).toBeInTheDocument();
   expect(screen.getByText('Crusher: Strength · step 1 of 4')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Leave pilot' }));
@@ -24,6 +24,6 @@ test('a joined athlete sees the block day and each grip\'s next step, and can le
 });
 
 test('before the first block a joined athlete sees the start date', () => {
-  render(<EmphasisPilotCard enrollment={pilotEnrollment('emphasis-2026-11', 'active')} onSave={jest.fn()} date="2026-11-02" />);
-  expect(screen.getByRole('status')).toHaveTextContent(/^Starts Nov 3$/);
+  render(<EmphasisPilotCard enrollment={pilotEnrollment('emphasis-2026-11', 'active')} onSave={jest.fn()} date="2026-11-01" />);
+  expect(screen.getByRole('status')).toHaveTextContent(/^Starts Nov 2$/);
 });

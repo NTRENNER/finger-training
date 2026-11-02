@@ -35,8 +35,8 @@ export const EMPHASIS_PILOTS = {
     primaryGrip: 'Micro',
     grips: ['Micro', 'Crusher', 'Prime'],
     blocks: [
-      { label: 'B', emphasis: 'long', start: '2026-11-03', end: '2026-11-30' },
-      { label: 'A', emphasis: 'short', start: '2026-12-01', end: '2026-12-28' },
+      { label: 'B', emphasis: 'long', start: '2026-11-02', end: '2026-11-29' },
+      { label: 'A', emphasis: 'short', start: '2026-11-30', end: '2026-12-27' },
     ],
   },
 };

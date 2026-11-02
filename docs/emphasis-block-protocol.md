@@ -1,7 +1,7 @@
 # Emphasis-block pilot protocol
 
 **Status:** v0.4, 2026-11-02. Phase 1 starts with one athlete (Nathan, A1)
-on 2026-11-03; other athletes may join in 2027 if phase 1 looks promising.
+on 2026-11-02; other athletes may join in 2027 if phase 1 looks promising.
 Pre-registered for A1 when committed with the calendar below; after that,
 changes need a dated note here (see `docs/model-roadmap.md`, "Emphasis
 blocks").
@@ -9,6 +9,10 @@ blocks").
 v0.4 (per Nathan): no separate test weeks, because every session goes to
 failure and so measures (see "Measurement"); blocks are 28 days of the
 athlete's usual routine, and any grip may be trained on consecutive days.
+
+2026-11-02, before any pilot session: the start moved from Tue Nov 3 to
+Mon Nov 2 (the first calendar mislabeled Nov 3 as a Monday), so blocks run
+Monday to Sunday, and the yardstick cutoff moved with it.
 
 ## Question
 
@@ -117,7 +121,7 @@ Every session is to failure, so the blocks measure themselves:
 - **Peak force.** The warm-up Peak Tests, before climbing, on almost every
   climbing day.
 - **Yardstick.** Each grip and hand is scored against its curve **frozen at
-  the start of the pilot**: fit on all fresh openers before 2026-11-03 at
+  the start of the pilot**: fit on all fresh openers before 2026-11-02 at
   curve model version 1, so it is reproducible from the data. Each opener is
   read as a percentage above or below the yardstick at its duration. The
   yardstick's own shape errors stay constant through the pilot, so they
@@ -242,14 +246,14 @@ Prime. No travel planned.
 - Random draw, 2026-11-02T03:00:38Z (node:crypto randomInt(2), one draw
   each): block order **B-A** (long end first). The same draw set a test
   order (peak, 30 s, 115 s, 220 s) that v0.4 no longer uses.
-- Block 1 (B, long end): Mon 2026-11-03 to Sun 2026-11-30. Includes
+- Block 1 (B, long end): Mon 2026-11-02 to Sun 2026-11-29. Includes
   Thanksgiving. It falls in A1's endurance climbing season (noted
   2026-11-02, after the draw), which adds long-end stimulus to block B,
   and to block A if the season continues. Climbing style is part of the
   background record, and the reverse pair separates season from emphasis.
-- Block 2 (A, short end): Mon 2026-12-01 to Sun 2026-12-28. Includes
+- Block 2 (A, short end): Mon 2026-11-30 to Sun 2026-12-27. Includes
   Christmas.
-- Decision point, about Dec 29: continue to B-A-A-B, invite other athletes
+- Decision point, about Dec 28: continue to B-A-A-B, invite other athletes
   in the new year, and ship model changes held by the freeze.
 
 Other athletes: to be added with their own start, draw and dates.
