@@ -25,3 +25,23 @@ test('band assistance keeps its multi-band controls after the first selection', 
   fireEvent.click(screen.getByRole('button',{name:'Band assistance for set 1: Blue'}));
   expect(JSON.parse(screen.getByTestId('logged').textContent).sets[0].modifiers.modifier_band_assistance.value).toBe('green+blue');
 });
+
+function TwoSets() {
+  const [data,setData] = useState({sets:[{weight:'155',reps:'5',done:false},{weight:'155',reps:'5',done:false}]});
+  return <><SessionExRow ex={{id:'benchPress',name:'Bench Press',reps:'5',logWeight:true}} unit="lbs"
+    setsData={data} onSetsChange={change => setData(old=>({...old,...change}))} last />
+    <output data-testid="logged">{JSON.stringify(data)}</output></>;
+}
+test('each set keeps its own custom-modifier draft, and custom ids are stable and clean', () => {
+  render(<TwoSets />);
+  fireEvent.click(screen.getByText('Modify set 1'));
+  fireEvent.click(screen.getByText('Modify set 2'));
+  fireEvent.change(screen.getByRole('textbox',{name:'Custom modifier for set 1'}),{target:{value:'  Board press!! '}});
+  expect(screen.getByRole('textbox',{name:'Custom modifier for set 2'})).toHaveValue('');
+  const addButtons = screen.getAllByRole('button',{name:'Add modifier'});
+  expect(addButtons[1]).toBeDisabled();
+  fireEvent.click(addButtons[0]);
+  const sets = JSON.parse(screen.getByTestId('logged').textContent).sets;
+  expect(Object.keys(sets[0].modifiers)).toEqual(['modifier_custom_board_press']);
+  expect(sets[1].modifiers).toBeUndefined();
+});

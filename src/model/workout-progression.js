@@ -390,18 +390,30 @@ function exerciseCompleted(data, exDef) {
 // Scope both the set ladder and load seeding to the same intended setup.
 // Keep a mixed execution of an unmodified plan so it blocks advancement;
 // do not borrow a completed Slingshot plan for the unassisted ladder.
+// A planned session done entirely in this setup also counts when it was
+// planned another way (a today-only change), so its loads seed the next
+// session; exerciseCompleted still keeps it from earning an advance.
 function plannedSetupMatches(data, signature) {
   const planned = data?.prescription?.sets;
-  if (planned?.length) return planned.every(set => modifierSelectionSignature(set) === signature);
-  return data?.sets?.some(set => set.done && modifierSelectionSignature(set) === signature);
+  const matches = set => modifierSelectionSignature(set) === signature;
+  const done = (data?.sets || []).filter(set => set?.done);
+  if (!planned?.length) return done.some(matches);
+  return planned.every(matches) || (done.length > 0 && done.every(matches));
 }
 
-export function recommendSetCount(history, exDef, templateSets, { referenceDate = null, unit = 'lbs' } = {}) {
-  const signature = modifierSelectionSignature(exDef?.templateSets?.[0] || {});
+// Converted increments land on plates: 5 lb → 2.5 kg, 10 lb → 5 kg.
+const KG_PLATE_STEP = 1.25;
+const strengthIncrement = (lbs, unit) => unit === 'kg'
+  ? Math.max(KG_PLATE_STEP, Math.round(lbs / 2.2046226218 / KG_PLATE_STEP) * KG_PLATE_STEP) : lbs;
+
+// `setup` is the set whose modifiers define the setup being planned (today's
+// selection); without one, the saved template's first set.
+export function recommendSetCount(history, exDef, templateSets, { referenceDate = null, unit = 'lbs', setup = null } = {}) {
+  const signature = modifierSelectionSignature(setup || exDef?.templateSets?.[0] || {});
   const comparable = (history || []).filter(session => plannedSetupMatches(session?.exercises?.[exDef.id], signature));
   const plan = computeSetCount(comparable, exDef, templateSets, referenceDate);
   if (exDef?.progressionPolicy === 'strength') {
-    plan.increment = exDef.loadIncrementLbs / (unit === 'kg' ? 2.2046226218 : 1);
+    plan.increment = strengthIncrement(exDef.loadIncrementLbs, unit);
     plan.unit = unit;
   }
   return referenceDate ? { ...plan, referenceDate } : plan;
@@ -586,12 +598,13 @@ function findLastSession(history, workoutKey, exId) {
 // detector for conditional reasoning text; the recommender does
 // NOT add bodyweight to the recorded weight (the user types added
 // weight, the volume math folds bodyweight in separately).
-export function recommendSet(history, exDef, workoutKey, setIdx, bw = null, ladder = null) {
+export function recommendSet(history, exDef, workoutKey, setIdx, bw = null, ladder = null, setup = null) {
   if (ladder?.referenceDate) history = (history || []).filter(s => s.date && s.date <= ladder.referenceDate);
   const template = exDef?.templateSets?.[setIdx] ?? exDef?.templateSets?.at(-1);
   const repRange = parseRepRange(template?.reps || exDef?.reps);
-  // Match the planned setup even when modifiers are offered dynamically.
-  const signature = modifierSelectionSignature(template || {});
+  // Match the set's selected setup (default: the planned one), even when
+  // modifiers are offered dynamically.
+  const signature = modifierSelectionSignature(setup || template || {});
   const comparable = (history || []).filter(session => {
     const sets = session?.exercises?.[exDef.id]?.sets || [];
     return plannedSetupMatches(session?.exercises?.[exDef.id], signature)

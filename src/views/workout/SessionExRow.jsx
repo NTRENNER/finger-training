@@ -30,6 +30,7 @@ import React from "react";
 import { isMeasuredSeconds, measuredSecondsOrBlank, parseRepsCount } from "../../model/workout-volume.js";
 import {
   copyModifierSelections,
+  customModifierDefinition,
   QUICK_MODIFIERS,
   modifierDefinitionsForSets,
   modifierSelectionSignature,
@@ -181,7 +182,8 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
       {ex.logTime ? "Enter reps and seconds to complete this set." : "Enter reps to complete this set."}
     </div>
   ) : null;
-  const [customModifierName, setCustomModifierName] = React.useState('');
+  // One custom-modifier draft per set, so typing in one panel stays there.
+  const [customModifierNames, setCustomModifierNames] = React.useState({});
   const [openModifiers, setOpenModifiers] = React.useState({});
   const setupModifiers = [...new Map([
     ...(ex.availableModifiers || []), ...modifierDefinitionsForSets(setsData?.sets),
@@ -269,14 +271,14 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
           </div>
         ))}
         <label style={{ fontSize: 11 }}>Custom modifier
-          <input aria-label={`Custom modifier for set ${index + 1}`} value={customModifierName}
-            onChange={event => setCustomModifierName(event.target.value)} placeholder="e.g. board press" />
+          <input aria-label={`Custom modifier for set ${index + 1}`} value={customModifierNames[index] || ''}
+            onChange={event => setCustomModifierNames(old => ({ ...old, [index]: event.target.value }))} placeholder="e.g. board press" />
         </label>
-        <button type="button" disabled={!customModifierName.trim()} onClick={() => {
-          const name = customModifierName.trim();
-          const id = `modifier_custom_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
-          updateModifier(set, index, { id, name, kind: 'setup', control: 'standard', options: [] }, 'on');
-          setCustomModifierName('');
+        <button type="button" disabled={!customModifierDefinition(customModifierNames[index])} onClick={() => {
+          const definition = customModifierDefinition(customModifierNames[index]);
+          if (!definition) return;
+          updateModifier(set, index, definition, 'on');
+          setCustomModifierNames(old => ({ ...old, [index]: '' }));
         }}>Add modifier</button>
         </div>
         <p style={{ fontSize: 11, color: C.muted }}>Today only unless you update the workout. A blank rep count means the whole set. Mixed or changed setups do not earn an unmodified load increase.</p></>}

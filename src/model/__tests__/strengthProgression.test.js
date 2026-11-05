@@ -53,14 +53,44 @@ test('explicit template updates retain membership and modifier targets, excludin
   expect(next.exercises[0].templateSets[0].done).toBeUndefined();
 });
 
-test('larger lower-body strength work uses 10 lb and metric increments preserve that amount', () => {
+test('larger lower-body strength work uses 10 lb and metric increments land on plates', () => {
   const { strengthExercise } = require('../workoutProgram.js');
   const lower = strengthExercise({id:'rdl',name:'RDL',type:'S',sets:2,reps:'5',logWeight:true});
   const history = [{date:'2026-10-30',workout:'A',exercises:{rdl:{sets:Array.from({length:4},()=>({weight:'100',reps:'5',done:true}))}}}];
   const pounds = recommendSetCount(history,lower,lower.sets,{referenceDate:'2026-11-05',unit:'lbs'});
   expect(recommendSet(history,lower,'A',0,null,pounds).weight).toBe('110');
   const metric = recommendSetCount(history,lower,lower.sets,{referenceDate:'2026-11-05',unit:'kg'});
-  expect(Number(recommendSet(history,lower,'A',0,null,metric).weight)).toBeCloseTo(104.54,2);
+  // 10 lb converts to 5 kg, not 4.54 kg: no plate set makes 104.54 kg.
+  expect(recommendSet(history,lower,'A',0,null,metric)).toMatchObject({weight:'105',reasoning:'↑ +5 kg (ladder top-out)'});
+});
+
+test('metric upper-body increases are 2.5 kg', () => {
+  const topped = log(Array.from({ length: 4 }, () => ({ ...set, weight: '60' })));
+  const metric = recommendSetCount(topped, bench, bench.sets, { referenceDate: '2026-11-05', unit: 'kg' });
+  expect(recommendSet(topped, bench, 'C', 0, null, metric)).toMatchObject({ weight: '62.5', reasoning: '↑ +2.5 kg (ladder top-out)' });
+});
+
+// A setup selected today (here a band the template does not have) is
+// recommended from that setup's own history.
+test('a selected setup modifier gets its own load and ladder from matching sessions', () => {
+  const band = { id: 'modifier_band_red', name: 'Band', kind: 'assistance', control: 'standard', options: [{ id: 'red', label: 'Red' }] };
+  const banded = setModifierSelection({ ...set, weight: '20' }, band, 'red');
+  const history = log(Array.from({ length: 3 }, () => ({ ...banded })), { prescription: { sets: [{ reps: '5' }, { reps: '5' }, { reps: '5' }] } });
+  const today = setModifierSelection({ reps: '5', weight: '' }, band, 'red');
+  const ladder = recommendSetCount(history, bench, bench.sets, { referenceDate: '2026-11-05', setup: today });
+  expect(ladder.mode).not.toBe('seed');
+  expect(recommendSet(history, bench, 'C', 0, null, ladder, today).weight).toBe('20');
+  // The unassisted setup never borrows the banded load.
+  expect(recommendSet(history, bench, 'C', 0, null, plan(history)).weight).toBe('');
+});
+
+test('changing a modifier\'s value keeps its rep and side scope', () => {
+  const bands = QUICK_MODIFIERS.find(m => m.control === 'bands');
+  const red = setModifierSelection(set, bands, ['red']);
+  red.modifiers[bands.id].repCount = 2;
+  red.modifiers[bands.id].side = 'L';
+  const both = setModifierSelection(red, bands, ['red', 'blue']);
+  expect(both.modifiers[bands.id]).toMatchObject({ value: 'red+blue', repCount: 2, side: 'L' });
 });
 
 test('modified sets remain volume but cannot inflate the unmodified estimated maximum', () => {
@@ -106,4 +136,19 @@ test('a ladder-added assisted set inherits the final template setup and its load
   expect(next).toMatchObject({mode:'accumulate',sets:4});
   expect(Array.from({length:4},(_,index)=>recommendSet(history,assistedBench,'C',index,null,next).weight))
     .toEqual(['225','225','225','225']);
+});
+
+// An extra set added and left undone is not another setup; it must not
+// block an otherwise complete session from progressing.
+test('an undone extra set does not mark a modifier-filtered session incomplete', () => {
+  const { filterHistoryForModifierSetup } = require('../workoutModifiers.js');
+  const band = { id: 'modifier_band_red', name: 'Band', kind: 'assistance', control: 'standard', options: [{ id: 'red', label: 'Red' }] };
+  const banded = setModifierSelection({ ...set, weight: '20' }, band, 'red');
+  const history = log([banded, banded, banded, { ...banded, done: false, reps: '', weight: '' }]);
+  const filtered = filterHistoryForModifierSetup(history, 'benchPress', banded);
+  expect(filtered[0].exercises.benchPress.modifierHistoryIncomplete).toBe(false);
+  const mixed = filterHistoryForModifierSetup(log([banded, banded, { ...set }]), 'benchPress', banded);
+  expect(mixed[0].exercises.benchPress.modifierHistoryIncomplete).toBe(true);
+  expect(recommendSetCount(filtered, bench, bench.sets, { referenceDate: '2026-11-05', setup: banded }).mode)
+    .toBe(recommendSetCount(log([banded, banded, banded]), bench, bench.sets, { referenceDate: '2026-11-05', setup: banded }).mode);
 });

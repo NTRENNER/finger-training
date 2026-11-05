@@ -66,6 +66,15 @@ export function createModifierDefinition(values) {
   });
 }
 
+// A modifier typed during a session. The id depends only on the name, so the
+// same custom setup matches itself in later sessions.
+export function customModifierDefinition(name) {
+  const clean = cleanString(name);
+  if (!clean) return null;
+  return sanitizeModifierDefinition({ id: `modifier_custom_${slug(clean, "setup")}`, name: clean,
+    kind: "setup", control: "standard", options: [] });
+}
+
 export function modifierValueOptions(definition) {
   const options = Array.isArray(definition?.options) ? definition.options : [];
   return options.length > 0
@@ -113,6 +122,8 @@ export function setModifierSelection(set, definition, value) {
       ? available.filter(option => requested.includes(option.id))
       : available.filter(option => option.id === requested[0]).slice(0, 1);
     if (options.length === 0) return { ...set, modifiers: next };
+    // Changing the value keeps the scope the athlete set (reps and side).
+    const { repCount, side } = next[definition.id] || {};
     next[definition.id] = {
       modifierId: definition.id,
       name: definition.name,
@@ -121,6 +132,8 @@ export function setModifierSelection(set, definition, value) {
       valueLabel: definition.options?.length
         ? options.map(option => option.label).join(" + ")
         : "",
+      ...(repCount ? { repCount } : {}),
+      ...(side ? { side } : {}),
     };
   }
   return { ...set, modifiers: next };
@@ -153,8 +166,10 @@ export function filterHistoryForModifierSetup(history, exerciseId, setOrSelectio
       ...session,
       exercises: {
         ...session.exercises,
+        // Incomplete only when other completed sets used another setup; a
+        // set left undone is not a different setup.
         [exerciseId]: { ...data, sets,
-          modifierHistoryIncomplete: sets.length !== data.sets.length,
+          modifierHistoryIncomplete: sets.length !== data.sets.filter(set => set?.done).length,
         },
       },
     });

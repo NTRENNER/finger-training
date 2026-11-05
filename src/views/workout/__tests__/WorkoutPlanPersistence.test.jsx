@@ -93,3 +93,43 @@ test('saved curl template does not overwrite bridge progression from six to seve
   expect(next.sets).toHaveLength(3);
   expect(next.sets[0]).toMatchObject({leftWeight:'25',rightWeight:'25',leftReps:'7',rightReps:'7'});
 });
+
+// The template sets targets; what the athlete progressed to (variant, band,
+// hold time, weight) comes from completed history once there is some.
+test('a saved template sets rep targets but never resets a progressed variant', () => {
+  const { defaultWorkoutProgram } = require('../../../model/workoutProgram.js');
+  const program = defaultWorkoutProgram();
+  program.templates.A = ['trxRow'];
+  program.templateDefaults = { A: { trxRow: { sets: Array.from({ length: 3 }, () => ({ variant: 'Two-arm', reps: '8' })) } } };
+  saveLS(LS_WORKOUT_PLAN_KEY, program);
+  saveLS(LS_WORKOUT_LOG_KEY, []);
+  const { unmount } = render(<WorkoutTab unit="lbs" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Choose Workout A' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start Workout A' }));
+  expect(JSON.parse(screen.getByTestId('trxRow-state').textContent).sets[0]).toMatchObject({ variant: 'Two-arm', reps: '8' });
+  unmount();
+  saveLS(LS_WORKOUT_LOG_KEY, [{ id: 'rows', date: '2026-09-29', workout: 'A', exercises: { trxRow: { sets:
+    Array.from({ length: 3 }, () => ({ variant: 'Feet-elevated', reps: '10', done: true })) } } }]);
+  render(<WorkoutTab unit="lbs" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Choose Workout A' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start Workout A' }));
+  expect(JSON.parse(screen.getByTestId('trxRow-state').textContent).sets[0]).toMatchObject({ variant: 'Feet-elevated', reps: '8' });
+});
+
+test('a timed hold seeds seconds from its own setup, not a band-assisted session', () => {
+  const { defaultWorkoutProgram } = require('../../../model/workoutProgram.js');
+  const program = defaultWorkoutProgram();
+  program.templates.A = ['frontLever'];
+  program.modifierDefinitions = [{ id: 'modifier_band', name: 'Band', kind: 'assistance', control: 'standard', options: [{ id: 'red', label: 'Red' }] }];
+  program.exerciseModifierIds = { frontLever: ['modifier_band'] };
+  saveLS(LS_WORKOUT_PLAN_KEY, program);
+  saveLS(LS_WORKOUT_LOG_KEY, [{ id: 'lever', date: '2026-09-29', workout: 'A', exercises: { frontLever: { sets: [
+    { variant: 'Tuck', reps: '3', seconds: '12', done: true,
+      modifiers: { modifier_band: { name: 'Band', kind: 'assistance', value: 'red', valueLabel: 'Red' } } }] } } }]);
+  render(<WorkoutTab unit="lbs" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Choose Workout A' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start Workout A' }));
+  const seeded = JSON.parse(screen.getByTestId('frontLever-state').textContent).sets[0];
+  expect(seeded.modifiers).toBeUndefined();          // today starts unassisted
+  expect(seeded.seconds).not.toBe('12');             // the banded 12 s is a different setup
+});

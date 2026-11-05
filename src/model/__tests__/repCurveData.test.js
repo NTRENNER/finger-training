@@ -325,3 +325,19 @@ describe("manual-load holds stay comparable", () => {
     expect(bundle.actual[0].activityOnly).toBeUndefined();
   });
 });
+
+// Same-day sessions are ordered by their timestamps only; the answer never
+// depends on the order rows happen to arrive in.
+test("same-day previous sessions pick the same answer in any input order", () => {
+  const rep = (session_id, start) => ({ session_id, date: "2026-11-04", grip: "Micro", hand: "L", set_num: 1,
+    rep_num: 1, target_duration: 40, actual_time_s: 30, failure_valid: true,
+    ...(start != null ? { session_started_at: new Date(start).toISOString() } : {}) });
+  const opts = { grip: "Micro", hand: "L", beforeDate: "2026-11-05", targetDuration: 40 };
+  const A = rep("A", 100000), B = rep("B", null), C = rep("C", 200000);
+  const orders = [[A, B, C], [B, A, C], [C, B, A], [A, C, B]];
+  const picks = orders.map(order => findPrevSessionReps(order, opts)?.[0]?.session_id ?? null);
+  expect(new Set(picks).size).toBe(1);
+  expect(picks[0]).toBeNull();                                // B cannot be ordered
+  expect(findPrevSessionReps([C, A], opts)[0].session_id).toBe("C");
+  expect(findPrevSessionReps([A, C], opts)[0].session_id).toBe("C");
+});

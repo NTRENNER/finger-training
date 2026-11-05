@@ -101,6 +101,10 @@ import {
 
 function genId() { return Math.random().toString(36).slice(2, 10); }
 
+// What the athlete did, not what was planned: seeded from completed history.
+const OBSERVED_SET_KEYS = ['weight', 'leftWeight', 'rightWeight', 'band', 'leftBand', 'rightBand',
+  'variant', 'seconds', 'leftSeconds', 'rightSeconds'];
+
 
 // ─────────────────────────────────────────────────────────────
 // Main WorkoutTab
@@ -287,10 +291,6 @@ export function WorkoutTab({
   // without duplicating the three-logging-mode branching.
   const seedExerciseData = (ex) => {
     if (!ex.loggable) return { done: false, notes: "" };
-    const latestExerciseSession = ex.setupModifiers?.length
-      ? findLastSessionFor(wLog, activeId, ex.id)
-      : null;
-    const latestDoneSets = latestExerciseSession?.exercises?.[ex.id]?.sets || [];
     const defaultModifiers = copyModifierSelections(ex.templateSets?.[0]);
     const progressionLog = ex.setupModifiers?.length
       ? filterHistoryForModifierSetup(wLog, ex.id, defaultModifiers)
@@ -312,7 +312,7 @@ export function WorkoutTab({
         ? filterHistoryForModifierSetup(wLog, ex.id, source)
         : progressionLog;
       const setLadder = isWeightLogged
-        ? recommendSetCount(setProgressionLog, ex, ex.sets || 1, { referenceDate: today(), unit })
+        ? recommendSetCount(setProgressionLog, ex, ex.sets || 1, { referenceDate: today(), unit, setup: source })
         : ladder;
       const withModifiers = set => {
         const modifiers = copyModifierSelections(source);
@@ -374,7 +374,7 @@ export function WorkoutTab({
       // Default weight-logged exercise — seed via recommendSet, with
       // the ladder plan steering the load policy (hold during set
       // accumulation; step/jump/bridge only at top-out).
-      const rec = recommendSet(setProgressionLog, ex, activeId, i, null, setLadder);
+      const rec = recommendSet(setProgressionLog, ex, activeId, i, null, setLadder, source);
       if (ex.unilateral) {
         return withModifiers({
           leftReps:    rec?.leftReps    ?? ex.reps ?? "",
@@ -389,27 +389,33 @@ export function WorkoutTab({
         weight: rec?.weight ?? "",
         done: false,
       });
-    }).map((set, i) => withHoldTime(ex, set, i, latestDoneSets, progressionLog));
+    }).map((set, i) => withHoldTime(ex, set, i, progressionLog));
     return { sets };
   };
 
   // Timed holds carry reps AND seconds forward from the last session in
-  // the same setup (see holdTimeSeed).
-  const withHoldTime = (ex, set, i, latestDoneSets, progressionLog) => {
+  // the same setup as this set (see holdTimeSeed).
+  const withHoldTime = (ex, set, i, progressionLog) => {
     if (!ex.logTime) return set;
-    const source = latestDoneSets[i] ?? latestDoneSets.at(-1);
-    const log = ex.setupModifiers?.length ? filterHistoryForModifierSetup(wLog, ex.id, source) : progressionLog;
+    const log = ex.setupModifiers?.length ? filterHistoryForModifierSetup(wLog, ex.id, set) : progressionLog;
     const doneSets = findLastSessionFor(log, activeId, ex.id)?.exercises?.[ex.id]?.sets;
     return { ...set, ...holdTimeSeed(ex, doneSets?.[i] ?? doneSets?.at(-1)) };
   };
 
   const seedExercise = ex => {
     const data = seedExerciseData(ex);
+    // The saved template sets targets (reps, modifiers). Once this setup has
+    // completed history, band, variant, hold time and weight come from it.
     if (data.sets && ex.templateSets?.length) data.sets = data.sets.map((set, index) => {
       const template = ex.templateSets[Math.min(index, ex.templateSets.length - 1)];
       const earnedReps = !ex.circlesOnly && !ex.logBand && !ex.logVariant
         ? Object.fromEntries(['reps', 'leftReps', 'rightReps'].filter(key => set[key] != null).map(key => [key, set[key]])) : {};
-      return { ...set, ...template, ...earnedReps, done: false };
+      const setupLog = ex.setupModifiers?.length ? filterHistoryForModifierSetup(wLog, ex.id, template) : wLog;
+      const seeded = setupLog.some(session => session.exercises?.[ex.id]?.sets?.some(s => s?.done));
+      const targets = seeded
+        ? Object.fromEntries(Object.entries(template).filter(([key]) => !OBSERVED_SET_KEYS.includes(key)))
+        : template;
+      return { ...set, ...targets, ...earnedReps, done: false };
     });
     if (!data.sets) return data;
     const comparableLog = ex.setupModifiers?.length
@@ -417,7 +423,7 @@ export function WorkoutTab({
       : wLog;
     const returnPlan = returnToTrainingPlan(comparableLog, ex, ex.sets || 1, today());
     if (returnPlan) data.sets = data.sets.slice(0, returnPlan.sets);
-    const plan = recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today(), unit });
+    const plan = recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today(), unit, setup: data.sets[0] });
     return { ...data, prescription: { version: 1, date: today(),
       sets: data.sets.map(({ done, ...target }) => ({ ...target })),
       progressionMode: plan.mode,
@@ -704,7 +710,7 @@ export function WorkoutTab({
                   ? filterHistoryForModifierSetup(wLog, ex.id, exData.sets?.[0])
                   : wLog;
                 const plan = (!ex.circlesOnly && !ex.logBand && !ex.logVariant)
-                  ? recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today(), unit })
+                  ? recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today(), unit, setup: exData.sets?.[0] })
                   : null;
                 const recommendations = ex.logVariant ? [] : Array.from(
                   { length: (exData.sets?.length || ex.sets || 1) },
@@ -713,9 +719,9 @@ export function WorkoutTab({
                       ? filterHistoryForModifierSetup(wLog, ex.id, exData.sets?.[idx])
                       : comparableLog;
                     const setPlan = (!ex.circlesOnly && !ex.logBand && !ex.logVariant)
-                      ? recommendSetCount(setLog, ex, ex.sets || 1, { referenceDate: today(), unit })
+                      ? recommendSetCount(setLog, ex, ex.sets || 1, { referenceDate: today(), unit, setup: exData.sets?.[idx] })
                       : plan;
-                    return recommendSet(setLog, ex, activeId, idx, null, setPlan);
+                    return recommendSet(setLog, ex, activeId, idx, null, setPlan, exData.sets?.[idx]);
                   }
                 );
                 return (

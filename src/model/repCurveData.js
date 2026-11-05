@@ -139,25 +139,21 @@ export function findPrevSessionReps(history, { grip, hand, beforeDate, targetDur
   }
   if (byKey.size === 0) return null;
 
-  // Same-day sessions need measured/session timestamps, never input order.
-  let best = null;
-  let bestDate = null;
-  let bestStart = null;
-  let ambiguous = false;
-  for (const reps of byKey.values()) {
-    const d = reps.reduce((mx, r) => (r.date > mx ? r.date : mx), "");
+  // The latest date wins. Same-day sessions are ordered only by distinct
+  // session timestamps, never by input order: if any of them has no
+  // timestamp, or the latest start is shared, there is no comparison.
+  const sessions = [...byKey.values()].map(reps => {
     const starts = reps.map(sessionStart).filter(Number.isFinite);
-    const start = starts.length ? Math.min(...starts) : null;
-    if (!bestDate || d > bestDate || (d === bestDate && start != null && bestStart != null && start > bestStart)) {
-      bestDate = d;
-      bestStart = start;
-      best = reps;
-      ambiguous = false;
-    } else if (d === bestDate && (start == null || bestStart == null || start === bestStart)) {
-      ambiguous = true;
-    }
-  }
-  return ambiguous ? null : best;
+    return { reps, date: reps.reduce((mx, r) => (r.date > mx ? r.date : mx), ""),
+      start: starts.length ? Math.min(...starts) : null };
+  });
+  const lastDate = sessions.reduce((mx, s) => (s.date > mx ? s.date : mx), "");
+  const sameDay = sessions.filter(s => s.date === lastDate);
+  if (sameDay.length === 1) return sameDay[0].reps;
+  if (sameDay.some(s => s.start == null)) return null;
+  const latest = Math.max(...sameDay.map(s => s.start));
+  const top = sameDay.filter(s => s.start === latest);
+  return top.length === 1 ? top[0].reps : null;
 }
 
 // Run the recovery model out to N=ASYMPTOTE_REPS and return the
