@@ -540,7 +540,8 @@ export const exercises = {
     logTime: true,
     logVariant: true,
     variants: ["Tuck", "Advanced tuck", "Single-leg", "Straddle", "Full"],
-    logWeight: true,
+    // Bodyweight hold: no weight box (per Nathan, 2026-11-05).
+    logWeight: false,
     progressionPolicy: "maintain",
   },
 

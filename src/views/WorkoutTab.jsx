@@ -60,9 +60,11 @@ import { useLSValue } from "../hooks/useLSValue.js";
 import { WorkoutEffort } from "./workout/WorkoutEffort.jsx";
 import { recommendSet, recommendSetCount, returnToTrainingPlan } from "../model/workout-progression.js";
 import {
+  carryModifierSelections,
   copyModifierSelections,
-  modifierDefinitionsForSets,
   filterHistoryForModifierSetup,
+  modifierMenu,
+  QUICK_MODIFIERS,
 } from "../model/workoutModifiers.js";
 import { holdTimeSeed } from "../model/workout-volume.js";
 import "./workout/WorkoutPlanner.css";
@@ -102,9 +104,10 @@ import {
 
 function genId() { return Math.random().toString(36).slice(2, 10); }
 
-// What the athlete did, not what was planned: seeded from completed history.
+// What the athlete did, not what was planned: seeded from completed history
+// (modifiers carry forward from the last session until changed).
 const OBSERVED_SET_KEYS = ['weight', 'leftWeight', 'rightWeight', 'band', 'leftBand', 'rightBand',
-  'variant', 'seconds', 'leftSeconds', 'rightSeconds'];
+  'variant', 'seconds', 'leftSeconds', 'rightSeconds', 'modifiers'];
 
 // The session in progress, saved as it is entered so a page reload (the
 // phone discarding a backgrounded page) or a tab switch restores it.
@@ -217,6 +220,27 @@ export function WorkoutTab({
     flushUserSettingsPatch().catch(() => {});
   };
 
+  // The Modify menu for an exercise: its configured modifiers, the
+  // athlete's own, then built-ins, minus any the athlete deleted.
+  const modifierCatalog = ex => {
+    const own = new Set(program.modifierDefinitions.map(definition => definition.id));
+    return modifierMenu([...(ex.setupModifiers || []).filter(definition => own.has(definition.id)),
+      ...program.modifierDefinitions, ...QUICK_MODIFIERS], program.hiddenModifierIds);
+  };
+  // A custom modifier joins the athlete's list (synced with the program).
+  const createModifier = definition => updateProgram({ ...program,
+    modifierDefinitions: [...program.modifierDefinitions.filter(item => item.id !== definition.id), definition] });
+  // Deleting removes the athlete's own modifier, or hides a built-in. Sets
+  // already logged keep what they recorded.
+  const deleteModifier = definition => {
+    const own = program.modifierDefinitions.some(item => item.id === definition.id);
+    updateProgram(own ? { ...program,
+      modifierDefinitions: program.modifierDefinitions.filter(item => item.id !== definition.id),
+      exerciseModifierIds: Object.fromEntries(Object.entries(program.exerciseModifierIds)
+        .map(([exerciseId, ids]) => [exerciseId, ids.filter(id => id !== definition.id)])),
+    } : { ...program, hiddenModifierIds: [...program.hiddenModifierIds, definition.id] });
+  };
+
   // ── Recommendation ───────────────────────────────────
   // Drop pin-style rotation sessions (legacy ROTATION_PIN_KEY) so
   // they don't pollute the recommender's daysSinceLastOfType counts.
@@ -311,7 +335,16 @@ export function WorkoutTab({
   // without duplicating the three-logging-mode branching.
   const seedExerciseData = (ex) => {
     if (!ex.loggable) return { done: false, notes: "" };
-    const defaultModifiers = copyModifierSelections(ex.templateSets?.[0]);
+    // Last session's modifiers carry forward, set by set, until changed;
+    // with no history, the saved template's.
+    const lastSets = findLastSessionFor(wLog, activeId, ex.id)?.exercises?.[ex.id]?.sets || [];
+    const catalog = modifierCatalog(ex);
+    const setupFor = i => {
+      const carried = lastSets[i] ?? lastSets.at(-1);
+      return carried ? { modifiers: carryModifierSelections(carried, catalog) }
+        : ex.templateSets?.[i] ?? ex.templateSets?.at(-1);
+    };
+    const defaultModifiers = copyModifierSelections(setupFor(0));
     const progressionLog = ex.setupModifiers?.length
       ? filterHistoryForModifierSetup(wLog, ex.id, defaultModifiers)
       : wLog;
@@ -327,7 +360,7 @@ export function WorkoutTab({
       : null;
     const setCount = ladder ? ladder.sets : (ex.sets || 1);
     const sets = Array.from({ length: setCount }, (_, i) => {
-      const source = ex.templateSets?.[i] ?? ex.templateSets?.at(-1);
+      const source = setupFor(i);
       const setProgressionLog = ex.setupModifiers?.length
         ? filterHistoryForModifierSetup(wLog, ex.id, source)
         : progressionLog;
@@ -424,14 +457,13 @@ export function WorkoutTab({
 
   const seedExercise = ex => {
     const data = seedExerciseData(ex);
-    // The saved template sets targets (reps, modifiers). Once this setup has
-    // completed history, band, variant, hold time and weight come from it.
+    // The saved template sets targets (reps). Once the exercise has completed
+    // history, modifiers, band, variant, hold time and weight come from it.
+    const seeded = !!findLastSessionFor(wLog, activeId, ex.id);
     if (data.sets && ex.templateSets?.length) data.sets = data.sets.map((set, index) => {
       const template = ex.templateSets[Math.min(index, ex.templateSets.length - 1)];
       const earnedReps = !ex.circlesOnly && !ex.logBand && !ex.logVariant
         ? Object.fromEntries(['reps', 'leftReps', 'rightReps'].filter(key => set[key] != null).map(key => [key, set[key]])) : {};
-      const setupLog = ex.setupModifiers?.length ? filterHistoryForModifierSetup(wLog, ex.id, template) : wLog;
-      const seeded = setupLog.some(session => session.exercises?.[ex.id]?.sets?.some(s => s?.done));
       const targets = seeded
         ? Object.fromEntries(Object.entries(template).filter(([key]) => !OBSERVED_SET_KEYS.includes(key)))
         : template;
@@ -464,8 +496,7 @@ export function WorkoutTab({
       seed[ex.id] = seedExercise(ex);
     }
     setSessionData(seed);
-    setLiveExercises(activeWorkout.exercises.map(ex => ({ ...ex, availableModifiers: modifierDefinitionsForSets(
-      wLog.flatMap(s => s.exercises?.[ex.id]?.sets || [])) })));
+    setLiveExercises(activeWorkout.exercises);
     setSessionNotes("");
     setUpdateTemplate(false);
     setSessionWorkoutId(activeId);
@@ -764,6 +795,9 @@ export function WorkoutTab({
                       onSetsChange={(next) => updateExerciseSets(ex.id, next)}
                       recommendations={recommendations}
                       last={last}
+                      modifierCatalog={modifierCatalog(ex)}
+                      onCreateModifier={createModifier}
+                      onDeleteModifier={deleteModifier}
                     />
                     <WorkoutEffort name={ex.name} data={exData}
                       onChange={effort => updateExerciseSets(ex.id, { effort })} />

@@ -139,11 +139,48 @@ export function setModifierSelection(set, definition, value) {
   return { ...set, modifiers: next };
 }
 
+const normName = value => cleanString(value).toLowerCase().replace(/\s+/g, "");
+
+// The setup a set was done in, by modifier NAME and value, not by id: two
+// definitions that mean the same thing to the athlete (an old "Band" and
+// its replacement) compare equal, so history keeps matching.
 export function modifierSelectionSignature(setOrSelections) {
-  return Object.entries(modifierSelections(setOrSelections))
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([id, selection]) => `${id}=${selection.value}${selection.repCount ? `@${selection.repCount}` : ""}${selection.side ? `:${selection.side}` : ""}`)
-    .join("|");
+  const parts = new Set(Object.values(modifierSelections(setOrSelections)).map(selection =>
+    `${normName(selection.name)}=${normName(selection.valueLabel) || normName(selection.value)}`
+    + `${selection.repCount ? `@${selection.repCount}` : ""}${selection.side ? `:${selection.side}` : ""}`));
+  return [...parts].sort().join("|");
+}
+
+// The Modify menu: one entry per name, earlier sources first (the
+// exercise's, then the athlete's, then built-ins), a single band
+// picker, and nothing the athlete removed from the list.
+export function modifierMenu(definitions = [], hiddenIds = []) {
+  const hidden = new Set(hiddenIds);
+  const names = new Set();
+  let bands = false;
+  const out = [];
+  for (const definition of definitions) {
+    if (!definition?.id || hidden.has(definition.id)) continue;
+    const name = normName(definition.name);
+    if (!name || names.has(name) || (definition.control === "bands" && bands)) continue;
+    names.add(name);
+    bands ||= definition.control === "bands";
+    out.push(definition);
+  }
+  return out;
+}
+
+// Last session's modifiers for the next one, one per name (an old
+// duplicate definition collapses into the one still in the menu).
+export function carryModifierSelections(setOrSelections, catalog = []) {
+  const known = new Set(catalog.map(definition => definition.id));
+  const byName = new Map();
+  for (const [id, selection] of Object.entries(copyModifierSelections(setOrSelections))) {
+    const name = normName(selection.name);
+    const kept = byName.get(name);
+    if (!kept || (!known.has(kept[0]) && known.has(id))) byName.set(name, [id, selection]);
+  }
+  return Object.fromEntries(byName.values());
 }
 
 export function modifierSelectionLabel(setOrSelections) {

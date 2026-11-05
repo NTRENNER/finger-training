@@ -7,7 +7,11 @@ jest.mock('../../../lib/sync.js', () => ({ pushWorkoutSession: jest.fn(() => Pro
 jest.mock('../../BodyWeightEntry.jsx', () => ({ BwPrompt: () => null }));
 jest.mock('../StretchPill.jsx', () => ({ StretchPill: () => null }));
 jest.mock('../RecommendationCard.jsx', () => ({ RecommendationCard: () => null }));
-jest.mock('../SessionExRow.jsx', () => ({ SessionExRow: ({ ex, setsData, onSetsChange }) => <div data-testid={ex.id}>
+jest.mock('../SessionExRow.jsx', () => ({ SessionExRow: ({ ex, setsData, onSetsChange, modifierCatalog = [], onCreateModifier, onDeleteModifier }) => <div data-testid={ex.id}>
+  <output data-testid={`${ex.id}-menu`}>{JSON.stringify(modifierCatalog.map(m => m.name))}</output>
+  <button onClick={() => onDeleteModifier?.(modifierCatalog.find(m => m.name === 'Tempo'))}>Delete Tempo</button>
+  <button onClick={() => onDeleteModifier?.(modifierCatalog.find(m => m.name === 'Band'))}>Delete Band</button>
+  <button onClick={() => onCreateModifier?.({ id: 'modifier_custom_rings', name: 'Rings', kind: 'setup', control: 'standard', options: [] })}>Create Rings</button>
   <span>{setsData.sets.length} sets</span><output data-testid={`${ex.id}-state`}>{JSON.stringify(setsData)}</output><span>{setsData.sets[0]?.weight}</span>
   <button onClick={() => onSetsChange({ sets: [...setsData.sets, {weight:'155',reps:'5',done:true}].map(s=>({...s,weight:'155',reps:'5',done:true})) })}>Complete four</button>
   <button onClick={() => onSetsChange({ sets: setsData.sets.map((s,i) => ({ ...s, done: i === 0 })) })}>Complete one</button>
@@ -117,7 +121,7 @@ test('a saved template sets rep targets but never resets a progressed variant', 
   expect(JSON.parse(screen.getByTestId('trxRow-state').textContent).sets[0]).toMatchObject({ variant: 'Feet-elevated', reps: '8' });
 });
 
-test('a timed hold seeds seconds from its own setup, not a band-assisted session', () => {
+test('a timed hold keeps last session\'s band and seeds seconds from that banded setup', () => {
   const { defaultWorkoutProgram } = require('../../../model/workoutProgram.js');
   const program = defaultWorkoutProgram();
   program.templates.A = ['frontLever'];
@@ -131,8 +135,44 @@ test('a timed hold seeds seconds from its own setup, not a band-assisted session
   fireEvent.click(screen.getByRole('button', { name: 'Choose Workout A' }));
   fireEvent.click(screen.getByRole('button', { name: 'Start Workout A' }));
   const seeded = JSON.parse(screen.getByTestId('frontLever-state').textContent).sets[0];
-  expect(seeded.modifiers).toBeUndefined();          // today starts unassisted
-  expect(seeded.seconds).not.toBe('12');             // the banded 12 s is a different setup
+  // Chosen once, the band persists into the next workout until changed.
+  expect(seeded.modifiers).toMatchObject({ modifier_band: { name: 'Band', value: 'red' } });
+  expect(seeded.seconds).toBe('12');
+});
+
+// Nathan's front lever history carries an old "Band" beside its
+// replacement: the next workout starts with one Band, and the menu offers
+// one band option, the athlete's own modifiers, and saved custom ones.
+test('modifiers carry forward once, and the menu list can be grown or trimmed', () => {
+  const { defaultWorkoutProgram } = require('../../../model/workoutProgram.js');
+  const program = defaultWorkoutProgram();
+  program.templates.A = ['frontLever'];
+  program.modifierDefinitions = [{ id: 'modifier_band_mglzk', name: 'Band', kind: 'setup', control: 'bands',
+    options: [{ id: 'red', label: 'Red' }] }];
+  program.exerciseModifierIds = { frontLever: ['modifier_band_mglzk'] };
+  saveLS(LS_WORKOUT_PLAN_KEY, program);
+  const bandSet = { variant: 'Full', reps: '4', seconds: '10', done: true, modifiers: {
+    modifier_band_iqdun: { name: 'Band', kind: 'assistance', value: 'red_1', valueLabel: 'Red' },
+    modifier_band_mglzk: { name: 'Band', kind: 'setup', value: 'red', valueLabel: 'Red' } } };
+  saveLS(LS_WORKOUT_LOG_KEY, [{ id: 'lever', date: '2026-09-29', workout: 'A', exercises: { frontLever: { sets: [bandSet, bandSet] } } }]);
+  render(<WorkoutTab unit="lbs" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Choose Workout A' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start Workout A' }));
+  const seeded = JSON.parse(screen.getByTestId('frontLever-state').textContent).sets[0];
+  expect(Object.keys(seeded.modifiers)).toEqual(['modifier_band_mglzk']);
+  expect(seeded.seconds).toBe('10');                 // history in the same (banded) setup still matches
+  const menu = () => JSON.parse(screen.getByTestId('frontLever-menu').textContent);
+  expect(menu().filter(name => /band/i.test(name))).toEqual(['Band']);
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Tempo' }));
+  expect(menu()).not.toContain('Tempo');
+  expect(loadLS(LS_WORKOUT_PLAN_KEY).hiddenModifierIds).toEqual(['modifier_tempo']);
+  fireEvent.click(screen.getByRole('button', { name: 'Create Rings' }));
+  expect(menu()).toContain('Rings');
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Band' }));
+  expect(loadLS(LS_WORKOUT_PLAN_KEY).modifierDefinitions.map(m => m.id)).toEqual(['modifier_custom_rings']);
+  expect(loadLS(LS_WORKOUT_PLAN_KEY).exerciseModifierIds).toEqual({});
+  // With the athlete's Band gone, the built-in band option takes its place.
+  expect(menu()).toContain('Band assistance');
 });
 
 // A phone can discard a backgrounded page, and switching tabs unmounts the

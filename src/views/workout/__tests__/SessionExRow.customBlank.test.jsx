@@ -68,13 +68,15 @@ test("an attached modifier is selected per set and survives completion", () => {
   };
   render(<StatefulRow ex={ex} initialSet={{ reps: "5", weight: "225", done: false }} />);
 
+  fireEvent.click(screen.getByRole("button", { name: "Modify set 1" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Slingshot" }));
   const setup = screen.getByLabelText("Slingshot for set 1");
   fireEvent.change(setup, { target: { value: "red" } });
   expect(setup).toHaveValue("red");
   expect(screen.getByRole("spinbutton", { name: "" })).toHaveValue(null);
   fireEvent.click(screen.getByTitle("Set 1: tap to toggle done"));
   expect(screen.getByTitle("Set 1: tap to toggle done")).toHaveTextContent("✓");
-  expect(setup).toHaveValue("red");
+  expect(screen.getByRole("button", { name: "Change Slingshot on set 1" })).toHaveTextContent("Slingshot: Red");
 });
 
 test("a band modifier reuses the multi-color swatch picker", () => {
@@ -89,6 +91,8 @@ test("a band modifier reuses the multi-color swatch picker", () => {
   };
   render(<StatefulRow ex={ex} initialSet={{ reps: "5", weight: "20", done: false }} />);
 
+  fireEvent.click(screen.getByRole("button", { name: "Modify set 1" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Band support" }));
   fireEvent.click(screen.getByRole("button", { name: "Band support for set 1: Green" }));
   fireEvent.click(screen.getByRole("button", { name: "Band support for set 1: Blue" }));
 

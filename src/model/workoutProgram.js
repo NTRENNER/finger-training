@@ -64,6 +64,8 @@ export function defaultWorkoutProgram() {
     customExercises: [],
     modifierDefinitions: [],
     exerciseModifierIds: {},
+    // Built-in modifiers the athlete removed from the Modify menu.
+    hiddenModifierIds: [],
     templateDefaults: {},
   };
 }
@@ -237,6 +239,8 @@ export function sanitizeWorkoutProgram(raw) {
     customExercises,
     modifierDefinitions,
     exerciseModifierIds,
+    hiddenModifierIds: [...new Set((Array.isArray(raw.hiddenModifierIds) ? raw.hiddenModifierIds : [])
+      .filter(id => typeof id === "string" && id.startsWith("modifier_")))].slice(0, 50),
     templateDefaults: sanitizeTemplateDefaults(raw.templateDefaults, knownIds),
   };
 }

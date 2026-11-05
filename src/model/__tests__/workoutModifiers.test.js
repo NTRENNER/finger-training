@@ -19,7 +19,8 @@ describe("workout modifiers", () => {
 
     const set = setModifierSelection({ reps: "5", weight: "225" }, modifier, modifier.options[0].id);
     expect(modifierSelectionLabel(set)).toBe("Slingshot: Red");
-    expect(modifierSelectionSignature(set)).toBe(`${modifier.id}=${modifier.options[0].id}`);
+    // Setups compare by modifier name and value, not by internal id.
+    expect(modifierSelectionSignature(set)).toBe("slingshot=red");
 
     modifier.name = "Renamed later";
     expect(modifierSelectionLabel(set)).toBe("Slingshot: Red");
@@ -47,7 +48,26 @@ describe("workout modifiers", () => {
 
     const assisted = setModifierSelection({}, modifier, ["blue", "green"]);
     expect(modifierSelectionLabel(assisted)).toBe("Band support: Green + Blue");
-    expect(modifierSelectionSignature(assisted)).toBe(`${modifier.id}=green+blue`);
+    expect(modifierSelectionSignature(assisted)).toBe("bandsupport=green+blue");
+  });
+
+  // Nathan's front lever sets carry an old "Band" definition beside its
+  // replacement, both Red. They must match a set with only the new one, the
+  // menu must offer one band picker, and carrying forward keeps one Band.
+  test("duplicate band definitions match, list once, and carry forward once", () => {
+    const { modifierMenu, carryModifierSelections, QUICK_MODIFIERS } = require("../workoutModifiers.js");
+    const current = { id: "modifier_band_mglzk", name: "Band", kind: "setup", control: "bands",
+      options: [{ id: "red", label: "Red" }, { id: "blue", label: "Blue" }] };
+    const legacy = { modifierId: "modifier_band_iqdun", name: "Band", kind: "assistance", value: "red_1", valueLabel: "Red" };
+    const both = { modifiers: { modifier_band_iqdun: legacy,
+      modifier_band_mglzk: { modifierId: current.id, name: "Band", kind: "setup", value: "red", valueLabel: "Red" } } };
+    const today = setModifierSelection({}, current, ["red"]);
+    expect(modifierSelectionSignature(both)).toBe(modifierSelectionSignature(today));
+    const menu = modifierMenu([current, ...QUICK_MODIFIERS]);
+    expect(menu.filter(definition => definition.control === "bands").map(definition => definition.id)).toEqual([current.id]);
+    expect(menu.map(definition => definition.name)).toEqual(expect.arrayContaining(["Band", "Slingshot", "Tempo"]));
+    expect(modifierMenu([current, ...QUICK_MODIFIERS], ["modifier_tempo"]).some(definition => definition.id === "modifier_tempo")).toBe(false);
+    expect(Object.keys(carryModifierSelections(both, menu))).toEqual([current.id]);
   });
 
   test("history filtering keeps only directly comparable set setups", () => {

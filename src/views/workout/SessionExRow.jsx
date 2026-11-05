@@ -33,6 +33,8 @@ import {
   customModifierDefinition,
   QUICK_MODIFIERS,
   modifierDefinitionsForSets,
+  modifierMenu,
+  modifierSelectionLabel,
   modifierSelectionSignature,
   modifierSelections,
   modifierValueOptions,
@@ -107,7 +109,143 @@ function BandPicker({ bands, label, onToggle }) {
   );
 }
 
-export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recommendations = [], last }) {
+const linkButton = { color: C.muted, background: "none", border: 0, padding: "4px 0", fontSize: 12, cursor: "pointer" };
+const tagStyle = { display: "inline-flex", alignItems: "center", border: `1px solid ${C.border}`, borderRadius: 12,
+  fontSize: 12, overflow: "hidden" };
+const tagButton = { background: "none", border: 0, color: C.text, padding: "3px 8px", fontSize: 12, cursor: "pointer" };
+
+// The modifiers on one set: a tag per modifier (tap to change it, ✕ to take
+// it off the set) and a Modify menu of the athlete's modifiers. A custom
+// modifier joins the list; ✕ in the menu removes one the athlete doesn't use.
+function SetModifiers({ set, index, catalog, unilateral, onSelect, onChangeSet, onCreate, onDelete }) {
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState(null);   // modifier id whose value is being chosen
+  const [custom, setCustom] = React.useState("");
+  const selected = modifierSelections(set);
+  const setLabel = `set ${index + 1}`;
+  const definitionFor = id => catalog.find(d => d.id === id)
+    ?? modifierDefinitionsForSets([set]).find(d => d.id === id);
+  const editingDef = editing ? definitionFor(editing) : null;
+  const choose = definition => {
+    setMenuOpen(false);
+    // A plain on/off modifier applies at once; one with values asks which.
+    if (definition.control !== "bands" && !definition.options?.length) {
+      onSelect(definition, "on");
+      setEditing(null);
+    } else setEditing(definition.id);
+  };
+  const scope = (id, patch) => {
+    const modifiers = copyModifierSelections(set);
+    if (!modifiers[id]) return;
+    for (const [key, value] of Object.entries(patch)) {
+      if (value) modifiers[id][key] = value; else delete modifiers[id][key];
+    }
+    onChangeSet({ ...set, modifiers });
+  };
+  return (
+    <div style={{ margin: "3px 0 7px 44px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+        {Object.values(selected).map(selection => (
+          <span key={selection.modifierId} style={tagStyle}>
+            <button type="button" style={tagButton} aria-label={`Change ${selection.name} on ${setLabel}`}
+              onClick={() => setEditing(open => open === selection.modifierId ? null : selection.modifierId)}>
+              {modifierSelectionLabel({ [selection.modifierId]: selection })}
+            </button>
+            <button type="button" style={{ ...tagButton, color: C.muted, paddingLeft: 0 }}
+              aria-label={`Remove ${selection.name} from ${setLabel}`}
+              onClick={() => {
+                onSelect(definitionFor(selection.modifierId)
+                  ?? { id: selection.modifierId, name: selection.name, control: "standard", options: [] }, "");
+                if (editing === selection.modifierId) setEditing(null);
+              }}>✕</button>
+          </span>
+        ))}
+        <button type="button" style={linkButton} aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
+          {Object.keys(selected).length ? "+ Modify" : `Modify ${setLabel}`}
+        </button>
+      </div>
+      {menuOpen && (
+        <div role="menu" aria-label={`Modifiers for ${setLabel}`} style={{
+          marginTop: 4, border: `1px solid ${C.border}`, borderRadius: 8, padding: 4, maxWidth: 280,
+        }}>
+          {catalog.map(definition => (
+            <div key={definition.id} style={{ display: "flex", alignItems: "center" }}>
+              <button type="button" role="menuitem" onClick={() => choose(definition)}
+                style={{ ...tagButton, flex: 1, textAlign: "left", padding: "8px" }}>{definition.name}</button>
+              {onDelete && <button type="button" style={{ ...tagButton, color: C.muted }}
+                aria-label={`Delete ${definition.name} from the modifier list`}
+                onClick={() => onDelete(definition)}>✕</button>}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 6, padding: 4 }}>
+            <input aria-label={`Custom modifier for ${setLabel}`} value={custom} placeholder="Custom…"
+              onChange={event => setCustom(event.target.value)}
+              style={{ flex: 1, minWidth: 0, background: C.bg, border: `1px solid ${C.border}`, color: C.text,
+                borderRadius: 6, padding: "4px 6px", fontSize: 12 }} />
+            <button type="button" disabled={!customModifierDefinition(custom)} onClick={() => {
+              const definition = customModifierDefinition(custom);
+              if (!definition) return;
+              onCreate?.(definition);
+              onSelect(definition, "on");
+              setCustom("");
+              setMenuOpen(false);
+            }}>Add modifier</button>
+          </div>
+        </div>
+      )}
+      {editingDef && (
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 6 }}>
+          <span style={{ color: C.muted, fontSize: 11 }}>{editingDef.name}</span>
+          {editingDef.control === "bands" ? (
+            <BandPicker
+              bands={selected[editingDef.id]?.value?.split("+") || []}
+              label={`${editingDef.name} for ${setLabel}`}
+              onToggle={bandKey => {
+                const current = selected[editingDef.id]?.value?.split("+").filter(Boolean) || [];
+                onSelect(editingDef, current.includes(bandKey)
+                  ? current.filter(value => value !== bandKey) : [...current, bandKey]);
+              }}
+            />
+          ) : editingDef.options?.length > 0 && (
+            <select aria-label={`${editingDef.name} for ${setLabel}`} value={selected[editingDef.id]?.value || ""}
+              onChange={event => onSelect(editingDef, event.target.value)}
+              style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6,
+                padding: "4px 6px", fontSize: 11 }}>
+              <option value="">None</option>
+              {modifierValueOptions(editingDef).map(option => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          )}
+          {selected[editingDef.id] && <label style={{ fontSize: 11 }}>Reps affected{" "}
+            <input type="number" min="1" placeholder="All"
+              aria-label={`${editingDef.name} affected reps for ${setLabel}`}
+              value={selected[editingDef.id].repCount || ""}
+              style={{ width: 50, background: C.bg, border: `1px solid ${C.border}`, color: C.text,
+                borderRadius: 6, padding: "4px 6px", fontSize: 12 }}
+              onChange={event => {
+                const count = Number(event.target.value);
+                if (event.target.value && (!Number.isInteger(count) || count < 1)) return;
+                scope(editingDef.id, { repCount: event.target.value ? count : null });
+              }} />
+          </label>}
+          {selected[editingDef.id] && unilateral && (
+            <select aria-label={`${editingDef.name} side for ${setLabel}`} value={selected[editingDef.id].side || ""}
+              onChange={event => scope(editingDef.id, { side: event.target.value || null })}>
+              <option value="">Both sides</option><option value="L">Left only</option><option value="R">Right only</option>
+            </select>
+          )}
+          <button type="button" style={linkButton} onClick={() => setEditing(null)}>Done</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recommendations = [], last,
+  // The Modify menu's list, and how a created or deleted entry is kept.
+  modifierCatalog = modifierMenu([...(ex.setupModifiers || []), ...QUICK_MODIFIERS]),
+  onCreateModifier = null, onDeleteModifier = null }) {
   const [repErrorSet, setRepErrorSet] = React.useState(null);
   const repInputRefs = React.useRef(new Map());
   const allSetsDone = setsData?.sets
@@ -144,9 +282,12 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     ? resolvedSeconds(set, key) : resolvedReps(set, index, key);
   // The load each row displays: the stored value, else the recommendation
   // (the same fallback the inputs below render).
+  // Bodyweight exercises (logWeight: false, e.g. front lever) show no
+  // weight box.
+  const showsWeight = ex.logWeight !== false;
   const loadKeys = ex.circlesOnly ? []
     : ex.logBand ? (ex.unilateral ? ["leftBand", "rightBand"] : ["band"])
-    : (ex.unilateral ? ["leftWeight", "rightWeight"] : ["weight"]);
+    : showsWeight ? (ex.unilateral ? ["leftWeight", "rightWeight"] : ["weight"]) : [];
   const filled = value => value != null && value !== "" && !(Array.isArray(value) && value.length === 0);
   const shownLoad = (set, index, key) => {
     if (filled(set?.[key])) return set[key];
@@ -200,13 +341,6 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
       {ex.logTime ? "Enter reps and seconds to complete this set." : "Enter reps to complete this set."}
     </div>
   ) : null;
-  // One custom-modifier draft per set, so typing in one panel stays there.
-  const [customModifierNames, setCustomModifierNames] = React.useState({});
-  const [openModifiers, setOpenModifiers] = React.useState({});
-  const setupModifiers = [...new Map([
-    ...(ex.availableModifiers || []), ...modifierDefinitionsForSets(setsData?.sets),
-    ...QUICK_MODIFIERS, ...(ex.setupModifiers || []),
-  ].map(definition => [definition.id, definition])).values()];
   const updateModifier = (set, index, modifier, value) => {
     const next = [...setsData.sets];
     const before = modifierSelectionSignature(set);
@@ -226,82 +360,16 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     next[index] = updated;
     onSetsChange({ sets: next });
   };
-  const modifierControls = (set, index) => {
-    const selected = modifierSelections(set);
-    return (
-      <div style={{ margin: "3px 0 7px 44px" }}>
-        <button type="button" style={{ color: C.muted, background: 'none', border: 0, padding: 0, fontSize: 12, cursor: 'pointer' }}
-          aria-expanded={openModifiers[index] ?? !!ex.setupModifiers?.length}
-          onClick={() => setOpenModifiers(old => ({ ...old, [index]: !(old[index] ?? !!ex.setupModifiers?.length) }))}>
-          Modify set {index + 1}{Object.keys(selected).length ? ` · ${Object.values(selected).map(s => s.name).join(', ')}` : ''}</button>
-        {(openModifiers[index] ?? !!ex.setupModifiers?.length) && <><div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 0' }}>
-        {setupModifiers.map(modifier => (
-          <div key={modifier.id} style={{ display: "inline-flex", flexWrap: "wrap", maxWidth: "100%", alignItems: "center", gap: 5 }}>
-            <span style={{ color: C.muted, fontSize: 10 }}>{modifier.name}</span>
-            {modifier.control === "bands" ? (
-              <BandPicker
-                bands={selected[modifier.id]?.value?.split("+") || []}
-                label={`${modifier.name} for set ${index + 1}`}
-                onToggle={bandKey => {
-                  const current = selected[modifier.id]?.value?.split("+").filter(Boolean) || [];
-                  const values = current.includes(bandKey)
-                    ? current.filter(value => value !== bandKey)
-                    : [...current, bandKey];
-                  updateModifier(set, index, modifier, values);
-                }}
-              />
-            ) : (
-              <select
-                aria-label={`${modifier.name} for set ${index + 1}`}
-                value={selected[modifier.id]?.value || ""}
-                onChange={event => updateModifier(set, index, modifier, event.target.value)}
-                style={{
-                  background: C.bg, border: `1px solid ${C.border}`, color: C.text,
-                  borderRadius: 6, padding: "4px 6px", fontSize: 11,
-                }}
-              >
-                <option value="">None</option>
-                {modifierValueOptions(modifier).map(option => (
-                  <option key={option.id} value={option.id}>{option.label}</option>
-                ))}
-              </select>
-            )}
-            {selected[modifier.id] && <label style={{ fontSize: 11 }}>Reps affected
-              <input type="number" min="1" placeholder="All" aria-label={`${modifier.name} affected reps for set ${index + 1}`}
-                value={selected[modifier.id].repCount || ''} style={{ ...inputStyle, width: 50 }}
-                onChange={event => {
-                  const modifiers = copyModifierSelections(set);
-                  const count = Number(event.target.value);
-                  if (event.target.value && (!Number.isInteger(count) || count < 1)) return;
-                  if (event.target.value) modifiers[modifier.id].repCount = count;
-                  else delete modifiers[modifier.id].repCount;
-                  const sets = [...setsData.sets]; sets[index] = { ...set, modifiers };
-                  onSetsChange({ sets });
-                }} />
-            </label>}
-            {selected[modifier.id] && ex.unilateral && <select aria-label={`${modifier.name} side for set ${index + 1}`}
-              value={selected[modifier.id].side || ''} onChange={event => {
-                const modifiers = copyModifierSelections(set);
-                if (event.target.value) modifiers[modifier.id].side = event.target.value;
-                else delete modifiers[modifier.id].side;
-                const sets = [...setsData.sets]; sets[index] = { ...set, modifiers }; onSetsChange({ sets });
-              }}><option value="">Both sides</option><option value="L">Left only</option><option value="R">Right only</option></select>}
-          </div>
-        ))}
-        <label style={{ fontSize: 11 }}>Custom modifier
-          <input aria-label={`Custom modifier for set ${index + 1}`} value={customModifierNames[index] || ''}
-            onChange={event => setCustomModifierNames(old => ({ ...old, [index]: event.target.value }))} placeholder="e.g. board press" />
-        </label>
-        <button type="button" disabled={!customModifierDefinition(customModifierNames[index])} onClick={() => {
-          const definition = customModifierDefinition(customModifierNames[index]);
-          if (!definition) return;
-          updateModifier(set, index, definition, 'on');
-          setCustomModifierNames(old => ({ ...old, [index]: '' }));
-        }}>Add modifier</button>
-        </div></>}
-      </div>
-    );
-  };
+  const modifierControls = (set, index) => (
+    <SetModifiers set={set} index={index} catalog={modifierCatalog} unilateral={!!ex.unilateral}
+      onSelect={(definition, value) => updateModifier(set, index, definition, value)}
+      onChangeSet={updated => {
+        const next = [...setsData.sets];
+        next[index] = updated;
+        onSetsChange({ sets: next });
+      }}
+      onCreate={onCreateModifier} onDelete={onDeleteModifier} />
+  );
   const secondsInput = (set, index, key, width = 40) => (
     <>
       <span style={{ fontSize: 12, color: C.muted }}>×</span>
@@ -488,9 +556,9 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
               {ex.logVariant && (
                 <span style={{ fontSize: 11, color: C.muted, width: 96, textAlign: "center" }}>variant</span>
               )}
-              <span style={{ fontSize: 11, color: C.muted, width: ex.logBand ? 192 : 80, textAlign: "center" }}>
+              {(ex.logBand || showsWeight) && <span style={{ fontSize: 11, color: C.muted, width: ex.logBand ? 192 : 80, textAlign: "center" }}>
                 {ex.logBand ? "bands" : "weight"}
-              </span>
+              </span>}
               {prevSets?.length > 0 && (
                 <span style={{ fontSize: 11, color: C.muted, width: 44, textAlign: "center" }}>prev</span>
               )}
@@ -606,7 +674,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                           onSetsChange({ sets: next });
                         }}
                       />
-                    ) : (
+                    ) : showsWeight && (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                         <input
                           type="number" inputMode="decimal"
