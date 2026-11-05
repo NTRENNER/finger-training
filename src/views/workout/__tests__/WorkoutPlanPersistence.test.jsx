@@ -107,6 +107,7 @@ test('a saved template sets rep targets but never resets a progressed variant', 
   fireEvent.click(screen.getByRole('button', { name: 'Choose Workout A' }));
   fireEvent.click(screen.getByRole('button', { name: 'Start Workout A' }));
   expect(JSON.parse(screen.getByTestId('trxRow-state').textContent).sets[0]).toMatchObject({ variant: 'Two-arm', reps: '8' });
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   unmount();
   saveLS(LS_WORKOUT_LOG_KEY, [{ id: 'rows', date: '2026-09-29', workout: 'A', exercises: { trxRow: { sets:
     Array.from({ length: 3 }, () => ({ variant: 'Feet-elevated', reps: '10', done: true })) } } }]);
@@ -132,4 +133,65 @@ test('a timed hold seeds seconds from its own setup, not a band-assisted session
   const seeded = JSON.parse(screen.getByTestId('frontLever-state').textContent).sets[0];
   expect(seeded.modifiers).toBeUndefined();          // today starts unassisted
   expect(seeded.seconds).not.toBe('12');             // the banded 12 s is a different setup
+});
+
+// A phone can discard a backgrounded page, and switching tabs unmounts the
+// Workout tab: entered sets must survive both until saved or cancelled.
+test('a workout in progress survives a reload until it is saved', () => {
+  const { LS_WORKOUT_DRAFT_KEY } = require('../../../lib/storage.js');
+  const { defaultWorkoutProgram } = require('../../../model/workoutProgram.js');
+  saveLS(LS_WORKOUT_PLAN_KEY, defaultWorkoutProgram());
+  saveLS(LS_WORKOUT_LOG_KEY, []);
+  const { unmount: reload } = render(<WorkoutTab unit="lbs" />);
+  fireEvent.click(screen.getByRole('button', { name: /Start Workout A/ }));
+  const row = within(screen.getByTestId('weightedPullup'));
+  fireEvent.click(row.getByRole('button', { name: 'Complete one' }));
+  fireEvent.change(screen.getByPlaceholderText(/notes/i), { target: { value: 'felt strong' } });
+  const entered = JSON.parse(screen.getByTestId('weightedPullup-state').textContent);
+  reload();                                          // page reload or tab switch
+
+  const saved = jest.fn();
+  const { unmount: reloadAgain } = render(<WorkoutTab unit="lbs" onSessionSaved={saved} />);
+  expect(JSON.parse(screen.getByTestId('weightedPullup-state').textContent)).toEqual(entered);
+  expect(screen.getByPlaceholderText(/notes/i)).toHaveValue('felt strong');
+  fireEvent.click(screen.getByRole('button', { name: 'Save Session' }));
+  expect(saved.mock.calls[0][0]).toMatchObject({ workout: 'A', date: '2026-09-30', notes: 'felt strong',
+    exercises: { weightedPullup: { sets: entered.sets } } });
+  expect(loadLS(LS_WORKOUT_DRAFT_KEY)).toBeNull();
+  reloadAgain();
+
+  render(<WorkoutTab unit="lbs" />);
+  expect(screen.getByRole('button', { name: /^Start Workout/ })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Save Session' })).not.toBeInTheDocument();
+});
+
+test('cancelling a workout discards its draft', () => {
+  const { LS_WORKOUT_DRAFT_KEY } = require('../../../lib/storage.js');
+  const { defaultWorkoutProgram } = require('../../../model/workoutProgram.js');
+  saveLS(LS_WORKOUT_PLAN_KEY, defaultWorkoutProgram());
+  saveLS(LS_WORKOUT_LOG_KEY, []);
+  const { unmount: reload } = render(<WorkoutTab unit="lbs" />);
+  fireEvent.click(screen.getByRole('button', { name: /Start Workout A/ }));
+  expect(loadLS(LS_WORKOUT_DRAFT_KEY)).toMatchObject({ version: 1, workoutId: 'A', date: '2026-09-30' });
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(loadLS(LS_WORKOUT_DRAFT_KEY)).toBeNull();
+  reload();
+  render(<WorkoutTab unit="lbs" />);
+  expect(screen.queryByRole('button', { name: 'Save Session' })).not.toBeInTheDocument();
+});
+
+test('a workout restored the next day is saved on the day it was started', () => {
+  const { LS_WORKOUT_DRAFT_KEY } = require('../../../lib/storage.js');
+  const { defaultWorkoutProgram } = require('../../../model/workoutProgram.js');
+  saveLS(LS_WORKOUT_PLAN_KEY, defaultWorkoutProgram());
+  saveLS(LS_WORKOUT_LOG_KEY, []);
+  const { unmount: reload } = render(<WorkoutTab unit="lbs" />);
+  fireEvent.click(screen.getByRole('button', { name: /Start Workout A/ }));
+  reload();
+  jest.setSystemTime(new Date(2026, 9, 1, 9));        // next morning
+  const saved = jest.fn();
+  render(<WorkoutTab unit="lbs" onSessionSaved={saved} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Save Session' }));
+  expect(saved.mock.calls[0][0].date).toBe('2026-09-30');
+  expect(loadLS(LS_WORKOUT_DRAFT_KEY)).toBeNull();
 });

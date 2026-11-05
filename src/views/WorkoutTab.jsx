@@ -45,6 +45,7 @@ import {
   loadLS, saveLS,
   LS_WORKOUT_LOG_KEY, LS_WORKOUT_SYNCED_KEY, LS_WORKOUT_DELETED_KEY,
   LS_DELOAD_WEEK_KEY, LS_STRETCH_PREFS_KEY, LS_WORKOUT_PLAN_KEY, ROTATION_PIN_KEY,
+  LS_WORKOUT_DRAFT_KEY,
 } from "../lib/storage.js";
 import { DELOAD_WEEK_DAYS } from "../model/deload.js";
 import {
@@ -105,6 +106,15 @@ function genId() { return Math.random().toString(36).slice(2, 10); }
 const OBSERVED_SET_KEYS = ['weight', 'leftWeight', 'rightWeight', 'band', 'leftBand', 'rightBand',
   'variant', 'seconds', 'leftSeconds', 'rightSeconds'];
 
+// The session in progress, saved as it is entered so a page reload (the
+// phone discarding a backgrounded page) or a tab switch restores it.
+function loadWorkoutDraft() {
+  const draft = loadLS(LS_WORKOUT_DRAFT_KEY);
+  return draft?.version === 1 && typeof draft.workoutId === "string"
+    && draft.sessionData && typeof draft.sessionData === "object"
+    && Array.isArray(draft.liveExercises) && draft.liveExercises.length > 0 ? draft : null;
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // Main WorkoutTab
@@ -157,25 +167,35 @@ export function WorkoutTab({
   // pickedId: null means "follow recommendation"; otherwise an
   // explicit workout selection.
   const [pickedId, setPickedId] = useState(null);
-  const [sessionActive, setSessionActive] = useState(false);
-  const [sessionData, setSessionData] = useState({}); // exId → { sets:[...] } | { done, notes }
-  const [sessionNotes, setSessionNotes] = useState(""); // overall session note
+  // A session in progress (restored from its draft after a reload or tab
+  // switch) keeps its own workout and start date until saved or cancelled.
+  const [draft] = useState(loadWorkoutDraft);
+  const [sessionWorkoutId, setSessionWorkoutId] = useState(() => draft?.workoutId ?? null);
+  const [sessionDate, setSessionDate] = useState(() => draft?.date ?? null);
+  const [sessionActive, setSessionActive] = useState(() => !!draft);
+  const [sessionData, setSessionData] = useState(() => draft?.sessionData ?? {}); // exId → { sets:[...] } | { done, notes }
+  const [sessionNotes, setSessionNotes] = useState(() => draft?.notes ?? ""); // overall session note
   // Session-local exercise list. Seeded from activeWorkout.exercises
   // at startSession; mutated by the per-row swap picker so a user can
   // substitute one exercise for another mid-workout without editing
   // the template. Rendering walks liveExercises (not activeWorkout)
   // once a session is active. Cleared when the session ends.
-  const [liveExercises, setLiveExercises] = useState([]);
+  const [liveExercises, setLiveExercises] = useState(() => draft?.liveExercises ?? []);
   // Swap picker state. null = closed; otherwise { index: number } —
   // the position in liveExercises being replaced. Add-at-end is
   // signaled by index === liveExercises.length.
   const [pickerState, setPickerState] = useState(null);
   const [builderOpen, setBuilderOpen] = useState(false);
-  const [updateTemplate, setUpdateTemplate] = useState(false);
+  const [updateTemplate, setUpdateTemplate] = useState(() => draft?.updateTemplate === true);
 
   useEffect(() => {
     onTrainingStateChange?.(sessionActive);
   }, [sessionActive, onTrainingStateChange]);
+  useEffect(() => {
+    if (!sessionActive || !sessionWorkoutId) return;
+    saveLS(LS_WORKOUT_DRAFT_KEY, { version: 1, workoutId: sessionWorkoutId, date: sessionDate,
+      sessionData, liveExercises, notes: sessionNotes, updateTemplate });
+  }, [sessionActive, sessionWorkoutId, sessionDate, sessionData, liveExercises, sessionNotes, updateTemplate]);
   useEffect(() => () => onTrainingStateChange?.(false), [onTrainingStateChange]);
 
   const programRaw = useLSValue(LS_WORKOUT_PLAN_KEY);
@@ -226,7 +246,7 @@ export function WorkoutTab({
   // The active workout is either the user's override or the
   // recommender's primary. We then look up the full template from
   // the user's resolved program.
-  const activeId = pickedId || recommendation?.primary?.id || "A";
+  const activeId = (sessionActive && sessionWorkoutId) || pickedId || recommendation?.primary?.id || "A";
   const activeWorkout = programWorkouts[activeId];
 
   // Deload-week nudge — set on the Setup tab when the user accepts a
@@ -448,6 +468,8 @@ export function WorkoutTab({
       wLog.flatMap(s => s.exercises?.[ex.id]?.sets || [])) })));
     setSessionNotes("");
     setUpdateTemplate(false);
+    setSessionWorkoutId(activeId);
+    setSessionDate(today());
     setSessionActive(true);
   };
 
@@ -501,7 +523,9 @@ export function WorkoutTab({
     );
     const session = {
       id: genId(),
-      date: today(),
+      // The day the workout was done: a session restored the next day
+      // keeps the day it was started.
+      date: sessionDate || today(),
       completedAt: nowISO(),
       workout: activeId,
       workoutId: activeId,
@@ -515,11 +539,19 @@ export function WorkoutTab({
     saveLS(LS_WORKOUT_LOG_KEY, nextLog);
     onSessionSaved?.(session);
     if (updateTemplate) updateProgram(saveWorkoutTemplate(program, activeId, liveExercises, sessionData));
+    endSession();
+    setPickedId(null); // back to "follow recommendation"
+  };
+
+  // Saved or cancelled: the draft goes with the session.
+  const endSession = () => {
+    saveLS(LS_WORKOUT_DRAFT_KEY, null);
     setSessionActive(false);
+    setSessionWorkoutId(null);
+    setSessionDate(null);
     setSessionData({});
     setSessionNotes("");
     setLiveExercises([]);
-    setPickedId(null); // back to "follow recommendation"
   };
 
   // CLIMB / REST save path — no exercise data, just a marker so
@@ -622,10 +654,7 @@ export function WorkoutTab({
     (findLastSessionFor(wLog, activeId, ex.id)?.exercises?.[ex.id]?.sets || []).map(set => setSummary(set, ex));
 
   const abortSession = () => {
-    setSessionActive(false);
-    setSessionData({});
-    setSessionNotes("");
-    setLiveExercises([]);
+    endSession();
     setPickerState(null);
   };
 

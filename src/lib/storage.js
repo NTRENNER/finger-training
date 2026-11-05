@@ -416,6 +416,11 @@ export const LS_WORKOUT_LOG_KEY = "ft_workout_log";
 // program never rewrites history.
 export const LS_WORKOUT_PLAN_KEY = "ft_workout_plan";
 
+// The support workout in progress on the Workout tab, kept until it is
+// saved or cancelled so a page reload or tab switch never loses entered
+// sets. Device-local; never synced.
+export const LS_WORKOUT_DRAFT_KEY = "ft_workout_draft";
+
 // Mobility-builder preferences. The completed session itself is stored
 // in LS_WORKOUT_LOG_KEY and synced through workout_sessions; this key is
 // only the local default for time, priorities, and available equipment.
