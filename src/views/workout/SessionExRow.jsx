@@ -142,15 +142,30 @@ function SetModifiers({ set, index, catalog, unilateral, onSelect, onChangeSet, 
     }
     onChangeSet({ ...set, modifiers });
   };
+  const bandPicker = definition => <BandPicker
+    bands={selected[definition.id]?.value?.split("+") || []}
+    label={`${definition.name} for ${setLabel}`}
+    onToggle={bandKey => {
+      const current = selected[definition.id]?.value?.split("+").filter(Boolean) || [];
+      setEditing(definition.id);
+      onSelect(definition, current.includes(bandKey)
+        ? current.filter(value => value !== bandKey) : [...current, bandKey]);
+    }}
+  />;
   return (
     <div style={{ margin: "3px 0 7px 44px" }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-        {Object.values(selected).map(selection => (
-          <span key={selection.modifierId} style={tagStyle}>
+        {Object.values(selected).map(selection => {
+          const definition = definitionFor(selection.modifierId);
+          const isBand = definition?.control === "bands";
+          return <span key={selection.modifierId} style={isBand
+            ? { display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: 6 }
+            : tagStyle}>
             <button type="button" style={tagButton} aria-label={`Change ${selection.name} on ${setLabel}`}
               onClick={() => setEditing(open => open === selection.modifierId ? null : selection.modifierId)}>
-              {modifierSelectionLabel({ [selection.modifierId]: selection })}
+              {modifierSelectionLabel({ [selection.modifierId]: isBand ? { ...selection, valueLabel: "" } : selection })}
             </button>
+            {isBand && bandPicker(definition)}
             <button type="button" style={{ ...tagButton, color: C.muted, paddingLeft: 0 }}
               aria-label={`Remove ${selection.name} from ${setLabel}`}
               onClick={() => {
@@ -159,7 +174,7 @@ function SetModifiers({ set, index, catalog, unilateral, onSelect, onChangeSet, 
                 if (editing === selection.modifierId) setEditing(null);
               }}>✕</button>
           </span>
-        ))}
+        })}
         <button type="button" style={linkButton} aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}>
           {Object.keys(selected).length ? "+ Modify" : `Modify ${setLabel}`}
         </button>
@@ -197,15 +212,7 @@ function SetModifiers({ set, index, catalog, unilateral, onSelect, onChangeSet, 
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 6 }}>
           <span style={{ color: C.muted, fontSize: 11 }}>{editingDef.name}</span>
           {editingDef.control === "bands" ? (
-            <BandPicker
-              bands={selected[editingDef.id]?.value?.split("+") || []}
-              label={`${editingDef.name} for ${setLabel}`}
-              onToggle={bandKey => {
-                const current = selected[editingDef.id]?.value?.split("+").filter(Boolean) || [];
-                onSelect(editingDef, current.includes(bandKey)
-                  ? current.filter(value => value !== bandKey) : [...current, bandKey]);
-              }}
-            />
+            !selected[editingDef.id] && bandPicker(editingDef)
           ) : editingDef.options?.length > 0 && (
             <select aria-label={`${editingDef.name} for ${setLabel}`} value={selected[editingDef.id]?.value || ""}
               onChange={event => onSelect(editingDef, event.target.value)}

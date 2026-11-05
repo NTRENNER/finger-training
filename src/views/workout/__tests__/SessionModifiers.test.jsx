@@ -1,6 +1,60 @@
 import React, { useState } from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { SessionExRow } from '../SessionExRow.jsx';
+import { BAND_MODIFIER_OPTIONS, setModifierSelection } from '../../../model/workoutModifiers.js';
+import { exercises } from '../../../model/supportTraining.js';
+
+test('selected front-lever bands use the lat-pull color toggles directly and preserve modifier scope',()=>{
+  const band={id:'modifier_band',name:'Band',kind:'assistance',control:'bands',options:BAND_MODIFIER_OPTIONS};
+  const initial=setModifierSelection({variant:'Full',reps:'4',seconds:'10',done:false},band,['red']);
+  initial.modifiers.modifier_band.repCount=2;
+  initial.modifiers.modifier_band.side='L';
+  function Row(){
+    const [data,setData]=useState({sets:[initial]});
+    return <><SessionExRow ex={{...exercises.frontLever,setupModifiers:[band],unilateral:true}} unit="lbs"
+      setsData={data} onSetsChange={change=>setData(old=>({...old,...change}))} last />
+      <output data-testid="band-state">{JSON.stringify(data)}</output></>;
+  }
+  render(<Row />);
+  // No edit/menu tap is needed for a saved band's seven-color picker.
+  const picker=screen.getByRole('group',{name:'Band for set 1'});
+  expect(within(picker).getAllByRole('button')).toHaveLength(7);
+  expect(within(picker).getByRole('button',{name:'Band for set 1: Red'})).toHaveAttribute('aria-pressed','true');
+  fireEvent.click(within(picker).getByRole('button',{name:'Band for set 1: Green'}));
+  let set=JSON.parse(screen.getByTestId('band-state').textContent).sets[0];
+  expect(set).toMatchObject({variant:'Full',reps:'4',seconds:'10',modifiers:{modifier_band:{value:'red+green',repCount:2,side:'L',kind:'assistance'}}});
+  expect(set.band).toBeUndefined();
+  expect(set.weight).toBeUndefined();
+  fireEvent.click(screen.getByRole('button',{name:'Done'}));
+  expect(screen.getByRole('group',{name:'Band for set 1'})).toBeVisible();
+  expect(screen.queryByRole('spinbutton',{name:'Band affected reps for set 1'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Band for set 1: Red'}));
+  fireEvent.click(screen.getByRole('button',{name:'Band for set 1: Green'}));
+  set=JSON.parse(screen.getByTestId('band-state').textContent).sets[0];
+  expect(set.modifiers).toEqual({});
+  expect(within(screen.getByRole('group',{name:'Band for set 1'})).getAllByRole('button').every(button=>button.getAttribute('aria-pressed')==='false')).toBe(true);
+});
+
+test('modifier and lat-pull band selectors share colors, selected state and toggle interaction',()=>{
+  const band={id:'modifier_band',name:'Band',kind:'setup',control:'bands',options:BAND_MODIFIER_OPTIONS};
+  const selected=setModifierSelection({reps:'1',seconds:'10',variant:'Full'},band,['red']);
+  function Rows(){
+    const [lever,setLever]=useState({sets:[selected]});
+    const [pull,setPull]=useState({sets:[{leftReps:'6',rightReps:'6',leftBand:['red'],rightBand:[]}]});
+    return <><SessionExRow ex={{...exercises.frontLever,setupModifiers:[band]}} unit="lbs" setsData={lever} onSetsChange={setLever} last />
+      <SessionExRow ex={exercises.bandedLatPull} unit="lbs" setsData={pull} onSetsChange={setPull} last /></>;
+  }
+  render(<Rows />);
+  const modifier=screen.getByRole('group',{name:'Band for set 1'});
+  const pull=screen.getByRole('group',{name:/Heavy-Band Single-Arm Lat Pull.*L.*bands/});
+  const buttons=group=>within(group).getAllByRole('button');
+  expect(buttons(modifier).map(button=>[button.style.cssText,button.getAttribute('aria-pressed')]))
+    .toEqual(buttons(pull).map(button=>[button.style.cssText,button.getAttribute('aria-pressed')]));
+  fireEvent.click(buttons(modifier)[3]);
+  fireEvent.click(buttons(pull)[3]);
+  expect(buttons(modifier).map(button=>button.getAttribute('aria-pressed')))
+    .toEqual(buttons(pull).map(button=>button.getAttribute('aria-pressed')));
+});
 function Harness() {
   const [data,setData] = useState({sets:[{weight:'155',reps:'5',done:true}]});
   return <><SessionExRow ex={{id:'benchPress',name:'Bench Press',reps:'5',logWeight:true}} unit="lbs"
