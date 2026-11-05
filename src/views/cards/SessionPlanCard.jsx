@@ -901,9 +901,6 @@ export function SessionPlanCard({
                 {recCfg.emoji} {recCfg.label}
               </div>
             </div>
-            {rec.pilot && <p style={{ color: C.muted, fontSize: 12, margin: '0 0 12px' }}>
-              The pilot sequence selects this zone. Selecting a gripper does not select its oldest recorded domain; you can choose another zone below.
-            </p>}
             <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
               <div style={{ flex: 1, textAlign: "center" }}>
                 <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>

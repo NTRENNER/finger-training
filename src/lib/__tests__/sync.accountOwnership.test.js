@@ -62,7 +62,7 @@ test('queued edit is bound to owner and newer same-row edits survive completion'
   enqueueRepUpdate({ kind: 'rep', id: rep.id, updates: { actual_time_s: 30 } });
   execute = () => {
     enqueueRepUpdate({ kind: 'rep', id: rep.id, updates: { actual_time_s: 31 } });
-    return { error: null };
+    return { data: [{ id: rep.id }], error: null };
   };
   expect(await flushUpdateQueue()).toBe(1);
   expect(queries[0].filters).toContainEqual(['user_id', 'a']);
@@ -86,6 +86,33 @@ test('an edit to a rep still waiting to upload rides on its queued insert', asyn
   expect(await flushUpdateQueue()).toBe(0);
   expect(loadLS(LS_UPDATE_QUEUE_KEY)).toHaveLength(1);
   saveLS(LS_QUEUE_KEY, []);
+  execute = () => ({ data: [{ id: rep.id }], error: null });
   expect(await flushUpdateQueue()).toBe(1);
+  expect(loadLS(LS_UPDATE_QUEUE_KEY)).toEqual([]);
+});
+
+// The original save can still be in flight (not queued) when the redo's
+// update runs: that update matches no row and must not count as applied.
+test('an update that matches no row stays queued until the row exists', async () => {
+  enqueueRepUpdate({ kind: 'rep', id: rep.id, updates: { failure_valid: false } });
+  execute = () => ({ data: [], error: null });
+  expect(await flushUpdateQueue()).toBe(0);
+  expect(loadLS(LS_UPDATE_QUEUE_KEY)).toHaveLength(1);
+  execute = () => ({ data: [{ id: rep.id }], error: null });
+  expect(await flushUpdateQueue()).toBe(1);
+  expect(loadLS(LS_UPDATE_QUEUE_KEY)).toEqual([]);
+});
+
+test('a flush requested while one is running runs again afterwards', async () => {
+  enqueueRepUpdate({ kind: 'rep', id: rep.id, updates: { failure_valid: false } });
+  let calls = 0, second;
+  execute = () => {
+    calls++;
+    if (calls === 1) second = flushUpdateQueue();      // e.g. the insert just landed
+    return calls === 1 ? { data: [], error: null } : { data: [{ id: rep.id }], error: null };
+  };
+  await flushUpdateQueue();
+  expect(await second).toBe(0);
+  expect(calls).toBe(2);
   expect(loadLS(LS_UPDATE_QUEUE_KEY)).toEqual([]);
 });

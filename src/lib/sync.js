@@ -502,44 +502,57 @@ export function applyPendingUpdates(reps) {
 // write; an edit that keeps failing keeps being applied locally via
 // applyPendingUpdates, so the user's view stays correct either way.
 let updateFlushInFlight = false;
+let updateFlushAgain = false;
 
 export async function flushUpdateQueue() {
-  if (updateFlushInFlight) return 0;
+  // A flush requested mid-flight (for example when a rep's insert lands)
+  // runs again afterwards instead of being dropped.
+  if (updateFlushInFlight) { updateFlushAgain = true; return 0; }
   updateFlushInFlight = true;
-  const owner = getStorageUserId();
+  let total = 0;
   try {
-    if (!ownsLocalSession(owner)) return 0;
-    const q = loadLS(LS_UPDATE_QUEUE_KEY) || [];
-    if (q.length === 0) return 0;
-    const done = new Set();
-    for (const e of q) {
-      try {
-        if (await currentUserId() !== owner) return done.size;
-        if (e.kind === "rep") {
-          const { error } = await supabase.from("reps")
-            .update(e.updates).eq("user_id", owner).eq("id", e.id);
-          if (!ownsLocalSession(owner)) return done.size;
-          // Before its insert lands, an update matches no row; keep it.
-          if (!error && !insertPending(e.id)) done.add(updateTargetKey(e));
-        } else if (e.kind === "session") {
-          const { error } = await supabase.from("reps")
-            .update(e.updates).eq("user_id", owner).eq("session_id", e.sessionKey);
-          if (!ownsLocalSession(owner)) return done.size;
-          if (!error) done.add(updateTargetKey(e));
-        }
-      } catch {
-        // Network-level failure — keep the entry for the next flush.
-      }
-    }
-    if (done.size > 0 && ownsLocalSession(owner)) {
-      const fresh = loadLS(LS_UPDATE_QUEUE_KEY) || [];
-      saveLS(LS_UPDATE_QUEUE_KEY, fresh.filter(e => !done.has(updateTargetKey(e))
-        || JSON.stringify(e) !== JSON.stringify(q.find(sent => updateTargetKey(sent) === updateTargetKey(e)))));
-    }
-    return done.size;
+    do {
+      updateFlushAgain = false;
+      total += await flushUpdateQueueOnce();
+    } while (updateFlushAgain);
+    return total;
   } finally {
     updateFlushInFlight = false;
   }
+}
+
+async function flushUpdateQueueOnce() {
+  const owner = getStorageUserId();
+  if (!ownsLocalSession(owner)) return 0;
+  const q = loadLS(LS_UPDATE_QUEUE_KEY) || [];
+  if (q.length === 0) return 0;
+  const done = new Set();
+  for (const e of q) {
+    try {
+      if (await currentUserId() !== owner) return done.size;
+      if (e.kind === "rep") {
+        const { data, error } = await supabase.from("reps")
+          .update(e.updates).eq("user_id", owner).eq("id", e.id).select("id");
+        if (!ownsLocalSession(owner)) return done.size;
+        // Before its insert lands (queued, or still in flight), an update
+        // matches no row and has not happened; keep it until it applies.
+        if (!error && data?.length && !insertPending(e.id)) done.add(updateTargetKey(e));
+      } else if (e.kind === "session") {
+        const { error } = await supabase.from("reps")
+          .update(e.updates).eq("user_id", owner).eq("session_id", e.sessionKey);
+        if (!ownsLocalSession(owner)) return done.size;
+        if (!error) done.add(updateTargetKey(e));
+      }
+    } catch {
+      // Network-level failure — keep the entry for the next flush.
+    }
+  }
+  if (done.size > 0 && ownsLocalSession(owner)) {
+    const fresh = loadLS(LS_UPDATE_QUEUE_KEY) || [];
+    saveLS(LS_UPDATE_QUEUE_KEY, fresh.filter(e => !done.has(updateTargetKey(e))
+      || JSON.stringify(e) !== JSON.stringify(q.find(sent => updateTargetKey(sent) === updateTargetKey(e)))));
+  }
+  return done.size;
 }
 
 // Pull all reps from Supabase, normalised to the local rep shape.

@@ -225,7 +225,6 @@ function RepCurveChart({
       {forecasted.length > 0 && <p style={{ fontSize: 12, color: C.muted, margin: '0 0 8px', lineHeight: 1.5 }}>
         Dashed line: approximate hold times at a similar load and rest.
       </p>}
-      {actual.some(point => point.activityOnly) && <p>Disputed or interrupted holds are shown as recorded activity only; they do not seed estimates or previous comparisons.</p>}
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={merged} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.border} opacity={0.3} />

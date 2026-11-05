@@ -60,3 +60,14 @@ test('unknown release blocks advancement and starts full rest after the unloaded
  act(()=>jest.advanceTimersByTime(1000));
  expect(done).toHaveBeenCalledTimes(1);
 });
+
+// A check pending when the Tindeq disconnected cannot be passed without it;
+// the manual workout's rest must run and finish as usual.
+test('a pending release check never blocks rest once the Tindeq is disconnected',()=>{
+ const done=jest.fn();
+ render(<RestView {...props} tindeq={{connected:false,releaseCheckRequired:true,zeroing:false}} onRestDone={done}/>);
+ expect(screen.queryByText('Release check')).not.toBeInTheDocument();
+ expect(screen.getByRole('button',{name:/skip rest/i})).toBeEnabled();
+ act(()=>jest.advanceTimersByTime(20000));
+ expect(done).toHaveBeenCalledTimes(1);
+});

@@ -142,6 +142,18 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
   };
   const resolvedValue = (set, index, key) => timeKeys.includes(key)
     ? resolvedSeconds(set, key) : resolvedReps(set, index, key);
+  // The load each row displays: the stored value, else the recommendation
+  // (the same fallback the inputs below render).
+  const loadKeys = ex.circlesOnly ? []
+    : ex.logBand ? (ex.unilateral ? ["leftBand", "rightBand"] : ["band"])
+    : (ex.unilateral ? ["leftWeight", "rightWeight"] : ["weight"]);
+  const filled = value => value != null && value !== "" && !(Array.isArray(value) && value.length === 0);
+  const shownLoad = (set, index, key) => {
+    if (filled(set?.[key])) return set[key];
+    const rec = recommendations[index];
+    const value = rec ? (rec[key] ?? (ex.logBand ? rec.band : rec.weight)) : null;
+    return filled(value) ? value : null;
+  };
   const entered = (set, index, key) => timeKeys.includes(key)
     ? isMeasuredSeconds(resolvedSeconds(set, key))
     : parseRepsCount(resolvedReps(set, index, key)) > 0;
@@ -168,6 +180,12 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     const next = [...setsData.sets];
     next[index] = { ...current, done: true };
     for (const key of requiredKeys) next[index][key] = String(resolvedValue(current, index, key));
+    // A load shown from the recommendation (for example after a setup change
+    // cleared the typed one) is the load being confirmed; save it too.
+    for (const key of loadKeys) {
+      const load = shownLoad(current, index, key);
+      if (load != null) next[index][key] = load;
+    }
     setRepErrorSet(null);
     onSetsChange({ sets: next });
   };
@@ -280,8 +298,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
           updateModifier(set, index, definition, 'on');
           setCustomModifierNames(old => ({ ...old, [index]: '' }));
         }}>Add modifier</button>
-        </div>
-        <p style={{ fontSize: 11, color: C.muted }}>Today only unless you update the workout. A blank rep count means the whole set. Mixed or changed setups do not earn an unmodified load increase.</p></>}
+        </div></>}
       </div>
     );
   };

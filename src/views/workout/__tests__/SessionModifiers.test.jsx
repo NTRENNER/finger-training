@@ -45,3 +45,23 @@ test('each set keeps its own custom-modifier draft, and custom ids are stable an
   expect(Object.keys(sets[0].modifiers)).toEqual(['modifier_custom_board_press']);
   expect(sets[1].modifiers).toBeUndefined();
 });
+
+// Changing a set's setup clears its typed weight; the recommended weight
+// for the new setup is then shown, and must be what the completed set saves.
+test('a set completed after a setup change saves the weight it showed', () => {
+  const band = { id: 'modifier_band', name: 'Band', kind: 'assistance', control: 'standard', options: [{ id: 'red', label: 'Red' }] };
+  function Banded() {
+    const [data,setData] = useState({sets:[{weight:'155',reps:'5',done:false}]});
+    const banded = !!data.sets[0].modifiers?.modifier_band;
+    return <><SessionExRow ex={{id:'pullup',name:'Pull-up',reps:'5',logWeight:true,setupModifiers:[band]}} unit="lbs"
+      setsData={data} onSetsChange={change => setData(old=>({...old,...change}))}
+      recommendations={[{weight: banded ? '20' : '155', reps:'5'}]} last />
+      <output data-testid="logged">{JSON.stringify(data)}</output></>;
+  }
+  render(<Banded />);
+  fireEvent.change(screen.getByRole('combobox',{name:'Band for set 1'}),{target:{value:'red'}});
+  expect(JSON.parse(screen.getByTestId('logged').textContent).sets[0].weight).toBe('');
+  expect(screen.getByDisplayValue('20')).toBeInTheDocument();
+  fireEvent.click(screen.getByTitle('Set 1: tap to toggle done'));
+  expect(JSON.parse(screen.getByTestId('logged').textContent).sets[0]).toMatchObject({weight:'20',reps:'5',done:true});
+});

@@ -21,8 +21,12 @@ export function includeRedoAttempts(result, attempts = [], opener = false) {
 }
 
 export function recordedRedoAttempts(rep) {
-  const { redo_attempts = [], last_attempt_activity, ...recording } = rep.force_recording || {};
-  const activity = last_attempt_activity || recording.activity;
+  // After a redo, `activity` is the combined total of every attempt; the
+  // last attempt's own activity is `last_attempt_activity` (null for a
+  // manual attempt). Using the combined total here counted earlier attempts
+  // twice on a further redo.
+  const { redo_attempts = [], last_attempt_activity, activity: stored, ...recording } = rep.force_recording || {};
+  const activity = redo_attempts.length ? last_attempt_activity : stored;
   return [...redo_attempts, {
     actualTime: rep.actual_time_s, avgForce: rep.avg_force_kg, peakForce: rep.peak_force_kg,
     failureValid: rep.failure_valid, endReason: rep.end_reason,

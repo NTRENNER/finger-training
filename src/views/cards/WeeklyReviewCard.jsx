@@ -1,4 +1,3 @@
-import { activePilot, pilotBlockOn } from '../../model/emphasisPilot.js';
 // ─────────────────────────────────────────────────────────────
 // CURRENT TRAINING ANALYSIS CARD
 // ─────────────────────────────────────────────────────────────
@@ -49,7 +48,6 @@ export function WeeklyReviewCard({ history = [], activities = [], pilotEnrollmen
   const workoutSessions = useMemo(() => workoutSessionsRaw || [], [workoutSessionsRaw]);
   const bwLog = useMemo(() => bwLogRaw || [], [bwLogRaw]);
   const todayYMD = today();
-  const pilotBlock = pilotBlockOn(activePilot(pilotEnrollment), todayYMD);
   const review = useMemo(() => {
     return buildCheckIn(history, activities, workoutSessions, { refDate: todayYMD, bwLog, program, pilotEnrollment });
   }, [history, activities, workoutSessions, todayYMD, bwLog, program, pilotEnrollment]);
@@ -123,10 +121,6 @@ export function WeeklyReviewCard({ history = [], activities = [], pilotEnrollmen
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: C.muted, marginBottom: 4 }}>
                   {label}
                 </div>
-                {key === 'focus' && <p style={{ color: C.muted, fontSize: 12 }}>
-                  {pilotBlock ? `Your active ${pilotBlock.emphasis}-end pilot follows its scheduled sequence. These recorded dates do not select the next workout.`
-                    : 'These dates describe recorded training, not the next workout recommendation.'}
-                </p>}
                 {items.map((t, i) => (
                   <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 4 }}>
                     <span style={{ flexShrink: 0, color: C.muted, fontSize: 13 }}>

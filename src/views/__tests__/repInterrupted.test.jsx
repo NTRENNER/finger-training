@@ -270,8 +270,9 @@ test.each(['Prime','Crusher','Micro'])('%s confirmed failure with elevated force
   // No extra wait: the detector already spent its confirmation window.
   act(()=>jest.advanceTimersByTime(0));
   expect(screen.getByRole('dialog',{name:'Still holding?'})).toBeInTheDocument();
-  // Continue / Mark interrupted / Redo only; no readouts (CLAUDE.md).
-  expect(screen.getByRole('dialog')).not.toHaveTextContent(/\d+\.\ds|Detected hold|Observed/);
+  // The live pull timer keeps counting the hold; no other readouts.
+  expect(screen.getByRole('timer',{name:'Pull time'})).toHaveTextContent('8.0s');
+  expect(screen.getByRole('dialog')).not.toHaveTextContent(/Detected hold|Observed|Signal/);
   fireEvent.click(screen.getByRole('button',{name:'Continue'}));
   expect(continueCurrentRep).toHaveBeenCalledTimes(1);
   expect(onRepDone).not.toHaveBeenCalled();
@@ -281,7 +282,7 @@ test.each(['Prime','Crusher','Micro'])('%s confirmed failure with elevated force
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
-test('signal loss disables Continue and shows no readouts',()=>{
+test('signal loss disables Continue and never invents pull seconds',()=>{
   let start;
   const continueCurrentRep=jest.fn();
   const tindeq={connected:true,signalRecovering:true,canContinueCurrentRep:false,targetKgRef:{},
@@ -290,7 +291,9 @@ test('signal loss disables Continue and shows no readouts',()=>{
   render(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()} tindeq={tindeq} />);
   act(()=>start());
   act(()=>jest.advanceTimersByTime(10000));
-  expect(screen.getByRole('dialog',{name:'Rep may have been interrupted'})).not.toHaveTextContent(/\d+\.\ds|Signal/);
+  // Last observed sample only: the timer stops with the signal.
+  expect(screen.getByRole('timer',{name:'Pull time'})).toHaveTextContent('4.0s');
+  expect(screen.getByRole('dialog',{name:'Rep may have been interrupted'})).not.toHaveTextContent(/Signal/);
   expect(screen.getByRole('button',{name:'Continue'})).toBeDisabled();
   fireEvent.click(screen.getByRole('button',{name:'Continue'}));
   expect(continueCurrentRep).not.toHaveBeenCalled();
@@ -326,10 +329,11 @@ test('rest chart receives actual, estimated and previous holds for the current h
   expect(chart.showLegend).toBe(true);
 });
 
-test('rest chart reports missing previous data instead of substituting current holds',()=>{
+test('rest chart never substitutes current holds for missing previous data',()=>{
   render(<RestView restSeconds={20} onRestDone={jest.fn()} repNum={1} repsPerSet={4}
     curveContext={{config,history:[],sessionReps:[],refWeights:{L:20}}} />);
-  expect(screen.getByText('No previous comparable hold times available.')).toBeVisible();
+  expect(JSON.parse(screen.getByTestId('hold-time-chart').textContent).prevSession).toEqual([]);
+  expect(screen.queryByText(/No previous comparable/)).not.toBeInTheDocument();
 });
 
 test.each([SwitchHandsView,BetweenSetRestView])('other rest screens keep the completed hand and set chart',View=>{

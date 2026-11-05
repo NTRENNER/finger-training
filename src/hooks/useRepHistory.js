@@ -477,7 +477,9 @@ export function useRepHistory({
       stamped.forEach(rep => {
         pushRep(rep).then(result => {
           if (result === "error") enqueueReps([rep]);
-          // result === "ok" → nothing to do
+          // result === "ok" → an edit made while this insert was in flight
+          //   (a redo) waits in the update queue; apply it now the row exists.
+          else if (result === "ok") flushUpdateQueue();
           // result === "tombstoned" → rep matched a server tombstone (rare
           //   race: addReps called for a rep whose id was tombstoned on
           //   another device). Don't enqueue (would loop forever). Local

@@ -8,3 +8,16 @@ test('redo preserves the disputed work and prevents manufactured recovery/fresh-
   expect(result.forceRecording.activity.duration_s).toBe(45);
   expect(includeRedoAttempts(result,[attempt],false).forceRecording.capacity_eligible).toBe(true);
 });
+
+// Sensor attempt, manual retry, then a sensor retry: each attempt's measured
+// work counts once (the manual attempt has none).
+test('repeated redos across sensor and manual attempts count each attempt once', () => {
+  const { recordedRedoAttempts } = require('../repRedo.js');
+  const sensor = d => ({ actualTime: d, avgForce: 3, forceRecording: { activity: { duration_s: d, impulse_kg_s: d * 3, started_at_ms: 1 } } });
+  const first = { actual_time_s: 20, failure_valid: true, force_recording: sensor(20).forceRecording };
+  const manual = includeRedoAttempts({ actualTime: 15, forceRecording: null }, recordedRedoAttempts(first));
+  const second = { actual_time_s: 15, failure_valid: true, force_recording: manual.forceRecording };
+  const third = includeRedoAttempts(sensor(30), recordedRedoAttempts(second));
+  expect(third.forceRecording.activity).toMatchObject({ duration_s: 50, impulse_kg_s: 150 });
+  expect(third.forceRecording.redo_attempts).toHaveLength(2);
+});

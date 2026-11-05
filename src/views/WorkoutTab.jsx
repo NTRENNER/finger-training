@@ -666,7 +666,6 @@ export function WorkoutTab({
             >Cancel</button>
           </div>
 
-          <p style={{ color: C.muted, fontSize: 13 }}>Changes apply to today only. Completed work can earn your next progression.</p>
           <label style={{ display: 'block', marginBottom: 16 }}><input type="checkbox" checked={updateTemplate}
             onChange={event => setUpdateTemplate(event.target.checked)} /> Update Workout {activeWorkout.shortName} for next time (exercises, set targets and modifiers)</label>
           <Card>

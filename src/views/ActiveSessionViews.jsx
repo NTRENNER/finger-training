@@ -80,7 +80,6 @@ function LiveRepCurveCard({
   if (!bundle) return null;
   const inner = (
     <>
-    {showLegend && !bundle.prevSession?.length && <p>No previous comparable hold times available.</p>}
     <RepCurveChart
       forecasted={bundle.forecasted}
       actual={bundle.actual}
@@ -214,10 +213,15 @@ function useInterruptPrompt(tindeq, active) {
   return { show, dismiss };
 }
 
-// Continue / Mark interrupted / Redo, and nothing else (CLAUDE.md).
+// Continue / Mark interrupted / Redo, with the live pull timer so the
+// athlete sees the hold still counting. It shows only observed samples, so
+// it stops when the signal does.
 function InterruptPrompt({ onContinue, onInterrupted, onRedo, tindeq }) {
-  const title = tindeq?.forceLoss?.status === 'complete' && tindeq?.canContinueCurrentRep === true
+  const state = tindeq?.forceLoss;
+  const title = state?.status === 'complete' && tindeq?.canContinueCurrentRep === true
     ? "Still holding?" : "Rep may have been interrupted";
+  const pullSeconds = state?.pullStartTs != null && Number.isFinite(state?.observedTs)
+    ? Math.max(0, (state.observedTs - state.pullStartTs) / 1000) : null;
   return (
     <div role="dialog" aria-modal="true" aria-label={title} style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000,
@@ -227,7 +231,9 @@ function InterruptPrompt({ onContinue, onInterrupted, onRedo, tindeq }) {
         background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12,
         padding: 20, maxWidth: 420, width: "100%", boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
       }}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>{title}</div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>{title}</div>
+        {pullSeconds != null && <div role="timer" aria-label="Pull time" style={{ fontSize: 48, fontWeight: 800,
+          fontVariantNumeric: 'tabular-nums', marginBottom: 16 }}>{pullSeconds.toFixed(1)}s</div>}
         <div style={{ display: "grid", gap: 10 }}>
           <Btn disabled={tindeq?.canContinueCurrentRep === false || tindeq?.signalRecovering || tindeq?.connected === false} onClick={onContinue} color={C.green} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Continue</Btn>
           <Btn onClick={onInterrupted} color={C.red} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Mark interrupted</Btn>
@@ -718,7 +724,9 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
   // (beeps, onRestDone) live in effects keyed off `remaining`, not
   // inside the setState updater — StrictMode double-invokes updaters,
   // which double-fired the beep and the phase transition in dev.
-  const releaseBlocked = !!(tindeq?.releaseCheckRequired || tindeq?.zeroing);
+  // Only a connected Tindeq can pass the check; without one the next rep is
+  // manual and rest must not wait on it.
+  const releaseBlocked = !!(tindeq?.connected && (tindeq.releaseCheckRequired || tindeq.zeroing));
   const wasBlockedRef = useRef(releaseBlocked);
   const mountedAtRef = useRef(Date.now());
   const restStartedAtMs = Number.isFinite(lastRep?.restStartedAtMs)
@@ -946,7 +954,7 @@ export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
   const doneRef = useRef(false);
   const origin = Number.isFinite(startedAtMs) ? Math.min(mountedAt, startedAtMs) : mountedAt;
   const remaining = Math.max(0, Math.ceil((origin + (restSeconds + extraSeconds) * 1000 - now) / 1000));
-  const releaseBlocked = !!(tindeq?.releaseCheckRequired || tindeq?.zeroing);
+  const releaseBlocked = !!(tindeq?.connected && (tindeq.releaseCheckRequired || tindeq.zeroing));
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(timer);

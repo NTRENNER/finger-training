@@ -102,3 +102,10 @@ test('selected sets display a full break without counting the other hand toward 
   expect(screen.getByText('0:00')).toBeInTheDocument();
   expect(ready).not.toHaveBeenCalled();
 });
+
+test('a pending release check never blocks the next set once the Tindeq is disconnected', () => {
+  const ready = jest.fn();
+  render(<BetweenSetRestView startedAtMs={400000} tindeq={{ connected: false, releaseCheckRequired: true }} onReady={ready} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Start set 2' }));
+  expect(ready).toHaveBeenCalledTimes(1);
+});
