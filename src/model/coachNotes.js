@@ -202,16 +202,16 @@ export function decisiveWhy(rec, { ladderText = null } = {}) {
   const room = rec.room ?? (1 - (rec.localRatio ?? 1));
   if (!rec.coverageSnap && rec.adaptBoost != null && rec.adaptBoost > 1.05) {
     const pct = Math.max(1, Math.round(room * 100));
-    return `reps near ${rec.T != null ? `${Math.round(rec.T)}s` : "here"} run ~${pct}% below your modeled curve — the strongest measured gap`;
+    return `reps near ${rec.T != null ? `${Math.round(rec.T)}s` : "here"} run ~${pct}% below your modeled curve — an estimated local gap`;
   }
   if (rec.staleStatus === "never") {
-    return "first data at this duration — one honest rep anchors the curve here";
+    return "coverage sampling at this duration — the next recording can add evidence here";
   }
   if (rec.staleStatus === "stale") {
-    return `${String(rec.zone || "").replace(/_/g, " ")} is your longest-unvisited zone`;
+    return `${String(rec.zone || "").replace(/_/g, " ")} has older eligible measurements; coverage contributed to this choice`;
   }
   if (rec.coverageSnap) {
     return "centered in the zone (heavier · shorter) so a strong rep still lands in-window";
   }
-  return "your curve is best supported here — this pick keeps every zone fresh";
+  return "selected by the current model score; coverage and recency are inputs";
 }

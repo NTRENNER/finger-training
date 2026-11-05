@@ -31,7 +31,7 @@ function setupButtonFor(exerciseName) {
 test("a modifier is created once and can be attached to other exercises", () => {
   render(<Harness />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "Strength B" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Workout B" }));
   fireEvent.click(setupButtonFor("Bench Press"));
   fireEvent.change(screen.getByPlaceholderText("Slingshot"), { target: { value: "Slingshot" } });
   fireEvent.change(screen.getByPlaceholderText("Red, Blue, Maddog"), { target: { value: "Red, Blue" } });
@@ -39,7 +39,7 @@ test("a modifier is created once and can be attached to other exercises", () => 
   expect(screen.getByRole("checkbox", { name: /Slingshot/ })).toBeChecked();
 
   fireEvent.click(screen.getByRole("button", { name: "Done" }));
-  fireEvent.click(screen.getByRole("tab", { name: "Strength A" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Workout A" }));
   fireEvent.click(setupButtonFor("Dips"));
   const reusable = screen.getByRole("checkbox", { name: /Slingshot/ });
   expect(reusable).not.toBeChecked();

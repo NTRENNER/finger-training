@@ -394,6 +394,37 @@ test('Continue keeps the same trace and records a later genuine failure', async 
   expect(onEnd.mock.calls[0][0]).toMatchObject({ failureValid: true,
     endReason: 'target_force_failure', forceRecording: { force_loss: { continued_adjustment_count: 1 } } });
 });
+
+test('Continue is unavailable during signal loss, after release, and after persistence', async () => {
+  const {view,packet,onEnd}=await setup(25);
+  feed(packet,0,7500,ms=>ms<3000?25:20);
+  expect(view.result.current.canContinueCurrentRep).toBe(true);
+  act(()=>jest.advanceTimersByTime(2000));
+  expect(view.result.current.canContinueCurrentRep).toBe(false);
+  act(()=>expect(view.result.current.continueCurrentRep()).toBe(false));
+  expect(onEnd).not.toHaveBeenCalled();
+  feed(packet,7600,7900,()=>20);
+  expect(view.result.current.canContinueCurrentRep).toBe(true);
+  packet([[8000,0]]);
+  expect(view.result.current.canContinueCurrentRep).toBe(false);
+  act(()=>expect(view.result.current.continueCurrentRep()).toBe(false));
+  feed(packet,8100,9200,()=>0);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  act(()=>expect(view.result.current.continueCurrentRep()).toBe(false));
+  expect(onEnd).toHaveBeenCalledTimes(1);
+});
+
+test('disconnect cannot continue an old recording or turn missing samples into hold time', async () => {
+  const {view,packet,onEnd,deviceListeners}=await setup(25);
+  feed(packet,0,7500,ms=>ms<3000?25:20);
+  act(()=>{deviceListeners.gattserverdisconnected();});
+  expect(view.result.current.canContinueCurrentRep).toBe(false);
+  act(()=>expect(view.result.current.continueCurrentRep()).toBe(false));
+  await act(async()=>jest.advanceTimersByTime(STREAM_ABANDON_MS+500));
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  expect(onEnd.mock.calls[0][0]).toMatchObject({failureValid:false,endReason:'equipment_interruption'});
+  act(()=>expect(view.result.current.continueCurrentRep()).toBe(false));
+});
 test('Continue also resumes a manually started Tindeq rep', async () => {
   const { view, packet } = await setup(25);
   const onFailure = jest.fn();

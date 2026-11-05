@@ -387,8 +387,8 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
       targetLoadKg: Math.max(1, mvc * fraction),
       targetFraction: fraction,
       repsPerHand: 2,
-      restBetweenSec: 20,
-      intensityLabel: `Fast single-hand pulls · ${Math.round(fraction * 100)}% peak · release immediately`,
+      restBetweenSec: 10,
+      intensityLabel: `Finish one hand, then switch · ${Math.round(fraction * 100)}% peak · release immediately`,
       restAfterSec: 0,
     });
   }

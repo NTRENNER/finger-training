@@ -133,10 +133,10 @@ describe("decisiveWhy", () => {
     const s = decisiveWhy({ adaptBoost: 1.3, room: 0.12, coverageSnap: true, staleStatus: "ok", zone: "strength" });
     expect(s).toMatch(/centered in the zone/);
   });
-  test("never → anchor; stale → longest-unvisited; default → supported", () => {
-    expect(decisiveWhy({ staleStatus: "never" })).toMatch(/anchors the curve/);
-    expect(decisiveWhy({ staleStatus: "stale", zone: "str_endurance" })).toMatch(/str endurance is your longest-unvisited/);
-    expect(decisiveWhy({ staleStatus: "ok" })).toMatch(/best supported/);
+  test("standard explanations describe inputs without promising complete coverage", () => {
+    expect(decisiveWhy({ staleStatus: "never" })).toMatch(/coverage sampling/);
+    expect(decisiveWhy({ staleStatus: "stale", zone: "str_endurance" })).toMatch(/str endurance has older eligible measurements/);
+    expect(decisiveWhy({ staleStatus: "ok" })).toMatch(/current model score/);
   });
   test("cold start explains seeding", () => {
     expect(decisiveWhy({ coldStart: true, adaptBoost: 2 })).toMatch(/new grip/);
@@ -147,4 +147,9 @@ describe("decisiveWhy", () => {
     expect(decisiveWhy({ coldStartStage: "lower" })).toMatch(/next three/);
     expect(decisiveWhy({ coldStartStage: "middle" })).toMatch(/fill the middle/);
   });
+});
+
+test('standard-mode explanations never promise all zones stay fresh or claim the selected stale zone is the oldest', () => {
+  const messages = [decisiveWhy({staleStatus:'ok'}),decisiveWhy({staleStatus:'stale',zone:'strength'})];
+  expect(messages.join(' ')).not.toMatch(/keeps every zone fresh|longest-unvisited|strongest measured gap/);
 });

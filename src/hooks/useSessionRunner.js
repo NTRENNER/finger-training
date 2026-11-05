@@ -1,3 +1,4 @@
+import { includeRedoAttempts, recordedRedoAttempts } from '../model/repRedo.js';
 import { displayedRepTime } from '../model/pullMeasurement.js';
 import { betaEligibility } from '../model/betaEligibility.js';
 import { startingHandForDay, otherHand, handOrderMetadata } from '../model/handOrder.js';
@@ -87,6 +88,7 @@ export function useSessionRunner({
   freshMap,
   threeExpPriors,
   addReps,
+  updateRep = null,
   tindeqConnected,
   onSessionStart,
 }) {
@@ -147,6 +149,8 @@ export function useSessionRunner({
   const sessionAdjustmentRef = useRef(null);
   const sessionPrescriptionRef = useRef({});
   const sessionDecisionRef = useRef(null);
+  const retryRecordRef = useRef(null);
+  const [retryTargetKg, setRetryTargetKg] = useState(null);
   const volumePlanRef = useRef(null);
   const lastActivityByHandRef = useRef({});
   const [setRestStartedAtMs, setSetRestStartedAtMs] = useState(null);
@@ -330,6 +334,8 @@ export function useSessionRunner({
     setSessionDate(startedDay);
     setRefWeights(rw);
     setSessionReps([]);
+    retryRecordRef.current = null;
+    setRetryTargetKg(null);
     setCurrentSet(1);
     setCurrentRep(0);
     setLeveledUp(false);
@@ -437,6 +443,12 @@ export function useSessionRunner({
     if (repDoneLockRef.current) return;   // duplicate event for this rep — drop
     repDoneLockRef.current = true;
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
+    const retryRecord = retryRecordRef.current;
+    if (retryRecord) {
+      forceRecording = includeRedoAttempts({ actualTime, avgForce, peakForce, forceRecording },
+        recordedRedoAttempts(retryRecord), currentRep === 0).forceRecording;
+    }
+
     // Weight is constant across the set — no within-set fatigue discount.
     // The rep-time curve (actual_time_s) is what reflects fatigue and feeds
     // the next session's prescription via the three-exp curve fit.
@@ -510,7 +522,7 @@ export function useSessionRunner({
       // cloud payload without writing back, so a uid() here meant
       // local id ≠ cloud id until the next reconcile — and id-based
       // updateRep/deleteRep calls silently matched 0 cloud rows.
-      id:              uuid(),
+      id:              retryRecord?.id ?? uuid(),
       date:            sessionDate || today(),
       grip:            config.grip,
       hand:            effectiveHand,
@@ -623,7 +635,11 @@ export function useSessionRunner({
         source: measuredRelease ? (forceRecording ? 'device_release' : 'manual_tap') : 'estimated_transition',
       };
     }
-    addReps([repRecord]);
+    if (retryRecord) {
+      Promise.resolve(updateRep(retryRecord, repRecord)).catch(() => {}); // write-ahead queue retains offline edits
+      retryRecordRef.current = null;
+      setRetryTargetKg(null);
+    } else addReps([repRecord]);
     if (endSession) {
       finishSession([...sessionReps, repRecord]);
       return;
@@ -661,7 +677,31 @@ export function useSessionRunner({
       setPhase("resting");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentSet, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected, mixed, currentStep, mixedPrediction, mixedPrefix, regularPrediction, queueNextSet]);
+  }, [config, currentSet, currentRep, refWeights, sessionId, sessionStartedAt, sessionDate, sessionReps, addReps, activeHand, manualOffset, tindeqConnected, mixed, currentStep, mixedPrediction, mixedPrefix, regularPrediction, queueNextSet, updateRep]);
+
+  const canRedoLastRep = typeof updateRep === 'function' && !mixed && !config.peakTest
+    && ['resting', 'switch_hands', 'done', 'between_sets'].includes(phase)
+    && sessionReps.length > 0;
+  const handleRedoLastRep = useCallback(() => {
+    if (!canRedoLastRep || retryRecordRef.current) return false;
+    const rep = sessionReps.at(-1);
+    retryRecordRef.current = rep;
+    // Mark the disputed measurement immediately, even if the athlete leaves
+    // before retrying. Keep its measured work and exact original UUID/slot.
+    Promise.resolve(updateRep(rep, { failure_valid: false, end_reason: 'interrupted',
+      force_recording: { ...rep.force_recording, capacity_eligible: false,
+        recovery_eligible: false, redo_pending: true } })).catch(() => {});
+    setSessionReps(rows => rows.filter(row => row.id !== rep.id));
+    setCurrentSet(Number(rep.set_num) || 1);
+    setCurrentRep(Number(rep.rep_num) - 1);
+    setActiveHand(rep.hand);
+    setRetryTargetKg(rep.manual_load_kg > 0 ? rep.manual_load_kg : null);
+    setLastRepResult(null);
+    setLeveledUp(false);
+    repDoneLockRef.current = false;
+    setPhase('rep_ready');
+    return true;
+  }, [canRedoLastRep, sessionReps, updateRep]);
 
   const handleRestDone = useCallback(() => {
     repDoneLockRef.current = false;   // next rep armed — accept its completion
@@ -723,7 +763,7 @@ export function useSessionRunner({
     currentSet,
     currentRep,
     sessionId, sessionStartedAt, refWeights,
-    sessionReps, lastRepResult,
+    sessionReps, lastRepResult, retryTargetKg, canRedoLastRep, handleRedoLastRep,
     leveledUp, newLevel,
     activeHand,
     nextWeight,

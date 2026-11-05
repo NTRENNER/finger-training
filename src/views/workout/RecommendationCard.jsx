@@ -27,7 +27,6 @@ export function RecommendationCard({ recommendation, onPickWorkout, pickedId }) 
         {isAccepted ? "★ RECOMMENDED" : "↩ USE RECOMMENDED WORKOUT"}
       </div>
       <div style={{ fontSize: 24, fontWeight: 750, lineHeight: 1.25 }}>
-        <span style={{ color: accent }}>{primary.shortName} · </span>
         {primary.name.replace(/^Workout [A-D] — /, "")}
       </div>
       <div style={{ fontSize: 14, color: C.muted, marginTop: 8 }}>

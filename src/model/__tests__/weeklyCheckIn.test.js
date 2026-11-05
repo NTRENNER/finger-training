@@ -127,15 +127,16 @@ describe("assembleCheckIn", () => {
     expect(Array.isArray(out.points)).toBe(true);
   });
 
-  test("focus items explain the engine, not prescribe (July 2026 voice)", () => {
+  test("recorded gaps do not promise what selecting a grip will schedule", () => {
     const hist = [
       rep("2026-04-01", "Micro", 200, 190),          // stale endurance zone → focus
       rep("2026-07-01", "Micro", 45, 50),
     ];
     const out = buildCheckIn(hist, [], [], { refDate: REF });
-    const staleItem = out.sections.focus.find(t => /days stale/.test(t));
+    const staleItem = out.sections.focus.find(t => /last recorded/.test(t));
     expect(staleItem).toBeTruthy();
-    expect(staleItem).toMatch(/the engine will queue it once you pick Micro on Setup/);
+    expect(staleItem).toMatch(/last recorded endurance target.*2026-04-01/);
+    expect(out.sections.focus.join(' ')).not.toMatch(/will queue|pick .* Setup|curve is drifting/);
     expect(out.sections.focus.some(t => /^Give /.test(t))).toBe(false);
   });
 
@@ -158,12 +159,12 @@ describe("assembleCheckIn", () => {
     const s = gatherCheckInSignals(dropHistory(), [], [], { refDate: REF });
     s.recovery = { level: "yellow", label: "Recovery softening", guidanceAction: null };
     const out = assembleCheckIn(s);
-    const compact = out.points.find(p => p.kind === "concern" && /Volume was already/.test(p.text));
-    const merged = out.sections.stuck.find(t => /Volume was already/.test(t));
+    const compact = out.points.find(p => p.kind === "concern" && /Volume was/.test(p.text));
+    const merged = out.sections.stuck.find(t => /Volume was/.test(t));
     expect(compact).toBeTruthy();
-    expect(compact.text).toMatch(/earlier recovery signal/);
+    expect(compact.text).toMatch(/rep-2 comparisons/);
     expect(merged).toBeTruthy();
-    expect(merged).toMatch(/earlier recovery signal/);
+    expect(merged).toMatch(/rep-2 comparisons/);
     expect([compact.text, merged].join(" ")).not.toMatch(/reassess|when you feel|until.*green|advance fresh/i);
     // Neither original line survives alongside the merge.
     expect(out.sections.stuck.some(t => /well under your monthly norm/.test(t))).toBe(false);
@@ -176,8 +177,8 @@ describe("assembleCheckIn", () => {
     s.behaviorNotes = [{ key: "ramp-drop", ratio: 0, text: "raw ramp-drop note" }];
     const out = assembleCheckIn(s);
 
-    expect(out.points.find(p => p.kind === "concern").text).toMatch(/Volume was already near zero/);
-    expect(out.sections.stuck.join(" ")).toMatch(/Volume was already near zero/);
+    expect(out.points.find(p => p.kind === "concern").text).toMatch(/Volume was near zero/);
+    expect(out.sections.stuck.join(" ")).toMatch(/Volume was near zero/);
     expect([...out.points.map(p => p.text), ...out.sections.stuck].join(" ")).not.toMatch(/~0%/);
   });
 
@@ -240,10 +241,10 @@ describe("assembleCheckIn", () => {
   test("support work shows at the exercise level; stale workout gets partial credit", () => {
     const hist = [rep("2026-07-01", "Micro", 45, 46)];
     const wlog = [
-      // Old full Strength B (key "C") — stale (>14d before REF) in Build mode.
+      // Old full Workout B (key "C") — stale (>14d before REF) in Build mode.
       { date: "2026-06-18", workout: "C", workoutId: "C",
         exercises: { trxRow: { sets: [{ done: true, reps: 8 }] } } },
-      // This week: an A session that ALSO touches Strength B's TRX row.
+      // This week: an A session that ALSO touches Workout B's TRX row.
       { date: "2026-07-02", workout: "A", workoutId: "A",
         exercises: {
           weightedPullup: { sets: [{ done: true, reps: 5 }] },
@@ -257,7 +258,7 @@ describe("assembleCheckIn", () => {
     expect(didFlat).toMatch(/TRX Row/);
     expect(didFlat).not.toMatch(/Dips/);
     const stuckFlat = out.sections.stuck.join(" ");
-    expect(stuckFlat).toMatch(/No full Strength B session in 1[0-9] days — but you touched 1 of its exercise/);
+    expect(stuckFlat).toMatch(/No full Workout B session in 1[0-9] days — but you touched 1 of its exercise/);
     expect(stuckFlat).not.toMatch(/hasn't come up/);
   });
 
@@ -273,14 +274,14 @@ describe("assembleCheckIn", () => {
     const stale = mode => gatherCheckInSignals(hist, [], wlog,
       { refDate: REF, program: { version: 2, mode } }).support.staleWorkouts;
     expect(stale("maintain")).toEqual([]);
-    expect(stale("build")).toEqual([{ workout: "C", label: "Strength B", days: 25 }]);
-    expect(stale("block").map(w => w.label)).toEqual(["Strength B", "Strength C"]);
+    expect(stale("build")).toEqual([{ workout: "C", label: "Workout B", days: 25 }]);
+    expect(stale("block").map(w => w.label)).toEqual(["Workout B", "Workout C"]);
     const out = buildCheckIn(hist, [], wlog, { refDate: REF, program: { version: 2, mode: "block" } });
-    expect(out.sections.stuck.join(" ")).toMatch(/Strength B hasn't come up in 25 days/);
+    expect(out.sections.stuck.join(" ")).toMatch(/Workout B hasn't come up in 25 days/);
     expect(out.sections.stuck.join(" ")).not.toMatch(/Power/);
   });
 
-  test("Strength C sessions count as support days and custom exercises show their names", () => {
+  test("Workout C sessions count as support days and custom exercises show their names", () => {
     const hist = [rep("2026-07-01", "Micro", 45, 46)];
     const custom = { id: "custom_ring_dips_ab12c", name: "Ring Dips", custom: true, movementCategories: ["push"] };
     const wlog = [{ date: "2026-07-02", workout: "S3", workoutId: "S3", exercises: {
@@ -341,3 +342,43 @@ describe("assembleCheckIn", () => {
    expect(signals.climbCtx.hardestSend).toBe("V6");
    expect(signals.climbing.prs).toHaveLength(0);
  });
+
+test('five-second training targets are not overdue recurring domains; pilot context is descriptive', () => {
+  const { pilotEnrollment } = require('../emphasisPilot.js');
+  const history = [
+    rep('2026-09-18','Micro',5,15),
+    rep('2026-09-20','Crusher',5,15),
+    rep('2026-06-10','Prime',30,30),
+    ...['Micro','Crusher','Prime'].flatMap(grip=>[
+      rep('2026-11-02',grip,115,115),rep('2026-11-04',grip,160,160),
+    ]),
+  ];
+  const signals = gatherCheckInSignals(history,[],[],{refDate:'2026-11-05',pilotEnrollment:pilotEnrollment('emphasis-2026-11','active')});
+  expect(signals.staleZones.some(zone=>zone.zone==='max_strength')).toBe(false);
+  const output = assembleCheckIn(signals);
+  expect(output.sections.focus.join(' ')).toMatch(/App focus: long-end pilot; its scheduled step is endurance/);
+  expect(output.sections.focus.join(' ')).not.toMatch(/will queue|pick .* Setup/);
+  expect(output.sections.stuck.join(' ')).not.toMatch(/hasn't been trained/);
+});
+
+test('recent Peak Tests remain visible to peak freshness even though they are excluded from training volume', () => {
+  const history = [rep('2026-11-04','Micro',160,160),{
+    ...rep('2026-11-02','Micro',3,3),failure_valid:false,peak_force_kg:20,end_reason:'peak_test_complete',
+    force_recording:{version:5,capacity_eligible:false,peak_valid:true,session_protocol:{id:'peak_test',version:2}},
+  }];
+  const signals = gatherCheckInSignals(history,[],[],{refDate:'2026-11-05'});
+  expect(signals.focusCandidates.some(item=>item.key==='peak|Micro')).toBe(false);
+});
+
+test('standard analysis does not promote a later session after an invalid opener or promise automatic heavier loads', () => {
+  const history = [
+    rep('2026-11-04','Prime',160,1.3,3,{failure_valid:false,session_id:'first',session_started_at:'2026-11-04T10:00:00Z'}),
+    rep('2026-11-04','Prime',160,200,3,{session_id:'later',session_started_at:'2026-11-04T11:00:00Z'}),
+  ];
+  expect(gatherCheckInSignals(history,[],[],{refDate:'2026-11-05'}).perf.n).toBe(0);
+  const signals = gatherCheckInSignals([rep('2026-11-04','Prime',160,240)],[],[],{refDate:'2026-11-05'});
+  signals.perf = {ratioNow:1.5,ratioPrev:1,n:10,overshoots:4};
+  const review = assembleCheckIn(signals);
+  expect(review.sections.moving.join(' ')).toMatch(/Load changes follow the saved progression rules/);
+  expect(review.sections.moving.join(' ')).not.toMatch(/will chase|amplitude is lifting/);
+});

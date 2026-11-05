@@ -1,3 +1,4 @@
+import { activePilot, pilotBlockOn } from '../../model/emphasisPilot.js';
 // ─────────────────────────────────────────────────────────────
 // CURRENT TRAINING ANALYSIS CARD
 // ─────────────────────────────────────────────────────────────
@@ -30,18 +31,16 @@ const MARK = { win: "✅", concern: "⚠️", info: "•" };
 const COLOR = { win: C.green, concern: C.orange, info: C.muted };
 
 // Section order + display copy for the expanded analysis.
-// "focus" header (July 2026, per Nathan): the section EXPLAINS what the
-// recommender will do and why (staleness receipts), rather than issuing
-// a parallel set of orders — item voice in weeklyReview.js matches.
+// Recorded dates describe history; the plan card owns the next session.
 const SECTIONS = [
   ["did",     "Training completed"],
   ["moving",  "Progress"],
-  ["stuck",   "Gaps and recovery"],
-  ["focus",   "Recommendation inputs"],
+  ["stuck",   "Recorded comparisons"],
+  ["focus",   "Recorded training gaps"],
   ["headsUp", "Data notes"],
 ];
 
-export function WeeklyReviewCard({ history = [], activities = [] }) {
+export function WeeklyReviewCard({ history = [], activities = [], pilotEnrollment = null }) {
   const [expanded, setExpanded] = useState(false);
   const workoutSessionsRaw = useLSValue(LS_WORKOUT_LOG_KEY);
   const bwLogRaw = useLSValue(LS_BW_LOG_KEY);
@@ -50,9 +49,10 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
   const workoutSessions = useMemo(() => workoutSessionsRaw || [], [workoutSessionsRaw]);
   const bwLog = useMemo(() => bwLogRaw || [], [bwLogRaw]);
   const todayYMD = today();
+  const pilotBlock = pilotBlockOn(activePilot(pilotEnrollment), todayYMD);
   const review = useMemo(() => {
-    return buildCheckIn(history, activities, workoutSessions, { refDate: todayYMD, bwLog, program });
-  }, [history, activities, workoutSessions, todayYMD, bwLog, program]);
+    return buildCheckIn(history, activities, workoutSessions, { refDate: todayYMD, bwLog, program, pilotEnrollment });
+  }, [history, activities, workoutSessions, todayYMD, bwLog, program, pilotEnrollment]);
 
   const recoveryStatus = useMemo(
     () => deloadStatus(history, workoutSessions, { today: todayYMD, activities }),
@@ -123,6 +123,10 @@ export function WeeklyReviewCard({ history = [], activities = [] }) {
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: C.muted, marginBottom: 4 }}>
                   {label}
                 </div>
+                {key === 'focus' && <p style={{ color: C.muted, fontSize: 12 }}>
+                  {pilotBlock ? `Your active ${pilotBlock.emphasis}-end pilot follows its scheduled sequence. These recorded dates do not select the next workout.`
+                    : 'These dates describe recorded training, not the next workout recommendation.'}
+                </p>}
                 {items.map((t, i) => (
                   <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 4 }}>
                     <span style={{ flexShrink: 0, color: C.muted, fontSize: 13 }}>

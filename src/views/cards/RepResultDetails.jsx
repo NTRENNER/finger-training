@@ -12,6 +12,10 @@ export function RepResultDetails({ rep, children }) {
   const releaseUncertain = rep.force_recording?.recording_stop_reason === 'release_not_observed';
   const detailRows = React.Children.toArray(children).filter(Boolean);
   return <>
+    {rep.force_recording?.redo_pending && <div style={{ color: C.muted }}>Redo requested — activity only</div>}
+    {rep.force_recording?.redo_attempts?.length > 0 && <div style={{ color: C.muted }}>
+      Redone · {rep.force_recording.redo_attempts.length} earlier attempt(s) retained as activity
+    </div>}
     {interrupted && <div style={{ color: C.muted }}>{rep.end_reason === 'target_not_reached' ? 'Target not reached' : 'Interrupted'}</div>}
     {!interrupted && releaseUncertain && <div style={{ color: C.muted }}>Release not detected</div>}
     {detailRows.length > 0 && <div style={{ color: C.muted, fontSize: 12, lineHeight: 1.5, marginTop: 4 }}>

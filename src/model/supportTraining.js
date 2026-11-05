@@ -727,7 +727,7 @@ export const workouts = {
   A: {
     id: "A",
     shortName: "A",
-    name: "Strength A — Heavy",
+    name: "Workout A",
     purpose: "Low-volume force production and structural strength.",
     fatigueClass: "big",
     fatigueCost: 3,
@@ -836,7 +836,7 @@ export const workouts = {
     // The key stays "C" so logged sessions keep their identity; the
     // display letter follows the Maintain/Build/Block rotation order.
     shortName: "B",
-    name: "Strength B — Balanced",
+    name: "Workout B",
     purpose: "Brief low-fatigue strength exposure to maintain frequency.",
     // The "I can do this when tired" workout — pull + press + core
     // in ~15 min. Catches the post-outdoor-Monday case and the
@@ -885,7 +885,7 @@ export const workouts = {
     // on the light day).
     exercises: [
       exercises.trxRow,
-      { ...exercises.benchPress, prescription: "2 × 5 · light",       progressionPolicy: "maintain" },
+      { ...exercises.benchPress, prescription: "2 × 5 · light", progressionPolicy: "maintain" },
       // abWheel is circlesOnly (no load to ladder against), so it
       // needs no policy override.
       { ...exercises.abWheel,    prescription: "1–2 light sets optional" },
@@ -902,7 +902,7 @@ export const workouts = {
   S3: {
     id: "S3",
     shortName: "C",
-    name: "Strength C — Lock-Off & Core",
+    name: "Workout C",
     purpose: "A third strength-block day for lock-off control, unilateral legs, shoulders, and trunk.",
     fatigueClass: "big",
     fatigueCost: 2,

@@ -14,8 +14,12 @@ endpoints: weaker pulling after a loss is work, never rest.
 - Allow four seconds after that mean crosses below tolerance. Clearing a pending
   loss requires 750 ms continuously back within tolerance. One good sample cannot
   reset it. A 1–2 second partial dip followed by a steady return continues the rep.
-- Confirmed loss freezes credited time at the smoothed crossing and shows
-  “Rep complete — release the handle.” Further recovery cannot reopen that hold.
+- Confirmed loss freezes credited time at the smoothed crossing. Recovery alone
+  cannot reopen that hold. While the original trace is active and force remains
+  above release, the athlete can explicitly Continue an adjustment. The prompt
+  shows observed sample time separately from the frozen detected endpoint.
+  Continue retains the original clock and trace; release, stale samples,
+  disconnects and interrupted transport block it. The release backstop remains.
 - Recording continues until a full second below the normal low-force threshold
   (the larger of 0.5 kg and 10% of target), or after a distinct unload to no more
   than 20% of the immediately preceding working force. For low-load work, the

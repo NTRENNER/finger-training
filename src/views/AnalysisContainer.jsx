@@ -83,7 +83,7 @@ export function AnalysisContainer(props) {
       {/* Interpretation is intentionally centralized in Analysis. This live
           summary refreshes after completed work; training surfaces stay
           focused on the session currently being performed. */}
-      <WeeklyReviewCard history={history} activities={activities} />
+      <WeeklyReviewCard history={history} activities={activities} pilotEnrollment={props.pilotEnrollment} />
 
       {sub === "fingers" && (
         <AnalysisView

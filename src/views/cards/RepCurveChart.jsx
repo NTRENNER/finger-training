@@ -114,6 +114,29 @@ export function repCurveYMax(merged, targetS) {
   ) * 1.1;
 }
 
+export function mergeRepCurveSeries(forecasted = [], actual = [], prevSession = []) {
+    const maxRep = Math.max(
+      0, ...forecasted.map(p => p.rep), ...actual.map(p => p.rep), ...prevSession.map(p => p.rep),
+    );
+    if (maxRep === 0) return { merged: [], xMax: 0 };
+    const rows = [];
+    for (let i = 1; i <= maxRep; i++) {
+      const f = forecasted.find(p => p.rep === i);
+      const a = actual.find(p => p.rep === i);
+      const p = prevSession.find(p => p.rep === i);
+      rows.push({
+        rep: i,
+        forecasted: f ? f.t : null,
+        actual:     a ? a.t : null,
+        prev:       p ? p.t : null,
+        actualWeightKg: a?.weightKg ?? null,
+        prevWeightKg: p?.weightKg ?? null,
+        prevDate: p?.date ?? null,
+      });
+    }
+    return { merged: rows, xMax: maxRep };
+}
+
 function RepCurveChart({
   forecasted = [],
   actual = [],
@@ -134,28 +157,7 @@ function RepCurveChart({
   // Merge all series into a single array of { rep, forecasted, actual,
   // prev } so recharts can render multiple Lines off the same data.
   // Domain is the max rep across all series.
-  const { merged, xMax } = useMemo(() => {
-    const maxRep = Math.max(
-      forecasted.length, actual.length, prevSession.length,
-    );
-    if (maxRep === 0) return { merged: [], xMax: 0 };
-    const rows = [];
-    for (let i = 1; i <= maxRep; i++) {
-      const f = forecasted.find(p => p.rep === i);
-      const a = actual.find(p => p.rep === i);
-      const p = prevSession.find(p => p.rep === i);
-      rows.push({
-        rep: i,
-        forecasted: f ? f.t : null,
-        actual:     a ? a.t : null,
-        prev:       p ? p.t : null,
-        actualWeightKg: a?.weightKg ?? null,
-        prevWeightKg: p?.weightKg ?? null,
-        prevDate: p?.date ?? null,
-      });
-    }
-    return { merged: rows, xMax: maxRep };
-  }, [forecasted, actual, prevSession]);
+  const { merged, xMax } = useMemo(() => mergeRepCurveSeries(forecasted, actual, prevSession), [forecasted, actual, prevSession]);
 
   if (merged.length === 0) {
     return (
@@ -223,6 +225,7 @@ function RepCurveChart({
       {forecasted.length > 0 && <p style={{ fontSize: 12, color: C.muted, margin: '0 0 8px', lineHeight: 1.5 }}>
         Dashed line: approximate hold times at a similar load and rest.
       </p>}
+      {actual.some(point => point.activityOnly) && <p>Disputed or interrupted holds are shown as recorded activity only; they do not seed estimates or previous comparisons.</p>}
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={merged} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.border} opacity={0.3} />
@@ -274,7 +277,7 @@ function RepCurveChart({
               strokeWidth={1.5}
               strokeOpacity={0.6}
               dot={{ r: 2, fill: COLORS.prevSession, fillOpacity: 0.6 }}
-              connectNulls
+              connectNulls={false}
               isAnimationActive={false}
             />
           )}

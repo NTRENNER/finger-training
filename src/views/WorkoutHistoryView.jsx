@@ -402,9 +402,9 @@ export function WorkoutHistoryView({
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
               <div>
                 <span style={{ fontWeight: 700, fontSize: 15 }}>
-                  {isMobility ? (wkDef.name || "Climbing Mobility") : `Workout ${session.workout}`}
+                  {isMobility ? (wkDef.name || "Climbing Mobility") : session.workoutId && wkDef.shortName ? `Workout ${wkDef.shortName}` : `Workout ${session.workout}`}
                 </span>
-                {wkDef.name && !isEditing && !isMobility && (
+                {wkDef.name && !isEditing && !isMobility && !session.workoutId && (
                   <span style={{ marginLeft: 8, fontSize: 12, color: C.muted }}>{wkDef.name}</span>
                 )}
               </div>

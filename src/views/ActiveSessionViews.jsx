@@ -32,13 +32,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { C } from "../ui/theme.js";
 import { Card, Btn, Label, PageFrame } from "../ui/components.jsx";
-import { fmtW, fmtTime, fromDisp } from "../ui/format.js";
+import { fmtW, fmtTime, fromDisp, toDisp } from "../ui/format.js";
 import { BigTimer, ForceGauge } from "./cards/LiveForceCard.jsx";
 
 import { suggestWeight, prescribedLoad } from "../model/prescription.js";
 import { levelTitle } from "../model/levels.js";
 import { downloadCSV } from "../lib/csv.js";
-import { buildRepCurveBundle, buildPhysModel } from "../model/repCurveData.js";
+import { buildRepCurveBundle, buildPhysModel, isComparableHold } from "../model/repCurveData.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRecoveryBundle } from "../model/recoveryDynamics.js";
 import { sessionOverpull } from "../model/overpull.js";
@@ -53,7 +53,7 @@ import { isVolumeSetComplete } from "../model/volumeSession.js";
 // engine's prediction before they've moved.
 function LiveRepCurveCard({
   history, config, currentSet = 1, activeHand, sessionReps, refWeights,
-  unit = "lbs", embedded = false,
+  unit = "lbs", embedded = false, showLegend = false,
 }) {
   const handForLookup = config.hand === "Both" ? (activeHand || "L") : config.hand;
   const bundle = useMemo(() => {
@@ -61,8 +61,8 @@ function LiveRepCurveCard({
     const sameHandReps = (sessionReps || []).filter(r =>
       r.hand === handForLookup && (r.set_num ?? 1) === currentSet
     );
-    const rep1 = sameHandReps[0];
-    const firstRepTime = rep1?.actual_time_s > 0 ? rep1.actual_time_s : config.targetTime;
+    const rep1 = sameHandReps.find(rep => Number(rep.rep_num ?? 1) === 1);
+    const firstRepTime = sameHandReps.length ? (isComparableHold(rep1) ? rep1.actual_time_s : null) : config.targetTime;
     return buildRepCurveBundle({
       history,
       grip: config.grip, hand: handForLookup,
@@ -79,6 +79,8 @@ function LiveRepCurveCard({
   const targetWeightKg = suggestWeight(refWeights?.[handForLookup] ?? null, 0) || null;
   if (!bundle) return null;
   const inner = (
+    <>
+    {showLegend && !bundle.prevSession?.length && <p>No previous comparable hold times available.</p>}
     <RepCurveChart
       forecasted={bundle.forecasted}
       actual={bundle.actual}
@@ -88,8 +90,9 @@ function LiveRepCurveCard({
       targetWeightKg={targetWeightKg}
       unit={unit}
       height={160}
-      showLegend={false}
+      showLegend={showLegend}
     />
+    </>
   );
   return embedded ? inner : <Card style={{ marginBottom: 12 }}>{inner}</Card>;
 }
@@ -137,6 +140,16 @@ function LiveRecoveryCard({ history, config, currentSet = 1, activeHand, session
   return embedded ? inner : <Card style={{ marginBottom: 12 }}>{inner}</Card>;
 }
 
+function RestHoldTimeChart({ context, unit = 'lbs' }) {
+  if (!context) return null;
+  return <Card>
+    <Label>Hold times — actual, estimated and previous</Label>
+    {context.config.mixedDomainPlan
+      ? <p>Hold-time comparison unavailable for mixed-duration sets.</p>
+      : <LiveRepCurveCard {...context} unit={unit} embedded showLegend />}
+  </Card>;
+}
+
 // Level display — numeric only, no old badge names. Used by
 // SessionSummaryView's level-up animation.
 const LEVEL_EMOJIS = ["🌱","🏛️","📈","⚡","⚙️","🔥","🏔️","⭐","💎","🏆","🌟"];
@@ -178,7 +191,8 @@ function useInterruptPrompt(tindeq, active) {
   // (93% of target) and hasn't recovered yet. 'holding' means force is at
   // or above the boundary — overpulling and settling back to target stays
   // in 'holding', so this doesn't fire for a smooth overshoot.
-  const dipActive = tindeq?.forceLoss?.status === 'recovering';
+  const dipActive = tindeq?.forceLoss?.status === 'recovering'
+    || (tindeq?.forceLoss?.status === 'complete' && tindeq?.canContinueCurrentRep === true);
   const trouble = active && (tindeq?.signalRecovering === true || dipActive);
   useEffect(() => {
     if (!trouble) {
@@ -196,7 +210,10 @@ function useInterruptPrompt(tindeq, active) {
   return { show, dismiss };
 }
 
-function InterruptPrompt({ onContinue, onInterrupted, onRedo }) {
+function InterruptPrompt({ onContinue, onInterrupted, onRedo, tindeq }) {
+  const state = tindeq?.forceLoss;
+  const observedSeconds = state?.pullStartTs != null && Number.isFinite(state?.observedTs)
+    ? Math.max(0, (state.observedTs - state.pullStartTs) / 1000) : null;
   return (
     <div role="dialog" aria-modal="true" aria-label="Rep may have been interrupted" style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000,
@@ -207,14 +224,29 @@ function InterruptPrompt({ onContinue, onInterrupted, onRedo }) {
         padding: 20, maxWidth: 420, width: "100%", boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
       }}>
         <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>Rep may have been interrupted</div>
+        <div role="status" style={{ marginBottom: 16 }}>
+          <div>Observed pull time</div>
+          <div style={{ fontSize: 48, fontVariantNumeric: 'tabular-nums' }}>{observedSeconds == null ? '—' : `${observedSeconds.toFixed(1)}s`}</div>
+          {state && <div>Detected hold: {creditedSeconds(state, 0)}s</div>}
+          {(tindeq?.signalRecovering || tindeq?.connected === false) && <p>Signal unavailable. The timer only includes observed samples.</p>}
+        </div>
         <div style={{ display: "grid", gap: 10 }}>
-          <Btn onClick={onContinue} color={C.green} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Continue</Btn>
+          <Btn disabled={tindeq?.canContinueCurrentRep === false || tindeq?.signalRecovering || tindeq?.connected === false} onClick={onContinue} color={C.green} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Continue</Btn>
           <Btn onClick={onInterrupted} color={C.red} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Mark interrupted</Btn>
           <Btn onClick={onRedo} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Redo rep</Btn>
         </div>
       </div>
     </div>
   );
+}
+
+// Optional action on post-rep screens; ordinary completion never waits for
+// a confirmation. The runner owns slot restoration and durable evidence edits.
+export function LastRepRedo({ onRedo, tindeq }) {
+  return <button type="button" onClick={() => {
+    if (onRedo()) tindeq?.endRepAndRequireRelease?.({ requireZero: true });
+  }} style={{ background: 'none', border: 0, color: C.muted, textDecoration: 'underline',
+    padding: '8px 12px', fontSize: 12, cursor: 'pointer' }}>Redo last rep</button>;
 }
 
 function RepDots({ total, done, current }) {
@@ -315,7 +347,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
   // Mixed-load holds need their own override; ordinary sets retain one per hand.
   const overrideKey = config.mixedDomainPlan ? `${overrideHand}:${currentRep}` : overrideHand;
   const [manualWeightStr, setManualWeightStrState] = useState(
-    () => (_overrideBySession.sessionId === sessionKey
+    () => (session.retryTargetKg > 0 ? String(toDisp(session.retryTargetKg, unit)) : _overrideBySession.sessionId === sessionKey
       ? (_overrideBySession.byHand[overrideKey] ?? "")
       : "")
   );
@@ -491,6 +523,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
 
   // Effective target weight in kg for color-coding and auto-failure threshold
   const manualKg = (() => {
+    if (session.retryTargetKg > 0 && manualWeightStr === String(toDisp(session.retryTargetKg, unit))) return session.retryTargetKg;
     const n = parseFloat(manualWeightStr);
     return Number.isFinite(n) && n > 0 ? fromDisp(n, unit) : null;
   })();
@@ -644,7 +677,8 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       </div>
       {interruptPrompt.show && (
         <InterruptPrompt
-          onContinue={() => { tindeq.continueCurrentRep?.(); interruptPrompt.dismiss(); }}
+          tindeq={tindeq}
+          onContinue={() => { if (tindeq.continueCurrentRep?.()) interruptPrompt.dismiss(); }}
           onInterrupted={() => { interruptPrompt.dismiss(); endRep(true); }}
           onRedo={() => { interruptPrompt.dismiss(); redoRep(); }}
         />
@@ -675,7 +709,7 @@ function playBeep(freq = 880, duration = 0.12, volume = 0.4) {
   } catch { /* audio not available */ }
 }
 
-export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustment = null, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs", tindeq = null }) {
+export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustment = null, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs", tindeq = null, curveContext = null }) {
   // Wall-clock countdown, NOT tick-counted. The old version decremented
   // once per setInterval fire; background tabs / locked phones throttle
   // intervals to ≥1/min, so a 20s rest silently stretched to minutes —
@@ -754,6 +788,8 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
       </Card>
 
       {releaseBlocked && <Card><p>Your hold is saved. Rest starts after this check.</p><UnloadedZeroCheck tindeq={tindeq} /></Card>}
+
+      <RestHoldTimeChart context={curveContext} unit={unit} />
 
       {/* OVER-PULL WARNING (July 2026, per Nathan). Spring/anchor
           setups let the user pull whatever they like — and pulling
@@ -851,7 +887,7 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
   );
 }
 
-export function SwitchHandsView({ onReady, activeHand = "R" }) {
+export function SwitchHandsView({ onReady, activeHand = "R", curveContext = null, unit = 'lbs' }) {
   // Wall-clock countdown — see RestView for the rationale.
   const SWITCH_SECONDS = 10;
   const [remaining, setRemaining] = useState(SWITCH_SECONDS);
@@ -886,6 +922,7 @@ export function SwitchHandsView({ onReady, activeHand = "R" }) {
       <div style={{ fontSize: 80, fontWeight: 900, color: remaining > 3 ? C.green : C.orange, lineHeight: 1, marginBottom: 24 }}>
         {remaining}
       </div>
+      <RestHoldTimeChart context={curveContext} unit={unit} />
       <Btn onClick={() => {
         if (doneRef.current) return;
         doneRef.current = true;
@@ -903,7 +940,7 @@ export function SwitchHandsView({ onReady, activeHand = "R" }) {
 // use a same-hand clock. Both start from physical release, never mounting,
 // and reaching zero never starts a rep.
 export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
-  source = 'estimated_transition', setNumber = 2, fullSetBreak = false, onReady, onFinish, tindeq }) {
+  source = 'estimated_transition', setNumber = 2, fullSetBreak = false, onReady, onFinish, tindeq, curveContext = null, unit = 'lbs' }) {
   const [mountedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const [extraSeconds, setExtraSeconds] = useState(0);
@@ -935,6 +972,7 @@ export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
       {remaining === 0 && <p>Ready for set {setNumber} when you are.</p>}
       {releaseBlocked && <UnloadedZeroCheck tindeq={tindeq} />}
     </Card>
+    <RestHoldTimeChart context={curveContext} unit={unit} />
     <Btn onClick={() => finish(onReady)} disabled={releaseBlocked}
       style={{ width: '100%', marginBottom: 12, padding: '14px 0' }}>
       {remaining > 0 ? 'Start when ready' : `Start set ${setNumber}`}
@@ -1165,9 +1203,10 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
   // Explicit pre-pull selection; never infer a new target from sagging force.
   // The program prescription stays intact, while the chosen target controls
   // acquisition, averaging and force-loss detection for this attempt.
-  const [targetInput, setTargetInput] = useState('');
+  const [targetInput, setTargetInput] = useState(() => session.retryTargetKg > 0 ? String(toDisp(session.retryTargetKg, unit)) : '');
   const inputKg = fromDisp(Number(targetInput), unit);
-  const manualKg = targetInput.trim() && Number.isFinite(inputKg) && inputKg > 0 && inputKg < 200 ? inputKg : null;
+  const manualKg = session.retryTargetKg > 0 && targetInput === String(toDisp(session.retryTargetKg, unit))
+    ? session.retryTargetKg : targetInput.trim() && Number.isFinite(inputKg) && inputKg > 0 && inputKg < 200 ? inputKg : null;
   const targetKg = manualKg ?? suggestedKg;
   const chosenTargetRef = useRef(null);
   chosenTargetRef.current = manualKg;
@@ -1393,7 +1432,8 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
       </div>
       {interruptPrompt.show && (
         <InterruptPrompt
-          onContinue={() => { tindeq.continueCurrentRep?.(); interruptPrompt.dismiss(); }}
+          tindeq={tindeq}
+          onContinue={() => { if (tindeq.continueCurrentRep?.()) interruptPrompt.dismiss(); }}
           onInterrupted={() => { interruptPrompt.dismiss(); finishAttempt({ explicit: true }); }}
           onRedo={() => { interruptPrompt.dismiss(); redoRep(); }}
         />

@@ -30,6 +30,8 @@ import React from "react";
 import { isMeasuredSeconds, measuredSecondsOrBlank, parseRepsCount } from "../../model/workout-volume.js";
 import {
   copyModifierSelections,
+  QUICK_MODIFIERS,
+  modifierDefinitionsForSets,
   modifierSelectionSignature,
   modifierSelections,
   modifierValueOptions,
@@ -179,12 +181,18 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
       {ex.logTime ? "Enter reps and seconds to complete this set." : "Enter reps to complete this set."}
     </div>
   ) : null;
-  const setupModifiers = Array.isArray(ex.setupModifiers) ? ex.setupModifiers : [];
+  const [customModifierName, setCustomModifierName] = React.useState('');
+  const [openModifiers, setOpenModifiers] = React.useState({});
+  const setupModifiers = [...new Map([
+    ...(ex.availableModifiers || []), ...modifierDefinitionsForSets(setsData?.sets),
+    ...QUICK_MODIFIERS, ...(ex.setupModifiers || []),
+  ].map(definition => [definition.id, definition])).values()];
   const updateModifier = (set, index, modifier, value) => {
     const next = [...setsData.sets];
     const before = modifierSelectionSignature(set);
     let updated = setModifierSelection(set, modifier, value);
-    if (!updated.done && modifierSelectionSignature(updated) !== before) {
+    if (!updated.done && ex.setupModifiers?.some(definition => definition.id === modifier.id)
+        && modifierSelectionSignature(updated) !== before) {
       updated = {
         ...updated,
         ...(Object.hasOwn(updated, "weight") ? { weight: "" } : {}),
@@ -199,12 +207,16 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     onSetsChange({ sets: next });
   };
   const modifierControls = (set, index) => {
-    if (setupModifiers.length === 0) return null;
     const selected = modifierSelections(set);
     return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "3px 0 7px 44px" }}>
+      <div style={{ margin: "3px 0 7px 44px" }}>
+        <button type="button" style={{ color: C.muted, background: 'none', border: 0, padding: 0, fontSize: 12, cursor: 'pointer' }}
+          aria-expanded={openModifiers[index] ?? !!ex.setupModifiers?.length}
+          onClick={() => setOpenModifiers(old => ({ ...old, [index]: !(old[index] ?? !!ex.setupModifiers?.length) }))}>
+          Modify set {index + 1}{Object.keys(selected).length ? ` · ${Object.values(selected).map(s => s.name).join(', ')}` : ''}</button>
+        {(openModifiers[index] ?? !!ex.setupModifiers?.length) && <><div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 0' }}>
         {setupModifiers.map(modifier => (
-          <div key={modifier.id} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <div key={modifier.id} style={{ display: "inline-flex", flexWrap: "wrap", maxWidth: "100%", alignItems: "center", gap: 5 }}>
             <span style={{ color: C.muted, fontSize: 10 }}>{modifier.name}</span>
             {modifier.control === "bands" ? (
               <BandPicker
@@ -234,8 +246,40 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                 ))}
               </select>
             )}
+            {selected[modifier.id] && <label style={{ fontSize: 11 }}>Reps affected
+              <input type="number" min="1" placeholder="All" aria-label={`${modifier.name} affected reps for set ${index + 1}`}
+                value={selected[modifier.id].repCount || ''} style={{ ...inputStyle, width: 50 }}
+                onChange={event => {
+                  const modifiers = copyModifierSelections(set);
+                  const count = Number(event.target.value);
+                  if (event.target.value && (!Number.isInteger(count) || count < 1)) return;
+                  if (event.target.value) modifiers[modifier.id].repCount = count;
+                  else delete modifiers[modifier.id].repCount;
+                  const sets = [...setsData.sets]; sets[index] = { ...set, modifiers };
+                  onSetsChange({ sets });
+                }} />
+            </label>}
+            {selected[modifier.id] && ex.unilateral && <select aria-label={`${modifier.name} side for set ${index + 1}`}
+              value={selected[modifier.id].side || ''} onChange={event => {
+                const modifiers = copyModifierSelections(set);
+                if (event.target.value) modifiers[modifier.id].side = event.target.value;
+                else delete modifiers[modifier.id].side;
+                const sets = [...setsData.sets]; sets[index] = { ...set, modifiers }; onSetsChange({ sets });
+              }}><option value="">Both sides</option><option value="L">Left only</option><option value="R">Right only</option></select>}
           </div>
         ))}
+        <label style={{ fontSize: 11 }}>Custom modifier
+          <input aria-label={`Custom modifier for set ${index + 1}`} value={customModifierName}
+            onChange={event => setCustomModifierName(event.target.value)} placeholder="e.g. board press" />
+        </label>
+        <button type="button" disabled={!customModifierName.trim()} onClick={() => {
+          const name = customModifierName.trim();
+          const id = `modifier_custom_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+          updateModifier(set, index, { id, name, kind: 'setup', control: 'standard', options: [] }, 'on');
+          setCustomModifierName('');
+        }}>Add modifier</button>
+        </div>
+        <p style={{ fontSize: 11, color: C.muted }}>Today only unless you update the workout. A blank rep count means the whole set. Mixed or changed setups do not earn an unmodified load increase.</p></>}
       </div>
     );
   };

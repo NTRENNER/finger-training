@@ -864,7 +864,17 @@ export function useTindeq() {
   // adjustment. Forgive only that loss episode: the original clock, samples,
   // and average continue uninterrupted, while failure detection re-arms after
   // force has stabilized back in the working band.
-  const continueCurrentRep = useCallback(() => {
+  const canContinueNow = () => {
+    const automatic = adActiveRef.current;
+    return connected && !signalRecovering && !reconnectingRef.current
+      && !releaseCheckRef.current && !transportRef.current.interruption && !transportRef.current.disconnect_count
+      && lastPacketAtRef.current != null && Date.now() - lastPacketAtRef.current <= 1500
+      && (automatic || (measuringRef.current && !measurementInterruptedRef.current && !manualReleaseResultRef.current))
+      && latestKgRef.current > (automatic ? adReleaseKgRef.current : manualReleaseKgRef.current);
+  };
+  const canContinueCurrentRep = canContinueNow();
+  const continueCurrentRep = () => {
+    if (!canContinueNow()) return false;
     const detector = adActiveRef.current
       ? targetDetectorRef.current
       : measuringRef.current ? manualTargetDetectorRef.current : null;
@@ -875,7 +885,7 @@ export function useTindeq() {
     publishForceLoss(detector, observedTs, releaseTs);
     scheduleUiFlush();
     return true;
-  }, [publishForceLoss, scheduleUiFlush]);
+  };
 
   // Start auto-detect mode: Tindeq streams continuously, reps are detected by
   // force threshold crossings. onRepStart fires when a pull begins; onRepEnd
@@ -971,5 +981,5 @@ export function useTindeq() {
     if (ctrlRef.current) await writeCommand(CMD_STOP);
   }, [writeCommand, cancelReleaseWatch]);
 
-  return { connected, reconnecting, signalRecovering, force, peak, avgForce, bleError, battery, awaitingRelease, forceLoss, releaseCheckRequired, zeroing, zeroForNextRep, continueCurrentRep, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
+  return { connected, reconnecting, signalRecovering, force, peak, avgForce, bleError, battery, awaitingRelease, forceLoss, releaseCheckRequired, zeroing, zeroForNextRep, canContinueCurrentRep, continueCurrentRep, connect, startMeasuring, stopMeasuring, resetPeak, tare, targetKgRef, setAutoFailCallback, startAutoDetect, stopAutoDetect, endRepAndRequireRelease };
 }

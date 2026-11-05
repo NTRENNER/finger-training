@@ -212,7 +212,8 @@ export function sessionExerciseEst1RM(sets, bw, exDef) {
   const additive = isBodyweightAdditive(exDef);
   let best = 0;
   for (const s of sets) {
-    if (!s || !s.done) continue;
+    // Modified/assisted repetitions cannot establish an unmodified maximum.
+    if (!s || !s.done || modifierSelectionSignature(s)) continue;
     for (const side of sidePayloads(s)) {
       const reps = parseRepsCount(side.reps);
       if (reps <= 0) continue;

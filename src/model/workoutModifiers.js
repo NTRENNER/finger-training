@@ -2,6 +2,7 @@ export const MODIFIER_KINDS = [
   { id: "assistance", label: "Assistance" },
   { id: "resistance", label: "Resistance" },
   { id: "setup", label: "Setup" },
+  { id: "execution", label: "Execution" },
 ];
 
 export const MODIFIER_CONTROLS = [
@@ -87,6 +88,8 @@ export function modifierSelections(setOrSelections) {
       kind: MODIFIER_KINDS.some(item => item.id === selection.kind) ? selection.kind : "setup",
       value,
       valueLabel: cleanString(selection.valueLabel),
+      ...(Number.isInteger(selection.repCount) && selection.repCount > 0 ? { repCount: selection.repCount } : {}),
+      ...(['L', 'R'].includes(selection.side) ? { side: selection.side } : {}),
     };
   }
   return out;
@@ -126,16 +129,14 @@ export function setModifierSelection(set, definition, value) {
 export function modifierSelectionSignature(setOrSelections) {
   return Object.entries(modifierSelections(setOrSelections))
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([id, selection]) => `${id}=${selection.value}`)
+    .map(([id, selection]) => `${id}=${selection.value}${selection.repCount ? `@${selection.repCount}` : ""}${selection.side ? `:${selection.side}` : ""}`)
     .join("|");
 }
 
 export function modifierSelectionLabel(setOrSelections) {
   return Object.values(modifierSelections(setOrSelections))
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map(selection => selection.valueLabel
-      ? `${selection.name}: ${selection.valueLabel}`
-      : selection.name)
+    .map(selection => `${selection.valueLabel ? `${selection.name}: ${selection.valueLabel}` : selection.name}${selection.repCount ? ` (${selection.repCount} rep${selection.repCount === 1 ? '' : 's'})` : ''}${selection.side ? ` · ${selection.side}` : ''}`)
     .join(" · ");
 }
 
@@ -152,9 +153,33 @@ export function filterHistoryForModifierSetup(history, exerciseId, setOrSelectio
       ...session,
       exercises: {
         ...session.exercises,
-        [exerciseId]: { ...data, sets },
+        [exerciseId]: { ...data, sets,
+          modifierHistoryIncomplete: sets.length !== data.sets.length,
+        },
       },
     });
   }
   return out;
+}
+
+export const QUICK_MODIFIERS = [
+  { id: 'modifier_slingshot', name: 'Slingshot', kind: 'assistance', control: 'standard', options: [] },
+  { id: 'modifier_band_assistance', name: 'Band assistance', kind: 'assistance', control: 'bands', options: BAND_MODIFIER_OPTIONS },
+  { id: 'modifier_spotter', name: 'Spotter assistance', kind: 'assistance', control: 'standard', options: [] },
+  { id: 'modifier_partial', name: 'Partial range', kind: 'execution', control: 'standard', options: [] },
+  { id: 'modifier_pause', name: 'Paused reps', kind: 'execution', control: 'standard', options: [] },
+  { id: 'modifier_tempo', name: 'Tempo', kind: 'execution', control: 'standard', options: [] },
+];
+
+export function modifierDefinitionsForSets(sets = []) {
+  const definitions = new Map();
+  for (const set of sets) for (const selection of Object.values(modifierSelections(set))) {
+    const previous = definitions.get(selection.modifierId);
+    const options = previous?.options || [];
+    if (selection.valueLabel && !options.some(o => o.id === selection.value))
+      options.push({ id: selection.value, label: selection.valueLabel });
+    definitions.set(selection.modifierId, { id: selection.modifierId, name: selection.name,
+      kind: selection.kind, control: 'standard', options });
+  }
+  return [...definitions.values()];
 }

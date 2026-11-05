@@ -191,7 +191,7 @@ test("recovery activity leads into Potentiation Pulls and completes the warm-up"
   for (let pull = 0; pull < 2; pull += 1) {
     fireEvent.click(screen.getByRole("button", { name: "Start pull" }));
     fireEvent.click(screen.getByRole("button", { name: "Pull complete" }));
-    if (pull === 0) fireEvent.click(screen.getByRole("button", { name: "Skip rest" }));
+    expect(screen.queryByRole("timer", { name: "Potentiation rest" })).not.toBeInTheDocument();
   }
   fireEvent.click(screen.getByRole("button", { name: "Finish warm-up" }));
   expect(screen.getByText(/Warm-up complete/)).toBeInTheDocument();

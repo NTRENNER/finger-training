@@ -60,6 +60,7 @@ import { WorkoutEffort } from "./workout/WorkoutEffort.jsx";
 import { recommendSet, recommendSetCount, returnToTrainingPlan } from "../model/workout-progression.js";
 import {
   copyModifierSelections,
+  modifierDefinitionsForSets,
   filterHistoryForModifierSetup,
 } from "../model/workoutModifiers.js";
 import { holdTimeSeed } from "../model/workout-volume.js";
@@ -69,6 +70,7 @@ import { recommendNextWorkout } from "../model/supportTraining.js";
 import {
   learnedCustomExercise,
   sanitizeWorkoutProgram,
+  saveWorkoutTemplate,
   strengthWorkoutIds,
   withLearnedCustomExercises,
   workoutProgramCatalog,
@@ -165,6 +167,7 @@ export function WorkoutTab({
   // signaled by index === liveExercises.length.
   const [pickerState, setPickerState] = useState(null);
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [updateTemplate, setUpdateTemplate] = useState(false);
 
   useEffect(() => {
     onTrainingStateChange?.(sessionActive);
@@ -288,7 +291,7 @@ export function WorkoutTab({
       ? findLastSessionFor(wLog, activeId, ex.id)
       : null;
     const latestDoneSets = latestExerciseSession?.exercises?.[ex.id]?.sets || [];
-    const defaultModifiers = copyModifierSelections(latestDoneSets[0]);
+    const defaultModifiers = copyModifierSelections(ex.templateSets?.[0]);
     const progressionLog = ex.setupModifiers?.length
       ? filterHistoryForModifierSetup(wLog, ex.id, defaultModifiers)
       : wLog;
@@ -300,16 +303,16 @@ export function WorkoutTab({
     // they're maintenance-dosed by design (no set accumulation).
     const isWeightLogged = !ex.circlesOnly && !ex.logBand && !ex.logVariant;
     const ladder = isWeightLogged
-      ? recommendSetCount(progressionLog, ex, ex.sets || 1, { referenceDate: today() })
+      ? recommendSetCount(progressionLog, ex, ex.sets || 1, { referenceDate: today(), unit })
       : null;
     const setCount = ladder ? ladder.sets : (ex.sets || 1);
     const sets = Array.from({ length: setCount }, (_, i) => {
-      const source = latestDoneSets[i] ?? latestDoneSets.at(-1);
+      const source = ex.templateSets?.[i] ?? ex.templateSets?.at(-1);
       const setProgressionLog = ex.setupModifiers?.length
         ? filterHistoryForModifierSetup(wLog, ex.id, source)
         : progressionLog;
       const setLadder = isWeightLogged
-        ? recommendSetCount(setProgressionLog, ex, ex.sets || 1, { referenceDate: today() })
+        ? recommendSetCount(setProgressionLog, ex, ex.sets || 1, { referenceDate: today(), unit })
         : ladder;
       const withModifiers = set => {
         const modifiers = copyModifierSelections(source);
@@ -402,13 +405,19 @@ export function WorkoutTab({
 
   const seedExercise = ex => {
     const data = seedExerciseData(ex);
+    if (data.sets && ex.templateSets?.length) data.sets = data.sets.map((set, index) => {
+      const template = ex.templateSets[Math.min(index, ex.templateSets.length - 1)];
+      const earnedReps = !ex.circlesOnly && !ex.logBand && !ex.logVariant
+        ? Object.fromEntries(['reps', 'leftReps', 'rightReps'].filter(key => set[key] != null).map(key => [key, set[key]])) : {};
+      return { ...set, ...template, ...earnedReps, done: false };
+    });
     if (!data.sets) return data;
     const comparableLog = ex.setupModifiers?.length
       ? filterHistoryForModifierSetup(wLog, ex.id, data.sets[0])
       : wLog;
     const returnPlan = returnToTrainingPlan(comparableLog, ex, ex.sets || 1, today());
     if (returnPlan) data.sets = data.sets.slice(0, returnPlan.sets);
-    const plan = recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today() });
+    const plan = recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today(), unit });
     return { ...data, prescription: { version: 1, date: today(),
       sets: data.sets.map(({ done, ...target }) => ({ ...target })),
       progressionMode: plan.mode,
@@ -429,8 +438,10 @@ export function WorkoutTab({
       seed[ex.id] = seedExercise(ex);
     }
     setSessionData(seed);
-    setLiveExercises(activeWorkout.exercises);
+    setLiveExercises(activeWorkout.exercises.map(ex => ({ ...ex, availableModifiers: modifierDefinitionsForSets(
+      wLog.flatMap(s => s.exercises?.[ex.id]?.sets || [])) })));
     setSessionNotes("");
+    setUpdateTemplate(false);
     setSessionActive(true);
   };
 
@@ -497,6 +508,7 @@ export function WorkoutTab({
     const nextLog = [...freshLog, session];
     saveLS(LS_WORKOUT_LOG_KEY, nextLog);
     onSessionSaved?.(session);
+    if (updateTemplate) updateProgram(saveWorkoutTemplate(program, activeId, liveExercises, sessionData));
     setSessionActive(false);
     setSessionData({});
     setSessionNotes("");
@@ -648,6 +660,9 @@ export function WorkoutTab({
             >Cancel</button>
           </div>
 
+          <p style={{ color: C.muted, fontSize: 13 }}>Changes apply to today only. Completed work can earn your next progression.</p>
+          <label style={{ display: 'block', marginBottom: 16 }}><input type="checkbox" checked={updateTemplate}
+            onChange={event => setUpdateTemplate(event.target.checked)} /> Update Workout {activeWorkout.shortName} for next time (exercises, set targets and modifiers)</label>
           <Card>
             {liveExercises.map((ex, i) => {
               const last = i === liveExercises.length - 1;
@@ -689,7 +704,7 @@ export function WorkoutTab({
                   ? filterHistoryForModifierSetup(wLog, ex.id, exData.sets?.[0])
                   : wLog;
                 const plan = (!ex.circlesOnly && !ex.logBand && !ex.logVariant)
-                  ? recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today() })
+                  ? recommendSetCount(comparableLog, ex, ex.sets || 1, { referenceDate: today(), unit })
                   : null;
                 const recommendations = ex.logVariant ? [] : Array.from(
                   { length: (exData.sets?.length || ex.sets || 1) },
@@ -698,7 +713,7 @@ export function WorkoutTab({
                       ? filterHistoryForModifierSetup(wLog, ex.id, exData.sets?.[idx])
                       : comparableLog;
                     const setPlan = (!ex.circlesOnly && !ex.logBand && !ex.logVariant)
-                      ? recommendSetCount(setLog, ex, ex.sets || 1, { referenceDate: today() })
+                      ? recommendSetCount(setLog, ex, ex.sets || 1, { referenceDate: today(), unit })
                       : plan;
                     return recommendSet(setLog, ex, activeId, idx, null, setPlan);
                   }
@@ -876,9 +891,7 @@ export function WorkoutTab({
                     {countdownLabel}{wtr != null ? ` · ${wtr}w to trip` : ""}
                   </div>}
                 </div>
-                <div style={{ fontSize: 15, color: C.muted, marginBottom: 16, lineHeight: 1.5 }}>
-                  {activeWorkout.purpose}
-                </div>
+
                 {activeWorkout.exercises.length === 0 ? (
                   <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginBottom: 12 }}>
                     {activeId === "REST"

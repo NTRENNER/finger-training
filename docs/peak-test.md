@@ -144,3 +144,15 @@ References expose instantaneousKg, sustainedKg, capKg and capBasis. The overload
 ceiling uses the larger measured force, while the base prescription uses capKg.
 Grip, hand, strictly-before-date replay boundaries and recent/historical fallback
 remain explicit. Historical records and two-second PRs are never rewritten.
+
+## Grouped rapid-force warm-up pulls
+
+Potentiation Pulls now finish both reps on the day's first hand, then both on
+the other hand. Same-hand reps retain a 10-second rest; switching
+hands has no extra timed rest and shows an explicit hand cue. Release detection,
+retry behavior and recording exclusions are unchanged. An equipment interruption
+does not consume a rep or change hands. Saved rapid-force rows carry
+`hand_sequence: grouped` and the within-hand position, so the changed ordering
+is visible in measurement provenance. Existing records are not rewritten. These
+submaximal rapid-force pulls remain distinct from the optional maximal Peak
+Test, which keeps its own alternating-hand/60-second protocol.

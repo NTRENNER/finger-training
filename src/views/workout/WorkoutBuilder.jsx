@@ -17,9 +17,9 @@ import {
 import { ExercisePicker } from "./ExercisePicker.jsx";
 
 const TEMPLATE_TABS = [
-  { id: "A", label: "Strength A" },
-  { id: "C", label: "Strength B" },
-  { id: "S3", label: "Strength C" },
+  { id: "A", label: "Workout A" },
+  { id: "C", label: "Workout B" },
+  { id: "S3", label: "Workout C" },
 ];
 
 const fieldStyle = {
@@ -176,7 +176,7 @@ export function WorkoutBuilder({ program: incoming, workouts, catalog, onChange,
           <div className="builder-summary-row">
             <div>
               <div className="builder-workout-name">{selectedWorkout?.name}</div>
-              <div className="builder-workout-purpose">{selectedWorkout?.purpose}</div>
+
             </div>
             <button type="button" className="text-button" onClick={resetTemplate}>Reset</button>
           </div>

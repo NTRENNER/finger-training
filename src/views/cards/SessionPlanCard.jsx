@@ -637,7 +637,7 @@ export function SessionPlanCard({
     if (curveWhy) detailParts.push(curveWhy);
   }
   if (rec.adaptBoost != null && rec.adaptBoost < 0.85 && !rec.coverageSnap) {
-    detailParts.push("you're at or above the modeled curve everywhere — picked on staleness alone");
+    detailParts.push("measurements near the selected duration are at or above its fitted curve; other scoring inputs also influenced this choice");
   }
   if (rec.staleStatus === "stale") {
     detailParts.push(`${rec.zone.replace(/_/g, " ")} zone is past its detraining window`);
@@ -651,7 +651,7 @@ export function SessionPlanCard({
     detailParts.push("similar durations were trained recently");
   }
   if (rec.confidence != null && rec.confidence < 0.5) {
-    detailParts.push("limited repeat evidence here — comparable sessions will strengthen confidence");
+    detailParts.push("limited repeat evidence at this duration");
   }
   if (rec.focus != null && rec.focus !== 1.0 && rec.climbingFocus && rec.climbingFocus !== "balanced") {
     const fPct = Math.round((rec.focus - 1) * 100);
@@ -666,7 +666,7 @@ export function SessionPlanCard({
   const pickIsShort = !rec.pilot && activeT != null && activeT <= FRESH_TEST_SHORT_T_MAX;
   if (pickIsShort) {
     if (cookedSuggestion && cookedSuggestion.todayFatigue != null && cookedSuggestion.cooked >= 4) {
-      detailParts.push("⚠️ you've climbed today — a max effort now will read low");
+      detailParts.push("Climbing is logged today; a peak measurement may reflect that earlier work");
     } else {
       detailParts.push("do this fresh — before climbing — so it anchors the curve's top end honestly");
     }
@@ -901,6 +901,9 @@ export function SessionPlanCard({
                 {recCfg.emoji} {recCfg.label}
               </div>
             </div>
+            {rec.pilot && <p style={{ color: C.muted, fontSize: 12, margin: '0 0 12px' }}>
+              The pilot sequence selects this zone. Selecting a gripper does not select its oldest recorded domain; you can choose another zone below.
+            </p>}
             <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
               <div style={{ flex: 1, textAlign: "center" }}>
                 <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Target</div>

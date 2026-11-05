@@ -51,7 +51,7 @@ describe("assembleReview", () => {
 
   test("red recovery → deload headline + guidance concern (when no wins)", () => {
     const r = assembleReview(makeSignals({ recovery: { level: "red", label: "Deload recommended", guidanceAction: "This week: limit finger training to 1 session." } }));
-    expect(r.headline).toMatch(/back off|deload/i);
+    expect(r.headline).toBe("Repeated rep-2 comparisons were below baseline.");
     const c = r.points.find(p => p.kind === "concern");
     expect(c.text).toMatch(/Deload recommended/);
     expect(c.text).toMatch(/limit finger training/);
@@ -60,7 +60,7 @@ describe("assembleReview", () => {
   test("yellow recovery → softening headline, the measured claim, no advice", () => {
     const why = "Rep 2 recovered less than expected after the rest on each of your last 2 comparable Crusher sessions.";
     const r = assembleReview(makeSignals({ recovery: { level: "yellow", label: "Recovery softening", guidanceAction: null, why } }));
-    expect(r.headline).toBe("Solid week; recovery is softening.");
+    expect(r.headline).toBe("Recent rep-2 comparisons were below baseline.");
     const concern = r.points.find(p => p.kind === "concern").text;
     expect(concern).toBe(`Recovery softening — ${why}`);
     expect(concern).not.toMatch(/consider|reassess|how you feel|until.*green/i);
@@ -68,7 +68,7 @@ describe("assembleReview", () => {
 
   test("stale grip surfaces as a concern", () => {
     const r = assembleReview(makeSignals({ finger: { daysThisWeek: 3, daysPerWeekBaseline: 3, staleGrips: [{ grip: "Prime", days: 20 }] } }));
-    const c = r.points.find(p => /Prime has gone quiet/i.test(p.text));
+    const c = r.points.find(p => /Last recorded Prime training/i.test(p.text));
     expect(c).toBeTruthy();
     expect(c.text).toMatch(/20 days/);
   });

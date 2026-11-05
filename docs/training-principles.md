@@ -23,6 +23,28 @@ load reduction is not proof of lost physiological capacity. See
 
 ## Support workouts
 
+The strength days display as Workout A, B and C, retaining their historical
+storage IDs. In Strength block mode, progressing weight-tracked strength work
+starts with three sets, then four at the same load. After four completed target
+sets, return to three and add 5 lb for upper-body lifts or 10 lb for larger
+lower-body lifts (the equivalent increment in kg). Discrete equipment keeps its
+available-load gate. Maintenance, technique, power and return-phase rules remain
+separate. Bench participates in strength progression during the strength block.
+
+Session edits apply to today only unless the athlete selects the template-update
+option. Completed comparable extra work can earn progression; it does not silently
+add exercises to the next workout. The explicit update stores exercise membership,
+set/rep targets and modifiers; observed loads still come from completed history.
+Frozen historical prescriptions and actual sets remain distinct.
+
+Every set can record assistance or an execution modifier, including a custom
+label, a count of affected reps and an optional unilateral side. A blank count
+means the entire set. A modified rep is never silently treated as unmodified
+completion. Changed or mixed setups block advancement; whole-set matching setups
+can progress against their own explicitly saved target. Modified sets remain
+volume but cannot establish the unmodified estimated 1RM. No assistance-to-load
+conversion is inferred.
+
 Save the original exercise prescription alongside completed sets and optional
 exercise effort (could do more / about right / at my limit). Subsequent edits to
 actual sets never rewrite that snapshot. Only completed sets seed future loads.
@@ -186,3 +208,39 @@ New live-model research snapshots use `first-session-openers-v3`; new Chaos
 predictions use version 2 so comparisons do not pool them with older fits.
 Existing descriptive/context-weighted trend candidates keep their explicit
 later-session policy for comparison; they do not supply live prescriptions.
+
+## Analysis and the selected finger protocol
+
+Completed Prime, Micro and Crusher reps continue immediately. An optional
+“Redo last rep” action is available during rest, hand changes and completion;
+there is no confirmation prompt after each rep. Redo reopens the same hand,
+set and rep slot, including any explicit target override. The disputed result
+is immediately marked invalid while retaining its measured activity. A retry
+replaces the same saved ID and retains prior attempts as observed workload;
+it must not manufacture a fresh opener or clean recovery comparison. Mixed
+sessions and the separate Peak Test retain their own existing flows.
+
+A confirmed force-loss endpoint does not mean recording has stopped. While
+the original recording remains active and force stays above release, offer
+Continue with the observed sample-time timer and the detected hold endpoint
+shown separately. Continue forgives that adjustment in the same trace; it
+does not create a new rep or restart the clock. Release, stale samples,
+disconnects and interrupted transport block continuation. Existing release
+confirmation and the missing-release safety timeout remain in force. Completed
+records use the optional redo path instead. Retry targets retain their exact
+stored numeric value in either display unit until explicitly edited.
+
+Rest shows the same actual, estimated and previous-session hold-time chart
+as work, scoped to the current grip, hand and set. Missing previous data and
+unsupported mixed-duration comparisons are stated explicitly.
+
+Recorded target dates describe history; they are not promises about the next
+workout. Analysis must not claim that picking a gripper automatically queues
+its oldest target domain. The continuous scorer weighs several signals; the
+active emphasis pilot instead follows its per-grip cycle, with manual zone
+choice still available. Display the active protocol alongside any dated gap.
+Max-strength measurements use the separate Peak Test policy and must not be
+flagged as overdue recurring five-second training. The long-end pilot does not
+schedule max-strength holds in its cycle, so do not promise automatic maintenance
+of that domain during the block. Changing that protocol needs an explicit
+programming decision, not a reassuring coaching sentence.

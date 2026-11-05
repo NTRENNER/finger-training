@@ -7,6 +7,7 @@ import { parseRepsCount, parseSeconds } from "./workout-volume.js";
 import {
   createModifierDefinition,
   sanitizeModifierDefinition,
+  copyModifierSelections,
 } from "./workoutModifiers.js";
 
 export { createModifierDefinition };
@@ -63,6 +64,7 @@ export function defaultWorkoutProgram() {
     customExercises: [],
     modifierDefinitions: [],
     exerciseModifierIds: {},
+    templateDefaults: {},
   };
 }
 
@@ -235,7 +237,53 @@ export function sanitizeWorkoutProgram(raw) {
     customExercises,
     modifierDefinitions,
     exerciseModifierIds,
+    templateDefaults: sanitizeTemplateDefaults(raw.templateDefaults, knownIds),
   };
+}
+
+// Session edits stay local unless the athlete explicitly saves this template.
+function sanitizeTemplateDefaults(raw, knownIds) {
+  const out = {};
+  for (const templateId of TEMPLATE_IDS) {
+    const exercises = {};
+    for (const [id, value] of Object.entries(raw?.[templateId] || {})) {
+      if (!knownIds.has(id) || !Array.isArray(value?.sets)) continue;
+      const sets = value.sets.slice(0, 20).map(set => ({
+        ...Object.fromEntries(['reps', 'leftReps', 'rightReps', 'seconds', 'leftSeconds', 'rightSeconds', 'variant', 'band', 'leftBand', 'rightBand']
+          .filter(key => typeof set?.[key] === 'string').map(key => [key, set[key]])),
+        ...Object.fromEntries(['band', 'leftBand', 'rightBand'].filter(key => Array.isArray(set?.[key]))
+          .map(key => [key, set[key].filter(value => typeof value === 'string')])),
+        modifiers: copyModifierSelections(set),
+      }));
+      if (sets.length) exercises[id] = { sets };
+    }
+    if (Object.keys(exercises).length) out[templateId] = exercises;
+  }
+  return out;
+}
+
+export function saveWorkoutTemplate(programLike, templateId, exercises, sessionData) {
+  const program = sanitizeWorkoutProgram(programLike);
+  if (!TEMPLATE_IDS.includes(templateId)) return program;
+  const custom = new Map(program.customExercises.map(ex => [ex.id, ex]));
+  for (const ex of exercises) if (ex.custom) custom.set(ex.id, ex);
+  return sanitizeWorkoutProgram({ ...program,
+    customExercises: [...custom.values()],
+    templates: { ...program.templates, [templateId]: exercises.map(ex => ex.id) },
+    templateDefaults: { ...program.templateDefaults, [templateId]: Object.fromEntries(exercises
+      .filter(ex => sessionData[ex.id]?.sets?.length)
+      .map(ex => [ex.id, { sets: sessionData[ex.id].sets }])) },
+  });
+}
+
+// Discrete equipment retains its available-load ladder. Barbell increments
+// use the agreed upper/lower-body defaults, independently of display units.
+const LOWER_BODY_LIFTS = new Set(['rdl', 'gobletSquat', 'rfess', 'splitSquat', 'stepUp', 'goodMorning']);
+export function strengthExercise(ex) {
+  if (ex?.id === 'benchPress') ex = { ...ex, progressionPolicy: undefined };
+  if (!ex || ex.type !== 'S' || !ex.logWeight || ex.circlesOnly || ex.logBand || ex.logVariant || ex.progressionPolicy) return ex;
+  return { ...ex, sets: 3, progressionPolicy: 'strength', loadIncrementLbs: LOWER_BODY_LIFTS.has(ex.id) || ex.movementCategories?.includes('legs') ? 10 : 5,
+    prescription: `3–4 × ${ex.reps}` };
 }
 
 function withSetupModifiers(exercise, program) {
@@ -269,7 +317,14 @@ export function workoutProgramWorkouts(programLike) {
     resolved[templateId] = {
       ...base,
       exercises: program.templates[templateId]
-        .map(id => withSetupModifiers(native[id] || catalog[id], program))
+        .map(id => {
+          const defaults = program.templateDefaults?.[templateId]?.[id];
+          const nativeExercise = withSetupModifiers(native[id] || catalog[id], program);
+          const ex = program.mode === 'block' ? strengthExercise(nativeExercise) : nativeExercise;
+          return ex && defaults ? { ...ex, sets: defaults.sets.length,
+            reps: defaults.sets[0].reps || ex.reps, templateSets: defaults.sets,
+            prescription: formatPrescription(defaults.sets.length, defaults.sets[0].reps || ex.reps) } : ex;
+        })
         .filter(Boolean),
     };
   }

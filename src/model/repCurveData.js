@@ -19,6 +19,23 @@ import { predictRepTimes, getPhysModel } from "./fatigue.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 import { zoneOf } from "./zones.js";
 import { effectiveLoad } from "./load.js";
+import { isCapacityEvidenceRep } from './forceRecording.js';
+
+export function isComparableHold(rep) {
+  const recording = rep?.force_recording;
+  return isCapacityEvidenceRep(rep) && Number(rep.actual_time_s) > 0
+    && !['interrupted', 'equipment_interruption', 'target_not_reached'].includes(rep.end_reason)
+    && !recording?.redo_pending && !recording?.redo_attempts?.length
+    && recording?.recording_stop_reason !== 'release_not_observed';
+}
+
+function sessionStart(rep) {
+  for (const value of [rep.session_started_at, rep.rep_timing?.started_at_ms, rep.created_at]) {
+    const time = typeof value === 'number' ? value : Date.parse(value);
+    if (Number.isFinite(time)) return time;
+  }
+  return null;
+}
 
 // How far out to run the recovery model to read the asymptote. With
 // the default time constants the system converges within ~20-30 reps;
@@ -29,8 +46,14 @@ const ASYMPTOTE_REPS = 50;
 // exists, otherwise falls back to the population default. Pure
 // wrapper around computePersonalRecoveryTausForGrip + getPhysModel.
 export function buildPhysModel(history, hand, grip, opts = {}) {
-  const base = getPhysModel(history, hand, grip, opts);
-  const personal = grip ? computePersonalRecoveryTausForGrip(history, grip) : null;
+  // Retain ordering/preceding work: filtering an invalid opener out could
+  // promote its later rep into fresh evidence in downstream fitting.
+  const evidence = (history || []).map(rep => isComparableHold(rep) ? rep : {
+    ...rep, failure_valid: false,
+    force_recording: {...rep.force_recording, capacity_eligible:false, recovery_eligible:false},
+  });
+  const base = getPhysModel(evidence, hand, grip, opts);
+  const personal = grip ? computePersonalRecoveryTausForGrip(evidence, grip) : null;
   // computePersonalRecoveryTausForGrip returns flat {fast, medium,
   // slow, nSets} — there is no nested .tauR. The original guard here
   // checked `!personal.tauR`, which was always true, so every
@@ -70,12 +93,12 @@ export function buildActualSeries(reps) {
     return (a.rep_num ?? 0) - (b.rep_num ?? 0);
   });
   return sorted
-    .filter(r => Number(r.actual_time_s) > 0)
     .map((r, i) => ({
-      rep: i + 1,
-      t: Number(r.actual_time_s),
+      rep: Number(r.rep_num) > 0 ? Number(r.rep_num) : i + 1,
+      t: Number(r.actual_time_s) > 0 ? Number(r.actual_time_s) : null,
       weightKg: effectiveLoad(r) || null,
       date: r.date || null,
+      ...(!isComparableHold(r) && Number(r.actual_time_s) > 0 ? {activityOnly:true} : {}),
     }));
 }
 
@@ -98,6 +121,7 @@ export function findPrevSessionReps(history, { grip, hand, beforeDate, targetDur
   // specifically — fall back to grip-only match.
   const byKey = new Map();
   for (const r of history) {
+    if (!isComparableHold(r)) continue;
     if (r.force_recording?.session_protocol?.id === 'whole_curve_beta') continue;
     // An optional/Volume second set is a separate fatigued sequence. Never
     // flatten it into the first set or substitute it for a fresh comparison.
@@ -113,17 +137,25 @@ export function findPrevSessionReps(history, { grip, hand, beforeDate, targetDur
   }
   if (byKey.size === 0) return null;
 
-  // Most recent session by max(date) across its reps.
+  // Same-day sessions need measured/session timestamps, never input order.
   let best = null;
   let bestDate = null;
+  let bestStart = null;
+  let ambiguous = false;
   for (const reps of byKey.values()) {
     const d = reps.reduce((mx, r) => (r.date > mx ? r.date : mx), "");
-    if (!bestDate || d > bestDate) {
+    const starts = reps.map(sessionStart).filter(Number.isFinite);
+    const start = starts.length ? Math.min(...starts) : null;
+    if (!bestDate || d > bestDate || (d === bestDate && start != null && bestStart != null && start > bestStart)) {
       bestDate = d;
+      bestStart = start;
       best = reps;
+      ambiguous = false;
+    } else if (d === bestDate && (start == null || bestStart == null || start === bestStart)) {
+      ambiguous = true;
     }
   }
-  return best;
+  return ambiguous ? null : best;
 }
 
 // Run the recovery model out to N=ASYMPTOTE_REPS and return the
@@ -154,16 +186,19 @@ export function buildRepCurveBundle({
   actualReps = [], targetDuration, beforeDate, physModel, setNum = 1, excludeSessionId = null,
 }) {
   const model = physModel || buildPhysModel(history, hand, grip);
+  const opener = actualReps.find(rep => Number(rep.rep_num ?? 1) === 1);
+  const seed = actualReps.length
+    ? (isComparableHold(opener) ? opener.actual_time_s : null) : firstRepTime;
   return {
     forecasted: buildForecastSeries({
-      numReps, firstRepTime, restSeconds, physModel: model,
+      numReps, firstRepTime:seed, restSeconds, physModel: model,
     }),
     actual: buildActualSeries(actualReps),
     prevSession: ((reps) => reps ? buildActualSeries(reps) : [])(
       findPrevSessionReps(history, { grip, hand, beforeDate, targetDuration, setNum, excludeSessionId })
     ),
     asymptoticHold: computeAsymptoticHold({
-      firstRepTime, restSeconds, physModel: model,
+      firstRepTime:seed, restSeconds, physModel: model,
     }),
     targetS: targetDuration,
   };

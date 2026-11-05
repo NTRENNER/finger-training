@@ -1,7 +1,9 @@
 import React from 'react';
-import { act, render, fireEvent, screen, waitFor } from '@testing-library/react';
-import { AutoRepSessionView, ActiveSessionView, RestView, SessionSummaryView } from '../ActiveSessionViews.jsx';
-jest.mock('../cards/RepCurveChart.jsx', () => ({ RepCurveChart: () => null }));
+import { act, render, renderHook, fireEvent, screen, waitFor } from '@testing-library/react';
+import { useSessionRunner } from '../../hooks/useSessionRunner.js';
+import { AutoRepSessionView, ActiveSessionView, RestView, SwitchHandsView, BetweenSetRestView, SessionSummaryView } from '../ActiveSessionViews.jsx';
+jest.mock('../../lib/sync.js',()=>({pushDailyState:jest.fn()}));
+jest.mock('../cards/RepCurveChart.jsx', () => ({ RepCurveChart: props => <div data-testid="hold-time-chart">{JSON.stringify(props)}</div> }));
 jest.mock('../cards/RecoveryChart.jsx', () => ({ RecoveryChart: () => null }));
 jest.mock('../cards/LiveForceCard.jsx', () => ({ BigTimer: () => null, ForceGauge: () => <div data-testid="force-gauge" /> }));
 const config = { grip: 'Micro', hand: 'L', repsPerSet: 4, targetTime: 40, restTime: 20 };
@@ -190,4 +192,155 @@ test('rest shows pull time with compact recorded rest and force variation detail
   const detail = screen.getByText('Rest: 21.4s · Force variation: 3%');
   expect(detail).toBeVisible();
   expect(screen.queryByText('Details')).not.toBeInTheDocument();
+});
+
+
+test.each(['Prime','Crusher','Micro'])('%s completes directly without a Keep result or redo prompt',grip=>{
+  let start,end;
+  const onRepDone=jest.fn();
+  const tindeq={targetKgRef:{},connected:true,startAutoDetect:(a,b)=>{start=a;end=b;},stopAutoDetect:jest.fn()};
+  render(<AutoRepSessionView session={{...session,config:{...config,grip}}} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={tindeq} />);
+  act(()=>start());
+  act(()=>end({actualTime:45,avgForce:2.8,failureValid:true}));
+  expect(onRepDone).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('button',{name:'Keep result'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading',{name:'Review rep'})).not.toBeInTheDocument();
+});
+
+test('the optional last-rep action requests release/zero only when the runner accepts it',()=>{
+  const {LastRepRedo}=require('../ActiveSessionViews.jsx');
+  const endRepAndRequireRelease=jest.fn();
+  const onRedo=jest.fn(()=>true);
+  render(<LastRepRedo onRedo={onRedo} tindeq={{endRepAndRequireRelease}} />);
+  fireEvent.click(screen.getByRole('button',{name:'Redo last rep'}));
+  expect(endRepAndRequireRelease).toHaveBeenCalledWith({requireZero:true});
+});
+
+test('sensor completion then disconnect and redo preserves the explicit target in manual fallback',()=>{
+  const history=[];
+  const addReps=jest.fn(rows=>history.push(...rows));
+  const updateRep=jest.fn((rep,updates)=>Object.assign(history.find(row=>row.id===rep.id),updates));
+  const {result,rerender}=renderHook(({connected})=>useSessionRunner({history,addReps,updateRep,tindeqConnected:connected}),{initialProps:{connected:true}});
+  act(()=>result.current.startSession({grip:'Prime',hand:'L',targetTime:160,repsPerSet:4,restTime:20,plannedLoadByHand:{L:2.8}}));
+  let start,end;
+  const sensor={connected:true,targetKgRef:{},startAutoDetect:(a,b)=>{start=a;end=b;},stopAutoDetect:jest.fn()};
+  const sessionProps=()=>({...result.current,config:result.current.config});
+  const {unmount}=render(<AutoRepSessionView session={sessionProps()} unit="kg" tindeq={sensor} onRepDone={result.current.handleRepDone} onAbort={jest.fn()} />);
+  fireEvent.change(screen.getByRole('spinbutton'),{target:{value:'3'}});
+  act(()=>start());
+  act(()=>end({actualTime:1.3,avgForce:2.8,failureValid:true}));
+  expect(history[0].manual_load_kg).toBe(3);
+  unmount();
+  rerender({connected:false});
+  act(()=>result.current.handleRedoLastRep());
+  const onRepDone=jest.fn(result.current.handleRepDone);
+  render(<ActiveSessionView session={sessionProps()} unit="kg" tindeq={{connected:false,targetKgRef:{},setAutoFailCallback:jest.fn()}} onRepDone={onRepDone} onAbort={jest.fn()} />);
+  expect(screen.getByPlaceholderText('Override kg…')).toHaveValue(3);
+  fireEvent.click(screen.getByRole('button',{name:/Start Rep/}));
+  for(let i=0;i<4;i++)act(()=>jest.advanceTimersByTime(1000));
+  fireEvent.click(screen.getByRole('button',{name:/Done — muscular failure/}));
+  expect(onRepDone).toHaveBeenCalledWith(expect.objectContaining({manualLoadKg:3}));
+  expect(history).toHaveLength(1);
+  expect(history[0].manual_load_kg).toBe(3);
+});
+
+test.each(['Prime','Crusher','Micro'])('%s confirmed failure with elevated force keeps observed timer and Continue available',grip=>{
+  let start;
+  const continueCurrentRep=jest.fn(()=>true);
+  const onRepDone=jest.fn();
+  const tindeq={connected:true,targetKgRef:{},force:2.8,canContinueCurrentRep:true,
+    forceLoss:{status:'complete',pullStartTs:1000,observedTs:9000,endTs:3000},
+    startAutoDetect:a=>{start=a;},stopAutoDetect:jest.fn(),continueCurrentRep};
+  const {rerender}=render(<AutoRepSessionView session={{...session,config:{...config,grip}}} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={tindeq} />);
+  act(()=>start());
+  act(()=>jest.advanceTimersByTime(2100));
+  expect(screen.getByRole('dialog')).toHaveTextContent('8.0s');
+  expect(screen.getByRole('dialog')).toHaveTextContent('Detected hold: 2.0s');
+  fireEvent.click(screen.getByRole('button',{name:'Continue'}));
+  expect(continueCurrentRep).toHaveBeenCalledTimes(1);
+  expect(onRepDone).not.toHaveBeenCalled();
+  act(()=>jest.advanceTimersByTime(2100));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  rerender(<AutoRepSessionView session={{...session,config:{...config,grip}}} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={{...tindeq,canContinueCurrentRep:false,force:0}} />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('signal loss disables Continue and never invents observed seconds',()=>{
+  let start;
+  const continueCurrentRep=jest.fn();
+  const tindeq={connected:true,signalRecovering:true,canContinueCurrentRep:false,targetKgRef:{},
+    forceLoss:{status:'complete',pullStartTs:1000,observedTs:5000,endTs:3000},
+    startAutoDetect:a=>{start=a;},stopAutoDetect:jest.fn(),continueCurrentRep};
+  render(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()} tindeq={tindeq} />);
+  act(()=>start());
+  act(()=>jest.advanceTimersByTime(10000));
+  expect(screen.getByRole('dialog')).toHaveTextContent('4.0s');
+  expect(screen.getByRole('button',{name:'Continue'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'Continue'}));
+  expect(continueCurrentRep).not.toHaveBeenCalled();
+});
+
+test.each(['kg','lbs'])('fractional retry target stays exact in automatic and manual %s flow until edited',unit=>{
+  let start,end;
+  const onRepDone=jest.fn();
+  const retrySession={...session,sessionId:`fractional-${unit}`,retryTargetKg:3.03};
+  const sensor={connected:true,targetKgRef:{},startAutoDetect:(a,b)=>{start=a;end=b;},stopAutoDetect:jest.fn()};
+  const {unmount}=render(<AutoRepSessionView session={retrySession} unit={unit} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={sensor} />);
+  expect(sensor.targetKgRef.current).toBe(3.03);
+  act(()=>start());
+  act(()=>end({actualTime:10,avgForce:3.03}));
+  expect(onRepDone).toHaveBeenLastCalledWith(expect.objectContaining({manualLoadKg:3.03}));
+  unmount();
+  render(<ActiveSessionView session={retrySession} unit={unit} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={{connected:false,targetKgRef:{},setAutoFailCallback:jest.fn()}} />);
+  fireEvent.click(screen.getByRole('button',{name:/Start Rep/}));
+  for(let i=0;i<4;i++)act(()=>jest.advanceTimersByTime(1000));
+  fireEvent.click(screen.getByRole('button',{name:/Done — muscular failure/}));
+  expect(onRepDone).toHaveBeenLastCalledWith(expect.objectContaining({manualLoadKg:3.03}));
+});
+
+test('rest chart receives actual, estimated and previous holds for the current hand and set',()=>{
+  const prior={session_id:'prior',date:'2026-11-01',grip:'Micro',hand:'L',set_num:1,rep_num:1,target_duration:40,actual_time_s:35,avg_force_kg:20,failure_valid:true};
+  const current={...prior,session_id:'current',date:'2026-11-05',actual_time_s:30};
+  render(<RestView lastRep={{actualTime:30}} restSeconds={20} onRestDone={jest.fn()} repNum={1} repsPerSet={4}
+    curveContext={{config,history:[prior,current],currentSet:1,activeHand:'L',sessionReps:[current],refWeights:{L:20}}} />);
+  const chart=JSON.parse(screen.getByTestId('hold-time-chart').textContent);
+  expect(chart.actual[0].t).toBe(30);
+  expect(chart.prevSession[0].t).toBe(35);
+  expect(chart.forecasted).toHaveLength(4);
+  expect(chart.showLegend).toBe(true);
+});
+
+test('rest chart reports missing previous data instead of substituting current holds',()=>{
+  render(<RestView restSeconds={20} onRestDone={jest.fn()} repNum={1} repsPerSet={4}
+    curveContext={{config,history:[],sessionReps:[],refWeights:{L:20}}} />);
+  expect(screen.getByText('No previous comparable hold times available.')).toBeVisible();
+});
+
+test.each([SwitchHandsView,BetweenSetRestView])('other rest screens keep the completed hand and set chart',View=>{
+  const current={session_id:'current',date:'2026-11-05',grip:'Micro',hand:'R',set_num:2,rep_num:1,target_duration:40,actual_time_s:17,avg_force_kg:20};
+  render(<View onReady={jest.fn()} unit="kg" curveContext={{config:{...config,hand:'Both'},history:[],currentSet:2,activeHand:'R',sessionReps:[{...current,hand:'L',actual_time_s:99},{...current,set_num:1,actual_time_s:88},current],refWeights:{R:20}}} />);
+  const chart=JSON.parse(screen.getByTestId('hold-time-chart').textContent);
+  expect(chart.actual).toHaveLength(1);
+  expect(chart.actual[0].t).toBe(17);
+  expect(chart.unit).toBe('kg');
+});
+
+test('mixed-duration rest does not invent a constant-load hold-time comparison',()=>{
+  render(<RestView restSeconds={20} onRestDone={jest.fn()} repNum={1} repsPerSet={4}
+    curveContext={{config:{...config,mixedDomainPlan:{}},history:[],sessionReps:[]}} />);
+  expect(screen.getByText('Hold-time comparison unavailable for mixed-duration sets.')).toBeVisible();
+  expect(screen.queryByTestId('hold-time-chart')).not.toBeInTheDocument();
+});
+
+test('rest keeps disputed activity visible without seeding estimates or promoting later reps',()=>{
+  const opener={session_id:'current',grip:'Micro',hand:'L',rep_num:1,set_num:1,target_duration:40,actual_time_s:1.3,failure_valid:false,force_recording:{redo_pending:true}};
+  const later={...opener,rep_num:3,actual_time_s:22,failure_valid:true,force_recording:{}};
+  render(<RestView restSeconds={20} onRestDone={jest.fn()} repNum={3} repsPerSet={4}
+    curveContext={{config,history:[opener,later],sessionReps:[opener,later],refWeights:{L:20}}} />);
+  const chart=JSON.parse(screen.getByTestId('hold-time-chart').textContent);
+  expect(chart.actual.map(point=>point.rep)).toEqual([1,3]);
+  expect(chart.actual[0]).toMatchObject({t:1.3,activityOnly:true});
+  expect(chart.forecasted).toEqual([]);
+  expect(chart.asymptoticHold).toBeNull();
+  expect(chart.prevSession).toEqual([]);
 });

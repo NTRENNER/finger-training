@@ -22,7 +22,7 @@ import { SettingsView } from "./views/SettingsView.jsx";
 import { SetupView } from "./views/SetupView.jsx";
 import { ClimbView } from "./views/ClimbView.jsx";
 import {
-  ActiveSessionView, AutoRepSessionView,
+  ActiveSessionView, AutoRepSessionView, LastRepRedo,
   RestView, SwitchHandsView, BetweenSetRestView,
   SessionSummaryView, ManualOffsetPrompt,
 } from "./views/ActiveSessionViews.jsx";
@@ -324,7 +324,7 @@ export default function App() {
     phase, setPhase,
     currentSet, currentRep,
     sessionId, refWeights,
-    sessionReps, lastRepResult,
+    sessionReps, lastRepResult, retryTargetKg, canRedoLastRep, handleRedoLastRep,
     leveledUp, newLevel,
     activeHand,
     nextWeight,
@@ -332,7 +332,7 @@ export default function App() {
     handleRestDone, handleNextSet, handleAbort, handleSwitchHandsReady,
     setRestStartedAtMs, setRestSeconds, setRestHand, setRestSource, handleSetRestDone,
   } = useSessionRunner({
-    history, freshMap, threeExpPriors, addReps,
+    history, freshMap, threeExpPriors, addReps, updateRep,
     tindeqConnected: tindeq.connected,
     onSessionStart: () => setTab(0),
   });
@@ -621,6 +621,7 @@ export default function App() {
       </div>}
       {/* Train tab */}
       <div hidden={tab !== 0}>
+      {canRedoLastRep && <PageFrame><LastRepRedo onRedo={handleRedoLastRep} tindeq={tindeq} /></PageFrame>}
       {(tab === 0 || phase !== 'idle') && (() => {
         if (phase === "idle") {
           const tindeqConnectCard = (
@@ -697,7 +698,7 @@ export default function App() {
             return (
               <AutoRepSessionView
                 key={`auto-${currentSet}-${activeHand}-${currentRep}`}
-                session={{ config: activeRepConfig, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
+                session={{ config: activeRepConfig, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps, retryTargetKg }}
                 onRepDone={handleRepDone}
                 onAbort={handleAbort}
                 visible={tab === 0}
@@ -710,7 +711,7 @@ export default function App() {
           return (
             <ActiveSessionView
               key={`${currentSet}-${activeHand}-${currentRep}-${phase}`}
-              session={{ config: activeRepConfig, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps }}
+              session={{ config: activeRepConfig, currentSet, currentRep, sessionId, refWeights, activeHand, sessionReps, retryTargetKg }}
               onRepDone={handleRepDone}
               onAbort={handleAbort}
               visible={tab === 0}
@@ -723,11 +724,13 @@ export default function App() {
         }
 
         if (phase === "switch_hands") {
-          return <SwitchHandsView activeHand={activeHand} onReady={handleSwitchHandsReady} />;
+          return <SwitchHandsView activeHand={activeHand} onReady={handleSwitchHandsReady} unit={unit}
+            curveContext={{history,config,currentSet,activeHand:sessionReps.at(-1)?.hand,sessionReps,refWeights}} />;
         }
 
         if (phase === 'between_sets') {
           return <BetweenSetRestView key={`${currentSet}-${setRestHand}`} setNumber={currentSet} startedAtMs={setRestStartedAtMs} restSeconds={setRestSeconds}
+            unit={unit} curveContext={{history,config,currentSet:sessionReps.at(-1)?.set_num ?? Math.max(1,currentSet-1),activeHand:sessionReps.at(-1)?.hand,sessionReps,refWeights}}
             hand={setRestHand} source={setRestSource} fullSetBreak={config.plannedSets > 1} onReady={handleSetRestDone}
             onFinish={handleAbort} tindeq={tindeq} />;
         }
@@ -735,6 +738,7 @@ export default function App() {
         if (phase === "resting") {
           return (
             <RestView
+              curveContext={{ history, config, currentSet, activeHand, sessionReps, refWeights }}
               tindeq={tindeq}
               lastRep={lastRepResult}
               nextWeight={nextWeight}
@@ -786,7 +790,7 @@ export default function App() {
         />}
       </div>
       {tab === 3 && (
-        <AnalysisContainer
+        <AnalysisContainer pilotEnrollment={emphasisPilot}
           history={history}
           potentiationHistory={potentiationHistory}
           unit={unit}

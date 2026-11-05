@@ -111,7 +111,7 @@ test('potentiation pulls use single-hand submaximal targets and are not peak tes
   const micro = p.steps.find(s => s.id === 'potentiation-micro');
   expect(crusher.targetLoadKg).toBeCloseTo(p.mvcSource.crusherKg * 0.65, 5);
   expect(micro.targetLoadKg).toBeCloseTo(p.mvcSource.microKg * 0.60, 5);
-  expect([crusher, micro].every(s => s.repsPerHand === 2 && s.restBetweenSec === 20)).toBe(true);
+  expect([crusher, micro].every(s => s.repsPerHand === 2 && s.restBetweenSec === 10)).toBe(true);
 });
 
 

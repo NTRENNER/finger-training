@@ -1,3 +1,5 @@
+import { firstTrainingSessionRows } from './firstSessionEvidence.js';
+import { EMPHASIS_CYCLES, pilotStep } from './emphasisPilot.js';
 import { isPeakMeasurement } from './peakTest.js';
 // ─────────────────────────────────────────────────────────────
 // TRAINING ANALYSIS — concise evidence digest
@@ -29,7 +31,7 @@ import { buildThreeExpPriors } from "./threeExp.js";
 import { buildGripBaselines, buildGripEstimates, buildGripImprovement } from "./baselines.js";
 import { computeDensityLadder } from "./densityLadder.js";
 import { deloadStatus, buildDeloadGuidance } from "./deload.js";
-import { ZONE_KEYS, ZONE_REF_T, zoneOf } from "./zones.js";
+import { ZONE_KEYS, TRAINING_ZONE_KEYS, ZONE_REF_T, zoneOf } from "./zones.js";
 import { gradeRank, isClimbingPrSend, isCompletedClimb, weekKey } from "../lib/climbing-grades.js";
 import { effectiveLoad, isOpenerRep } from "./load.js";
 import { maxTestStaleness } from "./peakForce.js";
@@ -246,12 +248,12 @@ export function assembleReview(signals) {
   // CONCERNS — recovery first. Each line states what was measured; it does
   // not tell the athlete what to do (October 2026, less is more).
   if (recovery.level === "red" || recovery.level === "yellow") {
-    const detail = recovery.why || (recovery.level === "red" ? "Your cross-grip recovery is down." : null);
+    const detail = recovery.why || (recovery.level === "red" ? "Recent rep-2 comparisons were below baseline." : null);
     const parts = [detail, recovery.guidanceAction].filter(Boolean).join(" ");
     concerns.push({ kind: "concern", text: parts ? `${recovery.label} — ${parts}` : `${recovery.label}.` });
   }
   for (const g of finger.staleGrips.slice(0, 2)) {
-    concerns.push({ kind: "concern", text: `${g.grip} has gone quiet — ${g.days} days since you last trained it.` });
+    concerns.push({ kind: "concern", text: `Last recorded ${g.grip} training was ${g.days} days ago.` });
   }
   for (const w of support.staleWorkouts.slice(0, 1)) {
     concerns.push({ kind: "concern", staleWorkout: w,
@@ -279,9 +281,9 @@ export function assembleReview(signals) {
   } else if (wins.length) {
     headline = wins.length === 1 ? `Strong week — you've got a win to bank.` : `Big week — ${wins.length} things went right.`;
   } else if (recovery.level === "red") {
-    headline = `Recovery says deload.`;
+    headline = `Repeated rep-2 comparisons were below baseline.`;
   } else if (recovery.level === "yellow") {
-    headline = `Solid week; recovery is softening.`;
+    headline = `Recent rep-2 comparisons were below baseline.`;
   } else if (concerns.length) {
     headline = `Decent week, with one thing to tidy up.`;
   } else {
@@ -352,13 +354,16 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   for (const g of grips) {
     const lastByZone = {};
     for (const r of fingerReps) {
-      if (r.grip !== g) continue;
+      if (r.grip !== g || r.date > refDate) continue;
       const z = zoneOf(r.target_duration || r.actual_time_s);
+      // Max strength is assessed separately through Peak Tests, not a
+      // recurring five-second training deadline in the live planner.
+      if (!TRAINING_ZONE_KEYS.includes(z)) continue;
       if (!lastByZone[z] || r.date > lastByZone[z]) lastByZone[z] = r.date;
     }
     for (const [zone, last] of Object.entries(lastByZone)) {
       const days = daysDiff(last, refDate);
-      if (days >= CHECKIN_ZONE_STALE_DAYS) staleZones.push({ grip: g, zone, days });
+      if (days >= CHECKIN_ZONE_STALE_DAYS) staleZones.push({ grip: g, zone, days, last });
     }
   }
   staleZones.sort((a, b) => b.days - a.days);
@@ -370,7 +375,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   // capacity: density-ladder reps 2+ fall short of target BY DESIGN
   // (short rests), so high-rep weeks read 0.3-0.6 and "targets are
   // winning" fired off ladder structure rather than performance.
-  const ratioReps = (from, to) => fingerReps.filter(r =>
+  const ratioReps = (from, to) => firstTrainingSessionRows(fingerReps).filter(r =>
     r.date >= from && r.date <= to && Number(r.target_duration) > 0 &&
     effectiveLoad(r) > 0 && isOpenerRep(r));
   const meanRatio = (rs) => rs.length
@@ -448,39 +453,28 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
     multiDateSessions: multiDateList.length, multiDateList,
   };
 
-  // ── Focus candidates — GRIP-LEVEL only (2026-07-08 design call) ──
-  // Once a grip is picked, the recommender's escalating staleness boost
-  // already targets its stale zone — quoting a zone + load here would
-  // be a second recommender, and could DISAGREE with the plan card
-  // (which picks its own continuous T and applies cookedness). What
-  // the engine CANNOT do is choose which grip you train: grip selection
-  // is manual, so a grip's stale zones stay invisible for as long as
-  // you keep picking other grips. Cross-grip allocation is therefore
-  // the check-in's one legitimate prescription — name the grips that
-  // most need a session, say why, and trust the engine with the rest.
+  // Recorded target history is descriptive. Neither the continuous scorer
+  // nor an active pilot promises to select the oldest domain next.
   const focus = [];
   const worstZoneByGrip = new Map();
   for (const sz of staleZones) {
     if (!worstZoneByGrip.has(sz.grip)) worstZoneByGrip.set(sz.grip, sz);   // staleZones sorted worst-first
   }
-  // Voice (July 2026, per Nathan): these are EXPLANATIONS of what the
-  // engine will do and why — "X zone is N days stale; the engine will
-  // queue it once you pick X" — not imperatives ("Give X a session").
-  // The check-in narrates the recommender's reasoning; it doesn't issue
-  // a parallel set of orders. The rendered section header matches
-  // (WeeklyReviewCard: "What the engine will recommend — and why").
   const gripCandidates = [];
   for (const [g, sz] of worstZoneByGrip) {
+    const step = pilotStep(opts.pilotEnrollment, history, g, refDate);
+    const cycle = step ? EMPHASIS_CYCLES[step.emphasis][step.primary ? 'primary' : 'other'] : [];
+    const protocol = step ? ` App focus: ${step.emphasis}-end pilot; its scheduled step is ${step.zone.replace(/_/g, ' ')} (~${ZONE_REF_T[step.zone]}s). ${cycle.includes(sz.zone) ? 'The recorded-gap domain is included in this cycle, which follows its current step.' : 'The recorded-gap domain is not scheduled in this block.'}` : '';
     gripCandidates.push({
       grip: g, days: sz.days,
-      text: `${g} — its ${sz.zone.replace(/_/g, " ")} zone (~${ZONE_REF_T[sz.zone]}s) is ${sz.days} days stale; the engine will queue it once you pick ${g} on Setup.`,
+      text: `${g} — last recorded ${sz.zone.replace(/_/g, " ")} target (~${ZONE_REF_T[sz.zone]}s): ${sz.last} (${sz.days} days ago).${protocol}`,
     });
   }
   for (const g of base.finger.staleGrips) {
     if (!worstZoneByGrip.has(g.grip)) {
       gripCandidates.push({
         grip: g.grip, days: g.days,
-        text: `${g.grip} — no sessions in ${g.days} days; its whole curve is drifting, so any moderate session re-anchors it.`,
+        text: `${g.grip} — last recorded training was ${g.days} days ago.`,
       });
     }
   }
@@ -490,13 +484,13 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   }
   for (const g of grips) {
     let mt = null;
-    try { mt = maxTestStaleness(fingerReps.filter(r => r.grip === g), refDate); } catch { mt = null; }
+    try { mt = maxTestStaleness(history.filter(r => r?.grip === g && r.date && r.date <= refDate), refDate); } catch { mt = null; }
     if (mt && mt.recommended && focus.length < 3) {
       focus.push({
         key: `peak|${g}`,
         text: mt.staleDays == null
-          ? `${g} — no measured max yet; the engine's ceilings are guesses until a three-pull, 3-second peak test sets the top line.`
-          : `${g} — its peak reading is ${mt.staleDays}d old; a three-pull, 3-second peak test refreshes the ceiling the engine caps loads with.`,
+          ? `${g} — no qualifying peak-force reading is recorded.`
+          : `${g} — the last qualifying peak-force reading was ${mt.staleDays} days ago.`,
       });
     }
   }
@@ -578,7 +572,7 @@ export function assembleCheckIn(signals) {
     return { range: null, headline: "No training logged yet — log a session to begin your training analysis.", sections: null };
   }
   const digest = assembleReview(signals);
-  const { volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates } = signals;
+  const { volume, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates } = signals;
   const recovery = signals.recovery || { level: "unknown", label: null };
 
   // ── Recovery × volume cross-reference (July 2026, per Nathan) ──
@@ -598,7 +592,7 @@ export function assembleCheckIn(signals) {
   const mergedRecoveryVolume = rampDrop && recoveryConcern && recovery.label
     ? (recovery.level === "red"
       ? `Volume fell to ${volumeRead} this week. Rep 2 recovered less than expected after the rest in recent comparable sessions; reduced volume alone cannot tell us whether you have recovered.`
-      : `Volume was already ${volumeRead} this week, after the earlier recovery signal.`)
+      : `Volume was ${volumeRead} this week, with below-baseline rep-2 comparisons in recent comparable sets.`)
     : null;
   const reducedVolumeWithinRange = rampDrop && recovery.level === "green"
     ? `Volume fell to ${volumeRead} this week. Recent comparable sets stayed within your recorded recovery range.`
@@ -606,7 +600,7 @@ export function assembleCheckIn(signals) {
   const compactRecoveryVolume = rampDrop && recoveryConcern && recovery.label
     ? (recovery.level === "red"
       ? `Volume fell to ${volumeRead}. Earlier sets were below expected.`
-      : `Volume was already ${volumeRead}, after the earlier recovery signal.`)
+      : `Volume was ${volumeRead}; recent rep-2 comparisons were below baseline.`)
     : null;
   const compactPoints = compactRecoveryVolume
     ? digest.points.map(p =>
@@ -641,9 +635,9 @@ export function assembleCheckIn(signals) {
   const moving = digest.points.filter(p => p.kind === "win").map(p => p.text);
   if (perf && perf.ratioNow != null && perf.ratioPrev != null && perf.n >= 10) {
     const dir = perf.ratioNow - perf.ratioPrev;
-    if (dir >= 0.05) moving.push(`You're outlasting targets more: opening-rep hold ratio ${perf.ratioPrev} → ${perf.ratioNow} over the last month — the curve amplitude is lifting.`);
+    if (dir >= 0.05) moving.push(`Opening-rep duration/target ratio ${perf.ratioPrev} → ${perf.ratioNow} over the last month. Prescribed durations and loads may differ.`);
   }
-  if (perf && perf.overshoots >= 3) moving.push(`${perf.overshoots} reps beat their target by 40%+ this month — the engine will chase those with heavier prescriptions.`);
+  if (perf && perf.overshoots >= 3) moving.push(`${perf.overshoots} eligible opening reps exceeded their target duration by 40%+ this month. Load changes follow the saved progression rules.`);
   if (reducedVolumeWithinRange) moving.push(reducedVolumeWithinRange);
 
   // WHAT'S STUCK OR MISSING — digest concerns + behavior (workload
@@ -675,11 +669,8 @@ export function assembleCheckIn(signals) {
     if (rampDrop && n === rampDrop && (mergedRecoveryVolume || reducedVolumeWithinRange)) continue;
     stuck.push(n.text);
   }
-  for (const sz of (staleZones || []).slice(0, 3)) {
-    stuck.push(`${sz.grip} ${sz.zone.replace(/_/g, " ")} hasn't been trained in ${sz.days} days.`);
-  }
   if (perf && perf.ratioNow != null && perf.ratioPrev != null && perf.ratioNow - perf.ratioPrev <= -0.05 && perf.n >= 10) {
-    stuck.push(`Opening-rep hold ratio slipped ${perf.ratioPrev} → ${perf.ratioNow} vs the prior month — your fresh reps are ending short of target more often.`);
+    stuck.push(`Opening-rep duration/target ratio ${perf.ratioPrev} → ${perf.ratioNow} vs the prior month. Prescribed durations and loads may differ.`);
   }
   if (bw && Math.abs(bw.deltaKg) >= 1) {
     stuck.push(`Body weight moved ${bw.deltaKg > 0 ? "+" : ""}${bw.deltaKg} kg over the month — relative strength numbers shift with it.`);

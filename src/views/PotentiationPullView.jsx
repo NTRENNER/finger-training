@@ -15,7 +15,7 @@ export function PotentiationPullView({
   grip,
   targetLoadKg,
   repsPerHand = 2,
-  restSec = 20,
+  restSec = 10,
   history = [],
   tindeq,
   unit = "lbs",
@@ -48,7 +48,8 @@ export function PotentiationPullView({
     live.current = next;
     setState(next);
   };
-  const activeHand = context.hands[state.index % context.hands.length];
+  const handAt = index => context.hands[Math.min(context.hands.length - 1, Math.floor(index / repsPerHand))];
+  const activeHand = handAt(state.index);
 
   function finishAttempt(stats = {}) {
     const current = live.current;
@@ -57,7 +58,7 @@ export function PotentiationPullView({
       transition({ ...current, phase: "error" });
       return;
     }
-    const hand = context.hands[current.index % context.hands.length];
+    const hand = handAt(current.index);
     if (!manualMode && addReps) {
       const measurement = potentiationMeasurementRecord({
         stats,
@@ -69,6 +70,8 @@ export function PotentiationPullView({
         targetLoadKg,
         position: current.index + 1,
         restSec,
+        handSequence: 'grouped',
+        handPosition: current.index % repsPerHand + 1,
       });
       if (measurement) addReps([measurement]);
     }
@@ -81,8 +84,11 @@ export function PotentiationPullView({
       transition({ phase: "done", index: next, elapsed: 0, peaks });
       return;
     }
-    deadlineRef.current = Date.now() + restSec * 1000;
-    transition({ phase: "rest", index: next, elapsed: restSec, peaks });
+    // The other hand has not pulled yet: switch once without imposing an
+    // extra timed rest. Same-hand repeats retain the existing short rest.
+    const sameHand = handAt(next) === hand;
+    deadlineRef.current = sameHand ? Date.now() + restSec * 1000 : null;
+    transition({ phase: sameHand ? "rest" : "ready", index: next, elapsed: sameHand ? restSec : 0, peaks });
   }
 
   callbacks.current = {
@@ -168,7 +174,9 @@ export function PotentiationPullView({
           background: C.bg, border: `1px solid ${C.purple}`, borderRadius: 10,
           padding: "10px 12px", marginBottom: 14,
         }}>Swap the Tindeq to the <b>{grip}</b> gripper, let it settle unloaded, then pull.</div>}
+        {state.index === repsPerHand && state.phase === 'ready' && <p role="status">Switch to the {activeHand === 'L' ? 'left' : 'right'} hand.</p>}
         <HandCue hand={activeHand} />
+        <p style={{ color: C.muted }}>Hand rep {state.index % repsPerHand + 1} of {repsPerHand}</p>
         <p style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>Hit the target quickly, then release.</p>
         {manualMode ? <div style={{ margin: "20px 0" }}>
           <div style={{ color: C.muted, fontSize: 13 }}>Target</div>

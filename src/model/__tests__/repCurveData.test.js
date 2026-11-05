@@ -70,7 +70,7 @@ describe("buildActualSeries", () => {
     ]);
   });
 
-  test("skips reps with no/zero actual_time_s", () => {
+  test("keeps missing hold slots as gaps without renumbering later reps", () => {
     const reps = [
       rep({ rep_num: 1, actual_time_s: 30 }),
       rep({ rep_num: 2, actual_time_s: 0 }),
@@ -78,7 +78,8 @@ describe("buildActualSeries", () => {
       rep({ rep_num: 4, actual_time_s: 18 }),
     ];
     const out = buildActualSeries(reps);
-    expect(out.map(p => p.t)).toEqual([30, 18]);
+    expect(out.map(p => p.t)).toEqual([30, null, null, 18]);
+    expect(out.map(p => p.rep)).toEqual([1, 2, 3, 4]);
   });
 
   test("returns [] on empty/invalid input", () => {
@@ -174,6 +175,47 @@ describe("computeAsymptoticHold", () => {
 });
 
 describe("buildRepCurveBundle", () => {
+  test.each([
+    {failure_valid:false},
+    {end_reason:'interrupted'},
+    {end_reason:'equipment_interruption'},
+    {force_recording:{capacity_eligible:false}},
+    {force_recording:{redo_pending:true}},
+    {force_recording:{redo_attempts:[{actualTime:1.3}]}},
+    {force_recording:{recording_stop_reason:'release_not_observed'}},
+  ])('disputed opener stays descriptive and cannot seed estimates or previous comparison: %j',flags=>{
+    const invalid=rep({...flags,date:'2026-05-19',session_id:'disputed',actual_time_s:1.3});
+    const prior=rep({date:'2026-05-18',session_id:'valid'});
+    const out=buildRepCurveBundle({history:[prior,invalid],grip:'Crusher',hand:'L',numReps:4,firstRepTime:1.3,
+      restSeconds:20,actualReps:[invalid],targetDuration:45,excludeSessionId:'disputed'});
+    expect(out.actual).toEqual([expect.objectContaining({rep:1,t:1.3,activityOnly:true})]);
+    expect(out.forecasted).toEqual([]);
+    expect(out.asymptoticHold).toBeNull();
+    expect(out.prevSession[0].t).toBe(30);
+    expect(findPrevSessionReps([invalid],{grip:'Crusher',hand:'L',targetDuration:45})).toBeNull();
+  });
+
+  test('later valid holds never become the missing/invalid opener',()=>{
+    const out=buildRepCurveBundle({history:[],grip:'Crusher',hand:'L',numReps:4,firstRepTime:22,restSeconds:20,
+      actualReps:[rep({rep_num:3,actual_time_s:22})],targetDuration:45});
+    expect(out.forecasted).toEqual([]);
+    expect(out.actual[0]).toMatchObject({rep:3,t:22});
+  });
+
+  test('timestamp order chooses the latest same-day session regardless of input order',()=>{
+    const early=rep({session_id:'early',session_started_at:'2026-05-15T08:00:00Z',actual_time_s:20});
+    const late=rep({session_id:'late',session_started_at:'2026-05-15T18:00:00Z',actual_time_s:35});
+    const args={grip:'Crusher',hand:'L',targetDuration:45};
+    expect(findPrevSessionReps([early,late],args)).toEqual([late]);
+    expect(findPrevSessionReps([late,early],args)).toEqual([late]);
+    expect(findPrevSessionReps([{...early,session_started_at:null},{...late,session_started_at:null}],args)).toBeNull();
+  });
+
+  test('previous comparison preserves rep gaps when disputed middle holds are excluded',()=>{
+    const rows=[rep({rep_num:1}),rep({rep_num:2,failure_valid:false}),rep({rep_num:3,actual_time_s:19})];
+    const out=buildRepCurveBundle({history:rows,grip:'Crusher',hand:'L',numReps:4,firstRepTime:45,restSeconds:20,targetDuration:45});
+    expect(out.prevSession.map(point=>point.rep)).toEqual([1,3]);
+  });
   test('second-set bundle compares four prior second-set reps, never eight combined reps', () => {
     const previous = [1, 2].flatMap(set_num => [1, 2, 3, 4].map(rep_num => rep({
       set_num, rep_num, actual_time_s: 40 / (set_num * rep_num),

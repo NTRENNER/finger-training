@@ -361,7 +361,7 @@ export function deloadStatus(history, workoutSessions = [], opts = {}) {
 
   const label =
     level === "red" ? "Deload recommended" :
-    level === "yellow" ? "Recovery softening" :
+    level === "yellow" ? "Rep-2 comparison below baseline" :
     haveSignal ? "Observed recovery within range" : "Not enough recent data";
 
   return {

@@ -1,4 +1,11 @@
-import { repCurveYMax } from "../RepCurveChart.jsx";
+import { repCurveYMax, mergeRepCurveSeries } from "../RepCurveChart.jsx";
+
+test('sparse series retain the actual rep axis and missing slots',()=>{
+  const {merged,xMax}=mergeRepCurveSeries([], [{rep:4,t:18}], [{rep:1,t:30},{rep:3,t:20}]);
+  expect(xMax).toBe(4);
+  expect(merged.map(row=>row.actual)).toEqual([null,null,null,18]);
+  expect(merged.map(row=>row.prev)).toEqual([30,null,20,null]);
+});
 
 describe("repCurveYMax", () => {
   test("keeps a prescribed target above all results inside the visible domain", () => {

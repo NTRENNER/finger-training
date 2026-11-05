@@ -80,7 +80,7 @@ test('keeps the colored digest above the expanded analysis', () => {
   expect(concern).toBeInTheDocument();
   expect(screen.getByText('Training completed')).toBeInTheDocument();
   expect(screen.getByText('Two climbing sessions.')).toBeInTheDocument();
-  expect(screen.getByText('Recommendation inputs')).toBeInTheDocument();
+  expect(screen.getByText('Recorded training gaps')).toBeInTheDocument();
 });
 
 test('collapsing hides only the expanded analysis', () => {

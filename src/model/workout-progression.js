@@ -31,6 +31,7 @@
 // SessionExRow display can also call recommendSet to render the
 // "↑ +5 lbs (clean session)" hint underneath each input.
 
+import { modifierSelectionSignature, modifierSelections } from "./workoutModifiers.js";
 import { isBodyweightAdditive, parseRepsCount } from "./workout-volume.js";
 
 // Parse a reps string like "5", "8", "8–12", "8-12", "6/side" into
@@ -148,12 +149,14 @@ function recommendSide(prev, exDef, repRange, ladder = null) {
       };
     }
     if (ladder.mode === "step_load" && cleanLast) {
+      const increment = Number(ladder.increment) || 0;
       const raw = prevWeight * 1.05;
-      const bumped = roundToPlateIncrement(Math.max(raw, prevWeight + 2.5));
+      const bumped = increment > 0 ? Math.round((prevWeight + increment) * 100) / 100
+        : roundToPlateIncrement(Math.max(raw, prevWeight + 2.5));
       return {
         weight: String(bumped),
         reps:   String(targetReps || prevReps),
-        reasoning: `↑ +${(bumped - prevWeight).toFixed(1).replace(/\.0$/, "")} lbs (ladder top-out)`,
+        reasoning: `↑ +${(bumped - prevWeight).toFixed(1).replace(/\.0$/, "")} ${ladder.unit || 'lbs'} (ladder top-out)`,
       };
     }
     if (ladder.mode === "jump" && ladder.nextLoad != null) {
@@ -352,9 +355,15 @@ export function returnToTrainingPlan(history, exDef, templateSets, referenceDate
 }
 
 function exerciseCompleted(data, exDef) {
+  if (data?.modifierHistoryIncomplete) return false;
   const actual = data?.sets || [];
   const planned = data?.prescription?.sets;
   const required = planned?.length || actual.length;
+  // A modified final rep is not completion of an unmodified target. Added
+  // sets can earn progression only when they use the same whole-set setup.
+  const signature = modifierSelectionSignature(planned?.[0] || {});
+  if (actual.some(set => set.done && (modifierSelectionSignature(set) !== signature
+      || Object.values(modifierSelections(set)).some(selection => selection.repCount)))) return false;
   return required > 0 && actual.length >= required && actual.slice(0, required).every((set, i) => {
     if (exDef.circlesOnly) return !!set.done;
     const target = parseRepRange(planned?.[i]?.reps || exDef?.reps).targetReps;
@@ -378,13 +387,28 @@ function exerciseCompleted(data, exDef) {
 //     est1RM, requiredRM,   // KB gate receipts (bridge/jump modes)
 //     reasoning,   // human-readable receipt for the UI
 //   }
-export function recommendSetCount(history, exDef, templateSets, { referenceDate = null } = {}) {
-  const plan = computeSetCount(history, exDef, templateSets, referenceDate);
+// Scope both the set ladder and load seeding to the same intended setup.
+// Keep a mixed execution of an unmodified plan so it blocks advancement;
+// do not borrow a completed Slingshot plan for the unassisted ladder.
+function plannedSetupMatches(data, signature) {
+  const planned = data?.prescription?.sets;
+  if (planned?.length) return planned.every(set => modifierSelectionSignature(set) === signature);
+  return data?.sets?.some(set => set.done && modifierSelectionSignature(set) === signature);
+}
+
+export function recommendSetCount(history, exDef, templateSets, { referenceDate = null, unit = 'lbs' } = {}) {
+  const signature = modifierSelectionSignature(exDef?.templateSets?.[0] || {});
+  const comparable = (history || []).filter(session => plannedSetupMatches(session?.exercises?.[exDef.id], signature));
+  const plan = computeSetCount(comparable, exDef, templateSets, referenceDate);
+  if (exDef?.progressionPolicy === 'strength') {
+    plan.increment = exDef.loadIncrementLbs / (unit === 'kg' ? 2.2046226218 : 1);
+    plan.unit = unit;
+  }
   return referenceDate ? { ...plan, referenceDate } : plan;
 }
 function computeSetCount(history, exDef, templateSets, referenceDate) {
   if (referenceDate) history = (history || []).filter(s => s.date && s.date <= referenceDate);
-  const base = Math.max(1, Number(templateSets) || 1);
+  const base = exDef?.progressionPolicy === 'strength' ? 3 : Math.max(1, Number(templateSets) || 1);
   const returning = returnToTrainingPlan(history, exDef, base, referenceDate);
   const latest = findLastSession(history, null, exDef?.id)?.exercises?.[exDef?.id];
   const atLimit = latest?.effort === "at_limit";
@@ -416,7 +440,7 @@ function computeSetCount(history, exDef, templateSets, referenceDate) {
     };
   }
 
-  const cap = base + SET_LADDER_CAP_OVER_TEMPLATE;
+  const cap = policy === "strength" ? base + 1 : base + SET_LADDER_CAP_OVER_TEMPLATE;
   // (Only targetReps is needed here — topReps belongs to the per-set
   // rep-up logic in recommendSide, not the set-count decision.)
   const { targetReps } = parseRepRange(exDef?.reps);
@@ -564,9 +588,17 @@ function findLastSession(history, workoutKey, exId) {
 // weight, the volume math folds bodyweight in separately).
 export function recommendSet(history, exDef, workoutKey, setIdx, bw = null, ladder = null) {
   if (ladder?.referenceDate) history = (history || []).filter(s => s.date && s.date <= ladder.referenceDate);
-  const repRange = parseRepRange(exDef?.reps);
-  const lastSession = findLastSession(history, workoutKey, exDef.id);
-  const prevSets = lastSession?.exercises?.[exDef.id]?.sets?.filter(s => s?.done);
+  const template = exDef?.templateSets?.[setIdx] ?? exDef?.templateSets?.at(-1);
+  const repRange = parseRepRange(template?.reps || exDef?.reps);
+  // Match the planned setup even when modifiers are offered dynamically.
+  const signature = modifierSelectionSignature(template || {});
+  const comparable = (history || []).filter(session => {
+    const sets = session?.exercises?.[exDef.id]?.sets || [];
+    return plannedSetupMatches(session?.exercises?.[exDef.id], signature)
+      && sets.some(set => set.done && modifierSelectionSignature(set) === signature);
+  });
+  const lastSession = findLastSession(comparable, workoutKey, exDef.id);
+  const prevSets = lastSession?.exercises?.[exDef.id]?.sets?.filter(s => s?.done && modifierSelectionSignature(s) === signature);
   // Ladder-added sets have no positional precedent in the previous
   // session (setIdx beyond its count) — inherit the last set's values
   // so the new set seeds at the same weight instead of blank.
@@ -599,8 +631,8 @@ export function recommendSet(history, exDef, workoutKey, setIdx, bw = null, ladd
       reps:   lastSet.rightReps   ?? lastSet.reps   ?? "",
       done:   !!lastSet.done,
     } : null;
-    const left  = decorate(recommendSide(leftPrev,  exDef, repRange, ladder));
-    const right = decorate(recommendSide(rightPrev, exDef, repRange, ladder));
+    const left  = decorate(recommendSide(leftPrev, exDef, parseRepRange(template?.leftReps || template?.reps || exDef?.reps), ladder));
+    const right = decorate(recommendSide(rightPrev, exDef, parseRepRange(template?.rightReps || template?.reps || exDef?.reps), ladder));
     return {
       leftWeight:    left.weight,
       leftReps:      left.reps,

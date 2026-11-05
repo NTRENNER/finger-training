@@ -135,6 +135,8 @@ export function potentiationMeasurementRecord({
   targetLoadKg,
   position,
   restSec,
+  handSequence = null,
+  handPosition = null,
 }) {
   const measurement = stats?.potentiationRfd;
   if (!measurement?.valid) return null;
@@ -177,6 +179,7 @@ export function potentiationMeasurementRecord({
         source: "climbing_warmup",
         position,
         duration_reference: "rapid_submaximal_pull",
+        ...(handSequence ? { hand_sequence: handSequence, hand_position: handPosition, rest_between_same_hand_s: restSec } : {}),
       },
     },
   };
