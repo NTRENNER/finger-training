@@ -463,7 +463,17 @@ export function enqueueRepUpdate(entry) {
         : e)
     : [...q, { ...entry, ts: Date.now() }];
   saveLS(LS_UPDATE_QUEUE_KEY, next);
+  // A rep whose insert is still queued takes the edit too, so the insert
+  // cannot later restore the pre-edit values.
+  if (entry.kind === "rep") {
+    const pending = loadLS(LS_QUEUE_KEY) || [];
+    if (pending.some(r => r.id === entry.id)) {
+      saveLS(LS_QUEUE_KEY, pending.map(r => r.id === entry.id ? { ...r, ...entry.updates } : r));
+    }
+  }
 }
+
+const insertPending = id => (loadLS(LS_QUEUE_KEY) || []).some(r => r.id === id);
 
 // Apply pending edits over an array of cloud-fetched reps so the
 // reconcile's setHistory can't revert an edit that hasn't synced yet.
@@ -509,7 +519,8 @@ export async function flushUpdateQueue() {
           const { error } = await supabase.from("reps")
             .update(e.updates).eq("user_id", owner).eq("id", e.id);
           if (!ownsLocalSession(owner)) return done.size;
-          if (!error) done.add(updateTargetKey(e));
+          // Before its insert lands, an update matches no row; keep it.
+          if (!error && !insertPending(e.id)) done.add(updateTargetKey(e));
         } else if (e.kind === "session") {
           const { error } = await supabase.from("reps")
             .update(e.updates).eq("user_id", owner).eq("session_id", e.sessionKey);

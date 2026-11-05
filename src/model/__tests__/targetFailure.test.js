@@ -187,3 +187,31 @@ test('long oscillating holds retain bounded first/last audit details and complet
  expect(shifted.snapshot(false).startTs).toBe(origin);
  expect(shifted.snapshot(false).runs).toBeUndefined();
 });
+
+// Reconstructed from the stored smoothed runs of the 2026-11-04 Prime left
+// rep 3 (2.8 kg target): early settling dips below the boundary, each return
+// shorter than the recovery window, confirmed a failure at ~5.85 s back-dated
+// to ~1.84 s while the athlete kept pulling above target. Raw edges lead the
+// smoothed ones by the 300 ms smoothing. Continue must let that same hold run
+// to its real failure.
+test('settling dips on a light grip confirm early; Continue lets the hold run to its real failure', () => {
+  const below = [[1.62, 2.31], [2.48, 2.71], [3.09, 5.12]];
+  const settle = t => below.some(([a, b]) => t >= a && t < b) ? 2.1 : 3.0;
+  const detector = createTargetFailureDetector(2.8);
+  let result = null;
+  for (const s of trace(6.5, settle)) result = detector(s) || result;
+  expect(result).toMatchObject({reason:'sustained_force_loss'});
+  // Stored record: endpoint 1839 ms, confirmed 5850 ms.
+  expect(result.endTs).toBeGreaterThanOrEqual(1800);
+  expect(result.endTs).toBeLessThanOrEqual(1900);
+  expect(result.confirmedTs).toBeGreaterThanOrEqual(5800);
+  expect(result.confirmedTs).toBeLessThanOrEqual(5900);
+  expect(detector.continueRep()).toBe(true);
+  // Still pulling ~3 kg: no new failure for the next 40 s.
+  for (const s of trace(40, () => 3.0)) expect(detector({...s, ts: s.ts + 6510})).toBeNull();
+  // A real failure afterwards is still detected.
+  let late = null;
+  for (const s of trace(6, () => 2.0)) late = detector({...s, ts: s.ts + 46520}) || late;
+  expect(late).toMatchObject({reason:'sustained_force_loss'});
+  expect(late.endTs).toBeGreaterThan(46000);
+});

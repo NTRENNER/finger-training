@@ -19,11 +19,13 @@ import { predictRepTimes, getPhysModel } from "./fatigue.js";
 import { computePersonalRecoveryTausForGrip } from "./recoveryFit.js";
 import { zoneOf } from "./zones.js";
 import { effectiveLoad } from "./load.js";
-import { isCapacityEvidenceRep } from './forceRecording.js';
+import { isValidFailureRep } from './forceRecording.js';
 
+// A hold whose time can be compared with other holds. Load provenance does
+// not matter here: a manual-load hold is timed as honestly as a measured one.
 export function isComparableHold(rep) {
   const recording = rep?.force_recording;
-  return isCapacityEvidenceRep(rep) && Number(rep.actual_time_s) > 0
+  return isValidFailureRep(rep) && recording?.capacity_eligible !== false && Number(rep.actual_time_s) > 0
     && !['interrupted', 'equipment_interruption', 'target_not_reached'].includes(rep.end_reason)
     && !recording?.redo_pending && !recording?.redo_attempts?.length
     && recording?.recording_stop_reason !== 'release_not_observed';

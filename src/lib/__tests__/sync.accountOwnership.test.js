@@ -75,3 +75,17 @@ test('queued edits stay local on authentication mismatch', async () => {
   expect(loadLS(LS_UPDATE_QUEUE_KEY)).toHaveLength(1);
   expect(queries).toEqual([]);
 });
+
+// A redo edits a rep whose insert may still be queued offline. The update
+// alone matches no row; the later insert must carry the edit, and the update
+// must survive until the insert lands.
+test('an edit to a rep still waiting to upload rides on its queued insert', async () => {
+  enqueueReps([{ ...rep, actual_time_s: 1.3, failure_valid: true }]);
+  enqueueRepUpdate({ kind: 'rep', id: rep.id, updates: { actual_time_s: 45, failure_valid: true } });
+  expect(loadLS(LS_QUEUE_KEY)[0]).toMatchObject({ actual_time_s: 45 });
+  expect(await flushUpdateQueue()).toBe(0);
+  expect(loadLS(LS_UPDATE_QUEUE_KEY)).toHaveLength(1);
+  saveLS(LS_QUEUE_KEY, []);
+  expect(await flushUpdateQueue()).toBe(1);
+  expect(loadLS(LS_UPDATE_QUEUE_KEY)).toEqual([]);
+});

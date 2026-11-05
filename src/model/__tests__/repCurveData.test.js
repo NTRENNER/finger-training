@@ -9,6 +9,7 @@ import {
   findPrevSessionReps,
   computeAsymptoticHold,
   buildRepCurveBundle,
+  isComparableHold,
 } from "../repCurveData.js";
 import { PHYS_MODEL_DEFAULT } from "../fatigue.js";
 import { computePersonalRecoveryTausForGrip } from "../recoveryFit.js";
@@ -299,5 +300,28 @@ describe("buildPhysModel personalization", () => {
   test("falls back to population model when grip has no data", () => {
     const model = buildPhysModel(history, "L", "NoSuchGrip");
     expect(model.tauR).toEqual(PHYS_MODEL_DEFAULT.tauR);
+  });
+});
+
+// Manual-load holds (no Tindeq) are timed holds like any other: they seed the
+// estimate and the previous-session comparison. Disputed holds never do.
+describe("manual-load holds stay comparable", () => {
+  const manual = (date, rep_num, t, extra = {}) => ({ id: `${date}-${rep_num}`, session_id: date, date, grip: "Micro",
+    hand: "L", set_num: 1, rep_num, target_duration: 40, actual_time_s: t, failure_valid: true,
+    load_provenance: "nominal_setting", manual_load_kg: 20, ...extra });
+  test("a manual hold is comparable; a disputed one is not", () => {
+    expect(isComparableHold(manual("2026-11-01", 1, 35))).toBe(true);
+    expect(isComparableHold(manual("2026-11-01", 1, 35, { force_recording: { redo_pending: true } }))).toBe(false);
+    expect(isComparableHold(manual("2026-11-01", 1, 35, { failure_valid: false }))).toBe(false);
+  });
+  test("manual sessions keep the estimate, the previous session and plain points", () => {
+    const history = [manual("2026-11-01", 1, 35), manual("2026-11-01", 2, 25)];
+    const current = [manual("2026-11-05", 1, 33)];
+    const bundle = buildRepCurveBundle({ history, grip: "Micro", hand: "L", numReps: 4, firstRepTime: 33,
+      restSeconds: 20, actualReps: current, targetDuration: 40, beforeDate: "2026-11-05" });
+    expect(bundle.forecasted.length).toBeGreaterThan(0);
+    expect(bundle.asymptoticHold).not.toBeNull();
+    expect(bundle.prevSession.map(p => p.t)).toEqual([35, 25]);
+    expect(bundle.actual[0].activityOnly).toBeUndefined();
   });
 });

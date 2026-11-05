@@ -191,9 +191,13 @@ function useInterruptPrompt(tindeq, active) {
   // (93% of target) and hasn't recovered yet. 'holding' means force is at
   // or above the boundary — overpulling and settling back to target stays
   // in 'holding', so this doesn't fire for a smooth overshoot.
-  const dipActive = tindeq?.forceLoss?.status === 'recovering'
-    || (tindeq?.forceLoss?.status === 'complete' && tindeq?.canContinueCurrentRep === true);
+  // A confirmed failure while the Tindeq still reads load asks at once: the
+  // detector has already waited out its confirmation window, and the hold
+  // keeps going only if the athlete answers before the release backstop.
+  const stillLoaded = tindeq?.forceLoss?.status === 'complete' && tindeq?.canContinueCurrentRep === true;
+  const dipActive = tindeq?.forceLoss?.status === 'recovering' || stillLoaded;
   const trouble = active && (tindeq?.signalRecovering === true || dipActive);
+  const immediate = active && stillLoaded;
   useEffect(() => {
     if (!trouble) {
       dismissedRef.current = false;
@@ -203,19 +207,19 @@ function useInterruptPrompt(tindeq, active) {
     if (dismissedRef.current) return;
     // Debounce longer than the detector's own recovery window so a brief
     // slip that recovers never pops the modal — only a sustained dip does.
-    const t = setTimeout(() => setShow(true), 2000);
+    const t = setTimeout(() => setShow(true), immediate ? 0 : 2000);
     return () => clearTimeout(t);
-  }, [trouble]);
+  }, [trouble, immediate]);
   const dismiss = useCallback(() => { dismissedRef.current = true; setShow(false); }, []);
   return { show, dismiss };
 }
 
+// Continue / Mark interrupted / Redo, and nothing else (CLAUDE.md).
 function InterruptPrompt({ onContinue, onInterrupted, onRedo, tindeq }) {
-  const state = tindeq?.forceLoss;
-  const observedSeconds = state?.pullStartTs != null && Number.isFinite(state?.observedTs)
-    ? Math.max(0, (state.observedTs - state.pullStartTs) / 1000) : null;
+  const title = tindeq?.forceLoss?.status === 'complete' && tindeq?.canContinueCurrentRep === true
+    ? "Still holding?" : "Rep may have been interrupted";
   return (
-    <div role="dialog" aria-modal="true" aria-label="Rep may have been interrupted" style={{
+    <div role="dialog" aria-modal="true" aria-label={title} style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000,
       display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
     }}>
@@ -223,13 +227,7 @@ function InterruptPrompt({ onContinue, onInterrupted, onRedo, tindeq }) {
         background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12,
         padding: 20, maxWidth: 420, width: "100%", boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
       }}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>Rep may have been interrupted</div>
-        <div role="status" style={{ marginBottom: 16 }}>
-          <div>Observed pull time</div>
-          <div style={{ fontSize: 48, fontVariantNumeric: 'tabular-nums' }}>{observedSeconds == null ? '—' : `${observedSeconds.toFixed(1)}s`}</div>
-          {state && <div>Detected hold: {creditedSeconds(state, 0)}s</div>}
-          {(tindeq?.signalRecovering || tindeq?.connected === false) && <p>Signal unavailable. The timer only includes observed samples.</p>}
-        </div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>{title}</div>
         <div style={{ display: "grid", gap: 10 }}>
           <Btn disabled={tindeq?.canContinueCurrentRep === false || tindeq?.signalRecovering || tindeq?.connected === false} onClick={onContinue} color={C.green} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Continue</Btn>
           <Btn onClick={onInterrupted} color={C.red} style={{ padding: "14px 0", fontSize: 16, borderRadius: 10 }}>Mark interrupted</Btn>
@@ -242,9 +240,10 @@ function InterruptPrompt({ onContinue, onInterrupted, onRedo, tindeq }) {
 
 // Optional action on post-rep screens; ordinary completion never waits for
 // a confirmation. The runner owns slot restoration and durable evidence edits.
+// Only a connected Tindeq can clear a zero check, so manual sessions skip it.
 export function LastRepRedo({ onRedo, tindeq }) {
   return <button type="button" onClick={() => {
-    if (onRedo()) tindeq?.endRepAndRequireRelease?.({ requireZero: true });
+    if (onRedo() && tindeq?.connected) tindeq.endRepAndRequireRelease?.({ requireZero: true });
   }} style={{ background: 'none', border: 0, color: C.muted, textDecoration: 'underline',
     padding: '8px 12px', fontSize: 12, cursor: 'pointer' }}>Redo last rep</button>;
 }
@@ -628,7 +627,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
         {repPhase === "ready" && (
           <Btn
-            disabled={tindeq.releaseCheckRequired || tindeq.zeroing}
+            disabled={tindeq.connected && (tindeq.releaseCheckRequired || tindeq.zeroing)}
             onClick={() => { setCountdown(3); setRepPhase("countdown"); }}
             style={{ flex: 1, padding: "18px 0", fontSize: 18, borderRadius: 12 }}
             color={C.green}

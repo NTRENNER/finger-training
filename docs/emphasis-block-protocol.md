@@ -184,6 +184,14 @@ From the start of block 1 to the end of block 2, the production curve,
 recommender and progression versions stay fixed (urgent fixes excepted and
 logged). The decision log's version stamps verify this.
 
+2026-11-05, rep recording (curve, recommender and progression unchanged):
+an optional Redo replaces the last rep in its slot and keeps the disputed
+attempt as recorded work, excluded from capacity and recovery evidence.
+When the app confirms a failure while the Tindeq still reads load, it asks
+"Still holding?" at once, and Continue keeps the original clock. Prompted by
+Prime L rep 3 on 2026-11-04: early settling dips confirmed a failure at
+5.9 s, credited 1.3 s, while the hold continued above target for about 15 s.
+
 ## Missed training
 
 Sessions missed for any reason (illness, schedule, or anything unexpected)

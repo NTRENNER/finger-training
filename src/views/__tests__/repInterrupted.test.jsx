@@ -211,9 +211,23 @@ test('the optional last-rep action requests release/zero only when the runner ac
   const {LastRepRedo}=require('../ActiveSessionViews.jsx');
   const endRepAndRequireRelease=jest.fn();
   const onRedo=jest.fn(()=>true);
-  render(<LastRepRedo onRedo={onRedo} tindeq={{endRepAndRequireRelease}} />);
+  render(<LastRepRedo onRedo={onRedo} tindeq={{connected:true,endRepAndRequireRelease}} />);
   fireEvent.click(screen.getByRole('button',{name:'Redo last rep'}));
   expect(endRepAndRequireRelease).toHaveBeenCalledWith({requireZero:true});
+});
+
+// Only a connected Tindeq can clear a zero check, so a manual redo must not
+// set one, and a stale one must not lock the manual Start Rep button.
+test('a redo without a Tindeq never locks the manual retry',()=>{
+  const {LastRepRedo}=require('../ActiveSessionViews.jsx');
+  const endRepAndRequireRelease=jest.fn();
+  const {unmount}=render(<LastRepRedo onRedo={()=>true} tindeq={{connected:false,endRepAndRequireRelease}} />);
+  fireEvent.click(screen.getByRole('button',{name:'Redo last rep'}));
+  expect(endRepAndRequireRelease).not.toHaveBeenCalled();
+  unmount();
+  render(<ActiveSessionView session={session} unit="kg" onRepDone={jest.fn()} onAbort={jest.fn()}
+    tindeq={{connected:false,releaseCheckRequired:true,targetKgRef:{},setAutoFailCallback:jest.fn()}} />);
+  expect(screen.getByRole('button',{name:/Start Rep/})).toBeEnabled();
 });
 
 test('sensor completion then disconnect and redo preserves the explicit target in manual fallback',()=>{
@@ -244,7 +258,7 @@ test('sensor completion then disconnect and redo preserves the explicit target i
   expect(history[0].manual_load_kg).toBe(3);
 });
 
-test.each(['Prime','Crusher','Micro'])('%s confirmed failure with elevated force keeps observed timer and Continue available',grip=>{
+test.each(['Prime','Crusher','Micro'])('%s confirmed failure with elevated force asks at once whether you are still holding',grip=>{
   let start;
   const continueCurrentRep=jest.fn(()=>true);
   const onRepDone=jest.fn();
@@ -253,9 +267,11 @@ test.each(['Prime','Crusher','Micro'])('%s confirmed failure with elevated force
     startAutoDetect:a=>{start=a;},stopAutoDetect:jest.fn(),continueCurrentRep};
   const {rerender}=render(<AutoRepSessionView session={{...session,config:{...config,grip}}} onRepDone={onRepDone} onAbort={jest.fn()} tindeq={tindeq} />);
   act(()=>start());
-  act(()=>jest.advanceTimersByTime(2100));
-  expect(screen.getByRole('dialog')).toHaveTextContent('8.0s');
-  expect(screen.getByRole('dialog')).toHaveTextContent('Detected hold: 2.0s');
+  // No extra wait: the detector already spent its confirmation window.
+  act(()=>jest.advanceTimersByTime(0));
+  expect(screen.getByRole('dialog',{name:'Still holding?'})).toBeInTheDocument();
+  // Continue / Mark interrupted / Redo only; no readouts (CLAUDE.md).
+  expect(screen.getByRole('dialog')).not.toHaveTextContent(/\d+\.\ds|Detected hold|Observed/);
   fireEvent.click(screen.getByRole('button',{name:'Continue'}));
   expect(continueCurrentRep).toHaveBeenCalledTimes(1);
   expect(onRepDone).not.toHaveBeenCalled();
@@ -265,7 +281,7 @@ test.each(['Prime','Crusher','Micro'])('%s confirmed failure with elevated force
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
-test('signal loss disables Continue and never invents observed seconds',()=>{
+test('signal loss disables Continue and shows no readouts',()=>{
   let start;
   const continueCurrentRep=jest.fn();
   const tindeq={connected:true,signalRecovering:true,canContinueCurrentRep:false,targetKgRef:{},
@@ -274,7 +290,7 @@ test('signal loss disables Continue and never invents observed seconds',()=>{
   render(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()} tindeq={tindeq} />);
   act(()=>start());
   act(()=>jest.advanceTimersByTime(10000));
-  expect(screen.getByRole('dialog')).toHaveTextContent('4.0s');
+  expect(screen.getByRole('dialog',{name:'Rep may have been interrupted'})).not.toHaveTextContent(/\d+\.\ds|Signal/);
   expect(screen.getByRole('button',{name:'Continue'})).toBeDisabled();
   fireEvent.click(screen.getByRole('button',{name:'Continue'}));
   expect(continueCurrentRep).not.toHaveBeenCalled();

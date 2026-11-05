@@ -80,3 +80,36 @@ test('redoing an opener and abandoning it cannot leave a false capacity point',(
   expect(history[0].force_recording.capacity_eligible).toBe(false);
   expect(history[0].force_recording.redo_attempts).toHaveLength(1);
 });
+
+test('a redo left pending when the session ends never claims the next set\'s first rep', () => {
+  const {result,history,addReps,updateRep}=setup();
+  act(()=>result.current.handleRepDone(pull()));
+  act(()=>result.current.handleRestDone());
+  act(()=>result.current.handleRepDone(pull()));
+  const disputed=history.at(-1);
+  act(()=>{result.current.handleRedoLastRep();});
+  act(()=>result.current.handleAbort());
+  expect(result.current.phase).toBe('done');
+  expect(result.current.retryTargetKg).toBeNull();
+  act(()=>result.current.handleNextSet());
+  act(()=>result.current.handleRepDone(pull(50)));
+  const added=addReps.mock.calls.at(-1)[0][0];
+  expect(added).toMatchObject({set_num:2,rep_num:1,actual_time_s:50});
+  expect(added.id).not.toBe(disputed.id);
+  expect(updateRep).toHaveBeenCalledTimes(1);   // only the disputed mark
+  expect(history.find(r=>r.id===disputed.id)).toMatchObject({set_num:1,rep_num:2,failure_valid:false});
+});
+
+test('a retry is timed from its own attempt, not the disputed one', () => {
+  const {result,history}=setup('Prime','L',false);
+  act(()=>result.current.handleRepDone(pull(45,{startedAtMs:1000,endedAtMs:46000})));
+  act(()=>result.current.handleRestDone());
+  act(()=>result.current.handleRepDone(pull(1.3,{startedAtMs:66000,endedAtMs:67300,
+    forceRecording:{capacity_eligible:true,recording_stop_reason:'release_not_observed',activity:{duration_s:20.9,impulse_kg_s:55.9,started_at_ms:66000,ended_at_ms:null}}})));
+  act(()=>{result.current.handleRedoLastRep();});
+  // Manual retry: no force recording of its own.
+  act(()=>result.current.handleRepDone(pull(40,{startedAtMs:130000,endedAtMs:170000,forceRecording:null})));
+  const retry=history.at(-1);
+  expect(retry.rep_timing).toMatchObject({started_at_ms:130000,source:'manual_tap',rest_before_s:84});
+  expect(retry.force_recording.redo_attempts).toHaveLength(1);
+});

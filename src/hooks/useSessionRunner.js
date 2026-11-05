@@ -359,6 +359,10 @@ export function useSessionRunner({
   // Forward-declared so handleRepDone can call it before its
   // own useCallback identity is materialised.
   const finishSession = useCallback((allReps) => {
+    // A redo the athlete never retried stays marked disputed; it must not
+    // claim the next recorded rep (for example the first rep of an added set).
+    retryRecordRef.current = null;
+    setRetryTargetKg(null);
     // Check for level up
     const hands = config.hand === "Both" ? ["L","R"] : [config.hand];
     let leveled = false;
@@ -444,6 +448,9 @@ export function useSessionRunner({
     repDoneLockRef.current = true;
     const effectiveHand = config.hand === "Both" ? activeHand : config.hand;
     const retryRecord = retryRecordRef.current;
+    // Timing describes this attempt alone; earlier disputed attempts only
+    // add to the recorded work below.
+    const attemptRecording = forceRecording;
     if (retryRecord) {
       forceRecording = includeRedoAttempts({ actualTime, avgForce, peakForce, forceRecording },
         recordedRedoAttempts(retryRecord), currentRep === 0).forceRecording;
@@ -467,11 +474,11 @@ export function useSessionRunner({
     const roundedActual = Math.round(adjTime * 10) / 10;
     const measuredTiming = Number.isFinite(startedAtMs) && Number.isFinite(endedAtMs)
       && endedAtMs >= startedAtMs;
-    const adjustedEnd = forceRecording?.recording_stop_reason === 'release_not_observed' ? null : measuredTiming
-      ? (forceRecording?.activity?.ended_at_ms ?? endedAtMs) - (actualTime - adjTime) * 1000 : null;
+    const adjustedEnd = attemptRecording?.recording_stop_reason === 'release_not_observed' ? null : measuredTiming
+      ? (attemptRecording?.activity?.ended_at_ms ?? endedAtMs) - (actualTime - adjTime) * 1000 : null;
     const previousRep = [...sessionReps].reverse().find(r => r.hand === effectiveHand);
     const previousEnd = previousRep?.rep_timing?.ended_at_ms;
-    const activityStart = forceRecording?.activity?.started_at_ms ?? startedAtMs;
+    const activityStart = attemptRecording?.activity?.started_at_ms ?? startedAtMs;
     const betweenSet = currentSet > 1 && currentRep === 0;
     const setRestOrigin = betweenSet ? lastActivityByHandRef.current[effectiveHand] : null;
     const restEnd = betweenSet ? setRestOrigin?.releaseAtMs : previousEnd;
@@ -555,8 +562,8 @@ export function useSessionRunner({
         ended_at_ms: adjustedEnd, rest_before_s: restBefore,
         ...(betweenSet ? { rest_planned_s: volumePlanRef.current || mixed || config.plannedSets > 1 ? 300 : null,
           rest_source: setRestOrigin?.source ?? 'unknown' } : {}),
-        source: forceRecording?.duration_basis === "elapsed_activity_estimate" ? "elapsed_activity_estimate"
-          : measuredTiming ? (forceRecording ? "device_aligned" : "manual_tap") : "unknown" },
+        source: attemptRecording?.duration_basis === "elapsed_activity_estimate" ? "elapsed_activity_estimate"
+          : measuredTiming ? (attemptRecording ? "device_aligned" : "manual_tap") : "unknown" },
       load_provenance: provenance,
       failure_valid: failureValid,
       end_reason: endReason,
@@ -618,7 +625,7 @@ export function useSessionRunner({
       forceRecording: recordedForce, restBefore, loadProvenance: provenance,
       // Only a confirmed physical release can backdate the visible rest clock.
       // Interrupted/manual stops use completion time, never the capacity cutoff.
-      restStartedAtMs: forceRecording?.recording_stop_reason === 'release' && Number.isFinite(adjustedEnd)
+      restStartedAtMs: attemptRecording?.recording_stop_reason === 'release' && Number.isFinite(adjustedEnd)
         ? Math.min(Date.now(), adjustedEnd) : Date.now(),
       targetTime: repTargetTime,
       prescribedWeight: roundedPrescribed,
@@ -628,11 +635,11 @@ export function useSessionRunner({
     // capacity cutoff. Unknown release gets an explicitly estimated clock.
     {
       const measuredRelease = Number.isFinite(adjustedEnd)
-        && (forceRecording?.recording_stop_reason === 'release' || (!tindeqConnected && !forceRecording));
+        && (attemptRecording?.recording_stop_reason === 'release' || (!tindeqConnected && !attemptRecording));
       lastActivityByHandRef.current[effectiveHand] = {
         releaseAtMs: measuredRelease ? adjustedEnd : null,
         transitionAtMs: Date.now(),
-        source: measuredRelease ? (forceRecording ? 'device_release' : 'manual_tap') : 'estimated_transition',
+        source: measuredRelease ? (attemptRecording ? 'device_release' : 'manual_tap') : 'estimated_transition',
       };
     }
     if (retryRecord) {
