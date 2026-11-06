@@ -1,4 +1,4 @@
-import { createReleaseDetector, createTargetFailureDetector, repDetectionThresholds } from '../targetFailure.js';
+import { createReleaseDetector, createTargetFailureDetector, repDetectionThresholds, TARGET_FAILURE_POLICY } from '../targetFailure.js';
 import { recordCapacityForce } from '../forceRecording.js';
 const lb = .45359237;
 const trace = (seconds, fn, step = 10) => Array.from({length: seconds * 1000 / step + 1}, (_, i) => ({ts:i*step, kg:fn(i*step/1000), at:100000+i*step}));
@@ -80,7 +80,7 @@ test('release stops at physical release, excluding its confirmation delay', () =
   const decision = {...detector.finish(5000),activityEndTs:5000,stopReason:'release',summary:detector.snapshot()};
   expect(decision).toMatchObject({endTs:5000,reason:'release'});
   expect(recordCapacityForce(samples, decision.endTs, 25, decision)).toMatchObject({actualTime:5,avgForce:25,
-    forceRecording:{failure_policy:{version:11},recording_stop_reason:'release',capacity_end_reason:'release'}});
+    forceRecording:{failure_policy:{version:12},recording_stop_reason:'release',capacity_end_reason:'release'}});
 });
 test('sag tail is physical activity but not credited hold time or rest', () => {
   const samples = trace(12, t => t < 5 ? 25 : t < 11 ? 20 : 0);
@@ -189,29 +189,41 @@ test('long oscillating holds retain bounded first/last audit details and complet
 });
 
 // Reconstructed from the stored smoothed runs of the 2026-11-04 Prime left
-// rep 3 (2.8 kg target): early settling dips below the boundary, each return
-// shorter than the recovery window, confirmed a failure at ~5.85 s back-dated
-// to ~1.84 s while the athlete kept pulling above target. Raw edges lead the
-// smoothed ones by the 300 ms smoothing. Continue must let that same hold run
-// to its real failure.
-test('settling dips on a light grip confirm early; Continue lets the hold run to its real failure', () => {
+// rep 3 (2.8 kg target): settling dips below the boundary, each return
+// shorter than the recovery window. Policy v11 confirmed a failure at
+// ~5.85 s back-dated to ~1.84 s while the athlete kept pulling above
+// target; force was below the boundary for only ~65% of that window. Raw
+// edges lead the smoothed ones by the 300 ms smoothing. v12 requires the
+// loss to be mostly below (75%), so the hold runs on to its real failure.
+test('settling dips on a light grip are not a failure; the hold runs to its real failure', () => {
   const below = [[1.62, 2.31], [2.48, 2.71], [3.09, 5.12]];
-  const settle = t => below.some(([a, b]) => t >= a && t < b) ? 2.1 : 3.0;
+  const settle = t => below.some(([a, b]) => t >= a && t < b) ? 2.1 : t < 30 ? 3.0 : 2.0;
   const detector = createTargetFailureDetector(2.8);
   let result = null;
-  for (const s of trace(6.5, settle)) result = detector(s) || result;
-  expect(result).toMatchObject({reason:'sustained_force_loss'});
-  // Stored record: endpoint 1839 ms, confirmed 5850 ms.
-  expect(result.endTs).toBeGreaterThanOrEqual(1800);
-  expect(result.endTs).toBeLessThanOrEqual(1900);
-  expect(result.confirmedTs).toBeGreaterThanOrEqual(5800);
-  expect(result.confirmedTs).toBeLessThanOrEqual(5900);
-  expect(detector.continueRep()).toBe(true);
-  // Still pulling ~3 kg: no new failure for the next 40 s.
-  for (const s of trace(40, () => 3.0)) expect(detector({...s, ts: s.ts + 6510})).toBeNull();
-  // A real failure afterwards is still detected.
-  let late = null;
-  for (const s of trace(6, () => 2.0)) late = detector({...s, ts: s.ts + 46520}) || late;
-  expect(late).toMatchObject({reason:'sustained_force_loss'});
-  expect(late.endTs).toBeGreaterThan(46000);
+  for (const s of trace(40, settle)) result = detector(s) || result;
+  // The settling dips recover; the real loss starts at 30 s and is credited there.
+  expect(result).toMatchObject({ reason: 'sustained_force_loss' });
+  expect(result.endTs).toBeGreaterThanOrEqual(30000);
+  expect(result.endTs).toBeLessThan(30400);
+  expect(result.confirmedTs - result.endTs).toBeLessThan(4100);
+  expect(detector.snapshot().excursions.length).toBeGreaterThan(0);
+});
+
+// A real loss with brief surges still confirms on time (Prime 2026-10-29:
+// 90% below over the window, returns of at most ~400 ms).
+test('a loss that is mostly below the boundary still confirms at the deadline', () => {
+  const surges = [[12.0, 12.4], [13.5, 13.8]];
+  const failing = t => t < 10 ? 3.3 : surges.some(([a, b]) => t >= a && t < b) ? 3.3 : 2.4;
+  const { result } = run(trace(16, failing), 3.3);
+  expect(result).toMatchObject({ reason: 'sustained_force_loss' });
+  expect(result.endTs).toBeGreaterThanOrEqual(10000);
+  expect(result.endTs).toBeLessThan(10400);
+  expect(result.confirmedTs - result.endTs).toBeLessThan(4300);
+});
+
+// Policy v11 confirmed the same settling trace: the change is the sustained
+// fraction, not the boundary or the windows.
+test('only the sustained fraction separates settling from failure', () => {
+  expect(TARGET_FAILURE_POLICY).toMatchObject({ version: 12, sustained_fraction: 0.75,
+    confirmation_ms: 4000, recovery_ms: 750, below_target_fraction: 0.93 });
 });

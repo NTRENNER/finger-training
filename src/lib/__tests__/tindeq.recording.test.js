@@ -355,7 +355,7 @@ test('confirmed loss freezes hold time, records weaker work until release, and t
   expect(stats.actualTime).toBeGreaterThanOrEqual(3);
   expect(stats.actualTime).toBeLessThan(3.4);
   expect(stats).toMatchObject({failureValid:true,endReason:'target_force_failure',
-    forceRecording:{failure_policy:{version:11},recording_stop_reason:'release',
+    forceRecording:{failure_policy:{version:12},recording_stop_reason:'release',
       capacity_end_reason:'sustained_force_loss',activity:{duration_s:9.1}}});
   feed(packet,10200,11000,()=>25);
   expect(onStart).toHaveBeenCalledTimes(2);
@@ -371,7 +371,7 @@ test.each([2.5,5,6,25])('a two-second adjustment at target %s survives; zero rel
   packet([[10100,0]]);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0]).toMatchObject({actualTime:9.1,failureValid:true,
-    forceRecording:{capacity_end_reason:'release',failure_policy:{version:11}}});
+    forceRecording:{capacity_end_reason:'release',failure_policy:{version:12}}});
 });
 test('Continue keeps the same trace and records a later genuine failure', async () => {
   const { view, packet, onEnd } = await setup(25);

@@ -1,7 +1,9 @@
 // Engineering tolerances, not a physiological diagnosis. Device timestamps
 // drive every window so batched Bluetooth notifications behave identically.
 export const TARGET_FAILURE_POLICY = Object.freeze({
-  version: 11, below_target_fraction: 0.93, confirmation_ms: 4000,
+  // v12 (2026-11-06): a loss confirms only when force spent at least
+  // sustained_fraction of the window below the boundary (see detect).
+  version: 12, below_target_fraction: 0.93, confirmation_ms: 4000, sustained_fraction: 0.75,
   smoothing_ms: 300, recovery_ms: 750, acquisition_ms: 300,
   maximum_recovered_unload_ms: 300,
   // Release = force dropped below release_fraction of target (so 10% means
@@ -87,7 +89,7 @@ export function createTargetFailureDetector(targetKg) {
   const target = Number(targetKg), boundary = targetFailureBoundary(target);
   let acquisition = null, startTs = null, belowSince = null, recoverySince = null;
   let result = null, previous = null, window = [], runs = [], excursions = [];
-  let runCount = 0, excursionCount = 0, belowMs = 0, recoveredMs = 0;
+  let runCount = 0, excursionCount = 0, belowMs = 0, recoveredMs = 0, episodeBelowMs = 0;
   let continuationPending = false, continuationCount = 0;
   // Summarize smoothed-force runs for auditing recovery decisions. These are
   // not a raw trace and cannot reconstruct a different force threshold.
@@ -130,7 +132,10 @@ export function createTargetFailureDetector(targetKg) {
     const above = smooth >= boundary;
     const last = runs.at(-1);
     if (last) {
-      if (!last.above) belowMs += ts - last.to_ms;
+      if (!last.above) {
+        belowMs += ts - last.to_ms;
+        if (belowSince !== null) episodeBelowMs += ts - last.to_ms;
+      }
       last.to_ms = ts;
     }
     if (!last || last.above !== above) {
@@ -154,19 +159,24 @@ export function createTargetFailureDetector(targetKg) {
     }
     if (!above) {
       recoverySince = null;
-      if (belowSince === null) belowSince = ts;
+      if (belowSince === null) { belowSince = ts; episodeBelowMs = 0; }
     } else if (belowSince !== null) {
       if (recoverySince === null) recoverySince = ts;
       if (ts - recoverySince >= TARGET_FAILURE_POLICY.recovery_ms) {
         excursionCount++;
         recoveredMs += ts - belowSince;
         retainEnds(excursions, { onset_ms: belowSince, recovered_at_ms: ts });
-        belowSince = null; recoverySince = null;
+        belowSince = null; recoverySince = null; episodeBelowMs = 0;
       }
     }
     // A sustained return clears the drop; a lone good sample never does.
-    // At the deadline an incomplete recovery still counts as unrecovered.
-    if (belowSince !== null && ts - belowSince >= TARGET_FAILURE_POLICY.confirmation_ms) {
+    // At the deadline an incomplete recovery still counts as unrecovered,
+    // but only force held mostly below the boundary is a failure: settling
+    // on the handle dips repeatedly with brief returns above it (Prime,
+    // 2026-11-04: 65% below over the window while still holding).
+    const episodeMs = belowSince === null ? 0 : ts - belowSince;
+    if (belowSince !== null && episodeMs >= TARGET_FAILURE_POLICY.confirmation_ms
+        && episodeBelowMs >= TARGET_FAILURE_POLICY.sustained_fraction * episodeMs) {
       result = { endTs: belowSince, startTs, confirmedTs: ts, targetAcquired: true, reason: 'sustained_force_loss' };
     }
     return result;
@@ -176,6 +186,7 @@ export function createTargetFailureDetector(targetKg) {
     result = null;
     belowSince = null;
     recoverySince = null;
+    episodeBelowMs = 0;
     continuationPending = true;
     continuationCount++;
     return true;
