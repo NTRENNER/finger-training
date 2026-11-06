@@ -71,7 +71,7 @@ import {
   LADDER_MAX_REPS, LADDER_MIN_REPS, LADDER_LOAD_STEP_FRAC,
 } from "../../model/densityLadder.js";
 import { buildSessionDecision } from "../../model/decisionLog.js";
-import { EMPHASIS_BLOCK_NAME, pilotLabel, pilotRecommendation, pilotStep } from "../../model/emphasisPilot.js";
+import { EMPHASIS_BLOCK_NAME, pilotLabel, pilotRecommendation, pilotStep, pilotUsesLadder } from "../../model/emphasisPilot.js";
 import { today } from "../../util.js";
 import { makeMixedDomainPlan, recommendedMixedDomainZone, MIXED_DOMAIN_REST_S } from '../../model/mixedDomain.js';
 import { mixedPlanReadiness } from '../../model/mixedLoadPrescription.js';
@@ -227,12 +227,16 @@ export function SessionPlanCard({
     [hand]
   );
   const ladder = useMemo(
-    () => (grip && activeZone && !isPeakTest && !rec?.boundaryProbe)
-      ? computeDensityLadder(history, grip, activeZone, { expectedHands })
-      : null,
+    () => {
+      if (!grip || !activeZone || isPeakTest || rec?.boundaryProbe) return null;
+      const domainLadder = computeDensityLadder(history, grip, activeZone, { expectedHands });
+      // The pilot's session runs at its fixed target time; a ladder pinned
+      // at another time starts over there.
+      return isZoneOverridden || pilotUsesLadder(rec, domainLadder) ? domainLadder : null;
+    },
     [
       history, grip, activeZone, expectedHands, rec,
-      isPeakTest,
+      isPeakTest, isZoneOverridden,
     ]
   );
 
@@ -854,8 +858,9 @@ export function SessionPlanCard({
         // Under a tile override the ladder belongs to the override zone,
         // so the Recommended card reads its own domain plan.
         const recommendedRow = rows.find(row => row.key === recommendedZone);
-        const recLadder = isOverridden ? recommendedRow?.ladder : ladder;
-        const recommendedLoads = isOverridden ? recommendedRow?.resolvedLoads : ladderPlanLoadByHand;
+        const rowLadder = pilotUsesLadder(rec, recommendedRow?.ladder) ? recommendedRow?.ladder : null;
+        const recLadder = isOverridden ? rowLadder : ladder;
+        const recommendedLoads = isOverridden ? (rowLadder ? recommendedRow?.resolvedLoads : null) : ladderPlanLoadByHand;
         const purpose = rec.peakTest ? { label: 'Measure your peak', text: 'Three brief pulls per hand help us measure your maximum force.' } : trainingPurpose(rec, recLadder, recommendedLoads);
         const recT = recLadder ? recLadder.T : rec.T;
         let recLoadKg, recL, recR;

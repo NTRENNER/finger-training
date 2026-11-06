@@ -16,16 +16,18 @@ const ladderSession = ['L', 'R'].flatMap(hand => Array.from({ length: 4 }, (_, i
 })));
 const enrollment = pilotEnrollment('emphasis-2026-11', 'active');
 
-test('an enrolled athlete is shown the pilot step, run on its ladder, with the engine pick logged', () => {
+// Pilot sessions use one fixed time per domain on every grip (Strength 115 s).
+// A ladder pinned at another time (here 110 s) restarts at the target.
+test('an enrolled athlete is shown the pilot step at its fixed time, with the engine pick logged', () => {
   const apply = jest.fn();
   render(<SessionPlanCard history={ladderSession} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals}
     onApplyPlan={apply} pilotEnrollment={enrollment} />);
   expect(screen.getByText('★ Pilot · Long end · day 4 of 28')).toBeInTheDocument();
   const plan = apply.mock.calls.at(-1)[0];
-  expect(plan).toMatchObject({ goal: 'strength', targetTime: 110, peakTest: false });
+  expect(plan).toMatchObject({ goal: 'strength', targetTime: 115, peakTest: false, ladderLoadByHand: null });
   expect(plan.decision).toMatchObject({
-    recommended: { zone: 'power' }, overridden: false, plan_source: 'ladder',
-    pilot: { block: 'B', emphasis: 'long', step: 1, cycle_length: 8, zone: 'strength' },
+    recommended: { zone: 'power' }, overridden: false, plan_source: 'curve',
+    pilot: { version: 2, block: 'B', emphasis: 'long', step: 1, cycle_length: 8, zone: 'strength' },
   });
 
   fireEvent.click(screen.getByRole('button', { name: 'Train endurance at 220 seconds' }));
@@ -49,4 +51,19 @@ test('without enrollment the plan card is unchanged', () => {
   expect(screen.getByText('★ Recommended')).toBeInTheDocument();
   expect(apply.mock.calls.at(-1)[0]).toMatchObject({ goal: 'power' });
   expect(apply.mock.calls.at(-1)[0].decision.pilot).toBeNull();
+});
+
+test('a ladder already at the fixed time carries over', () => {
+  const apply = jest.fn();
+  const at115 = ladderSession.map(r => ({ ...r, target_duration: 115, actual_time_s: r.rep_num === 1 ? 115 : 60 }));
+  render(<SessionPlanCard history={at115} grip="Micro" hand="Both" unit="kg" GOAL_CONFIG={goals}
+    onApplyPlan={apply} pilotEnrollment={enrollment} />);
+  const plan = apply.mock.calls.at(-1)[0];
+  expect(plan).toMatchObject({ goal: 'strength', targetTime: 115 });
+  expect(plan.decision.plan_source).toBe('ladder');
+});
+
+test('the pilot targets are one time per domain', () => {
+  const { PILOT_TARGET_S } = require('../../../model/emphasisPilot.js');
+  expect(PILOT_TARGET_S).toMatchObject({ power: 20, power_strength: 70, strength: 115, strength_endurance: 160, endurance: 220 });
 });

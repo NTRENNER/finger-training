@@ -121,6 +121,12 @@ The protocol is written and fixed before anyone starts (pre-registration):
 - 3–4 weeks as a pilot, 4–6 weeks per block once the protocol is proven;
 - success and failure criteria stated in advance.
 
+Planned question after the first pilot (Nathan, 2026-11-06): the pilot
+trains fixed times per domain. If targeted training moves the curve more
+than the current rotation, test next whether training at the exact duration
+where the athlete underperforms the curve (a continuous target from the
+residual) beats fixed domain times.
+
 ## Guardrails (never optimized away)
 
 Minimum exposure in every domain including max strength; peak-force and

@@ -7,7 +7,21 @@ import { isPotentiationMeasurement } from './potentiationRfd.js';
 import { prescription } from './prescription.js';
 import { ZONE_REF_T } from './zones.js';
 
-export const EMPHASIS_PILOT_VERSION = 1;
+// v2 (2026-11-06): fixed target times per domain on every grip.
+export const EMPHASIS_PILOT_VERSION = 2;
+
+// One target time per domain, the same on every grip (Nathan, 2026-11-06),
+// so each emphasis trains the same points of the curve. A grip whose ladder
+// sits at another time restarts at this one from the curve's load. The
+// short-end block's max-strength target is still to be set (by Nov 30).
+export const PILOT_TARGET_S = {
+  max_strength: ZONE_REF_T.max_strength,
+  power: 20,
+  power_strength: 70,
+  strength: 115,
+  strength_endurance: 160,
+  endurance: 220,
+};
 
 // Each session on a grip takes the next step, repeating the cycle as needed.
 // The primary grip runs the 8-step cycle; the others run its first 4 steps.
@@ -105,13 +119,13 @@ export function pilotStep(enrollment, history, grip, date) {
   };
 }
 
-// What the plan card shows for a pilot step: the step's domain at its
-// reference duration, loaded from the curve like a tile. As on any tile, the
-// density ladder pins duration, load and reps for domains trained before.
+// What the plan card shows for a pilot step: the step's domain at its fixed
+// target time, loaded from the curve. The density ladder sets load and reps
+// only when its pinned time is that target (see pilotUsesLadder).
 // Grips the recommender still treats as new keep its cold-start plan.
 export function pilotRecommendation(step, engineRec, { history, grip, freshMap = null, threeExpPriors = null }) {
   if (!step || !engineRec || engineRec.coldStart || engineRec.coldStartStage || engineRec.boundaryProbe) return engineRec;
-  const T = ZONE_REF_T[step.zone];
+  const T = PILOT_TARGET_S[step.zone];
   const loadByHand = {};
   for (const hand of ['L', 'R']) {
     const value = prescription(history, hand, grip, T, { freshMap, threeExpPriors })?.value;
@@ -126,4 +140,10 @@ export function pilotRecommendation(step, engineRec, { history, grip, freshMap =
 
 export function pilotLabel(step) {
   return step ? `Pilot · ${EMPHASIS_LABEL[step.emphasis]} · day ${step.blockDay} of ${step.blockDays}` : null;
+}
+
+// A domain's ladder carries over only at the pilot's target time; at any
+// other time the session restarts at the target and the ladder re-pins there.
+export function pilotUsesLadder(rec, ladder) {
+  return !rec?.pilot || !ladder || ladder.T === rec.T;
 }
