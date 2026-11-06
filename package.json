@@ -26,7 +26,8 @@
     "evaluate:adaptive": "node --no-warnings scripts/evaluate-adaptive.mjs",
     "evaluate:windows": "node --no-warnings scripts/evaluate-windows.mjs",
     "audit:recommendations": "node --no-warnings scripts/audit-recommendations.mjs",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "pilot:analysis": "node --no-warnings scripts/pilot-analysis.mjs"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",
