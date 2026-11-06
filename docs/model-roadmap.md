@@ -11,6 +11,14 @@ Recommend the session with the largest expected gain in the **balanced curve
 score** per day of recovery, inside fixed safety rules, and fall back to the
 safe default when the evidence is thin.
 
+**Guiding principle (Nathan, 2026-11-06):** focused training where the most
+curve growth can happen, while broad curve coverage is maintained. The app
+moves toward this only as far as the research supports it. The emphasis
+pilot tests the first condition (focused training moves the curve more than
+rotation); if it holds, coverage stays as a minimum dose in every domain,
+and the remaining training goes where the expected gain is largest
+(Stages 1–3 below). If it does not hold, the rotation stays the default.
+
 - The balanced score is the geometric mean of predicted force at the six
   reference durations (5, 30, 70, 115, 160, 220 s), so an equal % gain in any
   domain counts equally. Literal force-time area is rejected: on real fits
