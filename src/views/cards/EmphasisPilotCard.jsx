@@ -4,7 +4,7 @@ import { C } from '../../ui/theme.js';
 import { today } from '../../util.js';
 import { TARGET_OPTIONS, ZONE_REF_T } from '../../model/zones.js';
 import {
-  EMPHASIS_PILOTS, EMPHASIS_LABEL, activePilot, pilotBlockOn, pilotEnrollment, pilotLabel, pilotStep,
+  EMPHASIS_CYCLES, EMPHASIS_PILOTS, EMPHASIS_LABEL, activePilot, pilotBlockOn, pilotEnrollment, pilotLabel, pilotStep,
 } from '../../model/emphasisPilot.js';
 
 const PILOT_ID = 'emphasis-2026-11';
@@ -20,17 +20,20 @@ export function EmphasisPilotCard({ enrollment, history = [], onSave, date = tod
   const schedule = pilot.blocks
     .map(b => `${EMPHASIS_LABEL[b.emphasis]} ${shortDate(b.start)}–${shortDate(b.end)}`).join(', then ');
   const grips = `${pilot.grips.slice(0, -1).join(', ')} and ${pilot.grips.at(-1)}`;
-  const status = block ? pilotLabel(pilotStep(enrollment, history, pilot.primaryGrip, date))
-    : date < pilot.blocks[0].start ? `Starts ${shortDate(pilot.blocks[0].start)}`
-      : 'Finished. Recommendations are back to normal.';
+  const emphasis = block && EMPHASIS_CYCLES[block.emphasis];
+  const status = emphasis ? pilotLabel(pilotStep(enrollment, history, pilot.primaryGrip, date))
+    : block ? `${EMPHASIS_LABEL[block.emphasis]} · day ${block.day} of ${block.days} · regular recommendations`
+      : date < pilot.blocks[0].start ? `Starts ${shortDate(pilot.blocks[0].start)}`
+        : 'Finished. Recommendations are back to normal.';
   return <Card>
     <CardTitle>Emphasis-block pilot</CardTitle>
     <p style={{ color: C.muted, lineHeight: 1.5, marginTop: 0 }}>
-      {schedule}. Every session on {grips} follows the block plan.
+      {schedule}. Every session on {grips} follows the block plan; the rotation block uses the
+      regular recommendations.
     </p>
     {joined && <>
       <p role="status" style={{ fontWeight: 700 }}>{status}</p>
-      {block && <ul style={{ paddingLeft: 18, lineHeight: 1.6 }}>
+      {emphasis && <ul style={{ paddingLeft: 18, lineHeight: 1.6 }}>
         {pilot.grips.map(grip => {
           const step = pilotStep(enrollment, history, grip, date);
           return <li key={grip}>{grip}: {zoneLabel(step.zone)} · step {step.step} of {step.cycleLength}</li>;

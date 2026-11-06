@@ -23,7 +23,22 @@ test("blocks follow the pre-registered calendar", () => {
   expect(pilotBlockOn(pilot, "2026-11-29")).toMatchObject({ label: "B", day: 28 });
   expect(pilotBlockOn(pilot, "2026-11-30")).toMatchObject({ label: "A", emphasis: "short", day: 1, days: 28 });
   expect(pilotBlockOn(pilot, "2026-12-27")).toMatchObject({ label: "A", day: 28 });
-  expect(pilotBlockOn(pilot, "2026-12-28")).toBeNull();
+  expect(pilotBlockOn(pilot, "2026-12-28")).toMatchObject({ label: "R", emphasis: "rotation", day: 1, days: 28 });
+  expect(pilotBlockOn(pilot, "2027-01-25")).toBeNull();
+});
+
+// The rotation block runs the app's regular recommendations: no pilot step.
+test("the rotation block has no pilot step", () => {
+  expect(pilotStep(joined, [], "Micro", "2027-01-05")).toBeNull();
+  expect(pilotStep(joined, [], "Micro", "2026-12-27")).toMatchObject({ block: "A" });
+});
+
+// Short-end max-strength steps are 20 s holds: the same session as power.
+test("a short-end max-strength step runs as the 20 s power session", () => {
+  const step = pilotStep(joined, [], "Micro", "2026-11-30");
+  expect(step).toMatchObject({ block: "A", step: 1, zone: "max_strength" });
+  const shown = pilotRecommendation(step, { zone: "endurance", T: 220, hand: "L" }, { history: [], grip: "Micro" });
+  expect(shown).toMatchObject({ zone: "power", T: 20, pilot: { zone: "max_strength" } });
 });
 
 test("each grip starts its cycle on the first day of a block", () => {

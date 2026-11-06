@@ -21,6 +21,7 @@ test('windows: two coverage-rotation windows, then the pilot blocks', () => {
   expect(pilotWindows().map(w => [w.id, w.start, w.end])).toEqual([
     ['coverage-1', '2026-09-10', '2026-10-07'], ['coverage-2', '2026-10-08', '2026-11-01'],
     ['block-B', '2026-11-02', '2026-11-29'], ['block-A', '2026-11-30', '2026-12-27'],
+    ['block-R', '2026-12-28', '2027-01-24'],
   ]);
 });
 

@@ -27,3 +27,9 @@ test('before the first block a joined athlete sees the start date', () => {
   render(<EmphasisPilotCard enrollment={pilotEnrollment('emphasis-2026-11', 'active')} onSave={jest.fn()} date="2026-11-01" />);
   expect(screen.getByRole('status')).toHaveTextContent(/^Starts Nov 2$/);
 });
+
+test('during the rotation block the card says recommendations are the regular ones', () => {
+  render(<EmphasisPilotCard enrollment={pilotEnrollment('emphasis-2026-11', 'active')} onSave={jest.fn()} date="2027-01-03" />);
+  expect(screen.getByRole('status')).toHaveTextContent('Rotation · day 7 of 28 · regular recommendations');
+  expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+});

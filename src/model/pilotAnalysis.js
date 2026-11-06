@@ -43,7 +43,8 @@ export function pilotWindows(pilot = EMPHASIS_PILOTS['emphasis-2026-11']) {
   return [
     { id: 'coverage-1', label: 'Coverage rotation 1', start: COVERAGE_START, end: split },
     { id: 'coverage-2', label: 'Coverage rotation 2', start: addDays(split, 1), end: addDays(first, -1) },
-    ...pilot.blocks.map(b => ({ id: `block-${b.label}`, label: `Block ${b.label} (${b.emphasis} end)`,
+    ...pilot.blocks.map(b => ({ id: `block-${b.label}`,
+      label: `Block ${b.label} (${b.emphasis === 'rotation' ? 'rotation' : `${b.emphasis} end`})`,
       start: b.start, end: b.end, emphasis: b.emphasis })),
   ];
 }
@@ -285,18 +286,20 @@ export function weeklyBackground(reps, activities, workouts, { start, end }) {
 }
 
 // Block-to-block comparison of weekly background load; flags any measure
-// whose weekly mean differs by more than BACKGROUND_MISMATCH.
+// whose weekly mean differs by more than BACKGROUND_MISMATCH between any two
+// blocks with data.
 export function backgroundComparison(weeks, blocks) {
   const keys = ['finger_sessions', 'finger_tut_s', 'climbing_days', 'climbs', 'climbing_load', 'support_workouts'];
   const perBlock = blocks.map(b => {
     const inBlock = weeks.filter(w => w.start >= b.start && w.end <= b.end);
     return { id: b.id, weeks: inBlock.length, means: Object.fromEntries(keys.map(k => [k, r3(mean(inBlock.map(w => w[k] ?? 0)))])) };
   });
-  const [a, b] = perBlock;
-  const flags = a && b && a.weeks && b.weeks ? keys.filter(k => {
-    const x = a.means[k], y = b.means[k];
-    return Math.max(x, y) > 0 && Math.abs(x - y) / Math.max(x, y) > BACKGROUND_MISMATCH;
-  }) : [];
+  const withData = perBlock.filter(b => b.weeks > 0);
+  const flags = withData.length < 2 ? [] : keys.filter(k => {
+    const values = withData.map(b => b.means[k]);
+    const high = Math.max(...values), low = Math.min(...values);
+    return high > 0 && (high - low) / high > BACKGROUND_MISMATCH;
+  });
   return { blocks: perBlock, mismatched: flags };
 }
 

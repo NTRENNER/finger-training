@@ -14,6 +14,22 @@ athlete's usual routine, and any grip may be trained on consecutive days.
 Mon Nov 2 (the first calendar mislabeled Nov 3 as a Monday), so blocks run
 Monday to Sunday, and the yardstick cutoff moved with it.
 
+2026-11-06, after the Nov 2 and Nov 4 sessions: every grip uses one fixed
+target time per domain (Power 20 s, Power-strength 70 s, Strength 115 s,
+Strength-endurance 160 s, Endurance 220 s). The first two sessions used each
+grip's ladder time, so Crusher's step 1 ran at 90 s rather than 115 s. A grip
+whose ladder sat at another time (Crusher power 45 s, strength 90 s,
+power-strength 50 s) restarts at the fixed time from the curve's load.
+
+2026-11-06, before block A: block A's max-strength steps are 20 s holds, the
+same session as its power steps, so the short-end block trains 20 s, 70 s
+and maintenance holds. A rotation block R (the app's regular
+recommendations, 28 days) follows block A, so focused and rotational
+training are compared under the same conditions rather than against the
+pre-pilot coverage windows, which differ in season and in training history.
+A small change to the Micro device between Oct 14 and Nov 4 needs no
+adjustment (per A1).
+
 ## Question
 
 For each athlete, how do four weeks emphasizing the **short end** of the
@@ -42,6 +58,12 @@ hypothesis.
 3. **Max carry-over:** peak-force change in each block, as its own outcome.
 4. **Whole curve:** balanced-score change in each block. No direction is
    predicted.
+5. **Focused against rotation:** each end's change and the balanced-score
+   change in the emphasis blocks beside the rotation block. A1's
+   hypothesis, stated before block R: focused training moves the curve more
+   than rotation. If it holds, the next question is whether training at the
+   durations with the largest expected gain beats fixed times
+   (docs/model-roadmap.md).
 
 ## Design
 
@@ -53,9 +75,12 @@ hypothesis.
   starting each way. An athlete may later run the reverse pair for a
   within-person A-B-B-A answer.
 - **Phase 1 (one athlete).** With no one to balance across, the reverse
-  pair matters more: A1 plans B-A-A-B and decides at the end of block 2
-  whether to continue. Athletes joining later get their own start and a
-  balanced random order.
+  pair matters more. A1 runs B-A, then the rotation block R, and decides at
+  the end of block R whether to run the reverse pair (A-B). Athletes joining
+  later get their own start and a balanced random order.
+- **Rotation block.** 28 days of the app's regular recommendations on every
+  grip, with the same measurement and background record; pilot mode shows
+  no steps.
 - **Grips.** All of the athlete's grips follow the block emphasis, and each
   is analyzed separately, so a grip that falls short of its dose yields less
   data, not a biased comparison. A1: Micro (primary, about two sessions a
@@ -76,36 +101,38 @@ difference of more than 25% between blocks is flagged.
 
 | # | Block A (short end) | Block B (long end) |
 |---|---|---|
-| 1 | Max strength | Strength (~115 s) |
-| 2 | Power (~30 s) | Strength-endurance (~160 s) |
-| 3 | Power-strength (~70 s) | Endurance (~220 s) |
-| 4 | Maintenance: strength (~115 s) | Maintenance: power (~30 s) |
+| 1 | Max strength | Strength (115 s) |
+| 2 | Power (20 s) | Strength-endurance (160 s) |
+| 3 | Power-strength (70 s) | Endurance (220 s) |
+| 4 | Maintenance: strength (115 s) | Maintenance: power (20 s) |
 | 5 | Max strength | Strength |
 | 6 | Power | Strength-endurance |
 | 7 | Power-strength | Endurance |
-| 8 | Maintenance: endurance (~220 s) | Maintenance: power-strength (~70 s) |
+| 8 | Maintenance: endurance (220 s) | Maintenance: power-strength (70 s) |
 
 **Crusher and Prime (target about one session a week each):**
 
 | # | Block A (short end) | Block B (long end) |
 |---|---|---|
-| 1 | Max strength | Strength (~115 s) |
-| 2 | Power (~30 s) | Strength-endurance (~160 s) |
-| 3 | Power-strength (~70 s) | Endurance (~220 s) |
-| 4 | Maintenance: strength (~115 s) | Maintenance: power (~30 s) |
+| 1 | Max strength | Strength (115 s) |
+| 2 | Power (20 s) | Strength-endurance (160 s) |
+| 3 | Power-strength (70 s) | Endurance (220 s) |
+| 4 | Maintenance: strength (115 s) | Maintenance: power (20 s) |
 
-- Block A's max-strength sessions run at the 5 s reference duration with
-  the curve's load; their reps and rest are confirmed in a dated note
-  before block A starts.
-- One set per session; no optional extra sets. Loads and reps come from
-  the app's normal prescription for that domain (density ladder).
+- Block A's max-strength steps are 20 s holds: the same session, ladder and
+  reps as its power steps (dated note above).
+- One set per session; no optional extra sets. Every grip uses the target
+  time in the table. Loads and reps come from the density ladder when its
+  pinned time is that target; otherwise the session restarts at the target
+  from the curve's load, and the ladder re-pins there.
 - **Warm-up Peak Tests** continue unchanged (A1 runs them on Crusher and
   Micro at essentially every warm-up, before climbing), so max exposure is
   identical across blocks; their frequency is recorded. Block A adds
   max-strength *training sessions* on top of that routine.
-- **No unchanged reference.** With every grip in the blocks, nothing stays
-  on the normal rotation to show general or seasonal improvement; the
-  reverse pair (B-A-A-B) handles time trends instead.
+- **No concurrent reference.** With every grip in the blocks, nothing stays
+  on the normal rotation alongside them; the rotation block R that follows
+  is the same-conditions comparison, and the reverse pair handles time
+  trends.
 - **Low dose:** a block with fewer than 6 Micro sessions is flagged; blocks
   are never extended. Crusher or Prime sessions below target are recorded as
   reduced dose for that grip.
@@ -142,6 +169,11 @@ sessions with duration, RPE and main style (endurance or bouldering), trips
 and unusual workload. If weekly
 background load differs by more than 25% between blocks, the pair is flagged
 as contextually mismatched.
+
+**Equipment:** any change to a grip device (for example a new printed Micro
+or Crusher version) is recorded with its date. Force from different devices
+is not directly comparable, so a window that spans a change is flagged
+unless the athlete judges the change negligible (the Micro, Oct 14 to Nov 4).
 
 ## Outcomes and analysis
 
@@ -180,7 +212,7 @@ Per athlete (pseudonymous) and pooled; descriptive; aggregates only.
 
 ## Model freeze
 
-From the start of block 1 to the end of block 2, the production curve,
+From the start of block 1 to the end of block R, the production curve,
 recommender and progression versions stay fixed (urgent fixes excepted and
 logged). The decision log's version stamps verify this.
 
@@ -191,6 +223,13 @@ When the app confirms a failure while the Tindeq still reads load, it asks
 "Still holding?" at once, and Continue keeps the original clock. Prompted by
 Prime L rep 3 on 2026-11-04: early settling dips confirmed a failure at
 5.9 s, credited 1.3 s, while the hold continued above target for about 15 s.
+
+2026-11-06, failure detection (policy v12): a force loss is confirmed only
+when force spent at least 75% of the confirmation window below the failure
+boundary. In a replay of stored detector runs across all athletes, the
+detector had called 8 failures while the athlete was still loading; only that
+Nov 4 Prime rep fell below 75% (65%), and the rest were 82–100% below. Holds
+ended by a release, which is most of them, are unaffected.
 
 ## Missed training
 
@@ -216,10 +255,10 @@ overrides the protocol and the event is recorded.
 
 ## Pilot success
 
-**Phase 1 (A1):** two interpretable blocks with Micro trained at its usual
-frequency in both; estimates at both ends of the curve and for peak force;
-documented background load and deviations; and enough signal to decide
-whether to continue to B-A-A-B and to invite others.
+**Phase 1 (A1):** three interpretable blocks (B, A, R) with Micro trained at
+its usual frequency in each; estimates at both ends of the curve and for
+peak force; documented background load and deviations; and enough signal to
+decide whether to run the reverse pair and to invite others.
 
 **Full pilot:**
 
@@ -242,9 +281,14 @@ whether to continue to B-A-A-B and to invite others.
   recorded beside it, and choosing another session is logged as an
   override of the step. Peak Tests are identified by their protocol tag and
   date, so they need no decision record.
-- **Offline:** the frozen yardstick, the coverage reference,
-  training-exposure accounting (all qualifying holds, including later reps),
-  the end-of-block curve fits, and a weekly background-load export.
+- **Offline (built 2026-11-06):** `npm run pilot:analysis -- <export.json>`
+  (src/model/pilotAnalysis.js) reports the frozen yardstick, every opener
+  against it, the change at each end of the curve per window (coverage
+  reference and blocks; within grip and hand, with a 90% day-bootstrap
+  range), the Peak Test trend (each test is the best of its pulls, so a
+  slipped pull does not count), same-load repeats, the whole-curve refit,
+  training exposure, and weekly background load with the 25% flag. Exports
+  stay in `scripts/data/` (ignored).
 
 ## Calendar
 
@@ -261,7 +305,9 @@ Prime. No travel planned.
   background record, and the reverse pair separates season from emphasis.
 - Block 2 (A, short end): Mon 2026-11-30 to Sun 2026-12-27. Includes
   Christmas.
-- Decision point, about Dec 28: continue to B-A-A-B, invite other athletes
-  in the new year, and ship model changes held by the freeze.
+- Block 3 (R, rotation): Mon 2026-12-28 to Sun 2027-01-24, the app's
+  regular recommendations. Includes New Year.
+- Decision point, about Jan 25: run the reverse pair (A-B), invite other
+  athletes, and ship model changes held by the freeze.
 
 Other athletes: to be added with their own start, draw and dates.
