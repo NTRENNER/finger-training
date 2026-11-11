@@ -234,6 +234,7 @@ export function ForceDurationCard({
             type="number" dataKey="x"
             domain={[0, maxDur + 10]}
             label={{ value: "Duration (s)", position: "insideBottom", offset: -16, fill: C.muted, fontSize: 11 }}
+            tickFormatter={v => Math.round(v)}
             tick={CHART.tick}
           />
           <YAxis
@@ -241,7 +242,7 @@ export function ForceDurationCard({
             domain={[0, Math.ceil(maxForceRel * 1.15 / (useRel ? 0.1 : 10)) * (useRel ? 0.1 : 10)]}
             tick={CHART.tick}
             unit={useRel ? "" : ` ${unit}`}
-            width={42}
+            width={useRel ? 42 : 58}
           />
           <Tooltip content={<ScatterTooltip unit={forceUnit} />} />
           {/* Zone backgrounds — uniform neutral tint per zone. Driven by

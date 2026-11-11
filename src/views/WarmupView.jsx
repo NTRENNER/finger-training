@@ -437,7 +437,7 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
                 <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{s.title}</div>
                 <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
                   {s.intensityLabel}
-                  {i < steps.length - 1 && s.restAfterSec > 0 && ` · rest ${fmtSec(s.restAfterSec)}s`}
+                  {i < steps.length - 1 && s.restAfterSec > 0 && ` · rest ${fmtSec(s.restAfterSec)}${s.restAfterSec < 59.5 ? "s" : ""}`}
                 </div>
                 {s.restActivity && <div style={{ fontSize: 11, color: C.green, marginTop: 4 }}>
                   During recovery: {s.restActivity.name} · {s.restActivity.dose}

@@ -239,6 +239,7 @@ function RepCurveChart({
           />
           <YAxis
             domain={[0, yMax]}
+            tickFormatter={v => Math.round(v)}
             tick={{ fontSize: 10, fill: C.muted }}
             label={{ value: "Hold (s)", angle: -90, position: "insideLeft", offset: 12, fontSize: 10, fill: C.muted }}
           />
@@ -254,7 +255,7 @@ function RepCurveChart({
               stroke={COLORS.target}
               strokeDasharray="2 4"
               strokeOpacity={0.6}
-              label={{ value: `prescribed ${targetS}s`, fill: COLORS.target, fontSize: 9, position: "right" }}
+              label={{ value: `prescribed ${targetS}s`, fill: COLORS.target, fontSize: 9, position: "insideTopRight" }}
             />
           )}
           {asymptoticHold != null && asymptoticHold > 0 && (
@@ -263,7 +264,7 @@ function RepCurveChart({
               stroke={COLORS.asymptote}
               strokeDasharray="1 3"
               strokeOpacity={0.5}
-              label={{ value: `floor ~${asymptoticHold.toFixed(0)}s`, fill: COLORS.asymptote, fontSize: 9, position: "left" }}
+              label={{ value: `floor ~${asymptoticHold.toFixed(0)}s`, fill: COLORS.asymptote, fontSize: 9, position: "insideBottomLeft" }}
             />
           )}
 

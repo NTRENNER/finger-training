@@ -580,7 +580,7 @@ export function HistoryView({
                         color: "#fff", fontWeight: 700, fontSize: 10,
                         padding: "1px 5px", cursor: "pointer", lineHeight: 1.2,
                       }}>{r.hand}</button>
-                    {r.load}{unit} · {r.time}s
+                    {r.load} {unit} · {r.time}s
                     <button onClick={() => setNewSessReps(rs => rs.filter((_, j) => j !== i))}
                       style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1 }}>✕</button>
                   </span>
@@ -1141,7 +1141,7 @@ export function HistoryView({
                           {handLetter}
                         </span>
                       )}
-                      <b>{fmtW(peakTest ? r.peak_force_kg : effectiveLoad(r), unit)}{unit}{peakTest ? " peak" : ""}</b> · {fmtTime(displayedRepTime(r.actual_time_s, r.force_recording))}
+                      <b>{fmtW(peakTest ? r.peak_force_kg : effectiveLoad(r), unit)} {unit}{peakTest ? " peak" : ""}</b> · {fmtTime(displayedRepTime(r.actual_time_s, r.force_recording))}
                       {beta && <span> · {MIXED_DOMAIN_LABELS[mixedDomainMetadata(r).zone]}</span>}
                       <RepResultDetails rep={r}>
                         {detailBits.length > 0 && <div>{detailBits.join(" · ")}</div>}

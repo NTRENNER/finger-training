@@ -476,7 +476,7 @@ export function ClimbingAnalysisView({
         <Sect title="Climbing">
           <Card>
             <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.6 }}>
-              No climbs logged yet. Use the Log a climb card on the Fingers tab
+              No climbs logged yet. Use the Climb tab
               to start a record — discipline, grade, ascent style, and RPE.
               Once you have a few entries, this view will fill in with a grade
               pyramid, hardest-send progression, and style mix.

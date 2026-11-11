@@ -240,7 +240,7 @@ export function ClimbingHistoryList({
         <Card>
           <div style={{ color: C.muted, fontSize: 13 }}>
             {climbs.length === 0
-              ? "No climbs logged yet. Use the Fingers tab to log your first climb."
+              ? "No climbs logged yet. Use the Climb tab to log your first climb."
               : "No climbs match these filters. Clear a pill above to widen the view."}
           </div>
         </Card>

@@ -499,17 +499,24 @@ export default function App() {
           (Chrome/Safari) since that pseudo-element can't be set
           inline; scrollbarWidth/msOverflowStyle handle Firefox + IE. */}
       <div
-        className="no-scrollbar"
         style={{
           background: C.card, borderBottom: `1px solid ${C.border}`,
           display: "flex", alignItems: "center", padding: "0 16px",
           position: "sticky", top: 0, zIndex: 100,
-          overflowX: "auto",
-          WebkitOverflowScrolling: "touch",
-          scrollbarWidth: "none",   // Firefox
-          msOverflowStyle: "none",  // IE/Edge legacy
         }}
       >
+        {/* Only the tabs scroll. The right cluster (Settings gear) stays
+            pinned so it is always reachable at phone width. */}
+        <div
+          className="no-scrollbar"
+          style={{
+            display: "flex", alignItems: "center", flex: 1, minWidth: 0,
+            overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
+            scrollbarWidth: "none",   // Firefox
+            msOverflowStyle: "none",  // IE/Edge legacy
+          }}
+        >
         {/* Climber icon — branding mark + home button. The full
             "🧗 Finger" wordmark was dropped late May 2026 (the
             "Finger" text was redundant once you're inside the app
@@ -556,6 +563,7 @@ export default function App() {
           </button>
           );
         })}
+        </div>
         {/* Right cluster: Tindeq status pill (when connected) + gear
             icon for Settings. marginLeft: auto on the wrapper pushes
             both to the far-right edge regardless of how many tabs
