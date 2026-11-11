@@ -18,6 +18,9 @@ const history = [1, 2].flatMap(set_num => recoveryRows('measured', { sessionId: 
 test('History compares set one without concatenating set two and retains every recorded hold', () => {
   render(<HistoryView history={history} unit="kg" />);
   expect(screen.getByText('Explore force-duration history')).toBeInTheDocument();
+  // Charts are drawn only once a card is opened, so the tab opens quickly.
+  expect(screen.queryByTestId('rep-curve-times')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Show charts' }));
   expect(screen.getByTestId('rep-curve-times')).toHaveTextContent('[40,24,16,12]');
   expect(screen.getByText(/Set 1 comparison/)).toBeInTheDocument();
   expect(screen.getAllByText(/^Set 2 · Rep/)).toHaveLength(4);

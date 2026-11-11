@@ -173,6 +173,15 @@ export function HistoryView({
   // expandable cap with a visible count.
   const SESSION_CAP = 30;
   const [showAllSessions, setShowAllSessions] = useState(false);
+  // Cards whose charts are open. Charts start closed: drawing every card's
+  // rep-curve and recovery charts up front (about 280 charts for 30
+  // sessions) made the tab take several seconds to open.
+  const [openCharts, setOpenCharts] = useState(() => new Set());
+  const toggleCharts = cardKey => setOpenCharts(prev => {
+    const next = new Set(prev);
+    if (!next.delete(cardKey)) next.add(cardKey);
+    return next;
+  });
 
   const openRepEdit = (sessKey, repIdx, rep) => {
     setAddingRep(null);
@@ -444,7 +453,8 @@ export function HistoryView({
   // (same SESSION_CAP slicing as the render), so collapsing back from
   // "show all" stays cheap. Map value: an entry per rendered hand —
   // empty array means "valid session but no per-hand reps", which the
-  // render distinguishes from "no charts at all" (missing key).
+  // render distinguishes from "no charts at all" (missing key). A null
+  // value means the card has charts but they are closed, so nothing is fit.
   const chartDataByCard = useMemo(() => {
     const map = new Map();
     for (const sess of (showAllSessions ? grouped : grouped.slice(0, SESSION_CAP))) {
@@ -456,6 +466,10 @@ export function HistoryView({
         ? ["L", "R"].filter(h => validReps.some(r => r.hand === h))
         : [sess.hand];
       if (hands.length === 0) continue;
+      if (!openCharts.has(cardKey)) {
+        if (hands.some(h => validReps.some(r => r.hand === h && Number(r.set_num ?? 1) === 1))) map.set(cardKey, null);
+        continue;
+      }
       const entries = [];
       for (const handKey of hands) {
         const handReps = validReps
@@ -487,7 +501,7 @@ export function HistoryView({
       map.set(cardKey, entries);
     }
     return map;
-  }, [grouped, history, showAllSessions]);
+  }, [grouped, history, showAllSessions, openCharts]);
 
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
@@ -986,13 +1000,22 @@ export function HistoryView({
               // render path. Missing key = session didn't qualify for
               // charts (fewer than 2 valid reps, or no chartable hand).
               const handEntries = chartDataByCard.get(cardKey);
-              if (!handEntries) return null;
+              if (handEntries === undefined) return null;
+              const chartsToggle = (
+                <button type="button" onClick={() => toggleCharts(cardKey)} aria-expanded={handEntries !== null}
+                  style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted,
+                    padding: "10px 14px", minHeight: 44, fontSize: 13, cursor: "pointer", marginBottom: 10 }}>
+                  {handEntries === null ? "Show charts" : "Hide charts"}
+                </button>
+              );
+              if (handEntries === null) return chartsToggle;
               // History strictly before this session — what the engine
               // knew when this session was prescribed.
               const priorHistory = history.filter(r => r.date < sess.date);
               const handCount = handEntries.length;
               return (
                 <div style={{ marginBottom: 10 }}>
+                  {chartsToggle}
                   {multipleSets && <p style={{ color: C.muted, fontSize: 12 }}>
                     Set 1 comparison. All sets are listed in the workout details below.
                   </p>}
